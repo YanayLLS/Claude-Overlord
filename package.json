@@ -1,0 +1,43 @@
+{
+  "name": "overlord",
+  "version": "1.0.0",
+  "description": "Overlord — Claude Agent Manager",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/bundle-xterm.js && electron .",
+    "dev": "node scripts/bundle-xterm.js && electronmon .",
+    "package": "node scripts/bundle-xterm.js && electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "electronmon": "^2.0.4",
+    "esbuild": "^0.25.0"
+  },
+  "build": {
+    "appId": "com.pixelagents.overlord",
+    "productName": "Overlord",
+    "win": {
+      "target": "dir"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "fonts/**/*",
+      "xterm-bundle.js",
+      "xterm.css"
+    ],
+    "directories": {
+      "output": "out"
+    },
+    "asar": false,
+    "npmRebuild": false
+  }
+}

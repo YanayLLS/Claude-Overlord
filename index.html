@@ -1,0 +1,1548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Overlord</title>
+<link rel="stylesheet" href="./xterm.css" />
+<style>
+:root {
+  --bg: #0f0f17; --bg2: #161622; --bg3: #1e1e2e; --border: #2a2a40; --border-hi: #3a3a5a;
+  --accent: #6c8cff; --green: #4ade80; --text: rgba(255,255,255,.92); --dim: rgba(255,255,255,.42);
+  --yellow: #facc15; --red: #f87171; --purple: #c084fc; --cyan: #67e8f9;
+  --shadow: #08080e; --card: #13131f;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+::selection { background:rgba(108,140,255,.3); color:var(--text); }
+html,body { width:100%; height:100%; background:var(--bg); color:var(--text); overflow:hidden; font-size:14px;
+  font-family: 'Segoe UI', -apple-system, system-ui, sans-serif; }
+
+#app { display:flex; flex-direction:column; height:100%; }
+
+/* ── Header ── */
+#header {
+  display:flex; align-items:center; padding:0 16px; height:44px;
+  border-bottom:2px solid var(--border-hi); gap:10px; flex-shrink:0;
+  background: linear-gradient(180deg, #1c1c2e 0%, #14141f 100%);
+}
+#header h1 {
+  font-size:18px; font-weight:normal; flex:1; letter-spacing:1px; color:var(--accent);
+  text-shadow: 0 0 12px rgba(108,140,255,.3);
+}
+#headerBadges { display:flex; gap:6px; align-items:center; }
+#headerBadges:empty { display:none; }
+#header .badge {
+  font-family:inherit; font-size:11px; padding:3px 8px; font-weight:normal; letter-spacing:.5px;
+  border:2px solid; box-shadow:2px 2px 0 var(--shadow);
+}
+.badge-perm {
+  color:var(--yellow); border-color:var(--yellow); background:rgba(250,204,21,.12);
+  cursor:pointer; transition:background .12s, transform .1s, box-shadow .1s;
+}
+.badge-perm:hover { background:rgba(250,204,21,.25); transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--shadow); }
+.badge-perm:active { transform:translate(1px,1px); box-shadow:1px 1px 0 var(--shadow); }
+.badge-active { color:var(--accent); border-color:var(--accent); background:rgba(108,140,255,.12); }
+.badge-wait { color:var(--green); border-color:var(--green); background:rgba(74,222,128,.12); }
+#addBtn {
+  font-family:inherit; font-size:13px; padding:5px 14px; color:#000; border:none; cursor:pointer;
+  font-weight:normal; letter-spacing:.5px;
+  background:var(--green); box-shadow:2px 2px 0 #1a6e3a;
+  transition:transform .1s, box-shadow .1s;
+}
+#addBtn:hover { transform:translate(-1px,-1px); box-shadow:3px 3px 0 #1a6e3a; }
+#addBtn:active { transform:translate(1px,1px); box-shadow:1px 1px 0 #1a6e3a; }
+.hdr-btn {
+  font-family:inherit; font-size:15px; padding:4px 8px; background:var(--bg);
+  color:var(--dim); border:2px solid var(--border); cursor:pointer;
+  box-shadow:2px 2px 0 var(--shadow); transition:background .1s, color .1s, border-color .1s, transform .1s, box-shadow .1s;
+}
+.hdr-btn:hover { background:var(--bg3); color:var(--text); border-color:var(--border-hi); }
+.hdr-btn:active { transform:translate(1px,1px); box-shadow:1px 1px 0 var(--shadow); }
+
+#content { display:flex; flex-direction:column; flex:1; overflow:hidden; }
+#list-col { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; }
+
+/* ── Context warning banner ── */
+#ctx-warning {
+  display:none; padding:5px 16px; flex-shrink:0; font-size:11px; letter-spacing:.3px;
+  background:rgba(248,113,113,.1); border-bottom:1px solid rgba(248,113,113,.25); color:var(--red);
+  align-items:center; gap:6px; cursor:pointer;
+}
+#ctx-warning.show { display:flex; }
+#ctx-warning:hover { background:rgba(248,113,113,.18); }
+.ctx-warning-icon { flex-shrink:0; }
+
+/* ── Filter bar ── */
+#filter-bar {
+  display:none; padding:6px 16px; border-bottom:1px solid var(--border); flex-shrink:0;
+  background:var(--bg2); align-items:center; gap:8px;
+}
+#filter-bar.open { display:flex; }
+#filter-input {
+  flex:1; font-family:inherit; font-size:13px; padding:4px 8px; color:var(--text);
+  background:var(--card); border:1px solid var(--border); outline:none; letter-spacing:.3px;
+  transition:border-color .12s;
+}
+#filter-input::placeholder { color:var(--dim); }
+#filter-input:focus { border-color:var(--accent); }
+#filter-count { font-size:11px; color:var(--dim); white-space:nowrap; letter-spacing:.3px; }
+#filter-close {
+  font-family:inherit; background:none; border:none; color:var(--dim); cursor:pointer;
+  font-size:15px; padding:0 4px; transition:color .12s;
+}
+#filter-close:hover { color:var(--text); }
+#filter-close:active { color:var(--red); }
+
+/* ── Scroll area ── */
+#list { flex:1; overflow-y:auto; padding:8px 0; scrollbar-gutter:stable; }
+#list::-webkit-scrollbar { width:6px; }
+#list::-webkit-scrollbar-track { background:var(--bg); }
+#list::-webkit-scrollbar-thumb { background:var(--border-hi); }
+#list::-webkit-scrollbar-thumb:hover { background:#4a4a6a; }
+
+/* ── Empty state ── */
+.empty {
+  display:flex; align-items:center; justify-content:center; height:100%;
+  color:var(--dim); font-size:18px; flex-direction:column; gap:16px; user-select:none;
+}
+.empty-icon { font-size:48px; opacity:.15; line-height:1; }
+.empty-title { font-size:15px; }
+.empty-sub { font-size:13px; color:rgba(255,255,255,.25); letter-spacing:.5px; }
+
+/* ── Project group ── */
+.group { margin-bottom:2px; }
+.group-header {
+  display:flex; align-items:center; padding:8px 16px; cursor:pointer; user-select:none;
+  background:linear-gradient(90deg, rgba(108,140,255,.06) 0%, transparent 100%);
+  border-bottom:1px solid var(--border); border-top:1px solid rgba(255,255,255,.03); gap:8px;
+}
+.group-header:hover { background:linear-gradient(90deg, rgba(108,140,255,.1) 0%, transparent 100%); }
+.group-chevron { font-size:10px; color:var(--dim); transition:transform .15s; flex-shrink:0; width:12px; }
+.group.collapsed .group-chevron { transform:rotate(-90deg); }
+.group.collapsed .agents,
+.group.collapsed .group-add { display:none; }
+.group-info { flex:1; min-width:0; }
+.group-name { font-size:14px; color:var(--accent); letter-spacing:.3px; }
+.group-path { font-size:11px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; opacity:.7; }
+.group-stats { font-size:11px; color:var(--dim); white-space:nowrap; flex-shrink:0; letter-spacing:.3px; }
+.group-badges { display:flex; gap:4px; flex-shrink:0; }
+.group-badges:empty { display:none; }
+.group-badges span {
+  font-size:10px; padding:2px 6px; font-weight:normal; letter-spacing:.3px;
+  border:1px solid; box-shadow:1px 1px 0 var(--shadow);
+}
+.gbadge-perm { color:var(--yellow); border-color:var(--yellow); }
+.gbadge-active { color:var(--accent); border-color:var(--accent); }
+.gbadge-wait { color:var(--green); border-color:var(--green); }
+.group-close-done {
+  font-family:inherit; font-size:10px; padding:2px 6px; cursor:pointer; flex-shrink:0;
+  color:var(--dim); background:none; border:1px solid var(--border); letter-spacing:.3px;
+  box-shadow:1px 1px 0 var(--shadow); transition:color .12s, border-color .12s, background .12s;
+}
+.group-close-done:hover { color:var(--red); border-color:var(--red); background:rgba(248,113,113,.08); }
+.group-close-done:active { background:rgba(248,113,113,.16); }
+
+/* ── Agent card ── */
+.agents { padding:4px 12px; display:flex; flex-direction:column; gap:4px; }
+.agent {
+  padding:8px 12px; cursor:pointer; border:2px solid var(--border); background:var(--card);
+  box-shadow:2px 2px 0 var(--shadow); transition:background .12s, border-color .12s, transform .12s, box-shadow .12s; position:relative;
+}
+.agent::before {
+  content:''; position:absolute; left:-2px; top:-2px; bottom:-2px; width:3px;
+  background:var(--dim); transition:background .15s;
+}
+.agent:hover { background:var(--bg3); border-color:var(--border-hi); transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--shadow); }
+.agent.selected { border-color:var(--accent); background:rgba(108,140,255,.08); }
+.agent.selected::before { background:var(--accent); }
+.agent-top { display:flex; align-items:center; gap:8px; margin-bottom:3px; }
+.dot { width:8px; height:8px; flex-shrink:0; }
+.dot-active { background:var(--accent); box-shadow:0 0 8px var(--accent), inset 0 0 2px rgba(255,255,255,.4); }
+.dot-waiting { background:var(--green); box-shadow:0 0 8px var(--green), inset 0 0 2px rgba(255,255,255,.4); }
+.dot-perm { background:var(--yellow); box-shadow:0 0 8px var(--yellow), inset 0 0 2px rgba(255,255,255,.4); }
+.dot-idle { background:var(--dim); opacity:.5; }
+.dot-crashed { background:var(--red); box-shadow:0 0 8px var(--red), inset 0 0 2px rgba(255,255,255,.4); }
+.dot-resuming { background:var(--yellow); box-shadow:0 0 8px var(--yellow), inset 0 0 2px rgba(255,255,255,.4); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.pulse { animation:pulse 1.5s ease-in-out infinite; }
+@keyframes typing-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-3px)} }
+.typing-dots { display:inline-flex; gap:2px; margin-left:5px; vertical-align:middle; }
+.typing-dots span { width:3px; height:3px; background:var(--accent); display:inline-block; animation:typing-bounce .8s ease-in-out infinite; }
+.typing-dots span:nth-child(2) { animation-delay:.15s; }
+.typing-dots span:nth-child(3) { animation-delay:.3s; }
+.agent-name { font-size:14px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+.agent-activity { font-size:11px; flex-shrink:0; letter-spacing:.3px; text-transform:uppercase; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; }
+.elapsed-timer { font-size:10px; color:var(--dim); flex-shrink:0; letter-spacing:.3px; font-variant-numeric:tabular-nums; }
+.agent-btn {
+  font-family:inherit; background:none; border:1px solid transparent; cursor:pointer;
+  padding:2px 5px; font-size:13px; line-height:1; flex-shrink:0; opacity:.3;
+  transition:opacity .12s, border-color .12s, background .12s; color:var(--text);
+}
+.agent-btn:hover { opacity:1; border-color:var(--border); background:var(--bg); }
+.agent-btn:active { opacity:1; background:var(--bg2); }
+.btn-export { color:var(--cyan); }
+.btn-restart { color:var(--accent); }
+.btn-close { color:var(--red); }
+
+/* Agent activity color driven by parent data-status */
+.agent[data-status="permission"] .agent-activity { color:var(--yellow); }
+.agent[data-status="active"] .agent-activity { color:var(--accent); }
+.agent[data-status="waiting"] .agent-activity { color:var(--green); }
+.agent[data-status="idle"] .agent-activity { color:var(--dim); }
+.agent[data-status="crashed"] .agent-activity { color:var(--red); }
+.agent[data-status="resuming"] .agent-activity { color:var(--yellow); }
+.agent-prompt { font-size:12px; color:var(--dim); margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:12px; position:relative; }
+.agent-prompt::before { content:'>'; position:absolute; left:0; color:var(--accent); opacity:.5; }
+.agent-preview { font-size:11px; color:rgba(255,255,255,.3); margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:12px; position:relative; }
+.agent-preview::before { content:'<'; position:absolute; left:0; color:var(--green); opacity:.4; }
+.agent-stats { display:flex; gap:4px; font-size:11px; color:var(--dim); flex-wrap:wrap; }
+.agent-stats span { padding:1px 0; letter-spacing:.2px; }
+.agent-stats span + span::before { content:'\00b7'; margin-right:4px; opacity:.5; }
+.ctx-warn { color:var(--yellow); text-shadow:0 0 6px rgba(250,204,21,.3); }
+
+/* Sub-agent items */
+.subagent {
+  display:flex; align-items:center; gap:6px; padding:3px 0 3px 16px;
+  margin:2px 0; border-left:2px solid var(--border); position:relative;
+}
+.subagent-dot {
+  width:6px; height:6px; flex-shrink:0;
+  background:var(--accent); box-shadow:0 0 6px var(--accent);
+}
+.subagent-name {
+  font-size:12px; color:var(--text); opacity:.7; flex:1; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.subagent-activity {
+  font-size:10px; color:var(--accent); flex-shrink:0; letter-spacing:.3px;
+  text-transform:uppercase; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+/* Context bar */
+.ctx-bar { height:3px; background:var(--border); margin-top:5px; overflow:hidden; }
+.ctx-bar-fill { height:100%; background:var(--accent); transition:width .3s; }
+.ctx-bar-fill.warn { background:var(--yellow); }
+.ctx-bar-fill.danger { background:var(--red); }
+
+
+/* ── Summary footer ── */
+#summary-bar {
+  display:none; padding:6px 16px; border-top:2px solid var(--border-hi); flex-shrink:0;
+  background:linear-gradient(180deg, #14141f 0%, #0f0f17 100%);
+  font-size:11px; color:var(--dim); gap:12px; align-items:center; letter-spacing:.3px;
+}
+#summary-bar.show { display:flex; }
+#summary-bar span + span::before { content:'\00b7'; margin-right:8px; opacity:.4; }
+.model-tag { font-size:9px; padding:1px 4px; letter-spacing:.5px; text-transform:uppercase;
+  border:1px solid var(--border); color:var(--dim); margin-left:4px; vertical-align:1px; }
+.model-tag.opus { color:var(--purple); border-color:var(--purple); }
+.model-tag.sonnet { color:var(--accent); border-color:var(--accent); }
+.model-tag.haiku { color:var(--cyan); border-color:var(--cyan); }
+.group-open-folder {
+  font-family:inherit; font-size:10px; padding:2px 6px; cursor:pointer; flex-shrink:0;
+  color:var(--dim); background:none; border:1px solid var(--border); letter-spacing:.3px;
+  box-shadow:1px 1px 0 var(--shadow); transition:color .12s, border-color .12s, background .12s;
+}
+.group-open-folder:hover { color:var(--accent); border-color:var(--accent); background:rgba(108,140,255,.08); }
+
+/* ── Add agent row in group ── */
+.group-add { padding:4px 12px 8px; }
+.group-add button {
+  font-family:inherit; font-size:12px; color:var(--dim); background:transparent;
+  border:1px dashed var(--border); padding:5px 14px; cursor:pointer;
+  transition:border-color .15s, color .15s, background .15s, border-style .15s; letter-spacing:.3px; width:100%;
+}
+.group-add button:hover { border-color:var(--green); color:var(--green); border-style:solid; background:rgba(74,222,128,.05); }
+.group-add button:active { background:rgba(74,222,128,.12); }
+
+/* ── Terminal panel — bottom layout (default) ── */
+#term { display:none; flex-direction:column; border-top:2px solid var(--border-hi); flex-shrink:0; height:40%; min-height:120px; }
+#term.open { display:flex; }
+#term-header {
+  display:flex; align-items:center; padding:0 12px; height:32px;
+  background:linear-gradient(180deg, #1a1a2a 0%, #14141f 100%);
+  border-bottom:1px solid var(--border); gap:8px; flex-shrink:0;
+}
+#term-header .term-title { font-size:12px; color:var(--dim); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; letter-spacing:.3px; }
+#term-header button {
+  font-family:inherit; background:none; border:1px solid transparent; color:var(--dim);
+  cursor:pointer; font-size:13px; padding:2px 6px; transition:background .12s, color .12s, border-color .12s;
+}
+#term-header button:hover { background:rgba(255,255,255,.06); color:var(--red); border-color:var(--border); }
+#term-header button:active { background:rgba(255,255,255,.1); }
+#term-container { flex:1; position:relative; background:#0a0a14; overflow:hidden; }
+#term-container .xterm { height:100%; }
+
+/* ── Resize handle ── */
+#resize { height:5px; background:var(--bg); cursor:ns-resize; flex-shrink:0; display:none; position:relative; }
+#resize::after { content:''; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:32px; height:2px; background:var(--border-hi); }
+#resize:hover { background:var(--bg3); }
+#resize:hover::after { background:var(--accent); }
+#resize.open { display:block; }
+
+/* ── Right layout mode ── */
+.layout-right #content { flex-direction:row; }
+.layout-right #list-col { flex:1; min-width:0; }
+.layout-right #term { height:auto; width:50%; min-width:200px; min-height:0; border-top:none; border-left:2px solid var(--border-hi); flex:none; }
+.layout-right #resize { width:5px; height:auto; cursor:ew-resize; border-top:none; }
+.layout-right #resize::after { width:2px; height:24px; }
+
+/* ── Settings overlay ── */
+#settings-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:999;
+  align-items:center; justify-content:center; transition:opacity .15s;
+}
+.settings-modal {
+  background:var(--bg); border:2px solid var(--border-hi);
+  box-shadow:4px 4px 0 var(--shadow); padding:20px 24px; min-width:380px;
+}
+.settings-title { font-size:18px; color:var(--accent); letter-spacing:1px; }
+.settings-close {
+  font-family:inherit; background:none; border:1px solid var(--border);
+  color:var(--dim); cursor:pointer; font-size:15px; padding:2px 8px;
+  transition:color .12s, border-color .12s, background .12s;
+}
+.settings-close:hover { color:var(--text); border-color:var(--border-hi); background:var(--bg3); }
+.settings-close:active { background:var(--bg2); }
+.settings-label { display:flex; align-items:center; gap:10px; cursor:pointer; padding:10px 0; }
+.settings-label input[type="checkbox"] {
+  appearance:none; width:16px; height:16px; border:2px solid var(--border-hi);
+  background:var(--bg); cursor:pointer; position:relative; flex-shrink:0;
+}
+.settings-label input[type="checkbox"]:checked { border-color:var(--accent); background:rgba(108,140,255,.15); }
+.settings-label input[type="checkbox"]:checked::after {
+  content:''; position:absolute; left:2px; top:2px; width:8px; height:8px; background:var(--accent);
+}
+.settings-hint { font-size:12px; color:var(--dim); padding:2px 0 0 26px; letter-spacing:.2px; }
+
+/* ── Focus-visible for keyboard accessibility ── */
+:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+button:focus-visible { outline-offset:0; }
+
+/* ── Selection highlight for status-colored left borders ── */
+.agent[data-status="permission"]::before { background:var(--yellow); }
+.agent[data-status="active"]::before { background:var(--accent); }
+.agent[data-status="waiting"]::before { background:var(--green); }
+.agent[data-status="crashed"]::before { background:var(--red); }
+.agent[data-status="resuming"]::before { background:var(--yellow); }
+
+/* Permission card urgency */
+.agent[data-status="permission"] { border-color:rgba(250,204,21,.3); box-shadow:2px 2px 0 var(--shadow), 0 0 8px rgba(250,204,21,.08); }
+/* Crashed card urgency */
+.agent[data-status="crashed"] { border-color:rgba(248,113,113,.3); box-shadow:2px 2px 0 var(--shadow), 0 0 8px rgba(248,113,113,.08); }
+
+/* Settings modal header */
+.settings-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+
+/* ── Help overlay ── */
+#help-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:999;
+  align-items:center; justify-content:center; transition:opacity .15s;
+}
+.help-modal {
+  background:var(--bg); border:2px solid var(--border-hi);
+  box-shadow:4px 4px 0 var(--shadow); padding:20px 24px; min-width:360px; max-width:90vw;
+}
+.help-modal h3 { font-size:16px; color:var(--accent); font-weight:normal; letter-spacing:1px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+.help-row { display:flex; align-items:center; padding:5px 0; gap:12px; }
+.help-key {
+  font-size:11px; padding:2px 7px; min-width:80px; text-align:center;
+  background:var(--bg3); border:1px solid var(--border-hi); color:var(--text);
+  box-shadow:1px 1px 0 var(--shadow); letter-spacing:.3px; flex-shrink:0;
+}
+.help-desc { font-size:12px; color:var(--dim); letter-spacing:.2px; }
+
+/* ── Prompt overlay ── */
+#prompt-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:999;
+  align-items:center; justify-content:center; transition:opacity .15s;
+}
+.prompt-modal {
+  background:var(--bg); border:2px solid var(--border-hi); box-shadow:4px 4px 0 var(--shadow);
+  padding:20px 24px; width:480px; max-width:90vw;
+}
+.prompt-modal h3 { font-size:15px; color:var(--accent); font-weight:normal; letter-spacing:.5px; margin-bottom:4px; }
+.prompt-path { font-size:11px; color:var(--dim); margin-bottom:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.prompt-input {
+  width:100%; font-family:inherit; font-size:14px; padding:8px 10px; color:var(--text);
+  background:var(--card); border:2px solid var(--border); outline:none;
+  resize:vertical; min-height:36px; max-height:200px;
+}
+.prompt-input::placeholder { color:var(--dim); }
+.prompt-input:focus { border-color:var(--accent); }
+.prompt-actions { display:flex; gap:8px; margin-top:12px; justify-content:flex-end; }
+.prompt-actions button {
+  font-family:inherit; font-size:13px; padding:6px 16px; cursor:pointer;
+  border:2px solid var(--border); background:var(--bg3); color:var(--text);
+  box-shadow:2px 2px 0 var(--shadow); transition:border-color .1s, transform .1s, box-shadow .1s;
+}
+.prompt-actions button:hover { border-color:var(--border-hi); transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--shadow); }
+.prompt-actions button:active { transform:translate(1px,1px); box-shadow:1px 1px 0 var(--shadow); }
+.prompt-actions .btn-go { background:var(--green); color:#000; border-color:var(--green); box-shadow:2px 2px 0 #1a6e3a; }
+.prompt-actions .btn-go:hover { box-shadow:3px 3px 0 #1a6e3a; }
+.prompt-actions .btn-go:active { box-shadow:1px 1px 0 #1a6e3a; }
+
+/* ── Terminal tabs ── */
+.term-tabs { display:flex; gap:0; flex-shrink:0; }
+.term-tab {
+  font-family:inherit; font-size:11px; padding:6px 14px; cursor:pointer;
+  background:transparent; color:var(--dim); border:none; border-bottom:2px solid transparent;
+  letter-spacing:.5px; text-transform:uppercase; transition:color .12s, border-color .12s, background .12s;
+}
+.term-tab:hover { color:var(--text); background:rgba(255,255,255,.03); }
+.term-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+/* ── Timeline ── */
+#timeline-events {
+  display:none; flex:1; overflow-y:auto; padding:10px 14px; font-size:12px;
+  background:#0a0a14; min-height:0;
+}
+#timeline-events.open { display:block; }
+.tl-empty { color:var(--dim); text-align:center; padding:40px 0; font-size:13px; }
+
+.tl-event { padding:6px 0 6px 22px; position:relative; border-left:2px solid var(--border); margin-left:5px; }
+.tl-event:last-child { border-left-color:transparent; }
+.tl-dot {
+  position:absolute; left:-5px; top:9px; width:8px; height:8px;
+  box-shadow:0 0 6px currentColor;
+}
+.tl-event-prompt .tl-dot { background:var(--green); color:var(--green); }
+.tl-event-text .tl-dot { background:var(--accent); color:var(--accent); }
+.tl-event-tool .tl-dot { background:var(--purple); color:var(--purple); }
+.tl-event-tool_done .tl-dot { background:rgba(255,255,255,.2); color:transparent; box-shadow:none; }
+.tl-event-turn .tl-dot { background:var(--yellow); color:var(--yellow); }
+.tl-event-subtask .tl-dot { background:var(--cyan); color:var(--cyan); }
+
+.tl-time { font-size:10px; color:var(--dim); letter-spacing:.3px; }
+.tl-label { color:var(--text); margin-top:1px; word-break:break-word; }
+.tl-label-tool { color:var(--purple); }
+.tl-label-prompt { color:var(--green); }
+.tl-label-turn { color:var(--yellow); font-size:11px; }
+.tl-detail {
+  color:rgba(255,255,255,.35); font-size:11px; margin-top:2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; cursor:pointer;
+}
+.tl-detail:hover { color:rgba(255,255,255,.55); }
+.tl-detail.expanded { white-space:normal; word-break:break-word; }
+.tl-turn-sep { border-top:1px solid var(--border); margin:6px 0 0 -22px; }
+
+/* ── Session History overlay ── */
+#history-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:999;
+  align-items:center; justify-content:center; transition:opacity .15s;
+}
+.history-modal {
+  background:var(--bg); border:2px solid var(--border-hi); box-shadow:4px 4px 0 var(--shadow);
+  padding:20px 24px; width:640px; max-width:90vw; max-height:80vh; display:flex; flex-direction:column;
+}
+.history-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+.history-header h3 { font-size:16px; color:var(--accent); font-weight:normal; letter-spacing:1px; }
+.history-search {
+  width:100%; font-family:inherit; font-size:13px; padding:6px 10px; color:var(--text);
+  background:var(--card); border:2px solid var(--border); outline:none; margin-bottom:10px; flex-shrink:0;
+}
+.history-search::placeholder { color:var(--dim); }
+.history-search:focus { border-color:var(--accent); }
+#history-list { flex:1; overflow-y:auto; }
+.history-loading { text-align:center; padding:40px 0; color:var(--dim); font-size:13px; }
+
+.history-group { margin-bottom:10px; }
+.history-group-header {
+  font-size:13px; color:var(--accent); padding:6px 0 4px; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
+}
+.history-group-header:hover { color:#8eaaff; }
+.history-group-chevron { font-size:9px; color:var(--dim); transition:transform .15s; }
+.history-group.collapsed .history-group-chevron { transform:rotate(-90deg); }
+.history-group.collapsed .history-items { display:none; }
+.history-group-path { font-size:10px; color:var(--dim); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.history-group-count { font-size:10px; color:var(--dim); }
+
+.history-item {
+  padding:8px 10px; cursor:pointer; border:1px solid transparent; margin:2px 0;
+  transition:background .12s, border-color .12s;
+}
+.history-item:hover { background:var(--bg3); border-color:var(--border); }
+.history-item.active-session { opacity:.4; pointer-events:none; }
+.history-item-top { display:flex; align-items:center; gap:8px; }
+.history-item-title { font-size:13px; color:var(--text); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.history-item-date { font-size:10px; color:var(--dim); flex-shrink:0; }
+.history-item-meta { font-size:11px; color:var(--dim); display:flex; gap:8px; margin-top:3px; }
+.history-item-meta span + span::before { content:'\00b7'; margin-right:4px; opacity:.5; }
+.history-item-prompt { font-size:11px; color:rgba(255,255,255,.3); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <h1>Overlord</h1>
+    <div id="headerBadges"></div>
+    <button class="hdr-btn" onclick="openHistory()" title="Session history (Ctrl+H)">&#x23F3;</button>
+    <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
+    <button id="layoutBtn" class="hdr-btn" onclick="toggleLayout()" title="Toggle terminal position">&#x25A7;</button>
+    <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
+    <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Reload app">&#x21BB;</button>
+    <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
+  </div>
+  <div id="content">
+  <div id="list-col">
+    <div id="ctx-warning" onclick="focusNextCtxDanger()"><span class="ctx-warning-icon">&#x26A0;</span><span id="ctx-warning-text"></span></div>
+    <div id="filter-bar">
+      <input id="filter-input" type="text" placeholder="Filter agents... (Esc to close)" />
+      <span id="filter-count"></span>
+      <button id="filter-close" onclick="closeFilter()" aria-label="Close filter">&times;</button>
+    </div>
+    <div id="list"></div>
+    <div id="summary-bar"></div>
+  </div>
+  <div id="resize"></div>
+  <div id="term">
+    <div id="term-header">
+      <div class="term-tabs">
+        <button class="term-tab active" id="tab-terminal" onclick="switchTermTab('terminal')">Terminal</button>
+        <button class="term-tab" id="tab-timeline" onclick="switchTermTab('timeline')">Timeline</button>
+      </div>
+      <span class="term-title" id="term-title"></span>
+      <button onclick="closeTerm()" aria-label="Close terminal">&times;</button>
+    </div>
+    <div id="term-container"></div>
+    <div id="timeline-events"></div>
+  </div>
+  </div><!-- end #content -->
+  <div id="settings-overlay" style="display:none" onclick="toggleSettings()">
+    <div class="settings-modal" onclick="event.stopPropagation()">
+      <div class="settings-header">
+        <span class="settings-title">Settings</span>
+        <button class="settings-close" onclick="toggleSettings()" aria-label="Close settings">&times;</button>
+      </div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-bypass" onchange="onBypassChange(this.checked)" />
+        <span>Bypass permissions (--dangerously-skip-permissions)</span>
+      </label>
+      <div class="settings-hint">Applies to newly spawned agents. Persisted across sessions.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-notif" onchange="onNotifChange(this.checked)" />
+        <span>Desktop notifications for permission requests</span>
+      </label>
+      <div class="settings-hint">Shows a native notification and flashes the taskbar when an agent needs approval.</div>
+      <label class="settings-label">
+        <span>Plan budget: $</span>
+        <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:13px;padding:3px 6px;color:var(--text);background:var(--card);border:2px solid var(--border);outline:none;" onchange="onBudgetChange(this.value)" />
+      </label>
+      <div class="settings-hint">Monthly plan budget — used to show usage percentage in the footer.</div>
+    </div>
+  </div>
+  <div id="prompt-overlay" onclick="closePromptOverlay()">
+    <div class="prompt-modal" onclick="event.stopPropagation()">
+      <h3>New Agent</h3>
+      <div class="prompt-path" id="prompt-cwd"></div>
+      <textarea class="prompt-input" id="prompt-input" rows="3" placeholder="What should this agent work on? (Enter to start, leave empty for interactive)"></textarea>
+      <div class="prompt-actions">
+        <button onclick="closePromptOverlay()">Cancel</button>
+        <button class="btn-go" onclick="submitPrompt()">Start</button>
+      </div>
+    </div>
+  </div>
+  <div id="help-overlay" onclick="closeHelp()">
+    <div class="help-modal" onclick="event.stopPropagation()">
+      <h3>Keyboard Shortcuts</h3>
+      <div class="help-row"><span class="help-key">Ctrl+N</span><span class="help-desc">New agent in current project</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+W</span><span class="help-desc">Close selected agent</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+R</span><span class="help-desc">Restart selected agent</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+D</span><span class="help-desc">Duplicate agent (same project, pre-filled prompt)</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+L</span><span class="help-desc">Clear terminal display</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Shift+W</span><span class="help-desc">Close all done agents</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Tab</span><span class="help-desc">Next agent</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Shift+Tab</span><span class="help-desc">Previous agent</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+!</span><span class="help-desc">Jump to next permission request</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+F</span><span class="help-desc">Filter agents</span></div>
+      <div class="help-row"><span class="help-key">/</span><span class="help-desc">Filter agents (when not typing)</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+0</span><span class="help-desc">Reset zoom to 100%</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Scroll</span><span class="help-desc">Zoom in/out</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+H</span><span class="help-desc">Session history</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+T</span><span class="help-desc">Toggle timeline / terminal</span></div>
+      <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close overlay / filter</span></div>
+      <div class="help-row"><span class="help-key">?</span><span class="help-desc">Show this help</span></div>
+    </div>
+  </div>
+  <div id="history-overlay" onclick="closeHistory()">
+    <div class="history-modal" onclick="event.stopPropagation()">
+      <div class="history-header">
+        <h3>Session History</h3>
+        <button class="settings-close" onclick="closeHistory()" aria-label="Close">&times;</button>
+      </div>
+      <input class="history-search" type="text" placeholder="Search sessions..." id="history-search" />
+      <div id="history-list"><div class="history-loading">Scanning sessions...</div></div>
+    </div>
+  </div>
+</div>
+<script src="./xterm-bundle.js"></script>
+<script>
+const CTX_WINDOW = 200000;
+const agents = new Map(); // id -> { cwd, status, tools:Map, prompt, preview, stats, sessionId }
+let selectedId = null;
+let filterText = '';
+const collapsedGroups = new Set();
+function toggleGroup(cwd) { if (collapsedGroups.has(cwd)) collapsedGroups.delete(cwd); else collapsedGroups.add(cwd); render(); }
+
+// ── Timeline state ──
+let termTab = 'terminal'; // 'terminal' or 'timeline'
+let timelineAgentId = null;
+let tlUserScrolled = false;
+
+// ── History state ──
+let _historyCloseTimer = null;
+let allSessions = [];
+const collapsedHistoryGroups = new Set();
+
+function openFilter() {
+  document.getElementById('filter-bar').classList.add('open');
+  const input = document.getElementById('filter-input');
+  input.value = filterText;
+  input.focus();
+  input.select();
+}
+function closeFilter() {
+  document.getElementById('filter-bar').classList.remove('open');
+  if (filterText) { filterText = ''; render(); }
+}
+document.getElementById('filter-input').addEventListener('input', (e) => { filterText = e.target.value.toLowerCase(); render(); });
+document.getElementById('filter-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFilter(); });
+
+let pendingCwd = null;
+let _promptCloseTimer = null;
+function browseAndAdd() { api.send({ type: 'browseFolder' }); }
+function addAgent(cwd) { showPromptOverlay(cwd); }
+function duplicateAgent(id) {
+  const a = agents.get(id);
+  if (!a) return;
+  showPromptOverlay(a.cwd, a.prompt || '');
+}
+function showPromptOverlay(cwd, prefill) {
+  if (_promptCloseTimer) { clearTimeout(_promptCloseTimer); _promptCloseTimer = null; }
+  pendingCwd = cwd;
+  document.getElementById('prompt-cwd').textContent = cwd;
+  const input = document.getElementById('prompt-input');
+  input.value = prefill || '';
+  const el = document.getElementById('prompt-overlay');
+  el.style.display = 'flex'; el.style.opacity = '0';
+  requestAnimationFrame(() => { el.style.opacity = '1'; input.focus(); });
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitPrompt(); }
+    if (e.key === 'Escape') closePromptOverlay();
+  };
+}
+function closePromptOverlay() {
+  if (_promptCloseTimer) return; // already closing
+  const el = document.getElementById('prompt-overlay');
+  el.style.opacity = '0';
+  _promptCloseTimer = setTimeout(() => { _promptCloseTimer = null; el.style.display = 'none'; }, 150);
+  pendingCwd = null;
+}
+function submitPrompt() {
+  if (!pendingCwd) return;
+  const prompt = document.getElementById('prompt-input').value.trim();
+  api.send({ type: 'createAgent', cwd: pendingCwd, prompt: prompt || undefined });
+  closePromptOverlay();
+}
+function closeAgent(id, skipConfirm) {
+  if (!skipConfirm) {
+    const a = agents.get(id);
+    if (a && agentStatus(a) === 'active') {
+      if (!confirm(`Agent "${a.title || 'New agent'}" is actively working. Close it?`)) return;
+    }
+  }
+  api.send({ type: 'closeAgent', id });
+}
+function focusNextPerm() {
+  const permIds = [...agents.entries()].filter(([, a]) => agentStatus(a) === 'permission').map(([id]) => id);
+  if (permIds.length === 0) return;
+  // Cycle: find first perm agent after current selection, or wrap to first
+  const idx = selectedId !== null ? permIds.indexOf(selectedId) : -1;
+  const next = idx >= 0 && idx < permIds.length - 1 ? permIds[idx + 1] : permIds[0];
+  focusAgent(next);
+}
+function focusNextCtxDanger() {
+  const dangerIds = [...agents.entries()].filter(([, a]) => a.stats?.ctxTok && Math.round((a.stats.ctxTok / CTX_WINDOW) * 100) >= 80).map(([id]) => id);
+  if (dangerIds.length === 0) return;
+  const idx = selectedId !== null ? dangerIds.indexOf(selectedId) : -1;
+  const next = idx >= 0 && idx < dangerIds.length - 1 ? dangerIds[idx + 1] : dangerIds[0];
+  focusAgent(next);
+}
+function closeDoneInGroup(cwd) {
+  for (const [id, a] of agents) {
+    if (a.cwd === cwd && (agentStatus(a) === 'waiting' || agentStatus(a) === 'idle')) closeAgent(id, true);
+  }
+}
+function restartAgent(id) {
+  const a = agents.get(id);
+  if (a && agentStatus(a) === 'active') {
+    if (!confirm(`Agent "${a.title || 'New agent'}" is actively working. Restart it?`)) return;
+  }
+  api.send({ type: 'restartAgent', id });
+}
+function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
+function focusAgent(id) { selectedId = id; api.send({ type: 'focusAgent', id }); render(); }
+function openUrl(url) { api.send({ type: 'openUrl', url }); }
+function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
+
+function fmtTok(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'k' : String(n); }
+function fmtDur(ms) { const s = Math.floor(ms/1000); if (s < 60) return s+'s'; const m = Math.floor(s/60); if (m < 60) return m+'m '+(s%60)+'s'; return Math.floor(m/60)+'h '+(m%60)+'m'; }
+function fmtAgo(ts) { if (!ts) return ''; const ms = Date.now() - ts; const s = Math.floor(ms/1000); if (s < 60) return '<1m'; const m = Math.floor(s/60); if (m < 60) return m+'m'; const h = Math.floor(m/60); if (h < 24) return h+'h '+( m%60)+'m'; return Math.floor(h/24)+'d '+( h%24)+'h'; }
+const PRICING = {
+  opus:   { input: 15,   output: 75,   cacheWrite: 18.75, cacheRead: 1.50 },
+  sonnet: { input: 3,    output: 15,   cacheWrite: 3.75,  cacheRead: 0.30 },
+  haiku:  { input: 0.80, output: 4,    cacheWrite: 1.00,  cacheRead: 0.08 },
+};
+function calcCost(s) {
+  if (!s) return 0;
+  const p = PRICING[s.modelFamily || 'sonnet'] || PRICING.sonnet;
+  const base = Math.max(0, s.inTok - (s.cacheTok || 0) - (s.cacheRead || 0)) * p.input;
+  return (base + s.outTok * p.output + (s.cacheTok || 0) * p.cacheWrite + (s.cacheRead || 0) * p.cacheRead) / 1e6;
+}
+function fmtCost(c) { return c >= 1 ? '$' + c.toFixed(2) : '$' + c.toFixed(3); }
+function pathLabel(p) { const pts = p.replace(/\\/g, '/').split('/').filter(Boolean); return pts[pts.length-1] || p; }
+const _escEl = document.createElement('div');
+function esc(s) { _escEl.textContent = s; return _escEl.innerHTML; }
+function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
+
+function deriveName(prompt) {
+  if (!prompt) return null;
+  const clean = prompt.replace(/^[\s\n]+/, '').slice(0, 60);
+  const first = clean.split('\n')[0].trim();
+  return first.length > 40 ? first.slice(0, 40) + '\u2026' : first || null;
+}
+
+function agentStatus(a) {
+  if (a.crashed === 'fatal') return 'crashed';
+  if (a.crashed === 'resuming') return 'resuming';
+  for (const t of a.tools.values()) { if (t.perm) return 'permission'; if (!t.done) return 'active'; }
+  if (a.status === 'waiting') return 'waiting';
+  if (a.status === 'active') return 'active';
+  return 'idle';
+}
+
+function matchesFilter(a) {
+  if (!filterText) return true;
+  return [a.title, a.prompt, a.preview, a.cwd, agentStatus(a)].join('\n').toLowerCase().includes(filterText);
+}
+const statusMeta = {
+  permission: { label: 'Needs approval', cls: 'dot-perm' },
+  active: { label: 'Working', cls: 'dot-active' },
+  waiting: { label: 'Done', cls: 'dot-waiting' },
+  idle: { label: 'Idle', cls: 'dot-idle' },
+  crashed: { label: 'Crashed', cls: 'dot-crashed' },
+  resuming: { label: 'Resuming...', cls: 'dot-resuming' },
+};
+
+let _renderPending = false;
+function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; render(); }); } }
+function render() {
+  const list = document.getElementById('list');
+  if (agents.size === 0) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
+    document.getElementById('headerBadges').innerHTML = '';
+    document.title = 'Overlord';
+    return;
+  }
+
+  // Group by cwd (apply filter)
+  const groups = new Map();
+  for (const [id, a] of agents) {
+    if (!matchesFilter(a)) continue;
+    const cwd = a.cwd || '(unknown)';
+    if (!groups.has(cwd)) groups.set(cwd, []);
+    groups.get(cwd).push([id, a]);
+  }
+
+  // Header badges
+  let permC = 0, actC = 0, waitC = 0;
+  for (const [, a] of agents) { const s = agentStatus(a); if (s === 'permission') permC++; else if (s === 'active') actC++; else if (s === 'waiting') waitC++; }
+  let badges = '';
+  if (permC) badges += `<button class="badge badge-perm" onclick="focusNextPerm()" title="Jump to next agent needing approval (Ctrl+!)">${permC} needs approval</button>`;
+  if (actC) badges += `<span class="badge badge-active">${actC} working</span>`;
+  if (waitC) badges += `<span class="badge badge-wait">${waitC} done</span>`;
+  document.getElementById('headerBadges').innerHTML = badges;
+
+  // Dynamic window title for taskbar
+  let totalCost = 0;
+  for (const [, a] of agents) totalCost += calcCost(a.stats);
+  const parts = [];
+  if (permC) parts.push(permC + '!');
+  if (actC) parts.push(actC + ' active');
+  if (waitC) parts.push(waitC + ' done');
+  if (totalCost > 0.001) parts.push(fmtCost(totalCost));
+  document.title = parts.length ? `Overlord (${parts.join(', ')})` : `Overlord \u2014 ${agents.size} agent${agents.size !== 1 ? 's' : ''}`;
+
+  let html = '', filterMatches = 0;
+  for (const [cwd, items] of groups) {
+    filterMatches += items.length;
+    let gTok = 0, gTurns = 0, gCost = 0;
+
+    for (const [, a] of items) { if (a.stats) { gTok += (a.stats.inTok||0) + (a.stats.outTok||0); gTurns += a.stats.turns||0; gCost += calcCost(a.stats); } }
+    const gPermC = items.filter(([,a]) => agentStatus(a) === 'permission').length;
+    const gActC = items.filter(([,a]) => agentStatus(a) === 'active').length;
+    const gWaitC = items.filter(([,a]) => agentStatus(a) === 'waiting').length;
+    const gIdleC = items.filter(([,a]) => agentStatus(a) === 'idle').length;
+    const gDoneCount = gWaitC + gIdleC;
+
+    const safeCwd = escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+    const isCollapsed = collapsedGroups.has(cwd);
+    html += `<div class="group${isCollapsed ? ' collapsed' : ''}"><div class="group-header" onclick="toggleGroup('${safeCwd}')">
+      <span class="group-chevron">&#x25BC;</span>
+      <div class="group-info"><span class="group-name">${esc(pathLabel(cwd))}</span><span class="group-path">${esc(cwd)}</span></div>
+      <div class="group-badges">
+        ${gPermC ? `<span class="gbadge-perm">${gPermC}!</span>` : ''}
+        ${gActC ? `<span class="gbadge-active">${gActC}</span>` : ''}
+        ${gWaitC ? `<span class="gbadge-wait">${gWaitC}</span>` : ''}
+      </div>
+      ${gDoneCount ? `<button class="group-close-done" onclick="event.stopPropagation();closeDoneInGroup('${safeCwd}')" title="Close ${gDoneCount} done agent${gDoneCount !== 1 ? 's' : ''}">close done</button>` : ''}
+      <button class="group-open-folder" onclick="event.stopPropagation();openFolder('${safeCwd}')" title="Open in file explorer">open</button>
+      <div class="group-stats">${items.length} agent${items.length !== 1 ? 's' : ''}${gCost > 0.001 ? ' · '+fmtCost(gCost) : ''}${gTurns ? ' · '+gTurns+'t' : ''}</div>
+    </div><div class="agents">`;
+
+    for (const [id, a] of items) {
+      const st = agentStatus(a);
+      const m = statusMeta[st];
+      const title = a.title || 'New agent';
+      let activity = m.label;
+      if (st === 'crashed') activity = `Crashed (${a.crashCount}/${a.crashMax})`;
+      else if (st === 'resuming') activity = `Resuming (${a.crashCount}/${a.crashMax})`;
+      else for (const t of a.tools.values()) { if (t.perm) { activity = 'Needs approval'; break; } if (!t.done) activity = t.status; }
+
+      const sel = selectedId === id;
+      const ctxPct = a.stats?.ctxTok ? Math.round((a.stats.ctxTok / CTX_WINDOW) * 100) : 0;
+      const cost = calcCost(a.stats);
+      const ctxCls = ctxPct >= 90 ? 'danger' : ctxPct >= 70 ? 'warn' : '';
+
+      html += `<div class="agent${sel ? ' selected' : ''}" data-status="${st}" data-id="${id}" onclick="focusAgent(${id})">
+        <div class="agent-top">
+          <span class="dot ${m.cls}${st === 'active' ? ' pulse' : ''}"></span>
+          <span class="agent-name" title="${escAttr(title)}">${esc(title)}</span>
+          <span class="agent-activity" title="${escAttr(activity)}">${esc(activity)}${st === 'active' || st === 'resuming' ? '<span class="typing-dots"><span></span><span></span><span></span></span>' : ''}</span>
+          ${a.activeAt ? `<span class="elapsed-timer">${(() => { const s = Math.floor((Date.now() - a.activeAt) / 1000); return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's'; })()}</span>` : ''}
+          <button class="agent-btn btn-export" onclick="event.stopPropagation();exportAgent(${id})" title="Export transcript">&#x2913;</button>
+          <button class="agent-btn" style="color:var(--green)" onclick="event.stopPropagation();duplicateAgent(${id})" title="Duplicate (Ctrl+D)">&#x2750;</button>
+          <button class="agent-btn btn-restart" onclick="event.stopPropagation();restartAgent(${id})" title="Restart (Ctrl+R)">&#x21BB;</button>
+          <button class="agent-btn btn-close" onclick="event.stopPropagation();closeAgent(${id})" title="Close (Ctrl+W / Middle-click)">&times;</button>
+        </div>
+        ${a.prompt ? `<div class="agent-prompt" title="${escAttr(a.prompt)}">${esc(a.prompt)}</div>` : ''}
+        ${a.preview ? `<div class="agent-preview" title="${escAttr(a.preview)}">${esc(a.preview)}</div>` : ''}
+        ${(() => {
+          let subHtml = '';
+          for (const [ptid, tool] of a.tools) {
+            if (!tool.isSubagent || tool.done) continue;
+            const subs = a.subTools.get(ptid);
+            const desc = tool.status.startsWith('Subtask: ') ? tool.status.slice(9) : tool.status;
+            let subActivity = '';
+            if (subs) { for (const st of subs.values()) { if (!st.done) { subActivity = st.status; } } }
+            subHtml += `<div class="subagent">
+              <span class="subagent-dot${subActivity ? ' pulse' : ''}"></span>
+              <span class="subagent-name" title="${escAttr(tool.status)}">${esc(desc)}</span>
+              ${subActivity ? `<span class="subagent-activity">${esc(subActivity)}</span>` : ''}
+            </div>`;
+          }
+          return subHtml;
+        })()}
+        <div class="agent-stats">
+          ${a.stats ? `<span class="${ctxPct >= 80 ? 'ctx-warn' : ''}">${fmtTok(a.stats.ctxTok || 0)} / ${fmtTok(CTX_WINDOW)} ctx (${ctxPct}%)</span>` : ''}
+          ${a.stats && (a.stats.inTok+a.stats.outTok) > 0 ? `<span>${fmtTok(a.stats.inTok+a.stats.outTok)} tok</span>` : ''}
+          ${cost > 0.001 ? `<span>${fmtCost(cost)}<span class="model-tag ${a.stats?.modelFamily || ''}">${a.stats?.modelFamily || '?'}</span></span>` : ''}
+          ${a.stats?.turns ? `<span>${a.stats.turns}t</span>` : ''}
+          ${a.stats?.durMs ? `<span>${fmtDur(a.stats.durMs)}</span>` : ''}
+          ${a.createdAt ? `<span title="Running since ${new Date(a.createdAt).toLocaleTimeString()}">${fmtAgo(a.createdAt)} ago</span>` : ''}
+        </div>
+        ${a.stats ? `<div class="ctx-bar" title="Context window: ${ctxPct}%"><div class="ctx-bar-fill ${ctxCls}" style="width:${Math.max(1, ctxPct)}%"></div></div>` : ''}
+      </div>`;
+    }
+    html += `</div><div class="group-add"><button onclick="addAgent('${safeCwd}')">+ Agent</button></div></div>`;
+  }
+  document.getElementById('filter-count').textContent = filterText ? filterMatches + ' of ' + agents.size : '';
+  if (filterText && filterMatches === 0) {
+    html = '<div class="empty"><div class="empty-title">No matching agents</div><div class="empty-sub">Try a different search term</div></div>';
+  }
+  const scrollTop = list.scrollTop;
+  list.innerHTML = html;
+  list.scrollTop = scrollTop;
+
+  // Context warning banner
+  const ctxWarn = document.getElementById('ctx-warning');
+  const dangerAgents = [...agents.entries()].filter(([, a]) => a.stats?.ctxTok && Math.round((a.stats.ctxTok / CTX_WINDOW) * 100) >= 80);
+  if (dangerAgents.length > 0) {
+    const msgs = dangerAgents.map(([, a]) => {
+      const pct = Math.round((a.stats.ctxTok / CTX_WINDOW) * 100);
+      return `${a.title || 'Agent'} (${pct}%)`;
+    });
+    document.getElementById('ctx-warning-text').textContent = dangerAgents.length === 1
+      ? `${msgs[0]} — context window almost full`
+      : `${dangerAgents.length} agents near context limit: ${msgs.join(', ')}`;
+    ctxWarn.classList.add('show');
+  } else {
+    ctxWarn.classList.remove('show');
+  }
+
+  // Summary bar
+  const bar = document.getElementById('summary-bar');
+  if (agents.size > 0) {
+    let totTok = 0, totTurns = 0, totDur = 0, models = {};
+    for (const [, a] of agents) {
+      if (a.stats) {
+        totTok += (a.stats.inTok || 0) + (a.stats.outTok || 0);
+        totTurns += a.stats.turns || 0;
+        totDur += a.stats.durMs || 0;
+        const mf = a.stats.modelFamily || 'sonnet';
+        models[mf] = (models[mf] || 0) + 1;
+      }
+    }
+    const modelTags = Object.entries(models).map(([m, c]) => `<span class="model-tag ${m}">${c} ${m}</span>`).join('');
+    const usagePct = planBudget > 0 ? Math.min(100, Math.round((totalCost / planBudget) * 100)) : 0;
+    const usageCls = usagePct >= 90 ? 'danger' : usagePct >= 70 ? 'warn' : '';
+    bar.innerHTML = `<span>${agents.size} agent${agents.size !== 1 ? 's' : ''}</span>`
+      + (totalCost > 0.001 ? `<span class="${usageCls}">${fmtCost(totalCost)} / $${planBudget} (${usagePct}%)</span>` : '')
+      + (totTok > 0 ? `<span>${fmtTok(totTok)} tok</span>` : '')
+      + (totTurns ? `<span>${totTurns} turns</span>` : '')
+      + (totDur ? `<span>${fmtDur(totDur)}</span>` : '')
+      + (modelTags ? `<span>${modelTags}</span>` : '');
+    bar.classList.add('show');
+  } else {
+    bar.classList.remove('show');
+    bar.innerHTML = '';
+  }
+}
+
+// ── Terminal panel (real xterm.js) ──────────────────────
+const xterms = new Map(); // id -> { terminal, fitAddon, el }
+const container = document.getElementById('term-container');
+
+function createXterm(id) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:absolute;inset:0;padding:4px;display:none;';
+  container.appendChild(el);
+  const fitAddon = new XFitAddon();
+  const terminal = new XTerminal({
+    theme: { background:'#0a0a14', foreground:'#e0e0e0', cursor:'#5ac88c', selectionBackground:'#5a8cff44',
+      black:'#1e1e2e', red:'#ee5555', green:'#5ac88c', yellow:'#cca700', blue:'#5a8cff', magenta:'#c084fc', cyan:'#67e8f9', white:'#e0e0e0' },
+    fontFamily: '"Cascadia Mono","Cascadia Code",Consolas,"Courier New",monospace', fontSize: 14, lineHeight: 1.15, cursorBlink: true, scrollback: 10000,
+  });
+  terminal.loadAddon(fitAddon);
+  terminal.open(el);
+  terminal.onData((data) => api.send({ type: 'termInput', id, data }));
+  terminal.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown') return true;
+    if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
+    if (e.ctrlKey && e.key === 'v') { navigator.clipboard.readText().then(t => { if (t) api.send({ type: 'termInput', id, data: t }); }); return false; }
+    return true;
+  });
+  xterms.set(id, { terminal, fitAddon, el });
+  return { terminal, fitAddon, el };
+}
+
+function destroyXterm(id) {
+  const x = xterms.get(id); if (!x) return;
+  x.terminal.dispose(); x.el.remove(); xterms.delete(id);
+}
+
+function showXterm(id) {
+  for (const [xid, x] of xterms) x.el.style.display = xid === id ? '' : 'none';
+  const x = xterms.get(id);
+  if (x) { setTimeout(() => { if (!xterms.has(id)) return; x.fitAddon.fit(); x.terminal.scrollToBottom(); x.terminal.focus(); sendResize(id, x); }, 50); }
+}
+
+function sendResize(id, x) {
+  const t = x.terminal; api.send({ type: 'termResize', id, cols: t.cols, rows: t.rows });
+}
+
+function openTerm(id) {
+  const a = agents.get(id);
+  if (!a) return;
+  selectedId = id;
+  document.getElementById('term').classList.add('open');
+  document.getElementById('resize').classList.add('open');
+  const title = a.title || 'New agent';
+  document.getElementById('term-title').textContent = title + ' \u2014 ' + pathLabel(a.cwd || '');
+  if (!xterms.has(id)) createXterm(id);
+  if (termTab === 'terminal') showXterm(id);
+  // Load timeline if tab is active or agent changed
+  if (timelineAgentId !== id) loadTimeline(id);
+  render();
+}
+
+function closeTerm() {
+  document.getElementById('term').classList.remove('open');
+  document.getElementById('resize').classList.remove('open');
+}
+
+// ── Timeline ───────────────────────────────────────────
+function switchTermTab(tab) {
+  termTab = tab;
+  document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
+  document.getElementById('tab-timeline').classList.toggle('active', tab === 'timeline');
+  const tc = document.getElementById('term-container');
+  const tl = document.getElementById('timeline-events');
+  if (tab === 'terminal') {
+    tc.style.display = ''; tl.classList.remove('open');
+    if (selectedId) showXterm(selectedId);
+  } else {
+    tc.style.display = 'none'; tl.classList.add('open');
+    if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
+  }
+}
+
+function loadTimeline(id) {
+  timelineAgentId = id;
+  tlUserScrolled = false;
+  api.send({ type: 'setTimelineAgent', id });
+  api.send({ type: 'getTimeline', id });
+  document.getElementById('timeline-events').innerHTML = '<div class="tl-empty">Loading timeline...</div>';
+}
+
+function fmtTs(ts) {
+  if (!ts) return '';
+  try { const d = new Date(ts); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; }
+}
+
+function renderTlEvent(ev) {
+  const time = fmtTs(ev.ts);
+  const cls = 'tl-event tl-event-' + ev.type;
+  let label = '', detail = '';
+  switch (ev.type) {
+    case 'prompt': label = `<div class="tl-label tl-label-prompt">${esc(ev.text)}</div>`; break;
+    case 'text': label = `<div class="tl-label">${esc(ev.text)}</div>`; break;
+    case 'tool': label = `<div class="tl-label tl-label-tool">${esc(ev.name)}</div>`; detail = `<div class="tl-detail" onclick="this.classList.toggle('expanded')">${esc(ev.text)}</div>`; break;
+    case 'tool_done': detail = ev.text ? `<div class="tl-detail" onclick="this.classList.toggle('expanded')">${esc(ev.text)}</div>` : ''; break;
+    case 'turn': label = `<div class="tl-label tl-label-turn">${esc(ev.text)}</div><div class="tl-turn-sep"></div>`; break;
+    case 'subtask': label = `<div class="tl-label tl-label-tool">${esc(ev.name)}</div>`; detail = `<div class="tl-detail">${esc(ev.text)}</div>`; break;
+  }
+  return `<div class="${cls}"><div class="tl-dot"></div>${time ? `<div class="tl-time">${time}</div>` : ''}${label}${detail}</div>`;
+}
+
+function handleTimelineData(msg) {
+  if (msg.id !== timelineAgentId) return;
+  const el = document.getElementById('timeline-events');
+  if (!msg.events || msg.events.length === 0) {
+    el.innerHTML = '<div class="tl-empty">No events yet</div>';
+    return;
+  }
+  el.innerHTML = msg.events.map(renderTlEvent).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function handleTimelineEvent(msg) {
+  if (msg.id !== timelineAgentId) return;
+  const el = document.getElementById('timeline-events');
+  // Remove empty message if present
+  const empty = el.querySelector('.tl-empty');
+  if (empty) empty.remove();
+  el.insertAdjacentHTML('beforeend', renderTlEvent(msg.event));
+  if (!tlUserScrolled) el.scrollTop = el.scrollHeight;
+}
+
+// Auto-scroll detection for timeline
+document.getElementById('timeline-events').addEventListener('scroll', function() {
+  const el = this;
+  tlUserScrolled = el.scrollTop + el.clientHeight < el.scrollHeight - 30;
+});
+
+// ── Session History ────────────────────────────────────
+function openHistory() {
+  if (_historyCloseTimer) { clearTimeout(_historyCloseTimer); _historyCloseTimer = null; }
+  const el = document.getElementById('history-overlay');
+  el.style.display = 'flex'; el.style.opacity = '0';
+  requestAnimationFrame(() => { el.style.opacity = '1'; });
+  document.getElementById('history-list').innerHTML = '<div class="history-loading">Scanning sessions...</div>';
+  document.getElementById('history-search').value = '';
+  api.send({ type: 'getSessions' });
+  setTimeout(() => document.getElementById('history-search').focus(), 100);
+}
+
+function closeHistory() {
+  if (_historyCloseTimer) return;
+  const el = document.getElementById('history-overlay');
+  el.style.opacity = '0';
+  _historyCloseTimer = setTimeout(() => { _historyCloseTimer = null; el.style.display = 'none'; }, 150);
+}
+
+function toggleHistoryGroup(key) {
+  if (collapsedHistoryGroups.has(key)) collapsedHistoryGroups.delete(key);
+  else collapsedHistoryGroups.add(key);
+  renderHistory(allSessions);
+}
+
+function renderHistory(sessions) {
+  const list = document.getElementById('history-list');
+  const filter = (document.getElementById('history-search').value || '').toLowerCase();
+  const filtered = filter ? sessions.filter(s =>
+    [s.title, s.firstPrompt, s.cwd, s.sessionId].join('\n').toLowerCase().includes(filter)
+  ) : sessions;
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="tl-empty">${filter ? 'No matching sessions' : 'No sessions found'}</div>`;
+    return;
+  }
+
+  // Group by cwd
+  const groups = new Map();
+  for (const s of filtered) {
+    const key = s.cwd || s.projectHash || 'Unknown';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+  // Sort each group by date descending
+  for (const items of groups.values()) items.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  let html = '';
+  for (const [cwd, items] of groups) {
+    const safeKey = escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+    const collapsed = collapsedHistoryGroups.has(cwd);
+    html += `<div class="history-group${collapsed ? ' collapsed' : ''}">
+      <div class="history-group-header" onclick="toggleHistoryGroup('${safeKey}')">
+        <span class="history-group-chevron">&#x25BC;</span>
+        ${esc(pathLabel(cwd))}
+        <span class="history-group-path">${esc(cwd)}</span>
+        <span class="history-group-count">${items.length}</span>
+      </div>
+      <div class="history-items">`;
+    for (const s of items) {
+      const safeSid = escAttr(s.sessionId);
+      const safeCwd = escAttr(s.cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+      const dateStr = s.date ? new Date(s.date).toLocaleDateString() + ' ' + new Date(s.date).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+      const tok = (s.inTok || 0) + (s.outTok || 0);
+      html += `<div class="history-item${s.isActive ? ' active-session' : ''}" onclick="resumeSession('${safeSid}','${safeCwd}')">
+        <div class="history-item-top">
+          <span class="history-item-title">${esc(s.title || 'Untitled')}</span>
+          <span class="history-item-date">${dateStr}</span>
+        </div>
+        <div class="history-item-meta">
+          <span>${s.turns || 0} turns</span>
+          <span>${fmtTok(tok)} tok</span>
+          ${s.size ? `<span>${(s.size / 1024).toFixed(0)}KB</span>` : ''}
+          ${s.isActive ? '<span style="color:var(--green)">active</span>' : ''}
+        </div>
+        ${s.firstPrompt ? `<div class="history-item-prompt">${esc(s.firstPrompt)}</div>` : ''}
+      </div>`;
+    }
+    html += '</div></div>';
+  }
+  list.innerHTML = html;
+}
+
+function handleSessions(msg) {
+  allSessions = msg.sessions || [];
+  renderHistory(allSessions);
+}
+
+document.getElementById('history-search').addEventListener('input', () => renderHistory(allSessions));
+document.getElementById('history-search').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHistory(); });
+
+function resumeSession(sessionId, cwd) {
+  api.send({ type: 'resumeSession', sessionId, cwd });
+  closeHistory();
+}
+
+// Override focusAgent to also open terminal
+focusAgent = function(id) {
+  if (!agents.has(id)) return; // Agent was closed, ignore stale click
+  selectedId = id;
+  api.send({ type: 'focusAgent', id });
+  openTerm(id);
+  // Scroll selected card into view (for keyboard nav with long lists)
+  const sel = document.querySelector('.agent.selected');
+  if (sel) sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+};
+
+// ── Layout state (must be before resize handler) ───────
+let layoutMode = 'bottom';
+
+// Resize handle drag
+(function() {
+  const handle = document.getElementById('resize');
+  const term = document.getElementById('term');
+  let dragging = false, startPos = 0, startSize = 0;
+  let overlay = null;
+  handle.addEventListener('mousedown', (e) => {
+    dragging = true;
+    const horiz = layoutMode === 'right';
+    startPos = horiz ? e.clientX : e.clientY;
+    startSize = horiz ? term.offsetWidth : term.offsetHeight;
+    document.body.style.cursor = horiz ? 'ew-resize' : 'ns-resize';
+    document.body.style.userSelect = 'none';
+    // Transparent overlay prevents xterm from capturing mouse events during drag
+    overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;cursor:' + (horiz ? 'ew-resize' : 'ns-resize');
+    document.body.appendChild(overlay);
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const horiz = layoutMode === 'right';
+    const pos = horiz ? e.clientX : e.clientY;
+    const delta = startPos - pos;
+    const max = horiz ? window.innerWidth - 200 : window.innerHeight - 150;
+    const size = Math.max(120, Math.min(max, startSize + delta));
+    if (horiz) term.style.width = size + 'px';
+    else term.style.height = size + 'px';
+    const x = xterms.get(selectedId); if (x) x.fitAddon.fit();
+  });
+  function stopDrag() {
+    if (dragging) {
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (overlay) { overlay.remove(); overlay = null; }
+      // Persist panel size
+      const horiz = layoutMode === 'right';
+      const size = horiz ? term.offsetWidth : term.offsetHeight;
+      if (size > 0) {
+        if (horiz) settings_termWidth = size; else settings_termHeight = size;
+        persistSettings();
+      }
+    }
+  }
+  document.addEventListener('mouseup', stopDrag);
+  window.addEventListener('blur', stopDrag);
+})();
+
+// Fit on window resize
+new ResizeObserver(() => { const x = xterms.get(selectedId); if (x) try { x.fitAddon.fit(); } catch {} }).observe(container);
+
+// ── Message handling ───────────────────────────────────
+api.on((msg) => {
+  if (msg.type === 'termData') {
+    let x = xterms.get(msg.id);
+    if (!x) {
+      if (!agents.has(msg.id)) return; // Agent was closed, ignore late data
+      x = createXterm(msg.id);
+    }
+    x.terminal.write(msg.data);
+    return;
+  }
+  if (msg.type === 'termExit') {
+    const x = xterms.get(msg.id);
+    if (x) x.terminal.write('\r\n\x1b[33m[Session ended]\x1b[0m\r\n');
+    return;
+  }
+  handleAgentMsg(msg);
+});
+
+function handleAgentMsg(msg) {
+  switch (msg.type) {
+    case 'agentCreated': {
+      if (!agents.has(msg.id)) agents.set(msg.id, { cwd: msg.cwd, status: 'active', tools: new Map(), subTools: new Map(), prompt: '', preview: '', stats: null, title: msg.title || '', sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: Date.now() });
+      scheduleRender(); break;
+    }
+    case 'agentClosed': {
+      agents.delete(msg.id); destroyXterm(msg.id);
+      if (selectedId === msg.id) {
+        // Auto-select next agent if available, otherwise close terminal
+        const remaining = [...agents.keys()];
+        if (remaining.length > 0) {
+          focusAgent(remaining[0]); // spawns terminal for restored agents + renders
+        } else {
+          selectedId = null;
+          closeTerm();
+          scheduleRender();
+        }
+      } else {
+        scheduleRender();
+      }
+      break;
+    }
+    case 'status': { const a = agents.get(msg.id); if (a) { const was = a.status; a.status = msg.status; a.crashed = null; if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now(); if (msg.status === 'waiting') a.activeAt = null; if (msg.status === 'waiting' && was !== 'waiting') playChime(); scheduleRender(); } break; }
+    case 'toolStart': { const a = agents.get(msg.id); if (a) { a.crashed = null; if (!a.activeAt) a.activeAt = Date.now(); a.tools.set(msg.toolId, { status: msg.status, name: msg.name, done: false, perm: false, isSubagent: msg.name === 'Task' || msg.name === 'Agent' }); scheduleRender(); } break; }
+    case 'toolDone': { const a = agents.get(msg.id); if (a) { const t = a.tools.get(msg.toolId); if (t) { t.done = true; a.subTools.delete(msg.toolId); } scheduleRender(); } break; }
+    case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
+    case 'subToolStart': { const a = agents.get(msg.id); if (a) { let subs = a.subTools.get(msg.parentToolId); if (!subs) { subs = new Map(); a.subTools.set(msg.parentToolId, subs); } subs.set(msg.toolId, { status: msg.status, name: msg.name, done: false }); scheduleRender(); } break; }
+    case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
+    case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; scheduleRender(); } break; }
+    case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = true; } scheduleRender(); } break; }
+    case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
+    case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
+    case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; scheduleRender(); } break; }
+    case 'title': { const a = agents.get(msg.id); if (a) { a.title = msg.text; if (selectedId === msg.id) document.getElementById('term-title').textContent = msg.text + ' \u2014 ' + pathLabel(a.cwd || ''); scheduleRender(); } break; }
+    case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
+    case 'folderSelected': addAgent(msg.path); break;
+    case 'focused': selectedId = msg.id; scheduleRender(); break;
+    case 'focusFromNotification': focusAgent(msg.id); break;
+    case 'settings': applySettings(msg.settings); break;
+    case 'timelineData': handleTimelineData(msg); break;
+    case 'timelineEvent': handleTimelineEvent(msg); break;
+    case 'sessions': handleSessions(msg); break;
+  }
+}
+
+// ── Audio ──────────────────────────────────────────────
+let _audioCtx = null;
+function playChime() {
+  if (!notificationsEnabled) return;
+  if (!_audioCtx) _audioCtx = new AudioContext();
+  if (_audioCtx.state === 'suspended') _audioCtx.resume();
+  const t = _audioCtx.currentTime;
+  const osc = _audioCtx.createOscillator();
+  const gain = _audioCtx.createGain();
+  osc.connect(gain); gain.connect(_audioCtx.destination);
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(659, t);      // E5
+  osc.frequency.setValueAtTime(1319, t + 0.1); // E6
+  gain.gain.setValueAtTime(0.12, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+  osc.start(t); osc.stop(t + 0.25);
+}
+// Unlock audio context on first interaction (Electron may suspend it)
+document.addEventListener('mousedown', () => { if (_audioCtx && _audioCtx.state === 'suspended') _audioCtx.resume(); }, { once: true });
+
+// ── Settings ───────────────────────────────────────────
+let uiZoom = 100;
+let settings_termHeight = 0; // 0 = use CSS default (40%)
+let settings_termWidth = 0;
+
+let bypassPermissions = true;
+let notificationsEnabled = true;
+let planBudget = 100;
+
+function applySettings(s) {
+  if (s.zoom) { uiZoom = s.zoom; api.setZoom(uiZoom / 100); }
+  if (s.layout) { layoutMode = s.layout; applyLayout(); }
+  if (s.bypassPermissions !== undefined) {
+    bypassPermissions = s.bypassPermissions;
+    const chk = document.getElementById('chk-bypass');
+    if (chk) chk.checked = bypassPermissions;
+  }
+  if (s.notifications !== undefined) {
+    notificationsEnabled = s.notifications;
+    const chk = document.getElementById('chk-notif');
+    if (chk) chk.checked = notificationsEnabled;
+  }
+  if (s.planBudget !== undefined) {
+    planBudget = s.planBudget;
+    const inp = document.getElementById('inp-budget');
+    if (inp) inp.value = planBudget;
+  }
+  // Restore terminal panel size
+  if (s.termHeight) settings_termHeight = s.termHeight;
+  if (s.termWidth) settings_termWidth = s.termWidth;
+  const term = document.getElementById('term');
+  if (s.layout === 'right' && settings_termWidth > 0) term.style.width = settings_termWidth + 'px';
+  else if (s.layout !== 'right' && settings_termHeight > 0) term.style.height = settings_termHeight + 'px';
+  // Refit xterm after zoom/layout restore
+  if (s.zoom || s.layout) {
+    const x = xterms.get(selectedId);
+    if (x) setTimeout(() => x.fitAddon.fit(), 100);
+  }
+}
+
+let _settingsCloseTimer = null;
+function toggleSettings() {
+  const el = document.getElementById('settings-overlay');
+  const open = el.style.display === 'flex';
+  if (open) {
+    if (_settingsCloseTimer) return; // already closing
+    el.style.opacity = '0';
+    _settingsCloseTimer = setTimeout(() => { _settingsCloseTimer = null; el.style.display = 'none'; }, 150);
+  } else {
+    if (_settingsCloseTimer) { clearTimeout(_settingsCloseTimer); _settingsCloseTimer = null; }
+    el.style.display = 'flex';
+    el.style.opacity = '0';
+    requestAnimationFrame(() => { el.style.opacity = '1'; });
+    document.getElementById('chk-bypass').checked = bypassPermissions;
+    document.getElementById('chk-notif').checked = notificationsEnabled;
+    document.getElementById('inp-budget').value = planBudget;
+  }
+}
+document.addEventListener('keydown', (e) => {
+  // Ctrl+W close selected agent, Ctrl+Shift+W close all done agents
+  if (e.key === 'w' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    if (e.shiftKey) {
+      // Close all waiting/idle agents across all groups
+      for (const [id, a] of agents) {
+        const st = agentStatus(a);
+        if (st === 'waiting' || st === 'idle') closeAgent(id, true);
+      }
+    } else if (selectedId && agents.has(selectedId)) {
+      closeAgent(selectedId);
+    }
+    return;
+  }
+  // Ctrl+R to restart selected agent
+  if (e.key === 'r' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    e.preventDefault();
+    if (selectedId && agents.has(selectedId)) restartAgent(selectedId);
+    return;
+  }
+  // Ctrl+L to clear terminal display
+  if (e.key === 'l' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    const x = selectedId ? xterms.get(selectedId) : null;
+    if (x) { x.terminal.clear(); x.terminal.focus(); }
+    return;
+  }
+  // Ctrl+D to duplicate selected agent
+  if (e.key === 'd' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    if (selectedId && agents.has(selectedId)) duplicateAgent(selectedId);
+    return;
+  }
+  // Ctrl+N to quickly add agent in current/last-used project
+  if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    const cwd = (selectedId && agents.get(selectedId)?.cwd) || [...agents.values()].pop()?.cwd;
+    if (cwd) { showPromptOverlay(cwd); }
+    else { browseAndAdd(); }
+    return;
+  }
+  // Ctrl+F or / to open filter (when not in an input)
+  if ((e.key === 'f' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName))) {
+    e.preventDefault();
+    openFilter();
+    return;
+  }
+  // Ctrl+0 reset zoom
+  if (e.key === '0' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    uiZoom = 100;
+    api.setZoom(1);
+    persistSettings();
+    const x = xterms.get(selectedId);
+    if (x) setTimeout(() => x.fitAddon.fit(), 50);
+    return;
+  }
+  // Ctrl+! to jump to next agent needing permission
+  if (e.key === '!' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    focusNextPerm();
+    return;
+  }
+  // Ctrl+Tab / Ctrl+Shift+Tab to cycle agents
+  if (e.key === 'Tab' && (e.ctrlKey || e.metaKey) && agents.size > 0) {
+    e.preventDefault();
+    const ids = [...agents.keys()];
+    const idx = selectedId !== null ? ids.indexOf(selectedId) : -1;
+    const next = e.shiftKey
+      ? (idx <= 0 ? ids[ids.length - 1] : ids[idx - 1])
+      : (idx < 0 || idx >= ids.length - 1 ? ids[0] : ids[idx + 1]);
+    focusAgent(next);
+    return;
+  }
+  // Ctrl+H to open session history
+  if (e.key === 'h' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    openHistory();
+    return;
+  }
+  // Ctrl+T to toggle terminal/timeline tab
+  if (e.key === 't' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    e.preventDefault();
+    switchTermTab(termTab === 'terminal' ? 'timeline' : 'terminal');
+    return;
+  }
+  // ? to show help (when not in an input)
+  if (e.key === '?' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
+    e.preventDefault();
+    toggleHelp();
+    return;
+  }
+  if (e.key === 'Escape') {
+    const history = document.getElementById('history-overlay');
+    if (history.style.display === 'flex') { closeHistory(); return; }
+    const help = document.getElementById('help-overlay');
+    if (help.style.display === 'flex') { closeHelp(); return; }
+    if (document.getElementById('filter-bar').classList.contains('open')) { closeFilter(); return; }
+    const prompt = document.getElementById('prompt-overlay');
+    if (prompt && prompt.style.display === 'flex') { closePromptOverlay(); return; }
+    const el = document.getElementById('settings-overlay');
+    if (el.style.display === 'flex') toggleSettings();
+  }
+});
+
+function toggleHelp() {
+  const el = document.getElementById('help-overlay');
+  const open = el.style.display === 'flex';
+  if (open) { closeHelp(); } else {
+    el.style.display = 'flex'; el.style.opacity = '0';
+    requestAnimationFrame(() => { el.style.opacity = '1'; });
+  }
+}
+function closeHelp() {
+  const el = document.getElementById('help-overlay');
+  el.style.opacity = '0';
+  setTimeout(() => { el.style.display = 'none'; }, 150);
+}
+
+function onBypassChange(val) {
+  bypassPermissions = val;
+  api.send({ type: 'saveSettings', settings: { bypassPermissions: val } });
+}
+
+function onBudgetChange(val) {
+  planBudget = Math.max(1, parseInt(val) || 100);
+  api.send({ type: 'saveSettings', settings: { planBudget } });
+  scheduleRender();
+}
+
+function onNotifChange(val) {
+  notificationsEnabled = val;
+  api.send({ type: 'saveSettings', settings: { notifications: val } });
+}
+
+let _persistTimer = null;
+function persistSettings() {
+  clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(() => { api.send({ type: 'saveSettings', settings: { zoom: uiZoom, layout: layoutMode, termHeight: settings_termHeight, termWidth: settings_termWidth } }); }, 300);
+}
+
+function toggleLayout() {
+  layoutMode = layoutMode === 'bottom' ? 'right' : 'bottom';
+  applyLayout();
+  persistSettings();
+  const x = xterms.get(selectedId);
+  if (x) setTimeout(() => x.fitAddon.fit(), 100);
+}
+
+function applyLayout() {
+  const term = document.getElementById('term');
+  // Clear inline size from the other mode, restore saved size for current mode
+  term.style.width = '';
+  term.style.height = '';
+  if (layoutMode === 'right' && settings_termWidth > 0) term.style.width = settings_termWidth + 'px';
+  else if (layoutMode !== 'right' && settings_termHeight > 0) term.style.height = settings_termHeight + 'px';
+  document.body.classList.toggle('layout-right', layoutMode === 'right');
+  document.getElementById('layoutBtn').textContent = layoutMode === 'bottom' ? '\u25A7' : '\u2B12';
+}
+
+// ── Ctrl+scroll zoom ───────────────────────────────────
+document.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  uiZoom = Math.max(60, Math.min(200, uiZoom + (e.deltaY < 0 ? 10 : -10)));
+  api.setZoom(uiZoom / 100);
+  persistSettings();
+  const x = xterms.get(selectedId);
+  if (x) setTimeout(() => x.fitAddon.fit(), 50);
+}, { passive: false });
+
+// Middle-click to close agent (event delegation on list)
+document.getElementById('list').addEventListener('mousedown', (e) => {
+  if (e.button !== 1) return; // middle-click only
+  const card = e.target.closest('.agent[data-id]');
+  if (!card) return;
+  e.preventDefault();
+  closeAgent(parseInt(card.dataset.id));
+});
+
+// Live elapsed timer — update every second without full re-render
+setInterval(() => {
+  for (const [id, a] of agents) {
+    if (!a.activeAt) continue;
+    const el = document.querySelector(`.agent[data-id="${id}"] .elapsed-timer`);
+    if (el) {
+      const s = Math.floor((Date.now() - a.activeAt) / 1000);
+      el.textContent = s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+    }
+  }
+}, 1000);
+
+// Initial render
+render();
+api.send({ type: 'getAgents' });
+</script>
+</body>
+</html>
