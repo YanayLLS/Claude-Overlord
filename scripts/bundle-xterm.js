@@ -7,8 +7,12 @@ const entry = path.join(root, 'scripts', '_xterm-entry.js');
 fs.writeFileSync(entry, `
   const { Terminal } = require('@xterm/xterm');
   const { FitAddon } = require('@xterm/addon-fit');
+  const { SearchAddon } = require('@xterm/addon-search');
+  const { WebLinksAddon } = require('@xterm/addon-web-links');
   window.XTerminal = Terminal;
   window.XFitAddon = FitAddon;
+  window.XSearchAddon = SearchAddon;
+  window.XWebLinksAddon = WebLinksAddon;
 `);
 require('esbuild').buildSync({
   entryPoints: [entry], bundle: true, outfile: path.join(root, 'xterm-bundle.js'),

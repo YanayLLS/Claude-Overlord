@@ -188,6 +188,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .dot-resuming { color:var(--yellow); text-shadow:0 0 6px var(--yellow); }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 .pulse { animation:pulse 1.5s ease-in-out infinite; }
+.agent-pname { font-size:11px; flex-shrink:0; padding:1px 5px; color:var(--accent); border:1px solid var(--accent); background:rgba(108,140,255,.08); letter-spacing:.3px; white-space:nowrap; }
 .agent-name { font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); min-width:0; }
 .agent-activity { font-size:10px; flex-shrink:0; letter-spacing:.3px; text-transform:uppercase; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; }
 .elapsed-timer { font-size:10px; color:var(--dim); flex-shrink:0; font-variant-numeric:tabular-nums; }
@@ -312,9 +313,13 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   font-family:inherit; font-size:10px; padding:2px 6px; cursor:pointer; flex-shrink:0;
   color:var(--cyan); background:rgba(103,232,249,.08); border:1px solid var(--cyan); letter-spacing:.3px;
   box-shadow:1px 1px 0 var(--shadow); transition:color .12s, background .12s, border-color .12s;
-  text-decoration:none;
+  text-decoration:none; display:inline-flex; align-items:center; gap:4px;
 }
 .server-badge:hover { color:#fff; background:rgba(103,232,249,.2); border-color:#9ef0ff; }
+.server-badge .server-close {
+  font-size:12px; line-height:1; opacity:.5; cursor:pointer; padding:0 1px;
+}
+.server-badge .server-close:hover { opacity:1; color:#ff6b6b; }
 
 /* ── Terminal panel — bottom layout (default) ── */
 #term { display:none; flex-direction:column; border-top:2px solid var(--border-hi); flex-shrink:0; height:40%; min-height:120px; }
@@ -337,6 +342,27 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #prompt-nav .prompt-counter { font-size:10px; color:var(--dim); min-width:28px; text-align:center; user-select:none; }
 #term-container { flex:1; position:relative; background:#0a0a14; overflow:hidden; }
 #term-container .xterm { height:100%; }
+
+/* ── Terminal search bar ── */
+#term-search {
+  display:none; align-items:center; gap:6px; padding:4px 12px; flex-shrink:0;
+  background:var(--bg2); border-bottom:1px solid var(--border);
+}
+#term-search.open { display:flex; }
+#term-search-input {
+  flex:1; font-family:inherit; font-size:13px; padding:3px 8px; color:var(--text);
+  background:var(--card); border:1px solid var(--border); outline:none; letter-spacing:.3px;
+  transition:border-color .12s; min-width:0;
+}
+#term-search-input::placeholder { color:var(--dim); }
+#term-search-input:focus { border-color:var(--accent); }
+#term-search-count { font-size:11px; color:var(--dim); white-space:nowrap; letter-spacing:.3px; min-width:20px; }
+#term-search button {
+  font-family:inherit; background:none; border:none; color:var(--dim); cursor:pointer;
+  font-size:13px; padding:0 4px; transition:color .12s;
+}
+#term-search button:hover { color:var(--text); }
+#term-search button:last-child:hover { color:var(--red); }
 
 /* ── Resize handle ── */
 #resize { height:5px; background:var(--bg); cursor:ns-resize; flex-shrink:0; display:none; position:relative; }
@@ -602,6 +628,13 @@ button:focus-visible { outline-offset:0; }
       </div>
       <button onclick="closeTerm()" aria-label="Close terminal">&times;</button>
     </div>
+    <div id="term-search" style="display:none">
+      <input id="term-search-input" type="text" placeholder="Find in terminal..." />
+      <span id="term-search-count"></span>
+      <button onclick="termSearchPrev()" title="Previous (Shift+Enter)">&#x25B2;</button>
+      <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
+      <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
+    </div>
     <div id="term-container"></div>
     <div id="timeline-events"></div>
   </div>
@@ -663,7 +696,7 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+Tab</span><span class="help-desc">Next agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+Tab</span><span class="help-desc">Previous agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+!</span><span class="help-desc">Jump to next permission request</span></div>
-      <div class="help-row"><span class="help-key">Ctrl+F</span><span class="help-desc">Filter agents</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+F</span><span class="help-desc">Find in terminal / Filter agents</span></div>
       <div class="help-row"><span class="help-key">/</span><span class="help-desc">Filter agents (when not typing)</span></div>
       <div class="help-row"><span class="help-key">Ctrl+0</span><span class="help-desc">Reset zoom to 100%</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Scroll</span><span class="help-desc">Zoom in/out</span></div>
@@ -917,17 +950,19 @@ function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
 function focusAgent(id) { const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
+  _renaming = true;
   const cur = a.title || a.prompt || '';
   const input = document.createElement('input');
   input.type = 'text'; input.value = cur;
   input.style.cssText = 'font:inherit;font-size:12px;color:var(--text);background:var(--card);border:1px solid var(--accent);outline:none;padding:0 4px;width:100%;min-width:0;';
   const commit = () => {
+    _renaming = false;
     const name = input.value.trim();
     if (name && name !== cur) { api.send({ type: 'renameAgent', id, name }); a.title = name; a.customName = true; }
     scheduleRender();
   };
   input.onblur = commit;
-  input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } if (e.key === 'Escape') { input.onblur = null; scheduleRender(); } };
+  input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } if (e.key === 'Escape') { input.onblur = null; _renaming = false; scheduleRender(); } };
   el.textContent = '';
   el.appendChild(input);
   input.focus(); input.select();
@@ -975,6 +1010,7 @@ function showAgentMenu(e, id) {
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 function openUrl(url) { api.send({ type: 'openUrl', url }); }
+function killServer(port) { api.send({ type: 'killServer', port }); }
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
 function enableRC(id) { api.send({ type: 'enableRemoteControl', id }); }
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
@@ -1018,7 +1054,7 @@ function agentStatus(a) {
 
 function matchesFilter(a) {
   if (!filterText) return true;
-  return [a.title, a.prompt, a.preview, a.cwd, agentStatus(a)].join('\n').toLowerCase().includes(filterText);
+  return [a.agentName, a.title, a.prompt, a.preview, a.cwd, agentStatus(a)].join('\n').toLowerCase().includes(filterText);
 }
 const statusMeta = {
   permission: { label: 'Needs approval', cls: 'dot-perm' },
@@ -1030,7 +1066,8 @@ const statusMeta = {
 };
 
 let _renderPending = false;
-function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; render(); }); } }
+let _renaming = false; // true while inline rename input is active
+function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; if (_renaming) return; render(); }); } }
 function render() {
   const list = document.getElementById('list');
   if (agents.size === 0 && knownProjects.size === 0) {
@@ -1081,7 +1118,7 @@ function render() {
     let serverBadges = '';
     if (gServers.size > 0) {
       const sorted = [...gServers.entries()].sort((a, b) => a[0] - b[0]);
-      serverBadges = `<div class="group-servers">${sorted.map(([port, url]) => `<a class="server-badge" onclick="event.stopPropagation();openUrl('${escAttr(url)}')" title="${escAttr(url)}">:${port}</a>`).join('')}</div>`;
+      serverBadges = `<div class="group-servers">${sorted.map(([port, url]) => `<a class="server-badge" onclick="event.stopPropagation();openUrl('${escAttr(url)}')" title="${escAttr(url)}">:${port}<span class="server-close" onclick="event.stopPropagation();event.preventDefault();killServer(${port})" title="Kill server on port ${port}">&times;</span></a>`).join('')}</div>`;
     }
 
     const safeCwd = escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
@@ -1121,6 +1158,7 @@ function render() {
       html += `<div class="agent${sel ? ' selected' : ''}" data-status="${st}" data-id="${id}" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})">
         <div class="agent-top">
           <span class="agent-icon ${m.cls}${st === 'active' ? ' pulse' : ''}" onclick="event.stopPropagation();showIconPicker(event,'${a.sessionId}')" title="Click to change icon">${getAgentIcon(a.sessionId)}</span>
+          ${a.agentName ? `<span class="agent-pname">${esc(a.agentName)}</span>` : ''}
           <span class="agent-name" title="${escAttr(title)}${a.customName ? ' (custom name)' : ''}" ondblclick="event.stopPropagation();renameAgent(${id},this)">${esc(title)}</span>
           <span class="agent-activity" title="${escAttr(activity)}">${esc(activity)}${st === 'active' || st === 'resuming' ? '<span class="typing-dots"><span></span><span></span><span></span></span>' : ''}</span>
           ${a.activeAt ? `<span class="elapsed-timer">${(() => { const s = Math.floor((Date.now() - a.activeAt) / 1000); return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's'; })()}</span>` : ''}
@@ -1235,7 +1273,7 @@ function render() {
 }
 
 // ── Terminal panel (real xterm.js) ──────────────────────
-const xterms = new Map(); // id -> { terminal, fitAddon, el }
+const xterms = new Map(); // id -> { terminal, fitAddon, searchAddon, el }
 const container = document.getElementById('term-container');
 container.addEventListener('click', () => {
   if (selectedId != null && termTab === 'terminal') {
@@ -1254,18 +1292,42 @@ function createXterm(id) {
       black:'#1e1e2e', red:'#ee5555', green:'#5ac88c', yellow:'#cca700', blue:'#5a8cff', magenta:'#c084fc', cyan:'#67e8f9', white:'#e0e0e0' },
     fontFamily: '"Cascadia Mono","Cascadia Code",Consolas,"Courier New",monospace', fontSize: 14, lineHeight: 1.15, cursorBlink: true, scrollback: 10000,
   });
+  const searchAddon = new XSearchAddon();
+  const webLinksAddon = new XWebLinksAddon((_e, uri) => api.send({ type: 'openUrl', url: uri }));
   terminal.loadAddon(fitAddon);
+  terminal.loadAddon(searchAddon);
+  terminal.loadAddon(webLinksAddon);
   terminal.open(el);
+  // File path link provider — detects Windows/Unix paths with optional :line:col
+  terminal.registerLinkProvider({
+    provideLinks(y, callback) {
+      const line = terminal.buffer.active.getLine(y - 1);
+      if (!line) { callback(undefined); return; }
+      const text = line.translateToString();
+      const links = [];
+      const re = /(?:[A-Za-z]:[\\\/]|\.{0,2}\/)[^\s:*?"<>|,()]+(?::\d+(?::\d+)?)?/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        links.push({
+          range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } },
+          text: m[0],
+          activate: () => api.send({ type: 'openFile', id, path: m[0] }),
+        });
+      }
+      callback(links.length ? links : undefined);
+    }
+  });
   terminal.onData((data) => api.send({ type: 'termInput', id, data }));
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
     if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
+    if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
     return true;
   });
-  xterms.set(id, { terminal, fitAddon, el });
-  return { terminal, fitAddon, el };
+  xterms.set(id, { terminal, fitAddon, searchAddon, el });
+  return { terminal, fitAddon, searchAddon, el };
 }
 
 function destroyXterm(id) {
@@ -1290,7 +1352,8 @@ function openTerm(id) {
   document.getElementById('term').classList.add('open');
   document.getElementById('resize').classList.add('open');
   const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
-  document.getElementById('term-title').textContent = title + ' \u2014 ' + pathLabel(a.cwd || '');
+  const namePrefix = a.agentName ? a.agentName + ' \u2014 ' : '';
+  document.getElementById('term-title').textContent = namePrefix + title + ' \u2014 ' + pathLabel(a.cwd || '');
   updatePromptNav();
   if (!xterms.has(id)) createXterm(id);
   if (termTab === 'terminal') showXterm(id);
@@ -1305,9 +1368,46 @@ function openTerm(id) {
 }
 
 function closeTerm() {
+  closeTermSearch();
   document.getElementById('term').classList.remove('open');
   document.getElementById('resize').classList.remove('open');
 }
+
+function openTermSearch() {
+  const bar = document.getElementById('term-search');
+  bar.style.display = 'flex';
+  const input = document.getElementById('term-search-input');
+  input.focus();
+  input.select();
+}
+function closeTermSearch() {
+  const bar = document.getElementById('term-search');
+  bar.style.display = 'none';
+  document.getElementById('term-search-input').value = '';
+  document.getElementById('term-search-count').textContent = '';
+  if (selectedId != null) {
+    const x = xterms.get(selectedId);
+    if (x) { x.searchAddon.clearDecorations(); x.terminal.focus(); }
+  }
+}
+function termSearchNext() {
+  const query = document.getElementById('term-search-input').value;
+  if (!query || selectedId == null) return;
+  const x = xterms.get(selectedId);
+  if (x) x.searchAddon.findNext(query);
+}
+function termSearchPrev() {
+  const query = document.getElementById('term-search-input').value;
+  if (!query || selectedId == null) return;
+  const x = xterms.get(selectedId);
+  if (x) x.searchAddon.findPrevious(query);
+}
+document.getElementById('term-search-input').addEventListener('input', () => { termSearchNext(); });
+document.getElementById('term-search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeTermSearch(); e.stopPropagation(); }
+  else if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); termSearchPrev(); }
+  else if (e.key === 'Enter') { e.preventDefault(); termSearchNext(); }
+});
 
 function updatePromptNav() {
   const nav = document.getElementById('prompt-nav');
@@ -1603,7 +1703,7 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false, agentName: msg.agentName || '' });
       if (msg.cwd) knownProjects.add(msg.cwd);
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
@@ -1640,9 +1740,10 @@ function handleAgentMsg(msg) {
     case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = true; } scheduleRender(); } break; }
     case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
-    case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; document.getElementById('term-title').textContent = t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
+    case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = msg.prompts.length - 1; if (selectedId === msg.id) updatePromptNav(); } break; }
-    case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && !msg.customName) break; a.title = msg.text; if (msg.customName) a.customName = true; if (selectedId === msg.id) { const t = a.prompt || msg.text; document.getElementById('term-title').textContent = t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
+    case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && !msg.customName) break; a.title = msg.text; if (msg.customName) a.customName = true; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
+    case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
     case 'focused': selectedId = msg.id; scheduleRender(); break;
@@ -1654,6 +1755,7 @@ function handleAgentMsg(msg) {
     case 'usage': handleUsage(msg.usage); break;
     case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
     case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
+    case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); } break; }
     case 'remoteControl': { const a = agents.get(msg.id); if (a) { a.remoteControl = msg.active; scheduleRender(); } break; }
     case 'looping': { const a = agents.get(msg.id); if (a) { a.looping = msg.active; scheduleRender(); } break; }
     case 'teamDetected': {
@@ -1829,8 +1931,18 @@ document.addEventListener('keydown', (e) => {
     else { browseAndAdd(); }
     return;
   }
-  // Ctrl+F or / to open filter (when not in an input)
-  if ((e.key === 'f' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName))) {
+  // Ctrl+F: open terminal search if terminal is open, otherwise filter agents
+  if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    if (document.getElementById('term').classList.contains('open') && termTab === 'terminal') {
+      openTermSearch();
+    } else {
+      openFilter();
+    }
+    return;
+  }
+  // / to open filter (when not in an input)
+  if (e.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
     e.preventDefault();
     openFilter();
     return;
@@ -1894,6 +2006,7 @@ document.addEventListener('keydown', (e) => {
     const help = document.getElementById('help-overlay');
     if (help.style.display === 'flex') { closeHelp(); return; }
     if (document.getElementById('filter-bar').classList.contains('open')) { closeFilter(); return; }
+    if (document.getElementById('term-search').style.display !== 'none') { closeTermSearch(); return; }
     const prompt = document.getElementById('prompt-overlay');
     if (prompt && prompt.style.display === 'flex') { closePromptOverlay(); return; }
     const team = document.getElementById('team-overlay');
