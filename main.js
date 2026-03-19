@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const pty = require('node-pty');
 
 // ── Constants ──────────────────────────────────────────
@@ -16,9 +16,15 @@ const PROMPT_HISTORY_MAX = 5;
 const PROMPT_BRIEF_MAX = 150;
 const TITLE_MODEL = 'claude-haiku-4-5-20251001';
 const TITLE_REGEN_TURNS = 3;
-const EXEMPT = new Set(['Task', 'Agent', 'AskUserQuestion']);
+const EXEMPT = new Set(['Task', 'Agent', 'AskUserQuestion', 'CronCreate', 'CronDelete', 'CronList']);
 const MAX_CRASH_RETRIES = 3;
 const CRASH_RESUME_DELAY_MS = 2000;
+const USAGE_POLL_MS = 60000;
+const USAGE_TIMEOUT_MS = 15000;
+const TEAM_POLL_MS = 3000;
+const TEAMS_DIR = path.join(os.homedir(), '.claude', 'teams');
+const TASKS_DIR = path.join(os.homedir(), '.claude', 'tasks');
+const SERVER_URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})\b[^\s)>\]'"]*/g;
 
 // Model family detection for cost tracking (pricing computed in renderer)
 function modelFamily(model) {
@@ -38,6 +44,11 @@ const watchers = new Map();
 const polls = new Map();
 const waitTimers = new Map();
 const permTimers = new Map();
+const serverPorts = new Map(); // agentId -> Map(port -> url)
+const remoteControlAgents = new Set(); // agentIds with remote control active
+const teams = new Map(); // teamName -> { name, leadAgentId, leadSessionId, members[], tasks[] }
+const agentTeamMap = new Map(); // agentId -> teamName
+const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
 let nextId = 1;
 
 function send(data) {
@@ -54,9 +65,79 @@ function deriveTitle(text) {
   return words.length > 40 ? words.slice(0, 40) + '\u2026' : words;
 }
 
+function killProcessTree(pid) {
+  if (!pid) return;
+  try {
+    if (process.platform === 'win32') {
+      execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+    } else {
+      process.kill(pid, 'SIGTERM');
+    }
+  } catch {} // Process may already be dead
+}
+
+function killSessionProcesses(sessionId) {
+  if (!sessionId) return;
+  try {
+    if (process.platform === 'win32') {
+      const out = execSync(`wmic process where "CommandLine like '%${sessionId}%'" get ProcessId /format:csv`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 5000 });
+      for (const line of out.split(/[\r\n]+/)) {
+        const parts = line.trim().split(',');
+        const pid = parseInt(parts[parts.length - 1], 10);
+        if (pid && pid !== process.pid) {
+          try { execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }); } catch {}
+        }
+      }
+    } else {
+      try { execSync(`pkill -f "${sessionId}"`, { stdio: 'ignore' }); } catch {}
+    }
+  } catch {}
+}
+
+// ── Server URL detection ──────────────────────────────
+// Scans tool output (JSONL) and raw terminal stream for localhost URLs.
+function scanForServers(id, text) {
+  if (!text || typeof text !== 'string') return;
+  let match;
+  SERVER_URL_RE.lastIndex = 0;
+  while ((match = SERVER_URL_RE.exec(text)) !== null) {
+    const url = match[0];
+    const port = parseInt(match[1], 10);
+    if (port < 1024 || port > 65535) continue;
+    let ports = serverPorts.get(id);
+    if (!ports) { ports = new Map(); serverPorts.set(id, ports); }
+    if (!ports.has(port)) {
+      const normalUrl = url.replace('0.0.0.0', 'localhost');
+      ports.set(port, normalUrl);
+      console.log(`[Overlord] Server detected for agent ${id}: ${normalUrl}`);
+      send({ type: 'serverDetected', id, port, url: normalUrl });
+    }
+  }
+}
+
+function clearServers(id) {
+  const ports = serverPorts.get(id);
+  if (ports && ports.size > 0) {
+    serverPorts.delete(id);
+    send({ type: 'serversClear', id });
+  }
+}
+
+// ── Remote control detection ──────────────────────────
+// Detected via MCP tool names in JSONL, not terminal output (which includes conversation text)
+const RC_TOOLS = new Set(['Snapshot', 'Click', 'Type', 'Scroll', 'Move', 'Shortcut', 'App', 'Shell', 'Wait', 'Scrape']);
+function detectRemoteControl(id, toolName) {
+  if (remoteControlAgents.has(id)) return;
+  if (RC_TOOLS.has(toolName)) {
+    remoteControlAgents.add(id);
+    send({ type: 'remoteControl', id, active: true });
+    console.log(`[Overlord] Remote control detected for agent ${id} (tool: ${toolName})`);
+  }
+}
+
 async function generateSummaryTitle(id) {
   const a = agents.get(id);
-  if (!a || !a.promptHistory || a.promptHistory.length === 0 || a.titlePending) return;
+  if (!a || a.customName || !a.promptHistory || a.promptHistory.length === 0 || a.titlePending) return;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return;
   a.titlePending = true;
@@ -87,7 +168,7 @@ function setPrompt(id, a, text) {
   const brief = text.length > PROMPT_BRIEF_MAX ? text.slice(0, PROMPT_BRIEF_MAX) : text;
   a.promptHistory.push(brief);
   if (a.promptHistory.length > PROMPT_HISTORY_MAX) a.promptHistory.shift();
-  if (!a.title) {
+  if (!a.title && !a.customName) {
     a.title = deriveTitle(text);
     send({ type: 'title', id, text: a.title });
     saveState();
@@ -108,6 +189,9 @@ function fmtTool(name, input) {
     case 'WebSearch': return 'Searching the web';
     case 'Task': case 'Agent': { const d = typeof input.description === 'string' ? input.description : ''; return d ? `Subtask: ${d.length > 40 ? d.slice(0, 40) + '\u2026' : d}` : 'Running subtask'; }
     case 'AskUserQuestion': return 'Waiting for your answer';
+    case 'CronCreate': { const p = typeof input.prompt === 'string' ? input.prompt : ''; return p ? `Scheduling: ${p.length > 40 ? p.slice(0, 40) + '\u2026' : p}` : 'Scheduling loop'; }
+    case 'CronDelete': return 'Stopping loop';
+    case 'CronList': return 'Listing loops';
     default: return `Using ${name}`;
   }
 }
@@ -293,11 +377,12 @@ let settings = { layout: 'bottom', zoom: 100, bypassPermissions: true, notificat
 
 function saveState() {
   const agentEntries = [];
-  for (const [, a] of agents) {
+  for (const [id, a] of agents) {
     const wasActive = !a.isWaiting;
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, createdAt: a.createdAt, wasActive, jsonlSize });
+    const termProc = terminals.get(id);
+    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -322,8 +407,17 @@ function restoreAgents() {
   settings = { ...settings, ...state.settings };
   const saved = state.agents;
   if (saved.length === 0) return;
+  // Kill orphaned processes from previous session to release session locks
   for (const entry of saved) {
-    const { cwd, sessionId, lastPrompt, lastText, title, createdAt, wasActive, jsonlSize } = entry;
+    if (entry.pid) {
+      killProcessTree(entry.pid);
+      console.log(`[Overlord] Killed orphan PID ${entry.pid} for session ${entry.sessionId}`);
+    }
+    killSessionProcesses(entry.sessionId);
+    entry.wasActive = false; // Process killed, no orphan to wait for
+  }
+  for (const entry of saved) {
+    const { cwd, sessionId, lastPrompt, lastText, title, customName, createdAt, wasActive, jsonlSize } = entry;
     if (!cwd || !sessionId) continue; // skip corrupted entries
     const jsonlFile = path.join(claudeDir(cwd), `${sessionId}.jsonl`);
 
@@ -340,9 +434,9 @@ function restoreAgents() {
       toolIds: new Set(), toolStatuses: new Map(), toolNames: new Map(),
       subToolIds: new Map(), subToolNames: new Map(),
       isWaiting: !orphanAlive, permSent: false, hadTools: orphanAlive, turnTools: 0,
-      lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '',
+      lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', customName: customName || false,
       promptHistory: [], titlePending: false, createdAt: createdAt || Date.now(),
-      crashCount: 0, orphanAlive,
+      crashCount: 0, cronCount: 0, orphanAlive,
       stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: 'sonnet' },
     };
     agents.set(id, agent);
@@ -360,7 +454,7 @@ function restoreAgents() {
               const u = r.message.usage;
               agent.stats.inTok += u.input_tokens || 0;
               agent.stats.outTok += u.output_tokens || 0;
-              if (u.input_tokens) agent.stats.ctxTok = u.input_tokens;
+              agent.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
               agent.stats.cacheTok += u.cache_creation_input_tokens || 0;
               agent.stats.cacheRead += u.cache_read_input_tokens || 0;
             }
@@ -372,6 +466,9 @@ function restoreAgents() {
                 if (b.type === 'tool_use' && b.name) {
                   agent.stats.tools[b.name] = (agent.stats.tools[b.name] || 0) + 1;
                   if (b.input?.file_path && ['Read', 'Write', 'Edit'].includes(b.name)) agent.stats.files++;
+                  detectRemoteControl(id, b.name);
+                  if (b.name === 'CronCreate') agent.cronCount++;
+                  if (b.name === 'CronDelete') agent.cronCount = Math.max(0, agent.cronCount - 1);
                 }
               }
             }
@@ -382,7 +479,7 @@ function restoreAgents() {
               else if (Array.isArray(c)) pTxt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
               if (pTxt) {
                 agent.lastPrompt = pTxt.length > PREVIEW_MAX ? pTxt.slice(0, PREVIEW_MAX) + '\u2026' : pTxt;
-                if (!agent.title) agent.title = deriveTitle(pTxt);
+                if (!agent.title && !agent.customName) agent.title = deriveTitle(pTxt);
                 const brief = pTxt.length > PROMPT_BRIEF_MAX ? pTxt.slice(0, PROMPT_BRIEF_MAX) : pTxt;
                 agent.promptHistory.push(brief);
                 if (agent.promptHistory.length > PROMPT_HISTORY_MAX) agent.promptHistory.shift();
@@ -420,6 +517,7 @@ function restoreAgents() {
         }
       }, 15000);
     }
+    registerKnownJsonl(claudeDir(cwd), jsonlFile);
     console.log(`[Overlord] Restored agent ${id}: session=${sessionId} cwd=${cwd}${orphanAlive ? ' (orphan still running)' : ''}`);
   }
 }
@@ -461,6 +559,9 @@ function spawnTerminal(id) {
     return;
   }
 
+  // Kill any lingering process holding this session lock
+  killSessionProcesses(a.sessionId);
+
   const hasJsonl = fs.existsSync(a.jsonlFile);
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const claudeCmd = hasJsonl ? `claude --resume ${a.sessionId}${skip}` : `claude --session-id ${a.sessionId}${skip}`;
@@ -469,8 +570,8 @@ function spawnTerminal(id) {
   try {
     const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: a.cwd, env: { ...process.env } });
     terminals.set(id, proc);
-    proc.onData((d) => { try { send({ type: 'termData', id, data: d }); } catch {} });
-    proc.onExit((e) => handleTermExit(id, e?.exitCode));
+    proc.onData((d) => { try { send({ type: 'termData', id, data: d }); scanForServers(id, d); } catch {} });
+    proc.onExit((e) => { handleTermExit(id, e?.exitCode); try { proc.destroy(); } catch {} });
   } catch (e) {
     console.log(`[Overlord] Failed to spawn terminal for agent ${id}:`, e.message);
     send({ type: 'termData', id, data: `\r\n\x1b[31mFailed to start terminal: ${e.message}\x1b[0m\r\n` });
@@ -490,42 +591,46 @@ function createAgent(folderPath, initialPrompt) {
     toolIds: new Set(), toolStatuses: new Map(), toolNames: new Map(),
     subToolIds: new Map(), subToolNames: new Map(),
     isWaiting: false, permSent: false, hadTools: false, turnTools: 0,
-    lastText: '', lastPrompt: '', title: '',
+    lastText: '', lastPrompt: '', title: '', customName: false,
     promptHistory: [], titlePending: false, createdAt: Date.now(),
-    crashCount: 0,
+    crashCount: 0, cronCount: 0,
     stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: 'sonnet' },
   };
   agents.set(id, agent);
 
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
-  let promptArg = '';
-  if (initialPrompt) {
-    if (process.platform === 'win32') {
-      // cmd.exe double-quoted: "" escapes quotes, %% prevents env var expansion
-      // &|<>^ are already literal inside double quotes so no escaping needed
-      const escaped = initialPrompt.replace(/%/g, '%%').replace(/"/g, '""');
-      promptArg = ` "${escaped}"`;
-    } else {
-      // bash/zsh: single-quote, escape inner single-quotes
-      const escaped = initialPrompt.replace(/'/g, "'\\''");
-      promptArg = ` '${escaped}'`;
-    }
-  }
-  const claudeCmd = `claude --session-id ${sessionId}${skip}${promptArg}`;
+  const claudeCmd = `claude --session-id ${sessionId}${skip}`;
   const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const shellArgs = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt });
 
+  const agentEnv = { ...process.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' };
   try {
-    const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd, env: { ...process.env } });
+    const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd, env: agentEnv });
     terminals.set(id, proc);
-    proc.onData((d) => { try { send({ type: 'termData', id, data: d }); } catch {} });
-    proc.onExit((e) => handleTermExit(id, e?.exitCode));
+    let promptSent = !initialPrompt;
+    proc.onData((d) => {
+      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); } catch {}
+      // Detect Claude ready prompt and send the initial prompt
+      if (!promptSent) {
+        const clean = d.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+        if (/>\s*$/.test(clean)) {
+          promptSent = true;
+          setTimeout(() => { try { proc.write(initialPrompt + '\r'); } catch {} }, 100);
+        }
+      }
+    });
+    proc.onExit((e) => { handleTermExit(id, e?.exitCode); try { proc.destroy(); } catch {} });
+    // Fallback: send prompt after timeout if ready-detection didn't fire
+    if (initialPrompt) {
+      setTimeout(() => { if (!promptSent) { promptSent = true; try { proc.write(initialPrompt + '\r'); } catch {} } }, 8000);
+    }
   } catch (e) {
     console.log(`[Overlord] Failed to spawn agent ${id}:`, e.message);
     send({ type: 'termData', id, data: `\r\n\x1b[31mFailed to start: ${e.message}\x1b[0m\r\n` });
   }
   saveState();
+  registerKnownJsonl(claudeDir(cwd), agent.jsonlFile);
 
   const poll = setInterval(() => {
     if (fs.existsSync(agent.jsonlFile)) { clearInterval(poll); startWatch(id); }
@@ -542,7 +647,9 @@ function closeAgent(id) {
   try { fs.unwatchFile(a.jsonlFile); } catch {}
   clrTimer(id, waitTimers); clrTimer(id, permTimers);
   lastNotifyTimes.delete(id);
-  const t = terminals.get(id); if (t) { try { t.kill(); } catch {} try { t.destroy(); } catch {} terminals.delete(id); }
+  clearServers(id);
+  remoteControlAgents.delete(id);
+  const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   agents.delete(id);
   send({ type: 'agentClosed', id });
   saveState();
@@ -587,7 +694,7 @@ function parseLine(id, line) {
       // Extract usage/model regardless of content format (matches restore logic)
       if (r.message?.model) a.stats.modelFamily = modelFamily(r.message.model);
       const u = r.message?.usage;
-      if (u) { a.stats.inTok += u.input_tokens || 0; a.stats.outTok += u.output_tokens || 0; if (u.input_tokens) a.stats.ctxTok = u.input_tokens; a.stats.cacheTok += u.cache_creation_input_tokens || 0; a.stats.cacheRead += u.cache_read_input_tokens || 0; }
+      if (u) { a.stats.inTok += u.input_tokens || 0; a.stats.outTok += u.output_tokens || 0; a.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); a.stats.cacheTok += u.cache_creation_input_tokens || 0; a.stats.cacheRead += u.cache_read_input_tokens || 0; send({ type: 'stats', id, stats: a.stats }); }
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       const blocks = r.message.content;
@@ -603,6 +710,9 @@ function parseLine(id, line) {
             a.stats.tools[tn] = (a.stats.tools[tn] || 0) + 1;
             if (inp.file_path && ['Read', 'Write', 'Edit'].includes(tn)) a.stats.files++;
             if (!EXEMPT.has(tn)) nonExempt = true;
+            detectRemoteControl(id, tn);
+            if (tn === 'CronCreate') { a.cronCount++; send({ type: 'looping', id, active: true, count: a.cronCount }); }
+            if (tn === 'CronDelete') { a.cronCount = Math.max(0, a.cronCount - 1); send({ type: 'looping', id, active: a.cronCount > 0, count: a.cronCount }); }
             send({ type: 'toolStart', id, toolId: b.id, status: st, name: tn });
           }
         }
@@ -615,6 +725,8 @@ function parseLine(id, line) {
           for (const b of c) {
             if (b.type === 'tool_result' && b.tool_use_id) {
               const tid = b.tool_use_id, cn = a.toolNames.get(tid);
+              // Scan Bash tool output for localhost server URLs
+              if (cn === 'Bash' && typeof b.content === 'string') scanForServers(id, b.content);
               if (cn === 'Task' || cn === 'Agent') { a.subToolIds.delete(tid); a.subToolNames.delete(tid); }
               a.toolIds.delete(tid); a.toolStatuses.delete(tid); a.toolNames.delete(tid);
               setTimeout(() => send({ type: 'toolDone', id, toolId: tid }), TOOL_DONE_DELAY_MS);
@@ -633,6 +745,7 @@ function parseLine(id, line) {
     } else if (r.type === 'system' && r.subtype === 'turn_duration') {
       clrTimer(id, waitTimers); clrTimer(id, permTimers);
       a.stats.turns++; a.stats.durMs += r.durationMs || 0;
+      send({ type: 'stats', id, stats: a.stats });
       if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
       a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0;
       // Orphaned process finished its turn — safe to spawn a real terminal now
@@ -646,7 +759,11 @@ function parseLine(id, line) {
     } else if (r.type === 'progress') {
       const ptid = r.parentToolUseID, d = r.data;
       if (ptid && d) {
-        if (d.type === 'bash_progress' || d.type === 'mcp_progress') { if (a.toolIds.has(ptid)) startPermTimer(id); }
+        if (d.type === 'bash_progress' || d.type === 'mcp_progress') {
+          if (a.toolIds.has(ptid)) startPermTimer(id);
+          // Scan bash/mcp progress output for localhost server URLs (background tasks like npm run dev)
+          if (d.type === 'bash_progress') { const pt = d.output || d.content || d.text || ''; if (pt) scanForServers(id, pt); }
+        }
         if (d.type === 'agent_progress' && a.toolIds.has(ptid)) {
           startPermTimer(id);
           const ptn = a.toolNames.get(ptid);
@@ -684,11 +801,89 @@ function parseLine(id, line) {
   }
 }
 
+// ── JSONL file scanning (detect /clear, session switches) ──
+function registerKnownJsonl(projectDir, filePath) {
+  let known = knownJsonlFiles.get(projectDir);
+  if (!known) {
+    // First time seeing this dir — seed with all existing JSONL files to avoid false detections
+    known = new Set();
+    try {
+      for (const f of fs.readdirSync(projectDir)) {
+        if (f.endsWith('.jsonl')) known.add(path.join(projectDir, f));
+      }
+    } catch {}
+    knownJsonlFiles.set(projectDir, known);
+  }
+  known.add(filePath);
+}
+
+function scanForNewJsonlFiles() {
+  // Group agents by projectDir
+  const byDir = new Map(); // projectDir -> [agentId, ...]
+  for (const [id, a] of agents) {
+    const dir = claudeDir(a.cwd);
+    let arr = byDir.get(dir); if (!arr) { arr = []; byDir.set(dir, arr); }
+    arr.push(id);
+  }
+  for (const [dir, ids] of byDir) {
+    let files;
+    try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => path.join(dir, f)); } catch { continue; }
+    let known = knownJsonlFiles.get(dir);
+    if (!known) { known = new Set(); knownJsonlFiles.set(dir, known); }
+    for (const file of files) {
+      if (known.has(file)) continue;
+      known.add(file);
+      // New JSONL found — find the agent whose terminal is running and whose old JSONL stopped growing
+      let targetId = null;
+      for (const id of ids) {
+        if (!terminals.has(id)) continue;
+        const ag = agents.get(id);
+        if (!ag) continue;
+        // Prefer the agent whose old file matches the new session's dir
+        // If only one terminal is running, that's the one that ran /clear
+        targetId = id;
+        break;
+      }
+      if (targetId !== null) {
+        console.log(`[Overlord] New JSONL detected: ${path.basename(file)}, reassigning agent ${targetId}`);
+        reassignAgentToFile(targetId, file);
+      }
+    }
+  }
+}
+
+function reassignAgentToFile(id, newFilePath) {
+  const a = agents.get(id); if (!a) return;
+  // Stop old watchers
+  const w = watchers.get(id); if (w) { try { w.close(); } catch {} watchers.delete(id); }
+  const p = polls.get(id); if (p) { clearInterval(p); polls.delete(id); }
+  try { fs.unwatchFile(a.jsonlFile); } catch {}
+  // Clear activity
+  clrTimer(id, waitTimers); clrTimer(id, permTimers);
+  a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear();
+  a.subToolIds.clear(); a.subToolNames.clear();
+  a.isWaiting = false; a.permSent = false; a.hadTools = false; a.turnTools = 0;
+  send({ type: 'toolsClear', id });
+  // Reset stats (new session = fresh context)
+  const oldModel = a.stats.modelFamily;
+  a.stats = { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: oldModel };
+  send({ type: 'stats', id, stats: a.stats });
+  // Switch to new file
+  const newSessionId = path.basename(newFilePath, '.jsonl');
+  a.sessionId = newSessionId;
+  a.jsonlFile = newFilePath;
+  a.fileOffset = 0;
+  a.lineBuffer = '';
+  saveState();
+  // Start watching new file
+  startWatch(id);
+}
+
 // ── Timers ─────────────────────────────────────────────
 function clrTimer(id, map) { const t = map.get(id); if (t) { clearTimeout(t); map.delete(id); } }
 function clrActivity(id) { const a = agents.get(id); if (!a) return; a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); a.isWaiting = false; a.permSent = false; clrTimer(id, permTimers); send({ type: 'toolsClear', id }); send({ type: 'status', id, status: 'active' }); }
 function startWaitTimer(id) { clrTimer(id, waitTimers); waitTimers.set(id, setTimeout(() => { waitTimers.delete(id); const a = agents.get(id); if (!a) return; a.isWaiting = true; send({ type: 'status', id, status: 'waiting' }); }, TEXT_IDLE_DELAY_MS)); }
-function startPermTimer(id) { clrTimer(id, permTimers); permTimers.set(id, setTimeout(() => { permTimers.delete(id); const a = agents.get(id); if (!a) return; let ne = false; for (const tid of a.toolIds) { if (!EXEMPT.has(a.toolNames.get(tid) || '')) { ne = true; break; } } if (ne) { a.permSent = true; send({ type: 'perm', id }); notifyPermission(id, a); } }, PERMISSION_TIMER_MS)); }
+function startPermTimer(id) { if (settings.bypassPermissions) return; clrTimer(id, permTimers); permTimers.set(id, setTimeout(() => { permTimers.delete(id); const a = agents.get(id); if (!a) return; let ne = false; for (const tid of a.toolIds) { if (!EXEMPT.has(a.toolNames.get(tid) || '')) { ne = true; break; } } if (ne) { a.permSent = true; send({ type: 'perm', id }); notifyPermission(id, a); } }, PERMISSION_TIMER_MS)); }
 
 const lastNotifyTimes = new Map(); // per-agent throttle
 const NOTIFY_THROTTLE_MS = 3000;
@@ -785,7 +980,7 @@ function resumeSessionAgent(sid, rcwd) {
     subToolIds: new Map(), subToolNames: new Map(),
     isWaiting: false, permSent: false, hadTools: false, turnTools: 0,
     lastText: '', lastPrompt: '', title: '',
-    promptHistory: [], titlePending: false, createdAt: Date.now(),
+    promptHistory: [], titlePending: false, createdAt: Date.now(), cronCount: 0,
     stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: 'sonnet' },
   };
   if (fs.existsSync(rjsonl)) {
@@ -798,13 +993,18 @@ function resumeSessionAgent(sid, rcwd) {
             if (r.message.model) ra.stats.modelFamily = modelFamily(r.message.model);
             const u = r.message.usage;
             ra.stats.inTok += u.input_tokens || 0; ra.stats.outTok += u.output_tokens || 0;
-            if (u.input_tokens) ra.stats.ctxTok = u.input_tokens;
+            ra.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
             ra.stats.cacheTok += u.cache_creation_input_tokens || 0; ra.stats.cacheRead += u.cache_read_input_tokens || 0;
           }
           if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
             for (const b of r.message.content) {
               if (b.type === 'text' && b.text) ra.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text;
-              if (b.type === 'tool_use' && b.name) ra.stats.tools[b.name] = (ra.stats.tools[b.name] || 0) + 1;
+              if (b.type === 'tool_use' && b.name) {
+                ra.stats.tools[b.name] = (ra.stats.tools[b.name] || 0) + 1;
+                detectRemoteControl(rid, b.name);
+                if (b.name === 'CronCreate') ra.cronCount++;
+                if (b.name === 'CronDelete') ra.cronCount = Math.max(0, ra.cronCount - 1);
+              }
             }
           }
           if (r.type === 'user') {
@@ -826,6 +1026,7 @@ function resumeSessionAgent(sid, rcwd) {
     } catch {}
   }
   agents.set(rid, ra);
+  registerKnownJsonl(claudeDir(rcwd), rjsonl);
   send({ type: 'agentCreated', id: rid, cwd: rcwd, sessionId: sid, title: ra.title, createdAt: ra.createdAt });
   if (ra.lastPrompt) send({ type: 'prompt', id: rid, text: ra.lastPrompt });
   if (ra.lastText) send({ type: 'preview', id: rid, text: ra.lastText });
@@ -837,14 +1038,189 @@ function resumeSessionAgent(sid, rcwd) {
   send({ type: 'focusFromNotification', id: rid });
 }
 
+// ── Usage polling ─────────────────────────────────────
+let usageInFlight = false;
+let lastUsage = null;
+
+function fetchUsage() {
+  if (usageInFlight) return;
+  fetchUsageHeadless();
+}
+
+function fetchUsageHeadless() {
+  usageInFlight = true;
+  const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+  const args = process.platform === 'win32' ? ['/c', 'claude'] : ['-c', 'claude'];
+  let proc;
+  try {
+    proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: os.homedir(), env: { ...process.env } });
+  } catch (e) {
+    console.log('[Overlord] Usage spawn failed:', e.message);
+    usageInFlight = false;
+    return;
+  }
+  let buf = '';
+  let sentUsage = false;
+  let sentExit = false;
+  let parsed = false;
+  function finish() {
+    if (parsed) return;
+    parsed = true;
+    usageInFlight = false;
+    parseAndSendUsage(buf);
+  }
+  proc.onData((d) => {
+    buf += d;
+    if (!sentUsage && buf.length > 100) {
+      sentUsage = true;
+      setTimeout(() => {
+        try { proc.write('/usage\r'); } catch {}
+        setTimeout(() => {
+          if (!sentExit) { sentExit = true; try { proc.write('/exit\r'); } catch {} }
+        }, 3000);
+      }, 500);
+    }
+  });
+  const timeout = setTimeout(() => {
+    finish();
+    if (!sentExit) { sentExit = true; try { proc.write('/exit\r'); } catch {} }
+    setTimeout(() => { try { proc.kill(); } catch {} }, 2000);
+  }, USAGE_TIMEOUT_MS);
+  proc.onExit(() => {
+    clearTimeout(timeout);
+    finish();
+  });
+}
+
+function parseAndSendUsage(raw) {
+  // Strip ANSI escape sequences
+  const clean = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
+  const usage = {};
+  const lines = clean.split(/[\r\n]+/);
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    const pctMatch = line.match(/([\d.]+)\s*%/);
+    if (!pctMatch) continue;
+    const pct = parseFloat(pctMatch[1]);
+    if (isNaN(pct)) continue;
+    if (lower.includes('hourly') || lower.includes('hour') || lower.includes('5m') || lower.includes('5 min')) {
+      usage.hourly = pct;
+    } else if (lower.includes('daily') || lower.includes('day')) {
+      usage.daily = pct;
+    } else if (lower.includes('weekly') || lower.includes('week')) {
+      if (!usage.weekly) usage.weekly = pct;
+      else usage.weeklyModel = pct;
+    } else if (lower.includes('session')) {
+      usage.session = pct;
+    }
+  }
+  if (Object.keys(usage).length > 0) {
+    lastUsage = usage;
+    send({ type: 'usage', usage });
+  }
+}
+
+// ── Team prompt building ──────────────────────────────
+function buildTeamPrompt(task, roles) {
+  let prompt = `Create an agent team to accomplish this task:\n\n${task}\n\n`;
+  if (roles && roles.length > 0) {
+    prompt += 'Team members should have these roles:\n';
+    for (const role of roles) {
+      prompt += `- ${role.name}: ${role.description}\n`;
+    }
+    prompt += '\n';
+  }
+  prompt += 'Use the agent teams feature to coordinate the work. Create the team, assign tasks, and begin working.';
+  return prompt;
+}
+
+// ── Team detection ────────────────────────────────────
+function scanTeams() {
+  try {
+    if (!fs.existsSync(TEAMS_DIR)) return;
+    const teamDirs = fs.readdirSync(TEAMS_DIR);
+    // Build sessionId -> agentId lookup from our agents
+    const sessionToAgent = new Map();
+    for (const [id, a] of agents) sessionToAgent.set(a.sessionId, id);
+
+    for (const teamName of teamDirs) {
+      const configPath = path.join(TEAMS_DIR, teamName, 'config.json');
+      if (!fs.existsSync(configPath)) continue;
+      let config;
+      try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { continue; }
+      if (!config.leadSessionId || !config.members) continue;
+
+      // Match team to one of our agents via leadSessionId
+      const leadAgentId = sessionToAgent.get(config.leadSessionId);
+      if (leadAgentId === undefined) continue; // not our agent
+
+      // Read tasks
+      let taskList = [];
+      const tasksDir = path.join(TASKS_DIR, teamName);
+      if (fs.existsSync(tasksDir)) {
+        try {
+          const taskFiles = fs.readdirSync(tasksDir).filter(f => f.endsWith('.json'));
+          for (const tf of taskFiles) {
+            try {
+              const task = JSON.parse(fs.readFileSync(path.join(tasksDir, tf), 'utf-8'));
+              taskList.push({ id: task.id, subject: task.subject, status: task.status, owner: task.owner, activeForm: task.activeForm });
+            } catch {}
+          }
+        } catch {}
+      }
+
+      const existing = teams.get(teamName);
+      const memberIds = config.members.map(m => m.agentId).sort().join(',');
+      const taskHash = taskList.map(t => `${t.id}:${t.status}:${t.owner}`).join(',');
+
+      if (existing) {
+        // Check for member changes
+        const existMemberIds = existing.members.map(m => m.agentId).sort().join(',');
+        if (existMemberIds !== memberIds) {
+          existing.members = config.members;
+          existing.tasks = taskList;
+          agentTeamMap.set(leadAgentId, teamName);
+          send({ type: 'teamDetected', team: { name: teamName, leadAgentId, members: config.members, tasks: taskList } });
+        }
+        // Check for task changes
+        const existTaskHash = existing.tasks.map(t => `${t.id}:${t.status}:${t.owner}`).join(',');
+        if (existTaskHash !== taskHash) {
+          existing.tasks = taskList;
+          send({ type: 'teamTasksUpdated', teamName, tasks: taskList });
+        }
+      } else {
+        // New team found
+        const teamData = { name: teamName, leadAgentId, leadSessionId: config.leadSessionId, members: config.members, tasks: taskList };
+        teams.set(teamName, teamData);
+        agentTeamMap.set(leadAgentId, teamName);
+        send({ type: 'teamDetected', team: { name: teamName, leadAgentId, members: config.members, tasks: taskList } });
+        console.log(`[Overlord] Team detected: ${teamName} (lead agent ${leadAgentId}, ${config.members.length} members)`);
+      }
+    }
+
+    // Clean up teams whose lead agent was closed
+    for (const [teamName, teamData] of teams) {
+      if (!agents.has(teamData.leadAgentId)) {
+        teams.delete(teamName);
+        agentTeamMap.delete(teamData.leadAgentId);
+        send({ type: 'teamRemoved', teamName });
+      }
+    }
+  } catch (e) { console.log('[Overlord] Team scan error:', e.message); }
+}
+
 // ── IPC ────────────────────────────────────────────────
 ipcMain.on('cmd', (_e, msg) => {
   switch (msg.type) {
     case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
     case 'closeAgent': closeAgent(msg.id); break;
+    case 'renameAgent': { const a = agents.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); } break; }
+    case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); generateSummaryTitle(msg.id); } break; }
     case 'restartAgent': { const a = agents.get(msg.id); if (a) { const c = a.cwd; closeAgent(msg.id); const newId = createAgent(c); send({ type: 'focusFromNotification', id: newId }); } break; }
     case 'focusAgent': spawnTerminal(msg.id); send({ type: 'focused', id: msg.id }); break;
     case 'termInput': { const t = terminals.get(msg.id); if (t) t.write(msg.data); break; }
+    case 'enableRemoteControl': { const t = terminals.get(msg.id); if (t) t.write('/remote-control\r'); break; }
+    case 'stopLoop': { const a = agents.get(msg.id); if (a) { a.cronCount = 0; send({ type: 'looping', id: msg.id, active: false, count: 0 }); } const t = terminals.get(msg.id); if (t) t.write('\x03'); break; }
     case 'termResize': { const t = terminals.get(msg.id); if (t) try { t.resize(msg.cols, msg.rows); } catch {} break; }
     case 'browseFolder':
       dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: 'Select Project Folder' })
@@ -859,6 +1235,27 @@ ipcMain.on('cmd', (_e, msg) => {
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
     case 'getSessions': scanSessions().then(s => send({ type: 'sessions', sessions: s })).catch(() => send({ type: 'sessions', sessions: [] })); break;
     case 'resumeSession': resumeSessionAgent(msg.sessionId, msg.cwd); break;
+    case 'fetchUsage': fetchUsage(); break;
+    case 'createTeam': {
+      const teamPrompt = buildTeamPrompt(msg.task, msg.roles);
+      createAgent(msg.cwd, teamPrompt);
+      break;
+    }
+    case 'focusTeamMember': {
+      const team = teams.get(msg.teamName);
+      if (!team) break;
+      const leadId = team.leadAgentId;
+      spawnTerminal(leadId);
+      send({ type: 'focused', id: leadId });
+      // Type @member-name tag into the lead's terminal for non-lead members
+      if (!msg.isLead && msg.memberName) {
+        const t = terminals.get(leadId);
+        if (t) {
+          setTimeout(() => { try { t.write('@' + msg.memberName + ' '); } catch {} }, 300);
+        }
+      }
+      break;
+    }
     case 'getAgents': {
       // Send settings first
       send({ type: 'settings', settings });
@@ -867,7 +1264,7 @@ ipcMain.on('cmd', (_e, msg) => {
         send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, createdAt: a.createdAt });
         if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
         if (a.lastText) send({ type: 'preview', id, text: a.lastText });
-        if (a.title) send({ type: 'title', id, text: a.title });
+        if (a.title) send({ type: 'title', id, text: a.title, customName: a.customName || false });
         if (a.isWaiting) send({ type: 'status', id, status: 'waiting' });
         else send({ type: 'status', id, status: 'active' });
         for (const [tid, st] of a.toolStatuses) {
@@ -877,24 +1274,44 @@ ipcMain.on('cmd', (_e, msg) => {
           if (subs && names) { for (const stid of subs) { const sn = names.get(stid) || ''; send({ type: 'subToolStart', id, parentToolId: tid, toolId: stid, status: fmtTool(sn, {}), name: sn }); } }
         }
         send({ type: 'stats', id, stats: a.stats });
+        // Send known servers and remote control state for this agent
+        const ports = serverPorts.get(id);
+        if (ports) { for (const [port, url] of ports) send({ type: 'serverDetected', id, port, url }); }
+        if (remoteControlAgents.has(id)) send({ type: 'remoteControl', id, active: true });
+        if (a.cronCount > 0) send({ type: 'looping', id, active: true, count: a.cronCount });
         // Start JSONL watching for restored agents (terminal is still lazy-spawned on click)
         if (fs.existsSync(a.jsonlFile) && !watchers.has(id) && !polls.has(id)) startWatch(id);
       }
+      // Send known teams
+      for (const [, teamData] of teams) {
+        send({ type: 'teamDetected', team: { name: teamData.name, leadAgentId: teamData.leadAgentId, members: teamData.members, tasks: teamData.tasks } });
+      }
+      // Send cached usage if available, and trigger a fresh fetch
+      if (lastUsage) send({ type: 'usage', usage: lastUsage });
+      fetchUsage();
       break;
     }
   }
 });
 
-// Periodically push stats
+// Periodically push stats + scan for new JSONL files (/clear detection)
 setInterval(() => {
   for (const [id, a] of agents) send({ type: 'stats', id, stats: a.stats });
+  scanForNewJsonlFiles();
 }, 5000);
+
+// Periodically scan for teams
+setInterval(() => scanTeams(), TEAM_POLL_MS);
+
+// Periodically fetch usage
+setInterval(() => fetchUsage(), USAGE_POLL_MS);
 
 // ── Window ─────────────────────────────────────────────
 let _boundsTimer = null;
 function saveWindowBounds() {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return;
-  settings.windowBounds = mainWindow.getBounds();
+  settings.isMaximized = mainWindow.isMaximized();
+  if (!settings.isMaximized) settings.windowBounds = mainWindow.getBounds();
   clearTimeout(_boundsTimer);
   _boundsTimer = setTimeout(() => saveState(), 500);
 }
@@ -911,11 +1328,18 @@ app.whenReady().then(() => {
   };
   if (bounds.x !== undefined && bounds.y !== undefined) { opts.x = bounds.x; opts.y = bounds.y; }
   mainWindow = new BrowserWindow(opts);
+  if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   mainWindow.setMenuBarVisibility(false);
   mainWindow.on('focus', () => mainWindow.flashFrame(false));
   mainWindow.webContents.on('before-input-event', (_e, input) => {
-    if (input.key === 'F5' && input.type === 'keyDown') { app.relaunch(); app.exit(0); }
+    if (input.key === 'F5' && input.type === 'keyDown') {
+      // Kill all pty processes before restarting to prevent orphaned session locks
+      for (const [, t] of terminals) { killProcessTree(t.pid); }
+      saveState();
+      app.relaunch();
+      app.exit(0);
+    }
   });
   mainWindow.on('resize', saveWindowBounds);
   mainWindow.on('move', saveWindowBounds);
@@ -927,7 +1351,8 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   // Spawn detached Claude processes for active agents so they survive the app restart.
   // The detached process continues the current turn headlessly; on restore the app
-  // detects it via JSONL growth and waits for it to finish before reconnecting.
+  // kills it via saved PID before reconnecting.
+  const detachedPids = new Map(); // sessionId -> pid
   for (const [id, a] of agents) {
     if (!terminals.has(id)) continue; // no live terminal, nothing to preserve
     const wasActive = !a.isWaiting;
@@ -939,9 +1364,24 @@ app.on('before-quit', () => {
       const args = process.platform === 'win32' ? ['/c', cmd] : ['-c', cmd];
       const child = spawn(sh, args, { cwd: a.cwd, detached: true, stdio: 'ignore', env: { ...process.env } });
       child.unref();
-      console.log(`[Overlord] Spawned detached Claude for agent ${id} (session ${a.sessionId})`);
+      detachedPids.set(a.sessionId, child.pid);
+      console.log(`[Overlord] Spawned detached Claude for agent ${id} (session ${a.sessionId}, pid ${child.pid})`);
     } catch (e) {
       console.log(`[Overlord] Failed to spawn detached Claude for agent ${id}:`, e.message);
+    }
+  }
+  // Update state file with detached PIDs so next startup can kill them
+  if (detachedPids.size > 0) {
+    try {
+      const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+      for (const entry of (data.agents || [])) {
+        const dpid = detachedPids.get(entry.sessionId);
+        if (dpid) entry.pid = dpid;
+      }
+      fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
+      fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
+    } catch (e) {
+      console.log('[Overlord] Failed to save detached PIDs:', e.message);
     }
   }
 });

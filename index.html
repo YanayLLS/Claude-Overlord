@@ -42,6 +42,18 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .badge-perm:active { transform:translate(1px,1px); box-shadow:1px 1px 0 var(--shadow); }
 .badge-active { color:var(--accent); border-color:var(--accent); background:rgba(108,140,255,.12); }
 .badge-wait { color:var(--green); border-color:var(--green); background:rgba(74,222,128,.12); }
+#usageBadges { display:flex; gap:6px; align-items:center; }
+#usageBadges:empty { display:none; }
+.badge-usage {
+  font-family:inherit; font-size:11px; padding:3px 8px; font-weight:normal; letter-spacing:.5px;
+  border:2px solid; box-shadow:2px 2px 0 var(--shadow); cursor:pointer;
+  color:var(--cyan); border-color:var(--cyan); background:rgba(103,232,249,.08);
+  transition:background .12s, transform .1s, box-shadow .1s;
+}
+.badge-usage:hover { background:rgba(103,232,249,.2); transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--shadow); }
+.badge-usage:active { transform:translate(1px,1px); box-shadow:1px 1px 0 var(--shadow); }
+.badge-usage.warn { color:var(--yellow); border-color:var(--yellow); background:rgba(250,204,21,.12); }
+.badge-usage.danger { color:var(--red); border-color:var(--red); background:rgba(248,113,113,.12); }
 #addBtn {
   font-family:inherit; font-size:13px; padding:5px 14px; color:#000; border:none; cursor:pointer;
   font-weight:normal; letter-spacing:.5px;
@@ -118,33 +130,42 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .group-header:hover { background:linear-gradient(90deg, rgba(108,140,255,.1) 0%, transparent 100%); }
 .group-chevron { font-size:10px; color:var(--dim); transition:transform .15s; flex-shrink:0; width:12px; }
 .group.collapsed .group-chevron { transform:rotate(-90deg); }
-.group.collapsed .agents,
-.group.collapsed .group-add { display:none; }
+.group.collapsed .agents { display:none; }
 .group-info { flex:1; min-width:0; }
 .group-name { font-size:14px; color:var(--accent); letter-spacing:.3px; }
 .group-path { font-size:11px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; opacity:.7; }
-.group-stats { font-size:11px; color:var(--dim); white-space:nowrap; flex-shrink:0; letter-spacing:.3px; }
-.group-badges { display:flex; gap:4px; flex-shrink:0; }
-.group-badges:empty { display:none; }
-.group-badges span {
-  font-size:10px; padding:2px 6px; font-weight:normal; letter-spacing:.3px;
-  border:1px solid; box-shadow:1px 1px 0 var(--shadow);
-}
-.gbadge-perm { color:var(--yellow); border-color:var(--yellow); }
-.gbadge-active { color:var(--accent); border-color:var(--accent); }
-.gbadge-wait { color:var(--green); border-color:var(--green); }
-.group-close-done {
-  font-family:inherit; font-size:10px; padding:2px 6px; cursor:pointer; flex-shrink:0;
+.group-actions { display:flex; gap:4px; flex-shrink:0; }
+.group-actions button {
+  font-family:inherit; font-size:10px; padding:2px 8px; cursor:pointer; flex-shrink:0;
   color:var(--dim); background:none; border:1px solid var(--border); letter-spacing:.3px;
   box-shadow:1px 1px 0 var(--shadow); transition:color .12s, border-color .12s, background .12s;
 }
-.group-close-done:hover { color:var(--red); border-color:var(--red); background:rgba(248,113,113,.08); }
-.group-close-done:active { background:rgba(248,113,113,.16); }
+.group-actions button:hover { color:var(--green); border-color:var(--green); background:rgba(74,222,128,.05); }
+.group-actions .btn-team:hover { color:var(--purple); border-color:var(--purple); background:rgba(192,132,252,.05); }
+.group-menu-wrap { position:relative; flex-shrink:0; }
+.group-menu-btn {
+  font-family:inherit; font-size:14px; padding:0 4px; cursor:pointer; line-height:1;
+  color:var(--dim); background:none; border:none; transition:color .12s;
+}
+.group-menu-btn:hover { color:var(--text); }
+.group-dropdown {
+  display:none; position:absolute; right:0; top:100%; margin-top:4px; z-index:100;
+  background:var(--bg3); border:2px solid var(--border-hi); box-shadow:3px 3px 0 var(--shadow);
+  min-width:120px;
+}
+.group-dropdown.open { display:block; }
+.group-dropdown button {
+  display:block; width:100%; font-family:inherit; font-size:11px; padding:6px 12px;
+  color:var(--text); background:none; border:none; cursor:pointer; text-align:left;
+  letter-spacing:.3px; transition:background .1s;
+}
+.group-dropdown button:hover { background:rgba(255,255,255,.06); }
+.group-dropdown button.danger:hover { color:var(--red); background:rgba(248,113,113,.08); }
 
 /* ── Agent card ── */
 .agents { padding:4px 12px; display:flex; flex-direction:column; gap:4px; }
 .agent {
-  padding:8px 12px; cursor:pointer; border:2px solid var(--border); background:var(--card);
+  padding:8px 10px; cursor:pointer; border:2px solid var(--border); background:var(--card);
   box-shadow:2px 2px 0 var(--shadow); transition:background .12s, border-color .12s, transform .12s, box-shadow .12s; position:relative;
 }
 .agent::before {
@@ -154,74 +175,122 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent:hover { background:var(--bg3); border-color:var(--border-hi); transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--shadow); }
 .agent.selected { border-color:var(--accent); background:rgba(108,140,255,.08); }
 .agent.selected::before { background:var(--accent); }
-.agent-top { display:flex; align-items:center; gap:8px; margin-bottom:3px; }
-.dot { width:8px; height:8px; flex-shrink:0; }
-.dot-active { background:var(--accent); box-shadow:0 0 8px var(--accent), inset 0 0 2px rgba(255,255,255,.4); }
-.dot-waiting { background:var(--green); box-shadow:0 0 8px var(--green), inset 0 0 2px rgba(255,255,255,.4); }
-.dot-perm { background:var(--yellow); box-shadow:0 0 8px var(--yellow), inset 0 0 2px rgba(255,255,255,.4); }
-.dot-idle { background:var(--dim); opacity:.5; }
-.dot-crashed { background:var(--red); box-shadow:0 0 8px var(--red), inset 0 0 2px rgba(255,255,255,.4); }
-.dot-resuming { background:var(--yellow); box-shadow:0 0 8px var(--yellow), inset 0 0 2px rgba(255,255,255,.4); }
+
+/* Single header row: icon + name + activity + timer + buttons */
+.agent-top { display:flex; align-items:center; gap:6px; }
+.agent-icon { font-size:14px; flex-shrink:0; cursor:pointer; line-height:1; width:18px; text-align:center; transition:transform .1s; color:var(--dim); font-family:'Segoe UI Symbol','Apple Symbols',sans-serif; font-style:normal; }
+.agent-icon:hover { transform:scale(1.25); }
+.dot-active { color:var(--accent); text-shadow:0 0 6px var(--accent); }
+.dot-waiting { color:var(--green); text-shadow:0 0 6px var(--green); }
+.dot-perm { color:var(--yellow); text-shadow:0 0 6px var(--yellow); }
+.dot-idle { color:var(--dim); opacity:.5; }
+.dot-crashed { color:var(--red); text-shadow:0 0 6px var(--red); }
+.dot-resuming { color:var(--yellow); text-shadow:0 0 6px var(--yellow); }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 .pulse { animation:pulse 1.5s ease-in-out infinite; }
+.agent-name { font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); min-width:0; }
+.agent-activity { font-size:10px; flex-shrink:0; letter-spacing:.3px; text-transform:uppercase; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; }
+.elapsed-timer { font-size:10px; color:var(--dim); flex-shrink:0; font-variant-numeric:tabular-nums; }
 @keyframes typing-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-3px)} }
-.typing-dots { display:inline-flex; gap:2px; margin-left:5px; vertical-align:middle; }
+.typing-dots { display:inline-flex; gap:2px; margin-left:4px; vertical-align:middle; }
 .typing-dots span { width:3px; height:3px; background:var(--accent); display:inline-block; animation:typing-bounce .8s ease-in-out infinite; }
 .typing-dots span:nth-child(2) { animation-delay:.15s; }
 .typing-dots span:nth-child(3) { animation-delay:.3s; }
-.agent-name { font-size:14px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
-.agent-activity { font-size:11px; flex-shrink:0; letter-spacing:.3px; text-transform:uppercase; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; }
-.elapsed-timer { font-size:10px; color:var(--dim); flex-shrink:0; letter-spacing:.3px; font-variant-numeric:tabular-nums; }
 .agent-btn {
-  font-family:inherit; background:none; border:1px solid transparent; cursor:pointer;
-  padding:2px 5px; font-size:13px; line-height:1; flex-shrink:0; opacity:.3;
-  transition:opacity .12s, border-color .12s, background .12s; color:var(--text);
+  font-family:inherit; background:none; border:none; cursor:pointer;
+  padding:0 3px; font-size:14px; line-height:1; flex-shrink:0; opacity:0;
+  transition:opacity .1s; color:var(--dim);
 }
-.agent-btn:hover { opacity:1; border-color:var(--border); background:var(--bg); }
-.agent-btn:active { opacity:1; background:var(--bg2); }
-.btn-export { color:var(--cyan); }
-.btn-restart { color:var(--accent); }
-.btn-close { color:var(--red); }
+.agent:hover .agent-btn { opacity:.4; }
+.agent-btn:hover { opacity:1 !important; color:var(--red); }
+.btn-rc { font-size:10px; letter-spacing:.3px; padding:1px 4px; border:1px solid var(--border); }
+.btn-rc:hover { color:var(--cyan) !important; border-color:var(--cyan); background:rgba(103,232,249,.08); }
+.btn-rc.rc-on { opacity:1 !important; display:inline-block; color:var(--cyan); border-color:var(--cyan); background:rgba(103,232,249,.12); cursor:default; }
+.btn-rc.rc-on:hover { color:var(--cyan) !important; }
+.btn-loop {
+  font-size:10px; letter-spacing:.3px; padding:1px 4px; border:1px solid var(--border);
+  opacity:1 !important; display:inline-flex; align-items:center; gap:3px;
+  color:var(--purple); border-color:var(--purple); background:rgba(192,132,252,.12);
+}
+.btn-loop:hover { color:var(--red) !important; border-color:var(--red); background:rgba(248,113,113,.12); }
+@keyframes loop-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+.loop-icon { display:inline-block; animation:loop-spin 2s linear infinite; font-style:normal; }
 
-/* Agent activity color driven by parent data-status */
+/* Activity color driven by parent data-status */
 .agent[data-status="permission"] .agent-activity { color:var(--yellow); }
 .agent[data-status="active"] .agent-activity { color:var(--accent); }
 .agent[data-status="waiting"] .agent-activity { color:var(--green); }
 .agent[data-status="idle"] .agent-activity { color:var(--dim); }
 .agent[data-status="crashed"] .agent-activity { color:var(--red); }
 .agent[data-status="resuming"] .agent-activity { color:var(--yellow); }
-.agent-prompt { font-size:12px; color:var(--dim); margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:12px; position:relative; }
-.agent-prompt::before { content:'>'; position:absolute; left:0; color:var(--accent); opacity:.5; }
-.agent-preview { font-size:11px; color:rgba(255,255,255,.3); margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:12px; position:relative; }
-.agent-preview::before { content:'<'; position:absolute; left:0; color:var(--green); opacity:.4; }
-.agent-stats { display:flex; gap:4px; font-size:11px; color:var(--dim); flex-wrap:wrap; }
-.agent-stats span { padding:1px 0; letter-spacing:.2px; }
+
+/* Prompt / preview */
+.agent-prompt { font-size:11px; color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:13px; position:relative; }
+.agent-prompt::before { content:'>'; position:absolute; left:2px; color:var(--accent); opacity:.5; }
+.agent-preview { font-size:11px; color:rgba(255,255,255,.25); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:13px; position:relative; }
+.agent-preview::before { content:'<'; position:absolute; left:2px; color:var(--green); opacity:.4; }
+
+/* Footer: stats + context bar inline */
+.agent-footer { display:flex; align-items:center; gap:6px; margin-top:4px; }
+.agent-stats { display:flex; gap:4px; font-size:10px; color:var(--dim); flex-wrap:nowrap; white-space:nowrap; }
+.agent-stats span { letter-spacing:.2px; }
 .agent-stats span + span::before { content:'\00b7'; margin-right:4px; opacity:.5; }
 .ctx-warn { color:var(--yellow); text-shadow:0 0 6px rgba(250,204,21,.3); }
+.ctx-bar { height:3px; background:var(--border); overflow:hidden; margin-top:6px; }
+.ctx-bar-fill { height:100%; background:var(--accent); transition:width .3s; }
+.ctx-bar-fill.warn { background:var(--yellow); }
+.ctx-bar-fill.danger { background:var(--red); }
 
 /* Sub-agent items */
 .subagent {
-  display:flex; align-items:center; gap:6px; padding:3px 0 3px 16px;
-  margin:2px 0; border-left:2px solid var(--border); position:relative;
+  display:flex; align-items:center; gap:5px; padding:2px 0 2px 13px;
+  margin:2px 0 0; border-left:2px solid var(--border);
 }
 .subagent-dot {
-  width:6px; height:6px; flex-shrink:0;
-  background:var(--accent); box-shadow:0 0 6px var(--accent);
+  width:5px; height:5px; flex-shrink:0;
+  background:var(--accent); box-shadow:0 0 4px var(--accent);
 }
 .subagent-name {
-  font-size:12px; color:var(--text); opacity:.7; flex:1; min-width:0;
+  font-size:11px; color:var(--text); opacity:.6; flex:1; min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .subagent-activity {
   font-size:10px; color:var(--accent); flex-shrink:0; letter-spacing:.3px;
-  text-transform:uppercase; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  text-transform:uppercase; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 
-/* Context bar */
-.ctx-bar { height:3px; background:var(--border); margin-top:5px; overflow:hidden; }
-.ctx-bar-fill { height:100%; background:var(--accent); transition:width .3s; }
-.ctx-bar-fill.warn { background:var(--yellow); }
-.ctx-bar-fill.danger { background:var(--red); }
+/* ── Team section ── */
+.team-section {
+  margin:4px 0; border:2px solid rgba(192,132,252,.3); background:rgba(192,132,252,.04);
+  padding:6px 8px;
+}
+.team-header {
+  display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
+  padding:2px 0 4px; border-bottom:1px solid rgba(192,132,252,.15);
+}
+.team-header:hover { background:rgba(192,132,252,.06); }
+.team-icon { color:var(--purple); font-size:12px; flex-shrink:0; }
+.team-name { font-size:12px; color:var(--purple); font-weight:normal; letter-spacing:.3px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.team-count { font-size:10px; color:var(--dim); flex-shrink:0; }
+.team-chevron { font-size:9px; color:var(--dim); transition:transform .15s; flex-shrink:0; }
+.team-section.collapsed .team-chevron { transform:rotate(-90deg); }
+.team-section.collapsed .team-members { display:none; }
+.team-members { padding:4px 0 0; display:flex; flex-direction:column; gap:3px; }
+.team-member {
+  display:flex; align-items:center; gap:6px; padding:3px 6px; cursor:pointer;
+  border:1px solid var(--border); background:var(--card);
+  transition:background .12s, border-color .12s;
+}
+.team-member:hover { background:var(--bg3); border-color:var(--border-hi); }
+.team-member-dot { width:6px; height:6px; flex-shrink:0; background:var(--purple); box-shadow:0 0 4px var(--purple); }
+.team-member-name { font-size:11px; color:var(--text); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.team-member-role { font-size:10px; color:var(--dim); flex-shrink:0; letter-spacing:.3px; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.team-member.is-lead .team-member-dot { background:var(--accent); box-shadow:0 0 4px var(--accent); }
+.team-lead-tag { font-size:9px; padding:1px 4px; color:var(--accent); border:1px solid var(--accent); background:rgba(108,140,255,.1); letter-spacing:.3px; flex-shrink:0; }
+.team-tasks-bar { display:flex; align-items:center; gap:6px; margin-top:4px; padding-top:4px; border-top:1px solid rgba(192,132,252,.1); }
+.team-tasks-progress { flex:1; height:3px; background:var(--border); overflow:hidden; }
+.team-tasks-fill { height:100%; background:var(--purple); transition:width .3s; }
+.team-tasks-label { font-size:10px; color:var(--dim); flex-shrink:0; }
 
 
 /* ── Summary footer ── */
@@ -237,22 +306,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .model-tag.opus { color:var(--purple); border-color:var(--purple); }
 .model-tag.sonnet { color:var(--accent); border-color:var(--accent); }
 .model-tag.haiku { color:var(--cyan); border-color:var(--cyan); }
-.group-open-folder {
+.group-servers { display:flex; gap:4px; flex-shrink:0; flex-wrap:wrap; }
+.group-servers:empty { display:none; }
+.server-badge {
   font-family:inherit; font-size:10px; padding:2px 6px; cursor:pointer; flex-shrink:0;
-  color:var(--dim); background:none; border:1px solid var(--border); letter-spacing:.3px;
-  box-shadow:1px 1px 0 var(--shadow); transition:color .12s, border-color .12s, background .12s;
+  color:var(--cyan); background:rgba(103,232,249,.08); border:1px solid var(--cyan); letter-spacing:.3px;
+  box-shadow:1px 1px 0 var(--shadow); transition:color .12s, background .12s, border-color .12s;
+  text-decoration:none;
 }
-.group-open-folder:hover { color:var(--accent); border-color:var(--accent); background:rgba(108,140,255,.08); }
-
-/* ── Add agent row in group ── */
-.group-add { padding:4px 12px 8px; }
-.group-add button {
-  font-family:inherit; font-size:12px; color:var(--dim); background:transparent;
-  border:1px dashed var(--border); padding:5px 14px; cursor:pointer;
-  transition:border-color .15s, color .15s, background .15s, border-style .15s; letter-spacing:.3px; width:100%;
-}
-.group-add button:hover { border-color:var(--green); color:var(--green); border-style:solid; background:rgba(74,222,128,.05); }
-.group-add button:active { background:rgba(74,222,128,.12); }
+.server-badge:hover { color:#fff; background:rgba(103,232,249,.2); border-color:#9ef0ff; }
 
 /* ── Terminal panel — bottom layout (default) ── */
 #term { display:none; flex-direction:column; border-top:2px solid var(--border-hi); flex-shrink:0; height:40%; min-height:120px; }
@@ -352,7 +414,7 @@ button:focus-visible { outline-offset:0; }
 .help-desc { font-size:12px; color:var(--dim); letter-spacing:.2px; }
 
 /* ── Prompt overlay ── */
-#prompt-overlay {
+#prompt-overlay, #team-overlay {
   display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:999;
   align-items:center; justify-content:center; transition:opacity .15s;
 }
@@ -380,6 +442,7 @@ button:focus-visible { outline-offset:0; }
 .prompt-actions .btn-go { background:var(--green); color:#000; border-color:var(--green); box-shadow:2px 2px 0 #1a6e3a; }
 .prompt-actions .btn-go:hover { box-shadow:3px 3px 0 #1a6e3a; }
 .prompt-actions .btn-go:active { box-shadow:1px 1px 0 #1a6e3a; }
+
 
 /* ── Terminal tabs ── */
 .term-tabs { display:flex; gap:0; flex-shrink:0; }
@@ -469,6 +532,31 @@ button:focus-visible { outline-offset:0; }
 .history-item-meta { font-size:11px; color:var(--dim); display:flex; gap:8px; margin-top:3px; }
 .history-item-meta span + span::before { content:'\00b7'; margin-right:4px; opacity:.5; }
 .history-item-prompt { font-size:11px; color:rgba(255,255,255,.3); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ── Confirm modal ── */
+#confirm-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000;
+  align-items:center; justify-content:center; transition:opacity .15s;
+}
+#confirm-overlay.open { display:flex; }
+.confirm-modal {
+  background:var(--bg); border:2px solid var(--border-hi);
+  box-shadow:4px 4px 0 var(--shadow); padding:20px 24px; min-width:340px; max-width:90vw;
+}
+.confirm-title {
+  font-size:15px; color:var(--text); letter-spacing:.3px; margin-bottom:16px; line-height:1.4;
+}
+.confirm-actions { display:flex; gap:8px; justify-content:flex-end; }
+.confirm-actions button {
+  font-family:inherit; font-size:13px; padding:6px 16px; cursor:pointer;
+  border:2px solid var(--border); background:var(--bg3); color:var(--text);
+  box-shadow:2px 2px 0 var(--shadow); transition:border-color .1s, transform .1s, box-shadow .1s;
+}
+.confirm-actions button:hover { border-color:var(--border-hi); transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--shadow); }
+.confirm-actions button:active { transform:translate(1px,1px); box-shadow:1px 1px 0 var(--shadow); }
+.confirm-actions .btn-danger { background:rgba(248,113,113,.15); color:var(--red); border-color:var(--red); box-shadow:2px 2px 0 rgba(248,113,113,.2); }
+.confirm-actions .btn-danger:hover { background:rgba(248,113,113,.25); box-shadow:3px 3px 0 rgba(248,113,113,.2); }
+.confirm-actions .btn-danger:active { box-shadow:1px 1px 0 rgba(248,113,113,.2); }
 </style>
 </head>
 <body>
@@ -476,6 +564,7 @@ button:focus-visible { outline-offset:0; }
   <div id="header">
     <h1>Overlord</h1>
     <div id="headerBadges"></div>
+    <div id="usageBadges"></div>
     <button class="hdr-btn" onclick="openHistory()" title="Session history (Ctrl+H)">&#x23F3;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
     <button id="layoutBtn" class="hdr-btn" onclick="toggleLayout()" title="Toggle terminal position">&#x25A7;</button>
@@ -542,6 +631,17 @@ button:focus-visible { outline-offset:0; }
       </div>
     </div>
   </div>
+  <div id="team-overlay" onclick="closeTeamOverlay()">
+    <div class="prompt-modal" onclick="event.stopPropagation()">
+      <h3 style="color:var(--purple)">New Agent Team</h3>
+      <div class="prompt-path" id="team-cwd"></div>
+      <textarea class="prompt-input" id="team-task" rows="4" placeholder="Describe the task and team structure, e.g.&#10;&#10;Review PR #42 with 3 teammates: one on security, one on performance, one on test coverage"></textarea>
+      <div class="prompt-actions">
+        <button onclick="closeTeamOverlay()">Cancel</button>
+        <button class="btn-go" onclick="submitTeam()" style="background:var(--purple);border-color:var(--purple);box-shadow:2px 2px 0 #5b2d8e;">Start Team</button>
+      </div>
+    </div>
+  </div>
   <div id="help-overlay" onclick="closeHelp()">
     <div class="help-modal" onclick="event.stopPropagation()">
       <h3>Keyboard Shortcuts</h3>
@@ -560,6 +660,7 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+Scroll</span><span class="help-desc">Zoom in/out</span></div>
       <div class="help-row"><span class="help-key">Ctrl+H</span><span class="help-desc">Session history</span></div>
       <div class="help-row"><span class="help-key">Ctrl+T</span><span class="help-desc">Toggle timeline / terminal</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+U</span><span class="help-desc">Refresh usage stats</span></div>
       <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close overlay / filter</span></div>
       <div class="help-row"><span class="help-key">?</span><span class="help-desc">Show this help</span></div>
     </div>
@@ -574,15 +675,87 @@ button:focus-visible { outline-offset:0; }
       <div id="history-list"><div class="history-loading">Scanning sessions...</div></div>
     </div>
   </div>
+  <div id="confirm-overlay" onclick="confirmResolve(false)">
+    <div class="confirm-modal" onclick="event.stopPropagation()">
+      <div class="confirm-title" id="confirm-msg"></div>
+      <div class="confirm-actions">
+        <button onclick="confirmResolve(false)">Cancel</button>
+        <button class="btn-danger" id="confirm-ok" onclick="confirmResolve(true)"></button>
+      </div>
+    </div>
+  </div>
 </div>
 <script src="./xterm-bundle.js"></script>
 <script>
 const CTX_WINDOW = 200000;
-const agents = new Map(); // id -> { cwd, status, tools:Map, prompt, preview, stats, sessionId }
+const agents = new Map(); // id -> { cwd, status, tools:Map, prompt, preview, stats, sessionId, servers:Map(port->url) }
+const teamMap = new Map(); // teamName -> { name, leadAgentId, members[], tasks[] }
+const knownProjects = new Set(); // cwd paths that persist even when all agents are closed
 let selectedId = null;
 let filterText = '';
 const collapsedGroups = new Set();
 function toggleGroup(cwd) { if (collapsedGroups.has(cwd)) collapsedGroups.delete(cwd); else collapsedGroups.add(cwd); render(); }
+
+function toggleGroupMenu(btn) {
+  const dd = btn.nextElementSibling;
+  const wasOpen = dd.classList.contains('open');
+  closeGroupMenus();
+  if (!wasOpen) dd.classList.add('open');
+}
+function closeGroupMenus() { document.querySelectorAll('.group-dropdown.open').forEach(d => d.classList.remove('open')); }
+function removeProject(cwd) { knownProjects.delete(cwd); render(); }
+document.addEventListener('click', closeGroupMenus);
+
+// ── Agent icons (flat text glyphs — \uFE0E forces text presentation) ──
+const AGENT_ICONS = [
+  '\u2726','\u2737','\u2742','\u2756','\u25C6','\u25CE','\u25B2','\u2B23',
+  '\u2605\uFE0E','\u2736','\u273B','\u2740','\u2746','\u2722','\u2727','\u2738',
+  '\u2735','\u2743','\u2741','\u274B','\u2744\uFE0E','\u2747','\u2748','\u2749',
+  '\u00A7','\u2720','\u2318','\u2316','\u2307','\u2311','\u2388','\u2394',
+  '\u25A0','\u25B6\uFE0E','\u25CF','\u2B22','\u29C8','\u29BE','\u2A01','\u2A02',
+];
+const agentIconMap = JSON.parse(localStorage.getItem('overlord-agent-icons') || '{}'); // sessionId -> icon
+function saveAgentIcons() { localStorage.setItem('overlord-agent-icons', JSON.stringify(agentIconMap)); }
+function getAgentIcon(sessionId) {
+  if (agentIconMap[sessionId]) return agentIconMap[sessionId];
+  const icon = AGENT_ICONS[Math.floor(Math.random() * AGENT_ICONS.length)];
+  agentIconMap[sessionId] = icon;
+  saveAgentIcons();
+  return icon;
+}
+function setAgentIcon(sessionId, icon) { agentIconMap[sessionId] = icon; saveAgentIcons(); render(); }
+let _iconMenuId = null;
+function showIconPicker(e, sessionId) {
+  e.stopPropagation();
+  // Remove existing picker
+  const old = document.getElementById('icon-picker');
+  if (old) old.remove();
+  if (_iconMenuId === sessionId) { _iconMenuId = null; return; }
+  _iconMenuId = sessionId;
+  const picker = document.createElement('div');
+  picker.id = 'icon-picker';
+  picker.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:2px solid var(--border-hi);box-shadow:4px 4px 0 var(--shadow);padding:6px;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;';
+  picker.style.left = e.clientX + 'px';
+  picker.style.top = e.clientY + 'px';
+  // Keep picker on screen
+  for (const icon of AGENT_ICONS) {
+    const btn = document.createElement('button');
+    btn.textContent = icon;
+    btn.style.cssText = 'font-size:16px;width:28px;height:28px;background:none;border:1px solid transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;color:var(--text);font-family:"Segoe UI Symbol","Apple Symbols",sans-serif;';
+    btn.addEventListener('mouseenter', () => { btn.style.borderColor = 'var(--accent)'; btn.style.background = 'rgba(108,140,255,.15)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.borderColor = 'transparent'; btn.style.background = 'none'; });
+    btn.onclick = (ev) => { ev.stopPropagation(); setAgentIcon(sessionId, icon); picker.remove(); _iconMenuId = null; };
+    picker.appendChild(btn);
+  }
+  document.body.appendChild(picker);
+  // Adjust if off-screen
+  const rect = picker.getBoundingClientRect();
+  if (rect.right > window.innerWidth) picker.style.left = (window.innerWidth - rect.width - 8) + 'px';
+  if (rect.bottom > window.innerHeight) picker.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  // Close on outside click
+  const close = (ev) => { if (!picker.contains(ev.target)) { picker.remove(); _iconMenuId = null; document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
 
 // ── Timeline state ──
 let termTab = 'terminal'; // 'terminal' or 'timeline'
@@ -611,7 +784,7 @@ document.getElementById('filter-input').addEventListener('keydown', (e) => { if 
 let pendingCwd = null;
 let _promptCloseTimer = null;
 function browseAndAdd() { api.send({ type: 'browseFolder' }); }
-function addAgent(cwd) { showPromptOverlay(cwd); }
+function addAgent(cwd) { api.send({ type: 'createAgent', cwd }); }
 function duplicateAgent(id) {
   const a = agents.get(id);
   if (!a) return;
@@ -644,11 +817,62 @@ function submitPrompt() {
   api.send({ type: 'createAgent', cwd: pendingCwd, prompt: prompt || undefined });
   closePromptOverlay();
 }
-function closeAgent(id, skipConfirm) {
+
+// ── Team overlay ──
+let pendingTeamCwd = null;
+let _teamCloseTimer = null;
+function showTeamOverlay(cwd) {
+  if (_teamCloseTimer) { clearTimeout(_teamCloseTimer); _teamCloseTimer = null; }
+  pendingTeamCwd = cwd;
+  document.getElementById('team-cwd').textContent = cwd;
+  const input = document.getElementById('team-task');
+  input.value = '';
+  const el = document.getElementById('team-overlay');
+  el.style.display = 'flex'; el.style.opacity = '0';
+  requestAnimationFrame(() => { el.style.opacity = '1'; input.focus(); });
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitTeam(); }
+    if (e.key === 'Escape') closeTeamOverlay();
+  };
+}
+function closeTeamOverlay() {
+  if (_teamCloseTimer) return;
+  const el = document.getElementById('team-overlay');
+  el.style.opacity = '0';
+  _teamCloseTimer = setTimeout(() => { _teamCloseTimer = null; el.style.display = 'none'; }, 150);
+  pendingTeamCwd = null;
+}
+function submitTeam() {
+  if (!pendingTeamCwd) return;
+  const task = document.getElementById('team-task').value.trim();
+  if (!task) { document.getElementById('team-task').focus(); return; }
+  api.send({ type: 'createTeam', cwd: pendingTeamCwd, task });
+  closeTeamOverlay();
+}
+
+// ── In-app confirm dialog ──
+let _confirmCb = null;
+function showConfirm(message, okLabel) {
+  return new Promise((resolve) => {
+    _confirmCb = resolve;
+    document.getElementById('confirm-msg').textContent = message;
+    document.getElementById('confirm-ok').textContent = okLabel || 'OK';
+    const el = document.getElementById('confirm-overlay');
+    el.classList.add('open');
+    document.getElementById('confirm-ok').focus();
+  });
+}
+function confirmResolve(value) {
+  const el = document.getElementById('confirm-overlay');
+  el.classList.remove('open');
+  if (_confirmCb) { const cb = _confirmCb; _confirmCb = null; cb(value); }
+}
+
+async function closeAgent(id, skipConfirm) {
   if (!skipConfirm) {
     const a = agents.get(id);
     if (a && agentStatus(a) === 'active') {
-      if (!confirm(`Agent "${a.title || 'New agent'}" is actively working. Close it?`)) return;
+      if (!await showConfirm(`Agent "${a.title || 'New agent'}" is actively working. Close it?`, 'Close')) return;
     }
   }
   api.send({ type: 'closeAgent', id });
@@ -673,17 +897,79 @@ function closeDoneInGroup(cwd) {
     if (a.cwd === cwd && (agentStatus(a) === 'waiting' || agentStatus(a) === 'idle')) closeAgent(id, true);
   }
 }
-function restartAgent(id) {
+async function restartAgent(id) {
   const a = agents.get(id);
   if (a && agentStatus(a) === 'active') {
-    if (!confirm(`Agent "${a.title || 'New agent'}" is actively working. Restart it?`)) return;
+    if (!await showConfirm(`Agent "${a.title || 'New agent'}" is actively working. Restart it?`, 'Restart')) return;
   }
   api.send({ type: 'restartAgent', id });
 }
 function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
 function focusAgent(id) { selectedId = id; api.send({ type: 'focusAgent', id }); render(); }
+function renameAgent(id, el) {
+  const a = agents.get(id); if (!a) return;
+  const cur = a.title || a.prompt || '';
+  const input = document.createElement('input');
+  input.type = 'text'; input.value = cur;
+  input.style.cssText = 'font:inherit;font-size:12px;color:var(--text);background:var(--card);border:1px solid var(--accent);outline:none;padding:0 4px;width:100%;min-width:0;';
+  const commit = () => {
+    const name = input.value.trim();
+    if (name && name !== cur) { api.send({ type: 'renameAgent', id, name }); a.title = name; a.customName = true; }
+    scheduleRender();
+  };
+  input.onblur = commit;
+  input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } if (e.key === 'Escape') { input.onblur = null; scheduleRender(); } };
+  el.textContent = '';
+  el.appendChild(input);
+  input.focus(); input.select();
+}
+function clearCustomName(id) {
+  const a = agents.get(id); if (!a) return;
+  a.customName = false;
+  api.send({ type: 'clearCustomName', id });
+  scheduleRender();
+}
+function showAgentMenu(e, id) {
+  const old = document.getElementById('agent-ctx-menu');
+  if (old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 'agent-ctx-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:2px solid var(--border-hi);box-shadow:4px 4px 0 var(--shadow);padding:4px 0;min-width:140px;';
+  menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
+  const a = agents.get(id);
+  const items = [
+    { label: 'Rename', action: () => { const el = document.querySelector(`.agent[data-id="${id}"] .agent-name`); if (el) renameAgent(id, el); } },
+    ...(a && a.customName ? [{ label: 'Clear custom name', action: () => clearCustomName(id) }] : []),
+    { label: 'Restart', action: () => restartAgent(id) },
+    { label: 'Duplicate', action: () => duplicateAgent(id) },
+    { label: 'Export transcript', action: () => exportAgent(id) },
+    { sep: true },
+    { label: 'Close', action: () => closeAgent(id), cls: 'ctx-danger' },
+  ];
+  for (const it of items) {
+    if (it.sep) { const hr = document.createElement('div'); hr.style.cssText = 'height:1px;background:var(--border);margin:3px 0;'; menu.appendChild(hr); continue; }
+    const btn = document.createElement('button');
+    btn.textContent = it.label;
+    btn.className = it.cls || '';
+    btn.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:4px 12px;background:none;border:none;color:var(--text);cursor:pointer;';
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(108,140,255,.15)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+    if (it.cls === 'ctx-danger') { btn.style.color = 'var(--red)'; }
+    btn.onclick = () => { menu.remove(); it.action(); };
+    menu.appendChild(btn);
+  }
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
 function openUrl(url) { api.send({ type: 'openUrl', url }); }
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
+function enableRC(id) { api.send({ type: 'enableRemoteControl', id }); }
+function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
+function focusTeamMember(teamName, memberName, isLead) { api.send({ type: 'focusTeamMember', teamName, memberName, isLead }); }
 
 function fmtTok(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'k' : String(n); }
 function fmtDur(ms) { const s = Math.floor(ms/1000); if (s < 60) return s+'s'; const m = Math.floor(s/60); if (m < 60) return m+'m '+(s%60)+'s'; return Math.floor(m/60)+'h '+(m%60)+'m'; }
@@ -738,15 +1024,16 @@ let _renderPending = false;
 function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; render(); }); } }
 function render() {
   const list = document.getElementById('list');
-  if (agents.size === 0) {
+  if (agents.size === 0 && knownProjects.size === 0) {
     list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
     document.getElementById('headerBadges').innerHTML = '';
     document.title = 'Overlord';
     return;
   }
 
-  // Group by cwd (apply filter)
+  // Group by cwd (apply filter), include empty known projects
   const groups = new Map();
+  for (const cwd of knownProjects) groups.set(cwd, []);
   for (const [id, a] of agents) {
     if (!matchesFilter(a)) continue;
     const cwd = a.cwd || '(unknown)';
@@ -762,6 +1049,7 @@ function render() {
   if (actC) badges += `<span class="badge badge-active">${actC} working</span>`;
   if (waitC) badges += `<span class="badge badge-wait">${waitC} done</span>`;
   document.getElementById('headerBadges').innerHTML = badges;
+  renderUsageBadges();
 
   // Dynamic window title for taskbar
   let totalCost = 0;
@@ -776,34 +1064,41 @@ function render() {
   let html = '', filterMatches = 0;
   for (const [cwd, items] of groups) {
     filterMatches += items.length;
-    let gTok = 0, gTurns = 0, gCost = 0;
+    const gDoneCount = items.filter(([,a]) => { const s = agentStatus(a); return s === 'waiting' || s === 'idle'; }).length;
 
-    for (const [, a] of items) { if (a.stats) { gTok += (a.stats.inTok||0) + (a.stats.outTok||0); gTurns += a.stats.turns||0; gCost += calcCost(a.stats); } }
-    const gPermC = items.filter(([,a]) => agentStatus(a) === 'permission').length;
-    const gActC = items.filter(([,a]) => agentStatus(a) === 'active').length;
-    const gWaitC = items.filter(([,a]) => agentStatus(a) === 'waiting').length;
-    const gIdleC = items.filter(([,a]) => agentStatus(a) === 'idle').length;
-    const gDoneCount = gWaitC + gIdleC;
+    // Collect servers from all agents in this group (dedupe by port)
+    const gServers = new Map();
+    for (const [, a] of items) { if (a.servers) for (const [port, url] of a.servers) gServers.set(port, url); }
+    let serverBadges = '';
+    if (gServers.size > 0) {
+      const sorted = [...gServers.entries()].sort((a, b) => a[0] - b[0]);
+      serverBadges = `<div class="group-servers">${sorted.map(([port, url]) => `<a class="server-badge" onclick="event.stopPropagation();openUrl('${escAttr(url)}')" title="${escAttr(url)}">:${port}</a>`).join('')}</div>`;
+    }
 
     const safeCwd = escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
     const isCollapsed = collapsedGroups.has(cwd);
     html += `<div class="group${isCollapsed ? ' collapsed' : ''}"><div class="group-header" onclick="toggleGroup('${safeCwd}')">
       <span class="group-chevron">&#x25BC;</span>
       <div class="group-info"><span class="group-name">${esc(pathLabel(cwd))}</span><span class="group-path">${esc(cwd)}</span></div>
-      <div class="group-badges">
-        ${gPermC ? `<span class="gbadge-perm">${gPermC}!</span>` : ''}
-        ${gActC ? `<span class="gbadge-active">${gActC}</span>` : ''}
-        ${gWaitC ? `<span class="gbadge-wait">${gWaitC}</span>` : ''}
+      ${serverBadges}
+      <div class="group-actions">
+        <button onclick="event.stopPropagation();addAgent('${safeCwd}')">+ Agent</button>
+        <button class="btn-team" onclick="event.stopPropagation();showTeamOverlay('${safeCwd}')">+ Team</button>
       </div>
-      ${gDoneCount ? `<button class="group-close-done" onclick="event.stopPropagation();closeDoneInGroup('${safeCwd}')" title="Close ${gDoneCount} done agent${gDoneCount !== 1 ? 's' : ''}">close done</button>` : ''}
-      <button class="group-open-folder" onclick="event.stopPropagation();openFolder('${safeCwd}')" title="Open in file explorer">open</button>
-      <div class="group-stats">${items.length} agent${items.length !== 1 ? 's' : ''}${gCost > 0.001 ? ' · '+fmtCost(gCost) : ''}${gTurns ? ' · '+gTurns+'t' : ''}</div>
+      <div class="group-menu-wrap">
+        <button class="group-menu-btn" onclick="event.stopPropagation();toggleGroupMenu(this)" title="More actions">&#x22EE;</button>
+        <div class="group-dropdown">
+          <button onclick="event.stopPropagation();openFolder('${safeCwd}');closeGroupMenus()">Open folder</button>
+          ${gDoneCount ? `<button class="danger" onclick="event.stopPropagation();closeDoneInGroup('${safeCwd}');closeGroupMenus()">Close done (${gDoneCount})</button>` : ''}
+          ${items.length === 0 ? `<button class="danger" onclick="event.stopPropagation();removeProject('${safeCwd}');closeGroupMenus()">Remove project</button>` : ''}
+        </div>
+      </div>
     </div><div class="agents">`;
 
     for (const [id, a] of items) {
       const st = agentStatus(a);
       const m = statusMeta[st];
-      const title = a.title || 'New agent';
+      const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
       let activity = m.label;
       if (st === 'crashed') activity = `Crashed (${a.crashCount}/${a.crashMax})`;
       else if (st === 'resuming') activity = `Resuming (${a.crashCount}/${a.crashMax})`;
@@ -814,47 +1109,62 @@ function render() {
       const cost = calcCost(a.stats);
       const ctxCls = ctxPct >= 90 ? 'danger' : ctxPct >= 70 ? 'warn' : '';
 
-      html += `<div class="agent${sel ? ' selected' : ''}" data-status="${st}" data-id="${id}" onclick="focusAgent(${id})">
+      html += `<div class="agent${sel ? ' selected' : ''}" data-status="${st}" data-id="${id}" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})">
         <div class="agent-top">
-          <span class="dot ${m.cls}${st === 'active' ? ' pulse' : ''}"></span>
-          <span class="agent-name" title="${escAttr(title)}">${esc(title)}</span>
+          <span class="agent-icon ${m.cls}${st === 'active' ? ' pulse' : ''}" onclick="event.stopPropagation();showIconPicker(event,'${a.sessionId}')" title="Click to change icon">${getAgentIcon(a.sessionId)}</span>
+          <span class="agent-name" title="${escAttr(title)}${a.customName ? ' (custom name)' : ''}" ondblclick="event.stopPropagation();renameAgent(${id},this)">${esc(title)}</span>
           <span class="agent-activity" title="${escAttr(activity)}">${esc(activity)}${st === 'active' || st === 'resuming' ? '<span class="typing-dots"><span></span><span></span><span></span></span>' : ''}</span>
           ${a.activeAt ? `<span class="elapsed-timer">${(() => { const s = Math.floor((Date.now() - a.activeAt) / 1000); return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's'; })()}</span>` : ''}
-          <button class="agent-btn btn-export" onclick="event.stopPropagation();exportAgent(${id})" title="Export transcript">&#x2913;</button>
-          <button class="agent-btn" style="color:var(--green)" onclick="event.stopPropagation();duplicateAgent(${id})" title="Duplicate (Ctrl+D)">&#x2750;</button>
-          <button class="agent-btn btn-restart" onclick="event.stopPropagation();restartAgent(${id})" title="Restart (Ctrl+R)">&#x21BB;</button>
-          <button class="agent-btn btn-close" onclick="event.stopPropagation();closeAgent(${id})" title="Close (Ctrl+W / Middle-click)">&times;</button>
+          ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
+          ${a.remoteControl ? `<button class="agent-btn btn-rc rc-on" title="Remote Control active">RC</button>` : ''}
+          <button class="agent-btn btn-close" onclick="event.stopPropagation();closeAgent(${id})" title="Close">&times;</button>
         </div>
-        ${a.prompt ? `<div class="agent-prompt" title="${escAttr(a.prompt)}">${esc(a.prompt)}</div>` : ''}
-        ${a.preview ? `<div class="agent-preview" title="${escAttr(a.preview)}">${esc(a.preview)}</div>` : ''}
-        ${(() => {
-          let subHtml = '';
-          for (const [ptid, tool] of a.tools) {
-            if (!tool.isSubagent || tool.done) continue;
-            const subs = a.subTools.get(ptid);
-            const desc = tool.status.startsWith('Subtask: ') ? tool.status.slice(9) : tool.status;
-            let subActivity = '';
-            if (subs) { for (const st of subs.values()) { if (!st.done) { subActivity = st.status; } } }
-            subHtml += `<div class="subagent">
-              <span class="subagent-dot${subActivity ? ' pulse' : ''}"></span>
-              <span class="subagent-name" title="${escAttr(tool.status)}">${esc(desc)}</span>
-              ${subActivity ? `<span class="subagent-activity">${esc(subActivity)}</span>` : ''}
-            </div>`;
-          }
-          return subHtml;
-        })()}
-        <div class="agent-stats">
-          ${a.stats ? `<span class="${ctxPct >= 80 ? 'ctx-warn' : ''}">${fmtTok(a.stats.ctxTok || 0)} / ${fmtTok(CTX_WINDOW)} ctx (${ctxPct}%)</span>` : ''}
-          ${a.stats && (a.stats.inTok+a.stats.outTok) > 0 ? `<span>${fmtTok(a.stats.inTok+a.stats.outTok)} tok</span>` : ''}
-          ${cost > 0.001 ? `<span>${fmtCost(cost)}<span class="model-tag ${a.stats?.modelFamily || ''}">${a.stats?.modelFamily || '?'}</span></span>` : ''}
-          ${a.stats?.turns ? `<span>${a.stats.turns}t</span>` : ''}
-          ${a.stats?.durMs ? `<span>${fmtDur(a.stats.durMs)}</span>` : ''}
-          ${a.createdAt ? `<span title="Running since ${new Date(a.createdAt).toLocaleTimeString()}">${fmtAgo(a.createdAt)} ago</span>` : ''}
-        </div>
-        ${a.stats ? `<div class="ctx-bar" title="Context window: ${ctxPct}%"><div class="ctx-bar-fill ${ctxCls}" style="width:${Math.max(1, ctxPct)}%"></div></div>` : ''}
+        <div class="ctx-bar" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${CTX_WINDOW / 1000}K (${ctxPct}%)"><div class="ctx-bar-fill ${ctxCls}" style="width:${ctxPct}%"></div></div>
       </div>`;
     }
-    html += `</div><div class="group-add"><button onclick="addAgent('${safeCwd}')">+ Agent</button></div></div>`;
+
+    // Render team sections for agents in this group that lead a team
+    for (const [teamName, team] of teamMap) {
+      const leadInGroup = items.some(([id]) => id === team.leadAgentId);
+      if (!leadInGroup) continue;
+      const safeTeamName = escAttr(teamName.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+      const nonLeadMembers = team.members.filter(m => m.agentType !== 'team-lead');
+      const completedTasks = team.tasks.filter(t => t.status === 'completed').length;
+      const totalTasks = team.tasks.length;
+      const taskPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+      html += `<div class="team-section">
+        <div class="team-header">
+          <span class="team-icon">&#x2726;</span>
+          <span class="team-name">${esc(teamName)}</span>
+          <span class="team-count">${team.members.length} members</span>
+        </div>
+        <div class="team-members">`;
+
+      team.members.forEach((member, idx) => {
+        const isLead = member.agentType === 'team-lead';
+        const taskOwned = team.tasks.find(t => t.owner === member.name && t.status !== 'completed');
+        const taskLabel = taskOwned ? taskOwned.activeForm || taskOwned.subject : '';
+        const safeMemberName = esc(member.name).replace(/'/g, "\\'");
+      html += `<div class="team-member${isLead ? ' is-lead' : ''}" onclick="focusTeamMember('${safeTeamName}','${safeMemberName}',${isLead})">
+          <span class="team-member-dot"></span>
+          <span class="team-member-name">${esc(member.name)}</span>
+          ${isLead ? '<span class="team-lead-tag">LEAD</span>' : ''}
+          ${taskLabel ? `<span class="team-member-role" title="${escAttr(taskLabel)}">${esc(taskLabel)}</span>` : `<span class="team-member-role">${esc(member.agentType || '')}</span>`}
+        </div>`;
+      });
+
+      html += `</div>`;
+      if (totalTasks > 0) {
+        html += `<div class="team-tasks-bar">
+          <div class="team-tasks-progress"><div class="team-tasks-fill" style="width:${taskPct}%"></div></div>
+          <span class="team-tasks-label">${completedTasks}/${totalTasks} tasks</span>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
+    html += `</div></div>`;
   }
   document.getElementById('filter-count').textContent = filterText ? filterMatches + ' of ' + agents.size : '';
   if (filterText && filterMatches === 0) {
@@ -896,11 +1206,17 @@ function render() {
     const modelTags = Object.entries(models).map(([m, c]) => `<span class="model-tag ${m}">${c} ${m}</span>`).join('');
     const usagePct = planBudget > 0 ? Math.min(100, Math.round((totalCost / planBudget) * 100)) : 0;
     const usageCls = usagePct >= 90 ? 'danger' : usagePct >= 70 ? 'warn' : '';
+    let hourlyHtml = '';
+    if (currentUsage && currentUsage.hourly != null) {
+      const hCls = currentUsage.hourly >= 90 ? 'danger' : currentUsage.hourly >= 70 ? 'warn' : '';
+      hourlyHtml = `<span class="${hCls}" onclick="refreshUsage()" style="cursor:pointer" title="Hourly rate limit usage (click to refresh)">Hourly: ${currentUsage.hourly.toFixed(1)}%</span>`;
+    }
     bar.innerHTML = `<span>${agents.size} agent${agents.size !== 1 ? 's' : ''}</span>`
       + (totalCost > 0.001 ? `<span class="${usageCls}">${fmtCost(totalCost)} / $${planBudget} (${usagePct}%)</span>` : '')
       + (totTok > 0 ? `<span>${fmtTok(totTok)} tok</span>` : '')
       + (totTurns ? `<span>${totTurns} turns</span>` : '')
       + (totDur ? `<span>${fmtDur(totDur)}</span>` : '')
+      + hourlyHtml
       + (modelTags ? `<span>${modelTags}</span>` : '');
     bar.classList.add('show');
   } else {
@@ -912,6 +1228,12 @@ function render() {
 // ── Terminal panel (real xterm.js) ──────────────────────
 const xterms = new Map(); // id -> { terminal, fitAddon, el }
 const container = document.getElementById('term-container');
+container.addEventListener('click', () => {
+  if (selectedId != null && termTab === 'terminal') {
+    const x = xterms.get(selectedId);
+    if (x) x.terminal.focus();
+  }
+});
 
 function createXterm(id) {
   const el = document.createElement('div');
@@ -929,7 +1251,6 @@ function createXterm(id) {
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
-    if (e.ctrlKey && e.key === 'v') { navigator.clipboard.readText().then(t => { if (t) api.send({ type: 'termInput', id, data: t }); }); return false; }
     return true;
   });
   xterms.set(id, { terminal, fitAddon, el });
@@ -957,13 +1278,18 @@ function openTerm(id) {
   selectedId = id;
   document.getElementById('term').classList.add('open');
   document.getElementById('resize').classList.add('open');
-  const title = a.title || 'New agent';
+  const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
   document.getElementById('term-title').textContent = title + ' \u2014 ' + pathLabel(a.cwd || '');
   if (!xterms.has(id)) createXterm(id);
   if (termTab === 'terminal') showXterm(id);
   // Load timeline if tab is active or agent changed
   if (timelineAgentId !== id) loadTimeline(id);
   render();
+  // Re-focus terminal after render so keyboard input works immediately
+  if (termTab === 'terminal') {
+    const x = xterms.get(id);
+    if (x) setTimeout(() => x.terminal.focus(), 60);
+  }
 }
 
 function closeTerm() {
@@ -1226,11 +1552,16 @@ api.on((msg) => {
 function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
-      if (!agents.has(msg.id)) agents.set(msg.id, { cwd: msg.cwd, status: 'active', tools: new Map(), subTools: new Map(), prompt: '', preview: '', stats: null, title: msg.title || '', sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: Date.now() });
+      if (!agents.has(msg.id)) agents.set(msg.id, { cwd: msg.cwd, status: 'active', tools: new Map(), subTools: new Map(), prompt: '', preview: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: Date.now(), servers: new Map(), remoteControl: false });
+      if (msg.cwd) knownProjects.add(msg.cwd);
       scheduleRender(); break;
     }
     case 'agentClosed': {
       agents.delete(msg.id); destroyXterm(msg.id);
+      // Clean up teams led by this agent
+      for (const [teamName, team] of teamMap) {
+        if (team.leadAgentId === msg.id) teamMap.delete(teamName);
+      }
       if (selectedId === msg.id) {
         // Auto-select next agent if available, otherwise close terminal
         const remaining = [...agents.keys()];
@@ -1246,7 +1577,7 @@ function handleAgentMsg(msg) {
       }
       break;
     }
-    case 'status': { const a = agents.get(msg.id); if (a) { const was = a.status; a.status = msg.status; a.crashed = null; if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now(); if (msg.status === 'waiting') a.activeAt = null; if (msg.status === 'waiting' && was !== 'waiting') playChime(); scheduleRender(); } break; }
+    case 'status': { const a = agents.get(msg.id); if (a) { const was = a.status; a.status = msg.status; a.crashed = null; if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now(); if (msg.status === 'waiting') a.activeAt = null; if (msg.status === 'waiting' && was === 'active') playChime(); scheduleRender(); } break; }
     case 'toolStart': { const a = agents.get(msg.id); if (a) { a.crashed = null; if (!a.activeAt) a.activeAt = Date.now(); a.tools.set(msg.toolId, { status: msg.status, name: msg.name, done: false, perm: false, isSubagent: msg.name === 'Task' || msg.name === 'Agent' }); scheduleRender(); } break; }
     case 'toolDone': { const a = agents.get(msg.id); if (a) { const t = a.tools.get(msg.toolId); if (t) { t.done = true; a.subTools.delete(msg.toolId); } scheduleRender(); } break; }
     case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
@@ -1256,8 +1587,8 @@ function handleAgentMsg(msg) {
     case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = true; } scheduleRender(); } break; }
     case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
-    case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; scheduleRender(); } break; }
-    case 'title': { const a = agents.get(msg.id); if (a) { a.title = msg.text; if (selectedId === msg.id) document.getElementById('term-title').textContent = msg.text + ' \u2014 ' + pathLabel(a.cwd || ''); scheduleRender(); } break; }
+    case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; document.getElementById('term-title').textContent = t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
+    case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && !msg.customName) break; a.title = msg.text; if (msg.customName) a.customName = true; if (selectedId === msg.id) { const t = a.prompt || msg.text; document.getElementById('term-title').textContent = t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
     case 'focused': selectedId = msg.id; scheduleRender(); break;
@@ -1266,7 +1597,56 @@ function handleAgentMsg(msg) {
     case 'timelineData': handleTimelineData(msg); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'sessions': handleSessions(msg); break;
+    case 'usage': handleUsage(msg.usage); break;
+    case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
+    case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
+    case 'remoteControl': { const a = agents.get(msg.id); if (a) { a.remoteControl = msg.active; scheduleRender(); } break; }
+    case 'looping': { const a = agents.get(msg.id); if (a) { a.looping = msg.active; scheduleRender(); } break; }
+    case 'teamDetected': {
+      const t = msg.team;
+      teamMap.set(t.name, { name: t.name, leadAgentId: t.leadAgentId, members: t.members, tasks: t.tasks || [] });
+      scheduleRender();
+      break;
+    }
+    case 'teamTasksUpdated': {
+      const team = teamMap.get(msg.teamName);
+      if (team) { team.tasks = msg.tasks || []; scheduleRender(); }
+      break;
+    }
+    case 'teamRemoved': {
+      teamMap.delete(msg.teamName);
+      scheduleRender();
+      break;
+    }
   }
+}
+
+// ── Usage display ─────────────────────────────────────
+let currentUsage = null;
+function handleUsage(usage) {
+  currentUsage = usage;
+  renderUsageBadges();
+  scheduleRender();
+}
+function refreshUsage() { api.send({ type: 'fetchUsage' }); }
+function usageCls(pct) { return pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : ''; }
+function renderUsageBadges() {
+  const el = document.getElementById('usageBadges');
+  if (!currentUsage) { el.innerHTML = ''; return; }
+  let html = '';
+  if (currentUsage.hourly != null) {
+    const cls = usageCls(currentUsage.hourly);
+    html += `<span class="badge badge-usage${cls ? ' ' + cls : ''}" onclick="refreshUsage()" title="Hourly rate limit usage">H: ${currentUsage.hourly.toFixed(1)}%</span>`;
+  }
+  if (currentUsage.daily != null) {
+    const cls = usageCls(currentUsage.daily);
+    html += `<span class="badge badge-usage${cls ? ' ' + cls : ''}" onclick="refreshUsage()" title="Daily rate limit usage">D: ${currentUsage.daily.toFixed(1)}%</span>`;
+  }
+  if (currentUsage.weekly != null) {
+    const cls = usageCls(currentUsage.weekly);
+    html += `<span class="badge badge-usage${cls ? ' ' + cls : ''}" onclick="refreshUsage()" title="Weekly rate limit usage">W: ${currentUsage.weekly.toFixed(1)}%</span>`;
+  }
+  el.innerHTML = html;
 }
 
 // ── Audio ──────────────────────────────────────────────
@@ -1385,7 +1765,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     const cwd = (selectedId && agents.get(selectedId)?.cwd) || [...agents.values()].pop()?.cwd;
-    if (cwd) { showPromptOverlay(cwd); }
+    if (cwd) { addAgent(cwd); }
     else { browseAndAdd(); }
     return;
   }
@@ -1403,6 +1783,12 @@ document.addEventListener('keydown', (e) => {
     persistSettings();
     const x = xterms.get(selectedId);
     if (x) setTimeout(() => x.fitAddon.fit(), 50);
+    return;
+  }
+  // Ctrl+U to refresh usage
+  if (e.key === 'u' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    refreshUsage();
     return;
   }
   // Ctrl+! to jump to next agent needing permission
@@ -1441,6 +1827,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
+    const cfm = document.getElementById('confirm-overlay');
+    if (cfm.classList.contains('open')) { confirmResolve(false); return; }
     const history = document.getElementById('history-overlay');
     if (history.style.display === 'flex') { closeHistory(); return; }
     const help = document.getElementById('help-overlay');
@@ -1448,6 +1836,8 @@ document.addEventListener('keydown', (e) => {
     if (document.getElementById('filter-bar').classList.contains('open')) { closeFilter(); return; }
     const prompt = document.getElementById('prompt-overlay');
     if (prompt && prompt.style.display === 'flex') { closePromptOverlay(); return; }
+    const team = document.getElementById('team-overlay');
+    if (team && team.style.display === 'flex') { closeTeamOverlay(); return; }
     const el = document.getElementById('settings-overlay');
     if (el.style.display === 'flex') toggleSettings();
   }
