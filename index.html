@@ -331,6 +331,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 #term-header button:hover { background:rgba(255,255,255,.06); color:var(--red); border-color:var(--border); }
 #term-header button:active { background:rgba(255,255,255,.1); }
+#prompt-nav { display:flex; align-items:center; gap:2px; flex-shrink:0; }
+#prompt-nav button { font-size:11px; padding:1px 5px; color:var(--dim); }
+#prompt-nav button:hover { color:var(--accent); border-color:var(--border); }
+#prompt-nav .prompt-counter { font-size:10px; color:var(--dim); min-width:28px; text-align:center; user-select:none; }
 #term-container { flex:1; position:relative; background:#0a0a14; overflow:hidden; }
 #term-container .xterm { height:100%; }
 
@@ -591,6 +595,11 @@ button:focus-visible { outline-offset:0; }
         <button class="term-tab" id="tab-timeline" onclick="switchTermTab('timeline')">Timeline</button>
       </div>
       <span class="term-title" id="term-title"></span>
+      <div id="prompt-nav" style="display:none">
+        <button onclick="jumpPrompt(-1)" title="Previous prompt (Ctrl+&#x2191;)">&#x25B2;</button>
+        <span class="prompt-counter" id="prompt-counter"></span>
+        <button onclick="jumpPrompt(1)" title="Next prompt (Ctrl+&#x2193;)">&#x25BC;</button>
+      </div>
       <button onclick="closeTerm()" aria-label="Close terminal">&times;</button>
     </div>
     <div id="term-container"></div>
@@ -905,7 +914,7 @@ async function restartAgent(id) {
   api.send({ type: 'restartAgent', id });
 }
 function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
-function focusAgent(id) { selectedId = id; api.send({ type: 'focusAgent', id }); render(); }
+function focusAgent(id) { const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
   const cur = a.title || a.prompt || '';
@@ -1251,6 +1260,8 @@ function createXterm(id) {
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
+    if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
+    if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
     return true;
   });
   xterms.set(id, { terminal, fitAddon, el });
@@ -1280,6 +1291,7 @@ function openTerm(id) {
   document.getElementById('resize').classList.add('open');
   const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
   document.getElementById('term-title').textContent = title + ' \u2014 ' + pathLabel(a.cwd || '');
+  updatePromptNav();
   if (!xterms.has(id)) createXterm(id);
   if (termTab === 'terminal') showXterm(id);
   // Load timeline if tab is active or agent changed
@@ -1295,6 +1307,44 @@ function openTerm(id) {
 function closeTerm() {
   document.getElementById('term').classList.remove('open');
   document.getElementById('resize').classList.remove('open');
+}
+
+function updatePromptNav() {
+  const nav = document.getElementById('prompt-nav');
+  const a = selectedId != null ? agents.get(selectedId) : null;
+  if (!a || !a.prompts || a.prompts.length === 0) { nav.style.display = 'none'; return; }
+  nav.style.display = 'flex';
+  document.getElementById('prompt-counter').textContent = (a.promptNavIdx + 1) + '/' + a.prompts.length;
+}
+
+function jumpPrompt(dir) {
+  const a = selectedId != null ? agents.get(selectedId) : null;
+  if (!a || !a.prompts || a.prompts.length === 0) return;
+  const newIdx = a.promptNavIdx + dir;
+  if (newIdx < 0 || newIdx >= a.prompts.length) return;
+  a.promptNavIdx = newIdx;
+  updatePromptNav();
+  const x = xterms.get(selectedId);
+  if (!x) return;
+  const promptText = a.prompts[newIdx].trim().slice(0, 60);
+  if (!promptText) return;
+  // Search xterm buffer for this prompt text
+  const buf = x.terminal.buffer.active;
+  const matches = [];
+  for (let i = 0; i < buf.length; i++) {
+    const line = buf.getLine(i);
+    if (line && line.translateToString(true).includes(promptText)) matches.push(i);
+  }
+  // Find the Nth occurrence (prompts may repeat, pick the one matching our index)
+  // Count how many times this same prompt appears before this index
+  let occurrenceTarget = 0;
+  for (let i = 0; i < newIdx; i++) {
+    if (a.prompts[i].trim().slice(0, 60) === promptText) occurrenceTarget++;
+  }
+  const targetLine = matches[Math.min(occurrenceTarget, matches.length - 1)];
+  if (targetLine != null) {
+    x.terminal.scrollToLine(Math.max(0, targetLine - 1));
+  }
 }
 
 // ── Timeline ───────────────────────────────────────────
@@ -1552,9 +1602,12 @@ api.on((msg) => {
 function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
-      if (!agents.has(msg.id)) agents.set(msg.id, { cwd: msg.cwd, status: 'active', tools: new Map(), subTools: new Map(), prompt: '', preview: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: Date.now(), servers: new Map(), remoteControl: false });
+      const isNew = !agents.has(msg.id);
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false });
       if (msg.cwd) knownProjects.add(msg.cwd);
-      scheduleRender(); break;
+      if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
+      else scheduleRender();
+      break;
     }
     case 'agentClosed': {
       agents.delete(msg.id); destroyXterm(msg.id);
@@ -1588,6 +1641,7 @@ function handleAgentMsg(msg) {
     case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; document.getElementById('term-title').textContent = t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
+    case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = msg.prompts.length - 1; if (selectedId === msg.id) updatePromptNav(); } break; }
     case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && !msg.customName) break; a.title = msg.text; if (msg.customName) a.customName = true; if (selectedId === msg.id) { const t = a.prompt || msg.text; document.getElementById('term-title').textContent = t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
@@ -1740,6 +1794,12 @@ document.addEventListener('keydown', (e) => {
     } else if (selectedId && agents.has(selectedId)) {
       closeAgent(selectedId);
     }
+    return;
+  }
+  // Ctrl+Up/Down to navigate prompts
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    jumpPrompt(e.key === 'ArrowUp' ? -1 : 1);
     return;
   }
   // Ctrl+R to restart selected agent

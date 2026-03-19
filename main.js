@@ -12,7 +12,7 @@ const TOOL_DONE_DELAY_MS = 300;
 const PERMISSION_TIMER_MS = 7000;
 const TEXT_IDLE_DELAY_MS = 5000;
 const PREVIEW_MAX = 200;
-const PROMPT_HISTORY_MAX = 5;
+const PROMPT_HISTORY_MAX = 50;
 const PROMPT_BRIEF_MAX = 150;
 const TITLE_MODEL = 'claude-haiku-4-5-20251001';
 const TITLE_REGEN_TURNS = 3;
@@ -174,6 +174,7 @@ function setPrompt(id, a, text) {
     saveState();
   }
   send({ type: 'prompt', id, text: a.lastPrompt });
+  send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
 }
 
 function fmtTool(name, input) {
@@ -603,6 +604,7 @@ function createAgent(folderPath, initialPrompt) {
   const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const shellArgs = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt });
+  send({ type: 'focused', id });
 
   const agentEnv = { ...process.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' };
   try {
@@ -1029,6 +1031,7 @@ function resumeSessionAgent(sid, rcwd) {
   registerKnownJsonl(claudeDir(rcwd), rjsonl);
   send({ type: 'agentCreated', id: rid, cwd: rcwd, sessionId: sid, title: ra.title, createdAt: ra.createdAt });
   if (ra.lastPrompt) send({ type: 'prompt', id: rid, text: ra.lastPrompt });
+  if (ra.promptHistory.length) send({ type: 'promptHistory', id: rid, prompts: [...ra.promptHistory] });
   if (ra.lastText) send({ type: 'preview', id: rid, text: ra.lastText });
   if (ra.title) send({ type: 'title', id: rid, text: ra.title });
   send({ type: 'stats', id: rid, stats: ra.stats });
@@ -1216,7 +1219,24 @@ ipcMain.on('cmd', (_e, msg) => {
     case 'closeAgent': closeAgent(msg.id); break;
     case 'renameAgent': { const a = agents.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); } break; }
     case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); generateSummaryTitle(msg.id); } break; }
-    case 'restartAgent': { const a = agents.get(msg.id); if (a) { const c = a.cwd; closeAgent(msg.id); const newId = createAgent(c); send({ type: 'focusFromNotification', id: newId }); } break; }
+    case 'restartAgent': {
+      const a = agents.get(msg.id);
+      if (a) {
+        const c = a.cwd;
+        const savedTitle = a.customName ? a.title : '';
+        const savedCustomName = a.customName;
+        closeAgent(msg.id);
+        const newId = createAgent(c);
+        if (savedCustomName && savedTitle) {
+          const na = agents.get(newId);
+          if (na) { na.title = savedTitle; na.customName = true; }
+          send({ type: 'title', id: newId, text: savedTitle, customName: true });
+          saveState();
+        }
+        send({ type: 'focusFromNotification', id: newId });
+      }
+      break;
+    }
     case 'focusAgent': spawnTerminal(msg.id); send({ type: 'focused', id: msg.id }); break;
     case 'termInput': { const t = terminals.get(msg.id); if (t) t.write(msg.data); break; }
     case 'enableRemoteControl': { const t = terminals.get(msg.id); if (t) t.write('/remote-control\r'); break; }
@@ -1263,6 +1283,7 @@ ipcMain.on('cmd', (_e, msg) => {
       for (const [id, a] of agents) {
         send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, createdAt: a.createdAt });
         if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
+        if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
         if (a.lastText) send({ type: 'preview', id, text: a.lastText });
         if (a.title) send({ type: 'title', id, text: a.title, customName: a.customName || false });
         if (a.isWaiting) send({ type: 'status', id, status: 'waiting' });
