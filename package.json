@@ -7,6 +7,7 @@
     "start": "node scripts/bundle-xterm.js && electron .",
     "dev": "node scripts/bundle-xterm.js && electronmon .",
     "package": "node scripts/bundle-xterm.js && electron-builder --dir",
+    "dist": "node scripts/bundle-xterm.js && electron-builder",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
@@ -26,20 +27,24 @@
     "appId": "com.pixelagents.overlord",
     "productName": "Overlord",
     "win": {
-      "target": "dir"
+      "target": "portable",
+      "signAndEditExecutable": false
     },
     "files": [
       "main.js",
       "preload.js",
       "index.html",
+      "renderer.js",
+      "overlord.css",
       "fonts/**/*",
       "xterm-bundle.js",
-      "xterm.css"
+      "xterm.css",
+      "webview/**/*"
     ],
     "directories": {
       "output": "out"
     },
-    "asar": false,
+    "asar": true,
     "npmRebuild": false
   }
 }

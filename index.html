@@ -279,6 +279,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .ctx-bar-pct { font-size:9px; flex-shrink:0; font-variant-numeric:tabular-nums; color:var(--dim); min-width:24px; text-align:right; }
 .ctx-bar-pct.warn { color:var(--yellow); }
 .ctx-bar-pct.danger { color:var(--red); }
+.ctx-bar-compact { font-size:8px; color:var(--dim); cursor:pointer; padding:0 3px; flex-shrink:0; opacity:.6; transition:opacity .15s; }
+.ctx-bar-compact:hover { opacity:1; color:var(--fg); }
+.ctx-bar-compacting { font-size:8px; color:var(--accent); flex-shrink:0; animation:ctx-pulse 1s ease-in-out infinite; }
+@keyframes ctx-pulse { 0%,100% { opacity:.4; } 50% { opacity:1; } }
 
 /* Sub-agent items */
 .subagent {
@@ -622,6 +626,16 @@ button:focus-visible { outline-offset:0; }
 .confirm-actions .btn-danger { background:rgba(248,113,113,.15); color:var(--red); border-color:var(--red); box-shadow:2px 2px 0 rgba(248,113,113,.2); }
 .confirm-actions .btn-danger:hover { background:rgba(248,113,113,.25); box-shadow:3px 3px 0 rgba(248,113,113,.2); }
 .confirm-actions .btn-danger:active { box-shadow:1px 1px 0 rgba(248,113,113,.2); }
+
+/* Toast */
+.toast {
+  position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
+  background:var(--bg3); color:var(--green); border:2px solid var(--green);
+  padding:8px 18px; font-size:13px; border-radius:4px; pointer-events:none;
+  opacity:0; transition:opacity .2s, transform .2s; z-index:9999;
+  box-shadow:2px 2px 0 var(--shadow);
+}
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -1049,6 +1063,7 @@ function killServer(port) { api.send({ type: 'killServer', port }); }
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
 function enableRC(id) { api.send({ type: 'enableRemoteControl', id }); }
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
+function compactAgent(id) { api.send({ type: 'compactAgent', id }); }
 function focusTeamMember(teamName, memberName, isLead) { api.send({ type: 'focusTeamMember', teamName, memberName, isLead }); }
 
 function fmtTok(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'k' : String(n); }
@@ -1083,6 +1098,7 @@ function agentStatus(a) {
   if (a.crashed === 'fatal') return 'crashed';
   if (a.crashed === 'resuming') return 'resuming';
   for (const t of a.tools.values()) { if (t.perm) return 'permission'; if (!t.done) return 'active'; }
+  if (a.spinnerText) return 'active';
   if (a.status === 'waiting') return 'waiting';
   if (a.status === 'active') return 'active';
   return 'idle';
@@ -1233,6 +1249,7 @@ function render() {
           <span class="ctx-bar-label">ctx</span>
           <div class="ctx-bar-track"><div class="ctx-bar-fill ${ctxCls}" style="width:${ctxPct}%"></div></div>
           ${ctxPct > 0 ? `<span class="ctx-bar-pct ${ctxCls}">${ctxPct}%</span>` : ''}
+          ${a.compacting ? `<span class="ctx-bar-compacting">compacting\u2026</span>` : ctxPct >= 50 && a.status === 'waiting' ? `<span class="ctx-bar-compact" onclick="event.stopPropagation();compactAgent(${id})" title="Compact context (/compact)">compact</span>` : ''}
         </div>`;
 
       // If this agent leads a team, render team members inline
@@ -1484,18 +1501,27 @@ function updatePromptNav() {
   const a = selectedId != null ? agents.get(selectedId) : null;
   if (!a || !a.prompts || a.prompts.length === 0) { nav.style.display = 'none'; return; }
   nav.style.display = 'flex';
-  document.getElementById('prompt-counter').textContent = (a.promptNavIdx + 1) + '/' + a.prompts.length;
+  // +1 total for the "current prompt" virtual entry at the end
+  const total = a.prompts.length + 1;
+  const label = a.promptNavIdx >= a.prompts.length ? '\u25C7' : String(a.promptNavIdx + 1);
+  document.getElementById('prompt-counter').textContent = label + '/' + total;
 }
 
 function jumpPrompt(dir) {
   const a = selectedId != null ? agents.get(selectedId) : null;
   if (!a || !a.prompts || a.prompts.length === 0) return;
   const newIdx = a.promptNavIdx + dir;
-  if (newIdx < 0 || newIdx >= a.prompts.length) return;
+  // Allow one extra index past the end for "current prompt" (scroll to bottom)
+  if (newIdx < 0 || newIdx > a.prompts.length) return;
   a.promptNavIdx = newIdx;
   updatePromptNav();
   const x = xterms.get(selectedId);
   if (!x) return;
+  // If past the last prompt, scroll to bottom (current prompt area)
+  if (newIdx >= a.prompts.length) {
+    x.terminal.scrollToBottom();
+    return;
+  }
   const promptText = a.prompts[newIdx].trim().slice(0, 60);
   if (!promptText) return;
   // Search xterm buffer for this prompt text
@@ -1752,6 +1778,10 @@ new ResizeObserver(() => { const x = xterms.get(selectedId); if (x) try { x.fitA
 
 // ── Message handling ───────────────────────────────────
 api.on((msg) => {
+  if (msg.type === 'imagePasted') {
+    showToast('Image pasted — path inserted');
+    return;
+  }
   if (msg.type === 'termData') {
     let x = xterms.get(msg.id);
     if (!x) {
@@ -1773,7 +1803,7 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false, agentName: msg.agentName || '' });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false, compacting: false, agentName: msg.agentName || '' });
       if (msg.cwd) knownProjects.add(msg.cwd);
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
@@ -1829,6 +1859,7 @@ function handleAgentMsg(msg) {
     case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); } break; }
     case 'remoteControl': { const a = agents.get(msg.id); if (a) { a.remoteControl = msg.active; scheduleRender(); } break; }
     case 'looping': { const a = agents.get(msg.id); if (a) { a.looping = msg.active; scheduleRender(); } break; }
+    case 'compacting': { const a = agents.get(msg.id); if (a) { a.compacting = msg.active; scheduleRender(); } break; }
     case 'teamDetected': {
       const t = msg.team;
       teamMap.set(t.name, { name: t.name, leadAgentId: t.leadAgentId, members: t.members, tasks: t.tasks || [] });
@@ -1895,6 +1926,16 @@ function playChime() {
 }
 // Unlock audio context on first interaction (Electron may suspend it)
 document.addEventListener('mousedown', () => { if (_audioCtx && _audioCtx.state === 'suspended') _audioCtx.resume(); }, { once: true });
+
+// ── Toast ──────────────────────────────────────────────
+function showToast(text) {
+  let el = document.getElementById('toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
+  el.textContent = text;
+  el.className = 'toast show';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.className = 'toast'; }, 2000);
+}
 
 // ── Settings ───────────────────────────────────────────
 let uiZoom = 100;
@@ -2086,6 +2127,23 @@ document.addEventListener('keydown', (e) => {
     if (el.style.display === 'flex') toggleSettings();
   }
 });
+
+// ── Clipboard image paste ──────────────────────────────
+document.addEventListener('paste', (e) => {
+  if (!selectedId) return;
+  if (!document.getElementById('term').classList.contains('open')) return;
+  if (termTab !== 'terminal') return;
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      e.preventDefault();
+      e.stopPropagation();
+      api.send({ type: 'pasteImage', id: selectedId });
+      return;
+    }
+  }
+}, true);
 
 function toggleHelp() {
   const el = document.getElementById('help-overlay');
