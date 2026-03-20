@@ -1377,9 +1377,11 @@ function createXterm(id) {
     fontFamily: '"Cascadia Mono","Cascadia Code",Consolas,"Courier New",monospace', fontSize: 14, lineHeight: 1.15, cursorBlink: true, scrollback: 10000,
   });
   const searchAddon = new XSearchAddon();
+  const imageAddon = new XImageAddon({ sixelSupport: false, iipSupport: true, enableSizeReports: true });
   const webLinksAddon = new XWebLinksAddon((_e, uri) => api.send({ type: 'openUrl', url: uri }));
   terminal.loadAddon(fitAddon);
   terminal.loadAddon(searchAddon);
+  terminal.loadAddon(imageAddon);
   terminal.loadAddon(webLinksAddon);
   terminal.open(el);
   // File path link provider — detects Windows/Unix paths with optional :line:col
@@ -1779,6 +1781,11 @@ new ResizeObserver(() => { const x = xterms.get(selectedId); if (x) try { x.fitA
 // ── Message handling ───────────────────────────────────
 api.on((msg) => {
   if (msg.type === 'imagePasted') {
+    const x = xterms.get(msg.id);
+    if (x && msg.base64) {
+      // Show inline image thumbnail via iTerm2 inline image protocol
+      x.terminal.write('\r\n\x1b]1337;File=inline=1;width=auto;height=8;preserveAspectRatio=1:' + msg.base64 + '\x07\r\n');
+    }
     showToast('Image pasted — path inserted');
     return;
   }

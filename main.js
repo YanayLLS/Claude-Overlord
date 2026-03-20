@@ -1609,8 +1609,12 @@ ipcMain.on('cmd', (_e, msg) => {
       const filePath = path.join(dir, filename);
       fs.writeFileSync(filePath, img.toPNG());
       const insertPath = filePath.replace(/\\/g, '/');
+      // Create thumbnail for inline terminal preview (max 400px wide)
+      const sz = img.getSize();
+      const thumb = sz.width > 400 ? img.resize({ width: 400 }) : img;
+      const base64 = thumb.toPNG().toString('base64');
       handleTermInput(msg.id, insertPath + ' ');
-      send({ type: 'imagePasted', id: msg.id, path: insertPath });
+      send({ type: 'imagePasted', id: msg.id, path: insertPath, base64 });
       break;
     }
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;

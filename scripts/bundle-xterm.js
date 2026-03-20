@@ -18,10 +18,12 @@ fs.writeFileSync(entry, `
   const { FitAddon } = require('@xterm/addon-fit');
   const { SearchAddon } = require('@xterm/addon-search');
   const { WebLinksAddon } = require('@xterm/addon-web-links');
+  const { ImageAddon } = require('@xterm/addon-image');
   window.XTerminal = Terminal;
   window.XFitAddon = FitAddon;
   window.XSearchAddon = SearchAddon;
   window.XWebLinksAddon = WebLinksAddon;
+  window.XImageAddon = ImageAddon;
 `);
 require('esbuild').buildSync({
   entryPoints: [entry], bundle: true, outfile: outJs,
