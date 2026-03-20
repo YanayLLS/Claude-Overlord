@@ -17,6 +17,7 @@ const PROMPT_BRIEF_MAX = 150;
 const TITLE_MODEL = 'claude-haiku-4-5-20251001';
 const TITLE_REGEN_TURNS = 3;
 const EXEMPT = new Set(['Task', 'Agent', 'AskUserQuestion', 'CronCreate', 'CronDelete', 'CronList']);
+const SPINNER_DEBOUNCE_MS = 150;
 const MAX_CRASH_RETRIES = 3;
 const CRASH_RESUME_DELAY_MS = 2000;
 const USAGE_POLL_MS = 60000;
@@ -198,6 +199,35 @@ function setPrompt(id, a, text) {
   }
   send({ type: 'prompt', id, text: a.lastPrompt });
   send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
+}
+
+// ── Spinner text extraction from raw PTY data ──────────
+const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]|\x1b[78]|\x1b\[\?[0-9;]*[hl]/g;
+const spinnerDebounce = new Map();
+function extractSpinnerText(id, data) {
+  const stripped = data.replace(ANSI_RE, '');
+  const parts = stripped.split(/[\r\n]/);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const t = parts[i].trim();
+    if (!t || t.length < 3 || t.length > 120) continue;
+    const cp = t.codePointAt(0);
+    // Braille spinner chars (U+2800-U+28FF) or * prefix
+    if ((cp >= 0x2800 && cp <= 0x28FF) || t[0] === '*') {
+      const text = t.replace(/^.\s*/, '').trim();
+      if (text && text.length > 1) {
+        const a = agents.get(id);
+        if (a && a.spinnerText !== text) {
+          a.spinnerText = text;
+          clearTimeout(spinnerDebounce.get(id));
+          spinnerDebounce.set(id, setTimeout(() => {
+            spinnerDebounce.delete(id);
+            send({ type: 'spinnerText', id, text });
+          }, SPINNER_DEBOUNCE_MS));
+        }
+        return;
+      }
+    }
+  }
 }
 
 function fmtTool(name, input) {
@@ -465,7 +495,7 @@ function restoreAgents() {
       isWaiting: !orphanAlive, permSent: false, hadTools: orphanAlive, turnTools: 0,
       lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', customName: customName || false,
       promptHistory: [], titlePending: false, createdAt: createdAt || Date.now(),
-      crashCount: 0, cronCount: 0, orphanAlive, agentName: agentName,
+      crashCount: 0, cronCount: 0, orphanAlive, agentName: agentName, spinnerText: '',
       stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: 'sonnet' },
     };
     agents.set(id, agent);
@@ -605,7 +635,7 @@ function spawnTerminal(id) {
   try {
     const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: a.cwd, env: { ...process.env } });
     terminals.set(id, proc);
-    proc.onData((d) => { try { send({ type: 'termData', id, data: d }); scanForServers(id, d); } catch {} });
+    proc.onData((d) => { try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {} });
     proc.onExit((e) => { handleTermExit(id, e?.exitCode); try { proc.destroy(); } catch {} });
   } catch (e) {
     console.log(`[Overlord] Failed to spawn terminal for agent ${id}:`, e.message);
@@ -628,7 +658,7 @@ function createAgent(folderPath, initialPrompt) {
     isWaiting: false, permSent: false, hadTools: false, turnTools: 0,
     lastText: '', lastPrompt: '', title: '', customName: false,
     promptHistory: [], titlePending: false, createdAt: Date.now(),
-    crashCount: 0, cronCount: 0, agentName: pickAgentName(),
+    crashCount: 0, cronCount: 0, agentName: pickAgentName(), spinnerText: '',
     stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: 'sonnet' },
   };
   agents.set(id, agent);
@@ -646,7 +676,7 @@ function createAgent(folderPath, initialPrompt) {
     terminals.set(id, proc);
     let promptSent = !initialPrompt;
     proc.onData((d) => {
-      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); } catch {}
+      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
       // Detect Claude ready prompt and send the initial prompt
       if (!promptSent) {
         const clean = d.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
@@ -793,7 +823,7 @@ function parseLine(id, line) {
       a.stats.turns++; a.stats.durMs += r.durationMs || 0;
       send({ type: 'stats', id, stats: a.stats });
       if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
-      a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0;
+      a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0; a.spinnerText = '';
       // Orphaned process finished its turn — safe to spawn a real terminal now
       if (a.orphanAlive) {
         a.orphanAlive = false;

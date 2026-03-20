@@ -135,13 +135,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .group-name { font-size:14px; color:var(--accent); letter-spacing:.3px; }
 .group-path { font-size:11px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; opacity:.7; }
 .group-actions { display:flex; gap:4px; flex-shrink:0; }
+/* #7: More visible create buttons */
 .group-actions button {
   font-family:inherit; font-size:10px; padding:2px 8px; cursor:pointer; flex-shrink:0;
-  color:var(--dim); background:none; border:1px solid var(--border); letter-spacing:.3px;
+  color:var(--text); background:rgba(74,222,128,.06); border:1px solid rgba(74,222,128,.25); letter-spacing:.3px;
   box-shadow:1px 1px 0 var(--shadow); transition:color .12s, border-color .12s, background .12s;
 }
-.group-actions button:hover { color:var(--green); border-color:var(--green); background:rgba(74,222,128,.05); }
-.group-actions .btn-team:hover { color:var(--purple); border-color:var(--purple); background:rgba(192,132,252,.05); }
+.group-actions button:hover { color:var(--green); border-color:var(--green); background:rgba(74,222,128,.12); }
+.group-actions .btn-team { color:var(--text); background:rgba(192,132,252,.06); border-color:rgba(192,132,252,.25); }
+.group-actions .btn-team:hover { color:var(--purple); border-color:var(--purple); background:rgba(192,132,252,.12); }
 .group-menu-wrap { position:relative; flex-shrink:0; }
 .group-menu-btn {
   font-family:inherit; font-size:14px; padding:0 4px; cursor:pointer; line-height:1;
@@ -175,11 +177,22 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent:hover { background:var(--bg3); border-color:var(--border-hi); transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--shadow); }
 .agent.selected { border-color:var(--accent); background:rgba(108,140,255,.08); }
 .agent.selected::before { background:var(--accent); }
+.agent.has-team { border-color:rgba(192,132,252,.35); }
+.agent.has-team::before { background:var(--purple); }
+.agent.has-team.selected { border-color:var(--purple); background:rgba(192,132,252,.08); }
 
-/* Single header row: icon + name + activity + timer + buttons */
+/* #1: Two-line card layout — top row = identity, bottom row = status + actions */
 .agent-top { display:flex; align-items:center; gap:6px; }
-.agent-icon { font-size:14px; flex-shrink:0; cursor:pointer; line-height:1; width:18px; text-align:center; transition:transform .1s; color:var(--dim); font-family:'Segoe UI Symbol','Apple Symbols',sans-serif; font-style:normal; }
+.agent-icon { font-size:14px; flex-shrink:0; cursor:pointer; line-height:1; width:18px; text-align:center; transition:transform .1s; color:var(--dim); font-family:'Segoe UI Symbol','Apple Symbols',sans-serif; font-style:normal; position:relative; }
 .agent-icon:hover { transform:scale(1.25); }
+/* #9: Status badge overlay on icon for actionable states */
+.agent-status-badge {
+  position:absolute; top:-4px; right:-4px; width:12px; height:12px; font-size:8px; font-weight:bold;
+  display:flex; align-items:center; justify-content:center; line-height:1;
+  border:1px solid var(--card); font-family:inherit;
+}
+.agent[data-status="permission"] .agent-status-badge { background:var(--yellow); color:#000; }
+.agent[data-status="crashed"] .agent-status-badge { background:var(--red); color:#fff; }
 .dot-active { color:var(--accent); text-shadow:0 0 6px var(--accent); }
 .dot-waiting { color:var(--green); text-shadow:0 0 6px var(--green); }
 .dot-perm { color:var(--yellow); text-shadow:0 0 6px var(--yellow); }
@@ -188,15 +201,23 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .dot-resuming { color:var(--yellow); text-shadow:0 0 6px var(--yellow); }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 .pulse { animation:pulse 1.5s ease-in-out infinite; }
-.agent-pname { font-size:11px; flex-shrink:0; padding:1px 5px; color:var(--accent); border:1px solid var(--accent); background:rgba(108,140,255,.08); letter-spacing:.3px; white-space:nowrap; }
+/* #2: Agent name badge — dimmer, label-like instead of clickable-looking */
+.agent-pname { font-size:11px; flex-shrink:0; padding:1px 5px; color:var(--dim); border:1px solid var(--border); background:rgba(255,255,255,.03); letter-spacing:.3px; white-space:nowrap; }
 .agent-name { font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); min-width:0; }
-.agent-activity { font-size:10px; flex-shrink:0; letter-spacing:.3px; text-transform:uppercase; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; }
-.elapsed-timer { font-size:10px; color:var(--dim); flex-shrink:0; font-variant-numeric:tabular-nums; }
-@keyframes typing-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-3px)} }
-.typing-dots { display:inline-flex; gap:2px; margin-left:4px; vertical-align:middle; }
-.typing-dots span { width:3px; height:3px; background:var(--accent); display:inline-block; animation:typing-bounce .8s ease-in-out infinite; }
-.typing-dots span:nth-child(2) { animation-delay:.15s; }
-.typing-dots span:nth-child(3) { animation-delay:.3s; }
+/* #1: Second row for status + buttons */
+.agent-bottom { display:flex; align-items:center; gap:6px; margin-top:4px; padding-left:24px; }
+/* Claude Code-style status line */
+.agent-status-line {
+  font-size:11px; display:inline-flex; align-items:center; gap:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0;
+}
+.status-sym { flex-shrink:0; margin-right:5px; font-size:12px; }
+@keyframes status-ebb { 0%,100%{opacity:1} 50%{opacity:.2} }
+.status-sym.pulsing { animation:status-ebb 2s ease-in-out infinite; }
+.status-verb { flex-shrink:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.status-meta { flex-shrink:0; margin-left:5px; opacity:.5; font-size:10px; font-variant-numeric:tabular-nums; }
+.agent-bottom-spacer { flex:1; }
+/* #6: Close button — hidden behind context menu by default, only show loop/RC */
 .agent-btn {
   font-family:inherit; background:none; border:none; cursor:pointer;
   padding:0 3px; font-size:14px; line-height:1; flex-shrink:0; opacity:0;
@@ -204,6 +225,17 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 .agent:hover .agent-btn { opacity:.4; }
 .agent-btn:hover { opacity:1 !important; color:var(--red); }
+.btn-close { opacity:0 !important; width:0; overflow:hidden; padding:0; transition:opacity .1s, width .12s; }
+.agent:hover .btn-close { opacity:.4 !important; width:auto; padding:0 3px; }
+.btn-reset {
+  font-size:10px; letter-spacing:.3px; padding:1px 4px; border:1px solid var(--border);
+  opacity:0 !important; transition:opacity .1s, width .12s;
+}
+.agent:hover .btn-reset { opacity:.4 !important; }
+.btn-reset:hover { color:var(--cyan) !important; border-color:var(--cyan); background:rgba(103,232,249,.08); }
+/* Always show reset on crashed agents */
+.agent[data-status="crashed"] .btn-reset { opacity:1 !important; color:var(--yellow); border-color:var(--yellow); background:rgba(250,204,21,.1); }
+.agent[data-status="crashed"] .btn-reset:hover { color:#fff !important; background:rgba(250,204,21,.2); border-color:var(--yellow); }
 .btn-rc { font-size:10px; letter-spacing:.3px; padding:1px 4px; border:1px solid var(--border); }
 .btn-rc:hover { color:var(--cyan) !important; border-color:var(--cyan); background:rgba(103,232,249,.08); }
 .btn-rc.rc-on { opacity:1 !important; display:inline-block; color:var(--cyan); border-color:var(--cyan); background:rgba(103,232,249,.12); cursor:default; }
@@ -217,13 +249,13 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 @keyframes loop-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
 .loop-icon { display:inline-block; animation:loop-spin 2s linear infinite; font-style:normal; }
 
-/* Activity color driven by parent data-status */
-.agent[data-status="permission"] .agent-activity { color:var(--yellow); }
-.agent[data-status="active"] .agent-activity { color:var(--accent); }
-.agent[data-status="waiting"] .agent-activity { color:var(--green); }
-.agent[data-status="idle"] .agent-activity { color:var(--dim); }
-.agent[data-status="crashed"] .agent-activity { color:var(--red); }
-.agent[data-status="resuming"] .agent-activity { color:var(--yellow); }
+/* Status line color driven by parent data-status */
+.agent[data-status="permission"] .agent-status-line { color:var(--yellow); }
+.agent[data-status="active"] .agent-status-line { color:var(--accent); }
+.agent[data-status="waiting"] .agent-status-line { color:var(--green); }
+.agent[data-status="idle"] .agent-status-line { color:var(--dim); }
+.agent[data-status="crashed"] .agent-status-line { color:var(--red); }
+.agent[data-status="resuming"] .agent-status-line { color:var(--yellow); }
 
 /* Prompt / preview */
 .agent-prompt { font-size:11px; color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:13px; position:relative; }
@@ -237,10 +269,16 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent-stats span { letter-spacing:.2px; }
 .agent-stats span + span::before { content:'\00b7'; margin-right:4px; opacity:.5; }
 .ctx-warn { color:var(--yellow); text-shadow:0 0 6px rgba(250,204,21,.3); }
-.ctx-bar { height:3px; background:var(--border); overflow:hidden; margin-top:6px; }
+/* #8: Context bar with inline label when threshold exceeded */
+.ctx-bar { display:flex; align-items:center; gap:6px; margin-top:5px; }
+.ctx-bar-label { font-size:9px; color:var(--dim); letter-spacing:.3px; flex-shrink:0; text-transform:uppercase; min-width:22px; }
+.ctx-bar-track { height:3px; background:var(--border); overflow:hidden; flex:1; }
 .ctx-bar-fill { height:100%; background:var(--accent); transition:width .3s; }
 .ctx-bar-fill.warn { background:var(--yellow); }
 .ctx-bar-fill.danger { background:var(--red); }
+.ctx-bar-pct { font-size:9px; flex-shrink:0; font-variant-numeric:tabular-nums; color:var(--dim); min-width:24px; text-align:right; }
+.ctx-bar-pct.warn { color:var(--yellow); }
+.ctx-bar-pct.danger { color:var(--red); }
 
 /* Sub-agent items */
 .subagent {
@@ -260,38 +298,36 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   text-transform:uppercase; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 
-/* ── Team section ── */
-.team-section {
-  margin:4px 0; border:2px solid rgba(192,132,252,.3); background:rgba(192,132,252,.04);
-  padding:6px 8px;
+/* ── Team section (inline in agent card) ── */
+.agent-team {
+  margin:5px 0 0; border-top:1px solid rgba(192,132,252,.2);
+  padding:5px 0 0;
 }
-.team-header {
-  display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
-  padding:2px 0 4px; border-bottom:1px solid rgba(192,132,252,.15);
+.agent-team-header {
+  display:flex; align-items:center; gap:6px; user-select:none;
+  padding:0 0 3px;
 }
-.team-header:hover { background:rgba(192,132,252,.06); }
-.team-icon { color:var(--purple); font-size:12px; flex-shrink:0; }
-.team-name { font-size:12px; color:var(--purple); font-weight:normal; letter-spacing:.3px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.team-icon { color:var(--purple); font-size:11px; flex-shrink:0; }
+.team-name { font-size:11px; color:var(--purple); font-weight:normal; letter-spacing:.3px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .team-count { font-size:10px; color:var(--dim); flex-shrink:0; }
-.team-chevron { font-size:9px; color:var(--dim); transition:transform .15s; flex-shrink:0; }
-.team-section.collapsed .team-chevron { transform:rotate(-90deg); }
-.team-section.collapsed .team-members { display:none; }
-.team-members { padding:4px 0 0; display:flex; flex-direction:column; gap:3px; }
+/* #3 & #4: Team members use border-left indent pattern (consistent with .subagent) */
+.team-members { padding:2px 0 0; display:flex; flex-direction:column; gap:0;
+  margin-left:4px; border-left:2px solid rgba(192,132,252,.2); }
 .team-member {
-  display:flex; align-items:center; gap:6px; padding:3px 6px; cursor:pointer;
-  border:1px solid var(--border); background:var(--card);
-  transition:background .12s, border-color .12s;
+  display:flex; align-items:center; gap:6px; padding:3px 6px 3px 10px; cursor:pointer;
+  background:transparent; border:none;
+  transition:background .12s;
 }
-.team-member:hover { background:var(--bg3); border-color:var(--border-hi); }
-.team-member-dot { width:6px; height:6px; flex-shrink:0; background:var(--purple); box-shadow:0 0 4px var(--purple); }
-.team-member-name { font-size:11px; color:var(--text); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.team-member-role { font-size:10px; color:var(--dim); flex-shrink:0; letter-spacing:.3px; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.team-member.is-lead .team-member-dot { background:var(--accent); box-shadow:0 0 4px var(--accent); }
-.team-lead-tag { font-size:9px; padding:1px 4px; color:var(--accent); border:1px solid var(--accent); background:rgba(108,140,255,.1); letter-spacing:.3px; flex-shrink:0; }
-.team-tasks-bar { display:flex; align-items:center; gap:6px; margin-top:4px; padding-top:4px; border-top:1px solid rgba(192,132,252,.1); }
-.team-tasks-progress { flex:1; height:3px; background:var(--border); overflow:hidden; }
-.team-tasks-fill { height:100%; background:var(--purple); transition:width .3s; }
-.team-tasks-label { font-size:10px; color:var(--dim); flex-shrink:0; }
+.team-member:hover { background:rgba(192,132,252,.06); }
+.team-member-dot { width:5px; height:5px; flex-shrink:0; background:var(--purple); box-shadow:0 0 4px var(--purple); }
+.team-member-name { font-size:11px; color:var(--text); opacity:.7; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.team-member-role { font-size:10px; color:var(--dim); flex-shrink:0; letter-spacing:.3px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* #5: Task progress — text-based with inline dot, distinct from ctx bar */
+.team-tasks-bar { display:flex; align-items:center; gap:6px; margin:3px 0 0 4px; padding:2px 0 0 10px;
+  border-left:2px solid rgba(192,132,252,.2); }
+.team-tasks-dot { width:5px; height:5px; flex-shrink:0; background:var(--purple); box-shadow:0 0 4px var(--purple); }
+.team-tasks-label { font-size:10px; color:var(--purple); flex-shrink:0; letter-spacing:.3px; }
+.team-tasks-pct { font-size:9px; color:var(--dim); flex-shrink:0; }
 
 
 /* ── Summary footer ── */
@@ -417,10 +453,9 @@ button:focus-visible { outline-offset:0; }
 .agent[data-status="crashed"]::before { background:var(--red); }
 .agent[data-status="resuming"]::before { background:var(--yellow); }
 
-/* Permission card urgency */
-.agent[data-status="permission"] { border-color:rgba(250,204,21,.3); box-shadow:2px 2px 0 var(--shadow), 0 0 8px rgba(250,204,21,.08); }
-/* Crashed card urgency */
-.agent[data-status="crashed"] { border-color:rgba(248,113,113,.3); box-shadow:2px 2px 0 var(--shadow), 0 0 8px rgba(248,113,113,.08); }
+/* #2 & #9: Permission/crashed card urgency — stronger glow for scanning */
+.agent[data-status="permission"] { border-color:rgba(250,204,21,.4); box-shadow:2px 2px 0 var(--shadow), 0 0 12px rgba(250,204,21,.15); }
+.agent[data-status="crashed"] { border-color:rgba(248,113,113,.4); box-shadow:2px 2px 0 var(--shadow), 0 0 12px rgba(248,113,113,.15); }
 
 /* Settings modal header */
 .settings-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:10px; border-bottom:1px solid var(--border); }
@@ -1031,6 +1066,7 @@ function calcCost(s) {
   return (base + s.outTok * p.output + (s.cacheTok || 0) * p.cacheWrite + (s.cacheRead || 0) * p.cacheRead) / 1e6;
 }
 function fmtCost(c) { return c >= 1 ? '$' + c.toFixed(2) : '$' + c.toFixed(3); }
+function fmtTok(n) { if (!n) return '0'; if (n < 1000) return String(n); if (n < 10000) return (n / 1000).toFixed(1) + 'k'; return Math.round(n / 1000) + 'k'; }
 function pathLabel(p) { const pts = p.replace(/\\/g, '/').split('/').filter(Boolean); return pts[pts.length-1] || p; }
 const _escEl = document.createElement('div');
 function esc(s) { _escEl.textContent = s; return _escEl.innerHTML; }
@@ -1064,6 +1100,33 @@ const statusMeta = {
   crashed: { label: 'Crashed', cls: 'dot-crashed' },
   resuming: { label: 'Resuming...', cls: 'dot-resuming' },
 };
+const statusSymbols = { active:'\u273D', permission:'\u26A1', waiting:'\u2713', idle:'\u25CB', crashed:'\u2715', resuming:'\u21BB' };
+function statusVerb(a, st) {
+  if (st === 'crashed') return 'Crashed (' + a.crashCount + '/' + a.crashMax + ')';
+  if (st === 'resuming') return 'Resuming\u2026 (' + a.crashCount + '/' + a.crashMax + ')';
+  if (st === 'waiting') return 'Done';
+  if (st === 'idle') return 'Idle';
+  for (const t of a.tools.values()) {
+    if (t.perm) return 'Needs approval';
+    if (!t.done) { const s = t.status || 'Working'; return /[.\u2026!?]$/.test(s) ? s : s + '\u2026'; }
+  }
+  if (a.spinnerText) return a.spinnerText;
+  return 'Thinking\u2026';
+}
+function statusMetaText(a) {
+  const parts = [];
+  if (a.activeAt) { const s = Math.floor((Date.now() - a.activeAt) / 1000); parts.push(s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's'); }
+  const out = a.stats?.outTok || 0;
+  if (out > 0) parts.push('\u2191\u2009' + fmtTok(out) + ' tokens');
+  return parts.length ? '(' + parts.join(' \u00b7 ') + ')' : '';
+}
+function statusLineHTML(a, st) {
+  const sym = statusSymbols[st] || '\u25CB';
+  const pulsing = st === 'active' || st === 'resuming';
+  const verb = statusVerb(a, st);
+  const meta = statusMetaText(a);
+  return `<span class="status-sym${pulsing ? ' pulsing' : ''}">${sym}</span><span class="status-verb">${esc(verb)}</span>${meta ? `<span class="status-meta">${esc(meta)}</span>` : ''}`;
+}
 
 let _renderPending = false;
 let _renaming = false; // true while inline rename input is active
@@ -1145,69 +1208,73 @@ function render() {
       const st = agentStatus(a);
       const m = statusMeta[st];
       const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
-      let activity = m.label;
-      if (st === 'crashed') activity = `Crashed (${a.crashCount}/${a.crashMax})`;
-      else if (st === 'resuming') activity = `Resuming (${a.crashCount}/${a.crashMax})`;
-      else for (const t of a.tools.values()) { if (t.perm) { activity = 'Needs approval'; break; } if (!t.done) activity = t.status; }
-
       const sel = selectedId === id;
       const ctxPct = a.stats?.ctxTok ? Math.round((a.stats.ctxTok / CTX_WINDOW) * 100) : 0;
       const cost = calcCost(a.stats);
       const ctxCls = ctxPct >= 90 ? 'danger' : ctxPct >= 70 ? 'warn' : '';
 
-      html += `<div class="agent${sel ? ' selected' : ''}" data-status="${st}" data-id="${id}" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})">
+      const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
+      const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
+      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})">
         <div class="agent-top">
-          <span class="agent-icon ${m.cls}${st === 'active' ? ' pulse' : ''}" onclick="event.stopPropagation();showIconPicker(event,'${a.sessionId}')" title="Click to change icon">${getAgentIcon(a.sessionId)}</span>
+          <span class="agent-icon ${m.cls}${st === 'active' ? ' pulse' : ''}" onclick="event.stopPropagation();showIconPicker(event,'${a.sessionId}')" title="Click to change icon">${getAgentIcon(a.sessionId)}${statusBadge ? `<span class="agent-status-badge">${statusBadge}</span>` : ''}</span>
           ${a.agentName ? `<span class="agent-pname">${esc(a.agentName)}</span>` : ''}
           <span class="agent-name" title="${escAttr(title)}${a.customName ? ' (custom name)' : ''}" ondblclick="event.stopPropagation();renameAgent(${id},this)">${esc(title)}</span>
-          <span class="agent-activity" title="${escAttr(activity)}">${esc(activity)}${st === 'active' || st === 'resuming' ? '<span class="typing-dots"><span></span><span></span><span></span></span>' : ''}</span>
-          ${a.activeAt ? `<span class="elapsed-timer">${(() => { const s = Math.floor((Date.now() - a.activeAt) / 1000); return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's'; })()}</span>` : ''}
+        </div>
+        <div class="agent-bottom">
+          <span class="agent-status-line">${statusLineHTML(a, st)}</span>
+          <span class="agent-bottom-spacer"></span>
           ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
           ${a.remoteControl ? `<button class="agent-btn btn-rc rc-on" title="Remote Control active">RC</button>` : ''}
+          <button class="agent-btn btn-reset" onclick="event.stopPropagation();restartAgent(${id})" title="Reset agent (fresh session, keeps name)">&#x21BB;</button>
           <button class="agent-btn btn-close" onclick="event.stopPropagation();closeAgent(${id})" title="Close">&times;</button>
         </div>
-        <div class="ctx-bar" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${CTX_WINDOW / 1000}K (${ctxPct}%)"><div class="ctx-bar-fill ${ctxCls}" style="width:${ctxPct}%"></div></div>
-      </div>`;
-    }
-
-    // Render team sections for agents in this group that lead a team
-    for (const [teamName, team] of teamMap) {
-      const leadInGroup = items.some(([id]) => id === team.leadAgentId);
-      if (!leadInGroup) continue;
-      const safeTeamName = escAttr(teamName.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
-      const nonLeadMembers = team.members.filter(m => m.agentType !== 'team-lead');
-      const completedTasks = team.tasks.filter(t => t.status === 'completed').length;
-      const totalTasks = team.tasks.length;
-      const taskPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-      html += `<div class="team-section">
-        <div class="team-header">
-          <span class="team-icon">&#x2726;</span>
-          <span class="team-name">${esc(teamName)}</span>
-          <span class="team-count">${team.members.length} members</span>
-        </div>
-        <div class="team-members">`;
-
-      team.members.forEach((member, idx) => {
-        const isLead = member.agentType === 'team-lead';
-        const taskOwned = team.tasks.find(t => t.owner === member.name && t.status !== 'completed');
-        const taskLabel = taskOwned ? taskOwned.activeForm || taskOwned.subject : '';
-        const safeMemberName = esc(member.name).replace(/'/g, "\\'");
-      html += `<div class="team-member${isLead ? ' is-lead' : ''}" onclick="focusTeamMember('${safeTeamName}','${safeMemberName}',${isLead})">
-          <span class="team-member-dot"></span>
-          <span class="team-member-name">${esc(member.name)}</span>
-          ${isLead ? '<span class="team-lead-tag">LEAD</span>' : ''}
-          ${taskLabel ? `<span class="team-member-role" title="${escAttr(taskLabel)}">${esc(taskLabel)}</span>` : `<span class="team-member-role">${esc(member.agentType || '')}</span>`}
+        <div class="ctx-bar" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${CTX_WINDOW / 1000}K (${ctxPct}%)">
+          <span class="ctx-bar-label">ctx</span>
+          <div class="ctx-bar-track"><div class="ctx-bar-fill ${ctxCls}" style="width:${ctxPct}%"></div></div>
+          ${ctxPct > 0 ? `<span class="ctx-bar-pct ${ctxCls}">${ctxPct}%</span>` : ''}
         </div>`;
-      });
 
-      html += `</div>`;
-      if (totalTasks > 0) {
-        html += `<div class="team-tasks-bar">
-          <div class="team-tasks-progress"><div class="team-tasks-fill" style="width:${taskPct}%"></div></div>
-          <span class="team-tasks-label">${completedTasks}/${totalTasks} tasks</span>
-        </div>`;
+      // If this agent leads a team, render team members inline
+      const leadTeamName = [...teamMap.entries()].find(([, t]) => t.leadAgentId === id);
+      if (leadTeamName) {
+        const [teamName, team] = leadTeamName;
+        const safeTeamName = escAttr(teamName.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+        const nonLeadMembers = team.members.filter(m => m.agentType !== 'team-lead');
+        const completedTasks = team.tasks.filter(t => t.status === 'completed').length;
+        const totalTasks = team.tasks.length;
+        const taskPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+        html += `<div class="agent-team">
+          <div class="agent-team-header">
+            <span class="team-icon">&#x2726;</span>
+            <span class="team-name">${esc(teamName)}</span>
+            <span class="team-count">${nonLeadMembers.length} teammate${nonLeadMembers.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div class="team-members">`;
+
+        nonLeadMembers.forEach(member => {
+          const taskOwned = team.tasks.find(t => t.owner === member.name && t.status !== 'completed');
+          const taskLabel = taskOwned ? taskOwned.activeForm || taskOwned.subject : '';
+          const safeMemberName = esc(member.name).replace(/'/g, "\\'");
+          html += `<div class="team-member" onclick="focusTeamMember('${safeTeamName}','${safeMemberName}',false)">
+            <span class="team-member-dot"></span>
+            <span class="team-member-name">${esc(member.name)}</span>
+            ${taskLabel ? `<span class="team-member-role" title="${escAttr(taskLabel)}">${esc(taskLabel)}</span>` : `<span class="team-member-role">${esc(member.agentType || '')}</span>`}
+          </div>`;
+        });
+
+        html += `</div>`;
+        if (totalTasks > 0) {
+          html += `<div class="team-tasks-bar">
+            <span class="team-tasks-dot"></span>
+            <span class="team-tasks-label">${completedTasks}/${totalTasks} done</span>
+            <span class="team-tasks-pct">${taskPct}%</span>
+          </div>`;
+        }
+        html += `</div>`;
       }
+
       html += `</div>`;
     }
 
@@ -1308,10 +1375,13 @@ function createXterm(id) {
       const re = /(?:[A-Za-z]:[\\\/]|\.{0,2}\/)[^\s:*?"<>|,()]+(?::\d+(?::\d+)?)?/g;
       let m;
       while ((m = re.exec(text)) !== null) {
+        const filePath = m[0];
+        const startX = m.index + 1;
+        const endX = m.index + filePath.length;
         links.push({
-          range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } },
-          text: m[0],
-          activate: () => api.send({ type: 'openFile', id, path: m[0] }),
+          range: { start: { x: startX, y }, end: { x: endX, y } },
+          text: filePath,
+          activate: () => api.send({ type: 'openFile', id, path: filePath }),
         });
       }
       callback(links.length ? links : undefined);
@@ -1703,7 +1773,7 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false, agentName: msg.agentName || '' });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false, agentName: msg.agentName || '' });
       if (msg.cwd) knownProjects.add(msg.cwd);
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
@@ -1730,7 +1800,7 @@ function handleAgentMsg(msg) {
       }
       break;
     }
-    case 'status': { const a = agents.get(msg.id); if (a) { const was = a.status; a.status = msg.status; a.crashed = null; if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now(); if (msg.status === 'waiting') a.activeAt = null; if (msg.status === 'waiting' && was === 'active') playChime(); scheduleRender(); } break; }
+    case 'status': { const a = agents.get(msg.id); if (a) { const was = a.status; a.status = msg.status; a.crashed = null; if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now(); if (msg.status === 'waiting') { a.activeAt = null; a.tools.clear(); a.subTools.clear(); a.spinnerText = ''; } if (msg.status === 'waiting' && was === 'active') playChime(); scheduleRender(); } break; }
     case 'toolStart': { const a = agents.get(msg.id); if (a) { a.crashed = null; if (!a.activeAt) a.activeAt = Date.now(); a.tools.set(msg.toolId, { status: msg.status, name: msg.name, done: false, perm: false, isSubagent: msg.name === 'Task' || msg.name === 'Agent' }); scheduleRender(); } break; }
     case 'toolDone': { const a = agents.get(msg.id); if (a) { const t = a.tools.get(msg.toolId); if (t) { t.done = true; a.subTools.delete(msg.toolId); } scheduleRender(); } break; }
     case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
@@ -1739,6 +1809,7 @@ function handleAgentMsg(msg) {
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; scheduleRender(); } break; }
     case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = true; } scheduleRender(); } break; }
     case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
+    case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = msg.prompts.length - 1; if (selectedId === msg.id) updatePromptNav(); } break; }
@@ -2082,24 +2153,14 @@ document.addEventListener('wheel', (e) => {
   if (x) setTimeout(() => x.fitAddon.fit(), 50);
 }, { passive: false });
 
-// Middle-click to close agent (event delegation on list)
-document.getElementById('list').addEventListener('mousedown', (e) => {
-  if (e.button !== 1) return; // middle-click only
-  const card = e.target.closest('.agent[data-id]');
-  if (!card) return;
-  e.preventDefault();
-  closeAgent(parseInt(card.dataset.id));
-});
 
-// Live elapsed timer — update every second without full re-render
+// Live status line timer — update every second without full re-render
 setInterval(() => {
   for (const [id, a] of agents) {
-    if (!a.activeAt) continue;
-    const el = document.querySelector(`.agent[data-id="${id}"] .elapsed-timer`);
-    if (el) {
-      const s = Math.floor((Date.now() - a.activeAt) / 1000);
-      el.textContent = s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
-    }
+    const el = document.querySelector(`.agent[data-id="${id}"] .status-meta`);
+    if (!el) continue;
+    const txt = statusMetaText(a);
+    if (txt) el.textContent = txt; else el.textContent = '';
   }
 }, 1000);
 
