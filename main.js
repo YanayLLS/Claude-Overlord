@@ -78,6 +78,11 @@ let nextId = 1;
 function send(data) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
 }
+function logToRenderer(...args) {
+  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  console.log(msg);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('main-log', msg);
+}
 
 function sendFullState() {
   send({ type: 'settings', settings });
@@ -834,6 +839,8 @@ function closeAgent(id) {
 // ── JSONL watching ─────────────────────────────────────
 function startWatch(id) {
   const a = agents.get(id); if (!a) return;
+  const exists = fs.existsSync(a.jsonlFile);
+  logToRenderer(`[startWatch] Agent ${id}: watching ${a.jsonlFile} (exists: ${exists})`);
   // Clean up any existing watchers before creating new ones
   const w = watchers.get(id); if (w) { try { w.close(); } catch {} watchers.delete(id); }
   try { fs.unwatchFile(a.jsonlFile); } catch {}
@@ -863,7 +870,7 @@ function readLines(id) {
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
     if (lines.some(l => l.trim())) { clrTimer(id, waitTimers); clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; send({ type: 'permClear', id }); } }
     for (const line of lines) { if (line.trim()) parseLine(id, line); }
-  } catch {}
+  } catch (e) { logToRenderer(`[readLines] Agent ${id} error: ${e.message} — file: ${a.jsonlFile}`); }
 }
 
 function parseLine(id, line) {
@@ -1701,6 +1708,9 @@ app.whenReady().then(() => {
   });
   mainWindow.on('focus', () => mainWindow.flashFrame(false));
   mainWindow.webContents.on('before-input-event', (_e, input) => {
+    if (input.key === 'F12' && input.type === 'keyDown') {
+      mainWindow.webContents.toggleDevTools();
+    }
     if (input.key === 'F5' && input.type === 'keyDown') {
       // Kill all pty processes before restarting to prevent orphaned session locks
       for (const [, t] of terminals) { killProcessTree(t.pid); }

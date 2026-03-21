@@ -1778,6 +1778,9 @@ let layoutMode = 'bottom';
 // Fit on window resize
 new ResizeObserver(() => { const x = xterms.get(selectedId); if (x) try { x.fitAddon.fit(); } catch {} }).observe(container);
 
+// ── Forward main-process logs to DevTools console ─────
+api.onMainLog((msg) => console.log('%c[main]', 'color:#888', msg));
+
 // ── Message handling ───────────────────────────────────
 api.on((msg) => {
   if (msg.type === 'imagePasted') {
