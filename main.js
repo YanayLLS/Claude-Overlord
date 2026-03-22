@@ -115,7 +115,7 @@ function sendFullState() {
 }
 
 function claudeDir(projectPath) {
-  return path.join(os.homedir(), '.claude', 'projects', projectPath.replace(/[:\\/]/g, '-'));
+  return path.join(os.homedir(), '.claude', 'projects', projectPath.replace(/[:\\/\s]/g, '-'));
 }
 
 function deriveTitle(text) {
@@ -393,6 +393,66 @@ function getFullTimeline(id) {
     // Return last N events if too many
     return events.length > TIMELINE_MAX_EVENTS ? events.slice(-TIMELINE_MAX_EVENTS) : events;
   } catch { return []; }
+}
+
+function globalSearch(query) {
+  if (!query || query.length < 2) return [];
+  const q = query.toLowerCase();
+  const results = [];
+  const MAX_RESULTS = 100;
+  const CONTEXT_CHARS = 120;
+  for (const [id, a] of agents) {
+    if (results.length >= MAX_RESULTS) break;
+    if (!a.jsonlFile || !fs.existsSync(a.jsonlFile)) continue;
+    try {
+      const content = fs.readFileSync(a.jsonlFile, 'utf-8');
+      const lines = content.split('\n');
+      for (const line of lines) {
+        if (results.length >= MAX_RESULTS) break;
+        if (!line.trim()) continue;
+        try {
+          const r = JSON.parse(line);
+          let texts = [];
+          let role = '';
+          if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
+            role = 'assistant';
+            for (const b of r.message.content) {
+              if (b.type === 'text' && b.text) texts.push(b.text);
+            }
+          } else if (r.type === 'user') {
+            role = 'user';
+            const c = r.message?.content;
+            if (Array.isArray(c)) {
+              for (const b of c) {
+                if (b.type === 'text' && b.text) texts.push(b.text);
+              }
+            } else if (typeof c === 'string') texts.push(c);
+          }
+          for (const txt of texts) {
+            const idx = txt.toLowerCase().indexOf(q);
+            if (idx === -1) continue;
+            const start = Math.max(0, idx - 40);
+            const end = Math.min(txt.length, idx + q.length + CONTEXT_CHARS - 40);
+            let snippet = txt.slice(start, end).replace(/[\n\r]+/g, ' ');
+            if (start > 0) snippet = '\u2026' + snippet;
+            if (end < txt.length) snippet += '\u2026';
+            results.push({
+              agentId: id,
+              agentName: a.agentName || '',
+              title: a.title || '',
+              cwd: a.cwd || '',
+              role,
+              snippet,
+              matchIdx: idx,
+              ts: r.timestamp || null,
+            });
+            break; // one match per message block
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  return results;
 }
 
 async function scanSessions() {
@@ -1628,6 +1688,7 @@ ipcMain.on('cmd', (_e, msg) => {
     case 'saveSettings': Object.assign(settings, msg.settings); saveState(); break;
     case 'relaunch': app.relaunch(); app.exit(0); break;
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); break; }
+    case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
     case 'getSessions': scanSessions().then(s => send({ type: 'sessions', sessions: s })).catch(() => send({ type: 'sessions', sessions: [] })); break;
     case 'resumeSession': resumeSessionAgent(msg.sessionId, msg.cwd); break;

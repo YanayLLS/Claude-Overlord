@@ -602,6 +602,46 @@ button:focus-visible { outline-offset:0; }
 .history-item-meta span + span::before { content:'\00b7'; margin-right:4px; opacity:.5; }
 .history-item-prompt { font-size:11px; color:rgba(255,255,255,.3); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
+/* ── Global Search overlay ── */
+#search-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:999;
+  align-items:flex-start; justify-content:center; padding-top:10vh; transition:opacity .15s;
+}
+.search-modal {
+  background:var(--bg); border:2px solid var(--border-hi); box-shadow:4px 4px 0 var(--shadow);
+  padding:16px 20px; width:680px; max-width:90vw; max-height:70vh; display:flex; flex-direction:column;
+}
+.search-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.search-header h3 { font-size:15px; color:var(--accent); font-weight:normal; letter-spacing:1px; white-space:nowrap; }
+#search-input {
+  flex:1; font-family:inherit; font-size:14px; padding:6px 10px; color:var(--text);
+  background:var(--card); border:2px solid var(--border); outline:none;
+}
+#search-input::placeholder { color:var(--dim); }
+#search-input:focus { border-color:var(--accent); }
+#search-count { font-size:11px; color:var(--dim); white-space:nowrap; }
+.search-close {
+  font-size:20px; cursor:pointer; color:var(--dim); background:none; border:none; line-height:1;
+  transition:color .1s;
+}
+.search-close:hover { color:var(--text); }
+#search-results { flex:1; overflow-y:auto; margin-top:4px; }
+.search-empty { text-align:center; padding:30px 0; color:var(--dim); font-size:13px; }
+.search-result {
+  padding:8px 10px; cursor:pointer; border:1px solid transparent; margin:2px 0;
+  transition:background .12s, border-color .12s;
+}
+.search-result:hover { background:var(--bg3); border-color:var(--border); }
+.search-result.selected { background:var(--bg3); border-color:var(--accent); }
+.search-result-header { display:flex; align-items:center; gap:8px; margin-bottom:3px; }
+.search-result-agent { font-size:12px; color:var(--accent); font-weight:normal; }
+.search-result-role { font-size:10px; padding:1px 5px; border:1px solid; letter-spacing:.3px; }
+.search-result-role.user { color:var(--cyan); border-color:var(--cyan); }
+.search-result-role.assistant { color:var(--purple); border-color:var(--purple); }
+.search-result-project { font-size:10px; color:var(--dim); margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px; }
+.search-result-snippet { font-size:12px; color:rgba(255,255,255,.6); line-height:1.5; word-break:break-word; }
+.search-result-snippet mark { background:rgba(108,140,255,.3); color:var(--text); padding:0 1px; border-radius:1px; }
+
 /* ── Confirm modal ── */
 #confirm-overlay {
   display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:1000;
@@ -746,6 +786,7 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+Shift+Tab</span><span class="help-desc">Previous agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+!</span><span class="help-desc">Jump to next permission request</span></div>
       <div class="help-row"><span class="help-key">Ctrl+F</span><span class="help-desc">Find in terminal / Filter agents</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Shift+F</span><span class="help-desc">Search all agent conversations</span></div>
       <div class="help-row"><span class="help-key">/</span><span class="help-desc">Filter agents (when not typing)</span></div>
       <div class="help-row"><span class="help-key">Ctrl+0</span><span class="help-desc">Reset zoom to 100%</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Scroll</span><span class="help-desc">Zoom in/out</span></div>
@@ -764,6 +805,17 @@ button:focus-visible { outline-offset:0; }
       </div>
       <input class="history-search" type="text" placeholder="Search sessions..." id="history-search" />
       <div id="history-list"><div class="history-loading">Scanning sessions...</div></div>
+    </div>
+  </div>
+  <div id="search-overlay" onclick="closeSearch()">
+    <div class="search-modal" onclick="event.stopPropagation()">
+      <div class="search-header">
+        <h3>Search All Agents</h3>
+        <input id="search-input" type="text" placeholder="Search prompts and responses..." />
+        <span id="search-count"></span>
+        <button class="search-close" onclick="closeSearch()" aria-label="Close">&times;</button>
+      </div>
+      <div id="search-results"><div class="search-empty">Type to search across all agent conversations</div></div>
     </div>
   </div>
   <div id="confirm-overlay" onclick="confirmResolve(false)">
@@ -1635,6 +1687,104 @@ function closeHistory() {
   _historyCloseTimer = setTimeout(() => { _historyCloseTimer = null; el.style.display = 'none'; }, 150);
 }
 
+// ── Global Search ──
+let _searchTimer = null;
+let _searchSelectedIdx = -1;
+let _searchResults = [];
+
+function openSearch() {
+  const el = document.getElementById('search-overlay');
+  el.style.display = 'flex'; el.style.opacity = '0';
+  requestAnimationFrame(() => { el.style.opacity = '1'; });
+  const input = document.getElementById('search-input');
+  input.value = '';
+  input.focus();
+  document.getElementById('search-results').innerHTML = '<div class="search-empty">Type to search across all agent conversations</div>';
+  document.getElementById('search-count').textContent = '';
+  _searchSelectedIdx = -1;
+  _searchResults = [];
+}
+
+function closeSearch() {
+  const el = document.getElementById('search-overlay');
+  el.style.opacity = '0';
+  setTimeout(() => { el.style.display = 'none'; }, 150);
+}
+
+function highlightMatch(snippet, query) {
+  if (!query) return esc(snippet);
+  const lower = snippet.toLowerCase();
+  const q = query.toLowerCase();
+  const idx = lower.indexOf(q);
+  if (idx === -1) return esc(snippet);
+  return esc(snippet.slice(0, idx)) + '<mark>' + esc(snippet.slice(idx, idx + query.length)) + '</mark>' + esc(snippet.slice(idx + query.length));
+}
+
+function renderSearchResults(results, query) {
+  _searchResults = results;
+  _searchSelectedIdx = -1;
+  const container = document.getElementById('search-results');
+  const countEl = document.getElementById('search-count');
+  if (!results.length) {
+    container.innerHTML = '<div class="search-empty">No matches found</div>';
+    countEl.textContent = query ? '0 results' : '';
+    return;
+  }
+  countEl.textContent = results.length + (results.length >= 100 ? '+' : '') + ' results';
+  let html = '';
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const label = r.agentName ? r.agentName + (r.title ? ' \u2014 ' + r.title : '') : (r.title || 'Agent ' + r.agentId);
+    html += '<div class="search-result" data-idx="' + i + '" onclick="searchResultClick(' + i + ')">';
+    html += '<div class="search-result-header">';
+    html += '<span class="search-result-agent">' + esc(label) + '</span>';
+    html += '<span class="search-result-role ' + r.role + '">' + r.role + '</span>';
+    html += '<span class="search-result-project">' + esc(pathLabel(r.cwd)) + '</span>';
+    html += '</div>';
+    html += '<div class="search-result-snippet">' + highlightMatch(r.snippet, query) + '</div>';
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function searchResultClick(idx) {
+  const r = _searchResults[idx];
+  if (!r) return;
+  closeSearch();
+  focusAgent(r.agentId);
+}
+
+document.getElementById('search-input').addEventListener('input', (e) => {
+  const query = e.target.value.trim();
+  if (_searchTimer) clearTimeout(_searchTimer);
+  if (query.length < 2) {
+    document.getElementById('search-results').innerHTML = '<div class="search-empty">Type at least 2 characters</div>';
+    document.getElementById('search-count').textContent = '';
+    return;
+  }
+  _searchTimer = setTimeout(() => { api.send({ type: 'globalSearch', query }); }, 200);
+});
+
+document.getElementById('search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeSearch(); return; }
+  const items = document.querySelectorAll('.search-result');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _searchSelectedIdx = Math.min(_searchSelectedIdx + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('selected', i === _searchSelectedIdx));
+    items[_searchSelectedIdx]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _searchSelectedIdx = Math.max(_searchSelectedIdx - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('selected', i === _searchSelectedIdx));
+    items[_searchSelectedIdx]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter' && _searchSelectedIdx >= 0) {
+    e.preventDefault();
+    searchResultClick(_searchSelectedIdx);
+  }
+});
+
 function toggleHistoryGroup(key) {
   if (collapsedHistoryGroups.has(key)) collapsedHistoryGroups.delete(key);
   else collapsedHistoryGroups.add(key);
@@ -1861,6 +2011,7 @@ function handleAgentMsg(msg) {
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); break;
     case 'timelineData': handleTimelineData(msg); break;
+    case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'sessions': handleSessions(msg); break;
     case 'usage': handleUsage(msg.usage); break;
@@ -2053,6 +2204,12 @@ document.addEventListener('keydown', (e) => {
     else { browseAndAdd(); }
     return;
   }
+  // Ctrl+Shift+F: global search across all agents
+  if (e.key === 'F' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+    e.preventDefault();
+    openSearch();
+    return;
+  }
   // Ctrl+F: open terminal search if terminal is open, otherwise filter agents
   if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
@@ -2123,6 +2280,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     const cfm = document.getElementById('confirm-overlay');
     if (cfm.classList.contains('open')) { confirmResolve(false); return; }
+    const searchOv = document.getElementById('search-overlay');
+    if (searchOv.style.display === 'flex') { closeSearch(); return; }
     const history = document.getElementById('history-overlay');
     if (history.style.display === 'flex') { closeHistory(); return; }
     const help = document.getElementById('help-overlay');
