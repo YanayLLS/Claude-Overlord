@@ -285,6 +285,8 @@ function extractSpinnerText(id, data) {
     if ((cp >= 0x2800 && cp <= 0x28FF) || t[0] === '*' || cp === 0x273B || cp === 0x276F) {
       const text = t.replace(/^.\s*/, '').trim();
       if (text && text.length > 1) {
+        // Completion messages like "Sautéed for 36s" or "Cooked for 2m 44s" mean the turn is done — don't treat as active spinner
+        if (/\bfor\s+\d+[smh]/i.test(text)) return;
         const a = agents.get(id);
         if (a && a.spinnerText !== text) {
           a.spinnerText = text;
@@ -707,10 +709,11 @@ function restoreAgents(state) {
       registerKnownJsonl(claudeDir(agent.cwd), agent.jsonlFile);
       if (fs.existsSync(agent.jsonlFile) && !watchers.has(id) && !polls.has(id)) startWatch(id);
 
-      // Auto-resume: spawn terminal so the agent is live immediately
+      // Auto-resume: spawn terminal after a short delay to let session locks release
       if (agents.has(id)) {
         console.log(`[Overlord] Auto-resuming agent ${id}`);
-        spawnTerminal(id);
+        await new Promise(r => setTimeout(r, 1500));
+        if (agents.has(id)) spawnTerminal(id);
       }
     })();
   }
@@ -792,19 +795,41 @@ function spawnTerminal(id) {
     proc.onData((d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
       compactWatch(d);
-      // Detect "No conversation found with session ID" from claude --resume and retry with --session-id
-      if (useResume && !a._resumeFailed) {
+      // Detect resume errors and retry
+      if (!a._resumeHandled) {
         resumeErrorBuf += d;
         if (resumeErrorBuf.length > 4096) resumeErrorBuf = resumeErrorBuf.slice(-2048);
         const clean = resumeErrorBuf.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-        if (/No conversation found with session ID/i.test(clean)) {
+        if (useResume && !a._resumeFailed && /No conversation found with session ID/i.test(clean)) {
           a._resumeFailed = true;
           a._resumeRetrying = true;
+          a._resumeHandled = true;
           resumeErrorBuf = '';
           console.log(`[Overlord] --resume failed for agent ${id} (session not found), retrying with --session-id`);
           send({ type: 'termData', id, data: '\r\n\x1b[33m[Session expired — starting fresh conversation...]\x1b[0m\r\n' });
           try { proc.kill(); } catch {}
           setTimeout(() => { if (agents.has(id)) { terminals.delete(id); spawnTerminal(id); } }, 500);
+        } else if (/session.{0,5}id.{0,30}already in use/i.test(clean)) {
+          const retries = a._lockRetries || 0;
+          if (retries < 5) {
+            a._lockRetries = retries + 1;
+            a._resumeRetrying = true;
+            resumeErrorBuf = '';
+            const delay = 2000 * a._lockRetries;
+            console.log(`[Overlord] Session lock busy for agent ${id}, retry ${a._lockRetries}/5 in ${delay}ms`);
+            send({ type: 'termData', id, data: `\r\n\x1b[33m[Session locked — retrying in ${delay / 1000}s (${a._lockRetries}/5)...]\x1b[0m\r\n` });
+            try { proc.kill(); } catch {}
+            setTimeout(() => {
+              if (!agents.has(id)) return;
+              terminals.delete(id);
+              killSessionProcesses(a.sessionId);
+              spawnTerminal(id);
+            }, delay);
+          } else {
+            a._resumeHandled = true;
+            console.log(`[Overlord] Session lock retries exhausted for agent ${id}`);
+            send({ type: 'termData', id, data: '\r\n\x1b[31m[Session lock stuck — click to retry manually.]\x1b[0m\r\n' });
+          }
         }
       }
     });
@@ -1616,7 +1641,7 @@ ipcMain.on('cmd', (_e, msg) => {
       dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: 'Select Project Folder' })
         .then(r => { if (!r.canceled && r.filePaths[0]) send({ type: 'folderSelected', path: r.filePaths[0] }); });
       break;
-    case 'openUrl': { const url = msg.url; if (typeof url === 'string' && /^https?:\/\//.test(url)) shell.openExternal(url).catch(() => {}); break; }
+    case 'openUrl': { const url = msg.url; if (typeof url === 'string' && /^(?:https?|file):\/\//.test(url)) shell.openExternal(url).catch(() => {}); break; }
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
@@ -1773,8 +1798,8 @@ app.whenReady().then(() => {
       mainWindow.webContents.toggleDevTools();
     }
     if (input.key === 'F5' && input.type === 'keyDown') {
-      // Kill all pty processes before restarting to prevent orphaned session locks
-      for (const [, t] of terminals) { killProcessTree(t.pid); }
+      // Kill all pty processes and session locks before restarting
+      for (const [id, t] of terminals) { killProcessTree(t.pid); const a = agents.get(id); if (a) killSessionProcesses(a.sessionId); }
       saveState();
       app.relaunch();
       app.exit(0);

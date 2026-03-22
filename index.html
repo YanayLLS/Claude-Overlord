@@ -1443,16 +1443,17 @@ function createXterm(id) {
       if (!line) { callback(undefined); return; }
       const text = line.translateToString();
       const links = [];
-      const re = /(?:[A-Za-z]:[\\\/]|\.{0,2}\/)[^\s:*?"<>|,()]+(?::\d+(?::\d+)?)?/g;
+      const re = /(?:file:\/\/\/)?(?:[A-Za-z]:[\\\/]|\.{0,2}\/)[^\s:*?"<>|,()]+(?::\d+(?::\d+)?)?/g;
       let m;
       while ((m = re.exec(text)) !== null) {
         const filePath = m[0];
         const startX = m.index + 1;
         const endX = m.index + filePath.length;
+        const isFileUrl = filePath.startsWith('file:///');
         links.push({
           range: { start: { x: startX, y }, end: { x: endX, y } },
           text: filePath,
-          activate: () => api.send({ type: 'openFile', id, path: filePath }),
+          activate: () => isFileUrl ? api.send({ type: 'openUrl', url: filePath }) : api.send({ type: 'openFile', id, path: filePath }),
         });
       }
       callback(links.length ? links : undefined);
