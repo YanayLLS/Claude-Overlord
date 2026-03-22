@@ -1797,13 +1797,6 @@ app.whenReady().then(() => {
     if (input.key === 'F12' && input.type === 'keyDown') {
       mainWindow.webContents.toggleDevTools();
     }
-    if (input.key === 'F5' && input.type === 'keyDown') {
-      // Kill all pty processes and session locks before restarting
-      for (const [id, t] of terminals) { killProcessTree(t.pid); const a = agents.get(id); if (a) killSessionProcesses(a.sessionId); }
-      saveState();
-      app.relaunch();
-      app.exit(0);
-    }
   });
   mainWindow.on('resize', saveWindowBounds);
   mainWindow.on('move', saveWindowBounds);
