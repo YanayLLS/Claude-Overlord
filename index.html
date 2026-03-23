@@ -72,6 +72,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 .hdr-btn:hover { background:rgba(205,214,244,.08); color:var(--text); }
 .hdr-btn:active { background:rgba(205,214,244,.12); }
+.hdr-btn.active { background:var(--green); color:#000; border-radius:4px; }
 
 #content { display:flex; flex-direction:column; flex:1; overflow:hidden; }
 #list-col { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; background:var(--editor-bg); }
@@ -698,6 +699,7 @@ button:focus-visible { outline-offset:0; }
     <button id="layoutBtn" class="hdr-btn" onclick="toggleLayout()" title="Toggle terminal position">&#x25A7;</button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Reload app">&#x21BB;</button>
+    <button id="readyBtn" class="hdr-btn" onclick="toggleReadyFilter()" title="Show only ready agents">&#x2713;</button>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
   </div>
   <div id="content">
@@ -845,6 +847,7 @@ const teamMap = new Map(); // teamName -> { name, leadAgentId, members[], tasks[
 const knownProjects = new Set(); // cwd paths that persist even when all agents are closed
 let selectedId = null;
 let filterText = '';
+let filterReady = false;
 const collapsedGroups = new Set();
 function toggleGroup(cwd) { if (collapsedGroups.has(cwd)) collapsedGroups.delete(cwd); else collapsedGroups.add(cwd); render(); }
 
@@ -932,6 +935,7 @@ function closeFilter() {
 }
 document.getElementById('filter-input').addEventListener('input', (e) => { filterText = e.target.value.toLowerCase(); render(); });
 document.getElementById('filter-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFilter(); });
+function toggleReadyFilter() { filterReady = !filterReady; document.getElementById('readyBtn').classList.toggle('active', filterReady); render(); }
 
 let pendingCwd = null;
 let _promptCloseTimer = null;
@@ -1200,6 +1204,7 @@ function agentStatus(a) {
 }
 
 function matchesFilter(a) {
+  if (filterReady) { const st = agentStatus(a); if (st === 'active' || st === 'resuming') return false; }
   if (!filterText) return true;
   return [a.agentName, a.title, a.prompt, a.preview, a.cwd, agentStatus(a)].join('\n').toLowerCase().includes(filterText);
 }

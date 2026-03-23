@@ -307,8 +307,12 @@ function extractSpinnerText(id, data) {
     if ((cp >= 0x2800 && cp <= 0x28FF) || t[0] === '*' || cp === 0x273B || cp === 0x276F) {
       const text = t.replace(/^.\s*/, '').trim();
       if (text && text.length > 1) {
-        // Completion messages like "Sautéed for 36s" or "Cooked for 2m 44s" mean the turn is done — don't treat as active spinner
-        if (/\bfor\s+\d+[smh]/i.test(text)) return;
+        // Completion messages like "Sautéed for 36s" or "Cooked for 2m 44s" mean the turn is done — clear spinner
+        if (/\bfor\s+\d+[smh]/i.test(text)) {
+          const a = agents.get(id);
+          if (a && a.spinnerText) { a.spinnerText = ''; send({ type: 'spinnerText', id, text: '' }); }
+          return;
+        }
         const a = agents.get(id);
         if (a && a.spinnerText !== text) {
           a.spinnerText = text;
