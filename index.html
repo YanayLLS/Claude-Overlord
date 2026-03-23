@@ -361,10 +361,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   text-decoration:none; display:inline-flex; align-items:center; gap:4px;
 }
 .server-badge:hover { color:#fff; background:rgba(148,226,213,.15); border-color:var(--cyan); }
-.server-badge .server-close {
-  font-size:12px; line-height:1; opacity:.5; cursor:pointer; padding:0 1px;
+.server-badge .server-menu-btn {
+  font-size:11px; line-height:1; opacity:.4; cursor:pointer; padding:0 2px; font-weight:bold;
+  transition:opacity .12s;
 }
-.server-badge .server-close:hover { opacity:1; color:#ff6b6b; }
+.server-badge .server-menu-btn:hover { opacity:1; color:var(--text); }
 
 /* ── Terminal panel — bottom layout (default) ── */
 #term { display:none; flex-direction:column; border-top:1px solid var(--border); flex-shrink:0; height:40%; min-height:120px; }
@@ -387,6 +388,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #prompt-nav .prompt-counter { font-size:10px; color:var(--dim); min-width:28px; text-align:center; user-select:none; }
 #term-container { flex:1; position:relative; background:#000; overflow:hidden; min-width:0; min-height:0; }
 #term-container .xterm { height:100%; width:100%; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar { width:10px; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-track { background:transparent; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:var(--surface0); border-radius:5px; border:2px solid transparent; background-clip:padding-box; min-height:40px; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background:var(--surface1); }
 
 /* ── Terminal search bar ── */
 #term-search {
@@ -1116,6 +1121,40 @@ function showAgentMenu(e, id) {
 }
 function openUrl(url) { api.send({ type: 'openUrl', url }); }
 function killServer(port) { api.send({ type: 'killServer', port }); }
+function restartServer(port) { api.send({ type: 'restartServer', port }); }
+function showServerMenu(e, port, url) {
+  e.stopPropagation(); e.preventDefault();
+  const old = document.getElementById('server-ctx-menu');
+  if (old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 'server-ctx-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:140px;';
+  menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
+  const items = [
+    { label: 'Open in browser', action: () => openUrl(url) },
+    { sep: true },
+    { label: 'Restart', action: () => restartServer(port) },
+    { label: 'Remove', action: () => killServer(port), cls: 'ctx-danger' },
+  ];
+  for (const it of items) {
+    if (it.sep) { const hr = document.createElement('div'); hr.style.cssText = 'height:1px;background:var(--border);margin:3px 0;'; menu.appendChild(hr); continue; }
+    const btn = document.createElement('button');
+    btn.textContent = it.label;
+    btn.className = it.cls || '';
+    btn.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:5px 12px;background:none;border:none;color:var(--text);cursor:pointer;border-radius:0;transition:background .1s;';
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(205,214,244,.06)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+    if (it.cls === 'ctx-danger') { btn.style.color = 'var(--red)'; }
+    btn.onclick = () => { menu.remove(); it.action(); };
+    menu.appendChild(btn);
+  }
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
 function enableRC(id) { api.send({ type: 'enableRemoteControl', id }); }
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
@@ -1253,7 +1292,7 @@ function render() {
     let serverBadges = '';
     if (gServers.size > 0) {
       const sorted = [...gServers.entries()].sort((a, b) => a[0] - b[0]);
-      serverBadges = `<div class="group-servers">${sorted.map(([port, url]) => `<a class="server-badge" onclick="event.stopPropagation();openUrl('${escAttr(url)}')" title="${escAttr(url)}">:${port}<span class="server-close" onclick="event.stopPropagation();event.preventDefault();killServer(${port})" title="Kill server on port ${port}">&times;</span></a>`).join('')}</div>`;
+      serverBadges = `<div class="group-servers">${sorted.map(([port, url]) => `<a class="server-badge" onclick="event.stopPropagation();openUrl('${escAttr(url)}')" title="${escAttr(url)}">:${port}<span class="server-menu-btn" onclick="showServerMenu(event,${port},'${escAttr(url)}')" title="Server options">&#x22EE;</span></a>`).join('')}</div>`;
     }
 
     const safeCwd = escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
@@ -1424,7 +1463,7 @@ container.addEventListener('click', () => {
 
 function createXterm(id) {
   const el = document.createElement('div');
-  el.style.cssText = 'position:absolute;inset:0;padding:6px 8px;display:none;';
+  el.style.cssText = 'position:absolute;inset:0;padding:6px 0 6px 8px;display:none;';
   container.appendChild(el);
   const fitAddon = new XFitAddon();
   const terminal = new XTerminal({

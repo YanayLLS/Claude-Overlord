@@ -209,6 +209,22 @@ function scanForServers(id, text) {
   }
 }
 
+function killPortProcess(port) {
+  try {
+    if (process.platform === 'win32') {
+      const out = execSync(`netstat -ano | findstr LISTENING | findstr :${port}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+      const pids = new Set();
+      for (const line of out.split('\n')) {
+        const m = line.trim().match(/:(\d+)\s.*LISTENING\s+(\d+)/);
+        if (m && parseInt(m[1]) === port) pids.add(parseInt(m[2]));
+      }
+      for (const pid of pids) { try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' }); } catch {} }
+    } else {
+      execSync(`lsof -ti tcp:${port} | xargs kill -9`, { stdio: 'ignore' });
+    }
+  } catch {}
+}
+
 function clearServers(id) {
   const ports = serverPorts.get(id);
   if (ports && ports.size > 0) {
@@ -257,7 +273,13 @@ async function generateSummaryTitle(id) {
   finally { if (a) a.titlePending = false; }
 }
 
+// Check if text is a system/internal message rather than a real user prompt
+const SYSTEM_MSG_RE = /^<(?:command-name|local-command|system-reminder|task-notification|user-prompt-submit-hook|antml:)/;
+function isSystemMessage(text) { return SYSTEM_MSG_RE.test(text.trim()); }
+
 function setPrompt(id, a, text) {
+  // Skip system/internal messages — they're not real user prompts
+  if (isSystemMessage(text)) return;
   a.lastPrompt = text.length > PREVIEW_MAX ? text.slice(0, PREVIEW_MAX) + '\u2026' : text;
   const brief = text.length > PROMPT_BRIEF_MAX ? text.slice(0, PROMPT_BRIEF_MAX) : text;
   a.promptHistory.push(brief);
@@ -358,10 +380,10 @@ function parseLineForTimeline(line) {
           return events.length ? events : null;
         }
         const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-        if (txt) return [{ type: 'prompt', ts, text: txt.length > 200 ? txt.slice(0, 200) + '\u2026' : txt }];
+        if (txt && !isSystemMessage(txt)) return [{ type: 'prompt', ts, text: txt.length > 200 ? txt.slice(0, 200) + '\u2026' : txt }];
       } else if (typeof c === 'string' && c.trim()) {
         const txt = c.trim();
-        return [{ type: 'prompt', ts, text: txt.length > 200 ? txt.slice(0, 200) + '\u2026' : txt }];
+        if (!isSystemMessage(txt)) return [{ type: 'prompt', ts, text: txt.length > 200 ? txt.slice(0, 200) + '\u2026' : txt }];
       }
     }
     if (r.type === 'system' && r.subtype === 'turn_duration') {
@@ -511,11 +533,10 @@ async function extractSessionMeta(filePath, sessionId) {
           if (!cwd && r.cwd) cwd = r.cwd;
           if (r.type === 'user' && !firstPrompt) {
             const c = r.message?.content;
-            if (typeof c === 'string' && c.trim()) firstPrompt = c.trim();
-            else if (Array.isArray(c)) {
-              const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-              if (txt) firstPrompt = txt;
-            }
+            let pTxt = '';
+            if (typeof c === 'string' && c.trim()) pTxt = c.trim();
+            else if (Array.isArray(c)) pTxt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
+            if (pTxt && !isSystemMessage(pTxt)) firstPrompt = pTxt;
           }
           if (r.type === 'assistant' && r.message?.model) modelFam = modelFamily(r.message.model);
           if (r.type === 'assistant' && r.message?.usage) {
@@ -681,7 +702,7 @@ function restoreAgents(state) {
                 let pTxt = '';
                 if (typeof c === 'string' && c.trim()) pTxt = c;
                 else if (Array.isArray(c)) pTxt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-                if (pTxt) {
+                if (pTxt && !isSystemMessage(pTxt)) {
                   agent.lastPrompt = pTxt.length > PREVIEW_MAX ? pTxt.slice(0, PREVIEW_MAX) + '\u2026' : pTxt;
                   if (!agent.title && !agent.customName) agent.title = deriveTitle(pTxt);
                   const brief = pTxt.length > PROMPT_BRIEF_MAX ? pTxt.slice(0, PROMPT_BRIEF_MAX) : pTxt;
@@ -1112,16 +1133,26 @@ function scanForNewJsonlFiles() {
     for (const file of files) {
       if (known.has(file)) continue;
       known.add(file);
-      // New JSONL found — find the agent whose terminal is running and whose old JSONL stopped growing
+      // New JSONL found — find which agent ran /clear
       let targetId = null;
+      const candidates = [];
       for (const id of ids) {
         if (!terminals.has(id)) continue;
         const ag = agents.get(id);
         if (!ag) continue;
-        // Prefer the agent whose old file matches the new session's dir
-        // If only one terminal is running, that's the one that ran /clear
-        targetId = id;
-        break;
+        candidates.push(id);
+      }
+      if (candidates.length === 1) {
+        targetId = candidates[0];
+      } else if (candidates.length > 1) {
+        // Multiple running agents — prefer the one whose old JSONL stopped growing
+        for (const id of candidates) {
+          const ag = agents.get(id);
+          try {
+            const st = fs.statSync(ag.jsonlFile);
+            if (st.size <= ag.fileOffset) { targetId = id; break; } // old file hasn't grown = this agent ran /clear
+          } catch { targetId = id; break; } // old file gone = this agent
+        }
       }
       if (targetId !== null) {
         console.log(`[Overlord] New JSONL detected: ${path.basename(file)}, reassigning agent ${targetId}`);
@@ -1293,7 +1324,7 @@ function resumeSessionAgent(sid, rcwd) {
             let p = '';
             if (typeof c === 'string' && c.trim()) p = c;
             else if (Array.isArray(c)) p = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-            if (p) {
+            if (p && !isSystemMessage(p)) {
               ra.lastPrompt = p.length > PREVIEW_MAX ? p.slice(0, PREVIEW_MAX) + '\u2026' : p;
               if (!ra.title) ra.title = deriveTitle(p);
               const brief = p.length > PROMPT_BRIEF_MAX ? p.slice(0, PROMPT_BRIEF_MAX) : p;
@@ -1645,20 +1676,7 @@ ipcMain.on('cmd', (_e, msg) => {
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
-      try {
-        if (process.platform === 'win32') {
-          // Find PID listening on the port and kill it
-          const out = execSync(`netstat -ano | findstr LISTENING | findstr :${port}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-          const pids = new Set();
-          for (const line of out.split('\n')) {
-            const m = line.trim().match(/:(\d+)\s.*LISTENING\s+(\d+)/);
-            if (m && parseInt(m[1]) === port) pids.add(parseInt(m[2]));
-          }
-          for (const pid of pids) { try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' }); } catch {} }
-        } else {
-          execSync(`lsof -ti tcp:${port} | xargs kill -9`, { stdio: 'ignore' });
-        }
-      } catch {}
+      killPortProcess(port);
       // Remove from all agents' server maps and notify renderer
       for (const [id, ports] of serverPorts) {
         if (ports.has(port)) {
@@ -1667,6 +1685,13 @@ ipcMain.on('cmd', (_e, msg) => {
           send({ type: 'serverRemoved', id, port });
         }
       }
+      break;
+    }
+    case 'restartServer': {
+      const port = msg.port;
+      if (typeof port !== 'number' || port < 1024 || port > 65535) break;
+      killPortProcess(port);
+      // Keep the badge — the dev server watcher should auto-restart it
       break;
     }
     case 'openFolder': { const p = msg.path; if (typeof p === 'string' && fs.existsSync(p)) shell.openPath(p).catch(() => {}); break; }
