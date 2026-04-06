@@ -3,8 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const http = require('http');
 const { spawn, exec, execSync } = require('child_process');
 const pty = require('node-pty');
+const QRCode = require('qrcode');
 
 // ── Constants ──────────────────────────────────────────
 const JSONL_POLL_MS = 1000;
@@ -73,10 +75,13 @@ const remoteControlAgents = new Set(); // agentIds with remote control active
 const teams = new Map(); // teamName -> { name, leadAgentId, leadSessionId, members[], tasks[] }
 const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
+const pendingClearAgents = new Set(); // agentIds that recently ran /clear — used to correctly assign new JSONL files
 let nextId = 1;
 
+const RC_BROADCAST_TYPES = new Set(['status', 'agentCreated', 'agentClosed', 'title', 'preview', 'prompt', 'remoteControl']);
 function send(data) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
+  if (rcClients && rcClients.size > 0 && RC_BROADCAST_TYPES.has(data.type)) rcBroadcast();
 }
 function logToRenderer(...args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
@@ -87,7 +92,7 @@ function logToRenderer(...args) {
 function sendFullState() {
   send({ type: 'settings', settings });
   for (const [id, a] of agents) {
-    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, createdAt: a.createdAt, agentName: a.agentName });
+    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
@@ -243,6 +248,131 @@ function detectRemoteControl(id, toolName) {
     send({ type: 'remoteControl', id, active: true });
     console.log(`[Overlord] Remote control detected for agent ${id} (tool: ${toolName})`);
   }
+}
+
+// ── Remote control HTTP server ───────────────────────
+let rcServer = null;
+let rcPort = null;
+let rcToken = null;
+const rcClients = new Set(); // SSE response objects
+
+function getLocalIP() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) return net.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
+function rcAgentState() {
+  const list = [];
+  for (const [id, a] of agents) {
+    list.push({
+      id, cwd: a.cwd, title: a.title || '', agentName: a.agentName || '',
+      status: a.permSent ? 'permission' : a.isWaiting ? 'waiting' : 'active',
+      preview: a.lastText || '', prompt: a.lastPrompt || '',
+      remoteControl: remoteControlAgents.has(id),
+      cost: null, // computed client-side
+    });
+  }
+  return list;
+}
+
+function rcBroadcast() {
+  if (rcClients.size === 0) return;
+  const data = JSON.stringify({ type: 'state', agents: rcAgentState() });
+  for (const res of rcClients) {
+    try { res.write(`data: ${data}\n\n`); } catch { rcClients.delete(res); }
+  }
+}
+
+function startRemoteServer() {
+  if (rcServer) return Promise.resolve({ port: rcPort, token: rcToken });
+  rcToken = crypto.randomBytes(16).toString('hex');
+  return new Promise((resolve, reject) => {
+    const srv = http.createServer((req, res) => {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts[0] !== rcToken) { res.writeHead(403); res.end('Forbidden'); return; }
+      const route = parts[1] || '';
+      if (req.method === 'GET' && route === '') {
+        // Serve remote control page
+        const html = fs.readFileSync(path.join(__dirname, 'remote.html'), 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+      } else if (req.method === 'GET' && route === 'events') {
+        // SSE endpoint
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*',
+        });
+        res.write(`data: ${JSON.stringify({ type: 'state', agents: rcAgentState() })}\n\n`);
+        rcClients.add(res);
+        req.on('close', () => rcClients.delete(res));
+      } else if (req.method === 'POST' && route === 'input') {
+        // Send input to an agent
+        let body = '';
+        req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const { id, text } = JSON.parse(body);
+            const t = terminals.get(id);
+            if (t && typeof text === 'string') {
+              t.write(text + '\r');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end('{"ok":true}');
+            } else {
+              res.writeHead(404); res.end('{"error":"agent not found"}');
+            }
+          } catch { res.writeHead(400); res.end('{"error":"bad request"}'); }
+        });
+      } else if (req.method === 'POST' && route === 'approve') {
+        // Send 'y' to approve permission
+        let body = '';
+        req.on('data', c => { body += c; });
+        req.on('end', () => {
+          try {
+            const { id } = JSON.parse(body);
+            const t = terminals.get(id);
+            if (t) { t.write('y\r'); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); }
+            else { res.writeHead(404); res.end('{"error":"agent not found"}'); }
+          } catch { res.writeHead(400); res.end('{"error":"bad request"}'); }
+        });
+      } else if (req.method === 'POST' && route === 'reject') {
+        let body = '';
+        req.on('data', c => { body += c; });
+        req.on('end', () => {
+          try {
+            const { id } = JSON.parse(body);
+            const t = terminals.get(id);
+            if (t) { t.write('n\r'); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); }
+            else { res.writeHead(404); res.end('{"error":"agent not found"}'); }
+          } catch { res.writeHead(400); res.end('{"error":"bad request"}'); }
+        });
+      } else {
+        res.writeHead(404); res.end('Not found');
+      }
+    });
+    srv.listen(0, '0.0.0.0', () => {
+      rcPort = srv.address().port;
+      rcServer = srv;
+      console.log(`[Overlord] Remote control server on port ${rcPort}`);
+      // Broadcast state every 2 seconds
+      setInterval(() => rcBroadcast(), 2000);
+      resolve({ port: rcPort, token: rcToken });
+    });
+    srv.on('error', reject);
+  });
+}
+
+async function generateRemoteControlUrl() {
+  const { port, token } = await startRemoteServer();
+  const ip = getLocalIP();
+  const url = `http://${ip}:${port}/${token}/`;
+  const qrSvg = await QRCode.toString(url, { type: 'svg', margin: 2, width: 256, color: { dark: '#cdd6f4', light: '#1e1e2e' } });
+  return { url, qrSvg };
 }
 
 async function generateSummaryTitle(id) {
@@ -651,7 +781,22 @@ function restoreAgents(state) {
     if (!agent.agentName) agent.agentName = pickAgentName();
     restoredNames.add(agent.agentName);
     agentEntries.push({ id, entry });
+    // Register JSONL immediately (Phase 1) to prevent scanForNewJsonlFiles from reassigning stale files
+    registerKnownJsonl(claudeDir(cwd), jsonlFile);
     console.log(`[Overlord] Restored agent ${id}: session=${sessionId} cwd=${cwd}`);
+  }
+
+  // Pre-register ALL existing JSONL files in each project dir to prevent stale files
+  // from being mistakenly treated as "new" by scanForNewJsonlFiles after restart
+  const seenDirs = new Set();
+  for (const { entry } of agentEntries) {
+    const dir = claudeDir(entry.cwd);
+    if (seenDirs.has(dir)) continue;
+    seenDirs.add(dir);
+    try {
+      const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => path.join(dir, f));
+      for (const file of files) registerKnownJsonl(dir, file);
+    } catch {}
   }
 
   // ── Phase 2: Async — kill orphans, parse JSONL, auto-resume each agent without blocking UI ──
@@ -939,6 +1084,7 @@ function closeAgent(id) {
   lastNotifyTimes.delete(id);
   clearServers(id);
   remoteControlAgents.delete(id);
+  pendingClearAgents.delete(id);
   inputBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   agents.delete(id);
@@ -1149,13 +1295,19 @@ function scanForNewJsonlFiles() {
       if (candidates.length === 1) {
         targetId = candidates[0];
       } else if (candidates.length > 1) {
-        // Multiple running agents — prefer the one whose old JSONL stopped growing
+        // Primary: use pendingClearAgents to identify which agent ran /clear
         for (const id of candidates) {
-          const ag = agents.get(id);
-          try {
-            const st = fs.statSync(ag.jsonlFile);
-            if (st.size <= ag.fileOffset) { targetId = id; break; } // old file hasn't grown = this agent ran /clear
-          } catch { targetId = id; break; } // old file gone = this agent
+          if (pendingClearAgents.has(id)) { targetId = id; pendingClearAgents.delete(id); break; }
+        }
+        // Fallback: prefer the agent whose old JSONL stopped growing
+        if (targetId === null) {
+          for (const id of candidates) {
+            const ag = agents.get(id);
+            try {
+              const st = fs.statSync(ag.jsonlFile);
+              if (st.size <= ag.fileOffset) { targetId = id; break; }
+            } catch { targetId = id; break; }
+          }
         }
       }
       if (targetId !== null) {
@@ -1182,6 +1334,17 @@ function reassignAgentToFile(id, newFilePath) {
   const oldModel = a.stats.modelFamily;
   a.stats = { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: oldModel };
   send({ type: 'stats', id, stats: a.stats });
+  // Reset title, prompt, preview for new session (preserve custom names)
+  if (!a.customName) {
+    a.title = '';
+    send({ type: 'title', id, text: '' });
+  }
+  a.lastPrompt = '';
+  a.lastText = '';
+  a.promptHistory = [];
+  send({ type: 'prompt', id, text: '' });
+  send({ type: 'preview', id, text: '' });
+  send({ type: 'promptHistory', id, prompts: [] });
   // Switch to new file
   const newSessionId = path.basename(newFilePath, '.jsonl');
   a.sessionId = newSessionId;
@@ -1432,8 +1595,11 @@ function parseAndSendUsage(raw) {
     }
   }
   if (Object.keys(usage).length > 0) {
+    usage.fetchedAt = Date.now();
     lastUsage = usage;
     send({ type: 'usage', usage });
+  } else {
+    console.log('[Overlord] Usage parse found no data. Raw length:', raw.length);
   }
 }
 
@@ -1584,6 +1750,8 @@ function handleTermInput(id, data) {
     const lastCR = full.lastIndexOf('\r');
     const toSend = full.slice(0, lastCR); // everything up to last Enter
     const remainder = full.slice(lastCR + 1);
+    // Detect /clear command in paste
+    if (/^\s*\/clear\s*$/.test(toSend)) pendingClearAgents.add(id);
     const mentions = findMentions(toSend);
     if (mentions.length > 0) {
       const ctx = buildMentionContext(mentions);
@@ -1599,6 +1767,8 @@ function handleTermInput(id, data) {
 
   // Single-char handling
   if (data === '\r') {
+    // Detect /clear command — mark agent as expecting a new JSONL file
+    if (/^\s*\/clear\s*$/.test(buf)) pendingClearAgents.add(id);
     // Enter pressed — check buffer for mentions
     const mentions = findMentions(buf);
     if (mentions.length > 0) {
@@ -1650,16 +1820,17 @@ ipcMain.on('cmd', (_e, msg) => {
       const a = agents.get(msg.id);
       if (a) {
         const c = a.cwd;
-        const savedTitle = a.customName ? a.title : '';
+        const savedTitle = a.title || '';
         const savedCustomName = a.customName;
         const savedAgentName = a.agentName;
         closeAgent(msg.id);
         const newId = createAgent(c);
         const na = agents.get(newId);
         if (na && savedAgentName) { na.agentName = savedAgentName; send({ type: 'agentNameChanged', id: newId, agentName: savedAgentName }); }
-        if (savedCustomName && savedTitle) {
-          if (na) { na.title = savedTitle; na.customName = true; }
-          send({ type: 'title', id: newId, text: savedTitle, customName: true });
+        if (savedTitle && na) {
+          na.title = savedTitle;
+          na.customName = savedCustomName;
+          send({ type: 'title', id: newId, text: savedTitle, customName: savedCustomName });
           saveState();
         }
         send({ type: 'focusFromNotification', id: newId });
@@ -1669,6 +1840,12 @@ ipcMain.on('cmd', (_e, msg) => {
     case 'focusAgent': spawnTerminal(msg.id); send({ type: 'focused', id: msg.id }); break;
     case 'termInput': handleTermInput(msg.id, msg.data); break;
     case 'enableRemoteControl': { const t = terminals.get(msg.id); if (t) t.write('/remote-control\r'); break; }
+    case 'getRemoteControlQR': {
+      generateRemoteControlUrl().then(({ url, qrSvg }) => {
+        send({ type: 'remoteControlQR', url, qrSvg });
+      }).catch(e => console.log('[Overlord] Failed to generate RC URL:', e.message));
+      break;
+    }
     case 'stopLoop': { const a = agents.get(msg.id); if (a) { a.cronCount = 0; send({ type: 'looping', id: msg.id, active: false, count: 0 }); } const t = terminals.get(msg.id); if (t) t.write('\x03'); break; }
     case 'compactAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a && t && a.isWaiting) { a.compacting = true; send({ type: 'compacting', id: msg.id, active: true }); t.write('/compact\r'); } break; }
     case 'termResize': { const t = terminals.get(msg.id); if (t) try { t.resize(msg.cols, msg.rows); } catch {} break; }
@@ -1736,6 +1913,40 @@ ipcMain.on('cmd', (_e, msg) => {
       const base64 = thumb.toPNG().toString('base64');
       handleTermInput(msg.id, insertPath + ' ');
       send({ type: 'imagePasted', id: msg.id, path: insertPath, base64 });
+      break;
+    }
+    case 'pasteFiles': {
+      // Read file paths from clipboard (Windows: FileNameW, macOS/Linux: text/uri-list)
+      let filePaths = [];
+      if (process.platform === 'win32') {
+        try {
+          const buf = clipboard.readBuffer('FileNameW');
+          if (buf && buf.length > 0) {
+            // FileNameW is null-terminated UTF-16LE string(s), double-null terminated
+            const raw = buf.toString('utf16le');
+            filePaths = raw.split('\0').filter(p => p.length > 0);
+          }
+        } catch (_) {}
+      } else {
+        // macOS/Linux: clipboard may contain file URIs
+        const text = clipboard.readText();
+        if (text) {
+          filePaths = text.split('\n')
+            .map(l => l.trim())
+            .filter(l => l.startsWith('file://'))
+            .map(l => decodeURIComponent(l.replace('file://', '')));
+        }
+      }
+      // Filter to only actual files (not directories)
+      filePaths = filePaths.filter(p => {
+        try { return fs.statSync(p).isFile(); } catch (_) { return false; }
+      });
+      if (filePaths.length === 0) break;
+      const text = filePaths
+        .map(p => p.replace(/\\/g, '/'))
+        .map(p => p.includes(' ') ? `"${p}"` : p)
+        .join(' ');
+      handleTermInput(msg.id, text);
       break;
     }
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;
@@ -1835,6 +2046,10 @@ app.whenReady().then(() => {
   });
 });
 app.on('before-quit', () => {
+  // Close remote control server
+  if (rcServer) { try { rcServer.close(); } catch {} }
+  for (const res of rcClients) { try { res.end(); } catch {} }
+  rcClients.clear();
   // Spawn detached Claude processes for active agents so they survive the app restart.
   // The detached process continues the current turn headlessly; on restore the app
   // kills it via saved PID before reconnecting.

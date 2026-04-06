@@ -348,6 +348,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #summary-bar span + span::before { content:''; margin-right:0; }
 #summary-bar span { padding:0 6px; border-right:1px solid var(--border); line-height:24px; }
 #summary-bar span:last-child { border-right:none; }
+#summary-bar .pace-ok { color:var(--green); }
+#summary-bar .pace-warn { color:var(--yellow); }
+#summary-bar .pace-over { color:var(--red); }
 .model-tag { font-size:9px; padding:1px 5px; letter-spacing:.4px; text-transform:uppercase;
   border:1px solid var(--border); border-radius:3px; color:var(--dim); margin-left:3px; vertical-align:1px; }
 .model-tag.opus { color:var(--purple); border-color:rgba(203,166,247,.4); }
@@ -677,6 +680,36 @@ button:focus-visible { outline-offset:0; }
 .confirm-actions .btn-danger:hover { background:rgba(243,139,168,.2); }
 .confirm-actions .btn-danger:active { background:rgba(243,139,168,.25); }
 
+/* ── QR Remote Control overlay ── */
+#qr-overlay {
+  display:none; position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:999;
+  align-items:center; justify-content:center; transition:opacity .15s;
+}
+#qr-overlay.open { display:flex; }
+.qr-modal {
+  background:var(--editor-bg); border:1px solid var(--border-hi);
+  box-shadow:0 8px 32px rgba(0,0,0,.4); padding:24px 28px; min-width:320px; max-width:90vw; border-radius:10px;
+  text-align:center;
+}
+.qr-modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+.qr-modal-title { font-size:15px; color:var(--text); font-weight:600; letter-spacing:.3px; }
+.qr-modal-close {
+  font-family:inherit; background:none; border:none;
+  color:var(--dim); cursor:pointer; font-size:15px; padding:4px 6px; border-radius:4px;
+  transition:color .12s, background .12s;
+}
+.qr-modal-close:hover { color:var(--text); background:rgba(205,214,244,.08); }
+.qr-svg { margin:12px auto; }
+.qr-svg svg { display:block; margin:0 auto; border-radius:6px; }
+.qr-url {
+  font-size:11px; color:var(--dim); background:var(--bg3); border:1px solid var(--border);
+  padding:8px 12px; border-radius:6px; margin-top:12px; word-break:break-all;
+  font-family:'Cascadia Mono','Cascadia Code',Consolas,monospace; cursor:pointer;
+  transition:border-color .12s;
+}
+.qr-url:hover { border-color:var(--accent); color:var(--accent); }
+.qr-hint { font-size:11px; color:var(--dim); margin-top:10px; letter-spacing:.2px; }
+
 /* Toast */
 .toast {
   position:fixed; bottom:36px; left:50%; transform:translateX(-50%) translateY(12px);
@@ -697,6 +730,7 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" onclick="openHistory()" title="Session history (Ctrl+H)">&#x23F3;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
     <button id="layoutBtn" class="hdr-btn" onclick="toggleLayout()" title="Toggle terminal position">&#x25A7;</button>
+    <button class="hdr-btn" onclick="showRemoteQR()" title="Remote Control QR" style="font-size:10px;letter-spacing:.3px;padding:3px 7px;border:1px solid var(--border);border-radius:3px;">RC</button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Reload app">&#x21BB;</button>
     <button id="readyBtn" class="hdr-btn" onclick="toggleReadyFilter()" title="Show only ready agents">&#x2713;</button>
@@ -836,6 +870,17 @@ button:focus-visible { outline-offset:0; }
         <button onclick="confirmResolve(false)">Cancel</button>
         <button class="btn-danger" id="confirm-ok" onclick="confirmResolve(true)"></button>
       </div>
+    </div>
+  </div>
+  <div id="qr-overlay" onclick="closeQR()">
+    <div class="qr-modal" onclick="event.stopPropagation()">
+      <div class="qr-modal-header">
+        <span class="qr-modal-title">Remote Control</span>
+        <button class="qr-modal-close" onclick="closeQR()" aria-label="Close">&times;</button>
+      </div>
+      <div class="qr-svg" id="qr-svg"></div>
+      <div class="qr-url" id="qr-url" onclick="copyQRUrl()" title="Click to copy"></div>
+      <div class="qr-hint">Scan with your phone (same Wi-Fi network)</div>
     </div>
   </div>
 </div>
@@ -1024,13 +1069,7 @@ function confirmResolve(value) {
   if (_confirmCb) { const cb = _confirmCb; _confirmCb = null; cb(value); }
 }
 
-async function closeAgent(id, skipConfirm) {
-  if (!skipConfirm) {
-    const a = agents.get(id);
-    if (a && agentStatus(a) === 'active') {
-      if (!await showConfirm(`Agent "${a.title || 'New agent'}" is actively working. Close it?`, 'Close')) return;
-    }
-  }
+function closeAgent(id) {
   api.send({ type: 'closeAgent', id });
 }
 function focusNextPerm() {
@@ -1050,7 +1089,7 @@ function focusNextCtxDanger() {
 }
 function closeDoneInGroup(cwd) {
   for (const [id, a] of agents) {
-    if (a.cwd === cwd && (agentStatus(a) === 'waiting' || agentStatus(a) === 'idle')) closeAgent(id, true);
+    if (a.cwd === cwd && (agentStatus(a) === 'waiting' || agentStatus(a) === 'idle')) closeAgent(id);
   }
 }
 async function restartAgent(id) {
@@ -1161,6 +1200,19 @@ function showServerMenu(e, port, url) {
 }
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
 function enableRC(id) { api.send({ type: 'enableRemoteControl', id }); }
+function showRemoteQR() { api.send({ type: 'getRemoteControlQR' }); }
+let _rcUrl = '';
+function openQR(url, svg) {
+  _rcUrl = url;
+  document.getElementById('qr-svg').innerHTML = svg;
+  document.getElementById('qr-url').textContent = url;
+  document.getElementById('qr-overlay').classList.add('open');
+}
+function closeQR() { document.getElementById('qr-overlay').classList.remove('open'); }
+function copyQRUrl() {
+  if (!_rcUrl) return;
+  navigator.clipboard.writeText(_rcUrl).then(() => showToast('URL copied!')).catch(() => {});
+}
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
 function compactAgent(id) { api.send({ type: 'compactAgent', id }); }
 function focusTeamMember(teamName, memberName, isLead) { api.send({ type: 'focusTeamMember', teamName, memberName, isLead }); }
@@ -1421,39 +1473,35 @@ function render() {
     ctxWarn.classList.remove('show');
   }
 
-  // Summary bar
+  // Summary bar — always visible, shows usage pace when available
   const bar = document.getElementById('summary-bar');
-  if (agents.size > 0) {
-    let totTok = 0, totTurns = 0, totDur = 0, models = {};
-    for (const [, a] of agents) {
-      if (a.stats) {
-        totTok += (a.stats.inTok || 0) + (a.stats.outTok || 0);
-        totTurns += a.stats.turns || 0;
-        totDur += a.stats.durMs || 0;
-        const mf = a.stats.modelFamily || 'sonnet';
-        models[mf] = (models[mf] || 0) + 1;
-      }
-    }
-    const modelTags = Object.entries(models).map(([m, c]) => `<span class="model-tag ${m}">${c} ${m}</span>`).join('');
-    const usagePct = planBudget > 0 ? Math.min(100, Math.round((totalCost / planBudget) * 100)) : 0;
-    const usageCls = usagePct >= 90 ? 'danger' : usagePct >= 70 ? 'warn' : '';
-    let hourlyHtml = '';
-    if (currentUsage && currentUsage.hourly != null) {
-      const hCls = currentUsage.hourly >= 90 ? 'danger' : currentUsage.hourly >= 70 ? 'warn' : '';
-      hourlyHtml = `<span class="${hCls}" onclick="refreshUsage()" style="cursor:pointer" title="Hourly rate limit usage (click to refresh)">Hourly: ${currentUsage.hourly.toFixed(1)}%</span>`;
-    }
-    bar.innerHTML = `<span>${agents.size} agent${agents.size !== 1 ? 's' : ''}</span>`
-      + (totalCost > 0.001 ? `<span class="${usageCls}">${fmtCost(totalCost)} / $${planBudget} (${usagePct}%)</span>` : '')
-      + (totTok > 0 ? `<span>${fmtTok(totTok)} tok</span>` : '')
-      + (totTurns ? `<span>${totTurns} turns</span>` : '')
-      + (totDur ? `<span>${fmtDur(totDur)}</span>` : '')
-      + hourlyHtml
-      + (modelTags ? `<span>${modelTags}</span>` : '');
-    bar.classList.add('show');
+  const agentCount = agents.size;
+  const activeCount = [...agents.values()].filter(a => agentStatus(a) === 'active').length;
+  let barHtml = `<span>${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? ` · ${activeCount} active` : ''}</span>`;
+  if (currentUsage && currentUsage.weekly != null) {
+    const pct = currentUsage.weekly;
+    const now = Date.now();
+    // Compute start of current ISO week (Monday 00:00 UTC)
+    const d = new Date(now);
+    const day = d.getUTCDay(); // 0=Sun
+    const diff = day === 0 ? 6 : day - 1; // days since Monday
+    const weekStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diff));
+    const periodHours = 168;
+    const elapsedMs = now - weekStart.getTime();
+    const elapsedHours = Math.max(elapsedMs / 3600000, 0.5); // floor at 0.5h to avoid div-by-near-zero
+    const ratePerHour = pct / elapsedHours;
+    const ratePerDay = ratePerHour * 24;
+    const projected = ratePerHour * periodHours;
+    let status, cls;
+    if (projected <= 100) { status = 'On track'; cls = 'pace-ok'; }
+    else if (projected <= 110) { status = 'Slightly over'; cls = 'pace-warn'; }
+    else { status = 'Over limit'; cls = 'pace-over'; }
+    barHtml += `<span class="${cls}" onclick="refreshUsage()" style="cursor:pointer" title="Weekly: ${pct.toFixed(1)}% used | ${ratePerDay.toFixed(1)}%/day | Projected end-of-week: ${projected.toFixed(0)}% | ${status} (click to refresh)">${pct.toFixed(1)}% · ${ratePerDay.toFixed(1)}%/day · ${projected.toFixed(0)}% → ${status}</span>`;
   } else {
-    bar.classList.remove('show');
-    bar.innerHTML = '';
+    barHtml += `<span onclick="refreshUsage()" style="cursor:pointer" title="Click to fetch usage">Usage: --</span>`;
   }
+  bar.innerHTML = barHtml;
+  bar.classList.add('show');
 }
 
 // ── Terminal panel (real xterm.js) ──────────────────────
@@ -1545,9 +1593,10 @@ function openTerm(id) {
   const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
   const namePrefix = a.agentName ? a.agentName + ' \u2014 ' : '';
   document.getElementById('term-title').textContent = namePrefix + title + ' \u2014 ' + pathLabel(a.cwd || '');
-  updatePromptNav();
   if (!xterms.has(id)) createXterm(id);
   if (termTab === 'terminal') showXterm(id);
+  // Update prompt nav after xterm exists and buffer has time to populate
+  setTimeout(() => updatePromptNav(), 150);
   // Load timeline if tab is active or agent changed
   if (timelineAgentId !== id) loadTimeline(id);
   render();
@@ -1600,51 +1649,54 @@ document.getElementById('term-search-input').addEventListener('keydown', (e) => 
   else if (e.key === 'Enter') { e.preventDefault(); termSearchNext(); }
 });
 
+// Debounced prompt nav update — called when terminal data arrives
+let _promptNavTimer = null;
+function schedulePromptNavUpdate() {
+  if (_promptNavTimer) return;
+  _promptNavTimer = setTimeout(() => { _promptNavTimer = null; updatePromptNav(); }, 300);
+}
+
+// Scan terminal buffer for prompt marker lines (❯)
+function getPromptLines() {
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  if (!x) return [];
+  const buf = x.terminal.buffer.active;
+  const lines = [];
+  for (let i = 0; i < buf.length; i++) {
+    const line = buf.getLine(i);
+    if (!line) continue;
+    const text = line.translateToString(true);
+    if (/^\s*❯/.test(text)) lines.push(i);
+  }
+  return lines;
+}
+
 function updatePromptNav() {
   const nav = document.getElementById('prompt-nav');
   const a = selectedId != null ? agents.get(selectedId) : null;
-  if (!a || !a.prompts || a.prompts.length === 0) { nav.style.display = 'none'; return; }
+  const promptLines = getPromptLines();
+  if (!a || promptLines.length === 0) { nav.style.display = 'none'; return; }
   nav.style.display = 'flex';
-  // +1 total for the "current prompt" virtual entry at the end
-  const total = a.prompts.length + 1;
-  const label = a.promptNavIdx >= a.prompts.length ? '\u25C7' : String(a.promptNavIdx + 1);
+  const total = promptLines.length + 1; // +1 for "current/bottom" virtual entry
+  const label = a.promptNavIdx >= promptLines.length ? '\u25C7' : String(a.promptNavIdx + 1);
   document.getElementById('prompt-counter').textContent = label + '/' + total;
 }
 
 function jumpPrompt(dir) {
   const a = selectedId != null ? agents.get(selectedId) : null;
-  if (!a || !a.prompts || a.prompts.length === 0) return;
+  if (!a) return;
+  const promptLines = getPromptLines();
+  if (promptLines.length === 0) return;
+  // Initialize nav index if unset — start past the end (= bottom)
+  if (a.promptNavIdx < 0 || a.promptNavIdx > promptLines.length) a.promptNavIdx = promptLines.length;
   const newIdx = a.promptNavIdx + dir;
-  // Allow one extra index past the end for "current prompt" (scroll to bottom)
-  if (newIdx < 0 || newIdx > a.prompts.length) return;
+  if (newIdx < 0 || newIdx > promptLines.length) return;
   a.promptNavIdx = newIdx;
   updatePromptNav();
   const x = xterms.get(selectedId);
   if (!x) return;
-  // If past the last prompt, scroll to bottom (current prompt area)
-  if (newIdx >= a.prompts.length) {
-    x.terminal.scrollToBottom();
-    return;
-  }
-  const promptText = a.prompts[newIdx].trim().slice(0, 60);
-  if (!promptText) return;
-  // Search xterm buffer for this prompt text
-  const buf = x.terminal.buffer.active;
-  const matches = [];
-  for (let i = 0; i < buf.length; i++) {
-    const line = buf.getLine(i);
-    if (line && line.translateToString(true).includes(promptText)) matches.push(i);
-  }
-  // Find the Nth occurrence (prompts may repeat, pick the one matching our index)
-  // Count how many times this same prompt appears before this index
-  let occurrenceTarget = 0;
-  for (let i = 0; i < newIdx; i++) {
-    if (a.prompts[i].trim().slice(0, 60) === promptText) occurrenceTarget++;
-  }
-  const targetLine = matches[Math.min(occurrenceTarget, matches.length - 1)];
-  if (targetLine != null) {
-    x.terminal.scrollToLine(Math.max(0, targetLine - 1));
-  }
+  if (newIdx >= promptLines.length) { x.terminal.scrollToBottom(); return; }
+  x.terminal.scrollToLine(Math.max(0, promptLines[newIdx] - 1));
 }
 
 // ── Timeline ───────────────────────────────────────────
@@ -2030,6 +2082,8 @@ api.on((msg) => {
       x = createXterm(msg.id);
     }
     x.terminal.write(msg.data);
+    // Update prompt nav when new data arrives for the selected agent
+    if (msg.id === selectedId) schedulePromptNavUpdate();
     return;
   }
   if (msg.type === 'termExit') {
@@ -2044,7 +2098,7 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false, compacting: false, agentName: msg.agentName || '' });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false, compacting: false, agentName: msg.agentName || '' });
       if (msg.cwd) knownProjects.add(msg.cwd);
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
@@ -2084,7 +2138,7 @@ function handleAgentMsg(msg) {
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = msg.prompts.length - 1; if (selectedId === msg.id) updatePromptNav(); } break; }
-    case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && !msg.customName) break; a.title = msg.text; if (msg.customName) a.customName = true; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
+    case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
     case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
@@ -2100,6 +2154,7 @@ function handleAgentMsg(msg) {
     case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
     case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); } break; }
     case 'remoteControl': { const a = agents.get(msg.id); if (a) { a.remoteControl = msg.active; scheduleRender(); } break; }
+    case 'remoteControlQR': { openQR(msg.url, msg.qrSvg); break; }
     case 'looping': { const a = agents.get(msg.id); if (a) { a.looping = msg.active; scheduleRender(); } break; }
     case 'compacting': { const a = agents.get(msg.id); if (a) { a.compacting = msg.active; scheduleRender(); } break; }
     case 'teamDetected': {
@@ -2129,6 +2184,8 @@ function handleUsage(usage) {
   scheduleRender();
 }
 function refreshUsage() { api.send({ type: 'fetchUsage' }); }
+// Re-render pace every 60s so projections stay current even between usage fetches
+setInterval(() => { if (currentUsage && currentUsage.weekly != null) scheduleRender(); }, 60000);
 function usageCls(pct) { return pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : ''; }
 function renderUsageBadges() {
   const el = document.getElementById('usageBadges');
@@ -2245,7 +2302,7 @@ document.addEventListener('keydown', (e) => {
       // Close all waiting/idle agents across all groups
       for (const [id, a] of agents) {
         const st = agentStatus(a);
-        if (st === 'waiting' || st === 'idle') closeAgent(id, true);
+        if (st === 'waiting' || st === 'idle') closeAgent(id);
       }
     } else if (selectedId && agents.has(selectedId)) {
       closeAgent(selectedId);
@@ -2359,6 +2416,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
+    const qrOv = document.getElementById('qr-overlay');
+    if (qrOv.classList.contains('open')) { closeQR(); return; }
     const cfm = document.getElementById('confirm-overlay');
     if (cfm.classList.contains('open')) { confirmResolve(false); return; }
     const searchOv = document.getElementById('search-overlay');
@@ -2379,19 +2438,65 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── Clipboard image paste ──────────────────────────────
+// Drag-and-drop files anywhere in the window → insert file paths into active terminal
+document.addEventListener('dragover', (e) => {
+  if (!selectedId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (!selectedId) return;
+  const files = e.dataTransfer.files;
+  if (!files || files.length === 0) return;
+  const paths = [];
+  for (const f of files) {
+    if (f.path) paths.push(f.path);
+  }
+  if (paths.length === 0) return;
+  const text = paths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+  api.send({ type: 'termInput', id: selectedId, data: text });
+  const x = xterms.get(selectedId);
+  if (x) x.terminal.focus();
+});
+
 document.addEventListener('paste', (e) => {
   if (!selectedId) return;
   if (!document.getElementById('term').classList.contains('open')) return;
   if (termTab !== 'terminal') return;
   const items = e.clipboardData?.items;
   if (!items) return;
+  let hasImageFile = false;
+  let hasNonImageFile = false;
   for (const item of items) {
-    if (item.kind === 'file' && item.type.startsWith('image/')) {
-      e.preventDefault();
-      e.stopPropagation();
-      api.send({ type: 'pasteImage', id: selectedId });
-      return;
+    if (item.kind === 'file') {
+      if (item.type.startsWith('image/')) hasImageFile = true;
+      else hasNonImageFile = true;
     }
+  }
+  // Check if clipboard has files (copied from Explorer/Finder)
+  // Files copied from OS file manager appear as file items
+  if (hasImageFile) {
+    e.preventDefault();
+    e.stopPropagation();
+    api.send({ type: 'pasteImage', id: selectedId });
+    return;
+  }
+  if (hasNonImageFile || (e.clipboardData?.files && e.clipboardData.files.length > 0)) {
+    e.preventDefault();
+    e.stopPropagation();
+    api.send({ type: 'pasteFiles', id: selectedId });
+    return;
+  }
+  // On Windows, files copied from Explorer may not show as clipboardData items
+  // but the clipboard buffer contains FileNameW. If there's no text content, try pasteFiles.
+  const text = e.clipboardData?.getData('text/plain');
+  if (!text || text.length === 0) {
+    // No text in clipboard — might be a file copy; let main process check
+    e.preventDefault();
+    e.stopPropagation();
+    api.send({ type: 'pasteFiles', id: selectedId });
+    return;
   }
 }, true);
 

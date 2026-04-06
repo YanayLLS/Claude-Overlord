@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@xterm/addon-web-links": "^0.12.0",
-    "node-pty": "^1.0.0"
+    "node-pty": "^1.0.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -35,6 +36,7 @@
       "main.js",
       "preload.js",
       "index.html",
+      "remote.html",
       "xterm-bundle.js",
       "xterm.css"
     ],
