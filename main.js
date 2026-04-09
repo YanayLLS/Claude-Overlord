@@ -7,7 +7,7 @@ const http = require('http');
 const https = require('https');
 const { spawn, exec, execSync } = require('child_process');
 const pty = require('node-pty');
-const QRCode = require('qrcode');
+
 
 // ── Constants ──────────────────────────────────────────
 const JSONL_POLL_MS = 1000;
@@ -73,17 +73,14 @@ const polls = new Map();
 const waitTimers = new Map();
 const permTimers = new Map();
 const serverPorts = new Map(); // agentId -> Map(port -> url)
-const remoteControlAgents = new Set(); // agentIds with remote control active
 const teams = new Map(); // teamName -> { name, leadAgentId, leadSessionId, members[], tasks[] }
 const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
 const pendingClearAgents = new Set(); // agentIds that recently ran /clear — used to correctly assign new JSONL files
 let nextId = 1;
 
-const RC_BROADCAST_TYPES = new Set(['status', 'agentCreated', 'agentClosed', 'title', 'preview', 'prompt', 'remoteControl']);
 function send(data) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
-  if (rcClients && rcClients.size > 0 && RC_BROADCAST_TYPES.has(data.type)) rcBroadcast();
 }
 function logToRenderer(...args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
@@ -110,7 +107,6 @@ function sendFullState() {
     send({ type: 'stats', id, stats: a.stats });
     const ports = serverPorts.get(id);
     if (ports) { for (const [port, url] of ports) send({ type: 'serverDetected', id, port, url }); }
-    if (remoteControlAgents.has(id)) send({ type: 'remoteControl', id, active: true });
     if (a.cronCount > 0) send({ type: 'looping', id, active: true, count: a.cronCount });
     if (a.compacting) send({ type: 'compacting', id, active: true });
   }
@@ -240,142 +236,6 @@ function clearServers(id) {
   }
 }
 
-// ── Remote control detection ──────────────────────────
-// Detected via MCP tool names in JSONL, not terminal output (which includes conversation text)
-const RC_TOOLS = new Set(['Snapshot', 'Click', 'Type', 'Scroll', 'Move', 'Shortcut', 'App', 'Shell', 'Wait', 'Scrape']);
-function detectRemoteControl(id, toolName) {
-  if (remoteControlAgents.has(id)) return;
-  if (RC_TOOLS.has(toolName)) {
-    remoteControlAgents.add(id);
-    send({ type: 'remoteControl', id, active: true });
-    console.log(`[Overlord] Remote control detected for agent ${id} (tool: ${toolName})`);
-  }
-}
-
-// ── Remote control HTTP server ───────────────────────
-let rcServer = null;
-let rcPort = null;
-let rcToken = null;
-const rcClients = new Set(); // SSE response objects
-
-function getLocalIP() {
-  const nets = os.networkInterfaces();
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      if (net.family === 'IPv4' && !net.internal) return net.address;
-    }
-  }
-  return '127.0.0.1';
-}
-
-function rcAgentState() {
-  const list = [];
-  for (const [id, a] of agents) {
-    list.push({
-      id, cwd: a.cwd, title: a.title || '', agentName: a.agentName || '',
-      status: a.permSent ? 'permission' : a.isWaiting ? 'waiting' : 'active',
-      preview: a.lastText || '', prompt: a.lastPrompt || '',
-      remoteControl: remoteControlAgents.has(id),
-      cost: null, // computed client-side
-    });
-  }
-  return list;
-}
-
-function rcBroadcast() {
-  if (rcClients.size === 0) return;
-  const data = JSON.stringify({ type: 'state', agents: rcAgentState() });
-  for (const res of rcClients) {
-    try { res.write(`data: ${data}\n\n`); } catch { rcClients.delete(res); }
-  }
-}
-
-function startRemoteServer() {
-  if (rcServer) return Promise.resolve({ port: rcPort, token: rcToken });
-  rcToken = crypto.randomBytes(16).toString('hex');
-  return new Promise((resolve, reject) => {
-    const srv = http.createServer((req, res) => {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      const parts = url.pathname.split('/').filter(Boolean);
-      if (parts[0] !== rcToken) { res.writeHead(403); res.end('Forbidden'); return; }
-      const route = parts[1] || '';
-      if (req.method === 'GET' && route === '') {
-        // Serve remote control page
-        const html = fs.readFileSync(path.join(__dirname, 'remote.html'), 'utf-8');
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(html);
-      } else if (req.method === 'GET' && route === 'events') {
-        // SSE endpoint
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*',
-        });
-        res.write(`data: ${JSON.stringify({ type: 'state', agents: rcAgentState() })}\n\n`);
-        rcClients.add(res);
-        req.on('close', () => rcClients.delete(res));
-      } else if (req.method === 'POST' && route === 'input') {
-        // Send input to an agent
-        let body = '';
-        req.on('data', c => { body += c; if (body.length > 4096) req.destroy(); });
-        req.on('end', () => {
-          try {
-            const { id, text } = JSON.parse(body);
-            const t = terminals.get(id);
-            if (t && typeof text === 'string') {
-              t.write(text + '\r');
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end('{"ok":true}');
-            } else {
-              res.writeHead(404); res.end('{"error":"agent not found"}');
-            }
-          } catch { res.writeHead(400); res.end('{"error":"bad request"}'); }
-        });
-      } else if (req.method === 'POST' && route === 'approve') {
-        // Send 'y' to approve permission
-        let body = '';
-        req.on('data', c => { body += c; });
-        req.on('end', () => {
-          try {
-            const { id } = JSON.parse(body);
-            const t = terminals.get(id);
-            if (t) { t.write('y\r'); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); }
-            else { res.writeHead(404); res.end('{"error":"agent not found"}'); }
-          } catch { res.writeHead(400); res.end('{"error":"bad request"}'); }
-        });
-      } else if (req.method === 'POST' && route === 'reject') {
-        let body = '';
-        req.on('data', c => { body += c; });
-        req.on('end', () => {
-          try {
-            const { id } = JSON.parse(body);
-            const t = terminals.get(id);
-            if (t) { t.write('n\r'); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); }
-            else { res.writeHead(404); res.end('{"error":"agent not found"}'); }
-          } catch { res.writeHead(400); res.end('{"error":"bad request"}'); }
-        });
-      } else {
-        res.writeHead(404); res.end('Not found');
-      }
-    });
-    srv.listen(0, '0.0.0.0', () => {
-      rcPort = srv.address().port;
-      rcServer = srv;
-      console.log(`[Overlord] Remote control server on port ${rcPort}`);
-      // Broadcast state every 2 seconds
-      setInterval(() => rcBroadcast(), 2000);
-      resolve({ port: rcPort, token: rcToken });
-    });
-    srv.on('error', reject);
-  });
-}
-
-async function generateRemoteControlUrl() {
-  const { port, token } = await startRemoteServer();
-  const ip = getLocalIP();
-  const url = `http://${ip}:${port}/${token}/`;
-  const qrSvg = await QRCode.toString(url, { type: 'svg', margin: 2, width: 256, color: { dark: '#cdd6f4', light: '#1e1e2e' } });
-  return { url, qrSvg };
-}
 
 async function generateSummaryTitle(id) {
   const a = agents.get(id);
@@ -842,7 +702,6 @@ function restoreAgents(state) {
                   if (b.type === 'tool_use' && b.name) {
                     agent.stats.tools[b.name] = (agent.stats.tools[b.name] || 0) + 1;
                     if (b.input?.file_path && ['Read', 'Write', 'Edit'].includes(b.name)) agent.stats.files++;
-                    detectRemoteControl(id, b.name);
                     if (b.name === 'CronCreate') agent.cronCount++;
                     if (b.name === 'CronDelete') agent.cronCount = Math.max(0, agent.cronCount - 1);
                   }
@@ -1087,7 +946,6 @@ function closeAgent(id) {
   clrTimer(id, waitTimers); clrTimer(id, permTimers);
   lastNotifyTimes.delete(id);
   clearServers(id);
-  remoteControlAgents.delete(id);
   pendingClearAgents.delete(id);
   inputBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
@@ -1157,7 +1015,6 @@ function parseLine(id, line) {
             a.stats.tools[tn] = (a.stats.tools[tn] || 0) + 1;
             if (inp.file_path && ['Read', 'Write', 'Edit'].includes(tn)) a.stats.files++;
             if (!EXEMPT.has(tn)) nonExempt = true;
-            detectRemoteControl(id, tn);
             if (tn === 'CronCreate') { a.cronCount++; send({ type: 'looping', id, active: true, count: a.cronCount }); }
             if (tn === 'CronDelete') { a.cronCount = Math.max(0, a.cronCount - 1); send({ type: 'looping', id, active: a.cronCount > 0, count: a.cronCount }); }
             send({ type: 'toolStart', id, toolId: b.id, status: st, name: tn });
@@ -1483,7 +1340,6 @@ function resumeSessionAgent(sid, rcwd) {
               if (b.type === 'text' && b.text) ra.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text;
               if (b.type === 'tool_use' && b.name) {
                 ra.stats.tools[b.name] = (ra.stats.tools[b.name] || 0) + 1;
-                detectRemoteControl(rid, b.name);
                 if (b.name === 'CronCreate') ra.cronCount++;
                 if (b.name === 'CronDelete') ra.cronCount = Math.max(0, ra.cronCount - 1);
               }
@@ -1838,13 +1694,6 @@ ipcMain.on('cmd', (_e, msg) => {
     }
     case 'focusAgent': spawnTerminal(msg.id); send({ type: 'focused', id: msg.id }); break;
     case 'termInput': handleTermInput(msg.id, msg.data); break;
-    case 'enableRemoteControl': { const t = terminals.get(msg.id); if (t) t.write('/remote-control\r'); break; }
-    case 'getRemoteControlQR': {
-      generateRemoteControlUrl().then(({ url, qrSvg }) => {
-        send({ type: 'remoteControlQR', url, qrSvg });
-      }).catch(e => console.log('[Overlord] Failed to generate RC URL:', e.message));
-      break;
-    }
     case 'stopLoop': { const a = agents.get(msg.id); if (a) { a.cronCount = 0; send({ type: 'looping', id: msg.id, active: false, count: 0 }); } const t = terminals.get(msg.id); if (t) t.write('\x03'); break; }
     case 'compactAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a && t && a.isWaiting) { a.compacting = true; send({ type: 'compacting', id: msg.id, active: true }); t.write('/compact\r'); } break; }
     case 'termResize': { const t = terminals.get(msg.id); if (t) try { t.resize(msg.cols, msg.rows); } catch {} break; }
@@ -2060,10 +1909,6 @@ app.whenReady().then(() => {
   });
 });
 app.on('before-quit', () => {
-  // Close remote control server
-  if (rcServer) { try { rcServer.close(); } catch {} }
-  for (const res of rcClients) { try { res.end(); } catch {} }
-  rcClients.clear();
   // Spawn detached Claude processes for active agents so they survive the app restart.
   // The detached process continues the current turn headlessly; on restore the app
   // kills it via saved PID before reconnecting.

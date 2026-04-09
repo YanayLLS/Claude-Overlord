@@ -752,7 +752,6 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" onclick="openHistory()" title="Session history (Ctrl+H)">&#x23F3;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
     <button id="layoutBtn" class="hdr-btn" onclick="toggleLayout()" title="Toggle terminal position">&#x25A7;</button>
-    <button class="hdr-btn" onclick="showRemoteQR()" title="Remote Control QR" style="font-size:10px;letter-spacing:.3px;padding:3px 7px;border:1px solid var(--border);border-radius:3px;">RC</button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Reload app">&#x21BB;</button>
     <button id="readyBtn" class="hdr-btn" onclick="toggleReadyFilter()" title="Show only ready agents">&#x2713;</button>
@@ -897,17 +896,6 @@ button:focus-visible { outline-offset:0; }
         <button onclick="confirmResolve(false)">Cancel</button>
         <button class="btn-danger" id="confirm-ok" onclick="confirmResolve(true)"></button>
       </div>
-    </div>
-  </div>
-  <div id="qr-overlay" onclick="closeQR()">
-    <div class="qr-modal" onclick="event.stopPropagation()">
-      <div class="qr-modal-header">
-        <span class="qr-modal-title">Remote Control</span>
-        <button class="qr-modal-close" onclick="closeQR()" aria-label="Close">&times;</button>
-      </div>
-      <div class="qr-svg" id="qr-svg"></div>
-      <div class="qr-url" id="qr-url" onclick="copyQRUrl()" title="Click to copy"></div>
-      <div class="qr-hint">Scan with your phone (same Wi-Fi network)</div>
     </div>
   </div>
 </div>
@@ -1226,20 +1214,6 @@ function showServerMenu(e, port, url) {
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
-function enableRC(id) { api.send({ type: 'enableRemoteControl', id }); }
-function showRemoteQR() { api.send({ type: 'getRemoteControlQR' }); }
-let _rcUrl = '';
-function openQR(url, svg) {
-  _rcUrl = url;
-  document.getElementById('qr-svg').innerHTML = svg;
-  document.getElementById('qr-url').textContent = url;
-  document.getElementById('qr-overlay').classList.add('open');
-}
-function closeQR() { document.getElementById('qr-overlay').classList.remove('open'); }
-function copyQRUrl() {
-  if (!_rcUrl) return;
-  navigator.clipboard.writeText(_rcUrl).then(() => showToast('URL copied!')).catch(() => {});
-}
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
 function compactAgent(id) { api.send({ type: 'compactAgent', id }); }
 function focusTeamMember(teamName, memberName, isLead) { api.send({ type: 'focusTeamMember', teamName, memberName, isLead }); }
@@ -1422,7 +1396,6 @@ function render() {
           <span class="agent-status-line">${statusLineHTML(a, st)}</span>
           <span class="agent-bottom-spacer"></span>
           ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
-          ${a.remoteControl ? `<button class="agent-btn btn-rc rc-on" title="Remote Control active">RC</button>` : ''}
           <button class="agent-btn btn-reset" onclick="event.stopPropagation();restartAgent(${id})" title="Reset agent (fresh session, keeps name)">&#x21BB;</button>
           <button class="agent-btn btn-close" onclick="event.stopPropagation();closeAgent(${id})" title="Close">&times;</button>
         </div>
@@ -2164,7 +2137,7 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), remoteControl: false, compacting: false, agentName: msg.agentName || '' });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '' });
       if (msg.cwd) knownProjects.add(msg.cwd);
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
@@ -2256,8 +2229,6 @@ function handleAgentMsg(msg) {
     case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
     case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
     case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); } break; }
-    case 'remoteControl': { const a = agents.get(msg.id); if (a) { a.remoteControl = msg.active; scheduleRender(); } break; }
-    case 'remoteControlQR': { openQR(msg.url, msg.qrSvg); break; }
     case 'looping': { const a = agents.get(msg.id); if (a) { a.looping = msg.active; scheduleRender(); } break; }
     case 'compacting': { const a = agents.get(msg.id); if (a) { a.compacting = msg.active; scheduleRender(); } break; }
     case 'teamDetected': {
@@ -2533,8 +2504,6 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
-    const qrOv = document.getElementById('qr-overlay');
-    if (qrOv.classList.contains('open')) { closeQR(); return; }
     const cfm = document.getElementById('confirm-overlay');
     if (cfm.classList.contains('open')) { confirmResolve(false); return; }
     const searchOv = document.getElementById('search-overlay');
