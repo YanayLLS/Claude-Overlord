@@ -338,16 +338,23 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .team-tasks-pct { font-size:9px; color:var(--dim); flex-shrink:0; }
 
 
-/* ── Status bar (IDE-style footer) ── */
+/* ── Status bar (3-line usage footer) ── */
 #summary-bar {
-  display:none; padding:0 12px; border-top:1px solid var(--border); flex-shrink:0;
-  background:var(--title-bg); height:24px;
-  font-size:11px; color:var(--dim); gap:10px; align-items:center; letter-spacing:.3px;
+  display:none; flex-direction:column; padding:5px 12px; border-top:1px solid var(--border); flex-shrink:0;
+  background:var(--title-bg); font-size:11px; color:var(--dim); gap:3px; letter-spacing:.3px; cursor:pointer;
 }
 #summary-bar.show { display:flex; }
-#summary-bar span + span::before { content:''; margin-right:0; }
-#summary-bar span { padding:0 6px; border-right:1px solid var(--border); line-height:24px; }
-#summary-bar span:last-child { border-right:none; }
+.usage-row { display:flex; align-items:center; gap:8px; min-height:18px; }
+.usage-row-label { font-size:10px; color:var(--dim); white-space:nowrap; font-weight:600; min-width:110px; }
+.usage-row-track { position:relative; flex:1; height:10px; background:rgba(255,255,255,.08); border-radius:5px; overflow:hidden; min-width:40px; }
+.usage-row-fill { position:absolute; left:0; top:0; height:100%; border-radius:5px; transition:width .4s ease, background .3s; }
+.usage-row-fill.ok { background:var(--accent); opacity:.5; }
+.usage-row-fill.warn { background:var(--yellow); opacity:.65; }
+.usage-row-fill.danger { background:var(--red); opacity:.7; }
+.usage-row-pct { font-size:10px; color:var(--fg); white-space:nowrap; min-width:58px; text-align:right; }
+.usage-row-reset { font-size:9px; color:var(--dim); white-space:nowrap; opacity:.7; }
+.usage-info-row { display:flex; align-items:center; gap:6px; min-height:16px; font-size:10px; color:var(--dim); flex-wrap:wrap; }
+.usage-info-row .sep { opacity:.3; }
 #summary-bar .pace-ok { color:var(--green); }
 #summary-bar .pace-warn { color:var(--yellow); }
 #summary-bar .pace-over { color:var(--red); }
@@ -473,6 +480,21 @@ button:focus-visible { outline-offset:0; }
 /* Permission/crashed card urgency */
 .agent[data-status="permission"] { border-color:rgba(249,226,175,.25); background:rgba(249,226,175,.04); }
 .agent[data-status="crashed"] { border-color:rgba(243,139,168,.25); background:rgba(243,139,168,.04); }
+.agent[data-status="waiting"] { border-color:rgba(166,227,161,.15); background:rgba(166,227,161,.04); }
+.agent[data-status="waiting"].selected { border-color:rgba(166,227,161,.3); background:rgba(166,227,161,.1); }
+
+/* Done flash — green glow that fades out when agent finishes */
+@keyframes done-flash {
+  0%   { box-shadow:0 0 0 0 rgba(166,227,161,.6), inset 0 0 12px rgba(166,227,161,.15); border-color:rgba(166,227,161,.5); }
+  25%  { box-shadow:0 0 8px 2px rgba(166,227,161,.35), inset 0 0 8px rgba(166,227,161,.08); }
+  100% { box-shadow:0 0 0 0 transparent, inset 0 0 0 transparent; border-color:rgba(166,227,161,.15); }
+}
+.agent.done-flash {
+  animation:done-flash .9s ease-out forwards;
+}
+.agent.done-flash::before {
+  background:var(--green) !important;
+}
 
 /* Settings modal header */
 .settings-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:10px; border-bottom:1px solid var(--border); }
@@ -789,6 +811,11 @@ button:focus-visible { outline-offset:0; }
         <span>Desktop notifications for permission requests</span>
       </label>
       <div class="settings-hint">Shows a native notification and flashes the taskbar when an agent needs approval.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-sound" onchange="onSoundChange(this.checked)" />
+        <span>Notification sound</span>
+      </label>
+      <div class="settings-hint">Plays an audio chime when an agent completes or needs approval.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -1249,29 +1276,31 @@ function agentStatus(a) {
   if (a.crashed === 'fatal') return 'crashed';
   if (a.crashed === 'resuming') return 'resuming';
   for (const t of a.tools.values()) { if (t.perm) return 'permission'; if (!t.done) return 'active'; }
+  if (a.status === 'waiting') return a.doneConfirmed ? 'waiting' : 'settling';
   if (a.spinnerText) return 'active';
-  if (a.status === 'waiting') return 'waiting';
   if (a.status === 'active') return 'active';
   return 'idle';
 }
 
 function matchesFilter(a) {
-  if (filterReady) { const st = agentStatus(a); if (st === 'active' || st === 'resuming') return false; }
+  if (filterReady) { const st = agentStatus(a); if (st === 'active' || st === 'resuming' || st === 'settling') return false; }
   if (!filterText) return true;
   return [a.agentName, a.title, a.prompt, a.preview, a.cwd, agentStatus(a)].join('\n').toLowerCase().includes(filterText);
 }
 const statusMeta = {
   permission: { label: 'Needs approval', cls: 'dot-perm' },
   active: { label: 'Working', cls: 'dot-active' },
+  settling: { label: 'Finishing', cls: 'dot-active' },
   waiting: { label: 'Done', cls: 'dot-waiting' },
   idle: { label: 'Idle', cls: 'dot-idle' },
   crashed: { label: 'Crashed', cls: 'dot-crashed' },
   resuming: { label: 'Resuming...', cls: 'dot-resuming' },
 };
-const statusSymbols = { active:'\u273D', permission:'\u26A1', waiting:'\u2713', idle:'\u25CB', crashed:'\u2715', resuming:'\u21BB' };
+const statusSymbols = { active:'\u273D', permission:'\u26A1', settling:'\u273D', waiting:'\u2713', idle:'\u25CB', crashed:'\u2715', resuming:'\u21BB' };
 function statusVerb(a, st) {
   if (st === 'crashed') return 'Crashed (' + a.crashCount + '/' + a.crashMax + ')';
   if (st === 'resuming') return 'Resuming\u2026 (' + a.crashCount + '/' + a.crashMax + ')';
+  if (st === 'settling') return 'Finishing\u2026';
   if (st === 'waiting') return 'Done';
   if (st === 'idle') return 'Idle';
   for (const t of a.tools.values()) {
@@ -1290,7 +1319,7 @@ function statusMetaText(a) {
 }
 function statusLineHTML(a, st) {
   const sym = statusSymbols[st] || '\u25CB';
-  const pulsing = st === 'active' || st === 'resuming';
+  const pulsing = st === 'active' || st === 'resuming' || st === 'settling';
   const verb = statusVerb(a, st);
   const meta = statusMetaText(a);
   return `<span class="status-sym${pulsing ? ' pulsing' : ''}">${sym}</span><span class="status-verb">${esc(verb)}</span>${meta ? `<span class="status-meta">${esc(meta)}</span>` : ''}`;
@@ -1320,7 +1349,7 @@ function render() {
 
   // Header badges
   let permC = 0, actC = 0, waitC = 0;
-  for (const [, a] of agents) { const s = agentStatus(a); if (s === 'permission') permC++; else if (s === 'active') actC++; else if (s === 'waiting') waitC++; }
+  for (const [, a] of agents) { const s = agentStatus(a); if (s === 'permission') permC++; else if (s === 'active' || s === 'settling') actC++; else if (s === 'waiting') waitC++; }
   let badges = '';
   if (permC) badges += `<button class="badge badge-perm" onclick="focusNextPerm()" title="Jump to next agent needing approval (Ctrl+!)">${permC} needs approval</button>`;
   if (actC) badges += `<span class="badge badge-active">${actC} working</span>`;
@@ -1473,34 +1502,71 @@ function render() {
     ctxWarn.classList.remove('show');
   }
 
-  // Summary bar — always visible, shows usage pace when available
+  // Summary bar — 3-line layout: session bar, weekly bar, info/pace row
   const bar = document.getElementById('summary-bar');
   const agentCount = agents.size;
   const activeCount = [...agents.values()].filter(a => agentStatus(a) === 'active').length;
-  let barHtml = `<span>${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? ` · ${activeCount} active` : ''}</span>`;
-  if (currentUsage && currentUsage.weekly != null) {
-    const pct = currentUsage.weekly;
-    const now = Date.now();
-    // Compute start of current ISO week (Monday 00:00 UTC)
-    const d = new Date(now);
-    const day = d.getUTCDay(); // 0=Sun
-    const diff = day === 0 ? 6 : day - 1; // days since Monday
-    const weekStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diff));
-    const periodHours = 168;
-    const elapsedMs = now - weekStart.getTime();
-    const elapsedHours = Math.max(elapsedMs / 3600000, 0.5); // floor at 0.5h to avoid div-by-near-zero
-    const ratePerHour = pct / elapsedHours;
-    const ratePerDay = ratePerHour * 24;
-    const projected = ratePerHour * periodHours;
-    let status, cls;
-    if (projected <= 100) { status = 'On track'; cls = 'pace-ok'; }
-    else if (projected <= 110) { status = 'Slightly over'; cls = 'pace-warn'; }
-    else { status = 'Over limit'; cls = 'pace-over'; }
-    barHtml += `<span class="${cls}" onclick="refreshUsage()" style="cursor:pointer" title="Weekly: ${pct.toFixed(1)}% used | ${ratePerDay.toFixed(1)}%/day | Projected end-of-week: ${projected.toFixed(0)}% | ${status} (click to refresh)">${pct.toFixed(1)}% · ${ratePerDay.toFixed(1)}%/day · ${projected.toFixed(0)}% → ${status}</span>`;
+  const _tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+
+  function fmtResetTime(ts, includeDate) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (ts - Date.now() <= 0) return 'Resets now';
+    const h = d.getHours(), ampm = h >= 12 ? 'pm' : 'am', h12 = h % 12 || 12;
+    const min = d.getMinutes();
+    const timeStr = min === 0 ? `${h12}${ampm}` : `${h12}:${min.toString().padStart(2,'0')}${ampm}`;
+    if (includeDate) {
+      const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return `Resets ${mo[d.getMonth()]} ${d.getDate()}, ${timeStr}${_tz ? ` (${_tz})` : ''}`;
+    }
+    return `Resets ${timeStr}${_tz ? ` (${_tz})` : ''}`;
+  }
+
+  function usageRowHTML(label, pct, resetTs, includeDate) {
+    const cls = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
+    const resetStr = fmtResetTime(resetTs, includeDate);
+    return `<div class="usage-row">
+      <span class="usage-row-label">${label}</span>
+      <div class="usage-row-track" title="${pct.toFixed(1)}% used">
+        <div class="usage-row-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div>
+      </div>
+      <span class="usage-row-pct">${pct.toFixed(1)}% used</span>
+      ${resetStr ? `<span class="usage-row-reset">${resetStr}</span>` : ''}
+    </div>`;
+  }
+
+  let barHtml = '';
+  if (currentUsage && (currentUsage.hourly != null || currentUsage.weekly != null)) {
+    if (currentUsage.hourly != null) barHtml += usageRowHTML('Current session', currentUsage.hourly, currentUsage.hourlyReset, false);
+    if (currentUsage.weekly != null) barHtml += usageRowHTML('Current week', currentUsage.weekly, currentUsage.weeklyReset, true);
+
+    // Info row: agents + pace + age
+    let infoHtml = `<span>${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? ` · ${activeCount} active` : ''}</span>`;
+    if (currentUsage.weekly != null && currentUsage.weeklyReset) {
+      const msLeft = currentUsage.weeklyReset - Date.now();
+      const daysLeft = msLeft / 86400000;
+      const daysElapsed = 7 - daysLeft;
+      if (daysElapsed > 0.01 && daysLeft > 0) {
+        const dailyRate = currentUsage.weekly / daysElapsed;
+        const budgetRate = (100 - currentUsage.weekly) / daysLeft;
+        const paceClass = dailyRate <= budgetRate * 0.85 ? 'pace-ok' : dailyRate <= budgetRate ? 'pace-warn' : 'pace-over';
+        const paceLabel = dailyRate <= budgetRate ? 'On track' : 'Too fast';
+        infoHtml += `<span class="sep">│</span><span>Speed: ${dailyRate.toFixed(1)}%/day</span>`;
+        infoHtml += `<span class="sep">·</span><span>Budget: ${budgetRate.toFixed(1)}%/day</span>`;
+        infoHtml += `<span class="sep">·</span><span class="${paceClass}">${paceLabel}</span>`;
+      }
+    }
+    if (currentUsage.fetchedAt) {
+      const ago = Math.round((Date.now() - currentUsage.fetchedAt) / 1000);
+      const ageStr = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
+      infoHtml += `<span class="sep">│</span><span style="opacity:.5">${ageStr}</span>`;
+    }
+    barHtml += `<div class="usage-info-row">${infoHtml}</div>`;
   } else {
-    barHtml += `<span onclick="refreshUsage()" style="cursor:pointer" title="Click to fetch usage">Usage: --</span>`;
+    barHtml = `<div class="usage-info-row"><span>${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? ` · ${activeCount} active` : ''}</span><span class="sep">│</span><span>Usage: click to fetch</span></div>`;
   }
   bar.innerHTML = barHtml;
+  bar.onclick = () => refreshUsage();
   bar.classList.add('show');
 }
 
@@ -2125,7 +2191,44 @@ function handleAgentMsg(msg) {
       }
       break;
     }
-    case 'status': { const a = agents.get(msg.id); if (a) { const was = a.status; a.status = msg.status; a.crashed = null; if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now(); if (msg.status === 'waiting') { a.activeAt = null; a.tools.clear(); a.subTools.clear(); a.spinnerText = ''; } if (msg.status === 'waiting' && was === 'active') playChime(); scheduleRender(); } break; }
+    case 'status': {
+      const a = agents.get(msg.id);
+      if (a) {
+        const was = a.status;
+        a.status = msg.status;
+        a.crashed = null;
+        if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now();
+        if (msg.status === 'waiting') {
+          a.activeAt = null; a.tools.clear(); a.subTools.clear(); a.spinnerText = '';
+        }
+        // Debounced done: only confirm + chime after 3s of continuous waiting
+        if (msg.status === 'waiting' && was === 'active') {
+          a.doneConfirmed = false;
+          clearTimeout(_doneTimers.get(msg.id));
+          _doneTimers.set(msg.id, setTimeout(() => {
+            _doneTimers.delete(msg.id);
+            if (a.status === 'waiting') {
+              a.doneConfirmed = true;
+              playChime();
+              flashAgentCard(msg.id);
+              scheduleRender();
+            }
+          }, DONE_CONFIRM_MS));
+        }
+        // Restored agents: idle→waiting means already done, confirm immediately (no chime)
+        if (msg.status === 'waiting' && was !== 'active') {
+          a.doneConfirmed = true;
+        }
+        if (msg.status !== 'waiting') {
+          // Left waiting — cancel pending done timer
+          clearTimeout(_doneTimers.get(msg.id));
+          _doneTimers.delete(msg.id);
+          a.doneConfirmed = false;
+        }
+        scheduleRender();
+      }
+      break;
+    }
     case 'toolStart': { const a = agents.get(msg.id); if (a) { a.crashed = null; if (!a.activeAt) a.activeAt = Date.now(); a.tools.set(msg.toolId, { status: msg.status, name: msg.name, done: false, perm: false, isSubagent: msg.name === 'Task' || msg.name === 'Agent' }); scheduleRender(); } break; }
     case 'toolDone': { const a = agents.get(msg.id); if (a) { const t = a.tools.get(msg.toolId); if (t) { t.done = true; a.subTools.delete(msg.toolId); } scheduleRender(); } break; }
     case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
@@ -2184,8 +2287,8 @@ function handleUsage(usage) {
   scheduleRender();
 }
 function refreshUsage() { api.send({ type: 'fetchUsage' }); }
-// Re-render pace every 60s so projections stay current even between usage fetches
-setInterval(() => { if (currentUsage && currentUsage.weekly != null) scheduleRender(); }, 60000);
+// Re-render every 30s so age + reset countdowns stay fresh
+setInterval(() => { if (currentUsage) scheduleRender(); }, 30000);
 function usageCls(pct) { return pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : ''; }
 function renderUsageBadges() {
   const el = document.getElementById('usageBadges');
@@ -2193,15 +2296,11 @@ function renderUsageBadges() {
   let html = '';
   if (currentUsage.hourly != null) {
     const cls = usageCls(currentUsage.hourly);
-    html += `<span class="badge badge-usage${cls ? ' ' + cls : ''}" onclick="refreshUsage()" title="Hourly rate limit usage">H: ${currentUsage.hourly.toFixed(1)}%</span>`;
-  }
-  if (currentUsage.daily != null) {
-    const cls = usageCls(currentUsage.daily);
-    html += `<span class="badge badge-usage${cls ? ' ' + cls : ''}" onclick="refreshUsage()" title="Daily rate limit usage">D: ${currentUsage.daily.toFixed(1)}%</span>`;
+    html += `<span class="badge badge-usage${cls ? ' ' + cls : ''}" onclick="refreshUsage()" title="5-hour rate limit usage">5h: ${currentUsage.hourly.toFixed(1)}%</span>`;
   }
   if (currentUsage.weekly != null) {
     const cls = usageCls(currentUsage.weekly);
-    html += `<span class="badge badge-usage${cls ? ' ' + cls : ''}" onclick="refreshUsage()" title="Weekly rate limit usage">W: ${currentUsage.weekly.toFixed(1)}%</span>`;
+    html += `<span class="badge badge-usage${cls ? ' ' + cls : ''}" onclick="refreshUsage()" title="7-day rate limit usage">7d: ${currentUsage.weekly.toFixed(1)}%</span>`;
   }
   el.innerHTML = html;
 }
@@ -2209,7 +2308,7 @@ function renderUsageBadges() {
 // ── Audio ──────────────────────────────────────────────
 let _audioCtx = null;
 function playChime() {
-  if (!notificationsEnabled) return;
+  if (!notificationSoundEnabled) return;
   if (!_audioCtx) _audioCtx = new AudioContext();
   if (_audioCtx.state === 'suspended') _audioCtx.resume();
   const t = _audioCtx.currentTime;
@@ -2225,6 +2324,15 @@ function playChime() {
 }
 // Unlock audio context on first interaction (Electron may suspend it)
 document.addEventListener('mousedown', () => { if (_audioCtx && _audioCtx.state === 'suspended') _audioCtx.resume(); }, { once: true });
+
+function flashAgentCard(id) {
+  const el = document.querySelector(`.agent[data-id="${id}"]`);
+  if (!el) return;
+  el.classList.remove('done-flash');
+  void el.offsetWidth; // force reflow to restart animation
+  el.classList.add('done-flash');
+  el.addEventListener('animationend', () => el.classList.remove('done-flash'), { once: true });
+}
 
 // ── Toast ──────────────────────────────────────────────
 function showToast(text) {
@@ -2243,6 +2351,9 @@ let settings_termWidth = 0;
 
 let bypassPermissions = true;
 let notificationsEnabled = true;
+let notificationSoundEnabled = true;
+const _doneTimers = new Map(); // agentId → timeout for debounced "done" confirmation
+const DONE_CONFIRM_MS = 3000;
 let planBudget = 100;
 
 function applySettings(s) {
@@ -2257,6 +2368,11 @@ function applySettings(s) {
     notificationsEnabled = s.notifications;
     const chk = document.getElementById('chk-notif');
     if (chk) chk.checked = notificationsEnabled;
+  }
+  if (s.notificationSound !== undefined) {
+    notificationSoundEnabled = s.notificationSound;
+    const chk = document.getElementById('chk-sound');
+    if (chk) chk.checked = notificationSoundEnabled;
   }
   if (s.planBudget !== undefined) {
     planBudget = s.planBudget;
@@ -2291,6 +2407,7 @@ function toggleSettings() {
     requestAnimationFrame(() => { el.style.opacity = '1'; });
     document.getElementById('chk-bypass').checked = bypassPermissions;
     document.getElementById('chk-notif').checked = notificationsEnabled;
+    document.getElementById('chk-sound').checked = notificationSoundEnabled;
     document.getElementById('inp-budget').value = planBudget;
   }
 }
@@ -2438,26 +2555,20 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── Clipboard image paste ──────────────────────────────
-// Drag-and-drop files anywhere in the window → insert file paths into active terminal
+// Drag-and-drop: folders → create agent, files → insert paths into terminal
 document.addEventListener('dragover', (e) => {
-  if (!selectedId) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
 });
 document.addEventListener('drop', (e) => {
   e.preventDefault();
-  if (!selectedId) return;
   const files = e.dataTransfer.files;
   if (!files || files.length === 0) return;
   const paths = [];
-  for (const f of files) {
-    if (f.path) paths.push(f.path);
-  }
+  for (const f of files) { if (f.path) paths.push(f.path); }
   if (paths.length === 0) return;
-  const text = paths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
-  api.send({ type: 'termInput', id: selectedId, data: text });
-  const x = xterms.get(selectedId);
-  if (x) x.terminal.focus();
+  // Send to main process — it has fs access to detect folders vs files
+  api.send({ type: 'dropPaths', paths, activeAgent: selectedId || null });
 });
 
 document.addEventListener('paste', (e) => {
@@ -2528,6 +2639,11 @@ function onBudgetChange(val) {
 function onNotifChange(val) {
   notificationsEnabled = val;
   api.send({ type: 'saveSettings', settings: { notifications: val } });
+}
+
+function onSoundChange(val) {
+  notificationSoundEnabled = val;
+  api.send({ type: 'saveSettings', settings: { notificationSound: val } });
 }
 
 let _persistTimer = null;

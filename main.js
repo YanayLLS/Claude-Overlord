@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const http = require('http');
+const https = require('https');
 const { spawn, exec, execSync } = require('child_process');
 const pty = require('node-pty');
 const QRCode = require('qrcode');
@@ -24,6 +25,7 @@ const MAX_CRASH_RETRIES = 3;
 const CRASH_RESUME_DELAY_MS = 2000;
 const USAGE_POLL_MS = 60000;
 const USAGE_TIMEOUT_MS = 15000;
+const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const TEAM_POLL_MS = 3000;
 const TEAMS_DIR = path.join(os.homedir(), '.claude', 'teams');
 const TASKS_DIR = path.join(os.homedir(), '.claude', 'tasks');
@@ -446,7 +448,7 @@ function extractSpinnerText(id, data) {
         const a = agents.get(id);
         if (a && a.spinnerText !== text) {
           a.spinnerText = text;
-          if (a.isWaiting) { a.isWaiting = false; clrTimer(id, waitTimers); send({ type: 'status', id, status: 'active' }); }
+          // Don't flip waiting→active from spinner text alone — JSONL tool_use events are authoritative
           clearTimeout(spinnerDebounce.get(id));
           spinnerDebounce.set(id, setTimeout(() => {
             spinnerDebounce.delete(id);
@@ -715,7 +717,7 @@ async function extractSessionMeta(filePath, sessionId) {
 }
 
 // ── State persistence ─────────────────────────────────
-let settings = { layout: 'bottom', zoom: 100, bypassPermissions: true, notifications: true, planBudget: 100 };
+let settings = { layout: 'bottom', zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100 };
 
 function saveState() {
   const agentEntries = [];
@@ -924,8 +926,10 @@ function autoCompactWatcher(id, proc) {
     buf += d;
     if (buf.length > 4096) buf = buf.slice(-2048);
     const clean = buf.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-    // Match various compact prompt patterns: "compact...? Yes", "auto-compact", "compact conversation"
-    if (/compact/i.test(clean) && /(yes|❯|>\s*yes)/i.test(clean)) {
+    // Only match the actual compact prompt — must be a compact question with Yes selector nearby.
+    // Previous regex was too broad: any "compact" + "yes"/❯ anywhere in 4KB buffer would fire,
+    // causing false positives when /config (which renders ❯) ran after any mention of "compact".
+    if (/compact.*\?\s*(❯\s*)?yes/i.test(clean) || /compact.*\n\s*❯\s*yes/i.test(clean)) {
       const now = Date.now();
       if (now - lastCompactTime < 5000) return; // debounce
       lastCompactTime = now;
@@ -1299,15 +1303,11 @@ function scanForNewJsonlFiles() {
         for (const id of candidates) {
           if (pendingClearAgents.has(id)) { targetId = id; pendingClearAgents.delete(id); break; }
         }
-        // Fallback: prefer the agent whose old JSONL stopped growing
+        // No fallback — when multiple agents share a CWD and we can't
+        // identify which one ran /clear, skip reassignment to avoid
+        // pointing the wrong agent at someone else's JSONL file.
         if (targetId === null) {
-          for (const id of candidates) {
-            const ag = agents.get(id);
-            try {
-              const st = fs.statSync(ag.jsonlFile);
-              if (st.size <= ag.fileOffset) { targetId = id; break; }
-            } catch { targetId = id; break; }
-          }
+          console.log(`[Overlord] New JSONL ${path.basename(file)} in shared dir with ${candidates.length} candidates — skipping (no pending /clear match)`);
         }
       }
       if (targetId !== null) {
@@ -1345,6 +1345,9 @@ function reassignAgentToFile(id, newFilePath) {
   send({ type: 'prompt', id, text: '' });
   send({ type: 'preview', id, text: '' });
   send({ type: 'promptHistory', id, prompts: [] });
+  // After /clear, agent is idle at prompt — mark as waiting (done)
+  a.isWaiting = true;
+  send({ type: 'status', id, status: 'waiting' });
   // Switch to new file
   const newSessionId = path.basename(newFilePath, '.jsonl');
   a.sessionId = newSessionId;
@@ -1381,7 +1384,7 @@ function notifyPermission(id, a) {
     for (const tid of a.toolIds) {
       if (!EXEMPT.has(a.toolNames.get(tid) || '')) { toolName = a.toolStatuses.get(tid) || a.toolNames.get(tid) || ''; break; }
     }
-    const n = new Notification({ title: 'Needs approval', body: `${title}${toolName ? ': ' + toolName : ''}`, silent: false });
+    const n = new Notification({ title: 'Needs approval', body: `${title}${toolName ? ': ' + toolName : ''}`, silent: !settings.notificationSound });
     n.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.show();
@@ -1518,89 +1521,78 @@ function resumeSessionAgent(sid, rcwd) {
   send({ type: 'focusFromNotification', id: rid });
 }
 
-// ── Usage polling ─────────────────────────────────────
+// ── Usage polling (via API rate-limit headers) ────────
 let usageInFlight = false;
 let lastUsage = null;
 
+function getApiKey() {
+  try {
+    const creds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+    return creds?.claudeAiOauth?.accessToken || null;
+  } catch { return null; }
+}
+
 function fetchUsage() {
   if (usageInFlight) return;
-  fetchUsageHeadless();
-}
-
-function fetchUsageHeadless() {
-  usageInFlight = true;
-  const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
-  const args = process.platform === 'win32' ? ['/c', 'claude'] : ['-c', 'claude'];
-  let proc;
-  try {
-    proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: os.homedir(), env: { ...process.env } });
-  } catch (e) {
-    console.log('[Overlord] Usage spawn failed:', e.message);
-    usageInFlight = false;
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    console.log('[Overlord] No API key found in credentials');
     return;
   }
-  let buf = '';
-  let sentUsage = false;
-  let sentExit = false;
-  let parsed = false;
-  function finish() {
-    if (parsed) return;
-    parsed = true;
+  usageInFlight = true;
+  const body = JSON.stringify({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1,
+    messages: [{ role: 'user', content: '.' }]
+  });
+  const req = https.request({
+    hostname: 'api.anthropic.com',
+    path: '/v1/messages',
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'content-length': Buffer.byteLength(body),
+    },
+    timeout: USAGE_TIMEOUT_MS,
+  }, (res) => {
+    let data = '';
+    res.on('data', (chunk) => { data += chunk; });
+    res.on('end', () => {
+      usageInFlight = false;
+      const headers = res.headers;
+      const usage = {};
+      const h5 = parseFloat(headers['anthropic-ratelimit-unified-5h-utilization']);
+      const d7 = parseFloat(headers['anthropic-ratelimit-unified-7d-utilization']);
+      if (!isNaN(h5)) usage.hourly = +(h5 * 100).toFixed(1);
+      if (!isNaN(d7)) usage.weekly = +(d7 * 100).toFixed(1);
+      // Grab reset timestamps
+      const r5 = headers['anthropic-ratelimit-unified-5h-reset'];
+      const r7 = headers['anthropic-ratelimit-unified-7d-reset'];
+      if (r5) usage.hourlyReset = parseInt(r5, 10) * 1000;
+      if (r7) usage.weeklyReset = parseInt(r7, 10) * 1000;
+      if (Object.keys(usage).length > 0) {
+        usage.fetchedAt = Date.now();
+        lastUsage = usage;
+        send({ type: 'usage', usage });
+        console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
+      } else {
+        console.log('[Overlord] No rate-limit headers in response');
+      }
+    });
+  });
+  req.on('error', (e) => {
     usageInFlight = false;
-    parseAndSendUsage(buf);
-  }
-  proc.onData((d) => {
-    buf += d;
-    if (!sentUsage && buf.length > 100) {
-      sentUsage = true;
-      setTimeout(() => {
-        try { proc.write('/usage\r'); } catch {}
-        setTimeout(() => {
-          if (!sentExit) { sentExit = true; try { proc.write('/exit\r'); } catch {} }
-        }, 3000);
-      }, 500);
-    }
+    console.log('[Overlord] Usage fetch error:', e.message);
   });
-  const timeout = setTimeout(() => {
-    finish();
-    if (!sentExit) { sentExit = true; try { proc.write('/exit\r'); } catch {} }
-    setTimeout(() => { try { proc.kill(); } catch {} }, 2000);
-  }, USAGE_TIMEOUT_MS);
-  proc.onExit(() => {
-    clearTimeout(timeout);
-    finish();
+  req.on('timeout', () => {
+    usageInFlight = false;
+    req.destroy();
+    console.log('[Overlord] Usage fetch timed out');
   });
-}
-
-function parseAndSendUsage(raw) {
-  // Strip ANSI escape sequences
-  const clean = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
-  const usage = {};
-  const lines = clean.split(/[\r\n]+/);
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    const pctMatch = line.match(/([\d.]+)\s*%/);
-    if (!pctMatch) continue;
-    const pct = parseFloat(pctMatch[1]);
-    if (isNaN(pct)) continue;
-    if (lower.includes('hourly') || lower.includes('hour') || lower.includes('5m') || lower.includes('5 min')) {
-      usage.hourly = pct;
-    } else if (lower.includes('daily') || lower.includes('day')) {
-      usage.daily = pct;
-    } else if (lower.includes('weekly') || lower.includes('week')) {
-      if (!usage.weekly) usage.weekly = pct;
-      else usage.weeklyModel = pct;
-    } else if (lower.includes('session')) {
-      usage.session = pct;
-    }
-  }
-  if (Object.keys(usage).length > 0) {
-    usage.fetchedAt = Date.now();
-    lastUsage = usage;
-    send({ type: 'usage', usage });
-  } else {
-    console.log('[Overlord] Usage parse found no data. Raw length:', raw.length);
-  }
+  req.write(body);
+  req.end();
 }
 
 // ── Team prompt building ──────────────────────────────
@@ -1809,8 +1801,15 @@ function handleTermInput(id, data) {
   t.write(data);
 }
 
+// ── Window activity tracking (gates usage polling) ─────
+let _windowFocused = true;
+let _lastActivity = Date.now();
+const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes of no IPC = idle
+function isUserActive() { return _windowFocused && (Date.now() - _lastActivity < IDLE_THRESHOLD_MS); }
+
 // ── IPC ────────────────────────────────────────────────
 ipcMain.on('cmd', (_e, msg) => {
+  _lastActivity = Date.now();
   switch (msg.type) {
     case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
     case 'closeAgent': closeAgent(msg.id); break;
@@ -1949,6 +1948,19 @@ ipcMain.on('cmd', (_e, msg) => {
       handleTermInput(msg.id, text);
       break;
     }
+    case 'dropPaths': {
+      const folders = [], filePaths = [];
+      for (const p of (msg.paths || [])) {
+        try { if (fs.statSync(p).isDirectory()) { folders.push(p); continue; } } catch {}
+        filePaths.push(p);
+      }
+      for (const f of folders) createAgent(f);
+      if (filePaths.length > 0 && msg.activeAgent && terminals.has(msg.activeAgent)) {
+        const text = filePaths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+        handleTermInput(msg.activeAgent, text);
+      }
+      break;
+    }
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;
     case 'saveSettings': Object.assign(settings, msg.settings); saveState(); break;
     case 'relaunch': app.relaunch(); app.exit(0); break;
@@ -1994,8 +2006,9 @@ setInterval(() => {
 // Periodically scan for teams
 setInterval(() => scanTeams(), TEAM_POLL_MS);
 
-// Periodically fetch usage
-setInterval(() => fetchUsage(), USAGE_POLL_MS);
+// Periodically fetch usage — when user is active OR any agent is running
+function hasActiveAgents() { for (const a of agents.values()) { if (!a.isWaiting) return true; } return false; }
+setInterval(() => { if (isUserActive() || hasActiveAgents()) fetchUsage(); }, USAGE_POLL_MS);
 
 // ── Window ─────────────────────────────────────────────
 let _boundsTimer = null;
@@ -2032,7 +2045,8 @@ app.whenReady().then(() => {
     restoreAgents(state);
     sendFullState();
   });
-  mainWindow.on('focus', () => mainWindow.flashFrame(false));
+  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); });
+  mainWindow.on('blur', () => { _windowFocused = false; });
   mainWindow.webContents.on('before-input-event', (_e, input) => {
     if (input.key === 'F12' && input.type === 'keyDown') {
       mainWindow.webContents.toggleDevTools();
