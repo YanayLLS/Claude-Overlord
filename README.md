@@ -44,16 +44,26 @@ Each agent gets its own terminal session, live status tracking, and conversation
 
 ## Setup
 
-Requires [Node.js](https://nodejs.org/) 18+ and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated.
+### Prerequisites
 
-```bash
-git clone https://github.com/YanayLLS/Claude-Overlord.git
-cd Claude-Overlord
-npm install
-npm start
+- [Node.js](https://nodejs.org/) 18+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
+
+`npm install` will check for the native build tools required by `node-pty` and attempt to install them automatically via **winget** (Windows) or **xcode-select** (macOS). If auto-install isn't possible it will print what you need to install manually.
+
+### Quick Start (one-liner)
+
+**Windows (cmd or PowerShell):**
+```
+git clone https://github.com/YanayLLS/Claude-Overlord.git && cd Claude-Overlord && start.bat
 ```
 
-On Windows you can also double-click `start.bat`.
+**macOS / Linux:**
+```
+git clone https://github.com/YanayLLS/Claude-Overlord.git && cd Claude-Overlord && npm install && npm start
+```
+
+On Windows, `start.bat` automatically installs any missing build tools, refreshes your PATH, runs `npm install`, and launches the app — no terminal restart needed. You can also double-click it any time to launch Overlord.
 
 ### Development
 

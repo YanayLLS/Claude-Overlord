@@ -717,7 +717,7 @@ async function extractSessionMeta(filePath, sessionId) {
 }
 
 // ── State persistence ─────────────────────────────────
-let settings = { layout: 'bottom', zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100 };
+let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100 };
 
 function saveState() {
   const agentEntries = [];

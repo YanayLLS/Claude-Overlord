@@ -4,6 +4,7 @@
   "description": "Overlord — Claude Agent Manager",
   "main": "main.js",
   "scripts": {
+    "preinstall": "node scripts/check-prerequisites.js",
     "start": "node scripts/bundle-xterm.js && electron .",
     "dev": "node scripts/bundle-xterm.js && electronmon .",
     "package": "node scripts/bundle-xterm.js && electron-builder --dir",
