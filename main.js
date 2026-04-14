@@ -13,7 +13,7 @@ const pty = require('node-pty');
 const JSONL_POLL_MS = 1000;
 const TOOL_DONE_DELAY_MS = 300;
 const PERMISSION_TIMER_MS = 7000;
-const TEXT_IDLE_DELAY_MS = 5000;
+// TEXT_IDLE_DELAY_MS removed — turn_duration is the authoritative "done" signal
 const PREVIEW_MAX = 200;
 const PROMPT_HISTORY_MAX = 50;
 const PROMPT_BRIEF_MAX = 150;
@@ -70,7 +70,6 @@ const agents = new Map();
 const terminals = new Map();
 const watchers = new Map();
 const polls = new Map();
-const waitTimers = new Map();
 const permTimers = new Map();
 const serverPorts = new Map(); // agentId -> Map(port -> url)
 const teams = new Map(); // teamName -> { name, leadAgentId, leadSessionId, members[], tasks[] }
@@ -943,7 +942,7 @@ function closeAgent(id) {
   const w = watchers.get(id); if (w) { w.close(); watchers.delete(id); }
   const p = polls.get(id); if (p) { clearInterval(p); polls.delete(id); }
   try { fs.unwatchFile(a.jsonlFile); } catch {}
-  clrTimer(id, waitTimers); clrTimer(id, permTimers);
+  clrTimer(id, permTimers);
   lastNotifyTimes.delete(id);
   clearServers(id);
   pendingClearAgents.delete(id);
@@ -986,7 +985,7 @@ function readLines(id) {
     a.fileOffset = st.size;
     const text = a.lineBuffer + buf.toString('utf-8');
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
-    if (lines.some(l => l.trim())) { clrTimer(id, waitTimers); clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; send({ type: 'permClear', id }); } }
+    if (lines.some(l => l.trim())) { clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; send({ type: 'permClear', id }); } }
     for (const line of lines) { if (line.trim()) parseLine(id, line); }
   } catch (e) { logToRenderer(`[readLines] Agent ${id} error: ${e.message} — file: ${a.jsonlFile}`); }
 }
@@ -1005,7 +1004,7 @@ function parseLine(id, line) {
       const blocks = r.message.content;
       for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); } }
       if (blocks.some(b => b.type === 'tool_use')) {
-        clrTimer(id, waitTimers); a.isWaiting = false; a.hadTools = true;
+        a.isWaiting = false; a.hadTools = true;
         send({ type: 'status', id, status: 'active' });
         let nonExempt = false;
         for (const b of blocks) {
@@ -1022,7 +1021,7 @@ function parseLine(id, line) {
           }
         }
         if (nonExempt) startPermTimer(id);
-      } else if (blocks.some(b => b.type === 'text') && !a.hadTools) { startWaitTimer(id); }
+      }
     } else if (r.type === 'user') {
       const c = r.message?.content;
       if (Array.isArray(c)) {
@@ -1037,15 +1036,15 @@ function parseLine(id, line) {
               setTimeout(() => send({ type: 'toolDone', id, toolId: tid }), TOOL_DONE_DELAY_MS);
             }
           }
-          if (a.toolIds.size === 0) { a.hadTools = false; startWaitTimer(id); }
+          if (a.toolIds.size === 0) { a.hadTools = false; }
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
           if (txt) { setPrompt(id, a, txt); }
-          clrTimer(id, waitTimers); clrActivity(id); a.hadTools = false; a.turnTools = 0;
+          clrActivity(id); a.hadTools = false; a.turnTools = 0;
         }
       } else if (typeof c === 'string' && c.trim()) {
         setPrompt(id, a, c);
-        clrTimer(id, waitTimers); clrActivity(id); a.hadTools = false; a.turnTools = 0;
+        clrActivity(id); a.hadTools = false; a.turnTools = 0;
       }
     } else if (r.type === 'system' && r.subtype === 'compact_boundary') {
       // Context was compacted — reset ctxTok so bar reflects the reduction immediately
@@ -1055,7 +1054,7 @@ function parseLine(id, line) {
       send({ type: 'stats', id, stats: a.stats });
       send({ type: 'compacting', id, active: false });
     } else if (r.type === 'system' && r.subtype === 'turn_duration') {
-      clrTimer(id, waitTimers); clrTimer(id, permTimers);
+      clrTimer(id, permTimers);
       a.stats.turns++; a.stats.durMs += r.durationMs || 0;
       send({ type: 'stats', id, stats: a.stats });
       if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
@@ -1183,7 +1182,7 @@ function reassignAgentToFile(id, newFilePath) {
   const p = polls.get(id); if (p) { clearInterval(p); polls.delete(id); }
   try { fs.unwatchFile(a.jsonlFile); } catch {}
   // Clear activity
-  clrTimer(id, waitTimers); clrTimer(id, permTimers);
+  clrTimer(id, permTimers);
   a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear();
   a.subToolIds.clear(); a.subToolNames.clear();
   a.isWaiting = false; a.permSent = false; a.hadTools = false; a.turnTools = 0;
@@ -1220,7 +1219,7 @@ function reassignAgentToFile(id, newFilePath) {
 // ── Timers ─────────────────────────────────────────────
 function clrTimer(id, map) { const t = map.get(id); if (t) { clearTimeout(t); map.delete(id); } }
 function clrActivity(id) { const a = agents.get(id); if (!a) return; a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); a.isWaiting = false; a.permSent = false; clrTimer(id, permTimers); send({ type: 'toolsClear', id }); send({ type: 'status', id, status: 'active' }); }
-function startWaitTimer(id) { clrTimer(id, waitTimers); waitTimers.set(id, setTimeout(() => { waitTimers.delete(id); const a = agents.get(id); if (!a) return; a.isWaiting = true; send({ type: 'status', id, status: 'waiting' }); }, TEXT_IDLE_DELAY_MS)); }
+// startWaitTimer removed — status:'waiting' now comes exclusively from turn_duration (authoritative)
 function startPermTimer(id) { if (settings.bypassPermissions) return; clrTimer(id, permTimers); permTimers.set(id, setTimeout(() => { permTimers.delete(id); const a = agents.get(id); if (!a) return; let ne = false; for (const tid of a.toolIds) { if (!EXEMPT.has(a.toolNames.get(tid) || '')) { ne = true; break; } } if (ne) { a.permSent = true; send({ type: 'perm', id }); notifyPermission(id, a); } }, PERMISSION_TIMER_MS)); }
 
 const lastNotifyTimes = new Map(); // per-agent throttle
@@ -1738,13 +1737,13 @@ ipcMain.on('cmd', (_e, msg) => {
         if (a) p = path.resolve(a.cwd, p);
       }
       if (!fs.existsSync(p)) break;
-      // Try VS Code with --goto for line:col support
+      // Try VS Code with --goto for line:col support, fall back to OS default
       const goto = line ? `${p}:${line}${col ? ':' + col : ''}` : p;
-      try {
-        spawn('code', ['--goto', goto], { detached: true, stdio: 'ignore' }).unref();
-      } catch {
-        shell.openPath(p).catch(() => {});
-      }
+      const fallback = () => shell.openPath(p).catch(() => {});
+      const cp = spawn('code', ['--goto', goto], { detached: true, stdio: 'ignore', shell: true });
+      cp.on('error', fallback);
+      cp.on('exit', (code) => { if (code !== 0) fallback(); });
+      cp.unref();
       break;
     }
     case 'pasteImage': {
