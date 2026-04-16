@@ -25,6 +25,7 @@ const MAX_CRASH_RETRIES = 3;
 const CRASH_RESUME_DELAY_MS = 2000;
 const USAGE_POLL_MS = 60000;
 const USAGE_TIMEOUT_MS = 15000;
+const USAGE_STALE_MS = 60 * 60 * 1000; // 1 hour — fetch even when idle if data older than this
 const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const TEAM_POLL_MS = 3000;
 const TEAMS_DIR = path.join(os.homedir(), '.claude', 'teams');
@@ -1855,9 +1856,10 @@ setInterval(() => {
 // Periodically scan for teams
 setInterval(() => scanTeams(), TEAM_POLL_MS);
 
-// Periodically fetch usage — when user is active OR any agent is running
+// Periodically fetch usage — when user is active OR any agent is running OR data is stale
 function hasActiveAgents() { for (const a of agents.values()) { if (!a.isWaiting) return true; } return false; }
-setInterval(() => { if (isUserActive() || hasActiveAgents()) fetchUsage(); }, USAGE_POLL_MS);
+function isUsageStale() { return !lastUsage || (Date.now() - lastUsage.fetchedAt > USAGE_STALE_MS); }
+setInterval(() => { if (isUserActive() || hasActiveAgents() || isUsageStale()) fetchUsage(); }, USAGE_POLL_MS);
 
 // ── Window ─────────────────────────────────────────────
 let _boundsTimer = null;
@@ -1894,7 +1896,7 @@ app.whenReady().then(() => {
     restoreAgents(state);
     sendFullState();
   });
-  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); });
+  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); });
   mainWindow.on('blur', () => { _windowFocused = false; });
   mainWindow.webContents.on('before-input-event', (_e, input) => {
     if (input.key === 'F12' && input.type === 'keyDown') {
