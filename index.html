@@ -159,8 +159,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agents { padding:2px 8px; display:flex; flex-direction:column; gap:2px; }
 .agent {
   padding:6px 10px; cursor:pointer; border:1px solid transparent; background:transparent;
-  border-radius:4px; transition:background .1s, border-color .1s; position:relative;
+  border-radius:4px; transition:background .1s, border-color .1s, opacity .15s; position:relative;
 }
+.agent.dragging { opacity:0.3; }
+.agent.drag-over-top { border-top:2px solid var(--accent); margin-top:-1px; }
+.agent.drag-over-bottom { border-bottom:2px solid var(--accent); margin-bottom:-1px; }
 .agent::before {
   content:''; position:absolute; left:0; top:4px; bottom:4px; width:2px; border-radius:1px;
   background:transparent; transition:background .15s;
@@ -417,6 +420,16 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-track { background:transparent; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:var(--surface0); border-radius:5px; border:2px solid transparent; background-clip:padding-box; min-height:40px; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background:var(--surface1); }
+#scroll-bottom-btn {
+  display:none; position:absolute; bottom:12px; right:20px; z-index:10;
+  width:32px; height:32px; border-radius:50%; border:1px solid var(--border);
+  background:var(--surface0); color:var(--text); cursor:pointer;
+  font-size:14px; line-height:30px; text-align:center;
+  opacity:.7; transition:opacity .15s, background .15s;
+  box-shadow:0 2px 8px rgba(0,0,0,.4);
+}
+#scroll-bottom-btn:hover { opacity:1; background:var(--surface1); }
+#scroll-bottom-btn.visible { display:block; }
 
 /* ── Terminal search bar ── */
 #term-search {
@@ -773,7 +786,7 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"></div>
+    <div id="term-container"><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
     <div id="timeline-events"></div>
   </div>
   </div><!-- end #content -->
@@ -929,6 +942,68 @@ const AGENT_ICONS = [
 ];
 const agentIconMap = JSON.parse(localStorage.getItem('overlord-agent-icons') || '{}'); // sessionId -> icon
 function saveAgentIcons() { localStorage.setItem('overlord-agent-icons', JSON.stringify(agentIconMap)); }
+
+// ── Agent card drag-to-reorder ──
+const agentOrderMap = JSON.parse(localStorage.getItem('overlord-agent-order') || '{}'); // cwd -> [id, ...]
+function saveAgentOrder() { localStorage.setItem('overlord-agent-order', JSON.stringify(agentOrderMap)); }
+function sortByOrder(cwd, items) {
+  const order = agentOrderMap[cwd];
+  if (!order || !order.length) return items;
+  const posMap = new Map(order.map((id, i) => [id, i]));
+  return [...items].sort((a, b) => {
+    const pa = posMap.has(a[0]) ? posMap.get(a[0]) : 9999;
+    const pb = posMap.has(b[0]) ? posMap.get(b[0]) : 9999;
+    return pa - pb;
+  });
+}
+
+let _dragId = null, _dragCwd = null;
+function onCardDragStart(e, id, cwd) {
+  _dragId = id; _dragCwd = cwd;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', String(id));
+  requestAnimationFrame(() => { const el = document.querySelector(`.agent[data-id="${id}"]`); if (el) el.classList.add('dragging'); });
+}
+function onCardDragEnd() {
+  _dragId = null; _dragCwd = null;
+  document.querySelectorAll('.agent.dragging,.agent.drag-over-top,.agent.drag-over-bottom').forEach(el => el.classList.remove('dragging','drag-over-top','drag-over-bottom'));
+}
+function onCardDragOver(e, id) {
+  if (_dragId == null || _dragId === id) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const card = e.currentTarget;
+  const rect = card.getBoundingClientRect();
+  const midY = rect.top + rect.height / 2;
+  card.classList.toggle('drag-over-top', e.clientY < midY);
+  card.classList.toggle('drag-over-bottom', e.clientY >= midY);
+}
+function onCardDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over-top', 'drag-over-bottom');
+}
+function onCardDrop(e, dropId, cwd) {
+  e.preventDefault();
+  document.querySelectorAll('.agent.drag-over-top,.agent.drag-over-bottom').forEach(el => el.classList.remove('drag-over-top','drag-over-bottom'));
+  if (_dragId == null || _dragId === dropId || cwd !== _dragCwd) { onCardDragEnd(); return; }
+
+  // Build current order for this group
+  const groupEl = e.currentTarget.closest('.agents');
+  const cards = groupEl ? [...groupEl.querySelectorAll('.agent[data-id]')] : [];
+  const ids = cards.map(c => Number(c.dataset.id));
+
+  // Remove dragged, insert at drop position
+  const fromIdx = ids.indexOf(_dragId);
+  if (fromIdx !== -1) ids.splice(fromIdx, 1);
+  let toIdx = ids.indexOf(dropId);
+  const rect = e.currentTarget.getBoundingClientRect();
+  if (e.clientY >= rect.top + rect.height / 2) toIdx++;
+  ids.splice(toIdx, 0, _dragId);
+
+  agentOrderMap[cwd] = ids;
+  saveAgentOrder();
+  onCardDragEnd();
+  render();
+}
 function getAgentIcon(sessionId) {
   if (agentIconMap[sessionId]) return agentIconMap[sessionId];
   const icon = AGENT_ICONS[Math.floor(Math.random() * AGENT_ICONS.length)];
@@ -1368,7 +1443,8 @@ function render() {
       </div>
     </div><div class="agents">`;
 
-    for (const [id, a] of items) {
+    const sortedItems = sortByOrder(cwd, items);
+    for (const [id, a] of sortedItems) {
       const st = agentStatus(a);
       const m = statusMeta[st];
       const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
@@ -1380,7 +1456,7 @@ function render() {
 
       const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
       const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
-      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})">
+      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-top">
           <span class="agent-icon ${m.cls}${st === 'active' ? ' pulse' : ''}" onclick="event.stopPropagation();showIconPicker(event,'${a.sessionId}')" title="Click to change icon">${getAgentIcon(a.sessionId)}${statusBadge ? `<span class="agent-status-badge">${statusBadge}</span>` : ''}</span>
           ${a.agentName ? `<span class="agent-pname">${esc(a.agentName)}</span>` : ''}
@@ -1591,6 +1667,7 @@ function createXterm(id) {
     }
   });
   terminal.onData((data) => api.send({ type: 'termInput', id, data }));
+  terminal.onScroll(() => updateScrollBtn());
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
@@ -1606,6 +1683,19 @@ function createXterm(id) {
 function destroyXterm(id) {
   const x = xterms.get(id); if (!x) return;
   x.terminal.dispose(); x.el.remove(); xterms.delete(id);
+}
+
+function updateScrollBtn() {
+  const btn = document.getElementById('scroll-bottom-btn');
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  if (!x || termTab !== 'terminal') { btn.classList.remove('visible'); return; }
+  const atBottom = x.terminal.buffer.active.viewportY >= x.terminal.buffer.active.baseY;
+  btn.classList.toggle('visible', !atBottom);
+}
+
+function scrollTermBottom() {
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  if (x) { x.terminal.scrollToBottom(); x.terminal.focus(); }
 }
 
 // Fit terminal without disrupting scroll position
@@ -1631,6 +1721,7 @@ function showXterm(id) {
     }
     x.terminal.focus();
     sendResize(id, x);
+    updateScrollBtn();
   }, 50); }
 }
 
@@ -1767,6 +1858,7 @@ function switchTermTab(tab) {
     tc.style.display = 'none'; tl.classList.add('open');
     if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
   }
+  updateScrollBtn();
 }
 
 function loadTimeline(id) {
@@ -2129,7 +2221,7 @@ api.on((msg) => {
     }
     x.terminal.write(msg.data);
     // Update prompt nav when new data arrives for the selected agent
-    if (msg.id === selectedId) schedulePromptNavUpdate();
+    if (msg.id === selectedId) { schedulePromptNavUpdate(); updateScrollBtn(); }
     return;
   }
   if (msg.type === 'termExit') {
