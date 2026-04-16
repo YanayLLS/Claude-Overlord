@@ -488,7 +488,13 @@ button:focus-visible { outline-offset:0; }
 .agent[data-status="permission"] { border-color:rgba(249,226,175,.25); background:rgba(249,226,175,.04); }
 .agent[data-status="crashed"] { border-color:rgba(243,139,168,.25); background:rgba(243,139,168,.04); }
 .agent[data-status="waiting"] { border-color:rgba(166,227,161,.15); background:rgba(166,227,161,.04); }
-.agent[data-status="waiting"].selected { border-color:rgba(166,227,161,.3); background:rgba(166,227,161,.1); }
+/* Selected overrides — must beat data-status specificity */
+.agent.selected[data-status="permission"],
+.agent.selected[data-status="crashed"],
+.agent.selected[data-status="waiting"],
+.agent.selected[data-status="active"],
+.agent.selected[data-status="idle"],
+.agent.selected[data-status="resuming"] { background:var(--accent); border-color:var(--accent); }
 
 /* Done flash — green glow that fades out when agent finishes */
 @keyframes done-flash {
