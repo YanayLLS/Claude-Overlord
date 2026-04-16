@@ -1582,10 +1582,30 @@ function destroyXterm(id) {
   x.terminal.dispose(); x.el.remove(); xterms.delete(id);
 }
 
+// Fit terminal without disrupting scroll position
+function fitPreservingScroll(x) {
+  const vp = x.terminal.buffer.active.viewportY;
+  const atBottom = vp >= x.terminal.buffer.active.baseY;
+  x.fitAddon.fit();
+  if (atBottom) x.terminal.scrollToBottom();
+  else x.terminal.scrollToLine(vp);
+}
+
 function showXterm(id) {
   for (const [xid, x] of xterms) x.el.style.display = xid === id ? '' : 'none';
   const x = xterms.get(id);
-  if (x) { setTimeout(() => { if (!xterms.has(id)) return; x.fitAddon.fit(); x.terminal.scrollToBottom(); x.terminal.focus(); sendResize(id, x); }, 50); }
+  if (x) { setTimeout(() => {
+    if (!xterms.has(id)) return;
+    if (!x._shown) {
+      x.fitAddon.fit();
+      x.terminal.scrollToBottom();
+      x._shown = true;
+    } else {
+      fitPreservingScroll(x);
+    }
+    x.terminal.focus();
+    sendResize(id, x);
+  }, 50); }
 }
 
 function sendResize(id, x) {
@@ -2016,7 +2036,7 @@ focusAgent = function(id) {
   let rafId = 0;
   function fitActive() {
     const x = xterms.get(selectedId);
-    if (x) { try { x.fitAddon.fit(); } catch {} }
+    if (x) { try { fitPreservingScroll(x); } catch {} }
   }
   document.addEventListener('mousemove', (e) => {
     if (!dragging) return;
@@ -2033,7 +2053,7 @@ focusAgent = function(id) {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       if (overlay) { overlay.remove(); overlay = null; }
-      // Final fit after layout settles
+      // Final fit after layout settles (fitActive already uses fitPreservingScroll)
       requestAnimationFrame(() => { fitActive(); requestAnimationFrame(fitActive); });
       // Persist panel size
       const size = term.offsetWidth;
@@ -2053,7 +2073,7 @@ function schedFit() {
   cancelAnimationFrame(fitRaf);
   fitRaf = requestAnimationFrame(() => {
     for (const [, x] of xterms) {
-      if (x.el.style.display !== 'none') { try { x.fitAddon.fit(); } catch {} }
+      if (x.el.style.display !== 'none') { try { fitPreservingScroll(x); } catch {} }
     }
   });
 }
@@ -2305,7 +2325,7 @@ function applySettings(s) {
   // Refit xterm after zoom restore
   if (s.zoom || s.termWidth) {
     const x = xterms.get(selectedId);
-    if (x) setTimeout(() => x.fitAddon.fit(), 100);
+    if (x) setTimeout(() => fitPreservingScroll(x), 100);
   }
 }
 
@@ -2405,7 +2425,7 @@ document.addEventListener('keydown', (e) => {
     api.setZoom(1);
     persistSettings();
     const x = xterms.get(selectedId);
-    if (x) setTimeout(() => x.fitAddon.fit(), 50);
+    if (x) setTimeout(() => fitPreservingScroll(x), 50);
     return;
   }
   // Ctrl+U to refresh usage
@@ -2581,7 +2601,7 @@ document.addEventListener('wheel', (e) => {
   api.setZoom(uiZoom / 100);
   persistSettings();
   const x = xterms.get(selectedId);
-  if (x) setTimeout(() => x.fitAddon.fit(), 50);
+  if (x) setTimeout(() => fitPreservingScroll(x), 50);
 }, { passive: false });
 
 
