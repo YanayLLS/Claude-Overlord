@@ -166,11 +166,22 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   background:transparent; transition:background .15s;
 }
 .agent:hover { background:rgba(205,214,244,.04); }
-.agent.selected { background:rgba(137,180,250,.08); border-color:rgba(137,180,250,.15); }
-.agent.selected::before { background:var(--accent); }
+.agent.selected { background:var(--accent); border-color:var(--accent); }
+.agent.selected::before { background:rgba(0,0,0,.4); }
+.agent.selected .agent-name { color:#1e1e2e; }
+.agent.selected .agent-icon { color:#1e1e2e; }
+.agent.selected .agent-pname { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.1); }
+.agent.selected .agent-status-line { color:rgba(30,30,46,.7); }
+.agent.selected .agent-prompt { color:rgba(30,30,46,.6); }
+.agent.selected .agent-prompt::before { color:rgba(30,30,46,.5); opacity:1; }
+.agent.selected .agent-preview { color:rgba(30,30,46,.4); }
+.agent.selected .agent-actions button { color:rgba(30,30,46,.6); }
+.agent.selected .agent-actions button:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
+.agent.selected .dot-active, .agent.selected .dot-waiting, .agent.selected .dot-perm,
+.agent.selected .dot-idle, .agent.selected .dot-crashed, .agent.selected .dot-resuming { color:#1e1e2e; }
 .agent.has-team { border-color:rgba(203,166,247,.15); }
 .agent.has-team::before { background:var(--purple); }
-.agent.has-team.selected { border-color:rgba(203,166,247,.25); background:rgba(203,166,247,.06); }
+.agent.has-team.selected { border-color:var(--purple); background:var(--purple); }
 
 /* Two-line card layout — top row = identity, bottom row = status + actions */
 .agent-top { display:flex; align-items:center; gap:6px; }
@@ -254,6 +265,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent[data-status="idle"] .agent-status-line { color:var(--dim); }
 .agent[data-status="crashed"] .agent-status-line { color:var(--red); }
 .agent[data-status="resuming"] .agent-status-line { color:var(--yellow); }
+/* Dark text overrides when selected (needs higher specificity than data-status rules) */
+.agent.selected[data-status] .agent-status-line { color:rgba(30,30,46,.7); }
+.agent.selected .agent-current-file { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
+.agent.selected .agent-current-file:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); background:rgba(0,0,0,.15); }
+.agent.selected[data-status="active"] .agent-current-file { color:#1e1e2e; opacity:.7; }
+.agent.selected .btn-reset { color:rgba(30,30,46,.5); }
+.agent.selected .btn-reset:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
+.agent.selected .btn-loop { color:rgba(30,30,46,.7); border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
+.agent.selected .btn-loop:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); }
 
 /* Prompt / preview */
 .agent-prompt { font-size:11px; color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:13px; position:relative; }
