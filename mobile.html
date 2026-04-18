@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1e1e2e">
+<title>Overlord Remote</title>
+<style>
+:root {
+  --bg: #1e1e2e; --bg2: #262637; --bg3: #313244;
+  --text: #cdd6f4; --dim: #6c7086; --accent: #89b4fa;
+  --green: #a6e3a1; --red: #f38ba8; --yellow: #f9e2af;
+  --purple: #cba6f7; --border: #45475a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text);
+  height: 100dvh; overflow: hidden;
+  display: flex; flex-direction: column;
+  -webkit-tap-highlight-color: transparent;
+}
+header {
+  background: var(--bg2); padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+  min-height: 52px; flex-shrink: 0;
+}
+header h1 { font-size: 16px; font-weight: 600; flex: 1; }
+header .back { display: none; font-size: 22px; cursor: pointer; color: var(--accent); padding: 0 8px 0 0; }
+header .agent-name { display: none; font-size: 14px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+header .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.action-btn {
+  background: none; border: 1px solid var(--border); color: var(--dim);
+  border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+}
+.action-btn:active { background: var(--bg3); color: var(--text); }
+.action-btn.danger { border-color: var(--red); color: var(--red); }
+
+/* ── Agent list ── */
+#agent-list {
+  flex: 1; overflow-y: auto; padding: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.agent-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px; margin-bottom: 8px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px;
+  transition: background .15s;
+}
+.agent-card:active { background: var(--bg3); }
+.agent-top { display: flex; align-items: center; gap: 8px; }
+.agent-top .name { font-size: 14px; font-weight: 600; flex: 1; }
+.agent-top .status {
+  font-size: 10px; padding: 2px 8px; border-radius: 10px;
+  text-transform: uppercase; font-weight: 600; letter-spacing: .5px;
+}
+.status-active { background: rgba(166,227,161,.15); color: var(--green); }
+.status-waiting { background: rgba(249,226,175,.15); color: var(--yellow); }
+.status-idle { background: rgba(108,112,134,.15); color: var(--dim); }
+.agent-prompt { font-size: 12px; color: var(--dim); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.agent-project { font-size: 10px; color: var(--dim); opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+#new-agent-btn {
+  display: block; width: 100%; padding: 14px; margin-top: 4px;
+  background: none; border: 2px dashed var(--border); border-radius: 10px;
+  color: var(--dim); font-size: 14px; cursor: pointer; text-align: center;
+}
+#new-agent-btn:active { background: var(--bg2); color: var(--text); border-color: var(--accent); }
+
+/* ── Agent detail ── */
+#agent-detail { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+#terminal-output {
+  flex: 1; overflow-y: auto; padding: 10px 14px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+  word-break: break-word; background: #000; color: #cdd6f4;
+  -webkit-overflow-scrolling: touch;
+}
+#input-bar {
+  display: flex; gap: 8px; padding: 10px 12px;
+  background: var(--bg2); border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#input-bar textarea {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); padding: 10px 12px;
+  font-family: inherit; font-size: 14px; resize: none;
+  min-height: 42px; max-height: 120px; line-height: 1.4;
+}
+#input-bar textarea::placeholder { color: var(--dim); }
+#input-bar textarea:focus { outline: none; border-color: var(--accent); }
+#send-btn {
+  background: var(--accent); color: var(--bg); border: none;
+  border-radius: 8px; padding: 0 18px; font-size: 14px;
+  font-weight: 600; cursor: pointer; flex-shrink: 0;
+}
+#send-btn:active { opacity: .8; }
+
+/* ── Connection status ── */
+#conn-status {
+  position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
+  background: var(--red); color: #fff; font-size: 11px;
+  padding: 4px 14px; border-radius: 0 0 8px 8px;
+  display: none; z-index: 100; font-weight: 600;
+}
+
+/* ── New agent modal ── */
+#new-agent-modal {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  z-index: 200; align-items: flex-end; justify-content: center;
+}
+#new-agent-modal.open { display: flex; }
+.modal-sheet {
+  background: var(--bg2); border-radius: 16px 16px 0 0;
+  width: 100%; max-width: 500px; padding: 20px 16px 32px;
+}
+.modal-sheet h3 { font-size: 16px; margin-bottom: 12px; }
+.modal-sheet select, .modal-sheet textarea {
+  width: 100%; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); padding: 10px 12px;
+  font-size: 14px; margin-bottom: 10px; font-family: inherit;
+}
+.modal-sheet select { appearance: none; }
+.modal-sheet .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.modal-sheet .modal-btn {
+  padding: 10px 20px; border-radius: 8px; border: none;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.modal-sheet .modal-cancel { background: var(--bg3); color: var(--text); }
+.modal-sheet .modal-submit { background: var(--accent); color: var(--bg); }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="back" id="back-btn" onclick="showList()">&#x2190;</span>
+  <h1 id="title-text">Overlord</h1>
+  <span class="agent-name" id="agent-name-text"></span>
+  <span class="status-dot" id="agent-status-dot" style="display:none"></span>
+  <button class="action-btn" id="btn-restart" style="display:none" onclick="restartCurrent()">Restart</button>
+  <button class="action-btn danger" id="btn-close" style="display:none" onclick="closeCurrent()">Close</button>
+</header>
+
+<div id="conn-status">Disconnected</div>
+
+<div id="agent-list"></div>
+
+<div id="agent-detail">
+  <div id="terminal-output"></div>
+  <div id="input-bar">
+    <textarea id="msg-input" placeholder="Type a message..." rows="1"></textarea>
+    <button id="send-btn" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<button id="new-agent-btn" onclick="openNewAgent()">+ New Agent</button>
+
+<div id="new-agent-modal">
+  <div class="modal-sheet">
+    <h3>New Agent</h3>
+    <select id="project-select"><option value="">Select project...</option></select>
+    <textarea id="new-prompt" placeholder="Initial prompt (optional)..." rows="3"></textarea>
+    <div class="modal-actions">
+      <button class="modal-btn modal-cancel" onclick="closeNewAgent()">Cancel</button>
+      <button class="modal-btn modal-submit" onclick="submitNewAgent()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const agents = new Map();
+let currentAgent = null;
+let ws = null;
+let reconnectTimer = null;
+
+// ── ANSI stripping ──
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+          .replace(/\x1b\][^\x07]*\x07/g, '')   // OSC sequences
+          .replace(/\x1b[()][A-Z0-9]/g, '')      // charset
+          .replace(/[\x00-\x09\x0b-\x0c\x0e-\x1f]/g, ''); // control chars except \n \r
+}
+
+// ── WebSocket ──
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host + '/ws');
+  ws.onopen = () => {
+    document.getElementById('conn-status').style.display = 'none';
+    clearTimeout(reconnectTimer);
+    ws.send(JSON.stringify({ type: 'getState' }));
+  };
+  ws.onmessage = (e) => {
+    try { handleMsg(JSON.parse(e.data)); } catch {}
+  };
+  ws.onclose = () => {
+    document.getElementById('conn-status').style.display = 'block';
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function wsSend(msg) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+}
+
+// ── Message handling ──
+function handleMsg(msg) {
+  switch (msg.type) {
+    case 'fullState':
+      agents.clear();
+      for (const a of msg.agents) agents.set(a.id, a);
+      renderList();
+      break;
+    case 'agentCreated':
+      agents.set(msg.id, {
+        id: msg.id, cwd: msg.cwd, title: msg.title || '', customName: msg.customName,
+        agentName: msg.agentName || '', status: 'active', lastPrompt: '', preview: '',
+        createdAt: msg.createdAt, stats: null, spinnerText: '',
+      });
+      renderList();
+      break;
+    case 'agentClosed':
+      agents.delete(msg.id);
+      if (currentAgent === msg.id) showList();
+      renderList();
+      break;
+    case 'status': {
+      const a = agents.get(msg.id);
+      if (a) { a.status = msg.status; renderList(); updateDetailHeader(); }
+      break;
+    }
+    case 'title': {
+      const a = agents.get(msg.id);
+      if (a) { a.title = msg.text; a.customName = msg.customName; renderList(); updateDetailHeader(); }
+      break;
+    }
+    case 'prompt': {
+      const a = agents.get(msg.id);
+      if (a) { a.lastPrompt = msg.text; renderList(); }
+      break;
+    }
+    case 'preview': {
+      const a = agents.get(msg.id);
+      if (a) { a.preview = msg.text; renderList(); }
+      break;
+    }
+    case 'spinnerText': {
+      const a = agents.get(msg.id);
+      if (a) a.spinnerText = msg.text;
+      break;
+    }
+    case 'termData': {
+      if (msg.id !== currentAgent) return;
+      const out = document.getElementById('terminal-output');
+      const atBottom = out.scrollTop + out.clientHeight >= out.scrollHeight - 30;
+      out.textContent += stripAnsi(msg.data);
+      // Cap displayed text at 100K chars
+      if (out.textContent.length > 100000) out.textContent = out.textContent.slice(-80000);
+      if (atBottom) out.scrollTop = out.scrollHeight;
+      break;
+    }
+    case 'stats': {
+      const a = agents.get(msg.id);
+      if (a) a.stats = msg.stats;
+      break;
+    }
+    case 'projects': {
+      const sel = document.getElementById('project-select');
+      sel.innerHTML = '<option value="">Select project...</option>';
+      for (const p of msg.projects) {
+        const o = document.createElement('option');
+        o.value = p;
+        o.textContent = p.split(/[\\\/]/).slice(-2).join('/');
+        sel.appendChild(o);
+      }
+      break;
+    }
+    case 'agentNameChanged': {
+      const a = agents.get(msg.id);
+      if (a) { a.agentName = msg.agentName; renderList(); updateDetailHeader(); }
+      break;
+    }
+    case 'focused': break; // ignore on mobile
+    case 'remoteReady': break; // not relevant to mobile
+  }
+}
+
+// ── Rendering ──
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function pathLabel(p) { return p.split(/[\\\/]/).slice(-2).join('/'); }
+
+function renderList() {
+  const el = document.getElementById('agent-list');
+  if (agents.size === 0) {
+    el.innerHTML = '<div style="text-align:center;color:var(--dim);padding:40px 0;font-size:13px">No agents running</div>';
+    return;
+  }
+  let html = '';
+  for (const [id, a] of agents) {
+    const name = a.agentName ? a.agentName + ' \u2014 ' : '';
+    const title = a.customName ? a.title : (a.lastPrompt || a.title || 'New agent');
+    const st = a.status || 'idle';
+    html += `<div class="agent-card" onclick="viewAgent(${id})">
+      <div class="agent-top">
+        <span class="name">${esc(name + title)}</span>
+        <span class="status status-${st}">${st}</span>
+      </div>
+      ${a.lastPrompt ? `<div class="agent-prompt">${esc(a.lastPrompt)}</div>` : ''}
+      <div class="agent-project">${esc(pathLabel(a.cwd || ''))}</div>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function updateDetailHeader() {
+  if (currentAgent === null) return;
+  const a = agents.get(currentAgent);
+  if (!a) return;
+  const name = a.agentName || a.title || 'Agent';
+  document.getElementById('agent-name-text').textContent = name;
+  const dot = document.getElementById('agent-status-dot');
+  const st = a.status || 'idle';
+  dot.style.background = st === 'active' ? 'var(--green)' : st === 'waiting' ? 'var(--yellow)' : 'var(--dim)';
+}
+
+// ── Navigation ──
+function viewAgent(id) {
+  currentAgent = id;
+  document.getElementById('agent-list').style.display = 'none';
+  document.getElementById('new-agent-btn').style.display = 'none';
+  document.getElementById('agent-detail').style.display = 'flex';
+  document.getElementById('title-text').style.display = 'none';
+  document.getElementById('back-btn').style.display = 'block';
+  document.getElementById('agent-name-text').style.display = 'block';
+  document.getElementById('agent-status-dot').style.display = 'block';
+  document.getElementById('btn-restart').style.display = 'inline-block';
+  document.getElementById('btn-close').style.display = 'inline-block';
+  document.getElementById('terminal-output').textContent = '';
+  updateDetailHeader();
+  wsSend({ type: 'viewAgent', id });
+}
+
+function showList() {
+  currentAgent = null;
+  document.getElementById('agent-list').style.display = 'block';
+  document.getElementById('new-agent-btn').style.display = 'block';
+  document.getElementById('agent-detail').style.display = 'none';
+  document.getElementById('title-text').style.display = 'block';
+  document.getElementById('back-btn').style.display = 'none';
+  document.getElementById('agent-name-text').style.display = 'none';
+  document.getElementById('agent-status-dot').style.display = 'none';
+  document.getElementById('btn-restart').style.display = 'none';
+  document.getElementById('btn-close').style.display = 'none';
+  renderList();
+}
+
+// ── Actions ──
+function sendMessage() {
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text || currentAgent === null) return;
+  wsSend({ type: 'termInput', id: currentAgent, data: text + '\r' });
+  input.value = '';
+  input.style.height = 'auto';
+}
+
+function restartCurrent() {
+  if (currentAgent !== null && confirm('Restart this agent?')) {
+    wsSend({ type: 'restartAgent', id: currentAgent });
+    showList();
+  }
+}
+
+function closeCurrent() {
+  if (currentAgent !== null && confirm('Close this agent?')) {
+    wsSend({ type: 'closeAgent', id: currentAgent });
+    showList();
+  }
+}
+
+function openNewAgent() {
+  wsSend({ type: 'getProjects' });
+  document.getElementById('new-agent-modal').classList.add('open');
+}
+
+function closeNewAgent() {
+  document.getElementById('new-agent-modal').classList.remove('open');
+}
+
+function submitNewAgent() {
+  const cwd = document.getElementById('project-select').value;
+  if (!cwd) { alert('Select a project folder'); return; }
+  const prompt = document.getElementById('new-prompt').value.trim();
+  wsSend({ type: 'createAgent', cwd, prompt: prompt || undefined });
+  document.getElementById('new-prompt').value = '';
+  closeNewAgent();
+}
+
+// ── Input auto-resize ──
+const msgInput = document.getElementById('msg-input');
+msgInput.addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+msgInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+// ── Start ──
+connect();
+</script>
+</body>
+</html>
