@@ -77,10 +77,23 @@ const teams = new Map(); // teamName -> { name, leadAgentId, leadSessionId, memb
 const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
 const pendingClearAgents = new Set(); // agentIds that recently ran /clear — used to correctly assign new JSONL files
+const termBuffers = new Map(); // agentId -> string (last TERM_BUFFER_MAX chars of terminal output)
+const TERM_BUFFER_MAX = 50000;
+let remoteWs = null; // current WebSocket connection (only one at a time)
+let remoteViewingAgent = null; // which agent the mobile client is viewing
+const REMOTE_PORT = 7778;
 let nextId = 1;
 
 function send(data) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
+  // Forward to mobile WebSocket client (skip termData unless viewing that agent)
+  if (remoteWs && !remoteWs.destroyed) {
+    if (data.type === 'termData') {
+      if (data.id === remoteViewingAgent) wsSend(remoteWs, data);
+    } else {
+      wsSend(remoteWs, data);
+    }
+  }
 }
 function logToRenderer(...args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
@@ -91,7 +104,7 @@ function logToRenderer(...args) {
 function sendFullState() {
   send({ type: 'settings', settings });
   for (const [id, a] of agents) {
-    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName });
+    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
@@ -268,6 +281,91 @@ async function generateSummaryTitle(id) {
 // Check if text is a system/internal message rather than a real user prompt
 const SYSTEM_MSG_RE = /^<(?:command-name|local-command|system-reminder|task-notification|user-prompt-submit-hook|antml:)/;
 function isSystemMessage(text) { return SYSTEM_MSG_RE.test(text.trim()); }
+
+function getLanIp() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) return net.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
+// ── WebSocket protocol (minimal, text frames only) ──
+function wsHandshake(req, socket) {
+  const key = req.headers['sec-websocket-key'];
+  if (!key) { socket.destroy(); return null; }
+  const accept = crypto.createHash('sha1')
+    .update(key + '258EAFA5-E914-47DA-95CA-5AB5353BE70E')
+    .digest('base64');
+  socket.write(
+    'HTTP/1.1 101 Switching Protocols\r\n' +
+    'Upgrade: websocket\r\n' +
+    'Connection: Upgrade\r\n' +
+    'Sec-WebSocket-Accept: ' + accept + '\r\n\r\n'
+  );
+  return socket;
+}
+
+function wsEncodeFrame(text) {
+  const data = Buffer.from(text, 'utf8');
+  const len = data.length;
+  let header;
+  if (len < 126) {
+    header = Buffer.alloc(2);
+    header[0] = 0x81;
+    header[1] = len;
+  } else if (len < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeUInt32BE(0, 2);
+    header.writeUInt32BE(len, 6);
+  }
+  return Buffer.concat([header, data]);
+}
+
+function wsDecodeFrame(buffer) {
+  if (buffer.length < 2) return null;
+  const opcode = buffer[0] & 0x0f;
+  const masked = (buffer[1] & 0x80) !== 0;
+  let payloadLen = buffer[1] & 0x7f;
+  let offset = 2;
+  if (payloadLen === 126) {
+    if (buffer.length < 4) return null;
+    payloadLen = buffer.readUInt16BE(2);
+    offset = 4;
+  } else if (payloadLen === 127) {
+    if (buffer.length < 10) return null;
+    payloadLen = Number(buffer.readUInt32BE(6));
+    offset = 10;
+  }
+  const maskLen = masked ? 4 : 0;
+  const totalLen = offset + maskLen + payloadLen;
+  if (buffer.length < totalLen) return null;
+  let payload;
+  if (masked) {
+    const mask = buffer.slice(offset, offset + 4);
+    payload = Buffer.alloc(payloadLen);
+    for (let i = 0; i < payloadLen; i++) {
+      payload[i] = buffer[offset + 4 + i] ^ mask[i % 4];
+    }
+  } else {
+    payload = buffer.slice(offset, offset + payloadLen);
+  }
+  return { opcode, data: payload.toString('utf8'), totalLen };
+}
+
+function wsSend(socket, data) {
+  if (!socket || socket.destroyed) return;
+  try { socket.write(wsEncodeFrame(typeof data === 'string' ? data : JSON.stringify(data))); } catch {}
+}
 
 function setPrompt(id, a, text) {
   // Skip system/internal messages — they're not real user prompts
@@ -586,7 +684,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount });
+    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -637,6 +735,7 @@ function restoreAgents(state) {
       lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', customName: customName || false,
       promptHistory: entry.promptHistory || [], titlePending: false, createdAt: createdAt || Date.now(),
       crashCount: 0, cronCount: entry.cronCount || 0, compacting: false, orphanAlive: false, agentName: agentName, spinnerText: '',
+      archived: entry.archived || false,
       stats: savedStats,
     };
     agents.set(id, agent);
@@ -741,7 +840,8 @@ function restoreAgents(state) {
       if (fs.existsSync(agent.jsonlFile) && !watchers.has(id) && !polls.has(id)) startWatch(id);
 
       // Auto-resume: spawn terminal after a short delay to let session locks release
-      if (agents.has(id)) {
+      // Skip archived agents — stay dormant until user unarchives.
+      if (agents.has(id) && !agents.get(id).archived) {
         console.log(`[Overlord] Auto-resuming agent ${id}`);
         await new Promise(r => setTimeout(r, 1500));
         if (agents.has(id)) spawnTerminal(id);
@@ -827,6 +927,11 @@ function spawnTerminal(id) {
     let resumeErrorBuf = '';
     proc.onData((d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
+      // Buffer terminal output for mobile remote
+      let buf = termBuffers.get(id) || '';
+      buf += d;
+      if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
+      termBuffers.set(id, buf);
       compactWatch(d);
       // Detect resume errors and retry
       if (!a._resumeHandled) {
@@ -889,6 +994,7 @@ function createAgent(folderPath, initialPrompt) {
     lastText: '', lastPrompt: '', title: '', customName: false,
     promptHistory: [], titlePending: false, createdAt: Date.now(),
     crashCount: 0, cronCount: 0, compacting: false, agentName: pickAgentName(), spinnerText: '',
+    archived: false,
     stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: 'sonnet' },
   };
   agents.set(id, agent);
@@ -908,6 +1014,11 @@ function createAgent(folderPath, initialPrompt) {
     let promptSent = !initialPrompt;
     proc.onData((d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
+      // Buffer terminal output for mobile remote
+      let buf = termBuffers.get(id) || '';
+      buf += d;
+      if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
+      termBuffers.set(id, buf);
       compactWatch(d);
       // Detect Claude ready prompt and send the initial prompt
       if (!promptSent) {
@@ -948,9 +1059,45 @@ function closeAgent(id) {
   clearServers(id);
   pendingClearAgents.delete(id);
   inputBuffers.delete(id);
+  termBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   agents.delete(id);
   send({ type: 'agentClosed', id });
+  saveState();
+}
+
+function archiveAgent(id) {
+  const a = agents.get(id);
+  if (!a || a.archived) return;
+  a.archived = true;
+  // Kill pty + watchers to free resources; keep agent metadata + jsonl intact.
+  const w = watchers.get(id); if (w) { try { w.close(); } catch {} watchers.delete(id); }
+  const p = polls.get(id); if (p) { clearInterval(p); polls.delete(id); }
+  try { fs.unwatchFile(a.jsonlFile); } catch {}
+  clrTimer(id, permTimers);
+  clearServers(id);
+  inputBuffers.delete(id);
+  termBuffers.delete(id);
+  const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
+  send({ type: 'agentArchived', id });
+  saveState();
+}
+
+function unarchiveAgent(id) {
+  const a = agents.get(id);
+  if (!a || !a.archived) return;
+  a.archived = false;
+  // Reset runtime state so resume starts clean.
+  a.fileOffset = 0;
+  a.lineBuffer = '';
+  a.isWaiting = true;
+  a.crashCount = 0;
+  a._resumeFailed = false;
+  a._resumeHandled = false;
+  a._resumeRetrying = false;
+  send({ type: 'agentUnarchived', id });
+  try { if (fs.existsSync(a.jsonlFile)) { a.fileOffset = fs.statSync(a.jsonlFile).size; startWatch(id); } } catch {}
+  spawnTerminal(id);
   saveState();
 }
 
@@ -1670,6 +1817,8 @@ ipcMain.on('cmd', (_e, msg) => {
   switch (msg.type) {
     case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
     case 'closeAgent': closeAgent(msg.id); break;
+    case 'archiveAgent': archiveAgent(msg.id); break;
+    case 'unarchiveAgent': unarchiveAgent(msg.id); break;
     case 'renameAgent': { const a = agents.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); } break; }
     case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); generateSummaryTitle(msg.id); } break; }
     case 'restartAgent': {
@@ -1861,6 +2010,149 @@ function hasActiveAgents() { for (const a of agents.values()) { if (!a.isWaiting
 function isUsageStale() { return !lastUsage || (Date.now() - lastUsage.fetchedAt > USAGE_STALE_MS); }
 setInterval(() => { if (isUserActive() || hasActiveAgents() || isUsageStale()) fetchUsage(); }, USAGE_POLL_MS);
 
+// ── Remote (mobile) command handler ──────────────────
+function handleRemoteCmd(msg) {
+  switch (msg.type) {
+    case 'viewAgent': {
+      remoteViewingAgent = msg.id;
+      const buf = termBuffers.get(msg.id);
+      if (buf) wsSend(remoteWs, { type: 'termData', id: msg.id, data: buf });
+      break;
+    }
+    case 'getState': {
+      const agentList = [];
+      for (const [id, a] of agents) {
+        const st = a.isWaiting ? 'waiting' : (a.toolIds.size > 0 || a.hadTools ? 'active' : 'idle');
+        agentList.push({
+          id, cwd: a.cwd, title: a.title, customName: a.customName,
+          agentName: a.agentName, status: st, lastPrompt: a.lastPrompt,
+          preview: a.lastText, createdAt: a.createdAt,
+          stats: a.stats, spinnerText: a.spinnerText,
+        });
+      }
+      wsSend(remoteWs, { type: 'fullState', agents: agentList });
+      break;
+    }
+    case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
+    case 'closeAgent': closeAgent(msg.id); break;
+    case 'restartAgent': {
+      const a = agents.get(msg.id);
+      if (a) {
+        const c = a.cwd;
+        const savedTitle = a.title || '';
+        const savedCustomName = a.customName;
+        const savedAgentName = a.agentName;
+        closeAgent(msg.id);
+        const newId = createAgent(c);
+        const na = agents.get(newId);
+        if (na && savedAgentName) { na.agentName = savedAgentName; send({ type: 'agentNameChanged', id: newId, agentName: savedAgentName }); }
+        if (savedTitle && na) { na.title = savedTitle; na.customName = savedCustomName; send({ type: 'title', id: newId, text: savedTitle, customName: savedCustomName }); saveState(); }
+      }
+      break;
+    }
+    case 'termInput': handleTermInput(msg.id, msg.data); break;
+    case 'getProjects': {
+      const projects = new Set();
+      for (const [, a] of agents) if (a.cwd) projects.add(a.cwd);
+      wsSend(remoteWs, { type: 'projects', projects: [...projects] });
+      break;
+    }
+  }
+}
+
+// ── Remote access HTTP/WebSocket server ──────────────
+let remoteServer = null;
+let remoteUrl = null;
+
+function startRemoteServer() {
+  let mobileHtml;
+  try { mobileHtml = fs.readFileSync(path.join(__dirname, 'mobile.html'), 'utf-8'); }
+  catch { mobileHtml = '<html><body>mobile.html not found</body></html>'; }
+
+  let generateQRSvg;
+  try { generateQRSvg = require('./qr.js').generateQRSvg; }
+  catch (e) { console.log('[Overlord] QR module not found:', e.message); generateQRSvg = () => '<svg></svg>'; }
+
+  const server = http.createServer((req, res) => {
+    if (req.url === '/' || req.url === '/index.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+      res.end(mobileHtml);
+    } else {
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  });
+
+  server.on('upgrade', (req, socket) => {
+    if (req.url !== '/ws') { socket.destroy(); return; }
+    if (remoteWs && !remoteWs.destroyed) {
+      try { remoteWs.end(); } catch {}
+      remoteWs = null;
+    }
+    const ws = wsHandshake(req, socket);
+    if (!ws) return;
+    remoteWs = ws;
+    remoteViewingAgent = null;
+    console.log('[Overlord] Mobile client connected');
+    handleRemoteCmd({ type: 'getState' });
+
+    let wsBuf = Buffer.alloc(0);
+    ws.on('data', (chunk) => {
+      wsBuf = Buffer.concat([wsBuf, chunk]);
+      while (wsBuf.length >= 2) {
+        const frame = wsDecodeFrame(wsBuf);
+        if (!frame) break;
+        wsBuf = wsBuf.slice(frame.totalLen);
+        if (frame.opcode === 0x8) {
+          try { ws.end(wsEncodeFrame('')); } catch {}
+          ws.destroy();
+          if (remoteWs === ws) { remoteWs = null; remoteViewingAgent = null; }
+          console.log('[Overlord] Mobile client disconnected');
+          return;
+        }
+        if (frame.opcode === 0x9) {
+          const pong = Buffer.alloc(2);
+          pong[0] = 0x8a; pong[1] = 0;
+          try { ws.write(pong); } catch {}
+          continue;
+        }
+        if (frame.opcode === 0x1) {
+          try { handleRemoteCmd(JSON.parse(frame.data)); }
+          catch (e) { console.log('[Overlord] Bad remote message:', e.message); }
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      if (remoteWs === ws) { remoteWs = null; remoteViewingAgent = null; }
+      console.log('[Overlord] Mobile client disconnected');
+    });
+    ws.on('error', () => {
+      if (remoteWs === ws) { remoteWs = null; remoteViewingAgent = null; }
+    });
+  });
+
+  const tryListen = (port) => {
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE' && port < REMOTE_PORT + 10) {
+        console.log(`[Overlord] Port ${port} in use, trying ${port + 1}`);
+        tryListen(port + 1);
+      } else {
+        console.log(`[Overlord] Remote server failed: ${err.message}`);
+      }
+    });
+    server.listen(port, '0.0.0.0', () => {
+      const ip = getLanIp();
+      remoteUrl = `http://${ip}:${port}`;
+      remoteServer = server;
+      const svg = generateQRSvg(remoteUrl, 4);
+      send({ type: 'remoteReady', url: remoteUrl, qrSvg: svg });
+      console.log(`[Overlord] Remote access: ${remoteUrl}`);
+    });
+  };
+  tryListen(REMOTE_PORT);
+}
+
 // ── Window ─────────────────────────────────────────────
 let _boundsTimer = null;
 function saveWindowBounds() {
@@ -1886,6 +2178,9 @@ app.whenReady().then(() => {
   };
   if (bounds.x !== undefined && bounds.y !== undefined) { opts.x = bounds.x; opts.y = bounds.y; }
   mainWindow = new BrowserWindow(opts);
+  // Allow all permission requests (Electron default). Explicit so mic / audio-capture for
+  // speech recognition is guaranteed to pass without changing behaviour for other permissions.
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, cb) => cb(true));
   if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   mainWindow.setMenuBarVisibility(false);
@@ -1895,6 +2190,7 @@ app.whenReady().then(() => {
   mainWindow.webContents.once('did-finish-load', () => {
     restoreAgents(state);
     sendFullState();
+    startRemoteServer();
   });
   mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); });
   mainWindow.on('blur', () => { _windowFocused = false; });
@@ -1911,6 +2207,8 @@ app.whenReady().then(() => {
   });
 });
 app.on('before-quit', () => {
+  if (remoteServer) { try { remoteServer.close(); } catch {} }
+  if (remoteWs) { try { remoteWs.destroy(); } catch {} }
   // Spawn detached Claude processes for active agents so they survive the app restart.
   // The detached process continues the current turn headlessly; on restore the app
   // kills it via saved PID before reconnecting.

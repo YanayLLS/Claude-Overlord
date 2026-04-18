@@ -135,6 +135,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .group-actions button:hover { color:var(--green); border-color:rgba(166,227,161,.4); background:rgba(166,227,161,.08); }
 .group-actions .btn-team { color:var(--dim); }
 .group-actions .btn-team:hover { color:var(--purple); border-color:rgba(203,166,247,.4); background:rgba(203,166,247,.08); }
+.group-actions .btn-archive { color:var(--dim); }
+.group-actions .btn-archive:hover { color:var(--yellow,#f9e2af); border-color:rgba(249,226,175,.4); background:rgba(249,226,175,.08); }
 .group-menu-wrap { position:relative; flex-shrink:0; }
 .group-menu-btn {
   font-family:inherit; font-size:14px; padding:0 4px; cursor:pointer; line-height:1;
@@ -178,8 +180,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .agent-prompt { color:rgba(30,30,46,.6); }
 .agent.selected .agent-prompt::before { color:rgba(30,30,46,.5); opacity:1; }
 .agent.selected .agent-preview { color:rgba(30,30,46,.4); }
-.agent.selected .agent-actions button { color:rgba(30,30,46,.6); }
-.agent.selected .agent-actions button:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
+.agent.selected .agent-bottom button { color:rgba(30,30,46,.6); }
+.agent.selected .agent-bottom button:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
 .agent.selected .dot-active, .agent.selected .dot-waiting, .agent.selected .dot-perm,
 .agent.selected .dot-idle, .agent.selected .dot-crashed, .agent.selected .dot-resuming { color:#1e1e2e; }
 .agent.has-team { border-color:rgba(203,166,247,.15); }
@@ -275,8 +277,41 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected[data-status="active"] .agent-current-file { color:#1e1e2e; opacity:.7; }
 .agent.selected .btn-reset { color:rgba(30,30,46,.5); }
 .agent.selected .btn-reset:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
+.agent.selected .btn-close { color:rgba(30,30,46,.4); }
+.agent.selected .btn-close:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
+.agent.selected .agent-btn:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
 .agent.selected .btn-loop { color:rgba(30,30,46,.7); border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
 .agent.selected .btn-loop:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); }
+.agent.selected .status-meta { color:rgba(30,30,46,.5); opacity:1; }
+.agent.selected .ctx-bar-label { color:rgba(30,30,46,.5); }
+.agent.selected .ctx-bar-track { background:rgba(0,0,0,.15); }
+.agent.selected .ctx-bar-fill { background:rgba(0,0,0,.3); }
+.agent.selected .ctx-bar-fill.warn { background:rgba(0,0,0,.4); }
+.agent.selected .ctx-bar-fill.danger { background:rgba(0,0,0,.5); }
+.agent.selected .ctx-bar-pct { color:rgba(30,30,46,.6); }
+.agent.selected .ctx-bar-pct.warn { color:rgba(30,30,46,.7); }
+.agent.selected .ctx-bar-pct.danger { color:rgba(30,30,46,.8); }
+.agent.selected .ctx-bar-compact { color:rgba(30,30,46,.5); }
+.agent.selected .ctx-bar-compact:hover { color:#1e1e2e; }
+.agent.selected .ctx-bar-compacting { color:rgba(30,30,46,.7); }
+.agent.selected .agent-status-badge { border-color:rgba(0,0,0,.2); }
+.agent.selected .subagent { border-left-color:rgba(0,0,0,.2); }
+.agent.selected .subagent-dot { background:rgba(30,30,46,.5); box-shadow:none; }
+.agent.selected .subagent-name { color:#1e1e2e; opacity:.7; }
+.agent.selected .subagent-activity { color:rgba(30,30,46,.7); }
+.agent.selected .agent-team { border-top-color:rgba(0,0,0,.15); }
+.agent.selected .team-icon { color:rgba(30,30,46,.7); }
+.agent.selected .team-name { color:rgba(30,30,46,.8); }
+.agent.selected .team-count { color:rgba(30,30,46,.5); }
+.agent.selected .team-members { border-left-color:rgba(0,0,0,.15); }
+.agent.selected .team-member:hover { background:rgba(0,0,0,.06); }
+.agent.selected .team-member-dot { background:rgba(30,30,46,.6); box-shadow:none; }
+.agent.selected .team-member-name { color:#1e1e2e; }
+.agent.selected .team-member-role { color:rgba(30,30,46,.5); }
+.agent.selected .team-tasks-bar { border-left-color:rgba(0,0,0,.15); }
+.agent.selected .team-tasks-dot { background:rgba(30,30,46,.6); box-shadow:none; }
+.agent.selected .team-tasks-label { color:rgba(30,30,46,.7); }
+.agent.selected .team-tasks-pct { color:rgba(30,30,46,.5); }
 
 /* Prompt / preview */
 .agent-prompt { font-size:11px; color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:13px; position:relative; }
@@ -414,6 +449,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #prompt-nav button { font-size:10px; padding:2px 5px; color:var(--dim); }
 #prompt-nav button:hover { color:var(--accent); }
 #prompt-nav .prompt-counter { font-size:10px; color:var(--dim); min-width:28px; text-align:center; user-select:none; }
+#mic-btn { font-size:14px; line-height:1; padding:4px 7px; }
+#mic-btn:disabled { opacity:.3; cursor:not-allowed; }
+#mic-btn.recording { color:var(--red); background:rgba(243,139,168,.12); animation:micPulse 1.2s ease-in-out infinite; }
+#mic-btn.recording:hover { background:rgba(243,139,168,.2); color:var(--red); }
+@keyframes micPulse { 0%,100% { box-shadow:0 0 0 0 rgba(243,139,168,.5); } 50% { box-shadow:0 0 0 4px rgba(243,139,168,0); } }
 #term-container { flex:1; position:relative; background:#000; overflow:hidden; min-width:0; min-height:0; }
 #term-container .xterm { height:100%; width:100%; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar { width:10px; }
@@ -609,6 +649,26 @@ button:focus-visible { outline-offset:0; }
 .tl-label { color:var(--text); margin-top:1px; word-break:break-word; }
 .tl-label-tool { color:var(--purple); }
 .tl-label-prompt { color:var(--green); }
+.tl-event-prompt.tl-highlight { background:rgba(166,227,161,.1); border-radius:4px; }
+.tl-event-prompt.tl-highlight .tl-dot { box-shadow:0 0 6px var(--green); }
+
+/* ── QR overlay ── */
+#qr-overlay {
+  display:none; position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:999;
+  align-items:center; justify-content:center; transition:opacity .15s;
+}
+#qr-overlay .qr-modal {
+  background:var(--bg2); border:1px solid var(--border); border-radius:12px;
+  padding:28px 32px; text-align:center; max-width:340px;
+}
+#qr-overlay h3 { margin-bottom:16px; font-size:16px; }
+#qr-overlay .qr-svg { margin:0 auto 16px; }
+#qr-overlay .qr-url {
+  font-family:'Cascadia Code','Fira Code',monospace; font-size:13px;
+  color:var(--accent); word-break:break-all; margin-bottom:8px;
+  user-select:all; cursor:text;
+}
+#qr-overlay .qr-hint { font-size:11px; color:var(--dim); }
 .tl-label-turn { color:var(--yellow); font-size:11px; }
 .tl-detail {
   color:rgba(255,255,255,.35); font-size:11px; margin-top:2px;
@@ -746,6 +806,7 @@ button:focus-visible { outline-offset:0; }
     <h1><span>Overlord</span></h1>
     <div id="headerBadges"></div>
     <button class="hdr-btn" onclick="openHistory()" title="Session history (Ctrl+H)">&#x23F3;</button>
+    <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
@@ -777,6 +838,7 @@ button:focus-visible { outline-offset:0; }
         <span class="prompt-counter" id="prompt-counter"></span>
         <button onclick="jumpPrompt(1)" title="Next prompt (Ctrl+&#x2193;)">&#x25BC;</button>
       </div>
+      <button id="mic-btn" onclick="toggleMic()" title="Dictate to terminal (speech-to-text)">&#x1F3A4;</button>
       <button onclick="closeTerm()" aria-label="Close terminal">&times;</button>
     </div>
     <div id="term-search" style="display:none">
@@ -851,6 +913,7 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+Shift+W</span><span class="help-desc">Close all done agents</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Tab</span><span class="help-desc">Next agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+Tab</span><span class="help-desc">Previous agent</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+&#x2191;/&#x2193;</span><span class="help-desc">Cycle between your messages</span></div>
       <div class="help-row"><span class="help-key">Ctrl+!</span><span class="help-desc">Jump to next permission request</span></div>
       <div class="help-row"><span class="help-key">Ctrl+F</span><span class="help-desc">Find in terminal / Filter agents</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+F</span><span class="help-desc">Search all agent conversations</span></div>
@@ -885,6 +948,15 @@ button:focus-visible { outline-offset:0; }
       <div id="search-results"><div class="search-empty">Type to search across all agent conversations</div></div>
     </div>
   </div>
+  <div id="archive-overlay" onclick="closeArchiveModal()">
+    <div class="archive-modal" onclick="event.stopPropagation()">
+      <div class="archive-header">
+        <h3 id="archive-title">Archived</h3>
+        <button class="settings-close" onclick="closeArchiveModal()" aria-label="Close">&times;</button>
+      </div>
+      <div id="archive-list"></div>
+    </div>
+  </div>
   <div id="confirm-overlay" onclick="confirmResolve(false)">
     <div class="confirm-modal" onclick="event.stopPropagation()">
       <div class="confirm-title" id="confirm-msg"></div>
@@ -892,6 +964,14 @@ button:focus-visible { outline-offset:0; }
         <button onclick="confirmResolve(false)">Cancel</button>
         <button class="btn-danger" id="confirm-ok" onclick="confirmResolve(true)"></button>
       </div>
+    </div>
+  </div>
+  <div id="qr-overlay" onclick="closeQr()">
+    <div class="qr-modal" onclick="event.stopPropagation()">
+      <h3>Mobile Remote</h3>
+      <div class="qr-svg" id="qr-svg"></div>
+      <div class="qr-url" id="qr-url"></div>
+      <div class="qr-hint">Scan with your phone camera on the same network</div>
     </div>
   </div>
 </div>
@@ -1157,6 +1237,66 @@ function confirmResolve(value) {
   if (_confirmCb) { const cb = _confirmCb; _confirmCb = null; cb(value); }
 }
 
+function archiveAgent(id) {
+  api.send({ type: 'archiveAgent', id });
+}
+function unarchiveAgent(id) {
+  api.send({ type: 'unarchiveAgent', id });
+}
+
+let _archiveModalCwd = null;
+function openArchiveModal(cwd) {
+  _archiveModalCwd = cwd;
+  const el = document.getElementById('archive-overlay');
+  if (!el) return;
+  renderArchiveList(cwd);
+  el.style.display = 'flex';
+}
+function closeArchiveModal() {
+  _archiveModalCwd = null;
+  const el = document.getElementById('archive-overlay');
+  if (el) el.style.display = 'none';
+}
+function refreshArchiveModal(cwd) {
+  if (_archiveModalCwd && _archiveModalCwd === cwd) {
+    const remaining = [...agents.values()].filter(a => a.archived && (a.cwd || '(unknown)') === cwd).length;
+    if (remaining === 0) { closeArchiveModal(); return; }
+    renderArchiveList(cwd);
+  }
+}
+function renderArchiveList(cwd) {
+  const list = document.getElementById('archive-list');
+  if (!list) return;
+  const items = [];
+  for (const [id, a] of agents) {
+    if (!a.archived) continue;
+    if ((a.cwd || '(unknown)') !== cwd) continue;
+    items.push([id, a]);
+  }
+  items.sort((x, y) => (y[1].createdAt || 0) - (x[1].createdAt || 0));
+  document.getElementById('archive-title').textContent = `Archived \u2014 ${pathLabel(cwd)}`;
+  if (items.length === 0) {
+    list.innerHTML = '<div class="archive-empty">No archived agents</div>';
+    return;
+  }
+  list.innerHTML = items.map(([id, a]) => {
+    const title = a.customName ? a.title : (a.title || a.prompt || 'Untitled');
+    const last = a.preview || a.prompt || '';
+    const when = a.createdAt ? new Date(a.createdAt).toLocaleString() : '';
+    return `<div class="archive-item">
+      <div class="archive-item-body">
+        <div class="archive-item-top">
+          ${a.agentName ? `<span class="archive-item-pname">${esc(a.agentName)}</span>` : ''}
+          <span class="archive-item-title">${esc(title)}</span>
+        </div>
+        ${last ? `<div class="archive-item-prompt">${esc(last)}</div>` : ''}
+        ${when ? `<div class="archive-item-date">${esc(when)}</div>` : ''}
+      </div>
+      <button class="archive-unbtn" onclick="unarchiveAgent(${id})" title="Unarchive">Unarchive</button>
+    </div>`;
+  }).join('');
+}
+
 function closeAgent(id) {
   api.send({ type: 'closeAgent', id });
 }
@@ -1229,6 +1369,7 @@ function showAgentMenu(e, id) {
     { label: 'Duplicate', action: () => duplicateAgent(id) },
     { label: 'Export transcript', action: () => exportAgent(id) },
     { sep: true },
+    { label: 'Archive', action: () => archiveAgent(id) },
     { label: 'Close', action: () => closeAgent(id), cls: 'ctx-danger' },
   ];
   for (const it of items) {
@@ -1386,18 +1527,25 @@ function render() {
   }
 
   // Group by cwd (apply filter), include empty known projects
+  // Archived agents are tracked per-cwd so project header can show count, but excluded from visible list.
   const groups = new Map();
+  const archivedCounts = new Map();
   for (const cwd of knownProjects) groups.set(cwd, []);
   for (const [id, a] of agents) {
-    if (!matchesFilter(a)) continue;
     const cwd = a.cwd || '(unknown)';
+    if (a.archived) {
+      archivedCounts.set(cwd, (archivedCounts.get(cwd) || 0) + 1);
+      if (!groups.has(cwd)) groups.set(cwd, []);
+      continue;
+    }
+    if (!matchesFilter(a)) continue;
     if (!groups.has(cwd)) groups.set(cwd, []);
     groups.get(cwd).push([id, a]);
   }
 
   // Header badges
   let permC = 0, actC = 0, waitC = 0;
-  for (const [, a] of agents) { const s = agentStatus(a); if (s === 'permission') permC++; else if (s === 'active' || s === 'settling') actC++; else if (s === 'waiting') waitC++; }
+  for (const [, a] of agents) { if (a.archived) continue; const s = agentStatus(a); if (s === 'permission') permC++; else if (s === 'active' || s === 'settling') actC++; else if (s === 'waiting') waitC++; }
 
   // Dynamic window title for taskbar
   let totalCost = 0;
@@ -1432,6 +1580,7 @@ function render() {
       <div class="group-actions">
         <button onclick="event.stopPropagation();addAgent('${safeCwd}')">+ Agent</button>
         <button class="btn-team" onclick="event.stopPropagation();showTeamOverlay('${safeCwd}')">+ Team</button>
+        ${archivedCounts.get(cwd) ? `<button class="btn-archive" title="Show archived agents" onclick="event.stopPropagation();openArchiveModal('${safeCwd}')">&#x1F4E6; ${archivedCounts.get(cwd)}</button>` : ''}
       </div>
       <div class="group-menu-wrap">
         <button class="group-menu-btn" onclick="event.stopPropagation();toggleGroupMenu(this)" title="More actions">&#x22EE;</button>
@@ -1743,7 +1892,7 @@ function openTerm(id) {
   // Update prompt nav after xterm exists and buffer has time to populate
   setTimeout(() => updatePromptNav(), 150);
   // Load timeline if tab is active or agent changed
-  if (timelineAgentId !== id) loadTimeline(id);
+  if (timelineAgentId !== id) { _tlPromptIdx = -1; loadTimeline(id); }
   render();
   // Re-focus terminal after render so keyboard input works immediately
   if (termTab === 'terminal') {
@@ -1794,6 +1943,43 @@ document.getElementById('term-search-input').addEventListener('keydown', (e) => 
   else if (e.key === 'Enter') { e.preventDefault(); termSearchNext(); }
 });
 
+// ── Mic / speech-to-text ──
+let _micRec = null;
+let _micActive = false;
+function toggleMic() {
+  if (_micActive) { try { _micRec && _micRec.stop(); } catch {} return; }
+  if (selectedId == null) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('Speech recognition not supported in this build.'); return; }
+  if (!_micRec) {
+    _micRec = new SR();
+    _micRec.continuous = true;
+    _micRec.interimResults = false;
+    _micRec.lang = navigator.language || 'en-US';
+    _micRec.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (!e.results[i].isFinal) continue;
+        const text = e.results[i][0].transcript.trim();
+        if (text && selectedId != null) api.send({ type: 'termInput', id: selectedId, data: text + ' ' });
+      }
+    };
+    _micRec.onerror = (e) => {
+      const msg = e.error === 'not-allowed' ? 'Microphone blocked. Check OS privacy settings.'
+        : e.error === 'network' ? 'Speech recognition needs internet (uses Chromium speech service).'
+        : 'Mic error: ' + e.error;
+      console.error('speech', e); setMicUI(false);
+      if (e.error !== 'aborted' && e.error !== 'no-speech') alert(msg);
+    };
+    _micRec.onend = () => setMicUI(false);
+  }
+  try { _micRec.start(); setMicUI(true); } catch (err) { console.error(err); setMicUI(false); }
+}
+function setMicUI(on) {
+  _micActive = on;
+  const btn = document.getElementById('mic-btn');
+  if (btn) btn.classList.toggle('recording', on);
+}
+
 // Debounced prompt nav update — called when terminal data arrives
 let _promptNavTimer = null;
 function schedulePromptNavUpdate() {
@@ -1819,6 +2005,15 @@ function getPromptLines() {
 function updatePromptNav() {
   const nav = document.getElementById('prompt-nav');
   const a = selectedId != null ? agents.get(selectedId) : null;
+  if (termTab === 'timeline') {
+    const prompts = document.getElementById('timeline-events').querySelectorAll('.tl-event-prompt');
+    if (!a || prompts.length === 0) { nav.style.display = 'none'; return; }
+    nav.style.display = 'flex';
+    const total = prompts.length + 1;
+    const label = _tlPromptIdx < 0 || _tlPromptIdx >= prompts.length ? '\u25C7' : String(_tlPromptIdx + 1);
+    document.getElementById('prompt-counter').textContent = label + '/' + total;
+    return;
+  }
   const promptLines = getPromptLines();
   if (!a || promptLines.length === 0) { nav.style.display = 'none'; return; }
   nav.style.display = 'flex';
@@ -1830,6 +2025,8 @@ function updatePromptNav() {
 function jumpPrompt(dir) {
   const a = selectedId != null ? agents.get(selectedId) : null;
   if (!a) return;
+  // Timeline view: jump between prompt events
+  if (termTab === 'timeline') { jumpTimelinePrompt(dir); return; }
   const promptLines = getPromptLines();
   if (promptLines.length === 0) return;
   // Initialize nav index if unset — start past the end (= bottom)
@@ -1844,6 +2041,27 @@ function jumpPrompt(dir) {
   x.terminal.scrollToLine(Math.max(0, promptLines[newIdx] - 1));
 }
 
+let _tlPromptIdx = -1;
+function jumpTimelinePrompt(dir) {
+  const el = document.getElementById('timeline-events');
+  const prompts = el.querySelectorAll('.tl-event-prompt');
+  if (prompts.length === 0) return;
+  const total = prompts.length + 1; // +1 for bottom virtual entry
+  if (_tlPromptIdx < 0 || _tlPromptIdx > prompts.length) _tlPromptIdx = prompts.length;
+  const newIdx = _tlPromptIdx + dir;
+  if (newIdx < 0 || newIdx > prompts.length) return;
+  _tlPromptIdx = newIdx;
+  // Clear previous highlight
+  el.querySelectorAll('.tl-highlight').forEach(e => e.classList.remove('tl-highlight'));
+  const nav = document.getElementById('prompt-nav');
+  nav.style.display = 'flex';
+  const label = newIdx >= prompts.length ? '\u25C7' : String(newIdx + 1);
+  document.getElementById('prompt-counter').textContent = label + '/' + total;
+  if (newIdx >= prompts.length) { el.scrollTop = el.scrollHeight; return; }
+  prompts[newIdx].classList.add('tl-highlight');
+  prompts[newIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
 // ── Timeline ───────────────────────────────────────────
 function switchTermTab(tab) {
   termTab = tab;
@@ -1855,9 +2073,11 @@ function switchTermTab(tab) {
     tc.style.display = ''; tl.classList.remove('open');
     if (selectedId) showXterm(selectedId);
   } else {
+    _tlPromptIdx = -1;
     tc.style.display = 'none'; tl.classList.add('open');
     if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
   }
+  updatePromptNav();
   updateScrollBtn();
 }
 
@@ -2236,10 +2456,36 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', currentFile: '', currentFileName: '' });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', currentFile: '', currentFileName: '', archived: msg.archived || false });
       if (msg.cwd) knownProjects.add(msg.cwd);
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
+      break;
+    }
+    case 'agentArchived': {
+      const a = agents.get(msg.id);
+      if (a) {
+        a.archived = true;
+        a.status = 'idle';
+        a.tools.clear(); a.subTools.clear(); a.spinnerText = '';
+        destroyXterm(msg.id);
+        if (selectedId === msg.id) {
+          const remaining = [...agents.entries()].filter(([, x]) => !x.archived).map(([i]) => i);
+          if (remaining.length) focusAgent(remaining[0]);
+          else { selectedId = null; closeTerm(); }
+        }
+        refreshArchiveModal(a.cwd);
+        scheduleRender();
+      }
+      break;
+    }
+    case 'agentUnarchived': {
+      const a = agents.get(msg.id);
+      if (a) {
+        a.archived = false;
+        refreshArchiveModal(a.cwd);
+        scheduleRender();
+      }
       break;
     }
     case 'agentClosed': {
@@ -2325,6 +2571,7 @@ function handleAgentMsg(msg) {
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'sessions': handleSessions(msg); break;
     case 'usage': handleUsage(msg.usage); break;
+    case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
     case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
     case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
     case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); } break; }
@@ -2588,6 +2835,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
+    const qr = document.getElementById('qr-overlay');
+    if (qr.style.display === 'flex') { closeQr(); return; }
     const cfm = document.getElementById('confirm-overlay');
     if (cfm.classList.contains('open')) { confirmResolve(false); return; }
     const searchOv = document.getElementById('search-overlay');
@@ -2632,10 +2881,13 @@ document.addEventListener('paste', (e) => {
   if (!items) return;
   let hasImageFile = false;
   let hasNonImageFile = false;
+  let hasText = false;
   for (const item of items) {
     if (item.kind === 'file') {
       if (item.type.startsWith('image/')) hasImageFile = true;
       else hasNonImageFile = true;
+    } else if (item.kind === 'string') {
+      hasText = true;
     }
   }
   // Check if clipboard has files (copied from Explorer/Finder)
@@ -2652,16 +2904,14 @@ document.addEventListener('paste', (e) => {
     api.send({ type: 'pasteFiles', id: selectedId });
     return;
   }
+  // If clipboard has text items, let xterm handle the paste natively —
+  // don't read clipboardData here as it can interfere with xterm's own read.
+  if (hasText) return;
   // On Windows, files copied from Explorer may not show as clipboardData items
-  // but the clipboard buffer contains FileNameW. If there's no text content, try pasteFiles.
-  const text = e.clipboardData?.getData('text/plain');
-  if (!text || text.length === 0) {
-    // No text in clipboard — might be a file copy; let main process check
-    e.preventDefault();
-    e.stopPropagation();
-    api.send({ type: 'pasteFiles', id: selectedId });
-    return;
-  }
+  // but the clipboard buffer contains FileNameW. If there's no text or file items, try pasteFiles.
+  e.preventDefault();
+  e.stopPropagation();
+  api.send({ type: 'pasteFiles', id: selectedId });
 }, true);
 
 function toggleHelp() {
@@ -2674,6 +2924,25 @@ function toggleHelp() {
 }
 function closeHelp() {
   const el = document.getElementById('help-overlay');
+  el.style.opacity = '0';
+  setTimeout(() => { el.style.display = 'none'; }, 150);
+}
+
+// ── QR Remote overlay ──
+let _remoteUrl = null;
+let _qrSvg = null;
+function toggleQr() {
+  const el = document.getElementById('qr-overlay');
+  if (el.style.display === 'flex') { closeQr(); return; }
+  if (!_qrSvg) return;
+  document.getElementById('qr-svg').innerHTML = _qrSvg;
+  document.getElementById('qr-url').textContent = _remoteUrl;
+  el.style.display = 'flex';
+  el.style.opacity = '0';
+  requestAnimationFrame(() => el.style.opacity = '1');
+}
+function closeQr() {
+  const el = document.getElementById('qr-overlay');
   el.style.opacity = '0';
   setTimeout(() => { el.style.display = 'none'; }, 150);
 }

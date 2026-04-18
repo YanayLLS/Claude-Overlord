@@ -37,7 +37,9 @@
       "preload.js",
       "index.html",
       "xterm-bundle.js",
-      "xterm.css"
+      "xterm.css",
+      "qr.js",
+      "mobile.html"
     ],
     "directories": {
       "output": "out"
