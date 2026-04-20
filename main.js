@@ -1756,6 +1756,13 @@ function handleTermInput(id, data) {
   }
   let buf = inputBuffers.get(id) || '';
 
+  // Bracketed paste — PTY app handles multi-line natively; pass through raw.
+  if (data.includes('\x1b[200~')) {
+    t.write(data);
+    inputBuffers.set(id, '');
+    return;
+  }
+
   // Multi-char paste or chunk containing Enter
   if (data.length > 1 && data.includes('\r')) {
     // Treat entire paste as one input; combine with existing buffer
@@ -1830,8 +1837,7 @@ const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes of no IPC = idle
 function isUserActive() { return _windowFocused && (Date.now() - _lastActivity < IDLE_THRESHOLD_MS); }
 
 // ── IPC ────────────────────────────────────────────────
-ipcMain.on('cmd', (_e, msg) => {
-  _lastActivity = Date.now();
+function handleIpc(msg) {
   switch (msg.type) {
     case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
     case 'closeAgent': closeAgent(msg.id); break;
@@ -1916,7 +1922,13 @@ ipcMain.on('cmd', (_e, msg) => {
     }
     case 'pasteImage': {
       const img = clipboard.readImage();
-      if (img.isEmpty()) break;
+      if (img.isEmpty()) {
+        // No bitmap on clipboard — likely a file reference (e.g. image file copied from Explorer).
+        // Fall through to file-path paste logic.
+        msg.type = 'pasteFiles';
+        handleIpc(msg);
+        break;
+      }
       const dir = path.join(os.tmpdir(), 'overlord-clipboard');
       fs.mkdirSync(dir, { recursive: true });
       const filename = `paste-${Date.now()}.png`;
@@ -1932,17 +1944,30 @@ ipcMain.on('cmd', (_e, msg) => {
       break;
     }
     case 'pasteFiles': {
-      // Read file paths from clipboard (Windows: FileNameW, macOS/Linux: text/uri-list)
       let filePaths = [];
       if (process.platform === 'win32') {
+        // Try CF_HDROP first (Explorer's primary format for file copy)
         try {
-          const buf = clipboard.readBuffer('FileNameW');
-          if (buf && buf.length > 0) {
-            // FileNameW is null-terminated UTF-16LE string(s), double-null terminated
-            const raw = buf.toString('utf16le');
+          const buf = clipboard.readBuffer('CF_HDROP');
+          if (buf && buf.length > 20) {
+            const pFiles = buf.readUInt32LE(0);
+            const fWide = buf.readUInt32LE(16);
+            const raw = fWide
+              ? buf.slice(pFiles).toString('utf16le')
+              : buf.slice(pFiles).toString('ascii');
             filePaths = raw.split('\0').filter(p => p.length > 0);
           }
         } catch (_) {}
+        // Fallback: FileNameW (single-file format, some apps use this)
+        if (filePaths.length === 0) {
+          try {
+            const buf = clipboard.readBuffer('FileNameW');
+            if (buf && buf.length > 0) {
+              const raw = buf.toString('utf16le');
+              filePaths = raw.split('\0').filter(p => p.length > 0);
+            }
+          } catch (_) {}
+        }
       } else {
         // macOS/Linux: clipboard may contain file URIs
         const text = clipboard.readText();
@@ -1953,9 +1978,9 @@ ipcMain.on('cmd', (_e, msg) => {
             .map(l => decodeURIComponent(l.replace('file://', '')));
         }
       }
-      // Filter to only actual files (not directories)
+      // Keep only paths that exist on disk (files or directories)
       filePaths = filePaths.filter(p => {
-        try { return fs.statSync(p).isFile(); } catch (_) { return false; }
+        try { fs.statSync(p); return true; } catch (_) { return false; }
       });
       if (filePaths.length === 0) break;
       const text = filePaths
@@ -2012,6 +2037,10 @@ ipcMain.on('cmd', (_e, msg) => {
       break;
     }
   }
+}
+ipcMain.on('cmd', (_e, msg) => {
+  _lastActivity = Date.now();
+  handleIpc(msg);
 });
 
 // Periodically push stats + scan for new JSONL files (/clear detection)

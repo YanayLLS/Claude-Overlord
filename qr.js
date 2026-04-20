@@ -293,22 +293,19 @@ function applyMask(matrix, reserved, size, maskIdx) {
 
 function writeFormatInfo(matrix, size, maskIdx) {
   const bits = FORMAT_BITS[maskIdx];
-  // Horizontal: modules around top-left finder
-  const hPositions = [0,1,2,3,4,5,7,8, /*then*/ size-8,size-7,size-6,size-5,size-4,size-3,size-2,size-1];
-  // Vertical: modules around top-left finder
-  const vPositions = [size-1,size-2,size-3,size-4,size-5,size-6,size-7, size-8, /*then*/ 7,5,4,3,2,1,0];
-
-  for (let i = 0; i < 15; i++) {
-    const bit = (bits >> (14 - i)) & 1;
-    // Horizontal strip along row 8
-    if (i < 8) {
-      matrix[8][hPositions[i]] = bit;
-    } else {
-      matrix[8][hPositions[i]] = bit;
-    }
-    // Vertical strip along column 8
-    matrix[vPositions[i]][8] = bit;
-  }
+  // Copy 1: L-shaped strip around top-left finder
+  for (let i = 0; i <= 5; i++)
+    matrix[8][i] = (bits >> i) & 1;
+  matrix[8][7] = (bits >> 6) & 1;
+  matrix[8][8] = (bits >> 7) & 1;
+  matrix[7][8] = (bits >> 8) & 1;
+  for (let i = 9; i < 15; i++)
+    matrix[14 - i][8] = (bits >> i) & 1;
+  // Copy 2: bottom-left (vertical) and top-right (horizontal)
+  for (let i = 0; i < 8; i++)
+    matrix[size - 1 - i][8] = (bits >> i) & 1;
+  for (let i = 8; i < 15; i++)
+    matrix[8][size - 15 + i] = (bits >> i) & 1;
 }
 
 function penaltyScore(matrix, size) {
