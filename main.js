@@ -923,6 +923,12 @@ function spawnTerminal(id) {
   try {
     const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: a.cwd, env: { ...process.env } });
     terminals.set(id, proc);
+    // Flush any input that arrived before PTY was ready
+    const queued = pendingTermInput.get(id);
+    if (queued && queued.length > 0) {
+      pendingTermInput.delete(id);
+      for (const d of queued) handleTermInput(id, d);
+    }
     const compactWatch = autoCompactWatcher(id, proc);
     let resumeErrorBuf = '';
     proc.onData((d) => {
@@ -1059,6 +1065,7 @@ function closeAgent(id) {
   clearServers(id);
   pendingClearAgents.delete(id);
   inputBuffers.delete(id);
+  pendingTermInput.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   agents.delete(id);
@@ -1077,6 +1084,7 @@ function archiveAgent(id) {
   clrTimer(id, permTimers);
   clearServers(id);
   inputBuffers.delete(id);
+  pendingTermInput.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   send({ type: 'agentArchived', id });
@@ -1690,6 +1698,7 @@ function scanTeams() {
 
 // ── @Mention detection + context injection ─────────────
 const inputBuffers = new Map(); // agentId -> string buffer
+const pendingTermInput = new Map(); // agentId -> array of strings queued pre-spawn
 
 function findMentions(text) {
   const re = /@([A-Za-z][A-Za-z0-9]*)/g;
@@ -1736,7 +1745,15 @@ function buildMentionContext(mentions) {
 
 function handleTermInput(id, data) {
   const t = terminals.get(id);
-  if (!t) return;
+  if (!t) {
+    // PTY not yet spawned — queue input, flushed after spawn.
+    const q = pendingTermInput.get(id) || [];
+    q.push(data);
+    // cap queue to prevent unbounded growth if spawn never happens
+    if (q.length > 256) q.shift();
+    pendingTermInput.set(id, q);
+    return;
+  }
   let buf = inputBuffers.get(id) || '';
 
   // Multi-char paste or chunk containing Enter
@@ -1754,6 +1771,7 @@ function handleTermInput(id, data) {
       // Clear existing line with Ctrl+U, then rewrite with context
       t.write('\x15');
       t.write(toSend + '\n\n' + ctx + '\r');
+      if (remainder) t.write(remainder);
     } else {
       t.write(data);
     }
@@ -2178,8 +2196,6 @@ app.whenReady().then(() => {
   };
   if (bounds.x !== undefined && bounds.y !== undefined) { opts.x = bounds.x; opts.y = bounds.y; }
   mainWindow = new BrowserWindow(opts);
-  // Allow all permission requests (Electron default). Explicit so mic / audio-capture for
-  // speech recognition is guaranteed to pass without changing behaviour for other permissions.
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, cb) => cb(true));
   if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));

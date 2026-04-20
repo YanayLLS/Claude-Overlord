@@ -449,11 +449,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #prompt-nav button { font-size:10px; padding:2px 5px; color:var(--dim); }
 #prompt-nav button:hover { color:var(--accent); }
 #prompt-nav .prompt-counter { font-size:10px; color:var(--dim); min-width:28px; text-align:center; user-select:none; }
-#mic-btn { font-size:14px; line-height:1; padding:4px 7px; }
-#mic-btn:disabled { opacity:.3; cursor:not-allowed; }
-#mic-btn.recording { color:var(--red); background:rgba(243,139,168,.12); animation:micPulse 1.2s ease-in-out infinite; }
-#mic-btn.recording:hover { background:rgba(243,139,168,.2); color:var(--red); }
-@keyframes micPulse { 0%,100% { box-shadow:0 0 0 0 rgba(243,139,168,.5); } 50% { box-shadow:0 0 0 4px rgba(243,139,168,0); } }
 #term-container { flex:1; position:relative; background:#000; overflow:hidden; min-width:0; min-height:0; }
 #term-container .xterm { height:100%; width:100%; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar { width:10px; }
@@ -723,6 +718,37 @@ button:focus-visible { outline-offset:0; }
 .history-item-meta span + span::before { content:'\00b7'; margin-right:4px; opacity:.4; }
 .history-item-prompt { font-size:11px; color:rgba(166,173,200,.3); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
+/* ── Archive overlay ── */
+#archive-overlay {
+  display:none; position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:999;
+  align-items:center; justify-content:center; transition:opacity .15s;
+}
+.archive-modal {
+  background:var(--editor-bg); border:1px solid var(--border-hi); box-shadow:0 8px 32px rgba(0,0,0,.4);
+  padding:20px 24px; width:560px; max-width:90vw; max-height:80vh; display:flex; flex-direction:column; border-radius:8px;
+}
+.archive-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+.archive-header h3 { font-size:14px; color:var(--text); font-weight:600; letter-spacing:.3px; }
+#archive-list { flex:1; overflow-y:auto; }
+.archive-empty { text-align:center; padding:30px 0; color:var(--dim); font-size:12px; }
+.archive-item {
+  display:flex; align-items:center; gap:10px; padding:8px 10px; margin:2px 0;
+  border:1px solid var(--border); border-radius:6px; background:var(--bg3);
+}
+.archive-item:hover { border-color:var(--border-hi); }
+.archive-item-body { flex:1; min-width:0; }
+.archive-item-top { display:flex; align-items:center; gap:6px; }
+.archive-item-pname { font-size:11px; color:var(--accent); font-weight:500; }
+.archive-item-title { font-size:12px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.archive-item-prompt { font-size:11px; color:rgba(166,173,200,.5); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.archive-item-date { font-size:10px; color:var(--dim); margin-top:2px; }
+.archive-unbtn {
+  font-family:inherit; font-size:11px; padding:4px 10px; cursor:pointer;
+  color:var(--green); background:transparent; border:1px solid rgba(166,227,161,.3); border-radius:4px;
+  transition:background .12s, border-color .12s;
+}
+.archive-unbtn:hover { background:rgba(166,227,161,.12); border-color:var(--green); }
+
 /* ── Global Search overlay ── */
 #search-overlay {
   display:none; position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:999;
@@ -833,12 +859,11 @@ button:focus-visible { outline-offset:0; }
         <button class="term-tab" id="tab-timeline" onclick="switchTermTab('timeline')">Timeline</button>
       </div>
       <span class="term-title" id="term-title"></span>
-      <div id="prompt-nav" style="display:none">
+      <div id="prompt-nav">
         <button onclick="jumpPrompt(-1)" title="Previous prompt (Ctrl+&#x2191;)">&#x25B2;</button>
-        <span class="prompt-counter" id="prompt-counter"></span>
+        <span class="prompt-counter" id="prompt-counter">0/0</span>
         <button onclick="jumpPrompt(1)" title="Next prompt (Ctrl+&#x2193;)">&#x25BC;</button>
       </div>
-      <button id="mic-btn" onclick="toggleMic()" title="Dictate to terminal (speech-to-text)">&#x1F3A4;</button>
       <button onclick="closeTerm()" aria-label="Close terminal">&times;</button>
     </div>
     <div id="term-search" style="display:none">
@@ -1943,43 +1968,6 @@ document.getElementById('term-search-input').addEventListener('keydown', (e) => 
   else if (e.key === 'Enter') { e.preventDefault(); termSearchNext(); }
 });
 
-// ── Mic / speech-to-text ──
-let _micRec = null;
-let _micActive = false;
-function toggleMic() {
-  if (_micActive) { try { _micRec && _micRec.stop(); } catch {} return; }
-  if (selectedId == null) return;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { alert('Speech recognition not supported in this build.'); return; }
-  if (!_micRec) {
-    _micRec = new SR();
-    _micRec.continuous = true;
-    _micRec.interimResults = false;
-    _micRec.lang = navigator.language || 'en-US';
-    _micRec.onresult = (e) => {
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (!e.results[i].isFinal) continue;
-        const text = e.results[i][0].transcript.trim();
-        if (text && selectedId != null) api.send({ type: 'termInput', id: selectedId, data: text + ' ' });
-      }
-    };
-    _micRec.onerror = (e) => {
-      const msg = e.error === 'not-allowed' ? 'Microphone blocked. Check OS privacy settings.'
-        : e.error === 'network' ? 'Speech recognition needs internet (uses Chromium speech service).'
-        : 'Mic error: ' + e.error;
-      console.error('speech', e); setMicUI(false);
-      if (e.error !== 'aborted' && e.error !== 'no-speech') alert(msg);
-    };
-    _micRec.onend = () => setMicUI(false);
-  }
-  try { _micRec.start(); setMicUI(true); } catch (err) { console.error(err); setMicUI(false); }
-}
-function setMicUI(on) {
-  _micActive = on;
-  const btn = document.getElementById('mic-btn');
-  if (btn) btn.classList.toggle('recording', on);
-}
-
 // Debounced prompt nav update — called when terminal data arrives
 let _promptNavTimer = null;
 function schedulePromptNavUpdate() {
@@ -1997,29 +1985,29 @@ function getPromptLines() {
     const line = buf.getLine(i);
     if (!line) continue;
     const text = line.translateToString(true);
-    if (/^\s*❯/.test(text)) lines.push(i);
+    if (/^\s*❯/.test(text) || /^\s*[│┃]\s+>\s/.test(text)) lines.push(i);
   }
   return lines;
 }
 
 function updatePromptNav() {
   const nav = document.getElementById('prompt-nav');
+  const counter = document.getElementById('prompt-counter');
   const a = selectedId != null ? agents.get(selectedId) : null;
+  nav.style.display = 'flex';
   if (termTab === 'timeline') {
     const prompts = document.getElementById('timeline-events').querySelectorAll('.tl-event-prompt');
-    if (!a || prompts.length === 0) { nav.style.display = 'none'; return; }
-    nav.style.display = 'flex';
-    const total = prompts.length + 1;
+    if (!a || prompts.length === 0) { counter.textContent = '0/0'; return; }
+    const total = prompts.length;
     const label = _tlPromptIdx < 0 || _tlPromptIdx >= prompts.length ? '\u25C7' : String(_tlPromptIdx + 1);
-    document.getElementById('prompt-counter').textContent = label + '/' + total;
+    counter.textContent = label + '/' + total;
     return;
   }
   const promptLines = getPromptLines();
-  if (!a || promptLines.length === 0) { nav.style.display = 'none'; return; }
-  nav.style.display = 'flex';
-  const total = promptLines.length + 1; // +1 for "current/bottom" virtual entry
+  if (!a || promptLines.length === 0) { counter.textContent = '0/0'; return; }
+  const total = promptLines.length;
   const label = a.promptNavIdx >= promptLines.length ? '\u25C7' : String(a.promptNavIdx + 1);
-  document.getElementById('prompt-counter').textContent = label + '/' + total;
+  counter.textContent = label + '/' + total;
 }
 
 function jumpPrompt(dir) {
@@ -2843,6 +2831,8 @@ document.addEventListener('keydown', (e) => {
     if (searchOv.style.display === 'flex') { closeSearch(); return; }
     const history = document.getElementById('history-overlay');
     if (history.style.display === 'flex') { closeHistory(); return; }
+    const archive = document.getElementById('archive-overlay');
+    if (archive && archive.style.display === 'flex') { closeArchiveModal(); return; }
     const help = document.getElementById('help-overlay');
     if (help.style.display === 'flex') { closeHelp(); return; }
     if (document.getElementById('filter-bar').classList.contains('open')) { closeFilter(); return; }
@@ -2904,11 +2894,12 @@ document.addEventListener('paste', (e) => {
     api.send({ type: 'pasteFiles', id: selectedId });
     return;
   }
-  // If clipboard has text items, let xterm handle the paste natively —
-  // don't read clipboardData here as it can interfere with xterm's own read.
   if (hasText) return;
-  // On Windows, files copied from Explorer may not show as clipboardData items
-  // but the clipboard buffer contains FileNameW. If there's no text or file items, try pasteFiles.
+  // items list sometimes empty even when clipboard has text (Electron/Chromium quirk).
+  // Check types array for text format before falling through to file-paste path.
+  const types = e.clipboardData?.types || [];
+  if (types.includes('text/plain') || types.includes('text')) return;
+  // Truly no text — try Windows FileNameW fallback for Explorer-copied files.
   e.preventDefault();
   e.stopPropagation();
   api.send({ type: 'pasteFiles', id: selectedId });
