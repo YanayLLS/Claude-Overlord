@@ -1743,6 +1743,17 @@ function buildMentionContext(mentions) {
   return blocks.join('\n\n');
 }
 
+function writePtyChunked(proc, data, chunkSize = 1024) {
+  if (data.length <= chunkSize) { proc.write(data); return; }
+  let offset = 0;
+  (function next() {
+    if (offset >= data.length) return;
+    proc.write(data.slice(offset, offset + chunkSize));
+    offset += chunkSize;
+    if (offset < data.length) setTimeout(next, 3);
+  })();
+}
+
 function handleTermInput(id, data) {
   const t = terminals.get(id);
   if (!t) {
@@ -1756,9 +1767,9 @@ function handleTermInput(id, data) {
   }
   let buf = inputBuffers.get(id) || '';
 
-  // Bracketed paste — PTY app handles multi-line natively; pass through raw.
+  // Bracketed paste — PTY app handles multi-line natively; chunk to avoid ConPTY pipe overflow.
   if (data.includes('\x1b[200~')) {
-    t.write(data);
+    writePtyChunked(t, data);
     inputBuffers.set(id, '');
     return;
   }
@@ -1777,10 +1788,10 @@ function handleTermInput(id, data) {
       const ctx = buildMentionContext(mentions);
       // Clear existing line with Ctrl+U, then rewrite with context
       t.write('\x15');
-      t.write(toSend + '\n\n' + ctx + '\r');
+      writePtyChunked(t, toSend + '\n\n' + ctx + '\r');
       if (remainder) t.write(remainder);
     } else {
-      t.write(data);
+      writePtyChunked(t, data);
     }
     inputBuffers.set(id, remainder);
     return;

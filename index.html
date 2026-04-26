@@ -176,12 +176,16 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .agent-name { color:#1e1e2e; }
 .agent.selected .agent-icon { color:#1e1e2e; }
 .agent.selected .agent-pname { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.1); }
+.agent.selected .model-tag { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.1); }
 .agent.selected .agent-status-line { color:rgba(30,30,46,.7); }
 .agent.selected .agent-prompt { color:rgba(30,30,46,.6); }
 .agent.selected .agent-prompt::before { color:rgba(30,30,46,.5); opacity:1; }
 .agent.selected .agent-preview { color:rgba(30,30,46,.4); }
 .agent.selected .agent-bottom button { color:rgba(30,30,46,.6); }
 .agent.selected .agent-bottom button:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
+.agent.selected:hover .agent-btn { opacity:.7; }
+.agent.selected:hover .btn-close { opacity:.7 !important; }
+.agent.selected:hover .btn-reset { opacity:.7 !important; }
 .agent.selected .dot-active, .agent.selected .dot-waiting, .agent.selected .dot-perm,
 .agent.selected .dot-idle, .agent.selected .dot-crashed, .agent.selected .dot-resuming { color:#1e1e2e; }
 .agent.has-team { border-color:rgba(203,166,247,.15); }
@@ -1630,12 +1634,15 @@ function render() {
 
       const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
       const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
+      const mf = a.stats?.modelFamily || '';
       html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-top">
           <span class="agent-icon ${m.cls}${st === 'active' ? ' pulse' : ''}" onclick="event.stopPropagation();showIconPicker(event,'${a.sessionId}')" title="Click to change icon">${getAgentIcon(a.sessionId)}${statusBadge ? `<span class="agent-status-badge">${statusBadge}</span>` : ''}</span>
           ${a.agentName ? `<span class="agent-pname">${esc(a.agentName)}</span>` : ''}
           <span class="agent-name" title="${escAttr(title)}${a.customName ? ' (custom name)' : ''}" ondblclick="event.stopPropagation();renameAgent(${id},this)">${esc(title)}</span>
+          ${mf ? `<span class="model-tag ${mf}">${mf}</span>` : ''}
         </div>
+        ${a.customName && a.prompt ? `<div class="agent-prompt">${esc(a.prompt)}</div>` : ''}
         <div class="agent-bottom">
           <span class="agent-status-line">${statusLineHTML(a, st)}</span>
           <span class="agent-bottom-spacer"></span>
@@ -1765,12 +1772,12 @@ function render() {
       const daysLeft = msLeft / 86400000;
       const daysElapsed = 7 - daysLeft;
       if (daysElapsed > 0.01 && daysLeft > 0) {
-        const dailyRate = currentUsage.weekly / daysElapsed;
-        const budgetRate = (100 - currentUsage.weekly) / daysLeft;
-        const paceClass = dailyRate <= budgetRate * 0.85 ? 'pace-ok' : dailyRate <= budgetRate ? 'pace-warn' : 'pace-over';
-        const paceLabel = dailyRate <= budgetRate ? 'On track' : 'Too fast';
-        infoHtml += `<span class="sep">│</span><span>Speed: ${dailyRate.toFixed(1)}%/day</span>`;
-        infoHtml += `<span class="sep">·</span><span>Budget: ${budgetRate.toFixed(1)}%/day</span>`;
+        const expectedPct = (daysElapsed / 7) * 100;
+        const actual = currentUsage.weekly;
+        const paceClass = actual <= expectedPct * 0.85 ? 'pace-ok' : actual <= expectedPct * 1.1 ? 'pace-warn' : 'pace-over';
+        const paceLabel = actual <= expectedPct * 1.1 ? 'On track' : 'Too fast';
+        infoHtml += `<span class="sep">│</span><span>Used: ${actual.toFixed(1)}%</span>`;
+        infoHtml += `<span class="sep">·</span><span>Expected: ${expectedPct.toFixed(1)}%</span>`;
         infoHtml += `<span class="sep">·</span><span class="${paceClass}">${paceLabel}</span>`;
       }
     }
@@ -2004,25 +2011,25 @@ function updatePromptNav() {
     return;
   }
   const promptLines = getPromptLines();
-  if (!a || promptLines.length === 0) { counter.textContent = '0/0'; return; }
-  const total = promptLines.length;
-  const label = a.promptNavIdx >= promptLines.length ? '\u25C7' : String(a.promptNavIdx + 1);
+  const total = promptLines.length || (a?.prompts?.length ?? 0);
+  if (!a || total === 0) { counter.textContent = '0/0'; return; }
+  const label = a.promptNavIdx >= total ? '◇' : String(a.promptNavIdx + 1);
   counter.textContent = label + '/' + total;
 }
 
 function jumpPrompt(dir) {
   const a = selectedId != null ? agents.get(selectedId) : null;
   if (!a) return;
-  // Timeline view: jump between prompt events
   if (termTab === 'timeline') { jumpTimelinePrompt(dir); return; }
   const promptLines = getPromptLines();
-  if (promptLines.length === 0) return;
-  // Initialize nav index if unset — start past the end (= bottom)
-  if (a.promptNavIdx < 0 || a.promptNavIdx > promptLines.length) a.promptNavIdx = promptLines.length;
+  const total = promptLines.length || (a.prompts?.length ?? 0);
+  if (total === 0) return;
+  if (a.promptNavIdx < 0 || a.promptNavIdx > total) a.promptNavIdx = total;
   const newIdx = a.promptNavIdx + dir;
-  if (newIdx < 0 || newIdx > promptLines.length) return;
+  if (newIdx < 0 || newIdx > total) return;
   a.promptNavIdx = newIdx;
   updatePromptNav();
+  if (!promptLines.length) return;
   const x = xterms.get(selectedId);
   if (!x) return;
   if (newIdx >= promptLines.length) { x.terminal.scrollToBottom(); return; }
