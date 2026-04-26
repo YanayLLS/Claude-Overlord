@@ -899,6 +899,10 @@ function autoCompactWatcher(id, proc) {
   };
 }
 
+function safeCwd(cwd) {
+  return (cwd && fs.existsSync(cwd)) ? cwd : os.homedir();
+}
+
 function spawnTerminal(id) {
   if (terminals.has(id)) return; // already running
   const a = agents.get(id);
@@ -921,7 +925,7 @@ function spawnTerminal(id) {
   const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const args = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   try {
-    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: a.cwd, env: { ...process.env } });
+    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: { ...process.env } });
     terminals.set(id, proc);
     // Flush any input that arrived before PTY was ready
     const queued = pendingTermInput.get(id);
@@ -1014,7 +1018,7 @@ function createAgent(folderPath, initialPrompt) {
 
   const agentEnv = { ...process.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' };
   try {
-    const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd, env: agentEnv });
+    const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
     const compactWatch = autoCompactWatcher(id, proc);
     let promptSent = !initialPrompt;
@@ -2278,7 +2282,7 @@ app.on('before-quit', () => {
     try {
       const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
       const args = process.platform === 'win32' ? ['/c', cmd] : ['-c', cmd];
-      const child = spawn(sh, args, { cwd: a.cwd, detached: true, stdio: 'ignore', env: { ...process.env } });
+      const child = spawn(sh, args, { cwd: safeCwd(a.cwd), detached: true, stdio: 'ignore', env: { ...process.env } });
       child.unref();
       detachedPids.set(a.sessionId, child.pid);
       console.log(`[Overlord] Spawned detached Claude for agent ${id} (session ${a.sessionId}, pid ${child.pid})`);
