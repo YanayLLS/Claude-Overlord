@@ -2595,7 +2595,6 @@ function handleAgentMsg(msg) {
 let currentUsage = null;
 function handleUsage(usage) {
   currentUsage = usage;
-  renderUsageBadges();
   scheduleRender();
 }
 function refreshUsage() { api.send({ type: 'fetchUsage' }); }
