@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 const { spawn, exec, execSync } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 const pty = require('node-pty');
 
 
@@ -44,6 +45,28 @@ const AGENT_NAMES = [
   'Jet', 'Koda', 'Lynx', 'Mika', 'Nash', 'Opal', 'Pike',
   'Rain', 'Slate', 'Teal', 'Vega', 'Wilde', 'Xen', 'Zephyr',
 ];
+
+// ── Auto-updater ──────────────────────────────────────────
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+
+autoUpdater.on('update-available', info => {
+  logToRenderer(`Update available: v${info.version}`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update-available', { version: info.version });
+  }
+});
+
+autoUpdater.on('update-downloaded', info => {
+  logToRenderer(`Update downloaded: v${info.version} — will install on quit`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update-downloaded', { version: info.version });
+  }
+});
+
+autoUpdater.on('error', err => {
+  logToRenderer(`Auto-updater error: ${err.message}`);
+});
 
 function pickAgentName() {
   const used = new Set();
@@ -2265,6 +2288,10 @@ app.whenReady().then(() => {
     saveState();
     mainWindow = null;
   });
+  // Check for updates — only runs when packaged (not in dev)
+  if (app.isPackaged) {
+    setTimeout(() => autoUpdater.checkForUpdatesAndNotify(), 3000);
+  }
 });
 app.on('before-quit', () => {
   if (remoteServer) { try { remoteServer.close(); } catch {} }
