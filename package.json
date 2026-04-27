@@ -8,8 +8,7 @@
     "start": "node scripts/bundle-xterm.js && electron .",
     "dev": "node scripts/bundle-xterm.js && electronmon .",
     "package": "node scripts/bundle-xterm.js && electron-builder --dir",
-    "dist": "node scripts/bundle-xterm.js && electron-builder",
-    "postinstall": "node -e \"0\""
+    "dist": "node scripts/bundle-xterm.js && electron-builder"
   },
   "dependencies": {
     "@xterm/addon-web-links": "^0.12.0",

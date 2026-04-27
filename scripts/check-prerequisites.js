@@ -18,32 +18,6 @@ function hasPython() {
   return false;
 }
 
-function install(label, cmd) {
-  console.log(`  Installing ${label}...`);
-  try {
-    execSync(cmd, { stdio: 'inherit' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ── Windows ──────────────────────────────────────────────
-if (os.platform() === 'win32') {
-  if (!hasPython()) {
-    console.log('\nnode-pty requires Python 3 for some build scenarios.');
-    const hasWinget = !!run('where winget');
-    if (hasWinget) {
-      console.log('Installing Python 3 via winget...');
-      install('Python 3', 'winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements');
-    } else {
-      console.error('Install Python 3 from https://www.python.org/downloads/');
-      console.error('Check "Add python.exe to PATH" during install.');
-    }
-  }
-  process.exit(0);
-}
-
 // ── macOS ────────────────────────────────────────────────
 if (os.platform() === 'darwin') {
   if (!run('xcode-select -p')) {
