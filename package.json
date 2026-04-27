@@ -9,11 +9,11 @@
     "dev": "node scripts/bundle-xterm.js && electronmon .",
     "package": "node scripts/bundle-xterm.js && electron-builder --dir",
     "dist": "node scripts/bundle-xterm.js && electron-builder",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "node -e \"0\""
   },
   "dependencies": {
     "@xterm/addon-web-links": "^0.12.0",
-    "node-pty": "^1.0.0"
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@xterm/addon-fit": "^0.10.0",
