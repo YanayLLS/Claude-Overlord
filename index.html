@@ -1986,7 +1986,7 @@ function schedulePromptNavUpdate() {
 function getPromptLines() {
   const x = selectedId != null ? xterms.get(selectedId) : null;
   if (!x) return [];
-  const buf = x.terminal.buffer.active;
+  const buf = x.terminal.buffer.normal;
   const lines = [];
   for (let i = 0; i < buf.length; i++) {
     const line = buf.getLine(i);
@@ -2054,7 +2054,9 @@ function jumpTimelinePrompt(dir) {
   document.getElementById('prompt-counter').textContent = label + '/' + total;
   if (newIdx >= prompts.length) { el.scrollTop = el.scrollHeight; return; }
   prompts[newIdx].classList.add('tl-highlight');
-  prompts[newIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const promptEl = prompts[newIdx];
+  const relTop = promptEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+  el.scrollTo({ top: relTop - (el.clientHeight - promptEl.offsetHeight) / 2, behavior: 'smooth' });
 }
 
 // ── Timeline ───────────────────────────────────────────
