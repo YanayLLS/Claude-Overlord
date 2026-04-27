@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@xterm/addon-web-links": "^0.12.0",
+    "electron-updater": "^6.8.3",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
@@ -27,9 +28,31 @@
   "build": {
     "appId": "com.overlord.claude",
     "productName": "Overlord",
+    "icon": "assets/icon.ico",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yanayLLS",
+        "repo": "overlord"
+      }
+    ],
     "win": {
-      "target": "portable",
-      "signAndEditExecutable": false
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerSidebar": "assets/installer-sidebar.bmp",
+      "installerHeaderImage": "assets/installer-header.bmp",
+      "welcomeTitle": "Overlord — Claude Agent Manager",
+      "license": null,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Overlord"
     },
     "files": [
       "main.js",
