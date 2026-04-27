@@ -42,18 +42,23 @@ Each agent gets its own terminal session, live status tracking, and conversation
 | `Ctrl+Shift+W` | Close all idle agents |
 | `?` | Show all shortcuts |
 
-## Setup
+## Install
+
+Download the latest installer from [Releases](https://github.com/YanayLLS/Claude-Overlord/releases). Run `Overlord Setup x.x.x.exe` — no admin required. The app installs to your user profile and auto-updates when new versions are published.
+
+> Windows will show a SmartScreen warning on first install (app is unsigned). Click **More info → Run anyway**.
+
+## Run from source
 
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) 18+
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
+- macOS/Linux: Xcode Command Line Tools or `build-essential` + `python3` (for node-pty)
 
-`npm install` will check for the native build tools required by `node-pty` and attempt to install them automatically via **winget** (Windows) or **xcode-select** (macOS). If auto-install isn't possible it will print what you need to install manually.
+### Quick Start
 
-### Quick Start (one-liner)
-
-**Windows (cmd or PowerShell):**
+**Windows:**
 ```
 git clone https://github.com/YanayLLS/Claude-Overlord.git && cd Claude-Overlord && start.bat
 ```
@@ -63,14 +68,14 @@ git clone https://github.com/YanayLLS/Claude-Overlord.git && cd Claude-Overlord 
 git clone https://github.com/YanayLLS/Claude-Overlord.git && cd Claude-Overlord && npm install && npm start
 ```
 
-On Windows, `start.bat` automatically installs any missing build tools, refreshes your PATH, runs `npm install`, and launches the app — no terminal restart needed. You can also double-click it any time to launch Overlord.
+Double-click `start.bat` any time to launch on Windows.
 
 ### Development
 
 ```bash
 npm run dev       # Auto-restart on file changes
-npm run package   # Build portable executable
-npm run dist      # Build distributable
+npm run package   # Build unpacked app (no installer)
+npm run dist      # Build NSIS installer + publish assets
 ```
 
 ## How It Works
