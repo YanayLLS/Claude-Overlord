@@ -1093,6 +1093,7 @@ function closeAgent(id) {
   pendingClearAgents.delete(id);
   inputBuffers.delete(id);
   pendingTermInput.delete(id);
+  inBracketedPaste.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   agents.delete(id);
@@ -1112,6 +1113,7 @@ function archiveAgent(id) {
   clearServers(id);
   inputBuffers.delete(id);
   pendingTermInput.delete(id);
+  inBracketedPaste.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   send({ type: 'agentArchived', id });
@@ -1726,6 +1728,7 @@ function scanTeams() {
 // ── @Mention detection + context injection ─────────────
 const inputBuffers = new Map(); // agentId -> string buffer
 const pendingTermInput = new Map(); // agentId -> array of strings queued pre-spawn
+const inBracketedPaste = new Set(); // agentIds currently inside a bracketed paste
 
 function findMentions(text) {
   const re = /@([A-Za-z][A-Za-z0-9]*)/g;
@@ -1777,7 +1780,7 @@ function writePtyChunked(proc, data, chunkSize = 1024) {
     if (offset >= data.length) return;
     proc.write(data.slice(offset, offset + chunkSize));
     offset += chunkSize;
-    if (offset < data.length) setTimeout(next, 3);
+    if (offset < data.length) setTimeout(next, 8);
   })();
 }
 
@@ -1788,7 +1791,7 @@ function handleTermInput(id, data) {
     const q = pendingTermInput.get(id) || [];
     q.push(data);
     // cap queue to prevent unbounded growth if spawn never happens
-    if (q.length > 256) q.shift();
+    if (q.length > 1024) q.shift();
     pendingTermInput.set(id, q);
     return;
   }
@@ -1796,30 +1799,27 @@ function handleTermInput(id, data) {
 
   // Bracketed paste — PTY app handles multi-line natively; chunk to avoid ConPTY pipe overflow.
   if (data.includes('\x1b[200~')) {
+    inBracketedPaste.add(id);
+    if (data.includes('\x1b[201~')) inBracketedPaste.delete(id);
     writePtyChunked(t, data);
     inputBuffers.set(id, '');
     return;
   }
+  if (inBracketedPaste.has(id)) {
+    if (data.includes('\x1b[201~') || data.length === 1) inBracketedPaste.delete(id);
+    writePtyChunked(t, data);
+    return;
+  }
 
-  // Multi-char paste or chunk containing Enter
+  // Multi-char paste or chunk containing Enter — pass straight through.
+  // Mention scanning only happens on interactive single-char Enter to avoid
+  // mangling pasted text that contains @ symbols (emails, decorators, etc.).
   if (data.length > 1 && data.includes('\r')) {
-    // Treat entire paste as one input; combine with existing buffer
     const full = buf + data;
     const lastCR = full.lastIndexOf('\r');
-    const toSend = full.slice(0, lastCR); // everything up to last Enter
     const remainder = full.slice(lastCR + 1);
-    // Detect /clear command in paste
-    if (/^\s*\/clear\s*$/.test(toSend)) pendingClearAgents.add(id);
-    const mentions = findMentions(toSend);
-    if (mentions.length > 0) {
-      const ctx = buildMentionContext(mentions);
-      // Clear existing line with Ctrl+U, then rewrite with context
-      t.write('\x15');
-      writePtyChunked(t, toSend + '\n\n' + ctx + '\r');
-      if (remainder) t.write(remainder);
-    } else {
-      writePtyChunked(t, data);
-    }
+    if (/^\s*\/clear\s*$/.test(full.slice(0, lastCR))) pendingClearAgents.add(id);
+    writePtyChunked(t, data);
     inputBuffers.set(id, remainder);
     return;
   }

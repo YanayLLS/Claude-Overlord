@@ -1848,7 +1848,11 @@ function createXterm(id) {
     }
   });
   terminal.onData((data) => api.send({ type: 'termInput', id, data }));
-  terminal.onScroll(() => updateScrollBtn());
+  terminal.onScroll(() => {
+    const buf = terminal.buffer.active;
+    if (buf.baseY > 0 && buf.baseY - buf.viewportY <= 1) terminal.scrollToBottom();
+    updateScrollBtn();
+  });
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
@@ -2436,8 +2440,10 @@ api.on((msg) => {
       if (!agents.has(msg.id)) return; // Agent was closed, ignore late data
       x = createXterm(msg.id);
     }
+    const buf = x.terminal.buffer.active;
+    const nearBottom = buf.baseY - buf.viewportY <= 5;
     x.terminal.write(msg.data);
-    // Update prompt nav when new data arrives for the selected agent
+    if (nearBottom) x.terminal.scrollToBottom();
     if (msg.id === selectedId) { schedulePromptNavUpdate(); updateScrollBtn(); }
     return;
   }
