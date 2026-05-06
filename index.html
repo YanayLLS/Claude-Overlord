@@ -1859,6 +1859,7 @@ function createXterm(id) {
     if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
     if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
+    if (e.shiftKey && e.key === 'Enter') { api.send({ type: 'termInput', id, data: '\n' }); return false; }
     return true;
   });
   xterms.set(id, { terminal, fitAddon, searchAddon, el });

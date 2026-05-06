@@ -900,27 +900,6 @@ function handleTermExit(id, exitCode) {
   }
 }
 
-// Auto-accept context compaction prompts from Claude CLI
-function autoCompactWatcher(id, proc) {
-  let buf = '';
-  let lastCompactTime = 0;
-  return (d) => {
-    buf += d;
-    if (buf.length > 4096) buf = buf.slice(-2048);
-    const clean = buf.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-    // Only match the actual compact prompt — must be a compact question with Yes selector nearby.
-    // Previous regex was too broad: any "compact" + "yes"/❯ anywhere in 4KB buffer would fire,
-    // causing false positives when /config (which renders ❯) ran after any mention of "compact".
-    if (/compact.*\?\s*(❯\s*)?yes/i.test(clean) || /compact.*\n\s*❯\s*yes/i.test(clean)) {
-      const now = Date.now();
-      if (now - lastCompactTime < 5000) return; // debounce
-      lastCompactTime = now;
-      buf = '';
-      console.log(`[Overlord] Auto-accepting compact for agent ${id}`);
-      setTimeout(() => { try { proc.write('\r'); } catch {} }, 200);
-    }
-  };
-}
 
 function safeCwd(cwd) {
   return (cwd && fs.existsSync(cwd)) ? cwd : os.homedir();
@@ -956,7 +935,6 @@ function spawnTerminal(id) {
       pendingTermInput.delete(id);
       for (const d of queued) handleTermInput(id, d);
     }
-    const compactWatch = autoCompactWatcher(id, proc);
     let resumeErrorBuf = '';
     proc.onData((d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
@@ -965,7 +943,6 @@ function spawnTerminal(id) {
       buf += d;
       if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
       termBuffers.set(id, buf);
-      compactWatch(d);
       // Detect resume errors and retry
       if (!a._resumeHandled) {
         resumeErrorBuf += d;
@@ -1043,7 +1020,6 @@ function createAgent(folderPath, initialPrompt) {
   try {
     const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
-    const compactWatch = autoCompactWatcher(id, proc);
     let promptSent = !initialPrompt;
     proc.onData((d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
@@ -1052,7 +1028,6 @@ function createAgent(folderPath, initialPrompt) {
       buf += d;
       if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
       termBuffers.set(id, buf);
-      compactWatch(d);
       // Detect Claude ready prompt and send the initial prompt
       if (!promptSent) {
         const clean = d.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
