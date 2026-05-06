@@ -1856,7 +1856,7 @@ function handleIpc(msg) {
     case 'closeAgent': closeAgent(msg.id); break;
     case 'archiveAgent': archiveAgent(msg.id); break;
     case 'unarchiveAgent': unarchiveAgent(msg.id); break;
-    case 'renameAgent': { const a = agents.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); } break; }
+    case 'renameAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a && t) { t.write(`/rename ${msg.name}\r`); } else if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); } break; }
     case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); generateSummaryTitle(msg.id); } break; }
     case 'restartAgent': {
       const a = agents.get(msg.id);
