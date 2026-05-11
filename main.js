@@ -88,6 +88,7 @@ function modelFamily(model) {
 
 const STATE_DIR = path.join(os.homedir(), '.pixel-agents');
 const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
+const ACCOUNTS_PATH = path.join(STATE_DIR, 'accounts.json');
 
 let mainWindow = null;
 const agents = new Map();
@@ -150,6 +151,7 @@ function sendFullState() {
     send({ type: 'teamDetected', team: { name: teamData.name, leadAgentId: teamData.leadAgentId, members: teamData.members, tasks: teamData.tasks } });
   }
   if (lastUsage) send({ type: 'usage', usage: lastUsage });
+  send({ type: 'accountInfo', ...getCurrentAccountInfo() });
   fetchUsage();
 }
 
@@ -1069,6 +1071,7 @@ function closeAgent(id) {
   inputBuffers.delete(id);
   pendingTermInput.delete(id);
   inBracketedPaste.delete(id);
+  bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   agents.delete(id);
@@ -1089,6 +1092,7 @@ function archiveAgent(id) {
   inputBuffers.delete(id);
   pendingTermInput.delete(id);
   inBracketedPaste.delete(id);
+  bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   send({ type: 'agentArchived', id });
@@ -1548,6 +1552,58 @@ function getApiKey() {
   } catch { return null; }
 }
 
+// ── Account switching ─────────────────────────────────
+function loadAccounts() {
+  try {
+    if (!fs.existsSync(ACCOUNTS_PATH)) return { accounts: [], activeLabel: null };
+    return JSON.parse(fs.readFileSync(ACCOUNTS_PATH, 'utf8'));
+  } catch { return { accounts: [], activeLabel: null }; }
+}
+
+function saveAccountsFile(data) {
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.writeFileSync(ACCOUNTS_PATH, JSON.stringify(data, null, 2));
+}
+
+function getAccountMeta() {
+  try {
+    const creds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+    const oauth = creds?.claudeAiOauth;
+    if (!oauth) return {};
+    return {
+      subscriptionType: oauth.subscriptionType || null,
+      rateLimitTier: oauth.rateLimitTier || null,
+    };
+  } catch { return {}; }
+}
+
+let _cachedAuthStatus = null;
+function fetchAuthStatus() {
+  try {
+    const out = execSync('claude auth status', { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
+    _cachedAuthStatus = JSON.parse(out.trim());
+  } catch { _cachedAuthStatus = null; }
+}
+
+function getAccountEmail() {
+  if (!_cachedAuthStatus) fetchAuthStatus();
+  return _cachedAuthStatus?.email || null;
+}
+
+function getCurrentAccountInfo() {
+  const data = loadAccounts();
+  const meta = getAccountMeta();
+  const email = getAccountEmail();
+  const hasCredentials = !!getApiKey();
+  return {
+    activeLabel: data.activeLabel || null,
+    email,
+    meta,
+    hasCredentials,
+    accounts: data.accounts.map(a => ({ label: a.label, email: a.email, meta: a.meta })),
+  };
+}
+
 function fetchUsage() {
   if (usageInFlight) return;
   const apiKey = getApiKey();
@@ -1704,6 +1760,8 @@ function scanTeams() {
 const inputBuffers = new Map(); // agentId -> string buffer
 const pendingTermInput = new Map(); // agentId -> array of strings queued pre-spawn
 const inBracketedPaste = new Set(); // agentIds currently inside a bracketed paste
+const bracketedPasteBuffers = new Map(); // agentId -> accumulated paste content
+const LONG_PASTE_THRESHOLD = 500; // chars above which paste is saved to a temp file
 
 function findMentions(text) {
   const re = /@([A-Za-z][A-Za-z0-9]*)/g;
@@ -1759,6 +1817,12 @@ function writePtyChunked(proc, data, chunkSize = 1024) {
   })();
 }
 
+function savePasteToFile(content) {
+  const file = path.join(os.tmpdir(), `overlord-paste-${Date.now()}.txt`);
+  fs.writeFileSync(file, content, 'utf8');
+  return file;
+}
+
 function handleTermInput(id, data) {
   const t = terminals.get(id);
   if (!t) {
@@ -1772,17 +1836,47 @@ function handleTermInput(id, data) {
   }
   let buf = inputBuffers.get(id) || '';
 
-  // Bracketed paste — PTY app handles multi-line natively; chunk to avoid ConPTY pipe overflow.
+  // Bracketed paste — accumulate full content to check length before sending.
   if (data.includes('\x1b[200~')) {
-    inBracketedPaste.add(id);
-    if (data.includes('\x1b[201~')) inBracketedPaste.delete(id);
-    writePtyChunked(t, data);
+    const openIdx = data.indexOf('\x1b[200~') + 6;
+    const closeIdx = data.indexOf('\x1b[201~');
+    if (closeIdx !== -1) {
+      // Complete paste in single chunk
+      const content = data.slice(openIdx, closeIdx);
+      if (content.length > LONG_PASTE_THRESHOLD) {
+        const filePath = savePasteToFile(content);
+        t.write(filePath);
+      } else {
+        writePtyChunked(t, data);
+      }
+    } else {
+      // Multi-chunk paste — start accumulating, don't write yet
+      inBracketedPaste.add(id);
+      bracketedPasteBuffers.set(id, data.slice(openIdx));
+    }
     inputBuffers.set(id, '');
     return;
   }
   if (inBracketedPaste.has(id)) {
-    if (data.includes('\x1b[201~') || data.length === 1) inBracketedPaste.delete(id);
-    writePtyChunked(t, data);
+    const closeIdx = data.indexOf('\x1b[201~');
+    if (closeIdx !== -1) {
+      const content = (bracketedPasteBuffers.get(id) || '') + data.slice(0, closeIdx);
+      inBracketedPaste.delete(id);
+      bracketedPasteBuffers.delete(id);
+      if (content.length > LONG_PASTE_THRESHOLD) {
+        const filePath = savePasteToFile(content);
+        t.write(filePath);
+      } else {
+        writePtyChunked(t, '\x1b[200~' + content + '\x1b[201~');
+      }
+    } else {
+      bracketedPasteBuffers.set(id, (bracketedPasteBuffers.get(id) || '') + data);
+      if (data.length === 1) { // safety: single char means paste mode ended unexpectedly
+        inBracketedPaste.delete(id);
+        bracketedPasteBuffers.delete(id);
+        t.write(data);
+      }
+    }
     return;
   }
 
@@ -2025,6 +2119,98 @@ function handleIpc(msg) {
     case 'getSessions': scanSessions().then(s => send({ type: 'sessions', sessions: s })).catch(() => send({ type: 'sessions', sessions: [] })); break;
     case 'resumeSession': resumeSessionAgent(msg.sessionId, msg.cwd); break;
     case 'fetchUsage': fetchUsage(); break;
+    case 'getAccountInfo': send({ type: 'accountInfo', ...getCurrentAccountInfo() }); break;
+    case 'saveAccount': {
+      const data = loadAccounts();
+      let creds;
+      try { creds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8')); } catch { break; }
+      const meta = getAccountMeta();
+      const email = getAccountEmail();
+      const label = msg.label || email || `Account ${data.accounts.length + 1}`;
+      const entry = { label, email, meta, credentials: creds };
+      const idx = data.accounts.findIndex(a => a.label === label);
+      if (idx >= 0) data.accounts[idx] = entry;
+      else data.accounts.push(entry);
+      data.activeLabel = label;
+      saveAccountsFile(data);
+      send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+      break;
+    }
+    case 'switchAccount': {
+      const data = loadAccounts();
+      const target = data.accounts.find(a => a.label === msg.label);
+      if (!target) break;
+      // Save current credentials under active label before switching
+      if (data.activeLabel) {
+        try {
+          const curCreds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+          const curIdx = data.accounts.findIndex(a => a.label === data.activeLabel);
+          if (curIdx >= 0) { data.accounts[curIdx].credentials = curCreds; data.accounts[curIdx].meta = getAccountMeta(); }
+        } catch {}
+      }
+      fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(target.credentials, null, 2));
+      data.activeLabel = target.label;
+      saveAccountsFile(data);
+      _cachedAuthStatus = null;
+      lastUsage = null;
+      send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+      send({ type: 'usage', usage: null });
+      fetchUsage();
+      break;
+    }
+    case 'addAccount': {
+      // Auto-save current credentials before login flow
+      const curData = loadAccounts();
+      if (getApiKey() && curData.activeLabel) {
+        try {
+          const curCreds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+          const idx = curData.accounts.findIndex(a => a.label === curData.activeLabel);
+          if (idx >= 0) { curData.accounts[idx].credentials = curCreds; curData.accounts[idx].meta = getAccountMeta(); curData.accounts[idx].email = getAccountEmail(); }
+          saveAccountsFile(curData);
+        } catch {}
+      }
+      // Run claude auth login — opens browser for OAuth
+      const loginProc = spawn('claude', ['auth', 'login'], { shell: true, stdio: 'ignore', detached: true });
+      loginProc.unref();
+      // Watch credentials file for changes
+      let prevToken = getApiKey();
+      const checkInterval = setInterval(() => {
+        const newToken = getApiKey();
+        if (newToken && newToken !== prevToken) {
+          clearInterval(checkInterval);
+          _cachedAuthStatus = null;
+          const email = getAccountEmail();
+          const data = loadAccounts();
+          data.activeLabel = null;
+          saveAccountsFile(data);
+          send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+          send({ type: 'accountLoginComplete', email });
+        }
+      }, 1000);
+      // Stop watching after 2 minutes
+      setTimeout(() => clearInterval(checkInterval), 120000);
+      break;
+    }
+    case 'removeAccount': {
+      const data = loadAccounts();
+      data.accounts = data.accounts.filter(a => a.label !== msg.label);
+      saveAccountsFile(data);
+      send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+      break;
+    }
+    case 'logout': {
+      const data = loadAccounts();
+      if (data.activeLabel) {
+        data.accounts = data.accounts.filter(a => a.label !== data.activeLabel);
+      }
+      data.activeLabel = null;
+      saveAccountsFile(data);
+      try { fs.unlinkSync(CREDENTIALS_PATH); } catch {}
+      lastUsage = null;
+      send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+      send({ type: 'usage', usage: null });
+      break;
+    }
     case 'createTeam': {
       const teamPrompt = buildTeamPrompt(msg.task, msg.roles);
       createAgent(msg.cwd, teamPrompt);

@@ -60,6 +60,14 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .hdr-btn:hover { background:rgba(205,214,244,.08); color:var(--text); }
 .hdr-btn:active { background:rgba(205,214,244,.12); }
 .hdr-btn.active { background:var(--green); color:#000; border-radius:4px; }
+#account-btn {
+  font-family:inherit; font-size:11px; padding:3px 10px; background:rgba(137,180,250,.12);
+  color:var(--accent); border:1px solid rgba(137,180,250,.25); border-radius:10px; cursor:pointer;
+  letter-spacing:.3px; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis;
+  transition:background .12s, border-color .12s; -webkit-app-region:no-drag; flex-shrink:0;
+}
+#account-btn:hover { background:rgba(137,180,250,.22); border-color:rgba(137,180,250,.4); }
+#account-btn.no-account { color:var(--yellow); border-color:rgba(249,226,175,.25); background:rgba(249,226,175,.08); }
 
 #content { display:flex; flex-direction:row; flex:1; overflow:hidden; }
 #list-col { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; background:var(--editor-bg); }
@@ -419,6 +427,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .model-tag.opus { color:var(--purple); border-color:rgba(203,166,247,.4); }
 .model-tag.sonnet { color:var(--accent); border-color:rgba(137,180,250,.4); }
 .model-tag.haiku { color:var(--cyan); border-color:rgba(148,226,213,.4); }
+.model-tag:hover { opacity:.8; filter:brightness(1.2); }
 .group-servers { display:flex; gap:4px; flex-shrink:0; flex-wrap:wrap; }
 .group-servers:empty { display:none; }
 .server-badge {
@@ -843,6 +852,7 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Reload app">&#x21BB;</button>
     <button id="readyBtn" class="hdr-btn" onclick="toggleReadyFilter()" title="Show only ready agents">&#x2713;</button>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
+    <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account">&#x1F464; No account</button>
   </div>
   <div id="content">
   <div id="list-col">
@@ -1456,6 +1466,58 @@ function showServerMenu(e, port, url) {
   const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
+const CLAUDE_MODELS = [
+  { id: 'claude-opus-4-6', label: 'Opus 4.6', family: 'opus' },
+  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', family: 'sonnet' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', family: 'haiku' },
+];
+
+function showModelMenu(e, id) {
+  e.stopPropagation(); e.preventDefault();
+  const old = document.getElementById('model-ctx-menu');
+  if (old) old.remove();
+  const a = agents.get(id);
+  const currentFamily = a?.stats?.modelFamily || '';
+
+  const menu = document.createElement('div');
+  menu.id = 'model-ctx-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:160px;';
+  menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
+
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'padding:5px 12px 2px;font-size:10px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;font-weight:600;';
+  hdr.textContent = 'Switch model';
+  menu.appendChild(hdr);
+
+  for (const m of CLAUDE_MODELS) {
+    const btn = document.createElement('button');
+    const isCurrent = m.family === currentFamily;
+    btn.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:5px 12px;background:none;border:none;cursor:pointer;border-radius:0;transition:background .1s;';
+    btn.style.color = isCurrent ? 'var(--accent)' : 'var(--text)';
+    btn.style.fontWeight = isCurrent ? '600' : '400';
+    btn.innerHTML = `${m.label}${isCurrent ? ' <span style="font-size:10px;opacity:.5">current</span>' : ''}`;
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(205,214,244,.06)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+    btn.onclick = () => {
+      menu.remove();
+      if (isCurrent) return;
+      if (a && !a.isWaiting) {
+        showToast('Agent must be idle to switch model');
+        return;
+      }
+      api.send({ type: 'termInput', id, data: '/model ' + m.id + '\r' });
+    };
+    menu.appendChild(btn);
+  }
+
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
 function openFile(id, filePath) { if (filePath) api.send({ type: 'openFile', id, path: filePath }); }
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
@@ -1640,7 +1702,7 @@ function render() {
           <span class="agent-icon ${m.cls}${st === 'active' ? ' pulse' : ''}" onclick="event.stopPropagation();showIconPicker(event,'${a.sessionId}')" title="Click to change icon">${getAgentIcon(a.sessionId)}${statusBadge ? `<span class="agent-status-badge">${statusBadge}</span>` : ''}</span>
           ${a.agentName ? `<span class="agent-pname">${esc(a.agentName)}</span>` : ''}
           <span class="agent-name" title="${escAttr(title)}${a.customName ? ' (custom name)' : ''}" ondblclick="event.stopPropagation();renameAgent(${id},this)">${esc(title)}</span>
-          ${mf ? `<span class="model-tag ${mf}">${mf}</span>` : ''}
+          ${mf ? `<span class="model-tag ${mf}" onclick="event.stopPropagation();showModelMenu(event,${id})" style="cursor:pointer" title="Click to change model">${mf}</span>` : ''}
         </div>
         ${a.customName && a.prompt ? `<div class="agent-prompt">${esc(a.prompt)}</div>` : ''}
         <div class="agent-bottom">
@@ -2575,6 +2637,8 @@ function handleAgentMsg(msg) {
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'sessions': handleSessions(msg); break;
     case 'usage': handleUsage(msg.usage); break;
+    case 'accountInfo': handleAccountInfo(msg); break;
+    case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
     case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
     case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
@@ -2599,6 +2663,197 @@ function handleAgentMsg(msg) {
     }
   }
 }
+
+// ── Account switching ─────────────────────────────────
+let _accountInfo = null;
+function handleAccountInfo(msg) {
+  _accountInfo = msg;
+  const btn = document.getElementById('account-btn');
+  if (msg.hasCredentials) {
+    const display = msg.activeLabel || msg.email || 'Unsaved account';
+    btn.textContent = '\u{1F464} ' + display;
+    btn.classList.remove('no-account');
+    btn.title = msg.email ? `${display} (${msg.email})` : display;
+  } else {
+    btn.textContent = '\u{1F464} No account';
+    btn.classList.add('no-account');
+    btn.title = 'No credentials — run claude in a terminal to login';
+  }
+}
+
+function showAccountMenu(e) {
+  e.stopPropagation();
+  const old = document.getElementById('account-ctx-menu');
+  if (old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 'account-ctx-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:180px;';
+
+  function addItem(label, action, opts = {}) {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:5px 12px;background:none;border:none;color:var(--text);cursor:pointer;border-radius:0;transition:background .1s;';
+    if (opts.color) btn.style.color = opts.color;
+    if (opts.dim) { btn.style.color = 'var(--dim)'; btn.style.fontSize = '11px'; }
+    if (opts.active) { btn.style.color = 'var(--accent)'; btn.style.fontWeight = '600'; }
+    if (opts.disabled) { btn.style.opacity = '0.4'; btn.style.cursor = 'default'; }
+    btn.addEventListener('mouseenter', () => { if (!opts.disabled) btn.style.background = 'rgba(205,214,244,.06)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+    btn.onclick = () => { if (!opts.disabled) { menu.remove(); action(); } };
+    menu.appendChild(btn);
+  }
+  function addSep() {
+    const hr = document.createElement('div');
+    hr.style.cssText = 'height:1px;background:var(--border);margin:3px 0;';
+    menu.appendChild(hr);
+  }
+
+  const info = _accountInfo || {};
+  const accounts = info.accounts || [];
+  const activeLabel = info.activeLabel;
+
+  // Current account header
+  if (info.hasCredentials) {
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'padding:5px 12px 2px;font-size:10px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;font-weight:600;';
+    hdr.textContent = 'Current';
+    menu.appendChild(hdr);
+    const cur = document.createElement('div');
+    cur.style.cssText = 'padding:2px 12px 5px;font-size:12px;color:var(--accent);font-weight:500;';
+    cur.textContent = activeLabel || info.email || 'Unsaved account';
+    if (info.email && activeLabel && activeLabel !== info.email) {
+      const em = document.createElement('span');
+      em.style.cssText = 'color:var(--dim);font-size:10px;margin-left:6px;font-weight:400;';
+      em.textContent = info.email;
+      cur.appendChild(em);
+    }
+    menu.appendChild(cur);
+    addSep();
+  }
+
+  // Other saved accounts
+  const others = accounts.filter(a => a.label !== activeLabel);
+  if (others.length > 0) {
+    for (const acct of others) {
+      const label = acct.email && acct.email !== acct.label ? `${acct.label}  ·  ${acct.email}` : acct.label;
+      addItem(label, () => api.send({ type: 'switchAccount', label: acct.label }));
+    }
+    addSep();
+  }
+
+  // Save / Add accounts
+  if (info.hasCredentials && !activeLabel) {
+    addItem('Save this account…', () => showSaveAccountPrompt());
+  }
+  addItem('Add account…', () => api.send({ type: 'addAccount' }));
+
+  // Remove non-active accounts
+  if (others.length > 0) {
+    addItem('Remove account…', () => showRemoveAccountMenu(e));
+  }
+
+  addSep();
+  if (info.hasCredentials) {
+    addItem('Logout', () => {
+      if (confirm('Logout will clear credentials. Running agents may stop working.\n\nContinue?')) {
+        api.send({ type: 'logout' });
+      }
+    }, { color: 'var(--red)' });
+  } else {
+    addItem('Login via terminal', () => {}, { dim: true, disabled: true });
+    const hint = document.createElement('div');
+    hint.style.cssText = 'padding:2px 12px 4px;font-size:10px;color:var(--dim);';
+    hint.textContent = 'Run "claude" in any agent to login';
+    menu.appendChild(hint);
+  }
+
+  // Position
+  const btnRect = e.currentTarget.getBoundingClientRect();
+  menu.style.left = btnRect.left + 'px';
+  menu.style.top = (btnRect.bottom + 4) + 'px';
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (btnRect.top - rect.height - 4) + 'px';
+  const close = (ev) => { if (!menu.contains(ev.target) && ev.target.id !== 'account-btn') { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
+function showSaveAccountPrompt(emailOverride) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:var(--bg3);border:1px solid var(--border-hi);border-radius:8px;padding:16px;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,.4);';
+  box.innerHTML = '<div style="font-size:13px;color:var(--text);margin-bottom:8px;font-weight:500;">Save account as</div>';
+  const input = document.createElement('input');
+  input.type = 'text';
+  const defaultName = emailOverride || _accountInfo?.email || '';
+  input.placeholder = defaultName || 'Account name';
+  input.value = defaultName;
+  input.style.cssText = 'width:100%;padding:6px 8px;background:var(--bg);border:1px solid var(--border-hi);border-radius:4px;color:var(--text);font-family:inherit;font-size:12px;outline:none;box-sizing:border-box;';
+  input.onfocus = () => { input.style.borderColor = 'var(--accent)'; };
+  input.onblur = () => { input.style.borderColor = 'var(--border-hi)'; };
+  box.appendChild(input);
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:12px;';
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Cancel';
+  cancel.style.cssText = 'font-family:inherit;font-size:12px;padding:4px 12px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--dim);cursor:pointer;';
+  cancel.onclick = () => overlay.remove();
+  const save = document.createElement('button');
+  save.textContent = 'Save';
+  save.style.cssText = 'font-family:inherit;font-size:12px;padding:4px 12px;background:var(--accent);border:none;border-radius:4px;color:var(--title-bg);cursor:pointer;font-weight:600;';
+  save.onclick = () => {
+    const label = input.value.trim();
+    if (label) { api.send({ type: 'saveAccount', label }); overlay.remove(); }
+  };
+  input.onkeydown = (e) => { if (e.key === 'Enter') save.onclick(); if (e.key === 'Escape') overlay.remove(); };
+  btnRow.appendChild(cancel);
+  btnRow.appendChild(save);
+  box.appendChild(btnRow);
+  overlay.appendChild(box);
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+  input.focus();
+  input.select();
+}
+
+function showRemoveAccountMenu(e) {
+  const old = document.getElementById('account-ctx-menu');
+  if (old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 'account-ctx-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:180px;';
+
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'padding:5px 12px;font-size:10px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;font-weight:600;';
+  hdr.textContent = 'Remove saved account';
+  menu.appendChild(hdr);
+
+  const others = (_accountInfo?.accounts || []).filter(a => a.label !== _accountInfo?.activeLabel);
+  for (const acct of others) {
+    const btn = document.createElement('button');
+    btn.textContent = acct.label;
+    btn.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:5px 12px;background:none;border:none;color:var(--red);cursor:pointer;border-radius:0;transition:background .1s;';
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(243,139,168,.08)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+    btn.onclick = () => { menu.remove(); api.send({ type: 'removeAccount', label: acct.label }); };
+    menu.appendChild(btn);
+  }
+
+  const btnRect = document.getElementById('account-btn').getBoundingClientRect();
+  menu.style.left = btnRect.left + 'px';
+  menu.style.top = (btnRect.bottom + 4) + 'px';
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (btnRect.top - rect.height - 4) + 'px';
+  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
+// Request account info on startup
+api.send({ type: 'getAccountInfo' });
 
 // ── Usage display ─────────────────────────────────────
 let currentUsage = null;
