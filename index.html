@@ -1084,8 +1084,10 @@ function onCardDragStart(e, id, cwd) {
   requestAnimationFrame(() => { const el = document.querySelector(`.agent[data-id="${id}"]`); if (el) el.classList.add('dragging'); });
 }
 function onCardDragEnd() {
+  const wasDragging = _dragId != null;
   _dragId = null; _dragCwd = null;
   document.querySelectorAll('.agent.dragging,.agent.drag-over-top,.agent.drag-over-bottom').forEach(el => el.classList.remove('dragging','drag-over-top','drag-over-bottom'));
+  if (wasDragging) scheduleRender();
 }
 function onCardDragOver(e, id) {
   if (_dragId == null || _dragId === id) return;
@@ -1539,6 +1541,16 @@ function calcCost(s) {
   return (base + s.outTok * p.output + (s.cacheTok || 0) * p.cacheWrite + (s.cacheRead || 0) * p.cacheRead) / 1e6;
 }
 function fmtCost(c) { return c >= 1 ? '$' + c.toFixed(2) : '$' + c.toFixed(3); }
+function fmtTimeAgo(ts) {
+  const ms = Date.now() - ts;
+  if (ms < 60000) return 'just now';
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ago';
+  const d = Math.floor(h / 24);
+  return d + 'd ago';
+}
 function fmtTok(n) { if (!n) return '0'; if (n < 1000) return String(n); if (n < 10000) return (n / 1000).toFixed(1) + 'k'; return Math.round(n / 1000) + 'k'; }
 function pathLabel(p) { const pts = p.replace(/\\/g, '/').split('/').filter(Boolean); return pts[pts.length-1] || p; }
 const _escEl = document.createElement('div');
@@ -1607,7 +1619,7 @@ function statusLineHTML(a, st) {
 
 let _renderPending = false;
 let _renaming = false; // true while inline rename input is active
-function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; if (_renaming) return; render(); }); } }
+function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; if (_renaming || _dragId != null) return; render(); }); } }
 function render() {
   const list = document.getElementById('list');
   if (agents.size === 0 && knownProjects.size === 0) {
@@ -1639,13 +1651,16 @@ function render() {
   for (const [, a] of agents) { if (a.archived) continue; const s = agentStatus(a); if (s === 'permission') permC++; else if (s === 'active' || s === 'settling') actC++; else if (s === 'waiting') waitC++; }
 
   // Dynamic window title for taskbar
-  let totalCost = 0;
-  for (const [, a] of agents) totalCost += calcCost(a.stats);
+  let totalCost = 0, oldest = Infinity;
+  for (const [, a] of agents) { totalCost += calcCost(a.stats); if (a.createdAt && a.createdAt < oldest) oldest = a.createdAt; }
   const parts = [];
   if (permC) parts.push(permC + '!');
   if (actC) parts.push(actC + ' active');
   if (waitC) parts.push(waitC + ' done');
-  if (totalCost > 0.001) parts.push(fmtCost(totalCost));
+  if (totalCost > 0.001) {
+    const ago = oldest < Infinity ? fmtTimeAgo(oldest) : '';
+    parts.push(fmtCost(totalCost) + (ago ? ' since ' + ago : ''));
+  }
   document.title = parts.length ? `Overlord (${parts.join(', ')})` : `Overlord \u2014 ${agents.size} agent${agents.size !== 1 ? 's' : ''}`;
 
   let html = '', filterMatches = 0;

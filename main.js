@@ -2018,13 +2018,7 @@ function handleIpc(msg) {
         if (a) p = path.resolve(a.cwd, p);
       }
       if (!fs.existsSync(p)) break;
-      // Try VS Code with --goto for line:col support, fall back to OS default
-      const goto = line ? `${p}:${line}${col ? ':' + col : ''}` : p;
-      const fallback = () => shell.openPath(p).catch(() => {});
-      const cp = spawn('code', ['--goto', goto], { detached: true, stdio: 'ignore', shell: true });
-      cp.on('error', fallback);
-      cp.on('exit', (code) => { if (code !== 0) fallback(); });
-      cp.unref();
+      shell.openPath(p).catch(() => {});
       break;
     }
     case 'pasteImage': {
