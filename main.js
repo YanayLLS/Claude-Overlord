@@ -156,7 +156,7 @@ function sendFullState() {
 }
 
 function claudeDir(projectPath) {
-  return path.join(os.homedir(), '.claude', 'projects', projectPath.replace(/[:\\/\s]/g, '-'));
+  return path.join(os.homedir(), '.claude', 'projects', projectPath.replace(/[^a-zA-Z0-9]/g, '-'));
 }
 
 function deriveTitle(text) {
@@ -786,9 +786,14 @@ function restoreAgents(state) {
   }
 
   // ── Phase 2: Async — kill orphans, parse JSONL, auto-resume each agent without blocking UI ──
+  // Stagger the spawnTerminal calls: concurrent `claude` startups race-write ~/.claude.json
+  // (numStartups, projects, hasCompletedOnboarding) and one of them clobbers the others' state,
+  // which makes claude re-trigger the first-run/theme-chooser flow on next launch.
+  let spawnIndex = 0;
   for (const { id, entry } of agentEntries) {
     const agent = agents.get(id);
     if (!agent) continue;
+    const spawnDelayMs = 1500 + (spawnIndex++ * 800);
 
     // Kick off async cleanup per agent
     (async () => {
@@ -864,11 +869,11 @@ function restoreAgents(state) {
       registerKnownJsonl(claudeDir(agent.cwd), agent.jsonlFile);
       if (fs.existsSync(agent.jsonlFile) && !watchers.has(id) && !polls.has(id)) startWatch(id);
 
-      // Auto-resume: spawn terminal after a short delay to let session locks release
+      // Auto-resume: spawn terminal after a staggered delay (see Phase 2 comment above).
       // Skip archived agents — stay dormant until user unarchives.
       if (agents.has(id) && !agents.get(id).archived) {
-        console.log(`[Overlord] Auto-resuming agent ${id}`);
-        await new Promise(r => setTimeout(r, 1500));
+        console.log(`[Overlord] Auto-resuming agent ${id} in ${spawnDelayMs}ms`);
+        await new Promise(r => setTimeout(r, spawnDelayMs));
         if (agents.has(id)) spawnTerminal(id);
       }
     })();
