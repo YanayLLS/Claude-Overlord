@@ -1893,7 +1893,12 @@ function handleTermInput(id, data) {
     const lastCR = full.lastIndexOf('\r');
     const remainder = full.slice(lastCR + 1);
     if (/^\s*\/clear\s*$/.test(full.slice(0, lastCR))) pendingClearAgents.add(id);
-    writePtyChunked(t, data);
+    if (data.length > LONG_PASTE_THRESHOLD) {
+      const filePath = savePasteToFile(data);
+      t.write(filePath);
+    } else {
+      writePtyChunked(t, data);
+    }
     inputBuffers.set(id, remainder);
     return;
   }
@@ -2154,7 +2159,28 @@ function handleIpc(msg) {
       lastUsage = null;
       send({ type: 'accountInfo', ...getCurrentAccountInfo() });
       send({ type: 'usage', usage: null });
-      fetchUsage();
+      // Run token verification via claude auth login (opens browser if needed)
+      const switchLoginProc = spawn('claude', ['auth', 'login'], { shell: true, stdio: 'ignore', detached: true });
+      switchLoginProc.unref();
+      let switchPrevToken = getApiKey();
+      const switchCheckInterval = setInterval(() => {
+        const newToken = getApiKey();
+        if (newToken && newToken !== switchPrevToken) {
+          clearInterval(switchCheckInterval);
+          _cachedAuthStatus = null;
+          const switchData = loadAccounts();
+          const switchIdx = switchData.accounts.findIndex(a => a.label === target.label);
+          if (switchIdx >= 0) {
+            try { switchData.accounts[switchIdx].credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
+            switchData.accounts[switchIdx].meta = getAccountMeta();
+            switchData.accounts[switchIdx].email = getAccountEmail();
+            saveAccountsFile(switchData);
+          }
+          send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+          fetchUsage();
+        }
+      }, 1000);
+      setTimeout(() => clearInterval(switchCheckInterval), 120000);
       break;
     }
     case 'addAccount': {
