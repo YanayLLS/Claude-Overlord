@@ -88,6 +88,18 @@ function modelFamily(model) {
 
 const STATE_DIR = path.join(os.homedir(), '.pixel-agents');
 const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
+const CLAUDE_JSON = path.join(os.homedir(), '.claude.json');
+
+function protectClaudeConfig() {
+  try {
+    const data = JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf-8'));
+    if (!data.hasCompletedOnboarding) {
+      data.hasCompletedOnboarding = true;
+      fs.writeFileSync(CLAUDE_JSON, JSON.stringify(data, null, 2));
+      console.log('[Overlord] Restored hasCompletedOnboarding in ~/.claude.json');
+    }
+  } catch {}
+}
 const ACCOUNTS_PATH = path.join(STATE_DIR, 'accounts.json');
 
 let mainWindow = null;
@@ -789,6 +801,7 @@ function restoreAgents(state) {
   // Stagger the spawnTerminal calls: concurrent `claude` startups race-write ~/.claude.json
   // (numStartups, projects, hasCompletedOnboarding) and one of them clobbers the others' state,
   // which makes claude re-trigger the first-run/theme-chooser flow on next launch.
+  protectClaudeConfig();
   let spawnIndex = 0;
   for (const { id, entry } of agentEntries) {
     const agent = agents.get(id);
@@ -874,6 +887,7 @@ function restoreAgents(state) {
       if (agents.has(id) && !agents.get(id).archived) {
         console.log(`[Overlord] Auto-resuming agent ${id} in ${spawnDelayMs}ms`);
         await new Promise(r => setTimeout(r, spawnDelayMs));
+        protectClaudeConfig();
         if (agents.has(id)) spawnTerminal(id);
       }
     })();
@@ -955,7 +969,13 @@ function spawnTerminal(id) {
         resumeErrorBuf += d;
         if (resumeErrorBuf.length > 4096) resumeErrorBuf = resumeErrorBuf.slice(-2048);
         const clean = resumeErrorBuf.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-        if (useResume && !a._resumeFailed && /No conversation found with session ID/i.test(clean)) {
+        if (!a._onboardingHandled && /Choose the text style|Let's get started/i.test(clean)) {
+          a._onboardingHandled = true;
+          console.log(`[Overlord] Onboarding screen detected for agent ${id} — auto-selecting theme and restarting`);
+          protectClaudeConfig();
+          try { proc.kill(); } catch {}
+          setTimeout(() => { if (agents.has(id)) { terminals.delete(id); spawnTerminal(id); } }, 1000);
+        } else if (useResume && !a._resumeFailed && /No conversation found with session ID/i.test(clean)) {
           a._resumeFailed = true;
           a._resumeRetrying = true;
           a._resumeHandled = true;
@@ -1893,6 +1913,8 @@ function handleTermInput(id, data) {
     const lastCR = full.lastIndexOf('\r');
     const remainder = full.slice(lastCR + 1);
     if (/^\s*\/clear\s*$/.test(full.slice(0, lastCR))) pendingClearAgents.add(id);
+    const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
+    if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     if (data.length > LONG_PASTE_THRESHOLD) {
       const filePath = savePasteToFile(data);
       t.write(filePath);
@@ -1907,6 +1929,8 @@ function handleTermInput(id, data) {
   if (data === '\r') {
     // Detect /clear command — mark agent as expecting a new JSONL file
     if (/^\s*\/clear\s*$/.test(buf)) pendingClearAgents.add(id);
+    const renameM = buf.match(/^\s*\/rename\s+(.+?)\s*$/);
+    if (renameM) { const a = agents.get(id); if (a) { a.title = renameM[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     // Enter pressed — check buffer for mentions
     const mentions = findMentions(buf);
     if (mentions.length > 0) {
@@ -1960,7 +1984,7 @@ function handleIpc(msg) {
     case 'closeAgent': closeAgent(msg.id); break;
     case 'archiveAgent': archiveAgent(msg.id); break;
     case 'unarchiveAgent': unarchiveAgent(msg.id); break;
-    case 'renameAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a && t) { t.write(`/rename ${msg.name}\r`); } else if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); } break; }
+    case 'renameAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); if (t) t.write(`/rename ${msg.name}\r`); } break; }
     case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); generateSummaryTitle(msg.id); } break; }
     case 'restartAgent': {
       const a = agents.get(msg.id);
