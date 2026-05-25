@@ -1647,7 +1647,7 @@ function fetchUsage() {
     path: '/v1/messages',
     method: 'POST',
     headers: {
-      'x-api-key': apiKey,
+      'authorization': `Bearer ${apiKey}`,
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
       'content-length': Buffer.byteLength(body),
