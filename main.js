@@ -87,6 +87,15 @@ function modelFamily(model) {
   return 'sonnet';
 }
 
+// User's default model for new sessions (set via /model in Claude Code)
+function defaultModel() {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'));
+    if (s.model) return s.model;
+  } catch {}
+  return null;
+}
+
 const STATE_DIR = path.join(os.homedir(), '.pixel-agents');
 const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
 const CLAUDE_JSON = path.join(os.homedir(), '.claude.json');
@@ -1033,7 +1042,7 @@ function createAgent(folderPath, initialPrompt) {
     promptHistory: [], titlePending: false, createdAt: Date.now(),
     crashCount: 0, cronCount: 0, compacting: false, agentName: pickAgentName(), spinnerText: '',
     archived: false,
-    stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: 'sonnet' },
+    stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: modelFamily(defaultModel()), model: defaultModel() || undefined },
   };
   agents.set(id, agent);
 
@@ -1042,6 +1051,7 @@ function createAgent(folderPath, initialPrompt) {
   const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const shellArgs = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
+  send({ type: 'stats', id, stats: agent.stats });
   send({ type: 'focused', id });
 
   const agentEnv = { ...process.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' };
