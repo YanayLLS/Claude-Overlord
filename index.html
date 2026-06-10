@@ -1514,7 +1514,7 @@ function showModelMenu(e, id) {
     btn.onclick = () => {
       menu.remove();
       if (isCurrent) return;
-      if (a && !a.isWaiting) {
+      if (a && a.status === 'active') {
         showToast('Agent must be idle to switch model');
         return;
       }
