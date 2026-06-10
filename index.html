@@ -8,7 +8,7 @@
 :root {
   --bg: #1e1e2e; --bg2: #181825; --bg3: #252536; --border: #313244; --border-hi: #45475a;
   --accent: #89b4fa; --green: #a6e3a1; --text: rgba(205,214,244,.95); --dim: rgba(166,173,200,.5);
-  --yellow: #f9e2af; --red: #f38ba8; --purple: #cba6f7; --cyan: #94e2d5;
+  --yellow: #f9e2af; --red: #f38ba8; --purple: #cba6f7; --cyan: #94e2d5; --pink: #f5c2e7;
   --shadow: #11111b; --card: #1e1e2e;
   --surface0: #313244; --surface1: #45475a; --surface2: #585b70;
   --title-bg: #181825; --panel-bg: #181825; --editor-bg: #1e1e2e;
@@ -424,6 +424,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #summary-bar .pace-over { color:var(--red); }
 .model-tag { font-size:9px; padding:1px 5px; letter-spacing:.4px; text-transform:uppercase;
   border:1px solid var(--border); border-radius:3px; color:var(--dim); margin-left:3px; vertical-align:1px; }
+.model-tag.fable { color:var(--pink); border-color:rgba(245,194,231,.4); }
 .model-tag.opus { color:var(--purple); border-color:rgba(203,166,247,.4); }
 .model-tag.sonnet { color:var(--accent); border-color:rgba(137,180,250,.4); }
 .model-tag.haiku { color:var(--cyan); border-color:rgba(148,226,213,.4); }
@@ -1017,7 +1018,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./xterm-bundle.js"></script>
 <script>
 function ctxWindow(modelFamily) {
-  if (modelFamily === 'opus') return 1000000;  // 1M
+  if (modelFamily === 'opus' || modelFamily === 'fable') return 1000000;  // 1M
   return 200000; // sonnet, haiku: 200k
 }
 const agents = new Map(); // id -> { cwd, status, tools:Map, prompt, preview, stats, sessionId, servers:Map(port->url) }
@@ -1469,8 +1470,16 @@ function showServerMenu(e, port, url) {
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 const CLAUDE_MODELS = [
+  { id: 'claude-fable-5', label: 'Fable 5', family: 'fable' },
+  { id: 'claude-fable-5[1m]', label: 'Fable 5 — 1M context', family: 'fable' },
+  { id: 'claude-opus-4-8', label: 'Opus 4.8', family: 'opus' },
+  { id: 'claude-opus-4-8[1m]', label: 'Opus 4.8 — 1M context', family: 'opus' },
+  { id: 'claude-opus-4-7', label: 'Opus 4.7', family: 'opus' },
+  { id: 'claude-opus-4-7[1m]', label: 'Opus 4.7 — 1M context', family: 'opus' },
   { id: 'claude-opus-4-6', label: 'Opus 4.6', family: 'opus' },
+  { id: 'claude-opus-4-6[1m]', label: 'Opus 4.6 — 1M context', family: 'opus' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', family: 'sonnet' },
+  { id: 'claude-sonnet-4-6[1m]', label: 'Sonnet 4.6 — 1M context', family: 'sonnet' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', family: 'haiku' },
 ];
 
@@ -1479,6 +1488,7 @@ function showModelMenu(e, id) {
   const old = document.getElementById('model-ctx-menu');
   if (old) old.remove();
   const a = agents.get(id);
+  const currentModel = a?.stats?.model || '';
   const currentFamily = a?.stats?.modelFamily || '';
 
   const menu = document.createElement('div');
@@ -1493,7 +1503,8 @@ function showModelMenu(e, id) {
 
   for (const m of CLAUDE_MODELS) {
     const btn = document.createElement('button');
-    const isCurrent = m.family === currentFamily;
+    // Exact model id known from JSONL → exact match; otherwise fall back to family
+    const isCurrent = currentModel ? currentModel === m.id : m.family === currentFamily;
     btn.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:5px 12px;background:none;border:none;cursor:pointer;border-radius:0;transition:background .1s;';
     btn.style.color = isCurrent ? 'var(--accent)' : 'var(--text)';
     btn.style.fontWeight = isCurrent ? '600' : '400';
@@ -1530,6 +1541,7 @@ function fmtTok(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e
 function fmtDur(ms) { const s = Math.floor(ms/1000); if (s < 60) return s+'s'; const m = Math.floor(s/60); if (m < 60) return m+'m '+(s%60)+'s'; return Math.floor(m/60)+'h '+(m%60)+'m'; }
 function fmtAgo(ts) { if (!ts) return ''; const ms = Date.now() - ts; const s = Math.floor(ms/1000); if (s < 60) return '<1m'; const m = Math.floor(s/60); if (m < 60) return m+'m'; const h = Math.floor(m/60); if (h < 24) return h+'h '+( m%60)+'m'; return Math.floor(h/24)+'d '+( h%24)+'h'; }
 const PRICING = {
+  fable:  { input: 10,   output: 50,   cacheWrite: 12.50, cacheRead: 1.00 },
   opus:   { input: 15,   output: 75,   cacheWrite: 18.75, cacheRead: 1.50 },
   sonnet: { input: 3,    output: 15,   cacheWrite: 3.75,  cacheRead: 0.30 },
   haiku:  { input: 0.80, output: 4,    cacheWrite: 1.00,  cacheRead: 0.08 },

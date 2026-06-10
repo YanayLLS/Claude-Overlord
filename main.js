@@ -81,6 +81,7 @@ function pickAgentName() {
 // Model family detection for cost tracking (pricing computed in renderer)
 function modelFamily(model) {
   if (!model) return 'sonnet';
+  if (model.includes('fable')) return 'fable';
   if (model.includes('opus')) return 'opus';
   if (model.includes('haiku')) return 'haiku';
   return 'sonnet';
@@ -828,7 +829,7 @@ function restoreAgents(state) {
             try {
               const r = JSON.parse(line);
               if (r.type === 'assistant' && r.message?.usage) {
-                if (r.message.model) agent.stats.modelFamily = modelFamily(r.message.model);
+                if (r.message.model) { agent.stats.modelFamily = modelFamily(r.message.model); agent.stats.model = r.message.model; }
                 const u = r.message.usage;
                 agent.stats.inTok += u.input_tokens || 0;
                 agent.stats.outTok += u.output_tokens || 0;
@@ -1185,7 +1186,7 @@ function parseLine(id, line) {
     const r = JSON.parse(line);
     if (r.type === 'assistant') {
       // Extract usage/model regardless of content format (matches restore logic)
-      if (r.message?.model) a.stats.modelFamily = modelFamily(r.message.model);
+      if (r.message?.model) { a.stats.modelFamily = modelFamily(r.message.model); a.stats.model = r.message.model; }
       const u = r.message?.usage;
       if (u) { a.stats.inTok += u.input_tokens || 0; a.stats.outTok += u.output_tokens || 0; a.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); a.stats.cacheTok += u.cache_creation_input_tokens || 0; a.stats.cacheRead += u.cache_read_input_tokens || 0; send({ type: 'stats', id, stats: a.stats }); }
     }
@@ -1518,7 +1519,7 @@ function resumeSessionAgent(sid, rcwd) {
         try {
           const r = JSON.parse(line);
           if (r.type === 'assistant' && r.message?.usage) {
-            if (r.message.model) ra.stats.modelFamily = modelFamily(r.message.model);
+            if (r.message.model) { ra.stats.modelFamily = modelFamily(r.message.model); ra.stats.model = r.message.model; }
             const u = r.message.usage;
             ra.stats.inTok += u.input_tokens || 0; ra.stats.outTok += u.output_tokens || 0;
             ra.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
