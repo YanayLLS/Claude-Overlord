@@ -935,8 +935,12 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">Polls watched repos via the <code>gh</code> CLI for open PRs.</div>
       <label class="settings-label" style="display:block;">
-        <span>Watched repos (one <code>owner/repo</code> per line):</span>
-        <textarea id="inp-pr-repos" rows="3" style="width:100%;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;margin-top:4px;" onchange="onPrSettingsChange()"></textarea>
+        <span>Watched repos:</span>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="text" id="inp-pr-search" placeholder="Search repos..." oninput="renderRepoPicker()" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <button onclick="loadRepos()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Load from GitHub</button>
+        </div>
+        <div id="pr-repo-list" style="max-height:160px;overflow:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;padding:4px;"></div>
       </label>
       <label class="settings-label">
         <span>Poll interval (seconds):</span>
@@ -2688,6 +2692,11 @@ function handleAgentMsg(msg) {
       else { prState.prs = msg.prs || []; prState.error = null; }
       renderPrBadge();
       break;
+    case 'repoList':
+      if (msg.error) { document.getElementById('pr-repo-list').innerHTML = '<div class="pr-empty">Failed: ' + escapeHtml(msg.error) + '. Is <b>gh</b> logged in?</div>'; break; }
+      allRepos = msg.repos || [];
+      renderRepoPicker();
+      break;
     case 'timelineData': handleTimelineData(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
@@ -2997,9 +3006,10 @@ function applySettings(s) {
   }
   if (s.prSettings) {
     prSettings = s.prSettings;
+    selectedRepos = new Set(prSettings.repos || []);
     const c = document.getElementById('chk-pr'); if (c) c.checked = !!prSettings.enabled;
-    const r = document.getElementById('inp-pr-repos'); if (r) r.value = (prSettings.repos || []).join('\n');
     const i = document.getElementById('inp-pr-interval'); if (i) i.value = prSettings.intervalSec || 60;
+    renderRepoPicker();
   }
   // Restore terminal panel width
   if (s.termWidth) {
@@ -3338,12 +3348,38 @@ document.addEventListener('click', (e) => {
   if (d && d.style.display === 'block' && !e.target.closest('#pr-dropdown') && e.target.id !== 'pr-badge') d.style.display = 'none';
 });
 
+let allRepos = [];
+let selectedRepos = new Set();
+
 function onPrEnableChange(val) { prSettings.enabled = val; onPrSettingsChange(); }
 function onPrSettingsChange() {
-  const repos = document.getElementById('inp-pr-repos').value.split('\n').map(s => s.trim()).filter(Boolean);
   const intervalSec = Math.max(30, Number(document.getElementById('inp-pr-interval').value) || 60);
-  prSettings = { enabled: document.getElementById('chk-pr').checked, repos, intervalSec };
+  prSettings = { enabled: document.getElementById('chk-pr').checked, repos: [...selectedRepos], intervalSec };
   api.send({ type: 'savePrSettings', prSettings });
+}
+
+function loadRepos() {
+  document.getElementById('pr-repo-list').innerHTML = '<div class="pr-empty">Loading from GitHub…</div>';
+  api.send({ type: 'listRepos' });
+}
+
+function renderRepoPicker() {
+  const box = document.getElementById('pr-repo-list');
+  if (!box) return;
+  // Always show selected repos, even ones not in the loaded list yet.
+  const pool = [...new Set([...selectedRepos, ...allRepos])];
+  if (pool.length === 0) { box.innerHTML = '<div class="pr-empty">Click “Load from GitHub” to pick repos.</div>'; return; }
+  const q = (document.getElementById('inp-pr-search').value || '').toLowerCase();
+  const list = pool.filter(r => r.toLowerCase().includes(q)).sort();
+  box.innerHTML = list.slice(0, 500).map(r =>
+    `<label style="display:flex;gap:6px;align-items:center;padding:2px 4px;font-size:12px;cursor:pointer;">`
+    + `<input type="checkbox" ${selectedRepos.has(r) ? 'checked' : ''} onchange="toggleRepo('${r.replace(/'/g, "\\'")}',this.checked)">`
+    + `<span>${escapeHtml(r)}</span></label>`).join('') || '<div class="pr-empty">No match.</div>';
+}
+
+function toggleRepo(repo, on) {
+  if (on) selectedRepos.add(repo); else selectedRepos.delete(repo);
+  onPrSettingsChange();
 }
 
 let _persistTimer = null;

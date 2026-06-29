@@ -2120,6 +2120,16 @@ function handleIpc(msg) {
       armPrTimer();
       break;
     }
+    case 'listRepos': {
+      execFile('gh', ['api', '--paginate', 'user/repos?per_page=100&sort=full_name', '--jq', '.[].full_name'],
+        { timeout: 30000, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 16 * 1024 * 1024 },
+        (err, stdout) => {
+          if (err) { send({ type: 'repoList', repos: null, error: err.message }); return; }
+          const repos = [...new Set(stdout.split('\n').map(s => s.trim()).filter(Boolean))].sort();
+          send({ type: 'repoList', repos, error: null });
+        });
+      break;
+    }
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
@@ -2243,7 +2253,7 @@ function handleIpc(msg) {
     }
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;
     case 'saveSettings': Object.assign(settings, msg.settings); saveState(); break;
-    case 'relaunch': app.relaunch(); app.exit(0); break;
+    case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); break; }
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
@@ -2583,11 +2593,17 @@ app.whenReady().then(() => {
   // Show window as soon as the page is painted — don't wait for agent restoration
   mainWindow.once('ready-to-show', () => mainWindow.show());
   // Restore agents after window is visible (heavy JSONL parsing + process cleanup)
-  mainWindow.webContents.once('did-finish-load', () => {
-    restoreAgents(state);
+  let _didRestore = false;
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (!_didRestore) {
+      _didRestore = true;
+      restoreAgents(state);
+      startRemoteServer();
+      armPrTimer();
+    }
+    // Runs on every load incl. renderer reload — repaints from in-memory state
+    // so a reload (to pick up index.html changes) keeps all live sessions.
     sendFullState();
-    startRemoteServer();
-    armPrTimer();
   });
   mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); });
   mainWindow.on('blur', () => { _windowFocused = false; });
