@@ -1453,6 +1453,84 @@ function notifyPermission(id, a) {
   }
 }
 
+// ── PR notifications ───────────────────────────────────
+const { execFile } = require('child_process');
+const PR_REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+function prKey(repo, number) { return `${repo}#${number}`; }
+// Returns keys present now but not in the seen set.
+function diffNewPRKeys(currentKeys, seenKeys) {
+  const seen = new Set(seenKeys);
+  return currentKeys.filter(k => !seen.has(k));
+}
+
+let prTimer = null;
+let prSeenSeeded = false;
+let prGhErrorLogged = false;
+
+function fetchRepoPRs(repo) {
+  return new Promise((resolve) => {
+    if (!PR_REPO_RE.test(repo)) return resolve([]);
+    execFile('gh', ['pr', 'list', '--repo', repo, '--state', 'open', '--json',
+      'number,title,url,author,isDraft', '--limit', '100'],
+      { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
+        if (err) return resolve({ error: err.message });
+        try {
+          const rows = JSON.parse(stdout);
+          resolve(rows.filter(r => !r.isDraft).map(r => ({
+            key: prKey(repo, r.number), repo, number: r.number,
+            title: r.title, url: r.url, author: (r.author && r.author.login) || '',
+          })));
+        } catch { resolve({ error: 'parse error' }); }
+      });
+  });
+}
+
+async function pollPRs() {
+  const cfg = settings.prSettings;
+  if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
+  const results = await Promise.all(cfg.repos.map(fetchRepoPRs));
+  const failed = results.find(r => r && r.error);
+  if (failed) {
+    if (!prGhErrorLogged) { console.log('[Overlord] PR poll failed:', failed.error); prGhErrorLogged = true; }
+    send({ type: 'prList', prs: null, error: failed.error });
+    return; // keep last known list in renderer; do not notify
+  }
+  prGhErrorLogged = false;
+  const prs = results.flat();
+  const currentKeys = prs.map(p => p.key);
+  const seen = settings.prSeen || [];
+  if (!prSeenSeeded && seen.length === 0) {
+    // First run with no history: seed silently, no toasts for pre-existing PRs.
+    prSeenSeeded = true;
+  } else {
+    for (const k of diffNewPRKeys(currentKeys, seen)) {
+      const pr = prs.find(p => p.key === k);
+      if (pr) notifyNewPR(pr);
+    }
+  }
+  settings.prSeen = currentKeys;
+  prSeenSeeded = true;
+  saveState();
+  send({ type: 'prList', prs, error: null });
+}
+
+function notifyNewPR(pr) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title: `New PR · ${pr.repo}`, body: `#${pr.number} ${pr.title}`, silent: true });
+  n.on('click', () => shell.openExternal(pr.url).catch(() => {}));
+  n.show();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
+}
+
+function armPrTimer() {
+  if (prTimer) { clearInterval(prTimer); prTimer = null; }
+  const cfg = settings.prSettings;
+  if (!cfg || !cfg.enabled) return;
+  const sec = Math.max(30, Number(cfg.intervalSec) || 60);
+  pollPRs();
+  prTimer = setInterval(pollPRs, sec * 1000);
+}
+
 // ── Transcript export ─────────────────────────────────
 async function exportTranscript(id) {
   const a = agents.get(id);
@@ -2028,6 +2106,20 @@ function handleIpc(msg) {
         .then(r => { if (!r.canceled && r.filePaths[0]) send({ type: 'folderSelected', path: r.filePaths[0] }); });
       break;
     case 'openUrl': { const url = msg.url; if (typeof url === 'string' && /^(?:https?|file):\/\//.test(url)) shell.openExternal(url).catch(() => {}); break; }
+    case 'savePrSettings': {
+      const p = msg.prSettings || {};
+      settings.prSettings = {
+        enabled: !!p.enabled,
+        repos: Array.isArray(p.repos) ? p.repos.filter(r => PR_REPO_RE.test(r)) : [],
+        intervalSec: Math.max(30, Number(p.intervalSec) || 60),
+      };
+      prSeenSeeded = false; // re-seed silently against the new repo set
+      settings.prSeen = [];
+      saveState();
+      send({ type: 'settings', settings });
+      armPrTimer();
+      break;
+    }
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
@@ -2495,6 +2587,7 @@ app.whenReady().then(() => {
     restoreAgents(state);
     sendFullState();
     startRemoteServer();
+    armPrTimer();
   });
   mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); });
   mainWindow.on('blur', () => { _windowFocused = false; });
