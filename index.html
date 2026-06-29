@@ -36,6 +36,14 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #header h1 span { color:var(--accent); font-weight:600; }
 #headerBadges { display:flex; gap:4px; align-items:center; }
 #headerBadges:empty { display:none; }
+#pr-badge { cursor:pointer; font-size:11px; padding:2px 8px; border-radius:10px; background:var(--bg3); color:var(--text); border:1px solid var(--border); user-select:none; }
+#pr-badge.err { color:#f38ba8; }
+#pr-dropdown { position:absolute; top:40px; right:12px; z-index:50; background:var(--bg2,#1e1e2e); border:1px solid var(--border); border-radius:8px; min-width:280px; max-width:440px; max-height:60vh; overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.pr-row { padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
+.pr-row:last-child { border-bottom:none; }
+.pr-row:hover { background:var(--bg3); }
+.pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
+.pr-empty { padding:12px; color:var(--dim); font-size:12px; }
 #header .badge {
   font-family:inherit; font-size:10px; padding:2px 7px; font-weight:500; letter-spacing:.3px;
   border:1px solid; border-radius:10px;
@@ -845,6 +853,8 @@ button:focus-visible { outline-offset:0; }
   <div id="header">
     <h1><span>Overlord</span></h1>
     <div id="headerBadges"></div>
+    <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
+    <div id="pr-dropdown" style="display:none"></div>
     <button class="hdr-btn" onclick="openHistory()" title="Session history (Ctrl+H)">&#x23F3;</button>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
@@ -918,6 +928,20 @@ button:focus-visible { outline-offset:0; }
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
       </label>
       <div class="settings-hint">Monthly plan budget — used to show usage percentage in the footer.</div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-pr" onchange="onPrEnableChange(this.checked)" />
+        <span>PR notifications (watch GitHub repos)</span>
+      </label>
+      <div class="settings-hint">Polls watched repos via the <code>gh</code> CLI for open PRs.</div>
+      <label class="settings-label" style="display:block;">
+        <span>Watched repos (one <code>owner/repo</code> per line):</span>
+        <textarea id="inp-pr-repos" rows="3" style="width:100%;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;margin-top:4px;" onchange="onPrSettingsChange()"></textarea>
+      </label>
+      <label class="settings-label">
+        <span>Poll interval (seconds):</span>
+        <input type="number" id="inp-pr-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onPrSettingsChange()" />
+      </label>
     </div>
   </div>
   <div id="prompt-overlay" onclick="closePromptOverlay()">
@@ -2659,6 +2683,11 @@ function handleAgentMsg(msg) {
     case 'focused': selectedId = msg.id; scheduleRender(); break;
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); break;
+    case 'prList':
+      if (msg.error) { prState.error = msg.error; }
+      else { prState.prs = msg.prs || []; prState.error = null; }
+      renderPrBadge();
+      break;
     case 'timelineData': handleTimelineData(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
@@ -2966,6 +2995,12 @@ function applySettings(s) {
     const inp = document.getElementById('inp-budget');
     if (inp) inp.value = planBudget;
   }
+  if (s.prSettings) {
+    prSettings = s.prSettings;
+    const c = document.getElementById('chk-pr'); if (c) c.checked = !!prSettings.enabled;
+    const r = document.getElementById('inp-pr-repos'); if (r) r.value = (prSettings.repos || []).join('\n');
+    const i = document.getElementById('inp-pr-interval'); if (i) i.value = prSettings.intervalSec || 60;
+  }
   // Restore terminal panel width
   if (s.termWidth) {
     settings_termWidth = s.termWidth;
@@ -3254,6 +3289,61 @@ function onNotifChange(val) {
 function onSoundChange(val) {
   notificationSoundEnabled = val;
   api.send({ type: 'saveSettings', settings: { notificationSound: val } });
+}
+
+// ── PR notifications ───────────────────────────────────
+let prState = { prs: [], error: null };
+let prSettings = { enabled: false, repos: [], intervalSec: 60 };
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function renderPrBadge() {
+  const b = document.getElementById('pr-badge');
+  if (!b) return;
+  if (prState.error) {
+    b.style.display = ''; b.className = 'err'; b.textContent = '⬢ !';
+    b.title = 'PR check failed — is gh installed and logged in? (' + prState.error + ')';
+  } else if (prState.prs.length > 0) {
+    b.style.display = ''; b.className = ''; b.textContent = '⬢ ' + prState.prs.length;
+    b.title = prState.prs.length + ' open PR(s)';
+  } else {
+    b.style.display = 'none';
+    document.getElementById('pr-dropdown').style.display = 'none';
+  }
+}
+
+function togglePrDropdown(e) {
+  if (e) e.stopPropagation();
+  const d = document.getElementById('pr-dropdown');
+  if (d.style.display === 'block') { d.style.display = 'none'; return; }
+  if (prState.error) {
+    d.innerHTML = '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
+  } else if (prState.prs.length === 0) {
+    d.innerHTML = '<div class="pr-empty">No open PRs.</div>';
+  } else {
+    d.innerHTML = prState.prs.map(p =>
+      `<div class="pr-row" onclick="openPr('${p.url.replace(/'/g, "\\'")}')">`
+      + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
+      + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`).join('');
+  }
+  d.style.display = 'block';
+}
+
+function openPr(url) {
+  api.send({ type: 'openUrl', url });
+  document.getElementById('pr-dropdown').style.display = 'none';
+}
+
+document.addEventListener('click', (e) => {
+  const d = document.getElementById('pr-dropdown');
+  if (d && d.style.display === 'block' && !e.target.closest('#pr-dropdown') && e.target.id !== 'pr-badge') d.style.display = 'none';
+});
+
+function onPrEnableChange(val) { prSettings.enabled = val; onPrSettingsChange(); }
+function onPrSettingsChange() {
+  const repos = document.getElementById('inp-pr-repos').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const intervalSec = Math.max(30, Number(document.getElementById('inp-pr-interval').value) || 60);
+  prSettings = { enabled: document.getElementById('chk-pr').checked, repos, intervalSec };
+  api.send({ type: 'savePrSettings', prSettings });
 }
 
 let _persistTimer = null;
