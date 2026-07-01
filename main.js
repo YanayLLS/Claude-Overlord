@@ -1491,7 +1491,7 @@ function fetchRepoPRs(repo) {
   return new Promise((resolve) => {
     if (!PR_REPO_RE.test(repo)) return resolve([]);
     execFile('gh', ['pr', 'list', '--repo', repo, '--state', 'open', '--json',
-      'number,title,url,author,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus,reviewRequests', '--limit', '100'],
+      'number,title,url,author,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus,reviewRequests,createdAt', '--limit', '100'],
       { timeout: 20000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
         if (err) return resolve({ error: err.message, repo });
         try {
@@ -1509,6 +1509,7 @@ function fetchRepoPRs(repo) {
             mergeable: r.mergeable || 'UNKNOWN',
             mergeState: r.mergeStateStatus || '',
             requested: !!ghLogin && Array.isArray(r.reviewRequests) && r.reviewRequests.some(x => x && x.login === ghLogin),
+            createdAt: r.createdAt || '',
           })));
         } catch { resolve({ error: 'parse error', repo }); }
       });
@@ -1535,17 +1536,22 @@ async function pollPRs() {
   if (!failed.length) prGhErrorLogged = false;
   const prs = ok.flat();
   const currentKeys = prs.map(p => p.key);
+  const muted = new Set(settings.prMuted || []);
+  prs.forEach(p => { p.muted = muted.has(p.key); });
   const seen = settings.prSeen || [];
   if (!prSeenSeeded && seen.length === 0) {
     // First run with no history: seed silently, no toasts for pre-existing PRs.
     prSeenSeeded = true;
   } else {
     for (const k of diffNewPRKeys(currentKeys, seen)) {
+      if (muted.has(k)) continue; // muted PRs don't notify
       const pr = prs.find(p => p.key === k);
       if (pr) notifyNewPR(pr);
     }
   }
   settings.prSeen = currentKeys;
+  // Drop mutes for PRs that are no longer open (merged/closed) — keeps the list tidy.
+  settings.prMuted = (settings.prMuted || []).filter(k => currentKeys.includes(k));
   prSeenSeeded = true;
   saveState();
   send({ type: 'prList', prs, error: null, failedRepos: failed.map(f => f.repo) });
@@ -2301,6 +2307,20 @@ function handleIpc(msg) {
           if (err) { send({ type: 'prActionError', url, error: ((stderr || '') + err.message).trim() }); return; }
           pollPRs(); // approved PR now drops from the list
         });
+      break;
+    }
+    case 'mutePr': {
+      if (typeof msg.key === 'string') {
+        const s = new Set(settings.prMuted || []); s.add(msg.key);
+        settings.prMuted = [...s]; saveState(); pollPRs();
+      }
+      break;
+    }
+    case 'unmutePr': {
+      if (typeof msg.key === 'string') {
+        settings.prMuted = (settings.prMuted || []).filter(k => k !== msg.key);
+        saveState(); pollPRs();
+      }
       break;
     }
     case 'mergePr': {

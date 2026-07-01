@@ -44,14 +44,19 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-group-header:hover { background:var(--bg2,#1e1e2e); }
 .pr-group-header .pr-count { color:var(--dim); font-weight:400; }
 .pr-row { position:relative; padding:8px 12px 8px 20px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
-.pr-approve { position:absolute; right:10px; top:50%; transform:translateY(-50%); display:none; font-family:inherit; font-size:11px; font-weight:600; padding:3px 9px; background:#a6e3a1; color:#11111b; border:none; border-radius:4px; cursor:pointer; }
+.pr-actions { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:none; gap:6px; align-items:center; }
+.pr-row:hover .pr-actions { display:flex; }
+.pr-approve { font-family:inherit; font-size:11px; font-weight:600; padding:3px 9px; background:#a6e3a1; color:#11111b; border:none; border-radius:4px; cursor:pointer; }
 .pr-approve:hover { background:#94e2b5; }
 .pr-merge { background:#89b4fa; }
 .pr-merge:hover { background:#74a8f7; }
 .pr-approve:disabled { opacity:.6; cursor:default; }
-.pr-row:hover .pr-approve { display:block; }
+.pr-mute { background:var(--bg2,#313244); color:var(--text); }
+.pr-mute:hover { background:var(--border); }
 .pr-row.pr-req { background:rgba(137,180,250,.08); border-left:2px solid #89b4fa; }
+.pr-row.pr-muted { opacity:.55; }
 .pr-reqtag { color:#89b4fa; font-weight:600; }
+.pr-age { color:var(--dim); }
 .pr-row:last-child { border-bottom:none; }
 .pr-row:hover { background:var(--bg3); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
@@ -872,8 +877,7 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
-    <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Soft reload (renderer only — keeps sessions, picks up UI changes)">&#x21BB;</button>
-    <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Full restart (reloads main process — needed for backend/main.js changes)">&#x1F504;</button>
+    <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Restart app">&#x1F504;</button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
     <button id="readyBtn" class="hdr-btn" onclick="toggleReadyFilter()" title="Show only ready agents">&#x2713;</button>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
@@ -3342,10 +3346,11 @@ function renderPrBadge() {
   if (prState.error) {
     b.style.display = ''; b.className = 'err'; b.textContent = '⬢ !';
     b.title = 'PR check failed — is gh installed and logged in? (' + prState.error + ')';
-  } else if (prState.prs.length > 0) {
-    const waiting = prState.prs.filter(prNeedsApproval).length;
-    b.style.display = ''; b.className = waiting > 0 ? 'alert' : ''; b.textContent = '⬢ ' + prState.prs.length;
-    b.title = waiting > 0 ? waiting + ' PR(s) waiting for approval' : prState.prs.length + ' open PR(s)';
+  } else if (prState.prs.some(p => !p.muted)) {
+    const active = prState.prs.filter(p => !p.muted);
+    const waiting = active.filter(prNeedsApproval).length;
+    b.style.display = ''; b.className = waiting > 0 ? 'alert' : ''; b.textContent = '⬢ ' + active.length;
+    b.title = waiting > 0 ? waiting + ' PR(s) waiting for approval' : active.length + ' open PR(s)';
   } else {
     b.style.display = 'none';
     document.getElementById('pr-dropdown').style.display = 'none';
@@ -3369,12 +3374,61 @@ function prMergeInfo(p) {
   return { enabled: true, label: '' }; // CLEAN, HAS_HOOKS, UNSTABLE
 }
 
+// "Now" / "5 minutes ago" / "3 hours ago" / "Yesterday at 15:44" / "Jun 3 at 15:44"
+function prRelTime(iso) {
+  const t = new Date(iso).getTime();
+  if (!t) return '';
+  const now = Date.now(), diff = now - t, m = 60000, h = 3600000, d = 86400000;
+  if (diff < m) return 'Now';
+  if (diff < h) { const n = Math.floor(diff / m); return n + (n === 1 ? ' minute ago' : ' minutes ago'); }
+  const dt = new Date(t);
+  if (dt.toDateString() === new Date(now).toDateString()) { const n = Math.floor(diff / h); return n + (n === 1 ? ' hour ago' : ' hours ago'); }
+  const hhmm = dt.toTimeString().slice(0, 5);
+  if (dt.toDateString() === new Date(now - d).toDateString()) return 'Yesterday at ' + hhmm;
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' at ' + hhmm;
+}
+
+function prActionBtn(p, u) {
+  if (p.mine) {
+    const mi = prMergeInfo(p);
+    return mi.enabled
+      ? `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge</button>`
+      : `<button class="pr-approve pr-merge" disabled title="Can't merge: ${mi.label}">⤵ ${escapeHtml(mi.label)}</button>`;
+  }
+  return `<button class="pr-approve" title="Approve without a message" onclick="event.stopPropagation();approvePr('${u}',this)">✓ Approve</button>`;
+}
+
+function prRowHtml(p) {
+  const u = p.url.replace(/'/g, "\\'");
+  const k = p.key.replace(/'/g, "\\'");
+  const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
+  const meta = p.mine && p.reviewDecision === 'APPROVED' ? ' · approved' : tag;
+  const reqTag = p.requested ? ' · <span class="pr-reqtag">review requested</span>' : '';
+  const age = p.createdAt ? ' · <span class="pr-age" data-created="' + p.createdAt + '">' + escapeHtml(prRelTime(p.createdAt)) + '</span>' : '';
+  const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
+  return `<div class="pr-row${p.requested ? ' pr-req' : ''}" onclick="openPr('${u}')">`
+    + `<div class="pr-actions">${prActionBtn(p, u)}${muteBtn}</div>`
+    + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
+    + `<div class="pr-meta">@${escapeHtml(p.author)}${meta}${reqTag}${age}</div></div>`;
+}
+
+function prMutedRowHtml(p) {
+  const u = p.url.replace(/'/g, "\\'");
+  const k = p.key.replace(/'/g, "\\'");
+  return `<div class="pr-row pr-muted" onclick="openPr('${u}')">`
+    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-mute" onclick="event.stopPropagation();unmutePr('${k}')">🔔 Unmute</button></div>`
+    + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
+    + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`;
+}
+
 function prDropdownHtml() {
   if (prState.error) return '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
-  if (prState.prs.length === 0) return '<div class="pr-empty">No open PRs.</div>';
-  const byRepo = new Map();
-  for (const p of prState.prs) { if (!byRepo.has(p.repo)) byRepo.set(p.repo, []); byRepo.get(p.repo).push(p); }
+  const active = prState.prs.filter(p => !p.muted);
+  const muted = prState.prs.filter(p => p.muted);
+  if (active.length === 0 && muted.length === 0) return '<div class="pr-empty">No open PRs.</div>';
   let html = '';
+  const byRepo = new Map();
+  for (const p of active) { if (!byRepo.has(p.repo)) byRepo.set(p.repo, []); byRepo.get(p.repo).push(p); }
   for (const [repo, prs] of byRepo) {
     const collapsed = prCollapsed.has(repo);
     html += `<div class="pr-group-header" onclick="togglePrRepo('${repo.replace(/'/g, "\\'")}')">`
@@ -3382,26 +3436,13 @@ function prDropdownHtml() {
     if (collapsed) continue;
     // PRs that request my review float to the top of their repo group.
     const sorted = [...prs].sort((a, b) => (b.requested ? 1 : 0) - (a.requested ? 1 : 0));
-    html += sorted.map(p => {
-      const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
-      const u = p.url.replace(/'/g, "\\'");
-      let btn;
-      if (p.mine) {
-        const mi = prMergeInfo(p);
-        btn = mi.enabled
-          ? `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge</button>`
-          : `<button class="pr-approve pr-merge" disabled title="Can't merge: ${mi.label}">⤵ ${escapeHtml(mi.label)}</button>`;
-      } else {
-        btn = `<button class="pr-approve" title="Approve without a message" onclick="event.stopPropagation();approvePr('${u}',this)">✓ Approve</button>`;
-      }
-      const meta = p.mine && p.reviewDecision === 'APPROVED' ? ' · approved' : tag;
-      const reqTag = p.requested ? ' · <span class="pr-reqtag">review requested</span>' : '';
-      const ci = prCiIcon(p.checks);
-      return `<div class="pr-row${p.requested ? ' pr-req' : ''}" onclick="openPr('${u}')">`
-        + btn
-        + `<div>${ci}#${p.number} · ${escapeHtml(p.title)}</div>`
-        + `<div class="pr-meta">@${escapeHtml(p.author)}${meta}${reqTag}</div></div>`;
-    }).join('');
+    html += sorted.map(prRowHtml).join('');
+  }
+  if (muted.length) {
+    const collapsed = prCollapsed.has('__muted__');
+    html += `<div class="pr-group-header" onclick="togglePrRepo('__muted__')">`
+      + `<span>${collapsed ? '▸' : '▾'} 🔕 Muted</span><span class="pr-count">${muted.length}</span></div>`;
+    if (!collapsed) html += muted.map(prMutedRowHtml).join('');
   }
   if (prState.failedRepos && prState.failedRepos.length) {
     html += `<div class="pr-empty" style="color:#f38ba8">⚠ Couldn't reach: ${escapeHtml(prState.failedRepos.join(', '))}</div>`;
@@ -3436,6 +3477,9 @@ function mergePr(url, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Merging…'; }
   api.send({ type: 'mergePr', url });
 }
+
+function mutePr(key) { api.send({ type: 'mutePr', key }); }
+function unmutePr(key) { api.send({ type: 'unmutePr', key }); }
 
 document.addEventListener('click', (e) => {
   const d = document.getElementById('pr-dropdown');
