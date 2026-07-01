@@ -2121,7 +2121,7 @@ function handleIpc(msg) {
       break;
     }
     case 'listRepos': {
-      execFile('gh', ['api', '--paginate', 'user/repos?per_page=100&sort=full_name', '--jq', '.[].full_name'],
+      execFile('gh', ['api', '--paginate', 'user/repos?per_page=100', '--jq', '.[].full_name'],
         { timeout: 30000, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 16 * 1024 * 1024 },
         (err, stdout) => {
           if (err) { send({ type: 'repoList', repos: null, error: err.message }); return; }
