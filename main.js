@@ -2309,6 +2309,7 @@ function handleIpc(msg) {
         });
       break;
     }
+    case 'pollPrsNow': pollPRs(); break;
     case 'mutePr': {
       if (typeof msg.key === 'string') {
         const s = new Set(settings.prMuted || []); s.add(msg.key);

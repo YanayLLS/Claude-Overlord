@@ -57,6 +57,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-row.pr-muted { opacity:.55; }
 .pr-reqtag { color:#89b4fa; font-weight:600; }
 .pr-age { color:var(--dim); }
+.pr-dhead { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; font-size:11px; color:var(--dim); border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg2,#1e1e2e); z-index:1; }
+.pr-refresh { background:none; border:none; color:var(--text); font-size:14px; cursor:pointer; padding:0 4px; line-height:1; }
+.pr-refresh:hover { color:var(--accent); }
+.pr-refresh.spin { animation:pr-spin .7s linear infinite; }
+@keyframes pr-spin { to { transform:rotate(360deg); } }
 .pr-row:last-child { border-bottom:none; }
 .pr-row:hover { background:var(--bg3); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
@@ -3421,12 +3426,18 @@ function prMutedRowHtml(p) {
     + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`;
 }
 
+function prDropdownHead() {
+  return `<div class="pr-dhead"><span>Pull requests</span>`
+    + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button></div>`;
+}
+
 function prDropdownHtml() {
-  if (prState.error) return '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
+  const head = prDropdownHead();
+  if (prState.error) return head + '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
   const active = prState.prs.filter(p => !p.muted);
   const muted = prState.prs.filter(p => p.muted);
-  if (active.length === 0 && muted.length === 0) return '<div class="pr-empty">No open PRs.</div>';
-  let html = '';
+  if (active.length === 0 && muted.length === 0) return head + '<div class="pr-empty">No open PRs.</div>';
+  let html = head;
   const byRepo = new Map();
   for (const p of active) { if (!byRepo.has(p.repo)) byRepo.set(p.repo, []); byRepo.get(p.repo).push(p); }
   for (const [repo, prs] of byRepo) {
@@ -3480,6 +3491,11 @@ function mergePr(url, btn) {
 
 function mutePr(key) { api.send({ type: 'mutePr', key }); }
 function unmutePr(key) { api.send({ type: 'unmutePr', key }); }
+
+function refreshPrs(btn) {
+  if (btn) btn.classList.add('spin');
+  api.send({ type: 'pollPrsNow' });
+}
 
 document.addEventListener('click', (e) => {
   const d = document.getElementById('pr-dropdown');
