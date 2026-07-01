@@ -36,11 +36,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #header h1 span { color:var(--accent); font-weight:600; }
 #headerBadges { display:flex; gap:4px; align-items:center; }
 #headerBadges:empty { display:none; }
-#pr-badge { cursor:pointer; font-size:11px; padding:2px 8px; border-radius:10px; background:var(--bg3); color:var(--text); border:1px solid var(--border); user-select:none; }
+#pr-badge { align-items:center; gap:8px; padding:5px 12px; border-top:1px solid var(--border); background:var(--title-bg); font-size:11px; color:var(--text); cursor:pointer; letter-spacing:.3px; flex-shrink:0; user-select:none; }
 #pr-badge.err { color:#f38ba8; }
-#pr-badge.alert { background:#f38ba8; color:#11111b; border-color:#f38ba8; font-weight:600; }
-#pr-dropdown { position:absolute; top:40px; right:12px; z-index:50; background:var(--bg2,#1e1e2e); border:1px solid var(--border); border-radius:8px; min-width:280px; max-width:440px; max-height:60vh; overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
-.pr-group-header { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; cursor:pointer; font-size:11px; font-weight:600; color:var(--text); background:var(--bg3); border-bottom:1px solid var(--border); user-select:none; position:sticky; top:0; }
+#pr-badge.alert { color:#f38ba8; font-weight:600; }
+#pr-dropdown { position:fixed; z-index:50; background:var(--bg2,#1e1e2e); border:1px solid var(--border); border-radius:8px; min-width:280px; max-width:440px; max-height:60vh; overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.pr-group-header { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; cursor:pointer; font-size:11px; font-weight:600; color:var(--text); background:var(--bg3); border-bottom:1px solid var(--border); user-select:none; }
+.pr-group-header.pr-group-muted { opacity:.55; }
+.pr-ghead-right { display:flex; align-items:center; gap:8px; }
+.pr-repo-mute { display:none; background:none; border:none; cursor:pointer; font-size:12px; padding:0; line-height:1; }
+.pr-group-header:hover .pr-repo-mute { display:inline; }
 .pr-group-header:hover { background:var(--bg2,#1e1e2e); }
 .pr-group-header .pr-count { color:var(--dim); font-weight:400; }
 .pr-row { position:relative; padding:8px 12px 8px 20px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
@@ -875,8 +879,6 @@ button:focus-visible { outline-offset:0; }
   <div id="header">
     <h1><span>Overlord</span></h1>
     <div id="headerBadges"></div>
-    <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
-    <div id="pr-dropdown" style="display:none"></div>
     <button class="hdr-btn" onclick="openHistory()" title="Session history (Ctrl+H)">&#x23F3;</button>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
@@ -897,6 +899,8 @@ button:focus-visible { outline-offset:0; }
       <button id="filter-close" onclick="closeFilter()" aria-label="Close filter">&times;</button>
     </div>
     <div id="list"></div>
+    <div id="pr-dropdown" style="display:none"></div>
+    <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
     <div id="summary-bar"></div>
   </div>
   <div id="resize"></div>
@@ -3344,18 +3348,25 @@ let prSettings = { enabled: false, repos: [], intervalSec: 60 };
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function prNeedsApproval(p) { return !p.mine && p.reviewDecision !== 'CHANGES_REQUESTED'; }
+function prSilenced(p) { return p.muted || p.repoMuted; }
 
 function renderPrBadge() {
   const b = document.getElementById('pr-badge');
   if (!b) return;
   if (prState.error) {
-    b.style.display = ''; b.className = 'err'; b.textContent = '⬢ !';
+    b.style.display = 'flex'; b.className = 'err'; b.textContent = '⬢ PRs — check failed';
     b.title = 'PR check failed — is gh installed and logged in? (' + prState.error + ')';
-  } else if (prState.prs.some(p => !p.muted)) {
-    const active = prState.prs.filter(p => !p.muted);
+  } else if (prState.prs.some(p => !prSilenced(p))) {
+    const active = prState.prs.filter(p => !prSilenced(p));
     const waiting = active.filter(prNeedsApproval).length;
-    b.style.display = ''; b.className = waiting > 0 ? 'alert' : ''; b.textContent = '⬢ ' + active.length;
+    b.style.display = 'flex'; b.className = waiting > 0 ? 'alert' : '';
+    b.textContent = '⬢ ' + active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '');
     b.title = waiting > 0 ? waiting + ' PR(s) waiting for approval' : active.length + ' open PR(s)';
+  } else if (prState.prs.length > 0) {
+    // Only muted PRs remain — keep a quiet entry so the dropdown stays reachable to un-mute.
+    b.style.display = 'flex'; b.className = '';
+    b.textContent = '🔕 ' + prState.prs.length + ' muted';
+    b.title = 'All watched PRs are muted — click to manage';
   } else {
     b.style.display = 'none';
     document.getElementById('pr-dropdown').style.display = 'none';
@@ -3403,18 +3414,37 @@ function prActionBtn(p, u) {
   return `<button class="pr-approve" title="Approve without a message" onclick="event.stopPropagation();approvePr('${u}',this)">✓ Approve</button>`;
 }
 
-function prRowHtml(p) {
+function prRowHtml(p, dim) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
   const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
   const meta = p.mine && p.reviewDecision === 'APPROVED' ? ' · approved' : tag;
-  const reqTag = p.requested ? ' · <span class="pr-reqtag">review requested</span>' : '';
+  const showReq = p.requested && !dim;
+  const reqTag = showReq ? ' · <span class="pr-reqtag">review requested</span>' : '';
   const age = p.createdAt ? ' · <span class="pr-age" data-created="' + p.createdAt + '">' + escapeHtml(prRelTime(p.createdAt)) + '</span>' : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
-  return `<div class="pr-row${p.requested ? ' pr-req' : ''}" onclick="openPr('${u}')">`
+  const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (dim ? ' pr-muted' : '');
+  return `<div class="${cls}" onclick="openPr('${u}')">`
     + `<div class="pr-actions">${prActionBtn(p, u)}${muteBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
     + `<div class="pr-meta">@${escapeHtml(p.author)}${meta}${reqTag}${age}</div></div>`;
+}
+
+function prGroupHeader(repo, count, muted) {
+  const r = repo.replace(/'/g, "\\'");
+  const collapsed = prCollapsed.has(repo);
+  const muteBtn = muted
+    ? `<button class="pr-repo-mute" title="Un-mute repo" onclick="event.stopPropagation();unmuteRepo('${r}')">🔔</button>`
+    : `<button class="pr-repo-mute" title="Mute repo — no red/notify for its PRs" onclick="event.stopPropagation();muteRepo('${r}')">🔕</button>`;
+  return `<div class="pr-group-header${muted ? ' pr-group-muted' : ''}" onclick="togglePrRepo('${r}')">`
+    + `<span>${collapsed ? '▸' : '▾'} ${escapeHtml(repo)}</span>`
+    + `<span class="pr-ghead-right">${muteBtn}<span class="pr-count">${count}</span></span></div>`;
+}
+
+function prGroupByRepo(list) {
+  const m = new Map();
+  for (const p of list) { if (!m.has(p.repo)) m.set(p.repo, []); m.get(p.repo).push(p); }
+  return m;
 }
 
 function prMutedRowHtml(p) {
@@ -3434,21 +3464,26 @@ function prDropdownHead() {
 function prDropdownHtml() {
   const head = prDropdownHead();
   if (prState.error) return head + '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
-  const active = prState.prs.filter(p => !p.muted);
+  const active = prState.prs.filter(p => !p.muted && !p.repoMuted);
+  const repoMuted = prState.prs.filter(p => p.repoMuted && !p.muted);
   const muted = prState.prs.filter(p => p.muted);
-  if (active.length === 0 && muted.length === 0) return head + '<div class="pr-empty">No open PRs.</div>';
+  if (!active.length && !repoMuted.length && !muted.length) return head + '<div class="pr-empty">No open PRs.</div>';
   let html = head;
-  const byRepo = new Map();
-  for (const p of active) { if (!byRepo.has(p.repo)) byRepo.set(p.repo, []); byRepo.get(p.repo).push(p); }
-  for (const [repo, prs] of byRepo) {
-    const collapsed = prCollapsed.has(repo);
-    html += `<div class="pr-group-header" onclick="togglePrRepo('${repo.replace(/'/g, "\\'")}')">`
-      + `<span>${collapsed ? '▸' : '▾'} ${escapeHtml(repo)}</span><span class="pr-count">${prs.length}</span></div>`;
-    if (collapsed) continue;
+  // Active repos
+  for (const [repo, prs] of prGroupByRepo(active)) {
+    html += prGroupHeader(repo, prs.length, false);
+    if (prCollapsed.has(repo)) continue;
     // PRs that request my review float to the top of their repo group.
     const sorted = [...prs].sort((a, b) => (b.requested ? 1 : 0) - (a.requested ? 1 : 0));
-    html += sorted.map(prRowHtml).join('');
+    html += sorted.map(p => prRowHtml(p, false)).join('');
   }
+  // Muted repos (dimmed, no red)
+  for (const [repo, prs] of prGroupByRepo(repoMuted)) {
+    html += prGroupHeader(repo, prs.length, true);
+    if (prCollapsed.has(repo)) continue;
+    html += prs.map(p => prRowHtml(p, true)).join('');
+  }
+  // Individually muted PRs
   if (muted.length) {
     const collapsed = prCollapsed.has('__muted__');
     html += `<div class="pr-group-header" onclick="togglePrRepo('__muted__')">`
@@ -3466,6 +3501,13 @@ function togglePrDropdown(e) {
   const d = document.getElementById('pr-dropdown');
   if (d.style.display === 'block') { d.style.display = 'none'; return; }
   d.innerHTML = prDropdownHtml();
+  // Anchor above the bottom-left bar, opening upward.
+  const bar = document.getElementById('pr-badge');
+  const r = bar.getBoundingClientRect();
+  d.style.left = r.left + 'px';
+  d.style.right = 'auto';
+  d.style.top = 'auto';
+  d.style.bottom = (window.innerHeight - r.top + 4) + 'px';
   d.style.display = 'block';
 }
 
@@ -3491,6 +3533,8 @@ function mergePr(url, btn) {
 
 function mutePr(key) { api.send({ type: 'mutePr', key }); }
 function unmutePr(key) { api.send({ type: 'unmutePr', key }); }
+function muteRepo(repo) { api.send({ type: 'muteRepo', repo }); }
+function unmuteRepo(repo) { api.send({ type: 'unmuteRepo', repo }); }
 
 function refreshPrs(btn) {
   if (btn) btn.classList.add('spin');

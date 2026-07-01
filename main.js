@@ -1537,16 +1537,17 @@ async function pollPRs() {
   const prs = ok.flat();
   const currentKeys = prs.map(p => p.key);
   const muted = new Set(settings.prMuted || []);
-  prs.forEach(p => { p.muted = muted.has(p.key); });
+  const mutedRepos = new Set(settings.prMutedRepos || []);
+  prs.forEach(p => { p.muted = muted.has(p.key); p.repoMuted = mutedRepos.has(p.repo); });
   const seen = settings.prSeen || [];
   if (!prSeenSeeded && seen.length === 0) {
     // First run with no history: seed silently, no toasts for pre-existing PRs.
     prSeenSeeded = true;
   } else {
     for (const k of diffNewPRKeys(currentKeys, seen)) {
-      if (muted.has(k)) continue; // muted PRs don't notify
       const pr = prs.find(p => p.key === k);
-      if (pr) notifyNewPR(pr);
+      if (!pr || pr.muted || pr.repoMuted) continue; // muted PR/repo doesn't notify
+      notifyNewPR(pr);
     }
   }
   settings.prSeen = currentKeys;
@@ -2310,6 +2311,20 @@ function handleIpc(msg) {
       break;
     }
     case 'pollPrsNow': pollPRs(); break;
+    case 'muteRepo': {
+      if (typeof msg.repo === 'string') {
+        const s = new Set(settings.prMutedRepos || []); s.add(msg.repo);
+        settings.prMutedRepos = [...s]; saveState(); pollPRs();
+      }
+      break;
+    }
+    case 'unmuteRepo': {
+      if (typeof msg.repo === 'string') {
+        settings.prMutedRepos = (settings.prMutedRepos || []).filter(r => r !== msg.repo);
+        saveState(); pollPRs();
+      }
+      break;
+    }
     case 'mutePr': {
       if (typeof msg.key === 'string') {
         const s = new Set(settings.prMuted || []); s.add(msg.key);
