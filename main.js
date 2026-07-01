@@ -1462,6 +1462,19 @@ function diffNewPRKeys(currentKeys, seenKeys) {
 let prTimer = null;
 let prSeenSeeded = false;
 let prGhErrorLogged = false;
+let ghLogin = null;
+
+// Login of the authenticated gh user, cached after first lookup.
+function fetchGhLogin() {
+  return new Promise((resolve) => {
+    if (ghLogin !== null) return resolve(ghLogin);
+    execFile('gh', ['api', 'user', '--jq', '.login'],
+      { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
+        ghLogin = err ? '' : stdout.trim();
+        resolve(ghLogin);
+      });
+  });
+}
 
 function fetchRepoPRs(repo) {
   return new Promise((resolve) => {
@@ -1472,11 +1485,15 @@ function fetchRepoPRs(repo) {
         if (err) return resolve({ error: err.message });
         try {
           const rows = JSON.parse(stdout);
-          // Drop drafts and already-approved PRs — only show what still needs attention.
-          resolve(rows.filter(r => !r.isDraft && r.reviewDecision !== 'APPROVED').map(r => ({
+          // Drop drafts. Drop approved PRs UNLESS they're mine (I may still need to merge them).
+          resolve(rows.filter(r => {
+            const mine = !!ghLogin && (r.author && r.author.login) === ghLogin;
+            return !r.isDraft && (r.reviewDecision !== 'APPROVED' || mine);
+          }).map(r => ({
             key: prKey(repo, r.number), repo, number: r.number,
             title: r.title, url: r.url, author: (r.author && r.author.login) || '',
             reviewDecision: r.reviewDecision || '',
+            mine: !!ghLogin && (r.author && r.author.login) === ghLogin,
           })));
         } catch { resolve({ error: 'parse error' }); }
       });
@@ -1486,6 +1503,7 @@ function fetchRepoPRs(repo) {
 async function pollPRs() {
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
+  await fetchGhLogin();
   const results = await Promise.all(cfg.repos.map(fetchRepoPRs));
   const failed = results.find(r => r && r.error);
   if (failed) {
@@ -2254,6 +2272,26 @@ function handleIpc(msg) {
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'fullRestart': app.relaunch(); app.exit(0); break;
     case 'installUpdate': autoUpdater.quitAndInstall(); break;
+    case 'approvePr': {
+      const url = msg.url;
+      if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
+      execFile('gh', ['pr', 'review', url, '--approve'],
+        { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+          if (err) { send({ type: 'prActionError', url, error: ((stderr || '') + err.message).trim() }); return; }
+          pollPRs(); // approved PR now drops from the list
+        });
+      break;
+    }
+    case 'mergePr': {
+      const url = msg.url;
+      if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
+      execFile('gh', ['pr', 'merge', url, '--merge'],
+        { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+          if (err) { send({ type: 'prActionError', url, error: ((stderr || '') + err.message).trim() }); return; }
+          pollPRs(); // merged PR drops from the list
+        });
+      break;
+    }
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); break; }
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;

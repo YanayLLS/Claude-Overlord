@@ -43,7 +43,13 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-group-header { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; cursor:pointer; font-size:11px; font-weight:600; color:var(--text); background:var(--bg3); border-bottom:1px solid var(--border); user-select:none; position:sticky; top:0; }
 .pr-group-header:hover { background:var(--bg2,#1e1e2e); }
 .pr-group-header .pr-count { color:var(--dim); font-weight:400; }
-.pr-row { padding:8px 12px 8px 20px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
+.pr-row { position:relative; padding:8px 12px 8px 20px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
+.pr-approve { position:absolute; right:10px; top:50%; transform:translateY(-50%); display:none; font-family:inherit; font-size:11px; font-weight:600; padding:3px 9px; background:#a6e3a1; color:#11111b; border:none; border-radius:4px; cursor:pointer; }
+.pr-approve:hover { background:#94e2b5; }
+.pr-merge { background:#89b4fa; }
+.pr-merge:hover { background:#74a8f7; }
+.pr-approve:disabled { opacity:.6; cursor:default; }
+.pr-row:hover .pr-approve { display:block; }
 .pr-row:last-child { border-bottom:none; }
 .pr-row:hover { background:var(--bg3); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
@@ -2711,6 +2717,12 @@ function handleAgentMsg(msg) {
       if (b) { b.style.display = ''; b.textContent = '⬇ Update to ' + msg.version; }
       break;
     }
+    case 'prActionError': {
+      alert('PR action failed: ' + (msg.error || 'unknown error'));
+      const d = document.getElementById('pr-dropdown');
+      if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
+      break;
+    }
     case 'timelineData': handleTimelineData(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
@@ -3320,7 +3332,7 @@ let prState = { prs: [], error: null };
 let prSettings = { enabled: false, repos: [], intervalSec: 60 };
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
-function prNeedsApproval(p) { return p.reviewDecision !== 'CHANGES_REQUESTED'; }
+function prNeedsApproval(p) { return !p.mine && p.reviewDecision !== 'CHANGES_REQUESTED'; }
 
 function renderPrBadge() {
   const b = document.getElementById('pr-badge');
@@ -3353,9 +3365,15 @@ function prDropdownHtml() {
     if (collapsed) continue;
     html += prs.map(p => {
       const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
-      return `<div class="pr-row" onclick="openPr('${p.url.replace(/'/g, "\\'")}')">`
+      const u = p.url.replace(/'/g, "\\'");
+      const btn = p.mine
+        ? `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge</button>`
+        : `<button class="pr-approve" title="Approve without a message" onclick="event.stopPropagation();approvePr('${u}',this)">✓ Approve</button>`;
+      const meta = p.mine && p.reviewDecision === 'APPROVED' ? ' · approved' : tag;
+      return `<div class="pr-row" onclick="openPr('${u}')">`
+        + btn
         + `<div>#${p.number} · ${escapeHtml(p.title)}</div>`
-        + `<div class="pr-meta">@${escapeHtml(p.author)}${tag}</div></div>`;
+        + `<div class="pr-meta">@${escapeHtml(p.author)}${meta}</div></div>`;
     }).join('');
   }
   return html;
@@ -3377,6 +3395,16 @@ function togglePrRepo(repo) {
 function openPr(url) {
   api.send({ type: 'openUrl', url });
   document.getElementById('pr-dropdown').style.display = 'none';
+}
+
+function approvePr(url, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
+  api.send({ type: 'approvePr', url });
+}
+
+function mergePr(url, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Merging…'; }
+  api.send({ type: 'mergePr', url });
 }
 
 document.addEventListener('click', (e) => {
