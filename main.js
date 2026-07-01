@@ -52,16 +52,12 @@ autoUpdater.autoInstallOnAppQuit = true;
 
 autoUpdater.on('update-available', info => {
   logToRenderer(`Update available: v${info.version}`);
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('update-available', { version: info.version });
-  }
+  send({ type: 'updateAvailable', version: info.version });
 });
 
 autoUpdater.on('update-downloaded', info => {
-  logToRenderer(`Update downloaded: v${info.version} — will install on quit`);
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('update-downloaded', { version: info.version });
-  }
+  logToRenderer(`Update downloaded: v${info.version} — ready to install`);
+  send({ type: 'updateDownloaded', version: info.version });
 });
 
 autoUpdater.on('error', err => {
@@ -2257,6 +2253,7 @@ function handleIpc(msg) {
     case 'saveSettings': Object.assign(settings, msg.settings); saveState(); break;
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'fullRestart': app.relaunch(); app.exit(0); break;
+    case 'installUpdate': autoUpdater.quitAndInstall(); break;
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); break; }
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
@@ -2626,6 +2623,8 @@ app.whenReady().then(() => {
   // Check for updates — only runs when packaged (not in dev)
   if (app.isPackaged) {
     setTimeout(() => autoUpdater.checkForUpdatesAndNotify(), 3000);
+    // Re-check every minute so a long-running app catches new releases without a restart.
+    setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 60 * 1000);
   }
 });
 app.on('before-quit', () => {

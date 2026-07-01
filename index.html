@@ -40,7 +40,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #pr-badge.err { color:#f38ba8; }
 #pr-badge.alert { background:#f38ba8; color:#11111b; border-color:#f38ba8; font-weight:600; }
 #pr-dropdown { position:absolute; top:40px; right:12px; z-index:50; background:var(--bg2,#1e1e2e); border:1px solid var(--border); border-radius:8px; min-width:280px; max-width:440px; max-height:60vh; overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
-.pr-row { padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
+.pr-group-header { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; cursor:pointer; font-size:11px; font-weight:600; color:var(--text); background:var(--bg3); border-bottom:1px solid var(--border); user-select:none; position:sticky; top:0; }
+.pr-group-header:hover { background:var(--bg2,#1e1e2e); }
+.pr-group-header .pr-count { color:var(--dim); font-weight:400; }
+.pr-row { padding:8px 12px 8px 20px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
 .pr-row:last-child { border-bottom:none; }
 .pr-row:hover { background:var(--bg3); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
@@ -863,6 +866,7 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Soft reload (renderer only — keeps sessions, picks up UI changes)">&#x21BB;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Full restart (reloads main process — needed for backend/main.js changes)">&#x1F504;</button>
+    <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
     <button id="readyBtn" class="hdr-btn" onclick="toggleReadyFilter()" title="Show only ready agents">&#x2713;</button>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
     <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account">&#x1F464; No account</button>
@@ -2689,16 +2693,24 @@ function handleAgentMsg(msg) {
     case 'focused': selectedId = msg.id; scheduleRender(); break;
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); break;
-    case 'prList':
+    case 'prList': {
       if (msg.error) { prState.error = msg.error; }
       else { prState.prs = msg.prs || []; prState.error = null; }
       renderPrBadge();
+      const d = document.getElementById('pr-dropdown');
+      if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
       break;
+    }
     case 'repoList':
       if (msg.error) { document.getElementById('pr-repo-list').innerHTML = '<div class="pr-empty">Failed: ' + escapeHtml(msg.error) + '. Is <b>gh</b> logged in?</div>'; break; }
       allRepos = msg.repos || [];
       renderRepoPicker();
       break;
+    case 'updateDownloaded': {
+      const b = document.getElementById('update-btn');
+      if (b) { b.style.display = ''; b.textContent = '⬇ Update to ' + msg.version; }
+      break;
+    }
     case 'timelineData': handleTimelineData(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
@@ -3326,23 +3338,40 @@ function renderPrBadge() {
   }
 }
 
+let prCollapsed = new Set();
+
+function prDropdownHtml() {
+  if (prState.error) return '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
+  if (prState.prs.length === 0) return '<div class="pr-empty">No open PRs.</div>';
+  const byRepo = new Map();
+  for (const p of prState.prs) { if (!byRepo.has(p.repo)) byRepo.set(p.repo, []); byRepo.get(p.repo).push(p); }
+  let html = '';
+  for (const [repo, prs] of byRepo) {
+    const collapsed = prCollapsed.has(repo);
+    html += `<div class="pr-group-header" onclick="togglePrRepo('${repo.replace(/'/g, "\\'")}')">`
+      + `<span>${collapsed ? '▸' : '▾'} ${escapeHtml(repo)}</span><span class="pr-count">${prs.length}</span></div>`;
+    if (collapsed) continue;
+    html += prs.map(p => {
+      const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
+      return `<div class="pr-row" onclick="openPr('${p.url.replace(/'/g, "\\'")}')">`
+        + `<div>#${p.number} · ${escapeHtml(p.title)}</div>`
+        + `<div class="pr-meta">@${escapeHtml(p.author)}${tag}</div></div>`;
+    }).join('');
+  }
+  return html;
+}
+
 function togglePrDropdown(e) {
   if (e) e.stopPropagation();
   const d = document.getElementById('pr-dropdown');
   if (d.style.display === 'block') { d.style.display = 'none'; return; }
-  if (prState.error) {
-    d.innerHTML = '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
-  } else if (prState.prs.length === 0) {
-    d.innerHTML = '<div class="pr-empty">No open PRs.</div>';
-  } else {
-    d.innerHTML = prState.prs.map(p => {
-      const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
-      return `<div class="pr-row" onclick="openPr('${p.url.replace(/'/g, "\\'")}')">`
-        + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
-        + `<div class="pr-meta">@${escapeHtml(p.author)}${tag}</div></div>`;
-    }).join('');
-  }
+  d.innerHTML = prDropdownHtml();
   d.style.display = 'block';
+}
+
+function togglePrRepo(repo) {
+  if (prCollapsed.has(repo)) prCollapsed.delete(repo); else prCollapsed.add(repo);
+  document.getElementById('pr-dropdown').innerHTML = prDropdownHtml();
 }
 
 function openPr(url) {
