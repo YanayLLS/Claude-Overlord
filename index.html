@@ -38,6 +38,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #headerBadges:empty { display:none; }
 #pr-badge { cursor:pointer; font-size:11px; padding:2px 8px; border-radius:10px; background:var(--bg3); color:var(--text); border:1px solid var(--border); user-select:none; }
 #pr-badge.err { color:#f38ba8; }
+#pr-badge.alert { background:#f38ba8; color:#11111b; border-color:#f38ba8; font-weight:600; }
 #pr-dropdown { position:absolute; top:40px; right:12px; z-index:50; background:var(--bg2,#1e1e2e); border:1px solid var(--border); border-radius:8px; min-width:280px; max-width:440px; max-height:60vh; overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
 .pr-row { padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
 .pr-row:last-child { border-bottom:none; }
@@ -3307,6 +3308,8 @@ let prState = { prs: [], error: null };
 let prSettings = { enabled: false, repos: [], intervalSec: 60 };
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+function prNeedsApproval(p) { return p.reviewDecision !== 'CHANGES_REQUESTED'; }
+
 function renderPrBadge() {
   const b = document.getElementById('pr-badge');
   if (!b) return;
@@ -3314,8 +3317,9 @@ function renderPrBadge() {
     b.style.display = ''; b.className = 'err'; b.textContent = '⬢ !';
     b.title = 'PR check failed — is gh installed and logged in? (' + prState.error + ')';
   } else if (prState.prs.length > 0) {
-    b.style.display = ''; b.className = ''; b.textContent = '⬢ ' + prState.prs.length;
-    b.title = prState.prs.length + ' open PR(s)';
+    const waiting = prState.prs.filter(prNeedsApproval).length;
+    b.style.display = ''; b.className = waiting > 0 ? 'alert' : ''; b.textContent = '⬢ ' + prState.prs.length;
+    b.title = waiting > 0 ? waiting + ' PR(s) waiting for approval' : prState.prs.length + ' open PR(s)';
   } else {
     b.style.display = 'none';
     document.getElementById('pr-dropdown').style.display = 'none';
@@ -3331,10 +3335,12 @@ function togglePrDropdown(e) {
   } else if (prState.prs.length === 0) {
     d.innerHTML = '<div class="pr-empty">No open PRs.</div>';
   } else {
-    d.innerHTML = prState.prs.map(p =>
-      `<div class="pr-row" onclick="openPr('${p.url.replace(/'/g, "\\'")}')">`
-      + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
-      + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`).join('');
+    d.innerHTML = prState.prs.map(p => {
+      const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
+      return `<div class="pr-row" onclick="openPr('${p.url.replace(/'/g, "\\'")}')">`
+        + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
+        + `<div class="pr-meta">@${escapeHtml(p.author)}${tag}</div></div>`;
+    }).join('');
   }
   d.style.display = 'block';
 }

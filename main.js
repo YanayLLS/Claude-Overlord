@@ -1471,14 +1471,16 @@ function fetchRepoPRs(repo) {
   return new Promise((resolve) => {
     if (!PR_REPO_RE.test(repo)) return resolve([]);
     execFile('gh', ['pr', 'list', '--repo', repo, '--state', 'open', '--json',
-      'number,title,url,author,isDraft', '--limit', '100'],
+      'number,title,url,author,isDraft,reviewDecision', '--limit', '100'],
       { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
         if (err) return resolve({ error: err.message });
         try {
           const rows = JSON.parse(stdout);
-          resolve(rows.filter(r => !r.isDraft).map(r => ({
+          // Drop drafts and already-approved PRs — only show what still needs attention.
+          resolve(rows.filter(r => !r.isDraft && r.reviewDecision !== 'APPROVED').map(r => ({
             key: prKey(repo, r.number), repo, number: r.number,
             title: r.title, url: r.url, author: (r.author && r.author.login) || '',
+            reviewDecision: r.reviewDecision || '',
           })));
         } catch { resolve({ error: 'parse error' }); }
       });
