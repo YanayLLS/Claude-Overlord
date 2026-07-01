@@ -860,7 +860,8 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
-    <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Reload app">&#x21BB;</button>
+    <button class="hdr-btn" onclick="window.api.send({type:'relaunch'})" title="Soft reload (renderer only — keeps sessions, picks up UI changes)">&#x21BB;</button>
+    <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Full restart (reloads main process — needed for backend/main.js changes)">&#x1F504;</button>
     <button id="readyBtn" class="hdr-btn" onclick="toggleReadyFilter()" title="Show only ready agents">&#x2713;</button>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
     <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account">&#x1F464; No account</button>

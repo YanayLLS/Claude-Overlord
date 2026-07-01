@@ -2254,6 +2254,7 @@ function handleIpc(msg) {
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;
     case 'saveSettings': Object.assign(settings, msg.settings); saveState(); break;
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
+    case 'fullRestart': app.relaunch(); app.exit(0); break;
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); break; }
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
