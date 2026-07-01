@@ -2575,6 +2575,8 @@ function saveWindowBounds() {
 }
 
 app.whenReady().then(() => {
+  // Windows needs an explicit AppUserModelID or toast notifications silently no-op.
+  if (process.platform === 'win32') app.setAppUserModelId('com.overlord.claude');
   // Load settings early (fast) so window bounds are correct, but defer heavy agent restoration
   const state = loadState();
   settings = { ...settings, ...state.settings };
