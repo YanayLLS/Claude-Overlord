@@ -50,6 +50,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-merge:hover { background:#74a8f7; }
 .pr-approve:disabled { opacity:.6; cursor:default; }
 .pr-row:hover .pr-approve { display:block; }
+.pr-row.pr-req { background:rgba(137,180,250,.08); border-left:2px solid #89b4fa; }
+.pr-reqtag { color:#89b4fa; font-weight:600; }
 .pr-row:last-child { border-bottom:none; }
 .pr-row:hover { background:var(--bg3); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
@@ -2701,7 +2703,7 @@ function handleAgentMsg(msg) {
     case 'settings': applySettings(msg.settings); break;
     case 'prList': {
       if (msg.error) { prState.error = msg.error; }
-      else { prState.prs = msg.prs || []; prState.error = null; }
+      else { prState.prs = msg.prs || []; prState.error = null; prState.failedRepos = msg.failedRepos || []; }
       renderPrBadge();
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
@@ -3352,6 +3354,21 @@ function renderPrBadge() {
 
 let prCollapsed = new Set();
 
+function prCiIcon(c) {
+  if (c === 'pass') return '<span title="checks passing" style="color:#a6e3a1">✓</span> ';
+  if (c === 'fail') return '<span title="checks failing" style="color:#f38ba8">✗</span> ';
+  if (c === 'pending') return '<span title="checks running" style="color:#f9e2af">⏳</span> ';
+  return '';
+}
+
+function prMergeInfo(p) {
+  if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return { enabled: false, label: 'conflicts' };
+  if (p.mergeState === 'BEHIND') return { enabled: false, label: 'behind base' };
+  if (p.mergeState === 'BLOCKED') return { enabled: false, label: 'blocked' };
+  if (!p.mergeState || p.mergeState === 'UNKNOWN' || p.mergeable === 'UNKNOWN') return { enabled: false, label: 'checking…' };
+  return { enabled: true, label: '' }; // CLEAN, HAS_HOOKS, UNSTABLE
+}
+
 function prDropdownHtml() {
   if (prState.error) return '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
   if (prState.prs.length === 0) return '<div class="pr-empty">No open PRs.</div>';
@@ -3363,18 +3380,31 @@ function prDropdownHtml() {
     html += `<div class="pr-group-header" onclick="togglePrRepo('${repo.replace(/'/g, "\\'")}')">`
       + `<span>${collapsed ? '▸' : '▾'} ${escapeHtml(repo)}</span><span class="pr-count">${prs.length}</span></div>`;
     if (collapsed) continue;
-    html += prs.map(p => {
+    // PRs that request my review float to the top of their repo group.
+    const sorted = [...prs].sort((a, b) => (b.requested ? 1 : 0) - (a.requested ? 1 : 0));
+    html += sorted.map(p => {
       const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
       const u = p.url.replace(/'/g, "\\'");
-      const btn = p.mine
-        ? `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge</button>`
-        : `<button class="pr-approve" title="Approve without a message" onclick="event.stopPropagation();approvePr('${u}',this)">✓ Approve</button>`;
+      let btn;
+      if (p.mine) {
+        const mi = prMergeInfo(p);
+        btn = mi.enabled
+          ? `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge</button>`
+          : `<button class="pr-approve pr-merge" disabled title="Can't merge: ${mi.label}">⤵ ${escapeHtml(mi.label)}</button>`;
+      } else {
+        btn = `<button class="pr-approve" title="Approve without a message" onclick="event.stopPropagation();approvePr('${u}',this)">✓ Approve</button>`;
+      }
       const meta = p.mine && p.reviewDecision === 'APPROVED' ? ' · approved' : tag;
-      return `<div class="pr-row" onclick="openPr('${u}')">`
+      const reqTag = p.requested ? ' · <span class="pr-reqtag">review requested</span>' : '';
+      const ci = prCiIcon(p.checks);
+      return `<div class="pr-row${p.requested ? ' pr-req' : ''}" onclick="openPr('${u}')">`
         + btn
-        + `<div>#${p.number} · ${escapeHtml(p.title)}</div>`
-        + `<div class="pr-meta">@${escapeHtml(p.author)}${meta}</div></div>`;
+        + `<div>${ci}#${p.number} · ${escapeHtml(p.title)}</div>`
+        + `<div class="pr-meta">@${escapeHtml(p.author)}${meta}${reqTag}</div></div>`;
     }).join('');
+  }
+  if (prState.failedRepos && prState.failedRepos.length) {
+    html += `<div class="pr-empty" style="color:#f38ba8">⚠ Couldn't reach: ${escapeHtml(prState.failedRepos.join(', '))}</div>`;
   }
   return html;
 }

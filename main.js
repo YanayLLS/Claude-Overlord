@@ -808,11 +808,9 @@ function restoreAgents(state) {
   // (numStartups, projects, hasCompletedOnboarding) and one of them clobbers the others' state,
   // which makes claude re-trigger the first-run/theme-chooser flow on next launch.
   protectClaudeConfig();
-  let spawnIndex = 0;
   for (const { id, entry } of agentEntries) {
     const agent = agents.get(id);
     if (!agent) continue;
-    const spawnDelayMs = 1500 + (spawnIndex++ * 800);
 
     // Kick off async cleanup per agent
     (async () => {
@@ -888,14 +886,10 @@ function restoreAgents(state) {
       registerKnownJsonl(claudeDir(agent.cwd), agent.jsonlFile);
       if (fs.existsSync(agent.jsonlFile) && !watchers.has(id) && !polls.has(id)) startWatch(id);
 
-      // Auto-resume: spawn terminal after a staggered delay (see Phase 2 comment above).
-      // Skip archived agents — stay dormant until user unarchives.
-      if (agents.has(id) && !agents.get(id).archived) {
-        console.log(`[Overlord] Auto-resuming agent ${id} in ${spawnDelayMs}ms`);
-        await new Promise(r => setTimeout(r, spawnDelayMs));
-        protectClaudeConfig();
-        if (agents.has(id)) spawnTerminal(id);
-      }
+      // Lazy resume: terminals spawn on first focus (focusAgent → spawnTerminal),
+      // not eagerly on startup. Pre-warming every session froze the app for ~a minute
+      // and bought nothing — `claude --resume` just waits for input, it doesn't
+      // continue work in the background. ponytail: spawn-on-click, no stagger needed.
     })();
   }
 }
@@ -936,6 +930,7 @@ function spawnTerminal(id) {
   if (terminals.has(id)) return; // already running
   const a = agents.get(id);
   if (!a) return;
+  protectClaudeConfig(); // keep hasCompletedOnboarding set before each `claude` launch
 
   // If an orphaned Claude process is still writing, don't spawn a conflicting --resume.
   // Show a message and wait for it to finish (detected via turn_duration in JSONL watcher).
@@ -1459,6 +1454,22 @@ function diffNewPRKeys(currentKeys, seenKeys) {
   return currentKeys.filter(k => !seen.has(k));
 }
 
+// Roll a PR's checks up to one of: 'pass' | 'fail' | 'pending' | 'none'.
+function ciRollup(checks) {
+  if (!Array.isArray(checks) || checks.length === 0) return 'none';
+  let pending = false;
+  for (const c of checks) {
+    if (c.__typename === 'CheckRun') {
+      if (c.status !== 'COMPLETED') { pending = true; continue; }
+      if (!['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c.conclusion)) return 'fail';
+    } else { // StatusContext
+      if (c.state === 'PENDING' || c.state === 'EXPECTED') { pending = true; continue; }
+      if (c.state !== 'SUCCESS') return 'fail';
+    }
+  }
+  return pending ? 'pending' : 'pass';
+}
+
 let prTimer = null;
 let prSeenSeeded = false;
 let prGhErrorLogged = false;
@@ -1480,9 +1491,9 @@ function fetchRepoPRs(repo) {
   return new Promise((resolve) => {
     if (!PR_REPO_RE.test(repo)) return resolve([]);
     execFile('gh', ['pr', 'list', '--repo', repo, '--state', 'open', '--json',
-      'number,title,url,author,isDraft,reviewDecision', '--limit', '100'],
-      { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
-        if (err) return resolve({ error: err.message });
+      'number,title,url,author,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus,reviewRequests', '--limit', '100'],
+      { timeout: 20000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
+        if (err) return resolve({ error: err.message, repo });
         try {
           const rows = JSON.parse(stdout);
           // Drop drafts. Drop approved PRs UNLESS they're mine (I may still need to merge them).
@@ -1494,8 +1505,12 @@ function fetchRepoPRs(repo) {
             title: r.title, url: r.url, author: (r.author && r.author.login) || '',
             reviewDecision: r.reviewDecision || '',
             mine: !!ghLogin && (r.author && r.author.login) === ghLogin,
+            checks: ciRollup(r.statusCheckRollup),
+            mergeable: r.mergeable || 'UNKNOWN',
+            mergeState: r.mergeStateStatus || '',
+            requested: !!ghLogin && Array.isArray(r.reviewRequests) && r.reviewRequests.some(x => x && x.login === ghLogin),
           })));
-        } catch { resolve({ error: 'parse error' }); }
+        } catch { resolve({ error: 'parse error', repo }); }
       });
   });
 }
@@ -1505,14 +1520,20 @@ async function pollPRs() {
   if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
   await fetchGhLogin();
   const results = await Promise.all(cfg.repos.map(fetchRepoPRs));
-  const failed = results.find(r => r && r.error);
-  if (failed) {
-    if (!prGhErrorLogged) { console.log('[Overlord] PR poll failed:', failed.error); prGhErrorLogged = true; }
-    send({ type: 'prList', prs: null, error: failed.error });
-    return; // keep last known list in renderer; do not notify
+  const failed = results.filter(r => r && r.error);
+  const ok = results.filter(r => Array.isArray(r));
+  if (ok.length === 0) {
+    // Every repo failed — keep last known list in renderer, don't notify.
+    if (!prGhErrorLogged) { console.log('[Overlord] PR poll failed:', failed[0] && failed[0].error); prGhErrorLogged = true; }
+    send({ type: 'prList', prs: null, error: (failed[0] && failed[0].error) || 'poll failed' });
+    return;
   }
-  prGhErrorLogged = false;
-  const prs = results.flat();
+  if (failed.length && !prGhErrorLogged) {
+    console.log('[Overlord] PR poll: some repos failed:', failed.map(f => f.repo).join(', '));
+    prGhErrorLogged = true;
+  }
+  if (!failed.length) prGhErrorLogged = false;
+  const prs = ok.flat();
   const currentKeys = prs.map(p => p.key);
   const seen = settings.prSeen || [];
   if (!prSeenSeeded && seen.length === 0) {
@@ -1527,7 +1548,7 @@ async function pollPRs() {
   settings.prSeen = currentKeys;
   prSeenSeeded = true;
   saveState();
-  send({ type: 'prList', prs, error: null });
+  send({ type: 'prList', prs, error: null, failedRepos: failed.map(f => f.repo) });
 }
 
 function notifyNewPR(pr) {
