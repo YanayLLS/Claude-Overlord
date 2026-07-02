@@ -92,7 +92,9 @@ function defaultModel() {
   return null;
 }
 
-const STATE_DIR = path.join(os.homedir(), '.pixel-agents');
+// OVERLORD_STATE_DIR sandboxes a test instance: own state/accounts, so it never
+// restores (and never kills) the sessions of a concurrently running install.
+const STATE_DIR = process.env.OVERLORD_STATE_DIR || path.join(os.homedir(), '.pixel-agents');
 const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
 const CLAUDE_JSON = path.join(os.homedir(), '.claude.json');
 
@@ -2790,8 +2792,8 @@ app.whenReady().then(() => {
     saveState();
     mainWindow = null;
   });
-  // Check for updates — only runs when packaged (not in dev)
-  if (app.isPackaged) {
+  // Check for updates — only runs when packaged (not in dev, not in a sandboxed test instance)
+  if (app.isPackaged && !process.env.OVERLORD_STATE_DIR) {
     setTimeout(() => autoUpdater.checkForUpdatesAndNotify(), 3000);
     // Re-check every minute so a long-running app catches new releases without a restart.
     setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 60 * 1000);
