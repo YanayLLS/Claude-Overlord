@@ -183,41 +183,14 @@ function deriveTitle(text) {
   return words.length > 40 ? words.slice(0, 40) + '\u2026' : words;
 }
 
-function killProcessTree(pid) {
-  if (!pid) return;
-  try {
-    if (process.platform === 'win32') {
-      execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
-    } else {
-      process.kill(pid, 'SIGTERM');
-    }
-  } catch {} // Process may already be dead
-}
-
-function killSessionProcesses(sessionId) {
-  if (!sessionId) return;
-  try {
-    if (process.platform === 'win32') {
-      const out = execSync(`wmic process where "CommandLine like '%${sessionId}%'" get ProcessId /format:csv`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 5000 });
-      for (const line of out.split(/[\r\n]+/)) {
-        const parts = line.trim().split(',');
-        const pid = parseInt(parts[parts.length - 1], 10);
-        if (pid && pid !== process.pid) {
-          try { execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }); } catch {}
-        }
-      }
-    } else {
-      try { execSync(`pkill -f "${sessionId}"`, { stdio: 'ignore' }); } catch {}
-    }
-  } catch {}
-}
-
-// Async (non-blocking) versions for restore — won't freeze the UI
+// All process cleanup is async — sync wmic/taskkill calls used to block the main
+// process (and the whole UI) for seconds per call. wmic is also removed on newer
+// Windows 11 builds, so process lookup goes through PowerShell CIM instead.
 function killProcessTreeAsync(pid) {
   if (!pid) return Promise.resolve();
   return new Promise(resolve => {
     if (process.platform === 'win32') {
-      exec(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' }, () => resolve());
+      exec(`taskkill /PID ${pid} /T /F`, { windowsHide: true }, () => resolve());
     } else {
       try { process.kill(pid, 'SIGTERM'); } catch {}
       resolve();
@@ -225,26 +198,39 @@ function killProcessTreeAsync(pid) {
   });
 }
 
-function killSessionProcessesAsync(sessionId) {
-  if (!sessionId) return Promise.resolve();
+// One process-table scan, then kill every PID whose command line contains any of
+// the given substrings. Batching N session ids into one scan matters on restore:
+// one PowerShell spawn instead of N wmic spawns.
+function killProcessesByCmdline(substrings) {
+  const subs = (substrings || []).filter(Boolean);
+  if (!subs.length) return Promise.resolve();
   return new Promise(resolve => {
     if (process.platform === 'win32') {
-      exec(`wmic process where "CommandLine like '%${sessionId}%'" get ProcessId /format:csv`, { encoding: 'utf-8', timeout: 5000 }, (err, out) => {
+      const ps = "Get-CimInstance Win32_Process | ForEach-Object { $_.ProcessId.ToString() + '|' + $_.CommandLine }";
+      execFile('powershell', ['-NoProfile', '-Command', ps], { timeout: 20000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, out) => {
         if (err || !out) return resolve();
         const kills = [];
         for (const line of out.split(/[\r\n]+/)) {
-          const parts = line.trim().split(',');
-          const pid = parseInt(parts[parts.length - 1], 10);
-          if (pid && pid !== process.pid) {
-            kills.push(new Promise(r => exec(`taskkill /PID ${pid} /F`, { stdio: 'ignore' }, () => r())));
+          const sep = line.indexOf('|');
+          if (sep < 1) continue;
+          const pid = parseInt(line.slice(0, sep), 10);
+          const cmdline = line.slice(sep + 1);
+          if (!pid || pid === process.pid) continue;
+          if (subs.some(s => cmdline.includes(s))) {
+            kills.push(new Promise(r => exec(`taskkill /PID ${pid} /F`, { windowsHide: true }, () => r())));
           }
         }
         Promise.all(kills).then(() => resolve());
       });
     } else {
-      exec(`pkill -f "${sessionId}"`, { stdio: 'ignore' }, () => resolve());
+      Promise.all(subs.map(s => new Promise(r => exec(`pkill -f "${s}"`, () => r())))).then(() => resolve());
     }
   });
+}
+
+function killSessionProcessesAsync(sessionId) {
+  if (!sessionId) return Promise.resolve();
+  return killProcessesByCmdline([sessionId]);
 }
 
 // ── Server URL detection ──────────────────────────────
@@ -803,25 +789,23 @@ function restoreAgents(state) {
     } catch {}
   }
 
-  // ── Phase 2: Async — kill orphans, parse JSONL, auto-resume each agent without blocking UI ──
-  // Stagger the spawnTerminal calls: concurrent `claude` startups race-write ~/.claude.json
-  // (numStartups, projects, hasCompletedOnboarding) and one of them clobbers the others' state,
-  // which makes claude re-trigger the first-run/theme-chooser flow on next launch.
+  // ── Phase 2: Async — kill orphans in one sweep, parse JSONL, pre-warm terminals ──
   protectClaudeConfig();
-  for (const { id, entry } of agentEntries) {
-    const agent = agents.get(id);
-    if (!agent) continue;
-
-    // Kick off async cleanup per agent
-    (async () => {
-      // Kill orphaned processes without blocking the event loop
-      if (entry.pid) {
-        await killProcessTreeAsync(entry.pid);
-        console.log(`[Overlord] Killed orphan PID ${entry.pid} for session ${entry.sessionId}`);
-      }
-      await killSessionProcessesAsync(entry.sessionId);
-
-      if (!agents.has(id)) return; // closed while we were killing
+  (async () => {
+    // Kill saved orphan PIDs + anything still holding a session lock — one process
+    // scan for all agents instead of one wmic call per agent. All terminal spawns
+    // wait on _restoreSweep so the sweep can never kill a freshly spawned claude.
+    const sweep = (async () => {
+      await Promise.all(agentEntries.map(({ entry }) => killProcessTreeAsync(entry.pid)));
+      await killProcessesByCmdline(agentEntries.map(({ entry }) => entry.sessionId));
+      // Sessions swept — spawnTerminal can skip its own kill pass for these agents.
+      for (const { id } of agentEntries) { const ag = agents.get(id); if (ag) ag._sessionCleaned = true; }
+    })();
+    _restoreSweep = sweep;
+    await sweep;
+    for (const { id, entry } of agentEntries) {
+      const agent = agents.get(id);
+      if (!agent) continue; // closed while we were killing
 
       // If no saved stats, rebuild from JSONL (legacy state files)
       if (!entry.stats && fs.existsSync(agent.jsonlFile)) {
@@ -886,12 +870,26 @@ function restoreAgents(state) {
       registerKnownJsonl(claudeDir(agent.cwd), agent.jsonlFile);
       if (fs.existsSync(agent.jsonlFile) && !watchers.has(id) && !polls.has(id)) startWatch(id);
 
-      // Lazy resume: terminals spawn on first focus (focusAgent → spawnTerminal),
-      // not eagerly on startup. Pre-warming every session froze the app for ~a minute
-      // and bought nothing — `claude --resume` just waits for input, it doesn't
-      // continue work in the background. ponytail: spawn-on-click, no stagger needed.
-    })();
-  }
+      // Pre-warm terminals in the background (staggered — concurrent `claude`
+      // startups race-write ~/.claude.json) so clicking an agent connects instantly
+      // instead of paying `claude --resume` cold-start on click. The old freeze that
+      // killed pre-warming came from sync wmic kills, not from spawning itself.
+      if (!agent.archived) queuePrewarm(id);
+    }
+  })();
+}
+
+// ── Terminal pre-warm queue ────────────────────────────
+let _restoreSweep = Promise.resolve(); // resolves once startup orphan cleanup finished
+const PREWARM_STAGGER_MS = 1500;
+let _prewarmChain = Promise.resolve();
+function queuePrewarm(id) {
+  _prewarmChain = _prewarmChain.then(() => new Promise(res => {
+    const a = agents.get(id);
+    if (!a || a.archived || terminals.has(id) || spawningTerms.has(id)) return res();
+    spawnTerminal(id);
+    setTimeout(res, PREWARM_STAGGER_MS);
+  }));
 }
 
 function handleTermExit(id, exitCode) {
@@ -926,8 +924,10 @@ function safeCwd(cwd) {
   return (cwd && fs.existsSync(cwd)) ? cwd : os.homedir();
 }
 
+const spawningTerms = new Set(); // ids with an async pre-spawn kill in flight
+
 function spawnTerminal(id) {
-  if (terminals.has(id)) return; // already running
+  if (terminals.has(id) || spawningTerms.has(id)) return; // already running/starting
   const a = agents.get(id);
   if (!a) return;
   protectClaudeConfig(); // keep hasCompletedOnboarding set before each `claude` launch
@@ -939,9 +939,27 @@ function spawnTerminal(id) {
     return;
   }
 
-  // Kill any lingering process holding this session lock
-  killSessionProcesses(a.sessionId);
+  // Kill any lingering session-lock holder without blocking the UI. Restore's bulk
+  // sweep already covered this session once \u2014 skip the redundant pass then.
+  if (a._sessionCleaned) {
+    a._sessionCleaned = false;
+    doSpawnTerminal(id);
+    return;
+  }
+  spawningTerms.add(id);
+  send({ type: 'termData', id, data: '\x1b[90m[Connecting\u2026]\x1b[0m\r\n' });
+  (async () => {
+    await _restoreSweep; // never race the startup sweep \u2014 it could kill our fresh claude
+    if (a._sessionCleaned) a._sessionCleaned = false; // sweep covered us while waiting
+    else await killSessionProcessesAsync(a.sessionId);
+    spawningTerms.delete(id);
+    if (agents.has(id) && !terminals.has(id)) doSpawnTerminal(id);
+  })();
+}
 
+function doSpawnTerminal(id) {
+  const a = agents.get(id);
+  if (!a) return;
   const hasJsonl = fs.existsSync(a.jsonlFile);
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const useResume = hasJsonl && !a._resumeFailed;
@@ -998,8 +1016,7 @@ function spawnTerminal(id) {
             setTimeout(() => {
               if (!agents.has(id)) return;
               terminals.delete(id);
-              killSessionProcesses(a.sessionId);
-              spawnTerminal(id);
+              killSessionProcessesAsync(a.sessionId).then(() => { if (agents.has(id)) spawnTerminal(id); });
             }, delay);
           } else {
             a._resumeHandled = true;
@@ -1775,16 +1792,29 @@ function getAccountMeta() {
   } catch { return {}; }
 }
 
+// `claude auth status` spawns the whole CLI (~1-3s) — never run it synchronously,
+// it used to freeze the app during startup. Fetch in background, push accountInfo
+// to the renderer when it lands.
 let _cachedAuthStatus = null;
-function fetchAuthStatus() {
-  try {
-    const out = execSync('claude auth status', { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
-    _cachedAuthStatus = JSON.parse(out.trim());
-  } catch { _cachedAuthStatus = null; }
+let _authStatusChecked = false;
+function refreshAuthStatus(force) {
+  if (_authStatusChecked && !force) return Promise.resolve();
+  _authStatusChecked = true;
+  return new Promise(resolve => {
+    execFile('claude', ['auth', 'status'], { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
+      if (!err) {
+        try {
+          _cachedAuthStatus = JSON.parse(stdout.trim());
+          send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+        } catch {}
+      }
+      resolve();
+    });
+  });
 }
 
 function getAccountEmail() {
-  if (!_cachedAuthStatus) fetchAuthStatus();
+  if (!_cachedAuthStatus) refreshAuthStatus();
   return _cachedAuthStatus?.email || null;
 }
 
@@ -2428,6 +2458,7 @@ function handleIpc(msg) {
       data.activeLabel = target.label;
       saveAccountsFile(data);
       _cachedAuthStatus = null;
+      refreshAuthStatus(true);
       lastUsage = null;
       send({ type: 'accountInfo', ...getCurrentAccountInfo() });
       send({ type: 'usage', usage: null });
@@ -2440,16 +2471,18 @@ function handleIpc(msg) {
         if (newToken && newToken !== switchPrevToken) {
           clearInterval(switchCheckInterval);
           _cachedAuthStatus = null;
-          const switchData = loadAccounts();
-          const switchIdx = switchData.accounts.findIndex(a => a.label === target.label);
-          if (switchIdx >= 0) {
-            try { switchData.accounts[switchIdx].credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
-            switchData.accounts[switchIdx].meta = getAccountMeta();
-            switchData.accounts[switchIdx].email = getAccountEmail();
-            saveAccountsFile(switchData);
-          }
-          send({ type: 'accountInfo', ...getCurrentAccountInfo() });
-          fetchUsage();
+          refreshAuthStatus(true).then(() => {
+            const switchData = loadAccounts();
+            const switchIdx = switchData.accounts.findIndex(a => a.label === target.label);
+            if (switchIdx >= 0) {
+              try { switchData.accounts[switchIdx].credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
+              switchData.accounts[switchIdx].meta = getAccountMeta();
+              switchData.accounts[switchIdx].email = getAccountEmail();
+              saveAccountsFile(switchData);
+            }
+            send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+            fetchUsage();
+          });
         }
       }, 1000);
       setTimeout(() => clearInterval(switchCheckInterval), 120000);
@@ -2476,12 +2509,14 @@ function handleIpc(msg) {
         if (newToken && newToken !== prevToken) {
           clearInterval(checkInterval);
           _cachedAuthStatus = null;
-          const email = getAccountEmail();
-          const data = loadAccounts();
-          data.activeLabel = null;
-          saveAccountsFile(data);
-          send({ type: 'accountInfo', ...getCurrentAccountInfo() });
-          send({ type: 'accountLoginComplete', email });
+          refreshAuthStatus(true).then(() => {
+            const email = getAccountEmail();
+            const data = loadAccounts();
+            data.activeLabel = null;
+            saveAccountsFile(data);
+            send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+            send({ type: 'accountLoginComplete', email });
+          });
         }
       }, 1000);
       // Stop watching after 2 minutes
