@@ -3436,7 +3436,7 @@ function prGroupHeader(repo, count, muted) {
   const muteBtn = muted
     ? `<button class="pr-repo-mute" title="Un-mute repo" onclick="event.stopPropagation();unmuteRepo('${r}')">🔔</button>`
     : `<button class="pr-repo-mute" title="Mute repo — no red/notify for its PRs" onclick="event.stopPropagation();muteRepo('${r}')">🔕</button>`;
-  return `<div class="pr-group-header${muted ? ' pr-group-muted' : ''}" onclick="togglePrRepo('${r}')">`
+  return `<div class="pr-group-header${muted ? ' pr-group-muted' : ''}" onclick="event.stopPropagation();togglePrRepo('${r}')">`
     + `<span>${collapsed ? '▸' : '▾'} ${escapeHtml(repo)}</span>`
     + `<span class="pr-ghead-right">${muteBtn}<span class="pr-count">${count}</span></span></div>`;
 }
@@ -3486,7 +3486,7 @@ function prDropdownHtml() {
   // Individually muted PRs
   if (muted.length) {
     const collapsed = prCollapsed.has('__muted__');
-    html += `<div class="pr-group-header" onclick="togglePrRepo('__muted__')">`
+    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__muted__')">`
       + `<span>${collapsed ? '▸' : '▾'} 🔕 Muted</span><span class="pr-count">${muted.length}</span></div>`;
     if (!collapsed) html += muted.map(prMutedRowHtml).join('');
   }
