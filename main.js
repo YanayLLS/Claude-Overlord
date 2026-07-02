@@ -1454,20 +1454,12 @@ function diffNewPRKeys(currentKeys, seenKeys) {
   return currentKeys.filter(k => !seen.has(k));
 }
 
-// Roll a PR's checks up to one of: 'pass' | 'fail' | 'pending' | 'none'.
-function ciRollup(checks) {
-  if (!Array.isArray(checks) || checks.length === 0) return 'none';
-  let pending = false;
-  for (const c of checks) {
-    if (c.__typename === 'CheckRun') {
-      if (c.status !== 'COMPLETED') { pending = true; continue; }
-      if (!['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c.conclusion)) return 'fail';
-    } else { // StatusContext
-      if (c.state === 'PENDING' || c.state === 'EXPECTED') { pending = true; continue; }
-      if (c.state !== 'SUCCESS') return 'fail';
-    }
-  }
-  return pending ? 'pending' : 'pass';
+// Map a GraphQL StatusCheckRollup.state to 'pass' | 'fail' | 'pending' | 'none'.
+function rollupState(s) {
+  if (!s) return 'none';
+  if (s === 'SUCCESS') return 'pass';
+  if (s === 'PENDING' || s === 'EXPECTED') return 'pending';
+  return 'fail'; // FAILURE, ERROR
 }
 
 let prTimer = null;
@@ -1487,32 +1479,59 @@ function fetchGhLogin() {
   });
 }
 
-function fetchRepoPRs(repo) {
+// One GraphQL call for ALL watched repos (one gh process, not one per repo).
+// Returns { prs, failed[], error? }. Parses stdout even on non-zero exit so a
+// single bad repo (null alias + GraphQL error) doesn't lose the others.
+function fetchAllPRs(repos) {
   return new Promise((resolve) => {
-    if (!PR_REPO_RE.test(repo)) return resolve([]);
-    execFile('gh', ['pr', 'list', '--repo', repo, '--state', 'open', '--json',
-      'number,title,url,author,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus,reviewRequests,createdAt', '--limit', '100'],
-      { timeout: 20000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
-        if (err) return resolve({ error: err.message, repo });
-        try {
-          const rows = JSON.parse(stdout);
-          // Drop drafts. Drop approved PRs UNLESS they're mine (I may still need to merge them).
-          resolve(rows.filter(r => {
-            const mine = !!ghLogin && (r.author && r.author.login) === ghLogin;
-            return !r.isDraft && (r.reviewDecision !== 'APPROVED' || mine);
-          }).map(r => ({
-            key: prKey(repo, r.number), repo, number: r.number,
-            title: r.title, url: r.url, author: (r.author && r.author.login) || '',
-            reviewDecision: r.reviewDecision || '',
-            mine: !!ghLogin && (r.author && r.author.login) === ghLogin,
-            checks: ciRollup(r.statusCheckRollup),
-            mergeable: r.mergeable || 'UNKNOWN',
-            mergeState: r.mergeStateStatus || '',
-            requested: !!ghLogin && Array.isArray(r.reviewRequests) && r.reviewRequests.some(x => x && x.login === ghLogin),
-            createdAt: r.createdAt || '',
-          })));
-        } catch { resolve({ error: 'parse error', repo }); }
+    const valid = repos.filter(r => PR_REPO_RE.test(r));
+    if (!valid.length) return resolve({ prs: [], failed: [] });
+    const parts = valid.map((r, i) => {
+      const [owner, name] = r.split('/');
+      return `r${i}: repository(owner:${JSON.stringify(owner)}, name:${JSON.stringify(name)}) { `
+        + `pullRequests(states: OPEN, first: 100) { nodes { number title url isDraft createdAt `
+        + `author { login } reviewDecision mergeable mergeStateStatus `
+        + `reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } `
+        + `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }`;
+    });
+    const query = `query {\n${parts.join('\n')}\n}`;
+    let out = '', errbuf = '', proc, done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
+    try {
+      proc = spawn('gh', ['api', 'graphql', '-F', 'query=@-'], { windowsHide: true, shell: process.platform === 'win32' });
+    } catch (e) { return resolve({ prs: [], failed: valid, error: e.message }); }
+    const to = setTimeout(() => { try { proc.kill(); } catch {} finish({ prs: [], failed: valid, error: 'timeout' }); }, 25000);
+    proc.on('error', (e) => finish({ prs: [], failed: valid, error: e.message }));
+    proc.stdout.on('data', d => out += d);
+    proc.stderr.on('data', d => errbuf += d);
+    proc.on('close', () => {
+      let json;
+      try { json = JSON.parse(out); } catch { return finish({ prs: [], failed: valid, error: (errbuf || 'gh graphql failed').trim().slice(0, 200) }); }
+      const data = json.data || {};
+      const prs = [], failed = [];
+      valid.forEach((r, i) => {
+        const node = data['r' + i];
+        if (!node) { failed.push(r); return; }
+        for (const pr of (node.pullRequests && node.pullRequests.nodes) || []) {
+          const mine = !!ghLogin && pr.author && pr.author.login === ghLogin;
+          if (pr.isDraft) continue;
+          if (pr.reviewDecision === 'APPROVED' && !mine) continue; // hide approved unless mine
+          const rollup = pr.commits && pr.commits.nodes[0] && pr.commits.nodes[0].commit.statusCheckRollup;
+          const requested = !!ghLogin && ((pr.reviewRequests && pr.reviewRequests.nodes) || [])
+            .some(n => n.requestedReviewer && n.requestedReviewer.login === ghLogin);
+          prs.push({
+            key: prKey(r, pr.number), repo: r, number: pr.number, title: pr.title, url: pr.url,
+            author: (pr.author && pr.author.login) || '',
+            reviewDecision: pr.reviewDecision || '', mine,
+            checks: rollupState(rollup && rollup.state),
+            mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
+            requested, createdAt: pr.createdAt || '',
+          });
+        }
       });
+      finish({ prs, failed });
+    });
+    try { proc.stdin.write(query); proc.stdin.end(); } catch {}
   });
 }
 
@@ -1520,21 +1539,22 @@ async function pollPRs() {
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
   await fetchGhLogin();
-  const results = await Promise.all(cfg.repos.map(fetchRepoPRs));
-  const failed = results.filter(r => r && r.error);
-  const ok = results.filter(r => Array.isArray(r));
-  if (ok.length === 0) {
-    // Every repo failed — keep last known list in renderer, don't notify.
-    if (!prGhErrorLogged) { console.log('[Overlord] PR poll failed:', failed[0] && failed[0].error); prGhErrorLogged = true; }
-    send({ type: 'prList', prs: null, error: (failed[0] && failed[0].error) || 'poll failed' });
+  const res = await fetchAllPRs(cfg.repos);
+  const failedRepos = res.failed || [];
+  const validCount = cfg.repos.filter(r => PR_REPO_RE.test(r)).length;
+  if (res.prs.length === 0 && (res.error || failedRepos.length >= validCount)) {
+    // Total failure — keep last known list in renderer, don't notify.
+    const emsg = res.error || ('Couldn\'t reach: ' + failedRepos.join(', '));
+    if (!prGhErrorLogged) { console.log('[Overlord] PR poll failed:', emsg); prGhErrorLogged = true; }
+    send({ type: 'prList', prs: null, error: emsg });
     return;
   }
-  if (failed.length && !prGhErrorLogged) {
-    console.log('[Overlord] PR poll: some repos failed:', failed.map(f => f.repo).join(', '));
+  if (failedRepos.length && !prGhErrorLogged) {
+    console.log('[Overlord] PR poll: some repos failed:', failedRepos.join(', '));
     prGhErrorLogged = true;
   }
-  if (!failed.length) prGhErrorLogged = false;
-  const prs = ok.flat();
+  if (!failedRepos.length) prGhErrorLogged = false;
+  const prs = res.prs;
   const currentKeys = prs.map(p => p.key);
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);
@@ -1555,7 +1575,7 @@ async function pollPRs() {
   settings.prMuted = (settings.prMuted || []).filter(k => currentKeys.includes(k));
   prSeenSeeded = true;
   saveState();
-  send({ type: 'prList', prs, error: null, failedRepos: failed.map(f => f.repo) });
+  send({ type: 'prList', prs, error: null, failedRepos });
 }
 
 function notifyNewPR(pr) {

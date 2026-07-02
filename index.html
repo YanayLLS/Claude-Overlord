@@ -3045,6 +3045,7 @@ function applySettings(s) {
     const inp = document.getElementById('inp-budget');
     if (inp) inp.value = planBudget;
   }
+  if (s.prCollapsed) prCollapsed = new Set(s.prCollapsed);
   if (s.prSettings) {
     prSettings = s.prSettings;
     selectedRepos = new Set(prSettings.repos || []);
@@ -3514,6 +3515,7 @@ function togglePrDropdown(e) {
 function togglePrRepo(repo) {
   if (prCollapsed.has(repo)) prCollapsed.delete(repo); else prCollapsed.add(repo);
   document.getElementById('pr-dropdown').innerHTML = prDropdownHtml();
+  api.send({ type: 'saveSettings', settings: { prCollapsed: [...prCollapsed] } });
 }
 
 function openPr(url) {
