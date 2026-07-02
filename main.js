@@ -1570,6 +1570,17 @@ async function pollPRs() {
       notifyNewPR(pr);
     }
   }
+  // Notify when MY PR's review state changes (approved / changes requested).
+  const prevDecisions = settings.prDecisions || {};
+  for (const p of prs) {
+    if (!p.mine || p.muted || p.repoMuted) continue;
+    const prev = prevDecisions[p.key];
+    if (prev === undefined) continue; // no prior state — a new PR, not a transition
+    if (p.reviewDecision === 'APPROVED' && prev !== 'APPROVED') notifyPrDecision(p, 'approved');
+    else if (p.reviewDecision === 'CHANGES_REQUESTED' && prev !== 'CHANGES_REQUESTED') notifyPrDecision(p, 'changes');
+  }
+  settings.prDecisions = {};
+  for (const p of prs) settings.prDecisions[p.key] = p.reviewDecision;
   settings.prSeen = currentKeys;
   // Drop mutes for PRs that are no longer open (merged/closed) — keeps the list tidy.
   settings.prMuted = (settings.prMuted || []).filter(k => currentKeys.includes(k));
@@ -1581,6 +1592,15 @@ async function pollPRs() {
 function notifyNewPR(pr) {
   if (!Notification.isSupported()) return;
   const n = new Notification({ title: `New PR · ${pr.repo}`, body: `#${pr.number} ${pr.title}`, silent: true });
+  n.on('click', () => shell.openExternal(pr.url).catch(() => {}));
+  n.show();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
+}
+
+function notifyPrDecision(pr, kind) {
+  if (!Notification.isSupported()) return;
+  const title = kind === 'approved' ? `✅ PR approved · ${pr.repo}` : `📝 Changes requested · ${pr.repo}`;
+  const n = new Notification({ title, body: `#${pr.number} ${pr.title}`, silent: true });
   n.on('click', () => shell.openExternal(pr.url).catch(() => {}));
   n.show();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
