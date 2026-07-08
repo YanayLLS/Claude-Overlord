@@ -57,6 +57,12 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-approve:disabled { opacity:.6; cursor:default; }
 .pr-mute { background:var(--bg2,#313244); color:var(--text); }
 .pr-mute:hover { background:var(--border); }
+.pr-snooze { background:var(--bg2,#313244); color:var(--text); }
+.pr-snooze:hover { background:var(--border); }
+#pr-snooze-pop { position:fixed; z-index:60; background:var(--bg2,#1e1e2e); border:1px solid var(--border); border-radius:6px; padding:8px; display:flex; gap:6px; align-items:center; box-shadow:0 6px 18px rgba(0,0,0,.4); }
+#pr-snooze-pop input { width:52px; font-family:inherit; font-size:12px; padding:3px 6px; color:var(--text); background:var(--bg3); border:1px solid var(--border); border-radius:4px; outline:none; }
+#pr-snooze-pop select { font-family:inherit; font-size:12px; padding:3px 4px; color:var(--text); background:var(--bg3); border:1px solid var(--border); border-radius:4px; }
+#pr-snooze-pop button { font-family:inherit; font-size:11px; font-weight:600; padding:3px 9px; background:#89b4fa; color:#11111b; border:none; border-radius:4px; cursor:pointer; }
 .pr-row.pr-req { background:rgba(137,180,250,.08); border-left:2px solid #89b4fa; }
 .pr-row.pr-muted { opacity:.55; }
 .pr-reqtag { color:#89b4fa; font-weight:600; }
@@ -3349,7 +3355,7 @@ let prSettings = { enabled: false, repos: [], intervalSec: 60 };
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function prNeedsApproval(p) { return !p.mine && p.reviewDecision !== 'CHANGES_REQUESTED'; }
-function prSilenced(p) { return p.muted || p.repoMuted; }
+function prSilenced(p) { return p.muted || p.repoMuted || p.snoozed; }
 
 function renderPrBadge() {
   const b = document.getElementById('pr-badge');
@@ -3424,9 +3430,10 @@ function prRowHtml(p, dim) {
   const reqTag = showReq ? ' · <span class="pr-reqtag">review requested</span>' : '';
   const age = p.createdAt ? ' · <span class="pr-age" data-created="' + p.createdAt + '">' + escapeHtml(prRelTime(p.createdAt)) + '</span>' : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
+  const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (dim ? ' pr-muted' : '');
   return `<div class="${cls}" onclick="openPr('${u}')">`
-    + `<div class="pr-actions">${prActionBtn(p, u)}${muteBtn}</div>`
+    + `<div class="pr-actions">${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
     + `<div class="pr-meta">@${escapeHtml(p.author)}${meta}${reqTag}${age}</div></div>`;
 }
@@ -3462,13 +3469,59 @@ function prDropdownHead() {
     + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button></div>`;
 }
 
+function prSnoozeLeft(until) {
+  const d = until - Date.now();
+  if (d <= 0) return 'waking';
+  const m = Math.round(d / 60000);
+  if (m < 60) return 'back in ' + m + 'm';
+  const h = Math.floor(m / 60), rem = m % 60;
+  return 'back in ' + h + 'h' + (rem ? ' ' + rem + 'm' : '');
+}
+
+function prSnoozedRowHtml(p) {
+  const u = p.url.replace(/'/g, "\\'");
+  const k = p.key.replace(/'/g, "\\'");
+  return `<div class="pr-row pr-muted" onclick="openPr('${u}')">`
+    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Wake now" onclick="event.stopPropagation();unsnoozePr('${k}')">⏰ Wake</button></div>`
+    + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
+    + `<div class="pr-meta">@${escapeHtml(p.author)} · ${escapeHtml(prSnoozeLeft(p.snoozeUntil))}</div></div>`;
+}
+
+function openSnooze(key, btn) {
+  closeSnooze();
+  const pop = document.createElement('div');
+  pop.id = 'pr-snooze-pop';
+  pop.innerHTML = `<input id="pr-snooze-val" type="text" placeholder="30" />`
+    + `<select id="pr-snooze-unit"><option value="m">minutes</option><option value="h">hours</option></select>`
+    + `<button onclick="applySnooze('${key.replace(/'/g, "\\'")}')">Snooze</button>`;
+  document.body.appendChild(pop);
+  const r = btn.getBoundingClientRect();
+  pop.style.left = Math.min(r.left, window.innerWidth - pop.offsetWidth - 8) + 'px';
+  pop.style.top = Math.max(8, r.top - pop.offsetHeight - 4) + 'px';
+  const inp = document.getElementById('pr-snooze-val');
+  inp.focus();
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') applySnooze(key); });
+}
+
+function applySnooze(key) {
+  const v = parseFloat(document.getElementById('pr-snooze-val').value);
+  const unit = document.getElementById('pr-snooze-unit').value;
+  if (!v || v <= 0) { closeSnooze(); return; }
+  const ms = v * (unit === 'h' ? 3600000 : 60000);
+  api.send({ type: 'snoozePr', key, untilMs: Date.now() + ms });
+  closeSnooze();
+}
+
+function closeSnooze() { const p = document.getElementById('pr-snooze-pop'); if (p) p.remove(); }
+
 function prDropdownHtml() {
   const head = prDropdownHead();
   if (prState.error) return head + '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
-  const active = prState.prs.filter(p => !p.muted && !p.repoMuted);
+  const active = prState.prs.filter(p => !p.muted && !p.repoMuted && !p.snoozed);
   const repoMuted = prState.prs.filter(p => p.repoMuted && !p.muted);
+  const snoozed = prState.prs.filter(p => p.snoozed && !p.muted && !p.repoMuted);
   const muted = prState.prs.filter(p => p.muted);
-  if (!active.length && !repoMuted.length && !muted.length) return head + '<div class="pr-empty">No open PRs.</div>';
+  if (!active.length && !repoMuted.length && !snoozed.length && !muted.length) return head + '<div class="pr-empty">No open PRs.</div>';
   let html = head;
   // Active repos
   for (const [repo, prs] of prGroupByRepo(active)) {
@@ -3483,6 +3536,13 @@ function prDropdownHtml() {
     html += prGroupHeader(repo, prs.length, true);
     if (prCollapsed.has(repo)) continue;
     html += prs.map(p => prRowHtml(p, true)).join('');
+  }
+  // Snoozed PRs
+  if (snoozed.length) {
+    const collapsed = prCollapsed.has('__snoozed__');
+    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__snoozed__')">`
+      + `<span>${collapsed ? '▸' : '▾'} ⏰ Snoozed</span><span class="pr-count">${snoozed.length}</span></div>`;
+    if (!collapsed) html += snoozed.map(prSnoozedRowHtml).join('');
   }
   // Individually muted PRs
   if (muted.length) {
@@ -3544,8 +3604,9 @@ function refreshPrs(btn) {
 }
 
 document.addEventListener('click', (e) => {
+  if (!e.target.closest('#pr-snooze-pop') && !e.target.closest('.pr-snooze')) closeSnooze();
   const d = document.getElementById('pr-dropdown');
-  if (d && d.style.display === 'block' && !e.target.closest('#pr-dropdown') && e.target.id !== 'pr-badge') d.style.display = 'none';
+  if (d && d.style.display === 'block' && !e.target.closest('#pr-dropdown') && !e.target.closest('#pr-snooze-pop') && e.target.id !== 'pr-badge') d.style.display = 'none';
 });
 
 let allRepos = [];

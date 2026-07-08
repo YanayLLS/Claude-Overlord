@@ -20,10 +20,17 @@ const PROMPT_HISTORY_MAX = 50;
 const PROMPT_BRIEF_MAX = 150;
 const TITLE_MODEL = 'claude-haiku-4-5-20251001';
 const TITLE_REGEN_TURNS = 3;
-const EXEMPT = new Set(['Task', 'Agent', 'AskUserQuestion', 'CronCreate', 'CronDelete', 'CronList']);
+// Tools that don't imply the agent is blocked waiting on the user, so they don't
+// trigger the permission timer. AskUserQuestion is NOT here: it blocks on the user,
+// so it should surface as "needs you" (permission) rather than stay 'active'.
+const EXEMPT = new Set(['Task', 'Agent', 'CronCreate', 'CronDelete', 'CronList']);
 const SPINNER_DEBOUNCE_MS = 150;
 const MAX_CRASH_RETRIES = 3;
 const CRASH_RESUME_DELAY_MS = 2000;
+// Watchdog: an 'active' agent whose transcript hasn't grown in this long, with no
+// tool pending, has really finished — flip it to 'waiting' even if we never saw a
+// turn_duration event (e.g. terminal detached, or the process died at the prompt).
+const STATUS_STUCK_MS = 90000;
 const USAGE_POLL_MS = 60000;
 const USAGE_TIMEOUT_MS = 15000;
 const USAGE_STALE_MS = 60 * 60 * 1000; // 1 hour — fetch even when idle if data older than this
@@ -431,7 +438,11 @@ function extractSpinnerText(id, data) {
         // Completion messages like "Sautéed for 36s" or "Cooked for 2m 44s" mean the turn is done — clear spinner
         if (/\bfor\s+\d+[smh]/i.test(text)) {
           const a = agents.get(id);
-          if (a && a.spinnerText) { a.spinnerText = ''; send({ type: 'spinnerText', id, text: '' }); }
+          if (a) {
+            if (a.spinnerText) { a.spinnerText = ''; send({ type: 'spinnerText', id, text: '' }); }
+            // ponytail: pty completion line = ground-truth turn-done; backstop when turn_duration is missing (else stuck 'active' forever)
+            if (!a.isWaiting) { a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers); send({ type: 'status', id, status: 'waiting' }); }
+          }
           return;
         }
         const a = agents.get(id);
@@ -903,6 +914,7 @@ function handleTermExit(id, exitCode) {
   // Crash = non-zero exit while agent was not idle/waiting
   const wasActive = !a.isWaiting && (a.toolIds.size > 0 || a.hadTools);
   const crashed = exitCode !== 0 && exitCode !== undefined && wasActive;
+  if (crashed) a.crashed = true; // watchdog must not flip a crashed card to 'waiting'
   if (crashed && a.crashCount < MAX_CRASH_RETRIES) {
     a.crashCount++;
     console.log(`[Overlord] Agent ${id} crashed (exit ${exitCode}), auto-resuming (${a.crashCount}/${MAX_CRASH_RETRIES})`);
@@ -1195,7 +1207,7 @@ function readLines(id) {
     a.fileOffset = st.size;
     const text = a.lineBuffer + buf.toString('utf-8');
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
-    if (lines.some(l => l.trim())) { clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; send({ type: 'permClear', id }); } }
+    if (lines.some(l => l.trim())) { a.crashed = false; clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; send({ type: 'permClear', id }); } }
     for (const line of lines) { if (line.trim()) parseLine(id, line); }
   } catch (e) { logToRenderer(`[readLines] Agent ${id} error: ${e.message} — file: ${a.jsonlFile}`); }
 }
@@ -1577,7 +1589,16 @@ async function pollPRs() {
   const currentKeys = prs.map(p => p.key);
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);
-  prs.forEach(p => { p.muted = muted.has(p.key); p.repoMuted = mutedRepos.has(p.repo); });
+  const nowMs = Date.now();
+  const snoozes = settings.prSnoozed || {};
+  for (const k of Object.keys(snoozes)) if (snoozes[k] <= nowMs) delete snoozes[k]; // drop expired
+  settings.prSnoozed = snoozes;
+  prs.forEach(p => {
+    p.muted = muted.has(p.key);
+    p.repoMuted = mutedRepos.has(p.repo);
+    p.snoozed = snoozes[p.key] > nowMs;
+    p.snoozeUntil = snoozes[p.key] || 0;
+  });
   const seen = settings.prSeen || [];
   if (!prSeenSeeded && seen.length === 0) {
     // First run with no history: seed silently, no toasts for pre-existing PRs.
@@ -1585,14 +1606,14 @@ async function pollPRs() {
   } else {
     for (const k of diffNewPRKeys(currentKeys, seen)) {
       const pr = prs.find(p => p.key === k);
-      if (!pr || pr.muted || pr.repoMuted) continue; // muted PR/repo doesn't notify
+      if (!pr || pr.muted || pr.repoMuted || pr.snoozed) continue; // muted/snoozed doesn't notify
       notifyNewPR(pr);
     }
   }
   // Notify when MY PR's review state changes (approved / changes requested).
   const prevDecisions = settings.prDecisions || {};
   for (const p of prs) {
-    if (!p.mine || p.muted || p.repoMuted) continue;
+    if (!p.mine || p.muted || p.repoMuted || p.snoozed) continue;
     const prev = prevDecisions[p.key];
     if (prev === undefined) continue; // no prior state — a new PR, not a transition
     if (p.reviewDecision === 'APPROVED' && prev !== 'APPROVED') notifyPrDecision(p, 'approved');
@@ -2397,6 +2418,20 @@ function handleIpc(msg) {
       }
       break;
     }
+    case 'snoozePr': {
+      if (typeof msg.key === 'string' && typeof msg.untilMs === 'number' && msg.untilMs > Date.now()) {
+        const s = settings.prSnoozed || {}; s[msg.key] = msg.untilMs;
+        settings.prSnoozed = s; saveState(); pollPRs();
+      }
+      break;
+    }
+    case 'unsnoozePr': {
+      if (typeof msg.key === 'string') {
+        const s = settings.prSnoozed || {}; delete s[msg.key];
+        settings.prSnoozed = s; saveState(); pollPRs();
+      }
+      break;
+    }
     case 'mutePr': {
       if (typeof msg.key === 'string') {
         const s = new Set(settings.prMuted || []); s.add(msg.key);
@@ -2581,6 +2616,23 @@ setInterval(() => {
   for (const [id, a] of agents) send({ type: 'stats', id, stats: a.stats });
   scanForNewJsonlFiles();
 }, 5000);
+
+// Status watchdog — reconcile agents stuck on 'active'. The JSONL transcript is the
+// ground truth for "is this agent actually working": if it hasn't grown in
+// STATUS_STUCK_MS and no tool is pending, the turn ended without a turn_duration
+// event (detached terminal, or process idle/dead at the prompt). Pending tools are
+// left alone — a long-running Bash writes nothing meanwhile and isn't idle.
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, a] of agents) {
+    if (a.archived || a.isWaiting || a.crashed || a.toolIds.size > 0) continue;
+    let mtimeMs;
+    try { mtimeMs = fs.statSync(a.jsonlFile).mtimeMs; } catch { continue; }
+    if (now - mtimeMs < STATUS_STUCK_MS) continue;
+    a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers);
+    send({ type: 'status', id, status: 'waiting' });
+  }
+}, STATUS_STUCK_MS);
 
 // Periodically scan for teams
 setInterval(() => scanTeams(), TEAM_POLL_MS);
