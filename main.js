@@ -1535,6 +1535,7 @@ function fetchAllPRs(repos) {
         + `pullRequests(states: OPEN, first: 100) { nodes { number title url isDraft createdAt `
         + `author { login } reviewDecision mergeable mergeStateStatus `
         + `reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } `
+        + `latestReviews(first: 20) { nodes { author { login } state } } `
         + `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }`;
     });
     const query = `query {\n${parts.join('\n')}\n}`;
@@ -1562,13 +1563,16 @@ function fetchAllPRs(repos) {
           const rollup = pr.commits && pr.commits.nodes[0] && pr.commits.nodes[0].commit.statusCheckRollup;
           const requested = !!ghLogin && ((pr.reviewRequests && pr.reviewRequests.nodes) || [])
             .some(n => n.requestedReviewer && n.requestedReviewer.login === ghLogin);
+          const reviews = (pr.latestReviews && pr.latestReviews.nodes) || [];
+          const approvedBy = reviews.filter(r => r.state === 'APPROVED' && r.author).map(r => r.author.login);
+          const changesBy = reviews.filter(r => r.state === 'CHANGES_REQUESTED' && r.author).map(r => r.author.login);
           prs.push({
             key: prKey(r, pr.number), repo: r, number: pr.number, title: pr.title, url: pr.url,
             author: (pr.author && pr.author.login) || '',
             reviewDecision: pr.reviewDecision || '', mine,
             checks: rollupState(rollup && rollup.state),
             mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
-            requested, createdAt: pr.createdAt || '',
+            requested, createdAt: pr.createdAt || '', approvedBy, changesBy,
           });
         }
       });

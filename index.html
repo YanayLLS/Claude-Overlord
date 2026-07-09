@@ -66,6 +66,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-row.pr-req { background:rgba(137,180,250,.08); border-left:2px solid #89b4fa; }
 .pr-row.pr-muted { opacity:.55; }
 .pr-reqtag { color:#89b4fa; font-weight:600; }
+.pr-appr { color:#a6e3a1; font-weight:600; }
+.pr-chg { color:#f38ba8; font-weight:600; }
 .pr-age { color:var(--dim); }
 .pr-dhead { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; font-size:11px; color:var(--dim); border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg2,#1e1e2e); z-index:1; }
 .pr-refresh { background:none; border:none; color:var(--text); font-size:14px; cursor:pointer; padding:0 4px; line-height:1; }
@@ -236,11 +238,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .ctx-pct.warn { color:var(--yellow); } .ctx-pct.danger { color:var(--red); }
 /* Hover actions — overlaid at the right (over the ctx%), model chip stays put */
 .agent-actions { position:absolute; right:0; top:50%; transform:translateY(-50%); display:none; align-items:center; gap:1px; z-index:3;
-  padding-left:22px; background:linear-gradient(to right, transparent, var(--editor-bg) 45%); }
+  padding-left:22px; background:var(--editor-bg); }
 .agent:hover .agent-actions { display:flex; }
 .agent:hover .agent-tail .ctx-pct { visibility:hidden; }
 .agent-actions .agent-btn { opacity:1; }
-.agent-actions .btn-reset, .agent-actions .btn-close { opacity:1 !important; width:auto; padding:2px 5px; }
+.agent-actions .btn-close { opacity:1 !important; width:auto; padding:2px 5px; }
 .agent-btn.model { font-size:8px; font-weight:700; letter-spacing:.4px; padding:2px 5px; }
 /* Hover tooltip — last prompt */
 #agent-tip { position:fixed; z-index:1000; max-width:340px; background:var(--bg2,#181825);
@@ -283,7 +285,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .agent-bottom button:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
 .agent.selected:hover .agent-btn { opacity:.7; }
 .agent.selected:hover .btn-close { opacity:.7 !important; }
-.agent.selected:hover .btn-reset { opacity:.7 !important; }
 .agent.selected .dot-active, .agent.selected .dot-waiting, .agent.selected .dot-perm,
 .agent.selected .dot-idle, .agent.selected .dot-crashed, .agent.selected .dot-resuming { color:#1e1e2e; }
 .agent.has-team { border-color:rgba(203,166,247,.15); }
@@ -345,17 +346,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 .agent:hover .agent-btn { opacity:.35; }
 .agent-btn:hover { opacity:1 !important; color:var(--red); background:rgba(243,139,168,.08); }
-.btn-close { opacity:0 !important; width:0; overflow:hidden; padding:0; transition:opacity .12s, width .12s; }
+.btn-close { opacity:0 !important; width:0; overflow:hidden; padding:0; transition:opacity .12s, width .12s; color:var(--red) !important; }
 .agent:hover .btn-close { opacity:.35 !important; width:auto; padding:0 3px; }
-.btn-reset {
-  font-size:10px; letter-spacing:.3px; padding:1px 5px; border:1px solid var(--border); border-radius:3px;
-  opacity:0 !important; transition:opacity .12s, width .12s;
-}
-.agent:hover .btn-reset { opacity:.35 !important; }
-.btn-reset:hover { color:var(--cyan) !important; border-color:rgba(148,226,213,.4); background:rgba(148,226,213,.08); }
-/* Always show reset on crashed agents */
-.agent[data-status="crashed"] .btn-reset { opacity:1 !important; color:var(--yellow); border-color:rgba(249,226,175,.4); background:rgba(249,226,175,.08); }
-.agent[data-status="crashed"] .btn-reset:hover { color:#fff !important; background:rgba(249,226,175,.15); border-color:var(--yellow); }
 .btn-loop {
   font-size:10px; letter-spacing:.3px; padding:1px 5px; border:1px solid var(--border); border-radius:3px;
   opacity:1 !important; display:inline-flex; align-items:center; gap:3px;
@@ -377,10 +369,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .agent-current-file { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
 .agent.selected .agent-current-file:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); background:rgba(0,0,0,.15); }
 .agent.selected[data-status="active"] .agent-current-file { color:#1e1e2e; opacity:.7; }
-.agent.selected .btn-reset { color:rgba(30,30,46,.5); }
-.agent.selected .btn-reset:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
-.agent.selected .btn-close { color:rgba(30,30,46,.4); }
-.agent.selected .btn-close:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
+.agent.selected .btn-close:hover { background:rgba(0,0,0,.1); }
 .agent.selected .agent-btn:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
 .agent.selected .btn-loop { color:rgba(30,30,46,.7); border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
 .agent.selected .btn-loop:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); }
@@ -425,10 +414,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .agent-fill.warn { background:rgba(0,0,0,.18); }
 .agent.selected .agent-fill.danger { background:rgba(0,0,0,.24); }
 /* Hover actions sit on a dark scrim → light-colored UI */
-.agent.selected .agent-actions { background:linear-gradient(to right, transparent, #1e1e2e 42%); }
+.agent.selected .agent-actions { background:#1e1e2e; }
 .agent.selected .agent-actions .agent-btn { color:var(--text); }
 .agent.selected .agent-actions .agent-btn:hover { color:#fff; background:rgba(205,214,244,.12); }
-.agent.selected .agent-actions .btn-close:hover { color:var(--red); background:rgba(243,139,168,.14); }
+.agent.selected .agent-actions .btn-close:hover { background:rgba(243,139,168,.14); }
 
 /* Prompt / preview */
 .agent-prompt { font-size:11px; color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:13px; position:relative; }
@@ -1866,9 +1855,7 @@ function render() {
           <span class="agent-tail">
             <span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>
             <span class="agent-actions">
-              ${ctxPct >= 50 && a.status === 'waiting' ? `<button class="agent-btn model" onclick="event.stopPropagation();compactAgent(${id})" title="Compact context (/compact)">compact</button>` : ''}
               ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
-              <button class="agent-btn btn-reset" onclick="event.stopPropagation();restartAgent(${id})" title="Reset agent (fresh session, keeps name)">&#x21BB;</button>
               <button class="agent-btn btn-close" onclick="event.stopPropagation();closeAgent(${id})" title="Close">&times;</button>
             </span>
           </span>
@@ -3509,13 +3496,15 @@ function prRowHtml(p, dim) {
   const showReq = p.requested && !dim;
   const reqTag = showReq ? ' · <span class="pr-reqtag">review requested</span>' : '';
   const age = p.createdAt ? ' · <span class="pr-age" data-created="' + p.createdAt + '">' + escapeHtml(prRelTime(p.createdAt)) + '</span>' : '';
+  const appr = (p.approvedBy && p.approvedBy.length) ? ` · <span class="pr-appr" title="Approved by ${escapeHtml(p.approvedBy.join(', '))}">✓${p.approvedBy.length}</span>` : '';
+  const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (dim ? ' pr-muted' : '');
   return `<div class="${cls}" onclick="openPr('${u}')">`
     + `<div class="pr-actions">${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
-    + `<div class="pr-meta">@${escapeHtml(p.author)}${meta}${reqTag}${age}</div></div>`;
+    + `<div class="pr-meta">@${escapeHtml(p.author)}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
 }
 
 function prGroupHeader(repo, count, muted) {
