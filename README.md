@@ -16,7 +16,7 @@ Each agent gets its own terminal session, live status tracking, and conversation
 - **Teams** — Group agents with a lead and members for coordinated work
 - **Server detection** — Auto-detects localhost URLs from agent output, with restart/remove menu
 - **@mentions** — Reference one agent's context inside another
-- **Search** — Search across all conversations (Ctrl+Shift+F) or browse past sessions (Ctrl+H)
+- **Search** — Search across all conversations (Ctrl+Shift+F)
 - **Timeline** — Full conversation replay per agent (Ctrl+T)
 - **Auto-compact** — Automatically accepts context compaction prompts
 - **Permission bypass** — Optional unattended mode
@@ -36,7 +36,6 @@ Each agent gets its own terminal session, live status tracking, and conversation
 | `Ctrl+!` | Jump to next permission request |
 | `Ctrl+F` | Find in terminal / filter agents |
 | `Ctrl+Shift+F` | Search all conversations |
-| `Ctrl+H` | Session history |
 | `Ctrl+T` | Toggle timeline |
 | `Ctrl+U` | Refresh usage stats |
 | `Ctrl+Shift+W` | Close all idle agents |

@@ -130,7 +130,7 @@ const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
 const pendingClearAgents = new Set(); // agentIds that recently ran /clear — used to correctly assign new JSONL files
 const termBuffers = new Map(); // agentId -> string (last TERM_BUFFER_MAX chars of terminal output)
-const TERM_BUFFER_MAX = 50000;
+const TERM_BUFFER_MAX = 1_000_000; // ~10k lines — matches xterm scrollback so a reload can restore the whole visible history
 let remoteWs = null; // current WebSocket connection (only one at a time)
 let remoteViewingAgent = null; // which agent the mobile client is viewing
 const REMOTE_PORT = 7778;
@@ -170,6 +170,10 @@ function sendFullState() {
       if (subs && names) { for (const stid of subs) { const sn = names.get(stid) || ''; send({ type: 'subToolStart', id, parentToolId: tid, toolId: stid, status: fmtTool(sn, {}), name: sn }); } }
     }
     send({ type: 'stats', id, stats: a.stats });
+    // Replay buffered terminal output so a renderer reload (Ctrl+Shift+R) restores scrollback
+    // instead of showing a blank terminal. Renderer's termData handler lazily builds the xterm.
+    const tbuf = termBuffers.get(id);
+    if (tbuf) send({ type: 'termData', id, data: tbuf });
     const ports = serverPorts.get(id);
     if (ports) { for (const [port, url] of ports) send({ type: 'serverDetected', id, port, url }); }
     if (a.cronCount > 0) send({ type: 'looping', id, active: true, count: a.cronCount });
@@ -487,7 +491,6 @@ function fmtTool(name, input) {
 // ── Timeline parsing ──────────────────────────────────
 let timelineAgentId = null;
 const TIMELINE_MAX_EVENTS = 1000;
-const SESSION_HEAD_BYTES = 16384;
 
 function parseLineForTimeline(line) {
   try {
@@ -616,107 +619,6 @@ function globalSearch(query) {
     } catch {}
   }
   return results;
-}
-
-async function scanSessions() {
-  const claudeBase = path.join(os.homedir(), '.claude', 'projects');
-  const result = [];
-  const activeIds = new Set([...agents.values()].map(a => a.sessionId));
-  let dirs;
-  try { dirs = await fs.promises.readdir(claudeBase); } catch { return []; }
-  for (const dir of dirs) {
-    const dirPath = path.join(claudeBase, dir);
-    let stat;
-    try { stat = await fs.promises.stat(dirPath); } catch { continue; }
-    if (!stat.isDirectory()) continue;
-    let files;
-    try { files = await fs.promises.readdir(dirPath); } catch { continue; }
-    const jsonls = files.filter(f => f.endsWith('.jsonl'));
-    for (const file of jsonls) {
-      const sessionId = file.replace('.jsonl', '');
-      const filePath = path.join(dirPath, file);
-      try {
-        const meta = await extractSessionMeta(filePath, sessionId);
-        if (meta) {
-          meta.projectHash = dir;
-          meta.isActive = activeIds.has(sessionId);
-          result.push(meta);
-        }
-      } catch {}
-    }
-  }
-  return result;
-}
-
-async function extractSessionMeta(filePath, sessionId) {
-  try {
-    const stat = await fs.promises.stat(filePath);
-    if (stat.size === 0) return null;
-    const fd = await fs.promises.open(filePath, 'r');
-    try {
-      // Read head for first prompt and cwd
-      const headSize = Math.min(stat.size, SESSION_HEAD_BYTES);
-      const headBuf = Buffer.alloc(headSize);
-      await fd.read(headBuf, 0, headSize, 0);
-      const headText = headBuf.toString('utf-8');
-      const headLines = headText.split('\n').filter(l => l.trim());
-
-      let cwd = '', firstPrompt = '', title = '', date = null;
-      let turns = 0, inTok = 0, outTok = 0, modelFam = 'sonnet';
-
-      // Parse head lines
-      for (const line of headLines) {
-        try {
-          const r = JSON.parse(line);
-          if (!date && r.timestamp) date = r.timestamp;
-          if (!cwd && r.cwd) cwd = r.cwd;
-          if (r.type === 'user' && !firstPrompt) {
-            const c = r.message?.content;
-            let pTxt = '';
-            if (typeof c === 'string' && c.trim()) pTxt = c.trim();
-            else if (Array.isArray(c)) pTxt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-            if (pTxt && !isSystemMessage(pTxt)) firstPrompt = pTxt;
-          }
-          if (r.type === 'assistant' && r.message?.model) modelFam = modelFamily(r.message.model);
-          if (r.type === 'assistant' && r.message?.usage) {
-            const u = r.message.usage;
-            inTok += u.input_tokens || 0;
-            outTok += u.output_tokens || 0;
-          }
-          if (r.type === 'system' && r.subtype === 'turn_duration') turns++;
-        } catch {}
-      }
-
-      // If file is larger than head, read tail for more accurate stats
-      if (stat.size > SESSION_HEAD_BYTES) {
-        const tailSize = Math.min(stat.size - SESSION_HEAD_BYTES, SESSION_HEAD_BYTES);
-        const tailBuf = Buffer.alloc(tailSize);
-        await fd.read(tailBuf, 0, tailSize, stat.size - tailSize);
-        const tailText = tailBuf.toString('utf-8');
-        // Skip first partial line
-        const nlIdx = tailText.indexOf('\n');
-        const tailLines = (nlIdx >= 0 ? tailText.slice(nlIdx + 1) : tailText).split('\n').filter(l => l.trim());
-        for (const line of tailLines) {
-          try {
-            const r = JSON.parse(line);
-            if (r.type === 'assistant' && r.message?.usage) {
-              const u = r.message.usage;
-              inTok += u.input_tokens || 0;
-              outTok += u.output_tokens || 0;
-            }
-            if (r.type === 'assistant' && r.message?.model) modelFam = modelFamily(r.message.model);
-            if (r.type === 'system' && r.subtype === 'turn_duration') turns++;
-          } catch {}
-        }
-      }
-
-      if (!firstPrompt && !turns) return null; // empty/useless session
-      if (firstPrompt.length > 150) firstPrompt = firstPrompt.slice(0, 150) + '\u2026';
-      title = deriveTitle(firstPrompt || 'Untitled');
-
-      return { sessionId, cwd, firstPrompt, title, date: date || stat.mtime.toISOString(), turns, inTok, outTok, modelFamily: modelFam, size: stat.size };
-    } finally { await fd.close(); }
-  } catch { return null; }
 }
 
 // ── State persistence ─────────────────────────────────
@@ -1725,76 +1627,6 @@ async function exportTranscript(id) {
     .then(r => { if (!r.canceled && r.filePath) fs.writeFileSync(r.filePath, md, 'utf-8'); });
 }
 
-function resumeSessionAgent(sid, rcwd) {
-  const rjsonl = path.join(claudeDir(rcwd), `${sid}.jsonl`);
-  const rid = nextId++;
-  const ra = {
-    id: rid, sessionId: sid, cwd: rcwd, jsonlFile: rjsonl,
-    fileOffset: 0, lineBuffer: '',
-    toolIds: new Set(), toolStatuses: new Map(), toolNames: new Map(),
-    subToolIds: new Map(), subToolNames: new Map(),
-    isWaiting: false, permSent: false, hadTools: false, turnTools: 0,
-    lastText: '', lastPrompt: '', title: '', agentName: null,
-    promptHistory: [], titlePending: false, createdAt: Date.now(), cronCount: 0, compacting: false,
-    stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: 'sonnet' },
-  };
-  agents.set(rid, ra);
-  ra.agentName = pickAgentName(); // assign after agents.set so dedup works
-  if (fs.existsSync(rjsonl)) {
-    try {
-      const content = fs.readFileSync(rjsonl, 'utf-8');
-      for (const line of content.split('\n').filter(l => l.trim())) {
-        try {
-          const r = JSON.parse(line);
-          if (r.type === 'assistant' && r.message?.usage) {
-            if (r.message.model) { ra.stats.modelFamily = modelFamily(r.message.model); ra.stats.model = r.message.model; }
-            const u = r.message.usage;
-            ra.stats.inTok += u.input_tokens || 0; ra.stats.outTok += u.output_tokens || 0;
-            ra.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-            ra.stats.cacheTok += u.cache_creation_input_tokens || 0; ra.stats.cacheRead += u.cache_read_input_tokens || 0;
-          }
-          if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
-            for (const b of r.message.content) {
-              if (b.type === 'text' && b.text) ra.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text;
-              if (b.type === 'tool_use' && b.name) {
-                ra.stats.tools[b.name] = (ra.stats.tools[b.name] || 0) + 1;
-                if (b.name === 'CronCreate') ra.cronCount++;
-                if (b.name === 'CronDelete') ra.cronCount = Math.max(0, ra.cronCount - 1);
-              }
-            }
-          }
-          if (r.type === 'user') {
-            const c = r.message?.content;
-            let p = '';
-            if (typeof c === 'string' && c.trim()) p = c;
-            else if (Array.isArray(c)) p = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-            if (p && !isSystemMessage(p)) {
-              ra.lastPrompt = p.length > PREVIEW_MAX ? p.slice(0, PREVIEW_MAX) + '\u2026' : p;
-              if (!ra.title) ra.title = deriveTitle(p);
-              const brief = p.length > PROMPT_BRIEF_MAX ? p.slice(0, PROMPT_BRIEF_MAX) : p;
-              ra.promptHistory.push(brief); if (ra.promptHistory.length > PROMPT_HISTORY_MAX) ra.promptHistory.shift();
-            }
-          }
-          if (r.type === 'system' && r.subtype === 'compact_boundary') { ra.stats.ctxTok = 0; }
-          if (r.type === 'system' && r.subtype === 'turn_duration') { ra.stats.turns++; ra.stats.durMs += r.durationMs || 0; }
-        } catch {}
-      }
-      ra.fileOffset = fs.statSync(rjsonl).size;
-    } catch {}
-  }
-  registerKnownJsonl(claudeDir(rcwd), rjsonl);
-  send({ type: 'agentCreated', id: rid, cwd: rcwd, sessionId: sid, title: ra.title, createdAt: ra.createdAt, agentName: ra.agentName });
-  if (ra.lastPrompt) send({ type: 'prompt', id: rid, text: ra.lastPrompt });
-  if (ra.promptHistory.length) send({ type: 'promptHistory', id: rid, prompts: [...ra.promptHistory] });
-  if (ra.lastText) send({ type: 'preview', id: rid, text: ra.lastText });
-  if (ra.title) send({ type: 'title', id: rid, text: ra.title });
-  send({ type: 'stats', id: rid, stats: ra.stats });
-  send({ type: 'status', id: rid, status: 'waiting' });
-  saveState();
-  spawnTerminal(rid);
-  send({ type: 'focusFromNotification', id: rid });
-}
-
 // ── Usage polling (via API rate-limit headers) ────────
 let usageInFlight = false;
 let lastUsage = null;
@@ -2305,6 +2137,38 @@ function handleIpc(msg) {
       break;
     }
     case 'openFolder': { const p = msg.path; if (typeof p === 'string' && fs.existsSync(p)) shell.openPath(p).catch(() => {}); break; }
+    case 'openBookmark': {
+      const p = msg.path;
+      if (typeof p !== 'string' || !fs.existsSync(p)) { send({ type: 'toast', text: 'Bookmark not found: ' + p }); break; }
+      shell.openPath(p).catch(() => {});
+      break;
+    }
+    case 'addBookmark':
+      dialog.showOpenDialog(mainWindow, { properties: ['openFile', 'openDirectory'], title: 'Bookmark a file or folder' })
+        .then(r => {
+          if (r.canceled || !r.filePaths[0]) return;
+          const p = r.filePaths[0];
+          settings.bookmarks = settings.bookmarks || [];
+          if (settings.bookmarks.some(b => b.path === p)) return;
+          settings.bookmarks.push({ path: p, name: path.basename(p) || p });
+          saveState();
+          send({ type: 'settings', settings });
+        });
+      break;
+    case 'removeBookmark':
+      settings.bookmarks = (settings.bookmarks || []).filter(b => b.path !== msg.path);
+      saveState();
+      send({ type: 'settings', settings });
+      break;
+    case 'renameBookmark': {
+      const b = (settings.bookmarks || []).find(x => x.path === msg.path);
+      const name = typeof msg.name === 'string' ? msg.name.trim() : '';
+      if (!b || !name) break;
+      b.name = name;
+      saveState();
+      send({ type: 'settings', settings });
+      break;
+    }
     case 'openFile': {
       let p = typeof msg.path === 'string' ? msg.path : '';
       if (!p) break;
@@ -2475,8 +2339,6 @@ function handleIpc(msg) {
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); break; }
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
-    case 'getSessions': scanSessions().then(s => send({ type: 'sessions', sessions: s })).catch(() => send({ type: 'sessions', sessions: [] })); break;
-    case 'resumeSession': resumeSessionAgent(msg.sessionId, msg.cwd); break;
     case 'fetchUsage': fetchUsage(); break;
     case 'getAccountInfo': send({ type: 'accountInfo', ...getCurrentAccountInfo() }); break;
     case 'saveAccount': {

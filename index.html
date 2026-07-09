@@ -36,6 +36,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #header h1 span { color:var(--accent); font-weight:600; }
 #headerBadges { display:flex; gap:4px; align-items:center; }
 #headerBadges:empty { display:none; }
+#bookmarks { display:flex; gap:4px; align-items:center; min-width:0; overflow:hidden; }
+.bookmark { max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:4px; }
+.bookmark-add { opacity:.5; }
+.bookmark-add:hover { opacity:1; }
 #pr-badge { align-items:center; gap:8px; padding:5px 12px; border-top:1px solid var(--border); background:var(--title-bg); font-size:11px; color:var(--text); cursor:pointer; letter-spacing:.3px; flex-shrink:0; user-select:none; }
 #pr-badge.err { color:#f38ba8; }
 #pr-badge.alert { background:#f38ba8; color:#11111b; font-weight:700; }
@@ -238,11 +242,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .ctx-pct.warn { color:var(--yellow); } .ctx-pct.danger { color:var(--red); }
 /* Hover actions — overlaid at the right (over the ctx%), model chip stays put */
 .agent-actions { position:absolute; right:0; top:50%; transform:translateY(-50%); display:none; align-items:center; gap:1px; z-index:3;
-  padding-left:22px; background:var(--editor-bg); }
+  padding-left:22px; }
 .agent:hover .agent-actions { display:flex; }
 .agent:hover .agent-tail .ctx-pct { visibility:hidden; }
 .agent-actions .agent-btn { opacity:1; }
-.agent-actions .btn-close { opacity:1 !important; width:auto; padding:2px 5px; }
+.agent-actions .btn-close { opacity:1 !important; width:20px; padding:0; }
 .agent-btn.model { font-size:8px; font-weight:700; letter-spacing:.4px; padding:2px 5px; }
 /* Hover tooltip — last prompt */
 #agent-tip { position:fixed; z-index:1000; max-width:340px; background:var(--bg2,#181825);
@@ -270,7 +274,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   content:''; position:absolute; left:0; top:4px; bottom:4px; width:2px; border-radius:1px;
   background:transparent; transition:background .15s;
 }
-.agent:hover { background:rgba(205,214,244,.04); border-color:rgba(137,180,250,.35); }
+.agent:hover { background:rgba(205,214,244,.04); border-color:var(--accent); }
 .agent.selected { background:var(--accent); border-color:var(--accent); }
 .agent.selected::before { background:rgba(0,0,0,.4); }
 .agent.selected .agent-name { color:#1e1e2e; }
@@ -284,7 +288,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .agent-bottom button { color:rgba(30,30,46,.6); }
 .agent.selected .agent-bottom button:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
 .agent.selected:hover .agent-btn { opacity:.7; }
-.agent.selected:hover .btn-close { opacity:.7 !important; }
 .agent.selected .dot-active, .agent.selected .dot-waiting, .agent.selected .dot-perm,
 .agent.selected .dot-idle, .agent.selected .dot-crashed, .agent.selected .dot-resuming { color:#1e1e2e; }
 .agent.has-team { border-color:rgba(203,166,247,.15); }
@@ -346,8 +349,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 .agent:hover .agent-btn { opacity:.35; }
 .agent-btn:hover { opacity:1 !important; color:var(--red); background:rgba(243,139,168,.08); }
-.btn-close { opacity:0 !important; width:0; overflow:hidden; padding:0; transition:opacity .12s, width .12s; color:var(--red) !important; }
-.agent:hover .btn-close { opacity:.35 !important; width:auto; padding:0 3px; }
+.btn-close { opacity:0 !important; width:0; height:20px; overflow:hidden; padding:0; transition:opacity .12s, width .12s;
+  display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box;
+  color:#fff !important; background:var(--red); border-radius:5px; font-size:14px; line-height:1; }
+.agent:hover .btn-close { opacity:1 !important; width:20px; padding:0; }
 .btn-loop {
   font-size:10px; letter-spacing:.3px; padding:1px 5px; border:1px solid var(--border); border-radius:3px;
   opacity:1 !important; display:inline-flex; align-items:center; gap:3px;
@@ -369,7 +374,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .agent-current-file { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
 .agent.selected .agent-current-file:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); background:rgba(0,0,0,.15); }
 .agent.selected[data-status="active"] .agent-current-file { color:#1e1e2e; opacity:.7; }
-.agent.selected .btn-close:hover { background:rgba(0,0,0,.1); }
 .agent.selected .agent-btn:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
 .agent.selected .btn-loop { color:rgba(30,30,46,.7); border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
 .agent.selected .btn-loop:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); }
@@ -414,10 +418,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .agent-fill.warn { background:rgba(0,0,0,.18); }
 .agent.selected .agent-fill.danger { background:rgba(0,0,0,.24); }
 /* Hover actions sit on a dark scrim → light-colored UI */
-.agent.selected .agent-actions { background:#1e1e2e; }
 .agent.selected .agent-actions .agent-btn { color:var(--text); }
 .agent.selected .agent-actions .agent-btn:hover { color:#fff; background:rgba(205,214,244,.12); }
-.agent.selected .agent-actions .btn-close:hover { background:rgba(243,139,168,.14); }
+.agent-actions .btn-close:hover, .agent.selected .agent-actions .btn-close:hover { color:#fff !important; background:#eb6f8e; }
 
 /* Prompt / preview */
 .agent-prompt { font-size:11px; color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:13px; position:relative; }
@@ -644,6 +647,8 @@ button:focus-visible { outline-offset:0; }
 .agent[data-status="permission"] { border-color:rgba(249,226,175,.25); background:rgba(249,226,175,.04); }
 .agent[data-status="crashed"] { border-color:rgba(243,139,168,.25); background:rgba(243,139,168,.04); }
 .agent[data-status="waiting"] { border-color:rgba(166,227,161,.15); background:rgba(166,227,161,.04); }
+/* Hover stroke — must beat data-status border-color above */
+.agent[data-status]:hover { border-color:var(--accent); }
 /* Selected overrides — must beat data-status specificity */
 .agent.selected[data-status="permission"],
 .agent.selected[data-status="crashed"],
@@ -781,51 +786,6 @@ button:focus-visible { outline-offset:0; }
 .tl-detail.expanded { white-space:normal; word-break:break-word; }
 .tl-turn-sep { border-top:1px solid var(--border); margin:6px 0 0 -22px; }
 
-/* ── Session History overlay ── */
-#history-overlay {
-  display:none; position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:999;
-  align-items:center; justify-content:center; transition:opacity .15s;
-}
-.history-modal {
-  background:var(--editor-bg); border:1px solid var(--border-hi); box-shadow:0 8px 32px rgba(0,0,0,.4);
-  padding:20px 24px; width:640px; max-width:90vw; max-height:80vh; display:flex; flex-direction:column; border-radius:8px;
-}
-.history-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid var(--border); }
-.history-header h3 { font-size:14px; color:var(--text); font-weight:600; letter-spacing:.3px; }
-.history-search {
-  width:100%; font-family:inherit; font-size:12px; padding:6px 10px; color:var(--text);
-  background:var(--bg3); border:1px solid var(--border); border-radius:6px; outline:none; margin-bottom:10px; flex-shrink:0;
-}
-.history-search::placeholder { color:var(--dim); }
-.history-search:focus { border-color:var(--accent); box-shadow:0 0 0 2px rgba(137,180,250,.15); }
-#history-list { flex:1; overflow-y:auto; }
-.history-loading { text-align:center; padding:40px 0; color:var(--dim); font-size:13px; }
-
-.history-group { margin-bottom:10px; }
-.history-group-header {
-  font-size:13px; color:var(--accent); padding:6px 0 4px; border-bottom:1px solid var(--border);
-  display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
-}
-.history-group-header:hover { color:var(--accent); }
-.history-group-chevron { font-size:9px; color:var(--dim); transition:transform .15s; }
-.history-group.collapsed .history-group-chevron { transform:rotate(-90deg); }
-.history-group.collapsed .history-items { display:none; }
-.history-group-path { font-size:10px; color:var(--dim); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.history-group-count { font-size:10px; color:var(--dim); }
-
-.history-item {
-  padding:6px 10px; cursor:pointer; border:1px solid transparent; margin:1px 0; border-radius:4px;
-  transition:background .12s;
-}
-.history-item:hover { background:rgba(205,214,244,.04); }
-.history-item.active-session { opacity:.35; pointer-events:none; }
-.history-item-top { display:flex; align-items:center; gap:8px; }
-.history-item-title { font-size:12px; color:var(--text); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.history-item-date { font-size:10px; color:var(--dim); flex-shrink:0; }
-.history-item-meta { font-size:10px; color:var(--dim); display:flex; gap:8px; margin-top:3px; }
-.history-item-meta span + span::before { content:'\00b7'; margin-right:4px; opacity:.4; }
-.history-item-prompt { font-size:11px; color:rgba(166,173,200,.3); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
 /* ── Archive overlay ── */
 #archive-overlay {
   display:none; position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:999;
@@ -939,14 +899,13 @@ button:focus-visible { outline-offset:0; }
   <div id="header">
     <h1><span>Overlord</span></h1>
     <div id="headerBadges"></div>
-    <button class="hdr-btn" onclick="openHistory()" title="Session history (Ctrl+H)">&#x23F3;</button>
+    <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Restart app">&#x1F504;</button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
-    <button id="readyBtn" class="hdr-btn" onclick="toggleReadyFilter()" title="Show only ready agents">&#x2713;</button>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
     <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account">&#x1F464; No account</button>
   </div>
@@ -1000,6 +959,11 @@ button:focus-visible { outline-offset:0; }
         <span>Bypass permissions (--dangerously-skip-permissions)</span>
       </label>
       <div class="settings-hint">Applies to newly spawned agents. Persisted across sessions.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-ready" onchange="toggleReadyFilter(this.checked)" />
+        <span>Show only ready agents</span>
+      </label>
+      <div class="settings-hint">Hides agents that are actively working, resuming, or settling.</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-notif" onchange="onNotifChange(this.checked)" />
         <span>Desktop notifications for permission requests</span>
@@ -1075,21 +1039,10 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">/</span><span class="help-desc">Filter agents (when not typing)</span></div>
       <div class="help-row"><span class="help-key">Ctrl+0</span><span class="help-desc">Reset zoom to 100%</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Scroll</span><span class="help-desc">Zoom in/out</span></div>
-      <div class="help-row"><span class="help-key">Ctrl+H</span><span class="help-desc">Session history</span></div>
       <div class="help-row"><span class="help-key">Ctrl+T</span><span class="help-desc">Toggle timeline / terminal</span></div>
       <div class="help-row"><span class="help-key">Ctrl+U</span><span class="help-desc">Refresh usage stats</span></div>
       <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close overlay / filter</span></div>
       <div class="help-row"><span class="help-key">?</span><span class="help-desc">Show this help</span></div>
-    </div>
-  </div>
-  <div id="history-overlay" onclick="closeHistory()">
-    <div class="history-modal" onclick="event.stopPropagation()">
-      <div class="history-header">
-        <h3>Session History</h3>
-        <button class="settings-close" onclick="closeHistory()" aria-label="Close">&times;</button>
-      </div>
-      <input class="history-search" type="text" placeholder="Search sessions..." id="history-search" />
-      <div id="history-list"><div class="history-loading">Scanning sessions...</div></div>
     </div>
   </div>
   <div id="search-overlay" onclick="closeSearch()">
@@ -1289,11 +1242,6 @@ let termTab = 'terminal'; // 'terminal' or 'timeline'
 let timelineAgentId = null;
 let tlUserScrolled = false;
 
-// ── History state ──
-let _historyCloseTimer = null;
-let allSessions = [];
-const collapsedHistoryGroups = new Set();
-
 function openFilter() {
   document.getElementById('filter-bar').classList.add('open');
   const input = document.getElementById('filter-input');
@@ -1307,7 +1255,7 @@ function closeFilter() {
 }
 document.getElementById('filter-input').addEventListener('input', (e) => { filterText = e.target.value.toLowerCase(); render(); });
 document.getElementById('filter-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFilter(); });
-function toggleReadyFilter() { filterReady = !filterReady; document.getElementById('readyBtn').classList.toggle('active', filterReady); render(); }
+function toggleReadyFilter(on) { filterReady = on !== undefined ? on : !filterReady; render(); }
 
 let pendingCwd = null;
 let _promptCloseTimer = null;
@@ -1487,7 +1435,7 @@ async function restartAgent(id) {
   api.send({ type: 'restartAgent', id });
 }
 function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
-function focusAgent(id) { const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); }
+function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
   _renaming = true;
@@ -1751,6 +1699,7 @@ let _renaming = false; // true while inline rename input is active
 function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; if (_renaming || _dragId != null) return; render(); }); } }
 function render() {
   if (_dragId != null) return; // never rebuild the list mid-drag — it cancels native drag-and-drop
+  if (_renaming) return; // rebuilding would destroy the inline rename input
   const list = document.getElementById('list');
   if (agents.size === 0 && knownProjects.size === 0) {
     list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
@@ -1846,7 +1795,7 @@ function render() {
       html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" data-recap="${escAttr((a.recap || '').slice(0, 600))}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
-        <span class="agent-name" ondblclick="event.stopPropagation();renameAgent(${id},this)">${esc(title)}</span>
+        <span class="agent-name" onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
         <div class="agent-mid">
           ${a.currentFileName ? `<span class="agent-current-file" title="${escAttr(a.currentFile)}" data-file="${escAttr(a.currentFile)}" onclick="event.stopPropagation();openFile(${id},this.dataset.file)">${esc(a.currentFileName)}</span>` : ''}
         </div>
@@ -2108,7 +2057,7 @@ function showXterm(id) {
     } else {
       fitPreservingScroll(x);
     }
-    x.terminal.focus();
+    if (!_renaming) x.terminal.focus();
     sendResize(id, x);
     updateScrollBtn();
   }, 50); }
@@ -2137,7 +2086,7 @@ function openTerm(id) {
   // Re-focus terminal after render so keyboard input works immediately
   if (termTab === 'terminal') {
     const x = xterms.get(id);
-    if (x) setTimeout(() => x.terminal.focus(), 60);
+    if (x) setTimeout(() => { if (!_renaming) x.terminal.focus(); }, 60);
   }
 }
 
@@ -2341,25 +2290,6 @@ document.getElementById('timeline-events').addEventListener('scroll', function()
   tlUserScrolled = el.scrollTop + el.clientHeight < el.scrollHeight - 30;
 });
 
-// ── Session History ────────────────────────────────────
-function openHistory() {
-  if (_historyCloseTimer) { clearTimeout(_historyCloseTimer); _historyCloseTimer = null; }
-  const el = document.getElementById('history-overlay');
-  el.style.display = 'flex'; el.style.opacity = '0';
-  requestAnimationFrame(() => { el.style.opacity = '1'; });
-  document.getElementById('history-list').innerHTML = '<div class="history-loading">Scanning sessions...</div>';
-  document.getElementById('history-search').value = '';
-  api.send({ type: 'getSessions' });
-  setTimeout(() => document.getElementById('history-search').focus(), 100);
-}
-
-function closeHistory() {
-  if (_historyCloseTimer) return;
-  const el = document.getElementById('history-overlay');
-  el.style.opacity = '0';
-  _historyCloseTimer = setTimeout(() => { _historyCloseTimer = null; el.style.display = 'none'; }, 150);
-}
-
 // ── Global Search ──
 let _searchTimer = null;
 let _searchSelectedIdx = -1;
@@ -2469,83 +2399,6 @@ document.getElementById('search-input').addEventListener('keydown', (e) => {
     searchResultClick(_searchSelectedIdx);
   }
 });
-
-function toggleHistoryGroup(key) {
-  if (collapsedHistoryGroups.has(key)) collapsedHistoryGroups.delete(key);
-  else collapsedHistoryGroups.add(key);
-  renderHistory(allSessions);
-}
-
-function renderHistory(sessions) {
-  const list = document.getElementById('history-list');
-  const filter = (document.getElementById('history-search').value || '').toLowerCase();
-  const filtered = filter ? sessions.filter(s =>
-    [s.title, s.firstPrompt, s.cwd, s.sessionId].join('\n').toLowerCase().includes(filter)
-  ) : sessions;
-
-  if (filtered.length === 0) {
-    list.innerHTML = `<div class="tl-empty">${filter ? 'No matching sessions' : 'No sessions found'}</div>`;
-    return;
-  }
-
-  // Group by cwd
-  const groups = new Map();
-  for (const s of filtered) {
-    const key = s.cwd || s.projectHash || 'Unknown';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s);
-  }
-  // Sort each group by date descending
-  for (const items of groups.values()) items.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-  let html = '';
-  for (const [cwd, items] of groups) {
-    const safeKey = escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
-    const collapsed = collapsedHistoryGroups.has(cwd);
-    html += `<div class="history-group${collapsed ? ' collapsed' : ''}">
-      <div class="history-group-header" onclick="toggleHistoryGroup('${safeKey}')">
-        <span class="history-group-chevron">&#x25BC;</span>
-        ${esc(pathLabel(cwd))}
-        <span class="history-group-path">${esc(cwd)}</span>
-        <span class="history-group-count">${items.length}</span>
-      </div>
-      <div class="history-items">`;
-    for (const s of items) {
-      const safeSid = escAttr(s.sessionId);
-      const safeCwd = escAttr(s.cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
-      const dateStr = s.date ? new Date(s.date).toLocaleDateString() + ' ' + new Date(s.date).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
-      const tok = (s.inTok || 0) + (s.outTok || 0);
-      html += `<div class="history-item${s.isActive ? ' active-session' : ''}" onclick="resumeSession('${safeSid}','${safeCwd}')">
-        <div class="history-item-top">
-          <span class="history-item-title">${esc(s.title || 'Untitled')}</span>
-          <span class="history-item-date">${dateStr}</span>
-        </div>
-        <div class="history-item-meta">
-          <span>${s.turns || 0} turns</span>
-          <span>${fmtTok(tok)} tok</span>
-          ${s.size ? `<span>${(s.size / 1024).toFixed(0)}KB</span>` : ''}
-          ${s.isActive ? '<span style="color:var(--green)">active</span>' : ''}
-        </div>
-        ${s.firstPrompt ? `<div class="history-item-prompt">${esc(s.firstPrompt)}</div>` : ''}
-      </div>`;
-    }
-    html += '</div></div>';
-  }
-  list.innerHTML = html;
-}
-
-function handleSessions(msg) {
-  allSessions = msg.sessions || [];
-  renderHistory(allSessions);
-}
-
-document.getElementById('history-search').addEventListener('input', () => renderHistory(allSessions));
-document.getElementById('history-search').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHistory(); });
-
-function resumeSession(sessionId, cwd) {
-  api.send({ type: 'resumeSession', sessionId, cwd });
-  closeHistory();
-}
 
 // Override focusAgent to also open terminal
 focusAgent = function(id) {
@@ -2773,7 +2626,8 @@ function handleAgentMsg(msg) {
     case 'folderSelected': addAgent(msg.path); break;
     case 'focused': selectedId = msg.id; scheduleRender(); break;
     case 'focusFromNotification': focusAgent(msg.id); break;
-    case 'settings': applySettings(msg.settings); break;
+    case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
+    case 'toast': showToast(msg.text); break;
     case 'prList': {
       if (msg.error) { prState.error = msg.error; }
       else { prState.prs = msg.prs || []; prState.error = null; prState.failedRepos = msg.failedRepos || []; }
@@ -2801,7 +2655,6 @@ function handleAgentMsg(msg) {
     case 'timelineData': handleTimelineData(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
-    case 'sessions': handleSessions(msg); break;
     case 'usage': handleUsage(msg.usage); break;
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
@@ -3061,6 +2914,78 @@ function flashAgentCard(id) {
   el.addEventListener('animationend', () => el.classList.remove('done-flash'), { once: true });
 }
 
+// ── Bookmarks ──────────────────────────────────────────
+function showBookmarkMenu(e, b, btn) {
+  const old = document.getElementById('bookmark-ctx-menu');
+  if (old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 'bookmark-ctx-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:130px;';
+  menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
+  const items = [
+    { label: 'Rename', action: () => renameBookmark(b, btn) },
+    { label: 'Remove', cls: 'ctx-danger', action: () => api.send({ type: 'removeBookmark', path: b.path }) },
+  ];
+  for (const it of items) {
+    const mb = document.createElement('button');
+    mb.textContent = it.label;
+    mb.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:5px 12px;background:none;border:none;color:var(--text);cursor:pointer;border-radius:0;transition:background .1s;';
+    if (it.cls === 'ctx-danger') mb.style.color = 'var(--red)';
+    mb.addEventListener('mouseenter', () => { mb.style.background = 'rgba(205,214,244,.06)'; });
+    mb.addEventListener('mouseleave', () => { mb.style.background = 'none'; });
+    mb.onclick = () => { menu.remove(); it.action(); };
+    menu.appendChild(mb);
+  }
+  document.body.appendChild(menu);
+  setTimeout(() => document.addEventListener('mousedown', function close(ev) {
+    if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); }
+  }), 0);
+}
+
+function renameBookmark(b, btn) {
+  const input = document.createElement('input');
+  input.type = 'text'; input.value = b.name;
+  input.style.cssText = 'font:inherit;font-size:12px;color:var(--text);background:var(--card);border:1px solid var(--accent);outline:none;padding:0 4px;width:110px;';
+  const commit = () => {
+    const name = input.value.trim();
+    if (name && name !== b.name) api.send({ type: 'renameBookmark', path: b.path, name });
+    else renderBookmarks(_bookmarks);
+  };
+  input.onblur = commit;
+  input.onkeydown = (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+    if (ev.key === 'Escape') { input.onblur = null; renderBookmarks(_bookmarks); }
+  };
+  btn.replaceWith(input);
+  input.focus(); input.select();
+}
+
+let _bookmarks = [];
+function renderBookmarks(bookmarks) {
+  _bookmarks = bookmarks;
+  const el = document.getElementById('bookmarks');
+  if (!el) return;
+  el.innerHTML = '';
+  for (const b of bookmarks) {
+    const btn = document.createElement('button');
+    btn.className = 'hdr-btn bookmark';
+    btn.textContent = b.name;
+    btn.title = b.path + '\n(right-click to rename or remove)';
+    btn.onclick = () => api.send({ type: 'openBookmark', path: b.path });
+    btn.oncontextmenu = (e) => {
+      e.preventDefault();
+      showBookmarkMenu(e, b, btn);
+    };
+    el.appendChild(btn);
+  }
+  const add = document.createElement('button');
+  add.className = 'hdr-btn bookmark-add';
+  add.textContent = '\u{1F516}';
+  add.title = 'Add bookmark — pin a file, folder, .bat, .exe or image here for one-click opening';
+  add.onclick = () => api.send({ type: 'addBookmark' });
+  el.appendChild(add);
+}
+
 // ── Toast ──────────────────────────────────────────────
 function showToast(text) {
   let el = document.getElementById('toast');
@@ -3261,12 +3186,6 @@ document.addEventListener('keydown', (e) => {
       return;
     }
   }
-  // Ctrl+H to open session history
-  if (e.key === 'h' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault();
-    openHistory();
-    return;
-  }
   // Ctrl+T to toggle terminal/timeline tab
   if (e.key === 't' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
     e.preventDefault();
@@ -3286,8 +3205,6 @@ document.addEventListener('keydown', (e) => {
     if (cfm.classList.contains('open')) { confirmResolve(false); return; }
     const searchOv = document.getElementById('search-overlay');
     if (searchOv.style.display === 'flex') { closeSearch(); return; }
-    const history = document.getElementById('history-overlay');
-    if (history.style.display === 'flex') { closeHistory(); return; }
     const archive = document.getElementById('archive-overlay');
     if (archive && archive.style.display === 'flex') { closeArchiveModal(); return; }
     const help = document.getElementById('help-overlay');
