@@ -230,13 +230,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 /* Right cluster — fixed-width columns so model + ctx% line up across rows */
 .agent-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 .agent-model-slot { width:54px; display:flex; justify-content:flex-end; flex-shrink:0; }
+/* Fixed tail slot: ctx% normally, hover actions swap in — model chip left of it never moves */
+.agent-tail { position:relative; display:flex; align-items:center; justify-content:flex-end; min-width:38px; flex-shrink:0; }
 .ctx-pct { font-size:10px; font-variant-numeric:tabular-nums; color:var(--dim); min-width:34px; text-align:right; flex-shrink:0; }
 .ctx-pct.warn { color:var(--yellow); } .ctx-pct.danger { color:var(--red); }
-/* Hover actions — overlaid over the right cluster, no reserved space */
-.agent-actions { position:absolute; right:6px; top:0; bottom:0; display:none; align-items:center; gap:1px; z-index:3;
-  padding-left:28px; background:linear-gradient(to right, transparent, var(--editor-bg) 42%); }
+/* Hover actions — overlaid at the right (over the ctx%), model chip stays put */
+.agent-actions { position:absolute; right:0; top:50%; transform:translateY(-50%); display:none; align-items:center; gap:1px; z-index:3;
+  padding-left:22px; background:linear-gradient(to right, transparent, var(--editor-bg) 45%); }
 .agent:hover .agent-actions { display:flex; }
-.agent:hover .agent-right { visibility:hidden; }
+.agent:hover .agent-tail .ctx-pct { visibility:hidden; }
 .agent-actions .agent-btn { opacity:1; }
 .agent-actions .btn-reset, .agent-actions .btn-close { opacity:1 !important; width:auto; padding:2px 5px; }
 .agent-btn.model { font-size:8px; font-weight:700; letter-spacing:.4px; padding:2px 5px; }
@@ -1860,15 +1862,16 @@ function render() {
           ${a.currentFileName ? `<span class="agent-current-file" title="${escAttr(a.currentFile)}" data-file="${escAttr(a.currentFile)}" onclick="event.stopPropagation();openFile(${id},this.dataset.file)">${esc(a.currentFileName)}</span>` : ''}
         </div>
         <div class="agent-right" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${agentCtxWin / 1000}K (${ctxPct}%)">
-          <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}">${mf}</span>` : ''}</span>
-          ${a.compacting ? `<span class="ctx-pct" style="min-width:auto;color:var(--accent)">compacting\u2026</span>` : `<span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>`}
-        </div>
-        <div class="agent-actions">
-          ${!a.compacting && ctxPct >= 50 && a.status === 'waiting' ? `<button class="agent-btn model" onclick="event.stopPropagation();compactAgent(${id})" title="Compact context (/compact)">compact</button>` : ''}
-          ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
-          ${mf ? `<button class="agent-btn model" onclick="event.stopPropagation();showModelMenu(event,${id})" title="Change model">${mf} \u2699</button>` : ''}
-          <button class="agent-btn btn-reset" onclick="event.stopPropagation();restartAgent(${id})" title="Reset agent (fresh session, keeps name)">&#x21BB;</button>
-          <button class="agent-btn btn-close" onclick="event.stopPropagation();closeAgent(${id})" title="Close">&times;</button>
+          <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}" onclick="event.stopPropagation();showModelMenu(event,${id})" style="cursor:pointer" title="Change model">${mf}</span>` : ''}</span>
+          <span class="agent-tail">
+            <span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>
+            <span class="agent-actions">
+              ${ctxPct >= 50 && a.status === 'waiting' ? `<button class="agent-btn model" onclick="event.stopPropagation();compactAgent(${id})" title="Compact context (/compact)">compact</button>` : ''}
+              ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
+              <button class="agent-btn btn-reset" onclick="event.stopPropagation();restartAgent(${id})" title="Reset agent (fresh session, keeps name)">&#x21BB;</button>
+              <button class="agent-btn btn-close" onclick="event.stopPropagation();closeAgent(${id})" title="Close">&times;</button>
+            </span>
+          </span>
         </div>`;
 
       // If this agent leads a team, render team members inline
@@ -3568,8 +3571,8 @@ function openSnooze(key, btn) {
   closeSnooze();
   const pop = document.createElement('div');
   pop.id = 'pr-snooze-pop';
-  pop.innerHTML = `<input id="pr-snooze-val" type="text" placeholder="30" />`
-    + `<select id="pr-snooze-unit"><option value="m">minutes</option><option value="h">hours</option></select>`
+  pop.innerHTML = `<input id="pr-snooze-val" type="text" value="4" />`
+    + `<select id="pr-snooze-unit"><option value="h">hours</option><option value="m">minutes</option></select>`
     + `<button onclick="applySnooze('${key.replace(/'/g, "\\'")}')">Snooze</button>`;
   document.body.appendChild(pop);
   const r = btn.getBoundingClientRect();
