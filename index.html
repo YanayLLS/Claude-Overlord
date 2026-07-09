@@ -226,7 +226,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent[data-status="crashed"] .agent-dot { background:var(--red); opacity:1; }
 .agent[data-status="resuming"] .agent-dot { background:var(--yellow); opacity:1; animation:pulse 2s ease-in-out infinite; }
 /* Middle flexible zone (status + current file) keeps the right cluster right-anchored */
-.agent-mid { flex:1; min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
+.agent-mid { flex:0 1 auto; min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
 /* Right cluster — fixed-width columns so model + ctx% line up across rows */
 .agent-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 .agent-model-slot { width:54px; display:flex; justify-content:flex-end; flex-shrink:0; }
@@ -309,7 +309,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pulse { animation:pulse 2s ease-in-out infinite; }
 /* Agent name badge */
 .agent-pname { font-size:10px; flex-shrink:0; padding:1px 5px; color:var(--dim); border:1px solid var(--border); border-radius:3px; background:rgba(205,214,244,.03); letter-spacing:.3px; white-space:nowrap; }
-.agent-name { font-size:12px; flex-shrink:1; max-width:46%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); min-width:24px; }
+.agent-name { font-size:12px; flex:1 1 auto; min-width:24px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
 /* Second row for status + buttons */
 .agent-bottom { display:flex; align-items:center; gap:6px; margin-top:3px; padding-left:24px; }
 /* Status line */
