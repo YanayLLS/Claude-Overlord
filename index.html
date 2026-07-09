@@ -1792,7 +1792,7 @@ function render() {
       const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
       const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
       const mf = a.stats?.modelFamily || '';
-      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" data-recap="${escAttr((a.recap || '').slice(0, 600))}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
+      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
         <span class="agent-name" onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
@@ -2617,7 +2617,6 @@ function handleAgentMsg(msg) {
     case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
-    case 'recap': { const a = agents.get(msg.id); if (a) { a.recap = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = msg.prompts.length - 1; if (selectedId === msg.id) updatePromptNav(); } break; }
     case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
@@ -2915,17 +2914,13 @@ function flashAgentCard(id) {
 }
 
 // ── Bookmarks ──────────────────────────────────────────
-function showBookmarkMenu(e, b, btn) {
+function showBookmarkMenu(e, items) {
   const old = document.getElementById('bookmark-ctx-menu');
   if (old) old.remove();
   const menu = document.createElement('div');
   menu.id = 'bookmark-ctx-menu';
   menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:130px;';
   menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
-  const items = [
-    { label: 'Rename', action: () => renameBookmark(b, btn) },
-    { label: 'Remove', cls: 'ctx-danger', action: () => api.send({ type: 'removeBookmark', path: b.path }) },
-  ];
   for (const it of items) {
     const mb = document.createElement('button');
     mb.textContent = it.label;
@@ -2974,7 +2969,10 @@ function renderBookmarks(bookmarks) {
     btn.onclick = () => api.send({ type: 'openBookmark', path: b.path });
     btn.oncontextmenu = (e) => {
       e.preventDefault();
-      showBookmarkMenu(e, b, btn);
+      showBookmarkMenu(e, [
+        { label: 'Rename', action: () => renameBookmark(b, btn) },
+        { label: 'Remove', cls: 'ctx-danger', action: () => api.send({ type: 'removeBookmark', path: b.path }) },
+      ]);
     };
     el.appendChild(btn);
   }
@@ -2982,7 +2980,10 @@ function renderBookmarks(bookmarks) {
   add.className = 'hdr-btn bookmark-add';
   add.textContent = '\u{1F516}';
   add.title = 'Add bookmark — pin a file, folder, .bat, .exe or image here for one-click opening';
-  add.onclick = () => api.send({ type: 'addBookmark' });
+  add.onclick = (e) => showBookmarkMenu(e, [
+    { label: 'Add file…', action: () => api.send({ type: 'addBookmark' }) },
+    { label: 'Add folder…', action: () => api.send({ type: 'addBookmark', dir: true }) },
+  ]);
   el.appendChild(add);
 }
 
@@ -3607,15 +3608,14 @@ document.addEventListener('click', (e) => {
   }
   function show(el) {
     const p = el.dataset.prompt || '', nm = el.dataset.aname || '', stx = el.dataset.stext || '',
-      st = el.dataset.status || '', rec = el.dataset.recap || '';
-    if (!p && !nm && !stx && !rec) { hide(); return; }
+      st = el.dataset.status || '';
+    if (!p && !nm && !stx) { hide(); return; }
     tip.innerHTML = '';
     const topRow = document.createElement('div'); topRow.className = 'tip-top';
     const n = document.createElement('div'); n.className = 'tip-name'; n.textContent = nm || 'Agent'; topRow.appendChild(n);
     if (stx) { const s = document.createElement('div'); s.className = 'tip-status'; s.dataset.st = st; s.textContent = stx; topRow.appendChild(s); }
     tip.appendChild(topRow);
     if (p) sect('Your last prompt', p);
-    if (rec) sect('Recap', rec);
     tip.style.display = 'block';
     const r = el.getBoundingClientRect();
     const tw = tip.offsetWidth, th = tip.offsetHeight;

@@ -16,7 +16,6 @@ const TOOL_DONE_DELAY_MS = 300;
 const PERMISSION_TIMER_MS = 7000;
 // TEXT_IDLE_DELAY_MS removed — turn_duration is the authoritative "done" signal
 const PREVIEW_MAX = 200;
-const RECAP_MAX = 600;
 const PROMPT_HISTORY_MAX = 50;
 const PROMPT_BRIEF_MAX = 150;
 const TITLE_MODEL = 'claude-haiku-4-5-20251001';
@@ -413,8 +412,6 @@ function wsSend(socket, data) {
 function setPrompt(id, a, text) {
   // Skip system/internal messages — they're not real user prompts
   if (isSystemMessage(text)) return;
-  if (text.trim() === '/recap') return; // our auto-injected recap command — not a user prompt
-  a.recapArmed = true; // real user prompt → auto-recap once when this turn completes
   a.lastPrompt = text.length > PREVIEW_MAX ? text.slice(0, PREVIEW_MAX) + '\u2026' : text;
   const brief = text.length > PROMPT_BRIEF_MAX ? text.slice(0, PROMPT_BRIEF_MAX) : text;
   a.promptHistory.push(brief);
@@ -1129,7 +1126,7 @@ function parseLine(id, line) {
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       const blocks = r.message.content;
-      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); if (a.awaitingRecap) { a.recap = b.text.length > RECAP_MAX ? b.text.slice(0, RECAP_MAX) + '\u2026' : b.text; send({ type: 'recap', id, text: a.recap }); } } }
+      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); } }
       if (blocks.some(b => b.type === 'tool_use')) {
         a.isWaiting = false; a.hadTools = true;
         send({ type: 'status', id, status: 'active' });
@@ -1186,14 +1183,6 @@ function parseLine(id, line) {
       send({ type: 'stats', id, stats: a.stats });
       if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
       a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0; a.spinnerText = '';
-      // Auto-/recap: after a real user turn finishes, inject /recap once and capture its output.
-      if (a.awaitingRecap) {
-        a.awaitingRecap = false; // the recap turn itself just finished
-      } else if (a.recapArmed) {
-        a.recapArmed = false;
-        const rt = terminals.get(id);
-        if (rt) { a.awaitingRecap = true; setTimeout(() => { try { rt.write('/recap\r'); } catch {} }, 400); }
-      }
       // Orphaned process finished its turn — safe to spawn a real terminal now
       if (a.orphanAlive) {
         a.orphanAlive = false;
@@ -2144,7 +2133,10 @@ function handleIpc(msg) {
       break;
     }
     case 'addBookmark':
-      dialog.showOpenDialog(mainWindow, { properties: ['openFile', 'openDirectory'], title: 'Bookmark a file or folder' })
+      // Windows/Linux can't show a combined file+directory picker, so the caller picks a mode.
+      dialog.showOpenDialog(mainWindow, msg.dir
+        ? { properties: ['openDirectory'], title: 'Bookmark a folder' }
+        : { properties: ['openFile'], title: 'Bookmark a file', filters: [{ name: 'All Files', extensions: ['*'] }] })
         .then(r => {
           if (r.canceled || !r.filePaths[0]) return;
           const p = r.filePaths[0];
