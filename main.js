@@ -1501,11 +1501,12 @@ let ghLogin = null;
 // Login of the authenticated gh user, cached after first lookup.
 function fetchGhLogin() {
   return new Promise((resolve) => {
-    if (ghLogin !== null) return resolve(ghLogin);
+    if (ghLogin) return resolve(ghLogin);
     execFile('gh', ['api', 'user', '--jq', '.login'],
       { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, stdout) => {
-        ghLogin = err ? '' : stdout.trim();
-        resolve(ghLogin);
+        const v = err ? '' : stdout.trim();
+        ghLogin = v || null; // only cache a real login; retry next poll if it failed
+        resolve(v);
       });
   });
 }
