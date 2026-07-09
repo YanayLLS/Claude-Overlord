@@ -246,8 +246,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   box-shadow:0 10px 28px rgba(0,0,0,.55); pointer-events:none; font-size:12px; line-height:1.45;
   opacity:0; transition:opacity .1s; }
 #agent-tip.show { opacity:1; }
-#agent-tip .tip-name { font-size:12px; font-weight:600; color:var(--text); margin-bottom:6px; }
-#agent-tip .tip-name + .tip-h { border-top:1px solid var(--border); padding-top:6px; }
+#agent-tip .tip-top { display:flex; justify-content:space-between; align-items:baseline; gap:14px; margin-bottom:7px; }
+#agent-tip .tip-name { font-size:12px; font-weight:600; color:var(--text); }
+#agent-tip .tip-status { font-size:10px; font-weight:600; white-space:nowrap; color:var(--dim); font-variant-numeric:tabular-nums; }
+#agent-tip .tip-status[data-st="active"] { color:var(--accent); }
+#agent-tip .tip-status[data-st="waiting"] { color:var(--green); }
+#agent-tip .tip-status[data-st="permission"] { color:var(--yellow); }
+#agent-tip .tip-status[data-st="crashed"] { color:var(--red); }
+#agent-tip .tip-status[data-st="resuming"] { color:var(--yellow); }
+#agent-tip .tip-top + .tip-h { border-top:1px solid var(--border); padding-top:6px; }
 #agent-tip .tip-b + .tip-h { margin-top:7px; border-top:1px solid var(--border); padding-top:6px; }
 #agent-tip .tip-h { font-size:9px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); font-weight:600; margin-bottom:4px; }
 #agent-tip .tip-b { color:var(--text); white-space:pre-wrap; word-break:break-word; }
@@ -405,37 +412,20 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent.selected .team-tasks-label { color:rgba(30,30,46,.7); }
 .agent.selected .team-tasks-pct { color:rgba(30,30,46,.5); }
 
-/* ── Selected & hover: subtle tint, keep normal contrast (overrides legacy bright-fill rules above) ── */
-.agent.selected { background:rgba(137,180,250,.15); border-color:rgba(137,180,250,.35); }
-.agent.selected::before { background:var(--accent); }
-.agent.has-team.selected { background:rgba(203,166,247,.15); border-color:rgba(203,166,247,.35); }
-.agent.has-team.selected::before { background:var(--purple); }
-.agent.selected .agent-name { color:var(--text); }
-.agent.selected .agent-dot { background:var(--dim); box-shadow:none; opacity:.6; }
-.agent.selected[data-status="active"] .agent-dot { background:var(--accent); opacity:1; }
-.agent.selected[data-status="waiting"] .agent-dot { background:var(--green); opacity:1; }
-.agent.selected[data-status="permission"] .agent-dot { background:var(--yellow); opacity:1; }
-.agent.selected[data-status="crashed"] .agent-dot { background:var(--red); opacity:1; }
-.agent.selected[data-status="resuming"] .agent-dot { background:var(--yellow); opacity:1; }
-.agent.selected .ctx-pct { color:var(--dim); }
-.agent.selected .ctx-pct.warn { color:var(--yellow); }
-.agent.selected .ctx-pct.danger { color:var(--red); }
-.agent.selected .model-tag { color:var(--dim); border-color:var(--border); background:rgba(205,214,244,.03); }
-.agent.selected .model-tag.opus { color:var(--purple); border-color:rgba(203,166,247,.4); }
-.agent.selected .model-tag.sonnet { color:var(--accent); border-color:rgba(137,180,250,.4); }
-.agent.selected .model-tag.haiku { color:var(--cyan); border-color:rgba(148,226,213,.4); }
-.agent.selected .model-tag.fable { color:var(--pink); border-color:rgba(245,194,231,.4); }
-.agent.selected .agent-current-file { color:var(--dim); border-color:var(--border); background:rgba(205,214,244,.03); }
-.agent.selected .agent-fill { background:rgba(137,180,250,.10); }
-.agent.selected .agent-fill.warn { background:rgba(249,226,175,.11); }
-.agent.selected .agent-fill.danger { background:rgba(243,139,168,.13); }
-.agent.selected .agent-actions { background:linear-gradient(to right, transparent, #2a2a3c 42%); }
-.agent.selected .agent-actions .agent-btn, .agent.selected .btn-reset, .agent.selected .btn-close { color:var(--dim); }
-.agent.selected .agent-actions .agent-btn:hover { color:var(--text); background:rgba(205,214,244,.1); }
-.agent.selected .btn-close:hover { color:var(--red); background:rgba(243,139,168,.14); }
-.agent.selected .team-name, .agent.selected .team-member-name, .agent.selected .subagent-name { color:var(--text); }
-.agent.selected .team-icon, .agent.selected .team-count, .agent.selected .team-member-role,
-.agent.selected .team-tasks-label, .agent.selected .team-tasks-pct, .agent.selected .subagent-activity { color:var(--dim); }
+/* ── Selected (bright accent bg): DARK text on the row, LIGHT text on the hover-action scrim ── */
+.agent.selected .agent-name { color:#1e1e2e; }
+.agent.selected .agent-dot { background:#1e1e2e; box-shadow:none; opacity:.85; }
+.agent.selected .ctx-pct { color:rgba(30,30,46,.7); }
+.agent.selected .ctx-pct.warn { color:rgba(30,30,46,.85); }
+.agent.selected .ctx-pct.danger { color:#1e1e2e; }
+.agent.selected .agent-fill { background:rgba(0,0,0,.14); }
+.agent.selected .agent-fill.warn { background:rgba(0,0,0,.18); }
+.agent.selected .agent-fill.danger { background:rgba(0,0,0,.24); }
+/* Hover actions sit on a dark scrim → light-colored UI */
+.agent.selected .agent-actions { background:linear-gradient(to right, transparent, #1e1e2e 42%); }
+.agent.selected .agent-actions .agent-btn { color:var(--text); }
+.agent.selected .agent-actions .agent-btn:hover { color:#fff; background:rgba(205,214,244,.12); }
+.agent.selected .agent-actions .btn-close:hover { color:var(--red); background:rgba(243,139,168,.14); }
 
 /* Prompt / preview */
 .agent-prompt { font-size:11px; color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-left:13px; position:relative; }
@@ -1861,7 +1851,7 @@ function render() {
       const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
       const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
       const mf = a.stats?.modelFamily || '';
-      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
+      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" data-preview="${escAttr((a.preview || '').slice(0, 300))}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
         <span class="agent-name" ondblclick="event.stopPropagation();renameAgent(${id},this)">${esc(title)}</span>
@@ -3705,12 +3695,16 @@ document.addEventListener('click', (e) => {
     const b = document.createElement('div'); b.className = 'tip-b'; b.textContent = body; tip.appendChild(b);
   }
   function show(el) {
-    const p = el.dataset.prompt || '', nm = el.dataset.aname || '', stx = el.dataset.stext || '';
-    if (!p && !nm && !stx) { hide(); return; }
+    const p = el.dataset.prompt || '', nm = el.dataset.aname || '', stx = el.dataset.stext || '',
+      st = el.dataset.status || '', rec = el.dataset.preview || '';
+    if (!p && !nm && !stx && !rec) { hide(); return; }
     tip.innerHTML = '';
-    if (nm) { const n = document.createElement('div'); n.className = 'tip-name'; n.textContent = nm; tip.appendChild(n); }
-    if (stx) sect('Status', stx);
+    const topRow = document.createElement('div'); topRow.className = 'tip-top';
+    const n = document.createElement('div'); n.className = 'tip-name'; n.textContent = nm || 'Agent'; topRow.appendChild(n);
+    if (stx) { const s = document.createElement('div'); s.className = 'tip-status'; s.dataset.st = st; s.textContent = stx; topRow.appendChild(s); }
+    tip.appendChild(topRow);
     if (p) sect('Your last prompt', p);
+    if (rec) sect('Recap', rec);
     tip.style.display = 'block';
     const r = el.getBoundingClientRect();
     const tw = tip.offsetWidth, th = tip.offsetHeight;
