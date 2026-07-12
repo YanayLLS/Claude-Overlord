@@ -3373,11 +3373,17 @@ document.addEventListener('keydown', (e) => {
 
 // ── Clipboard image paste ──────────────────────────────
 // Drag-and-drop: folders → create agent, files → insert paths into terminal
+// Only OS file drags. A card reorder is also a dragover, and this listener runs after the
+// card's (document = bubble target): forcing dropEffect='copy' against the card's
+// effectAllowed='move' makes the drop invalid, so the card snaps back.
+const isFileDrag = (e) => _dragId == null && [...(e.dataTransfer?.types || [])].includes('Files');
 document.addEventListener('dragover', (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
 });
 document.addEventListener('drop', (e) => {
+  if (!isFileDrag(e)) return;
   e.preventDefault();
   const files = e.dataTransfer.files;
   if (!files || files.length === 0) return;
