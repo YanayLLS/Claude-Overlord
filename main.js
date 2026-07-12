@@ -129,6 +129,14 @@ const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
 const pendingClearAgents = new Set(); // agentIds that recently ran /clear — used to correctly assign new JSONL files
 const termBuffers = new Map(); // agentId -> string (last TERM_BUFFER_MAX chars of terminal output)
+
+// /clear submitted: zero the context bar now. The new JSONL only appears on the next
+// prompt, and reassignAgentToFile() (which resets the rest of stats) runs then.
+function markClear(id) {
+  pendingClearAgents.add(id);
+  const a = agents.get(id);
+  if (a) { a.stats.ctxTok = 0; send({ type: 'stats', id, stats: a.stats }); }
+}
 const TERM_BUFFER_MAX = 1_000_000; // ~10k lines — matches xterm scrollback so a reload can restore the whole visible history
 let remoteWs = null; // current WebSocket connection (only one at a time)
 let remoteViewingAgent = null; // which agent the mobile client is viewing
@@ -813,9 +821,10 @@ function handleTermExit(id, exitCode) {
   terminals.delete(id);
   // If we're retrying due to --resume failure, don't treat as crash or send termExit
   if (a._resumeFailed && a._resumeRetrying) { a._resumeRetrying = false; return; }
-  // Crash = non-zero exit while agent was not idle/waiting
-  const wasActive = !a.isWaiting && (a.toolIds.size > 0 || a.hadTools);
-  const crashed = exitCode !== 0 && exitCode !== undefined && wasActive;
+  // Crash = any non-zero exit. Claude dying at the prompt (not mid-tool) is still a crash;
+  // the old `wasActive` gate silently let those through as a normal "[Session ended]".
+  // A clean exit (user typed /exit, code 0) is still not a crash.
+  const crashed = exitCode !== 0 && exitCode !== undefined;
   if (crashed) a.crashed = true; // watchdog must not flip a crashed card to 'waiting'
   if (crashed && a.crashCount < MAX_CRASH_RETRIES) {
     a.crashCount++;
@@ -1144,7 +1153,11 @@ function parseLine(id, line) {
             send({ type: 'toolStart', id, toolId: b.id, status: st, name: tn, filePath: fp });
           }
         }
-        if (nonExempt) startPermTimer(id);
+        // These tools always block on a human choice — flag now, don't wait out the timer.
+        // They also block under bypassPermissions, which startPermTimer skips.
+        if (blocks.some(b => b.type === 'tool_use' && (b.name === 'AskUserQuestion' || b.name === 'ExitPlanMode'))) {
+          clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id }); notifyPermission(id, a);
+        } else if (nonExempt) startPermTimer(id);
       }
     } else if (r.type === 'user') {
       const c = r.message?.content;
@@ -1975,7 +1988,7 @@ function handleTermInput(id, data) {
     const full = buf + data;
     const lastCR = full.lastIndexOf('\r');
     const remainder = full.slice(lastCR + 1);
-    if (/^\s*\/clear\s*$/.test(full.slice(0, lastCR))) pendingClearAgents.add(id);
+    if (/^\s*\/clear\s*$/.test(full.slice(0, lastCR))) markClear(id);
     const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     if (data.length > LONG_PASTE_THRESHOLD) {
@@ -1991,7 +2004,7 @@ function handleTermInput(id, data) {
   // Single-char handling
   if (data === '\r') {
     // Detect /clear command — mark agent as expecting a new JSONL file
-    if (/^\s*\/clear\s*$/.test(buf)) pendingClearAgents.add(id);
+    if (/^\s*\/clear\s*$/.test(buf)) markClear(id);
     const renameM = buf.match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameM) { const a = agents.get(id); if (a) { a.title = renameM[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     // Enter pressed — check buffer for mentions
@@ -2049,6 +2062,18 @@ function handleIpc(msg) {
     case 'unarchiveAgent': unarchiveAgent(msg.id); break;
     case 'renameAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); if (t) t.write(`/rename ${msg.name}\r`); } break; }
     case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); generateSummaryTitle(msg.id); } break; }
+    // Resume the SAME session after a crash — spawnTerminal re-attaches with
+    // `claude --resume <sessionId>`, keeping the conversation. restartAgent (below)
+    // throws the chat away and creates a fresh agent, so it can't serve this.
+    case 'resumeAgent': {
+      const a = agents.get(msg.id);
+      if (a && !terminals.has(msg.id)) {
+        a.crashCount = 0; a.crashed = false; a._resumeFailed = false;
+        send({ type: 'crashCleared', id: msg.id });
+        spawnTerminal(msg.id);
+      }
+      break;
+    }
     case 'restartAgent': {
       const a = agents.get(msg.id);
       if (a) {

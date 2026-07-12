@@ -36,8 +36,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #header h1 span { color:var(--accent); font-weight:600; }
 #headerBadges { display:flex; gap:4px; align-items:center; }
 #headerBadges:empty { display:none; }
-#bookmarks { display:flex; gap:4px; align-items:center; min-width:0; overflow:hidden; }
-.bookmark { max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:4px; }
+/* names are no longer truncated, so scroll rather than clip when the row runs long */
+#bookmarks { display:flex; gap:4px; align-items:center; min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+#bookmarks::-webkit-scrollbar { display:none; }
+.bookmark { white-space:nowrap; flex-shrink:0; border-radius:4px; } /* width follows the name — no truncation */
 .bookmark-add { opacity:.5; }
 .bookmark-add:hover { opacity:1; }
 #pr-badge { align-items:center; gap:8px; padding:5px 12px; border-top:1px solid var(--border); background:var(--title-bg); font-size:11px; color:var(--text); cursor:pointer; letter-spacing:.3px; flex-shrink:0; user-select:none; }
@@ -536,10 +538,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 .server-badge:hover { color:#fff; background:rgba(148,226,213,.15); border-color:var(--cyan); }
 .server-badge .server-menu-btn {
-  font-size:11px; line-height:1; opacity:.4; cursor:pointer; padding:0 2px; font-weight:bold;
-  transition:opacity .12s;
+  font-size:11px; line-height:1; opacity:.4; padding:0 2px; font-weight:bold;
+  transition:opacity .12s; pointer-events:none; /* whole chip opens the menu */
 }
-.server-badge .server-menu-btn:hover { opacity:1; color:var(--text); }
+.server-badge:hover .server-menu-btn { opacity:1; }
+.server-badge .server-count {
+  font-size:9px; line-height:1; padding:1px 4px; border-radius:6px; font-weight:600;
+  background:rgba(148,226,213,.18); color:var(--cyan);
+}
+.server-badge:hover .server-count { background:rgba(255,255,255,.2); color:#fff; }
 
 /* ── Terminal panel — right side ── */
 #term { display:none; flex-direction:column; border-left:1px solid var(--border); flex-shrink:0; height:auto; width:50%; min-width:200px; min-height:0; flex:none; }
@@ -576,6 +583,27 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 #scroll-bottom-btn:hover { opacity:1; background:var(--surface1); }
 #scroll-bottom-btn.visible { display:block; }
+#term-name-chip {
+  display:none; position:absolute; bottom:8px; left:10px; z-index:9; pointer-events:none;
+  max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:10px; letter-spacing:.3px; padding:2px 8px; border-radius:4px;
+  border-left:2px solid var(--blue); background:rgba(30,30,46,.82); color:var(--dim);
+}
+#term-name-chip.visible { display:block; }
+/* bottom offset is set from terminal row height in positionNameChip() */
+#term-dead {
+  display:none; position:absolute; left:0; right:0; bottom:0; z-index:11;
+  align-items:center; gap:10px; padding:8px 12px;
+  background:rgba(243,139,168,.12); border-top:1px solid var(--red);
+  backdrop-filter:blur(2px);
+}
+#term-dead.visible { display:flex; }
+#term-dead-msg { flex:1; font-size:11px; color:var(--red); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#term-resume-btn {
+  flex-shrink:0; cursor:pointer; font:inherit; font-size:11px; padding:3px 10px;
+  border-radius:4px; border:1px solid var(--red); background:var(--surface0); color:var(--text);
+}
+#term-resume-btn:hover { background:var(--red); color:#1e1e2e; }
 
 /* ── Terminal search bar ── */
 #term-search {
@@ -944,7 +972,7 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
+    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
     <div id="timeline-events"></div>
   </div>
   </div><!-- end #content -->
@@ -1501,7 +1529,25 @@ function showAgentMenu(e, id) {
 function openUrl(url) { api.send({ type: 'openUrl', url }); }
 function killServer(port) { api.send({ type: 'killServer', port }); }
 function restartServer(port) { api.send({ type: 'restartServer', port }); }
-function showServerMenu(e, port, url) {
+// Servers per group, keyed by cwd — set during render so the badge's onclick can look
+// them up instead of trying to smuggle a list through an HTML attribute.
+const _groupServers = new Map(); // cwd -> [[port, url], ...]
+
+function showServersMenu(e, cwd) {
+  const servers = _groupServers.get(cwd) || [];
+  if (!servers.length) return;
+  const items = [];
+  for (const [port, url] of servers) {
+    if (items.length) items.push({ sep: true });
+    items.push({ header: `:${port}` });
+    items.push({ label: 'Open in browser', action: () => openUrl(url) });
+    items.push({ label: 'Restart', action: () => restartServer(port) });
+    items.push({ label: 'Remove', action: () => killServer(port), cls: 'ctx-danger' });
+  }
+  showServerMenu(e, items);
+}
+
+function showServerMenu(e, items) {
   e.stopPropagation(); e.preventDefault();
   const old = document.getElementById('server-ctx-menu');
   if (old) old.remove();
@@ -1509,14 +1555,9 @@ function showServerMenu(e, port, url) {
   menu.id = 'server-ctx-menu';
   menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:140px;';
   menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
-  const items = [
-    { label: 'Open in browser', action: () => openUrl(url) },
-    { sep: true },
-    { label: 'Restart', action: () => restartServer(port) },
-    { label: 'Remove', action: () => killServer(port), cls: 'ctx-danger' },
-  ];
   for (const it of items) {
     if (it.sep) { const hr = document.createElement('div'); hr.style.cssText = 'height:1px;background:var(--border);margin:3px 0;'; menu.appendChild(hr); continue; }
+    if (it.header) { const h = document.createElement('div'); h.textContent = it.header; h.style.cssText = 'font-size:10px;letter-spacing:.4px;color:var(--cyan);padding:4px 12px 2px;font-weight:600;'; menu.appendChild(h); continue; }
     const btn = document.createElement('button');
     btn.textContent = it.label;
     btn.className = it.cls || '';
@@ -1753,7 +1794,12 @@ function render() {
     let serverBadges = '';
     if (gServers.size > 0) {
       const sorted = [...gServers.entries()].sort((a, b) => a[0] - b[0]);
-      serverBadges = `<div class="group-servers">${sorted.map(([port, url]) => `<a class="server-badge" onclick="event.stopPropagation();openUrl('${escAttr(url)}')" title="${escAttr(url)}">:${port}<span class="server-menu-btn" onclick="showServerMenu(event,${port},'${escAttr(url)}')" title="Server options">&#x22EE;</span></a>`).join('')}</div>`;
+      _groupServers.set(cwd, sorted);
+      const tip = sorted.map(([p]) => ':' + p).join('  ');
+      // One chip, not one per port — the ports live in its menu.
+      serverBadges = `<div class="group-servers"><a class="server-badge" onclick="showServersMenu(event,'${escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="${escAttr(tip)}">localhosts <span class="server-count">${sorted.length}</span><span class="server-menu-btn">&#x22EE;</span></a></div>`;
+    } else {
+      _groupServers.delete(cwd);
     }
 
     const safeCwd = escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
@@ -1950,6 +1996,12 @@ function render() {
 // ── Terminal panel (real xterm.js) ──────────────────────
 const xterms = new Map(); // id -> { terminal, fitAddon, searchAddon, el }
 const container = document.getElementById('term-container');
+// termData that arrived while #term was closed (container unmeasurable). Creating an xterm
+// then would pin it to 80x24 and force a scrollback reflow on first open. Held here, flushed
+// by createXterm once the terminal has been fit to real dimensions.
+const pendingTermData = new Map(); // id -> string
+const PENDING_TERM_MAX = 1_000_000; // matches main.js TERM_BUFFER_MAX
+const termMeasurable = () => container.clientWidth > 0 && container.clientHeight > 0;
 container.addEventListener('click', () => {
   if (selectedId != null && termTab === 'terminal') {
     const x = xterms.get(selectedId);
@@ -1959,7 +2011,11 @@ container.addEventListener('click', () => {
 
 function createXterm(id) {
   const el = document.createElement('div');
-  el.style.cssText = 'position:absolute;inset:0;padding:6px 0 6px 8px;display:none;';
+  // visibility (not display) so the element keeps layout dims — xterm must be able to
+  // measure itself at open() time. Opening into a display:none element pins it to 80x24;
+  // the scrollback replay then lands at 80 cols and the first fit() reflows 10k lines,
+  // desyncing baseY/viewport (scroll jumps, can't reach the prompt line).
+  el.style.cssText = 'position:absolute;inset:0;padding:6px 0 6px 8px;visibility:hidden;';
   container.appendChild(el);
   const fitAddon = new XFitAddon();
   const terminal = new XTerminal({
@@ -1976,6 +2032,10 @@ function createXterm(id) {
   terminal.loadAddon(imageAddon);
   terminal.loadAddon(webLinksAddon);
   terminal.open(el);
+  // Fit NOW, while the buffer is empty — reflowing later (after the scrollback replay)
+  // is what corrupts the viewport. Skipped when #term is closed (container has no size);
+  // showXterm's first-show fit covers that case, and the buffer is still small then.
+  if (termMeasurable()) { try { fitAddon.fit(); } catch {} }
   // File path link provider — detects Windows/Unix paths with optional :line:col
   terminal.registerLinkProvider({
     provideLinks(y, callback) {
@@ -2008,17 +2068,26 @@ function createXterm(id) {
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
+    // Ctrl+C with no selection: Claude clears the input box. Copy what was typed first so it isn't lost.
+    if (e.ctrlKey && e.key === 'c' && !terminal.hasSelection()) { const t = readPromptBox(terminal); if (t) navigator.clipboard.writeText(t); return true; }
     if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
     if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
+    // Bare PageUp/PageDown cycle agents. xterm binds them to scrollPages and its cancel()
+    // calls stopPropagation(), which would kill the event before the document handler sees
+    // it. Shift+PageUp/Down still scrolls the terminal.
+    if ((e.key === 'PageUp' || e.key === 'PageDown') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) return false;
     if (e.shiftKey && e.key === 'Enter') { api.send({ type: 'termInput', id, data: '\n' }); return false; }
     return true;
   });
   xterms.set(id, { terminal, fitAddon, searchAddon, el });
+  const pend = pendingTermData.get(id);
+  if (pend) { pendingTermData.delete(id); terminal.write(pend, () => terminal.scrollToBottom()); }
   return { terminal, fitAddon, searchAddon, el };
 }
 
 function destroyXterm(id) {
+  pendingTermData.delete(id);
   const x = xterms.get(id); if (!x) return;
   x.terminal.dispose(); x.el.remove(); xterms.delete(id);
 }
@@ -2029,6 +2098,45 @@ function updateScrollBtn() {
   if (!x || termTab !== 'terminal') { btn.classList.remove('visible'); return; }
   const atBottom = x.terminal.buffer.active.viewportY >= x.terminal.buffer.active.baseY;
   btn.classList.toggle('visible', !atBottom);
+}
+
+// Park the chip just above Claude's input box. The box is ~4 rows tall (borders + hint
+// line), so anchor in row-heights rather than px — that tracks font size and zoom.
+const CHIP_ROWS_FROM_BOTTOM = 4;
+function positionNameChip() {
+  const chip = document.getElementById('term-name-chip');
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  if (!x || termTab !== 'terminal') { chip.classList.remove('visible'); return; }
+  const rows = x.terminal.rows || 24;
+  const rowH = x.el.clientHeight / rows;
+  chip.style.bottom = Math.round(rowH * CHIP_ROWS_FROM_BOTTOM + 4) + 'px';
+  chip.classList.add('visible');
+}
+
+// Dead-terminal banner: the PTY exited and nothing is auto-resuming it.
+// a.dead holds the reason string, or null when the terminal is alive.
+function updateDeadOverlay() {
+  const bar = document.getElementById('term-dead');
+  const a = selectedId != null ? agents.get(selectedId) : null;
+  if (!a || !a.dead || termTab !== 'terminal') { bar.classList.remove('visible'); return; }
+  document.getElementById('term-dead-msg').textContent = a.dead;
+  bar.classList.add('visible');
+}
+
+function resumeSelected() {
+  if (selectedId == null) return;
+  const a = agents.get(selectedId);
+  if (a) a.dead = null;
+  updateDeadOverlay();
+  api.send({ type: 'resumeAgent', id: selectedId });
+}
+
+function markDead(id, reason) {
+  const a = agents.get(id);
+  if (!a) return;
+  a.dead = reason;
+  if (selectedId === id) updateDeadOverlay();
+  scheduleRender();
 }
 
 function scrollTermBottom() {
@@ -2046,7 +2154,8 @@ function fitPreservingScroll(x) {
 }
 
 function showXterm(id) {
-  for (const [xid, x] of xterms) x.el.style.display = xid === id ? '' : 'none';
+  // visibility, not display — a display:none xterm loses its dims and reflows on re-show
+  for (const [xid, x] of xterms) x.el.style.visibility = xid === id ? 'visible' : 'hidden';
   const x = xterms.get(id);
   if (x) { setTimeout(() => {
     if (!xterms.has(id)) return;
@@ -2060,7 +2169,29 @@ function showXterm(id) {
     if (!_renaming) x.terminal.focus();
     sendResize(id, x);
     updateScrollBtn();
+    positionNameChip();
+    updateDeadOverlay();
   }, 50); }
+}
+
+// Extract the text the user typed in Claude's input box from the visible buffer.
+// ponytail: scans the on-screen rows for the bordered box (│ … │) and strips the
+// "> " marker. Handles multi-line input; misses text scrolled out of view (rare).
+function readPromptBox(terminal) {
+  const buf = terminal.buffer.active;
+  const cursorAbs = buf.baseY + buf.cursorY;
+  const inner = (y) => {
+    const ln = buf.getLine(y); if (!ln) return null;
+    const m = ln.translateToString(true).match(/^\s*[│|]\s?(.*?)\s*[│|]\s*$/);
+    return m ? m[1] : null;
+  };
+  if (inner(cursorAbs) === null) return ''; // cursor not in a bordered box → nothing to grab
+  let top = cursorAbs, bot = cursorAbs;
+  while (inner(top - 1) !== null) top--;
+  while (inner(bot + 1) !== null) bot++;
+  const lines = [];
+  for (let y = top; y <= bot; y++) lines.push(inner(y).replace(/^[>❯]\s?/, ''));
+  return lines.join('\n').trim();
 }
 
 function sendResize(id, x) {
@@ -2076,6 +2207,7 @@ function openTerm(id) {
   const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
   const namePrefix = a.agentName ? a.agentName + ' \u2014 ' : '';
   document.getElementById('term-title').textContent = namePrefix + title + ' \u2014 ' + pathLabel(a.cwd || '');
+  document.getElementById('term-name-chip').textContent = title; // no agentName prefix
   if (!xterms.has(id)) createXterm(id);
   if (termTab === 'terminal') showXterm(id);
   // Update prompt nav after xterm exists and buffer has time to populate
@@ -2233,6 +2365,8 @@ function switchTermTab(tab) {
   }
   updatePromptNav();
   updateScrollBtn();
+  positionNameChip();
+  updateDeadOverlay();
 }
 
 function loadTimeline(id) {
@@ -2468,9 +2602,11 @@ let fitRaf = 0;
 function schedFit() {
   cancelAnimationFrame(fitRaf);
   fitRaf = requestAnimationFrame(() => {
-    for (const [, x] of xterms) {
-      if (x.el.style.display !== 'none') { try { fitPreservingScroll(x); } catch {} }
-    }
+    if (container.clientWidth <= 0 || container.clientHeight <= 0) return; // term panel closed
+    // Fit every xterm, not just the visible one — a background terminal left at the old
+    // width would reflow (and desync its viewport) the moment you switch to it.
+    for (const [, x] of xterms) { try { fitPreservingScroll(x); } catch {} }
+    positionNameChip();
   });
 }
 new ResizeObserver(schedFit).observe(container);
@@ -2495,18 +2631,28 @@ api.on((msg) => {
     let x = xterms.get(msg.id);
     if (!x) {
       if (!agents.has(msg.id)) return; // Agent was closed, ignore late data
+      if (!termMeasurable()) {
+        // #term is closed — can't size an xterm yet. Buffer; createXterm flushes it post-fit.
+        let p = (pendingTermData.get(msg.id) || '') + msg.data;
+        if (p.length > PENDING_TERM_MAX) p = p.slice(-PENDING_TERM_MAX);
+        pendingTermData.set(msg.id, p);
+        return;
+      }
       x = createXterm(msg.id);
     }
     const buf = x.terminal.buffer.active;
     const nearBottom = buf.baseY - buf.viewportY <= 5;
     x.terminal.write(msg.data);
     if (nearBottom) x.terminal.scrollToBottom();
+    const ag = agents.get(msg.id);
+    if (ag && ag.dead) { ag.dead = null; if (msg.id === selectedId) updateDeadOverlay(); scheduleRender(); } // terminal is talking again
     if (msg.id === selectedId) { schedulePromptNavUpdate(); updateScrollBtn(); }
     return;
   }
   if (msg.type === 'termExit') {
     const x = xterms.get(msg.id);
     if (x) x.terminal.write('\r\n\x1b[33m[Session ended]\x1b[0m\r\n');
+    markDead(msg.id, 'Session ended — the terminal exited.');
     return;
   }
   handleAgentMsg(msg);
@@ -2612,14 +2758,15 @@ function handleAgentMsg(msg) {
     case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
     case 'subToolStart': { const a = agents.get(msg.id); if (a) { let subs = a.subTools.get(msg.parentToolId); if (!subs) { subs = new Map(); a.subTools.set(msg.parentToolId, subs); } subs.set(msg.toolId, { status: msg.status, name: msg.name, done: false }); scheduleRender(); } break; }
     case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
-    case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; scheduleRender(); } break; }
+    case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
+    case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
     case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = true; } scheduleRender(); } break; }
     case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
-    case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
+    case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = msg.prompts.length - 1; if (selectedId === msg.id) updatePromptNav(); } break; }
-    case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); } scheduleRender(); } break; }
+    case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
@@ -2940,7 +3087,10 @@ function showBookmarkMenu(e, items) {
 function renameBookmark(b, btn) {
   const input = document.createElement('input');
   input.type = 'text'; input.value = b.name;
-  input.style.cssText = 'font:inherit;font-size:12px;color:var(--text);background:var(--card);border:1px solid var(--accent);outline:none;padding:0 4px;width:110px;';
+  input.style.cssText = 'font:inherit;font-size:12px;color:var(--text);background:var(--card);border:1px solid var(--accent);outline:none;padding:0 4px;flex-shrink:0;';
+  const autoWidth = () => { input.size = Math.max(8, input.value.length + 1); };
+  autoWidth();
+  input.oninput = autoWidth;
   const commit = () => {
     const name = input.value.trim();
     if (name && name !== b.name) api.send({ type: 'renameBookmark', path: b.path, name });
@@ -3696,7 +3846,7 @@ document.addEventListener('wheel', (e) => {
   api.setZoom(uiZoom / 100);
   persistSettings();
   const x = xterms.get(selectedId);
-  if (x) setTimeout(() => fitPreservingScroll(x), 50);
+  if (x) setTimeout(() => { fitPreservingScroll(x); positionNameChip(); }, 50);
 }, { passive: false });
 
 
