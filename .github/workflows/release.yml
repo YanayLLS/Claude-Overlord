@@ -54,3 +54,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist -- --publish always
+
+      # electron-builder can create the GitHub release as a draft, which is invisible to
+      # users and ignored by auto-update. Force it public + latest so releases actually ship.
+      - name: Publish release (un-draft + mark latest)
+        if: steps.check.outputs.EXISTS == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit ${{ steps.version.outputs.TAG }} --draft=false --latest --repo ${{ github.repository }}

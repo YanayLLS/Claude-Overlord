@@ -8,7 +8,7 @@
 :root {
   --bg: #1e1e2e; --bg2: #181825; --bg3: #252536; --border: #313244; --border-hi: #45475a;
   --accent: #89b4fa; --green: #a6e3a1; --text: rgba(205,214,244,.95); --dim: rgba(166,173,200,.5);
-  --yellow: #f9e2af; --red: #f38ba8; --purple: #cba6f7; --cyan: #94e2d5; --pink: #f5c2e7;
+  --yellow: #f9e2af; --red: #f38ba8; --purple: #cba6f7; --cyan: #94e2d5; --pink: #f5c2e7; --peach: #fab387;
   --shadow: #11111b; --card: #1e1e2e;
   --surface0: #313244; --surface1: #45475a; --surface2: #585b70;
   --title-bg: #181825; --panel-bg: #181825; --editor-bg: #1e1e2e;
@@ -78,6 +78,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-refresh { background:none; border:none; color:var(--text); font-size:14px; cursor:pointer; padding:0 4px; line-height:1; }
 .pr-refresh:hover { color:var(--accent); }
 .pr-refresh.spin { animation:pr-spin .7s linear infinite; }
+.pr-dhead-btns { display:flex; align-items:center; gap:2px; }
+.pr-close:hover { color:var(--red); }
 @keyframes pr-spin { to { transform:rotate(360deg); } }
 .pr-row:last-child { border-bottom:none; }
 .pr-row:hover { background:var(--bg3); }
@@ -86,6 +88,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-row.pr-req:hover { background:rgba(243,139,168,.2); }
 .pr-row.pr-mergeable, .pr-row.pr-mergeable:hover { background:rgba(166,227,161,.13); border-left:2px solid var(--green); }
 .pr-row.pr-mergeable:hover { background:rgba(166,227,161,.2); }
+/* Last: conflicts outrank "needs review" when a PR is both. */
+.pr-row.pr-conflict, .pr-row.pr-conflict:hover { background:rgba(250,179,135,.15); border-left:2px solid var(--peach); }
+.pr-row.pr-conflict:hover { background:rgba(250,179,135,.22); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
 .pr-empty { padding:12px; color:var(--dim); font-size:12px; }
 #header .badge {
@@ -104,6 +109,14 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 #addBtn:hover { opacity:.85; }
 #addBtn:active { opacity:.7; }
+#featBtn {
+  font-family:inherit; font-size:11px; padding:4px 12px; cursor:pointer;
+  font-weight:600; letter-spacing:.3px; border-radius:4px;
+  color:var(--accent); background:transparent; border:1px solid var(--accent);
+  transition:background .15s, color .15s;
+}
+#featBtn:hover { background:var(--accent); color:var(--title-bg); }
+#featBtn:active { opacity:.8; }
 .hdr-btn {
   font-family:inherit; font-size:14px; padding:4px 6px; background:transparent;
   color:var(--dim); border:none; border-radius:4px; cursor:pointer;
@@ -231,7 +244,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent-fill.warn { background:rgba(249,226,175,.11); }
 .agent-fill.danger { background:rgba(243,139,168,.13); }
 /* Status dot (replaces the per-agent icon) */
-.agent-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; background:var(--dim); opacity:.5; }
+.agent-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; background:var(--dim); opacity:.5; position:relative; }
+.agent-dot::after { content:''; position:absolute; inset:-6px; border-radius:50%; } /* larger hover hit-area for the tooltip */
 .agent[data-status="active"] .agent-dot { background:var(--accent); opacity:1; box-shadow:0 0 0 3px rgba(137,180,250,.15); animation:pulse 2s ease-in-out infinite; }
 .agent[data-status="waiting"] .agent-dot { background:var(--green); opacity:1; }
 .agent[data-status="permission"] .agent-dot { background:var(--yellow); opacity:1; box-shadow:0 0 0 3px rgba(249,226,175,.15); }
@@ -254,25 +268,28 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent-actions .agent-btn { opacity:1; }
 .agent-actions .btn-close { opacity:1 !important; width:20px; padding:0; }
 .agent-btn.model { font-size:8px; font-weight:700; letter-spacing:.4px; padding:2px 5px; }
-/* Hover tooltip — last prompt */
-#agent-tip { position:fixed; z-index:1000; max-width:340px; background:var(--bg2,#181825);
-  border:1px solid var(--border-hi,#45475a); border-radius:8px; padding:8px 11px;
-  box-shadow:0 10px 28px rgba(0,0,0,.55); pointer-events:none; font-size:12px; line-height:1.45;
+/* Hover tooltip — last prompts (shown on the status dot) */
+#agent-tip { position:fixed; z-index:1000; max-width:300px; max-height:60vh; overflow:hidden; background:var(--bg2,#181825);
+  border:1px solid var(--border-hi,#45475a); border-radius:8px; padding:7px 10px;
+  box-shadow:0 10px 28px rgba(0,0,0,.55); pointer-events:none; font-size:10px; line-height:1.4;
   opacity:0; transition:opacity .1s; }
 #agent-tip.show { opacity:1; }
-#agent-tip .tip-top { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:7px; }
-#agent-tip .tip-name { font-size:12px; font-weight:600; color:var(--text); flex:0 0 auto; }
-#agent-tip .tip-status { font-size:10px; font-weight:600; color:var(--dim); font-variant-numeric:tabular-nums;
+#agent-tip .tip-top { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:5px; }
+#agent-tip .tip-name { font-size:11px; font-weight:600; color:var(--text); flex:0 0 auto; }
+#agent-tip .tip-status { font-size:9px; font-weight:600; color:var(--dim); font-variant-numeric:tabular-nums;
   flex:1 1 auto; min-width:0; text-align:right; overflow-wrap:anywhere; }
 #agent-tip .tip-status[data-st="active"] { color:var(--accent); }
 #agent-tip .tip-status[data-st="waiting"] { color:var(--green); }
 #agent-tip .tip-status[data-st="permission"] { color:var(--yellow); }
 #agent-tip .tip-status[data-st="crashed"] { color:var(--red); }
 #agent-tip .tip-status[data-st="resuming"] { color:var(--yellow); }
-#agent-tip .tip-top + .tip-h { border-top:1px solid var(--border); padding-top:6px; }
-#agent-tip .tip-b + .tip-h { margin-top:7px; border-top:1px solid var(--border); padding-top:6px; }
-#agent-tip .tip-h { font-size:9px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); font-weight:600; margin-bottom:4px; }
-#agent-tip .tip-b { color:var(--text); white-space:pre-wrap; word-break:break-word; }
+#agent-tip .tip-top + .tip-h { border-top:1px solid var(--border); padding-top:5px; }
+#agent-tip .tip-h { font-size:8px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); font-weight:600; margin-bottom:4px; }
+#agent-tip .tip-b { color:var(--text); white-space:pre-wrap; word-break:break-word; font-size:10px; }
+/* Each prompt: compact, capped at ~3 lines so 5 fit without overflowing the screen. */
+#agent-tip .tip-prompt { color:var(--subtext,#bac2de); padding:3px 0; border-top:1px solid rgba(69,71,90,.5);
+  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+#agent-tip .tip-prompt:first-of-type { border-top:none; }
 .agent.dragging { opacity:0.3; }
 .agent.drag-over-top { border-top:2px solid var(--accent); margin-top:-1px; }
 .agent.drag-over-bottom { border-bottom:2px solid var(--accent); margin-bottom:-1px; }
@@ -541,6 +558,30 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   text-decoration:none; display:inline-flex; align-items:center; gap:4px;
 }
 .server-badge:hover { color:#fff; background:rgba(148,226,213,.15); border-color:var(--cyan); }
+.server-badge.running { color:#a6e3a1; background:rgba(166,227,161,.08); border-color:rgba(166,227,161,.4); }
+.server-badge.running:hover { color:#fff; background:rgba(166,227,161,.18); border-color:#a6e3a1; }
+.wt-branch { text-transform:none; color:var(--blue,#89b4fa); font-weight:600; letter-spacing:0; }
+.wt-state { font-size:10px; padding:2px 6px; border-radius:3px; flex-shrink:0; letter-spacing:.3px; }
+.wt-state.setup { color:#f9e2af; background:rgba(249,226,175,.08); border:1px solid rgba(249,226,175,.35); }
+.wt-state.failed { color:#f38ba8; background:rgba(243,139,168,.08); border:1px solid rgba(243,139,168,.4); }
+.wt-port { font-size:10px; padding:2px 6px; border-radius:3px; flex-shrink:0; color:var(--subtext,#a6adc8); background:rgba(148,226,213,.05); border:1px solid rgba(148,226,213,.2); font-family:monospace; cursor:pointer; text-decoration:none; transition:color .12s, border-color .12s; }
+.wt-port:hover { color:var(--cyan,#94e2d5); border-color:var(--cyan,#94e2d5); }
+.group.is-worktree > .group-header { border-left:2px solid var(--blue,#89b4fa); }
+.feature { margin:6px 0 10px; border:1px solid rgba(137,180,250,.35); border-radius:6px; background:rgba(137,180,250,.04); }
+.feature-header { display:flex; align-items:center; gap:8px; padding:6px 10px; cursor:pointer; user-select:none; }
+.feature-header:hover { background:rgba(137,180,250,.08); }
+.feature-icon { color:var(--blue,#89b4fa); }
+.feature-name { font-weight:700; font-size:12px; letter-spacing:.4px; color:var(--text); }
+.feature-summary { font-size:10px; color:var(--subtext,#a6adc8); }
+.feature-header .group-menu-wrap { margin-left:auto; }
+.feature-body { padding:2px 6px 6px; }
+.feature.collapsed .feature-body { display:none; }
+.feature.collapsed .feature-header .group-chevron { transform:rotate(-90deg); }
+.feature .group { margin-left:6px; }
+.branch-menu { position:absolute; top:100%; left:0; right:0; z-index:100; margin-top:2px; max-height:220px; overflow-y:auto;
+  background:#11111b; border:1px solid #45475a; border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.5); }
+.branch-item { padding:5px 8px; font-size:12px; color:#cdd6f4; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.branch-item:hover { background:rgba(137,180,250,.18); }
 .server-badge .server-menu-btn {
   font-size:11px; line-height:1; opacity:.4; padding:0 2px; font-weight:bold;
   transition:opacity .12s; pointer-events:none; /* whole chip opens the menu */
@@ -939,6 +980,7 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Restart app">&#x1F504;</button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
+    <button id="featBtn" onclick="openNewFeature()" title="Create a feature: one branch across multiple repos">+ Feature</button>
     <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account">&#x1F464; No account</button>
   </div>
   <div id="content">
@@ -1126,20 +1168,300 @@ function ctxWindow(modelFamily, ctxTok) {
 const agents = new Map(); // id -> { cwd, status, tools:Map, prompt, preview, stats, sessionId, servers:Map(port->url) }
 const teamMap = new Map(); // teamName -> { name, leadAgentId, members[], tasks[] }
 const knownProjects = new Set(); // cwd paths that persist even when all agents are closed
+let worktrees = []; // [{path, repo, branch, base, port, status}] — from settings, groups render even with 0 agents
+let projects = {}; // repo path -> {devCommand, urlTemplate, basePort, portStep, seedFiles, defaultBase}
+let lastFeatureRepos = []; // repos chosen in the last feature, prefilled next time
+const wtRunning = new Map(); // worktree path -> {port, url} for a running dev server
+function worktreeAt(p) { return worktrees.find(w => w.path === p) || null; }
 let selectedId = null;
 let filterText = '';
 let filterReady = false;
 const collapsedGroups = new Set();
 function toggleGroup(cwd) { if (collapsedGroups.has(cwd)) collapsedGroups.delete(cwd); else collapsedGroups.add(cwd); render(); }
 
+let _openMenu = null; // dataset.menu key of the currently-open dropdown, so a re-render can restore it
 function toggleGroupMenu(btn) {
   const dd = btn.nextElementSibling;
   const wasOpen = dd.classList.contains('open');
   closeGroupMenus();
-  if (!wasOpen) dd.classList.add('open');
+  if (!wasOpen) { dd.classList.add('open'); _openMenu = dd.dataset.menu || null; }
 }
-function closeGroupMenus() { document.querySelectorAll('.group-dropdown.open').forEach(d => d.classList.remove('open')); }
-function removeProject(cwd) { knownProjects.delete(cwd); render(); }
+function closeGroupMenus() { document.querySelectorAll('.group-dropdown.open').forEach(d => d.classList.remove('open')); _openMenu = null; }
+function restoreOpenMenu() {
+  if (_openMenu == null) return;
+  document.querySelectorAll('.group-dropdown').forEach(d => { if (d.dataset.menu === _openMenu) d.classList.add('open'); });
+}
+function persistProjects() { api.send({ type: 'saveProjects', dirs: [...knownProjects] }); }
+function addKnownProject(cwd) { if (cwd && !knownProjects.has(cwd)) { knownProjects.add(cwd); persistProjects(); } }
+function removeProject(cwd) { knownProjects.delete(cwd); persistProjects(); render(); }
+
+// ── Worktrees (client) ──────────────────────────────────
+function send(m) { api.send(m); }
+function fillPort(template, base) { return String(template || 'http://localhost:{port}').replace(/\{port([+-]\d+)?\}/g, (_, off) => String(Number(base) + (off ? parseInt(off, 10) : 0))); }
+let _branchCbs = {}, _projectCb = null, _wtRepo = null, _cfgRepo = null;
+
+function wtOverlay() {
+  let el = document.getElementById('wt-overlay');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'wt-overlay';
+  el.style.cssText = 'display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.55);align-items:center;justify-content:center';
+  el.onclick = (e) => { if (e.target === el) el.style.display = 'none'; };
+  document.body.appendChild(el);
+  return el;
+}
+function closeWt() { const el = document.getElementById('wt-overlay'); if (el) el.style.display = 'none'; }
+
+function openNewWorktree(repo) {
+  _wtRepo = repo;
+  const el = wtOverlay();
+  el.innerHTML = `<div style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:10px;padding:20px;width:440px;max-width:90vw;font-size:13px">
+    <div style="font-weight:600;font-size:15px;margin-bottom:4px">New worktree</div>
+    <div style="color:#a6adc8;margin-bottom:14px">${esc(pathLabel(repo))} &#x2014; isolated branch + folder + agents</div>
+    <label style="display:block;margin-bottom:4px">Branch name</label>
+    <input id="wt-branch" placeholder="feat/my-feature" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:12px">
+    <label style="display:block;margin-bottom:4px">Base branch (fork from + PR into)</label>
+    <select id="wt-base" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:16px"><option>loading branches…</option></select>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="closeWt()" style="padding:7px 14px;background:#313244;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer">Cancel</button>
+      <button id="wt-create" onclick="submitWorktree()" style="padding:7px 14px;background:#89b4fa;color:#11111b;border:none;border-radius:6px;font-weight:600;cursor:pointer">Create</button>
+    </div></div>`;
+  el.style.display = 'flex';
+  const branchInput = document.getElementById('wt-branch');
+  branchInput.focus();
+  branchInput.onkeydown = (e) => { if (e.key === 'Enter') submitWorktree(); if (e.key === 'Escape') closeWt(); };
+  _branchCbs[repo] = (branches, err) => {
+    const sel = document.getElementById('wt-base');
+    if (!sel) return;
+    if (err || !branches || !branches.length) { sel.innerHTML = '<option value="dev">dev</option>'; return; }
+    sel.innerHTML = branches.map(b => `<option value="${escAttr(b)}"${b === 'dev' ? ' selected' : ''}>${esc(b)}</option>`).join('');
+  };
+  send({ type: 'listBranches', repo });
+}
+function submitWorktree() {
+  const branch = document.getElementById('wt-branch').value.trim();
+  const base = document.getElementById('wt-base').value;
+  if (!branch) { document.getElementById('wt-branch').focus(); return; }
+  send({ type: 'createWorktree', repo: _wtRepo, branch, base });
+  closeWt();
+}
+
+function openProjectConfig(repo) {
+  _cfgRepo = repo;
+  const el = wtOverlay();
+  el.innerHTML = `<div style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:10px;padding:20px;width:520px;max-width:92vw;font-size:13px">
+    <div style="font-weight:600;font-size:15px;margin-bottom:4px">Dev server config</div>
+    <div style="color:#a6adc8;margin-bottom:14px">${esc(pathLabel(repo))} &#x2014; how Overlord starts this repo's server. Use <code>{port}</code> where the port goes.</div>
+    <label style="display:block;margin-bottom:4px">Dev command</label>
+    <input id="cfg-cmd" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:12px;font-family:monospace">
+    <label style="display:block;margin-bottom:4px">URL template</label>
+    <input id="cfg-url" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:12px;font-family:monospace">
+    <div style="display:flex;gap:12px;margin-bottom:12px">
+      <div style="flex:1"><label style="display:block;margin-bottom:4px">Base port</label>
+        <input id="cfg-base" type="number" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px"></div>
+      <div style="flex:1"><label style="display:block;margin-bottom:4px">Port step</label>
+        <input id="cfg-step" type="number" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px"></div>
+    </div>
+    <label style="display:block;margin-bottom:4px">Seed files (gitignored files to copy into each worktree, comma-separated)</label>
+    <input id="cfg-seed" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:16px;font-family:monospace">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="closeWt()" style="padding:7px 14px;background:#313244;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer">Cancel</button>
+      <button onclick="submitProjectConfig()" style="padding:7px 14px;background:#89b4fa;color:#11111b;border:none;border-radius:6px;font-weight:600;cursor:pointer">Save</button>
+    </div></div>`;
+  el.style.display = 'flex';
+  _projectCb = (guess, existing) => {
+    const c = existing || guess || {};
+    const g = guess || {};
+    document.getElementById('cfg-cmd').value = c.devCommand || g.devCommand || '';
+    document.getElementById('cfg-url').value = c.urlTemplate || g.urlTemplate || 'http://localhost:{port}';
+    document.getElementById('cfg-base').value = c.basePort || 5170;
+    document.getElementById('cfg-step').value = c.portStep || 10;
+    document.getElementById('cfg-seed').value = (c.seedFiles || ['.env', '.env.local', '.certs']).join(', ');
+  };
+  send({ type: 'detectProject', repo });
+}
+function submitProjectConfig() {
+  const config = {
+    devCommand: document.getElementById('cfg-cmd').value.trim(),
+    urlTemplate: document.getElementById('cfg-url').value.trim() || 'http://localhost:{port}',
+    basePort: Number(document.getElementById('cfg-base').value) || 5170,
+    portStep: Number(document.getElementById('cfg-step').value) || 10,
+    seedFiles: document.getElementById('cfg-seed').value.split(',').map(s => s.trim()).filter(Boolean),
+  };
+  send({ type: 'saveProjectConfig', repo: _cfgRepo, config });
+  closeWt();
+}
+
+async function removeWorktree(path) {
+  const w = worktreeAt(path);
+  if (!w) return;
+  const ok = await showConfirm(`Remove worktree "${w.branch}"? Its agents will close and its folder will be deleted.`, 'Remove');
+  if (!ok) return;
+  const delBranch = await showConfirm(`Also delete the branch "${w.branch}"? (Choose No to keep it — e.g. if it has an open PR.)`, 'Delete branch');
+  send({ type: 'removeWorktree', path, deleteBranch: !!delBranch });
+}
+
+// ── Features (a worktree spanning multiple repos, same branch name) ──
+function featureMembers(name) { return worktrees.filter(w => w.feature === name); }
+function featureHeaderHtml(name) {
+  const members = featureMembers(name);
+  const key = 'feature:' + name;
+  const safe = escAttr(name.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+  const collapsed = collapsedGroups.has(key);
+  const runningCount = members.filter(w => wtRunning.has(w.path)).length;
+  const summary = `${members.length} repo${members.length !== 1 ? 's' : ''}${runningCount ? ` · ${runningCount} running` : ''}`;
+  return `<div class="feature${collapsed ? ' collapsed' : ''}"><div class="feature-header" onclick="toggleGroup('${escAttr(key)}')">
+    <span class="group-chevron">&#x25BC;</span>
+    <span class="feature-icon">&#x2726;</span>
+    <span class="feature-name">${esc(name)}</span>
+    <span class="feature-summary">${esc(summary)}</span>
+    <div class="group-menu-wrap">
+      <button class="group-menu-btn" onclick="event.stopPropagation();toggleGroupMenu(this)" title="Feature actions">&#x22EE;</button>
+      <div class="group-dropdown" data-menu="feature:${escAttr(name)}">
+        <button onclick="event.stopPropagation();openAddRepo('${safe}');closeGroupMenus()">+ Add repo&#x2026;</button>
+        <button onclick="event.stopPropagation();startFeature('${safe}');closeGroupMenus()">&#x25B6; Start all servers</button>
+        <button onclick="event.stopPropagation();stopFeature('${safe}');closeGroupMenus()">&#x25A0; Stop all servers</button>
+        <button onclick="event.stopPropagation();prFeature('${safe}');closeGroupMenus()">Create PRs (all repos)</button>
+        <button class="danger" onclick="event.stopPropagation();removeFeature('${safe}');closeGroupMenus()">Remove feature</button>
+      </div>
+    </div>
+  </div><div class="feature-body">`;
+}
+function startFeature(name) { featureMembers(name).forEach(w => send({ type: 'startDevServer', path: w.path })); }
+function stopFeature(name) { featureMembers(name).forEach(w => send({ type: 'stopDevServer', path: w.path })); }
+function prFeature(name) { featureMembers(name).forEach(w => send({ type: 'createPr', path: w.path })); }
+async function removeFeature(name) {
+  const m = featureMembers(name);
+  if (!m.length) return;
+  const ok = await showConfirm(`Remove feature "${name}" and its ${m.length} worktree(s)? Agents close and folders are deleted.`, 'Remove feature');
+  if (!ok) return;
+  const del = await showConfirm(`Also delete the "${name}" branch in each repo? (No keeps them — e.g. open PRs.)`, 'Delete branches');
+  m.forEach(w => send({ type: 'removeWorktree', path: w.path, deleteBranch: !!del }));
+}
+
+let _addRepoFeature = null; // feature name while the Add-repo dialog is open (routes browse result)
+function openAddRepo(feature) {
+  _addRepoFeature = feature;
+  const inFeature = new Set(featureMembers(feature).map(w => w.repo));
+  const candidates = [...new Set([...[...knownProjects].filter(p => !worktreeAt(p)), ...lastFeatureRepos])].filter(r => !inFeature.has(r));
+  const el = wtOverlay();
+  el.innerHTML = `<div style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:10px;padding:20px;width:500px;max-width:92vw;font-size:13px">
+    <div style="font-weight:600;font-size:15px;margin-bottom:4px">Add repo to "${esc(feature)}"</div>
+    <div style="color:#a6adc8;margin-bottom:14px">Creates a <code>${esc(feature)}</code> worktree in the chosen repo, joined to this feature.</div>
+    <label style="display:block;margin-bottom:4px">Repo</label>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <select id="add-repo" onchange="onAddRepoPick()" style="flex:1;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px">
+        ${candidates.map(r => `<option value="${escAttr(r)}">${esc(pathLabel(r))}</option>`).join('') || '<option value="">(none — browse for a folder)</option>'}
+      </select>
+      <button onclick="send({type:'browseFeatureRepo'})" style="padding:7px 10px;background:transparent;color:#89b4fa;border:1px dashed #45475a;border-radius:6px;cursor:pointer;white-space:nowrap">Browse&#x2026;</button>
+    </div>
+    <label style="display:block;margin-bottom:4px">Base branch <span style="opacity:.6">(type to search)</span></label>
+    <div class="branch-combo" style="position:relative;width:100%;margin-bottom:16px">
+      <input id="ft-base-add" autocomplete="off" placeholder="base branch" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px"
+        oninput="filterBranchMenu('add')" onfocus="filterBranchMenu('add')" onblur="setTimeout(()=>hideBranchMenu('add'),150)">
+      <div id="ft-menu-add" class="branch-menu" style="display:none"></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="closeAddRepo()" style="padding:7px 14px;background:#313244;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer">Cancel</button>
+      <button onclick="submitAddRepo()" style="padding:7px 14px;background:#89b4fa;color:#11111b;border:none;border-radius:6px;font-weight:600;cursor:pointer">Add</button>
+    </div></div>`;
+  el.style.display = 'flex';
+  _ftBranches['add'] = ['dev'];
+  if (candidates.length) onAddRepoPick();
+}
+function closeAddRepo() { _addRepoFeature = null; closeWt(); }
+function onAddRepoPick() {
+  const repo = document.getElementById('add-repo').value;
+  if (!repo) return;
+  const def = (projects[repo] && projects[repo].defaultBase) || 'dev';
+  const inp = document.getElementById('ft-base-add'); if (inp && !inp.value) inp.value = def;
+  _branchCbs[repo] = (branches, err) => { _ftBranches['add'] = (err || !branches || !branches.length) ? ['dev'] : branches; };
+  send({ type: 'listBranches', repo });
+}
+function submitAddRepo() {
+  const repo = document.getElementById('add-repo').value;
+  const base = document.getElementById('ft-base-add').value.trim() || 'dev';
+  if (!repo || !_addRepoFeature) return;
+  if (featureMembers(_addRepoFeature).some(w => w.repo === repo)) { showToast('That repo is already in the feature'); return; }
+  send({ type: 'createWorktree', repo, branch: _addRepoFeature, base, feature: _addRepoFeature });
+  closeAddRepo();
+}
+
+let _ftIdx = 0;
+function openNewFeature() {
+  _ftIdx = 0;
+  // Repos to offer: current project repos + any remembered from last time (even if not active now).
+  const repoSet = [...new Set([...[...knownProjects].filter(p => !worktreeAt(p)), ...lastFeatureRepos])];
+  const el = wtOverlay();
+  el.innerHTML = `<div style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:10px;padding:20px;width:660px;max-width:94vw;font-size:13px">
+    <div style="font-weight:600;font-size:15px;margin-bottom:4px">New feature</div>
+    <div style="color:#a6adc8;margin-bottom:14px">One branch name, a worktree in each chosen repo, grouped together.</div>
+    <label style="display:block;margin-bottom:4px">Feature name (used as the branch in every repo)</label>
+    <input id="ft-name" placeholder="checkout-v2" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:16px">
+    <div style="margin-bottom:6px;color:#a6adc8">Repos &amp; base branch <span style="opacity:.6">(type to search branches)</span></div>
+    <div id="ft-rows"></div>
+    <button onclick="send({type:'browseFeatureRepo'})" style="margin-top:6px;padding:6px 10px;background:transparent;color:#89b4fa;border:1px dashed #45475a;border-radius:6px;cursor:pointer;font-size:12px">+ Add repo folder&#x2026;</button>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button onclick="closeWt()" style="padding:7px 14px;background:#313244;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer">Cancel</button>
+      <button onclick="submitFeature()" style="padding:7px 14px;background:#89b4fa;color:#11111b;border:none;border-radius:6px;font-weight:600;cursor:pointer">Create</button>
+    </div></div>`;
+  el.style.display = 'flex';
+  document.getElementById('ft-name').focus();
+  // Checked if it was in the last feature, or (first-ever use) check all.
+  const rememberAll = lastFeatureRepos.length === 0;
+  for (const r of repoSet) addFeatureRepoRow(r, rememberAll || lastFeatureRepos.includes(r));
+}
+const _ftBranches = {}; // row index -> branch list (for the fuzzy filter)
+function addFeatureRepoRow(repo, checked) {
+  const rows = document.getElementById('ft-rows');
+  if (!rows) return;
+  if (rows.querySelector(`[data-repo="${escAttr(repo)}"]`)) return; // no duplicate rows
+  const i = _ftIdx++;
+  const def = (projects[repo] && projects[repo].defaultBase) || 'dev';
+  _ftBranches[i] = ['dev'];
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px';
+  row.innerHTML = `<input type="checkbox" id="ft-repo-${i}" data-repo="${escAttr(repo)}" ${checked ? 'checked' : ''} style="width:16px;height:16px;flex-shrink:0">
+    <span style="width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(repo)}">${esc(pathLabel(repo))}</span>
+    <div class="branch-combo" style="position:relative;flex:1;min-width:0">
+      <input id="ft-base-${i}" autocomplete="off" value="${escAttr(def)}" placeholder="base branch" title="${escAttr(def)}" style="width:100%;box-sizing:border-box;padding:5px 7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px"
+        oninput="filterBranchMenu(${i})" onfocus="filterBranchMenu(${i})" onblur="setTimeout(()=>hideBranchMenu(${i}),150)">
+      <div id="ft-menu-${i}" class="branch-menu" style="display:none"></div>
+    </div>`;
+  rows.appendChild(row);
+  _branchCbs[repo] = (branches, err) => {
+    _ftBranches[i] = (err || !branches || !branches.length) ? ['dev'] : branches;
+    if (document.activeElement === document.getElementById(`ft-base-${i}`)) filterBranchMenu(i);
+  };
+  send({ type: 'listBranches', repo });
+}
+function filterBranchMenu(i) {
+  const inp = document.getElementById(`ft-base-${i}`), menu = document.getElementById(`ft-menu-${i}`);
+  if (!inp || !menu) return;
+  inp.title = inp.value; // hover the field to see the full (possibly long) branch name
+  const q = inp.value.trim().toLowerCase();
+  // Substring match anywhere: "branch" matches "feat/my-branch". Exact-prefix ranked first.
+  const hits = (_ftBranches[i] || []).filter(b => !q || b.toLowerCase().includes(q))
+    .sort((a, b) => (a.toLowerCase().startsWith(q) ? 0 : 1) - (b.toLowerCase().startsWith(q) ? 0 : 1))
+    .slice(0, 60);
+  if (!hits.length) { menu.style.display = 'none'; return; }
+  menu.innerHTML = hits.map(b => `<div class="branch-item" title="${escAttr(b)}" onmousedown="event.preventDefault();pickBranch('${i}','${escAttr(b.replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')">${esc(b)}</div>`).join('');
+  menu.style.display = 'block';
+}
+function pickBranch(i, b) { const inp = document.getElementById(`ft-base-${i}`); if (inp) { inp.value = b; inp.title = b; } hideBranchMenu(i); }
+function hideBranchMenu(i) { const m = document.getElementById(`ft-menu-${i}`); if (m) m.style.display = 'none'; }
+function submitFeature() {
+  const name = document.getElementById('ft-name').value.trim();
+  if (!name) { document.getElementById('ft-name').focus(); return; }
+  const repos = [];
+  document.querySelectorAll('#ft-rows [id^="ft-repo-"]').forEach((chk) => {
+    const i = chk.id.replace('ft-repo-', '');
+    if (chk.checked) repos.push({ repo: chk.dataset.repo, base: (document.getElementById(`ft-base-${i}`) || {}).value.trim() || 'dev' });
+  });
+  if (!repos.length) return;
+  send({ type: 'createFeature', name, repos });
+  closeWt();
+}
 document.addEventListener('click', closeGroupMenus);
 
 // Delegated handler for current-file badge — survives innerHTML re-renders
@@ -1440,7 +1762,7 @@ function closeAgent(id) {
   api.send({ type: 'closeAgent', id });
 }
 function focusNextPerm() {
-  const permIds = [...agents.entries()].filter(([, a]) => agentStatus(a) === 'permission').map(([id]) => id);
+  const permIds = [...agents.entries()].filter(([, a]) => !a.archived && agentStatus(a) === 'permission').map(([id]) => id);
   if (permIds.length === 0) return;
   // Cycle: find first perm agent after current selection, or wrap to first
   const idx = selectedId !== null ? permIds.indexOf(selectedId) : -1;
@@ -1448,7 +1770,7 @@ function focusNextPerm() {
   focusAgent(next);
 }
 function focusNextCtxDanger() {
-  const dangerIds = [...agents.entries()].filter(([, a]) => a.stats?.ctxTok && Math.round((a.stats.ctxTok / ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok)) * 100) >= 80).map(([id]) => id);
+  const dangerIds = [...agents.entries()].filter(([, a]) => !a.archived && a.stats?.ctxTok && Math.round((a.stats.ctxTok / ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok)) * 100) >= 80).map(([id]) => id);
   if (dangerIds.length === 0) return;
   const idx = selectedId !== null ? dangerIds.indexOf(selectedId) : -1;
   const next = idx >= 0 && idx < dangerIds.length - 1 ? dangerIds[idx + 1] : dangerIds[0];
@@ -1758,6 +2080,7 @@ function render() {
   const groups = new Map();
   const archivedCounts = new Map();
   for (const cwd of knownProjects) groups.set(cwd, []);
+  for (const w of worktrees) if (!groups.has(w.path)) groups.set(w.path, []); // worktree groups show even with 0 agents
   for (const [id, a] of agents) {
     const cwd = a.cwd || '(unknown)';
     if (a.archived) {
@@ -1787,8 +2110,24 @@ function render() {
   }
   document.title = parts.length ? `Overlord (${parts.join(', ')})` : `Overlord \u2014 ${agents.size} agent${agents.size !== 1 ? 's' : ''}`;
 
-  let html = '', filterMatches = 0;
-  for (const [cwd, items] of groups) {
+  // Order groups so all repos of a feature sit together under one heading; standalone
+  // groups follow. curFeature tracks when we cross a feature boundary to open/close the wrapper.
+  const featureNames = [...new Set(worktrees.filter(w => w.feature).map(w => w.feature))];
+  const orderedCwds = [], seenCwd = new Set();
+  for (const fname of featureNames) for (const cwd of groups.keys()) {
+    const w = worktreeAt(cwd);
+    if (w && w.feature === fname && !seenCwd.has(cwd)) { orderedCwds.push({ cwd, feature: fname }); seenCwd.add(cwd); }
+  }
+  for (const cwd of groups.keys()) if (!seenCwd.has(cwd)) orderedCwds.push({ cwd, feature: null });
+
+  let html = '', filterMatches = 0, curFeature = null;
+  for (const { cwd, feature } of orderedCwds) {
+    const items = groups.get(cwd);
+    if (feature !== curFeature) {
+      if (curFeature !== null) html += `</div></div>`;   // close previous feature body + wrapper
+      curFeature = feature;
+      if (feature !== null) html += featureHeaderHtml(feature);
+    }
     filterMatches += items.length;
     const gDoneCount = items.filter(([,a]) => { const s = agentStatus(a); return s === 'waiting' || s === 'idle'; }).length;
 
@@ -1808,21 +2147,46 @@ function render() {
 
     const safeCwd = escAttr(cwd.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
     const isCollapsed = collapsedGroups.has(cwd);
-    html += `<div class="group${isCollapsed ? ' collapsed' : ''}"><div class="group-header" onclick="toggleGroup('${safeCwd}')">
+    const wtEntry = worktreeAt(cwd);
+    const running = wtRunning.get(cwd);
+    // Worktree group: branch label + setup/ready state; else plain project.
+    const nameHtml = wtEntry
+      ? `<span class="group-name">${esc(pathLabel(wtEntry.repo))} <span class="wt-branch">&#x2442; ${esc(wtEntry.branch)}</span></span><span class="group-path">${esc(cwd)}</span>`
+      : `<span class="group-name">${esc(pathLabel(cwd))}</span><span class="group-path">${esc(cwd)}</span>`;
+    const wtStatus = wtEntry && wtEntry.status === 'setup' ? `<span class="wt-state setup" title="Installing dependencies">setting up…</span>`
+      : wtEntry && wtEntry.status === 'failed' ? `<span class="wt-state failed" title="Dependency install failed">setup failed</span>` : '';
+    const wtUrl = wtEntry ? fillPort(projects[wtEntry.repo] && projects[wtEntry.repo].urlTemplate, wtEntry.port) : '';
+    // When the proxy is on and this server is up, prefer the clean hostname.
+    const wtServerBadge = wtEntry && running
+      ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openUrl('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${esc(running.url.replace(/^https?:\/\//, ''))}<span class="server-menu-btn">&#x2197;</span></a></div>`
+      : (wtEntry ? `<a class="wt-port" onclick="event.stopPropagation();openUrl('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
+    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}"><div class="group-header" onclick="toggleGroup('${safeCwd}')">
       <span class="group-chevron">&#x25BC;</span>
-      <div class="group-info"><span class="group-name">${esc(pathLabel(cwd))}</span><span class="group-path">${esc(cwd)}</span></div>
+      <div class="group-info">${nameHtml}</div>
+      ${wtStatus}
+      ${wtServerBadge}
       ${serverBadges}
       <div class="group-actions">
         <button onclick="event.stopPropagation();addAgent('${safeCwd}')">+ Agent</button>
-        <button class="btn-team" onclick="event.stopPropagation();showTeamOverlay('${safeCwd}')">+ Team</button>
-        ${archivedCounts.get(cwd) ? `<button class="btn-archive" title="Show archived agents" onclick="event.stopPropagation();openArchiveModal('${safeCwd}')">&#x1F4E6; ${archivedCounts.get(cwd)}</button>` : ''}
       </div>
       <div class="group-menu-wrap">
         <button class="group-menu-btn" onclick="event.stopPropagation();toggleGroupMenu(this)" title="More actions">&#x22EE;</button>
-        <div class="group-dropdown">
+        <div class="group-dropdown" data-menu="${safeCwd}">
+          <button onclick="event.stopPropagation();showTeamOverlay('${safeCwd}');closeGroupMenus()">+ Team</button>
+          ${archivedCounts.get(cwd) ? `<button onclick="event.stopPropagation();openArchiveModal('${safeCwd}');closeGroupMenus()">Archived agents (${archivedCounts.get(cwd)})</button>` : ''}
           <button onclick="event.stopPropagation();openFolder('${safeCwd}');closeGroupMenus()">Open folder</button>
+          ${!wtEntry ? `<button onclick="event.stopPropagation();openNewWorktree('${safeCwd}');closeGroupMenus()">New worktree&#x2026;</button>` : ''}
+          ${!wtEntry ? `<button onclick="event.stopPropagation();openProjectConfig('${safeCwd}');closeGroupMenus()">Configure dev server&#x2026;</button>` : ''}
+          ${wtEntry && wtEntry.status === 'failed' ? `<button onclick="event.stopPropagation();send({type:'retrySetup',path:'${safeCwd}'});closeGroupMenus()">&#x21BB; Retry setup</button>` : ''}
+          ${wtEntry && wtEntry.status === 'failed' ? `<button onclick="event.stopPropagation();send({type:'openSetupLog',path:'${safeCwd}'});closeGroupMenus()">Open setup log</button>` : ''}
+          ${wtEntry && !running ? `<button onclick="event.stopPropagation();send({type:'startDevServer',path:'${safeCwd}'});closeGroupMenus()">&#x25B6; Start server</button>` : ''}
+          ${wtEntry && running ? `<button onclick="event.stopPropagation();send({type:'restartDevServer',path:'${safeCwd}'});closeGroupMenus()">&#x21BB; Restart server</button>` : ''}
+          ${wtEntry && running ? `<button onclick="event.stopPropagation();send({type:'stopDevServer',path:'${safeCwd}'});closeGroupMenus()">&#x25A0; Stop server</button>` : ''}
+          ${wtEntry ? `<button onclick="event.stopPropagation();send({type:'openServerLog',path:'${safeCwd}'});closeGroupMenus()">Open server log</button>` : ''}
+          ${wtEntry ? `<button onclick="event.stopPropagation();send({type:'createPr',path:'${safeCwd}'});closeGroupMenus()">Create PR &#x2192; ${esc(wtEntry.base)}</button>` : ''}
           ${gDoneCount ? `<button class="danger" onclick="event.stopPropagation();closeDoneInGroup('${safeCwd}');closeGroupMenus()">Close done (${gDoneCount})</button>` : ''}
-          ${items.length === 0 ? `<button class="danger" onclick="event.stopPropagation();removeProject('${safeCwd}');closeGroupMenus()">Remove project</button>` : ''}
+          ${wtEntry ? `<button class="danger" onclick="event.stopPropagation();removeWorktree('${safeCwd}');closeGroupMenus()">Remove worktree</button>`
+                    : (items.length === 0 ? `<button class="danger" onclick="event.stopPropagation();removeProject('${safeCwd}');closeGroupMenus()">Remove project</button>` : '')}
         </div>
       </div>
     </div><div class="agents">`;
@@ -1905,6 +2269,7 @@ function render() {
 
     html += `</div></div>`;
   }
+  if (curFeature !== null) html += `</div></div>`; // close trailing feature wrapper
   document.getElementById('filter-count').textContent = filterText ? filterMatches + ' of ' + agents.size : '';
   if (filterText && filterMatches === 0) {
     html = '<div class="empty"><div class="empty-title">No matching agents</div><div class="empty-sub">Try a different search term</div></div>';
@@ -1912,10 +2277,11 @@ function render() {
   const scrollTop = list.scrollTop;
   list.innerHTML = html;
   list.scrollTop = scrollTop;
+  restoreOpenMenu(); // a re-render mid-interaction shouldn't close an open kebab menu
 
   // Context warning banner
   const ctxWarn = document.getElementById('ctx-warning');
-  const dangerAgents = [...agents.entries()].filter(([, a]) => a.stats?.ctxTok && Math.round((a.stats.ctxTok / ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok)) * 100) >= 80);
+  const dangerAgents = [...agents.entries()].filter(([, a]) => !a.archived && a.stats?.ctxTok && Math.round((a.stats.ctxTok / ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok)) * 100) >= 80);
   if (dangerAgents.length > 0) {
     const msgs = dangerAgents.map(([, a]) => {
       const pct = Math.round((a.stats.ctxTok / ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok)) * 100);
@@ -2106,15 +2472,11 @@ function updateScrollBtn() {
 
 // Park the chip just above Claude's input box. The box is ~4 rows tall (borders + hint
 // line), so anchor in row-heights rather than px — that tracks font size and zoom.
-const CHIP_ROWS_FROM_BOTTOM = 4;
+// Chip removed — it overlapped Claude's prompt line. Keep the function as a no-op so callers
+// don't need touching.
 function positionNameChip() {
   const chip = document.getElementById('term-name-chip');
-  const x = selectedId != null ? xterms.get(selectedId) : null;
-  if (!x || termTab !== 'terminal') { chip.classList.remove('visible'); return; }
-  const rows = x.terminal.rows || 24;
-  const rowH = x.el.clientHeight / rows;
-  chip.style.bottom = Math.round(rowH * CHIP_ROWS_FROM_BOTTOM + 4) + 'px';
-  chip.classList.add('visible');
+  if (chip) chip.classList.remove('visible');
 }
 
 // Dead-terminal banner: the PTY exited and nothing is auto-resuming it.
@@ -2204,7 +2566,7 @@ function sendResize(id, x) {
 
 function openTerm(id) {
   const a = agents.get(id);
-  if (!a) return;
+  if (!a || a.archived) return; // archived agents have no live pty and no card
   selectedId = id;
   document.getElementById('term').classList.add('open');
   document.getElementById('resize').classList.add('open');
@@ -2540,7 +2902,9 @@ document.getElementById('search-input').addEventListener('keydown', (e) => {
 
 // Override focusAgent to also open terminal
 focusAgent = function(id) {
-  if (!agents.has(id)) return; // Agent was closed, ignore stale click
+  const a = agents.get(id);
+  if (!a) return;          // Agent was closed, ignore stale click
+  if (a.archived) return;  // archived agents have no card — never open their terminal
   selectedId = id;
   api.send({ type: 'focusAgent', id });
   openTerm(id);
@@ -2667,7 +3031,7 @@ function handleAgentMsg(msg) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
       if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', currentFile: '', currentFileName: '', archived: msg.archived || false });
-      if (msg.cwd) knownProjects.add(msg.cwd);
+      if (msg.cwd) addKnownProject(msg.cwd);
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
       break;
@@ -2706,7 +3070,7 @@ function handleAgentMsg(msg) {
       }
       if (selectedId === msg.id) {
         // Auto-select next agent if available, otherwise close terminal
-        const remaining = [...agents.keys()];
+        const remaining = [...agents.entries()].filter(([, x]) => !x.archived).map(([i]) => i);
         if (remaining.length > 0) {
           focusAgent(remaining[0]); // spawns terminal for restored agents + renders
         } else {
@@ -2778,6 +3142,23 @@ function handleAgentMsg(msg) {
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
     case 'toast': showToast(msg.text); break;
+    case 'branchList': if (_branchCbs[msg.repo]) _branchCbs[msg.repo](msg.branches, msg.error); break;
+    case 'featureRepoAdded':
+      if (_addRepoFeature) {
+        // Add-repo dialog: insert the browsed repo as an option and select it.
+        const sel = document.getElementById('add-repo');
+        if (sel) {
+          if (![...sel.options].some(o => o.value === msg.repo)) { const o = document.createElement('option'); o.value = msg.repo; o.textContent = pathLabel(msg.repo); sel.appendChild(o); }
+          sel.value = msg.repo; onAddRepoPick();
+        }
+      } else addFeatureRepoRow(msg.repo, true);
+      break;
+    case 'projectDetected': if (_projectCb) _projectCb(msg.guess, msg.existing); break;
+    case 'wtServer':
+      if (msg.running) wtRunning.set(msg.path, { port: msg.port, url: msg.url });
+      else wtRunning.delete(msg.path);
+      scheduleRender();
+      break;
     case 'prList': {
       if (msg.error) { prState.error = msg.error; }
       else { prState.prs = msg.prs || []; prState.error = null; prState.failedRepos = msg.failedRepos || []; }
@@ -3185,6 +3566,10 @@ function applySettings(s) {
     const inp = document.getElementById('inp-budget');
     if (inp) inp.value = planBudget;
   }
+  if (s.knownProjects) { for (const d of s.knownProjects) knownProjects.add(d); scheduleRender(); }
+  if (s.worktrees) { worktrees = s.worktrees; for (const w of worktrees) knownProjects.add(w.repo); scheduleRender(); }
+  if (s.projects) projects = s.projects;
+  if (s.lastFeatureRepos) lastFeatureRepos = s.lastFeatureRepos;
   if (s.prCollapsed) prCollapsed = new Set(s.prCollapsed);
   if (s.prSettings) {
     prSettings = s.prSettings;
@@ -3320,7 +3705,7 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+Tab / Ctrl+Shift+Tab to cycle agents
   if (e.key === 'Tab' && (e.ctrlKey || e.metaKey) && agents.size > 0) {
     e.preventDefault();
-    const ids = [...agents.keys()];
+    const ids = [...agents.entries()].filter(([, a]) => !a.archived).map(([i]) => i);
     const idx = selectedId !== null ? ids.indexOf(selectedId) : -1;
     const next = e.shiftKey
       ? (idx <= 0 ? ids[ids.length - 1] : ids[idx - 1])
@@ -3578,9 +3963,13 @@ function prRowHtml(p, dim) {
   const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
-  // Red = waiting on my review. Green = mine and ready to merge (same test the Merge button uses).
-  const canMerge = p.mine && !dim && prMergeInfo(p).enabled;
-  const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '') + (dim ? ' pr-muted' : '');
+  // Red = waiting on my review. Green = mine and ready to merge. Orange = conflicts.
+  // All three reuse prMergeInfo(), the same test that gates the Merge button.
+  const mi = prMergeInfo(p);
+  const canMerge = p.mine && !dim && mi.enabled;
+  const conflict = !dim && mi.label === 'conflicts';
+  const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '')
+    + (conflict ? ' pr-conflict' : '') + (dim ? ' pr-muted' : '');
   return `<div class="${cls}" onclick="openPr('${u}')">`
     + `<div class="pr-actions">${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
@@ -3614,8 +4003,14 @@ function prMutedRowHtml(p) {
 }
 
 function prDropdownHead() {
-  return `<div class="pr-dhead"><span>Pull requests</span>`
-    + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button></div>`;
+  return `<div class="pr-dhead"><span>Pull requests</span><span class="pr-dhead-btns">`
+    + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button>`
+    + `<button class="pr-refresh pr-close" title="Close" onclick="event.stopPropagation();closePrDropdown()">✕</button>`
+    + `</span></div>`;
+}
+
+function closePrDropdown() {
+  document.getElementById('pr-dropdown').style.display = 'none';
 }
 
 function prSnoozeLeft(until) {
@@ -3758,48 +4153,49 @@ document.addEventListener('click', (e) => {
   if (d && d.style.display === 'block' && !e.target.closest('#pr-dropdown') && !e.target.closest('#pr-snooze-pop') && e.target.id !== 'pr-badge') d.style.display = 'none';
 });
 
-// ── Agent hover tooltip: last prompt ──
+// ── Agent hover tooltip (on the status dot only): last 5 prompts ──
 (function () {
   const tip = document.createElement('div');
   tip.id = 'agent-tip';
   document.body.appendChild(tip);
   let cur = null;
-  function sect(head, body) {
-    const h = document.createElement('div'); h.className = 'tip-h'; h.textContent = head; tip.appendChild(h);
-    const b = document.createElement('div'); b.className = 'tip-b'; b.textContent = body; tip.appendChild(b);
-  }
-  function show(el) {
-    const p = el.dataset.prompt || '', nm = el.dataset.aname || '', stx = el.dataset.stext || '',
-      st = el.dataset.status || '';
-    if (!p && !nm && !stx) { hide(); return; }
+  function show(dot) {
+    const el = dot.closest('.agent'); if (!el) { hide(); return; }
+    const a = agents.get(Number(el.dataset.id)); if (!a) { hide(); return; }
+    const nm = el.dataset.aname || a.agentName || 'Agent', stx = el.dataset.stext || '', st = el.dataset.status || '';
+    const prompts = (a.prompts && a.prompts.length ? a.prompts : (a.prompt ? [a.prompt] : [])).slice(-5); // oldest→newest, as written
+    if (!prompts.length && !stx) { hide(); return; }
     tip.innerHTML = '';
     const topRow = document.createElement('div'); topRow.className = 'tip-top';
-    const n = document.createElement('div'); n.className = 'tip-name'; n.textContent = nm || 'Agent'; topRow.appendChild(n);
+    const n = document.createElement('div'); n.className = 'tip-name'; n.textContent = nm; topRow.appendChild(n);
     if (stx) { const s = document.createElement('div'); s.className = 'tip-status'; s.dataset.st = st; s.textContent = stx; topRow.appendChild(s); }
     tip.appendChild(topRow);
-    if (p) sect('Your last prompt', p);
+    if (prompts.length) {
+      const h = document.createElement('div'); h.className = 'tip-h'; h.textContent = prompts.length > 1 ? `Last ${prompts.length} prompts` : 'Last prompt'; tip.appendChild(h);
+      prompts.forEach(p => { const b = document.createElement('div'); b.className = 'tip-b tip-prompt'; b.textContent = p; tip.appendChild(b); });
+    }
     tip.style.display = 'block';
-    const r = el.getBoundingClientRect();
-    const tw = tip.offsetWidth, th = tip.offsetHeight;
-    let left = r.right + 10;                        // prefer right of the card
-    if (left + tw > window.innerWidth - 8) left = r.left - tw - 10; // flip left if no room
-    if (left < 8) left = 8;
-    let top = r.top;                               // align to card top
-    if (top + th > window.innerHeight - 8) top = window.innerHeight - th - 8;
-    if (top < 8) top = 8;
+    const r = dot.getBoundingClientRect();
+    const tw = tip.offsetWidth, th = tip.offsetHeight, M = 8, gap = 6;
+    // Above or below the dot — whichever side has more room; clamp within the viewport.
+    const spaceBelow = window.innerHeight - r.bottom, spaceAbove = r.top;
+    let top = spaceBelow >= spaceAbove ? r.bottom + gap : r.top - th - gap;
+    top = Math.max(M, Math.min(top, window.innerHeight - th - M));
+    let left = r.left + r.width / 2 - tw / 2;       // centered on the dot
+    left = Math.max(M, Math.min(left, window.innerWidth - tw - M));
     tip.style.left = left + 'px';
     tip.style.top = top + 'px';
     requestAnimationFrame(() => tip.classList.add('show'));
-    cur = el;
+    cur = dot;
   }
   function hide() { tip.classList.remove('show'); tip.style.display = 'none'; cur = null; }
   document.body.addEventListener('mouseover', (e) => {
-    const el = e.target.closest('.agent[data-prompt]');
-    if (el && el !== cur) show(el);
+    const dot = e.target.closest('.agent-dot');
+    if (dot && dot !== cur) show(dot); else if (!dot && cur && !e.target.closest('#agent-tip')) hide();
   });
   document.body.addEventListener('mouseout', (e) => {
-    const el = e.target.closest('.agent');
-    if (el && cur && (!e.relatedTarget || !el.contains(e.relatedTarget))) hide();
+    const dot = e.target.closest('.agent-dot');
+    if (dot && cur && (!e.relatedTarget || !dot.contains(e.relatedTarget))) hide();
   });
   window.addEventListener('scroll', hide, true);
 })();

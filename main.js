@@ -8,6 +8,7 @@ const https = require('https');
 const { spawn, exec, execSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const pty = require('node-pty');
+const wt = require('./worktree');
 
 
 // ── Constants ──────────────────────────────────────────
@@ -116,6 +117,19 @@ function protectClaudeConfig() {
   } catch {}
 }
 const ACCOUNTS_PATH = path.join(STATE_DIR, 'accounts.json');
+const LOG_FILE = path.join(STATE_DIR, 'overlord.log');
+
+// Append-only diagnostic log so failures (worktree setup, git, PR, crashes) leave a
+// readable trail on disk instead of vanishing into a truncated toast. Path is printed
+// on startup; open it from any worktree's "Setup failed" menu too.
+function flog(...args) {
+  const msg = args.map(a => (typeof a === 'string' ? a : (a && a.stack) || JSON.stringify(a))).join(' ');
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.appendFileSync(LOG_FILE, line); } catch {}
+  try { process.stdout.write(line); } catch {}
+}
+process.on('uncaughtException', (e) => flog('uncaughtException:', e));
+process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
 
 let mainWindow = null;
 const agents = new Map();
@@ -129,6 +143,7 @@ const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
 const pendingClearAgents = new Set(); // agentIds that recently ran /clear — used to correctly assign new JSONL files
 const termBuffers = new Map(); // agentId -> string (last TERM_BUFFER_MAX chars of terminal output)
+const devServers = new Map(); // worktree path -> { proc, port, url, repo } (per-worktree dev server pty)
 
 // /clear submitted: zero the context bar now. The new JSONL only appears on the next
 // prompt, and reassignAgentToFile() (which resets the rest of stats) runs then.
@@ -821,6 +836,9 @@ function handleTermExit(id, exitCode) {
   terminals.delete(id);
   // If we're retrying due to --resume failure, don't treat as crash or send termExit
   if (a._resumeFailed && a._resumeRetrying) { a._resumeRetrying = false; return; }
+  // Archiving kills the pty on purpose. Without this, the non-zero exit reads as a crash
+  // and auto-resume would respawn the terminal for the agent that was just archived.
+  if (a.archived) return;
   // Crash = any non-zero exit. Claude dying at the prompt (not mid-tool) is still a crash;
   // the old `wasActive` gate silently let those through as a normal "[Session ended]".
   // A clean exit (user typed /exit, code 0) is still not a crash.
@@ -888,11 +906,12 @@ function doSpawnTerminal(id) {
   const hasJsonl = fs.existsSync(a.jsonlFile);
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const useResume = hasJsonl && !a._resumeFailed;
-  const claudeCmd = useResume ? `claude --resume ${a.sessionId}${skip}` : `claude --session-id ${a.sessionId}${skip}`;
+  const feat = featureAgentArgs(a.cwd);
+  const claudeCmd = (useResume ? `claude --resume ${a.sessionId}${skip}` : `claude --session-id ${a.sessionId}${skip}`) + feat.flags;
   const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const args = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   try {
-    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: { ...process.env } });
+    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: { ...process.env, ...feat.env } });
     terminals.set(id, proc);
     // Flush any input that arrived before PTY was ready
     const queued = pendingTermInput.get(id);
@@ -980,14 +999,15 @@ function createAgent(folderPath, initialPrompt) {
   agents.set(id, agent);
 
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
-  const claudeCmd = `claude --session-id ${sessionId}${skip}`;
+  const feat = featureAgentArgs(cwd);
+  const claudeCmd = `claude --session-id ${sessionId}${skip}${feat.flags}`;
   const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const shellArgs = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
   send({ type: 'stats', id, stats: agent.stats });
   send({ type: 'focused', id });
 
-  const agentEnv = { ...process.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' };
+  const agentEnv = { ...process.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env };
   try {
     const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
@@ -2054,9 +2074,304 @@ const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes of no IPC = idle
 function isUserActive() { return _windowFocused && (Date.now() - _lastActivity < IDLE_THRESHOLD_MS); }
 
 // ── IPC ────────────────────────────────────────────────
+// ── Worktrees & per-worktree dev servers ──────────────
+function projectConfig(repo) { return (settings.projects || {})[repo] || null; }
+
+// Fill a URL template's port token. Supports {port} and arithmetic {port+1}/{port-1} so
+// repos whose openable app runs at base+N (e.g. back-office's vite client at base+1, with
+// the API on base) can point the link at the right port.
+function fillPort(template, base) {
+  return String(template || 'http://localhost:{port}')
+    .replace(/\{port([+-]\d+)?\}/g, (_, off) => String(Number(base) + (off ? parseInt(off, 10) : 0)));
+}
+
+// Ensure the project has a runnable config, filling any missing fields from detection.
+// Merges (doesn't overwrite) so an existing partial config — e.g. just {defaultBase} that
+// createFeature wrote — still gets a devCommand/urlTemplate so the server can start.
+function ensureProjectConfig(repo, base) {
+  const g = wt.detectDevCommand(repo);
+  const cur = projectConfig(repo) || {};
+  settings.projects = settings.projects || {};
+  const cfg = settings.projects[repo] = {
+    devCommand: cur.devCommand || g.devCommand,
+    urlTemplate: cur.urlTemplate || g.urlTemplate,
+    basePort: cur.basePort || 5170,
+    portStep: cur.portStep || 10,
+    seedFiles: cur.seedFiles || g.seedFiles,
+    defaultBase: base || cur.defaultBase || 'dev',
+  };
+  return cfg;
+}
+function findWorktree(p) { return (settings.worktrees || []).find(w => w.path === p) || null; }
+
+// Sticky base port per worktree, allocated GLOBALLY across all repos so two worktrees
+// (even in different repos of the same feature) never share a port. portStep (default 10)
+// leaves room for a repo's secondary ports (BFF, client) as PORT+1, PORT+2.
+function nextBasePort(repo) {
+  const cfg = projectConfig(repo) || {};
+  const base = Number(cfg.basePort) || 5170;
+  const step = Number(cfg.portStep) || 10;
+  const used = new Set((settings.worktrees || []).filter(w => w.port).map(w => w.port));
+  let port = base;
+  while (used.has(port)) port += step;
+  return port;
+}
+
+async function doCreateWorktree({ repo, branch, base, feature }) {
+  branch = wt.safeBranch(branch); // git forbids spaces/special chars in branch names
+  const dest = await wt.createWorktree({ repo, branch, base });
+  ensureProjectConfig(repo, base);
+  const cfg = projectConfig(repo);
+  const seeds = (cfg && cfg.seedFiles) ? cfg.seedFiles : wt.detectSeedFiles(repo);
+  wt.copySeedFiles(repo, dest, seeds);
+  const entry = { path: dest, repo, branch, base, port: nextBasePort(repo), status: 'setup', feature: feature || null, autostart: true };
+  settings.worktrees = settings.worktrees || [];
+  settings.worktrees.push(entry);
+  saveState();
+  send({ type: 'settings', settings });
+  send({ type: 'toast', text: `Created worktree ${branch}` });
+  installWorktree(entry);
+  return entry;
+}
+
+// Install deps so the worktree is actually runnable. Runs in the background; the group
+// card shows a "setup" state until done. seamless > watching npm scroll.
+function installWorktree(entry) {
+  const pm = wt.detectPackageManager(entry.path);
+  if (!pm) { entry.status = 'ready'; saveState(); send({ type: 'settings', settings }); return; }
+  const logPath = path.join(STATE_DIR, 'logs', `setup-${wt.slug(entry.branch)}.log`);
+  entry.setupLog = logPath;
+  try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.writeFileSync(logPath, `# ${pm} install in ${entry.path}\n# started ${new Date().toISOString()}\n\n`); } catch {}
+  const append = d => { try { fs.appendFileSync(logPath, d); } catch {} };
+  send({ type: 'toast', text: `Setting up ${entry.branch} — installing dependencies…` });
+
+  // Attempt install; on failure retry once with --legacy-peer-deps (repos like frontline
+  // have peer conflicts that need it) — which also covers a transient npm crash.
+  const attempt = (extraArgs, isRetry) => {
+    append(`\n# ${pm} install ${extraArgs.join(' ')} ${isRetry ? '(retry)' : ''}\n`);
+    const args = pm === 'npm' ? ['install', '--no-audit', '--no-fund', ...extraArgs] : ['install', ...extraArgs];
+    const proc = spawn(pm, args, { cwd: entry.path, windowsHide: true, shell: process.platform === 'win32' });
+    proc.stdout && proc.stdout.on('data', append);
+    proc.stderr && proc.stderr.on('data', append);
+    proc.on('exit', (code) => {
+      append(`\n# exit code ${code}\n`);
+      if (code === 0) {
+        entry.status = 'ready'; saveState(); send({ type: 'settings', settings });
+        // Auto-start the dev server once deps are in, so a new feature/worktree comes up
+        // ready to open in the browser without a second click.
+        if (entry.autostart && projectConfig(entry.repo) && projectConfig(entry.repo).devCommand) {
+          const url = fillPort(projectConfig(entry.repo).urlTemplate, entry.port);
+          send({ type: 'toast', text: `${entry.branch} ready — starting server at ${url}` });
+          startDevServer(entry.path);
+        } else {
+          send({ type: 'toast', text: `${entry.branch} ready` });
+        }
+      } else if (!isRetry) {
+        flog(`Setup for ${entry.branch}: ${pm} install exited ${code}, retrying with --legacy-peer-deps`);
+        attempt(pm === 'npm' ? ['--legacy-peer-deps'] : [], true);
+      } else {
+        entry.status = 'failed'; saveState(); send({ type: 'settings', settings });
+        flog(`Setup failed for ${entry.branch}: install exited ${code}. Log: ${logPath}`);
+        send({ type: 'toast', text: `${entry.branch} setup failed (exit ${code}) — see log in ⋮ menu` });
+      }
+    });
+    proc.on('error', (e) => {
+      append(`\n# spawn error: ${e.stack || e.message}\n`);
+      if (!isRetry) { attempt(pm === 'npm' ? ['--legacy-peer-deps'] : [], true); return; }
+      entry.status = 'failed'; saveState(); send({ type: 'settings', settings });
+      flog(`Setup spawn error for ${entry.branch}: ${e.message}. Log: ${logPath}`);
+      send({ type: 'toast', text: `${entry.branch} setup failed: ${e.message}` });
+    });
+  };
+  attempt([], false);
+}
+
+function startDevServer(p) {
+  const entry = findWorktree(p);
+  if (!entry) return;
+  let cfg = projectConfig(entry.repo);
+  if (!cfg || !cfg.devCommand) { cfg = ensureProjectConfig(entry.repo, entry.base); saveState(); send({ type: 'settings', settings }); }
+  if (!cfg.devCommand) { send({ type: 'toast', text: 'No dev command detected — set one in Configure dev server' }); return; }
+  // Upgrade a stale generic URL template to the detected one (e.g. back-office's openable app
+  // is the vite client at base+1, not the API on base). Only touches the plain default, so a
+  // custom template the user set is preserved.
+  if (!cfg.urlTemplate || cfg.urlTemplate === 'http://localhost:{port}') {
+    const g = wt.detectDevCommand(entry.repo);
+    if (g.urlTemplate && g.urlTemplate !== cfg.urlTemplate) { cfg.urlTemplate = g.urlTemplate; saveState(); send({ type: 'settings', settings }); }
+  }
+  if (devServers.has(p)) return;
+  const url = fillPort(cfg.urlTemplate, entry.port);
+  const logPath = path.join(STATE_DIR, 'logs', `server-${wt.slug(entry.branch)}-${wt.slug(path.basename(entry.repo))}.log`);
+  entry.serverLog = logPath;
+  try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.writeFileSync(logPath, `# ${cfg.devCommand}\n# cwd ${entry.path}  PORT=${entry.port}\n# started ${new Date().toISOString()}\n\n`); } catch {}
+  const append = d => { try { fs.appendFileSync(logPath, d); } catch {} };
+  const shell2 = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+  const shellArgs = process.platform === 'win32' ? ['/c', cfg.devCommand] : ['-c', cfg.devCommand];
+  const env = { ...process.env, PORT: String(entry.port), PORT_BASE: String(entry.port) };
+  try {
+    const proc = pty.spawn(shell2, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: entry.path, env });
+    const startedAt = Date.now();
+    let tail = '';
+    proc.onData(d => { append(d); tail = (tail + d).slice(-1500); });
+    proc.onExit((e) => {
+      append(`\n# exited (code ${e && e.exitCode}) after ${Math.round((Date.now() - startedAt) / 1000)}s\n`);
+      devServers.delete(p);
+      send({ type: 'wtServer', path: p, running: false });
+      // A server that dies within a few seconds never really started — surface why + point at the log.
+      if (Date.now() - startedAt < 5000) {
+        const line = tail.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim().split('\n').filter(Boolean).pop();
+        flog(`Dev server for ${entry.branch}/${path.basename(entry.repo)} exited early. Log: ${logPath}`);
+        send({ type: 'toast', text: `${path.basename(entry.repo)} server stopped: ${line || 'exited immediately'} — see server log in ⋮` });
+      }
+    });
+    devServers.set(p, { proc, port: entry.port, url, repo: entry.repo });
+    send({ type: 'wtServer', path: p, running: true, port: entry.port, url });
+    send({ type: 'toast', text: `Starting server: ${url}` });
+  } catch (e) {
+    append(`\n# spawn error: ${e.message}\n`);
+    send({ type: 'toast', text: 'Failed to start server: ' + e.message });
+  }
+}
+
+function stopDevServer(p) {
+  const s = devServers.get(p);
+  if (s) { try { s.proc.kill(); } catch {} killPortProcess(s.port); devServers.delete(p); }
+  send({ type: 'wtServer', path: p, running: false });
+}
+
+// If cwd is a worktree in a feature, give the agent tool-access to its sibling repos
+// (--add-dir) and a system-prompt note about them, plus env vars. Returns claude flags + env.
+function featureAgentArgs(cwd) {
+  const self = findWorktree(cwd);
+  if (!self || !self.feature) return { flags: '', env: {} };
+  const siblings = (settings.worktrees || []).filter(w => w.feature === self.feature && w.path !== cwd && fs.existsSync(w.path));
+  const env = {
+    OVERLORD_FEATURE: self.feature,
+    OVERLORD_FEATURE_BRANCH: self.branch || '',
+    OVERLORD_FEATURE_REPOS: siblings.map(w => `${path.basename(w.repo)}=${w.path}`).join(';'),
+  };
+  if (!siblings.length) return { flags: '', env };
+  const list = siblings.map(w => `${path.basename(w.repo)} (${w.path})`).join('; ');
+  const note = (`This git worktree is part of feature "${self.feature}" on branch ${self.branch}, spanning multiple repos. `
+    + `Sibling repos in the same feature (same branch) are: ${list}. They are already in your allowed directories — `
+    + `read and edit files in them when the task spans repos.`)
+    .replace(/"/g, "'").replace(/[\r\n]+/g, ' ').replace(/%/g, 'pct');
+  const addDirs = siblings.map(w => `--add-dir "${w.path}"`).join(' ');
+  return { flags: ` ${addDirs} --append-system-prompt "${note}"`, env };
+}
+
 function handleIpc(msg) {
   switch (msg.type) {
     case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
+    case 'listBranches': {
+      wt.listBranches(msg.repo)
+        .then(branches => send({ type: 'branchList', repo: msg.repo, branches, error: null }))
+        .catch(e => send({ type: 'branchList', repo: msg.repo, branches: null, error: e.message }));
+      break;
+    }
+    case 'detectProject': {
+      const guess = wt.detectDevCommand(msg.repo);
+      send({ type: 'projectDetected', repo: msg.repo, guess, existing: projectConfig(msg.repo) });
+      break;
+    }
+    case 'saveProjects': {
+      settings.knownProjects = Array.isArray(msg.dirs) ? [...new Set(msg.dirs.filter(d => typeof d === 'string'))] : [];
+      saveState();
+      break;
+    }
+    case 'saveProjectConfig': {
+      const c = msg.config || {};
+      settings.projects = settings.projects || {};
+      settings.projects[msg.repo] = {
+        devCommand: String(c.devCommand || ''),
+        urlTemplate: String(c.urlTemplate || 'http://localhost:{port}'),
+        basePort: Math.max(1024, Number(c.basePort) || 5170),
+        portStep: Math.max(1, Number(c.portStep) || 10),
+        seedFiles: Array.isArray(c.seedFiles) ? c.seedFiles.map(String) : ['.env', '.env.local', '.certs'],
+      };
+      saveState();
+      send({ type: 'settings', settings });
+      break;
+    }
+    case 'createWorktree': {
+      doCreateWorktree({ repo: msg.repo, branch: msg.branch, base: msg.base || 'dev', feature: msg.feature || null })
+        .catch(e => { flog('createWorktree failed:', e); send({ type: 'toast', text: 'Worktree failed: ' + (e.message || 'error') }); });
+      break;
+    }
+    case 'createFeature': {
+      const name = String(msg.name || '').trim();
+      const repos = Array.isArray(msg.repos) ? msg.repos : [];
+      if (!name || !repos.length) break;
+      // Remember choices for next time: each repo's base + the set of repos used.
+      settings.projects = settings.projects || {};
+      for (const r of repos) {
+        settings.projects[r.repo] = { ...(settings.projects[r.repo] || {}), defaultBase: r.base || 'dev' };
+      }
+      settings.lastFeatureRepos = repos.map(r => r.repo);
+      saveState();
+      send({ type: 'settings', settings });
+      for (const r of repos) {
+        doCreateWorktree({ repo: r.repo, branch: name, base: r.base || 'dev', feature: name })
+          .catch(e => { flog(`createFeature ${name} / ${r.repo} failed:`, e); send({ type: 'toast', text: `Feature ${name} — ${path.basename(r.repo)} failed: ${e.message || 'error'}` }); });
+      }
+      break;
+    }
+    case 'removeWorktree': {
+      const entry = findWorktree(msg.path);
+      if (!entry) break;
+      stopDevServer(msg.path);
+      for (const [id, a] of agents) { if (a.cwd === msg.path) closeAgent(id); }
+      // Optimistic: drop from state + UI now so it feels instant; deleting node_modules
+      // (thousands of files) is slow, so run the actual git worktree removal in the background.
+      settings.worktrees = (settings.worktrees || []).filter(w => w.path !== msg.path);
+      saveState();
+      send({ type: 'settings', settings });
+      wt.removeWorktree({ repo: entry.repo, dest: entry.path, branch: entry.branch, deleteBranch: !!msg.deleteBranch })
+        .catch(e => { flog('removeWorktree cleanup failed:', e); send({ type: 'toast', text: `Cleanup of ${entry.branch} folder failed — remove it manually` }); });
+      break;
+    }
+    case 'openSetupLog': {
+      const entry = findWorktree(msg.path);
+      const p = entry && entry.setupLog;
+      if (p && fs.existsSync(p)) shell.openPath(p).catch(() => {});
+      else send({ type: 'toast', text: 'No setup log yet' });
+      break;
+    }
+    case 'retrySetup': {
+      const entry = findWorktree(msg.path);
+      if (entry) { entry.status = 'setup'; saveState(); send({ type: 'settings', settings }); installWorktree(entry); }
+      break;
+    }
+    case 'openServerLog': {
+      const entry = findWorktree(msg.path);
+      const lp = entry && entry.serverLog;
+      if (lp && fs.existsSync(lp)) shell.openPath(lp).catch(() => {});
+      else send({ type: 'toast', text: 'No server log yet — start the server first' });
+      break;
+    }
+    case 'startDevServer': startDevServer(msg.path); break;
+    case 'stopDevServer': stopDevServer(msg.path); break;
+    case 'restartDevServer':
+      stopDevServer(msg.path);
+      // Give the OS a moment to release the port before the command rebinds it —
+      // strictPort dev servers (vite) fail hard if it's still held.
+      setTimeout(() => startDevServer(msg.path), 600);
+      break;
+    case 'createPr': {
+      const entry = findWorktree(msg.path);
+      if (!entry) break;
+      send({ type: 'toast', text: `Creating PR for ${entry.branch}…` });
+      execFile('gh', ['pr', 'create', '--base', entry.base, '--head', entry.branch, '--fill'],
+        { cwd: entry.path, timeout: 60000, windowsHide: true, shell: process.platform === 'win32' },
+        (err, stdout, stderr) => {
+          if (err) { send({ type: 'toast', text: 'PR failed: ' + ((stderr || err.message || '').split('\n').find(Boolean) || 'error') }); return; }
+          const url = String(stdout || '').trim().split('\n').filter(Boolean).pop() || '';
+          send({ type: 'toast', text: 'PR created: ' + url });
+          if (/^https?:\/\//.test(url)) shell.openExternal(url).catch(() => {});
+          try { pollPRs(); } catch {}
+        });
+      break;
+    }
     case 'closeAgent': closeAgent(msg.id); break;
     case 'archiveAgent': archiveAgent(msg.id); break;
     case 'unarchiveAgent': unarchiveAgent(msg.id); break;
@@ -2103,6 +2418,17 @@ function handleIpc(msg) {
     case 'browseFolder':
       dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: 'Select Project Folder' })
         .then(r => { if (!r.canceled && r.filePaths[0]) send({ type: 'folderSelected', path: r.filePaths[0] }); });
+      break;
+    case 'browseFeatureRepo':
+      dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: 'Select a git repo for this feature' })
+        .then(async r => {
+          if (r.canceled || !r.filePaths[0]) return;
+          const dir = r.filePaths[0];
+          let root = null;
+          try { root = await wt.repoRoot(dir); } catch {}
+          if (!root) { send({ type: 'toast', text: 'Not a git repository: ' + dir }); return; }
+          send({ type: 'featureRepoAdded', repo: root });
+        });
       break;
     case 'openUrl': { const url = msg.url; if (typeof url === 'string' && /^(?:https?|file):\/\//.test(url)) shell.openExternal(url).catch(() => {}); break; }
     case 'savePrSettings': {
