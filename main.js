@@ -1147,6 +1147,18 @@ function parseLine(id, line) {
   const a = agents.get(id); if (!a) return;
   try {
     const r = JSON.parse(line);
+    // Session rename. Claude Code persists /rename as a custom-title line, and
+    // agents that rename themselves append the same line — so this is the one
+    // source that covers both, and it's what /resume displays.
+    if (r.type === 'custom-title' && r.customTitle) {
+      if (r.customTitle !== a.title) {
+        a.title = r.customTitle;
+        a.customName = true;
+        send({ type: 'title', id, text: a.title, customName: true });
+        saveState();
+      }
+      return;
+    }
     if (r.type === 'assistant') {
       // Extract usage/model regardless of content format (matches restore logic)
       if (r.message?.model) { a.stats.modelFamily = modelFamily(r.message.model); a.stats.model = r.message.model; }
@@ -1332,6 +1344,23 @@ function scanForNewJsonlFiles() {
   }
 }
 
+// Newest chat name from a session's JSONL — user /rename (custom-title) wins over
+// the auto-generated ai-title. '' if neither (e.g. a fresh /clear session).
+function readSessionTitle(file) {
+  let custom = '', ai = '';
+  try {
+    for (const line of fs.readFileSync(file, 'utf-8').split('\n')) {
+      if (!line.includes('"custom-title"') && !line.includes('"ai-title"')) continue;
+      try {
+        const r = JSON.parse(line);
+        if (r.type === 'custom-title' && r.customTitle) custom = r.customTitle;
+        else if (r.type === 'ai-title' && r.aiTitle) ai = r.aiTitle;
+      } catch {}
+    }
+  } catch {}
+  return custom || ai;
+}
+
 function reassignAgentToFile(id, newFilePath) {
   const a = agents.get(id); if (!a) return;
   // Stop old watchers
@@ -1348,8 +1377,15 @@ function reassignAgentToFile(id, newFilePath) {
   const oldModel = a.stats.modelFamily;
   a.stats = { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: oldModel };
   send({ type: 'stats', id, stats: a.stats });
-  // Reset title, prompt, preview for new session (preserve custom names)
-  if (!a.customName) {
+  // Reset title, prompt, preview for new session. On /resume, Claude forks a new
+  // JSONL that already carries the resumed chat's name — adopt it as a sticky title
+  // so the card shows which chat you're back in. /clear's file has no title yet.
+  const resumedTitle = readSessionTitle(newFilePath);
+  if (resumedTitle) {
+    a.title = resumedTitle;
+    a.customName = true;
+    send({ type: 'title', id, text: a.title, customName: true });
+  } else if (!a.customName) {
     a.title = '';
     send({ type: 'title', id, text: '' });
   }
@@ -1413,6 +1449,47 @@ function notifyPermission(id, a) {
 // ── PR notifications ───────────────────────────────────
 const { execFile } = require('child_process');
 const PR_REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+
+// A GUI-launched Electron app inherits the PATH explorer.exe had at login, so a gh
+// installed since then stays invisible until reboot. Prepend its install dir so the
+// bare `gh` spawns below resolve without one.
+function repairGhPath() {
+  if (process.platform !== 'win32') return null;
+  const dirs = [
+    'C:\\Program Files\\GitHub CLI',
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'GitHub CLI'),
+  ];
+  const cur = (process.env.PATH || '').split(';');
+  for (const d of dirs) {
+    if (!d || cur.includes(d)) continue;
+    try {
+      if (fs.existsSync(path.join(d, 'gh.exe'))) {
+        process.env.PATH = d + ';' + process.env.PATH;
+        return d;
+      }
+    } catch {}
+  }
+  return null;
+}
+repairGhPath();
+
+// cmd.exe reports a missing binary as "is not recognized"; a direct spawn reports
+// ENOENT. Both mean gh is absent, which is not the auth failure we used to claim.
+// The code drives which one-click fix the renderer offers.
+function ghErrCode(err) {
+  const m = (err && err.message) || String(err || '');
+  if (/not recognized|ENOENT|cannot find/i.test(m)) return 'missing';
+  if (/gh auth login|not logged in|authentication token|HTTP 401/i.test(m)) return 'auth';
+  return null;
+}
+function ghErr(err) {
+  const m = (err && err.message) || String(err || '');
+  const c = ghErrCode(err);
+  if (c === 'missing') return 'GitHub CLI (gh) is not installed.';
+  if (c === 'auth') return 'GitHub CLI is not logged in.';
+  return m;
+}
 function prKey(repo, number) { return `${repo}#${number}`; }
 // Returns keys present now but not in the seen set.
 function diffNewPRKeys(currentKeys, seenKeys) {
@@ -1467,14 +1544,18 @@ function fetchAllPRs(repos) {
     const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
     try {
       proc = spawn('gh', ['api', 'graphql', '-F', 'query=@-'], { windowsHide: true, shell: process.platform === 'win32' });
-    } catch (e) { return resolve({ prs: [], failed: valid, error: e.message }); }
+    } catch (e) { return resolve({ prs: [], failed: valid, error: ghErr(e), errorCode: ghErrCode(e) }); }
     const to = setTimeout(() => { try { proc.kill(); } catch {} finish({ prs: [], failed: valid, error: 'timeout' }); }, 25000);
-    proc.on('error', (e) => finish({ prs: [], failed: valid, error: e.message }));
+    proc.on('error', (e) => finish({ prs: [], failed: valid, error: ghErr(e), errorCode: ghErrCode(e) }));
     proc.stdout.on('data', d => out += d);
     proc.stderr.on('data', d => errbuf += d);
     proc.on('close', () => {
       let json;
-      try { json = JSON.parse(out); } catch { return finish({ prs: [], failed: valid, error: (errbuf || 'gh graphql failed').trim().slice(0, 200) }); }
+      // With shell:true a missing gh fails via cmd.exe's stderr, not an 'error' event.
+      try { json = JSON.parse(out); } catch {
+        const e = { message: (errbuf || 'gh graphql failed').trim().slice(0, 200) };
+        return finish({ prs: [], failed: valid, error: ghErr(e), errorCode: ghErrCode(e) });
+      }
       const data = json.data || {};
       const prs = [], failed = [];
       valid.forEach((r, i) => {
@@ -1517,7 +1598,7 @@ async function pollPRs() {
     // Total failure — keep last known list in renderer, don't notify.
     const emsg = res.error || ('Couldn\'t reach: ' + failedRepos.join(', '));
     if (!prGhErrorLogged) { console.log('[Overlord] PR poll failed:', emsg); prGhErrorLogged = true; }
-    send({ type: 'prList', prs: null, error: emsg });
+    send({ type: 'prList', prs: null, error: emsg, errorCode: res.errorCode || null });
     return;
   }
   if (failedRepos.length && !prGhErrorLogged) {
@@ -2008,7 +2089,7 @@ function handleTermInput(id, data) {
     const full = buf + data;
     const lastCR = full.lastIndexOf('\r');
     const remainder = full.slice(lastCR + 1);
-    if (/^\s*\/clear\s*$/.test(full.slice(0, lastCR))) markClear(id);
+    if (/^\s*\/(clear|resume)(\s+\S+)?\s*$/.test(full.slice(0, lastCR))) markClear(id);
     const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     if (data.length > LONG_PASTE_THRESHOLD) {
@@ -2023,8 +2104,8 @@ function handleTermInput(id, data) {
 
   // Single-char handling
   if (data === '\r') {
-    // Detect /clear command — mark agent as expecting a new JSONL file
-    if (/^\s*\/clear\s*$/.test(buf)) markClear(id);
+    // Detect /clear or /resume — both make Claude write a new JSONL file
+    if (/^\s*\/(clear|resume)(\s+\S+)?\s*$/.test(buf)) markClear(id);
     const renameM = buf.match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameM) { const a = agents.get(id); if (a) { a.title = renameM[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     // Enter pressed — check buffer for mentions
@@ -2364,7 +2445,7 @@ function handleIpc(msg) {
       execFile('gh', ['pr', 'create', '--base', entry.base, '--head', entry.branch, '--fill'],
         { cwd: entry.path, timeout: 60000, windowsHide: true, shell: process.platform === 'win32' },
         (err, stdout, stderr) => {
-          if (err) { send({ type: 'toast', text: 'PR failed: ' + ((stderr || err.message || '').split('\n').find(Boolean) || 'error') }); return; }
+          if (err) { send({ type: 'toast', text: 'PR failed: ' + ghErr({ message: (stderr || err.message || '').split('\n').find(Boolean) || 'error' }) }); return; }
           const url = String(stdout || '').trim().split('\n').filter(Boolean).pop() || '';
           send({ type: 'toast', text: 'PR created: ' + url });
           if (/^https?:\/\//.test(url)) shell.openExternal(url).catch(() => {});
@@ -2449,7 +2530,7 @@ function handleIpc(msg) {
       execFile('gh', ['api', '--paginate', 'user/repos?per_page=100', '--jq', '.[].full_name'],
         { timeout: 30000, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 16 * 1024 * 1024 },
         (err, stdout) => {
-          if (err) { send({ type: 'repoList', repos: null, error: err.message }); return; }
+          if (err) { send({ type: 'repoList', repos: null, error: ghErr(err), errorCode: ghErrCode(err) }); return; }
           const repos = [...new Set(stdout.split('\n').map(s => s.trim()).filter(Boolean))].sort();
           send({ type: 'repoList', repos, error: null });
         });
@@ -2621,12 +2702,59 @@ function handleIpc(msg) {
       if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
       execFile('gh', ['pr', 'review', url, '--approve'],
         { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-          if (err) { send({ type: 'prActionError', url, error: ((stderr || '') + err.message).trim() }); return; }
+          if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
           pollPRs(); // approved PR now drops from the list
         });
       break;
     }
     case 'pollPrsNow': pollPRs(); break;
+    case 'installGh': {
+      if (process.platform !== 'win32') { shell.openExternal('https://cli.github.com').catch(() => {}); break; }
+      send({ type: 'toast', text: 'Installing GitHub CLI…' });
+      execFile('winget', ['install', '--id', 'GitHub.cli', '-e', '--source', 'winget',
+        '--accept-package-agreements', '--accept-source-agreements'],
+        { timeout: 300000, windowsHide: true, shell: true }, (err) => {
+          // winget puts gh on the machine PATH, which this already-running process
+          // won't see — repairGhPath finds it so no restart is needed.
+          const dir = repairGhPath();
+          if (err && !dir) {
+            send({ type: 'toast', text: 'Install failed — opening cli.github.com' });
+            shell.openExternal('https://cli.github.com').catch(() => {});
+            return;
+          }
+          ghLogin = null;
+          send({ type: 'toast', text: 'GitHub CLI installed' });
+          send({ type: 'ghReady' });
+          pollPRs();
+        });
+      break;
+    }
+    case 'ghAuthLogin': {
+      // gh auth login is interactive and prints a one-time code, so it needs a real
+      // console — the detached stdio:'ignore' spawn used for `claude` would hide it.
+      try {
+        const p = process.platform === 'win32'
+          ? spawn('cmd', ['/c', 'start', '', 'cmd', '/k', 'gh auth login --web'], { detached: true, stdio: 'ignore' })
+          : spawn('sh', ['-c', 'gh auth login --web'], { detached: true, stdio: 'ignore' });
+        p.unref();
+      } catch (e) { send({ type: 'toast', text: 'Could not start gh auth login' }); break; }
+      ghLogin = null; // drop the cached login so the next poll re-reads it
+      send({ type: 'toast', text: 'Finish login in the terminal window…' });
+      // The browser flow finishes out-of-band, so watch for the login to land and
+      // recover on our own rather than making the user hit reload.
+      let tries = 0;
+      const authWatch = setInterval(async () => {
+        if (++tries > 40) return clearInterval(authWatch); // ~2 min
+        ghLogin = null;
+        if (await fetchGhLogin()) {
+          clearInterval(authWatch);
+          send({ type: 'toast', text: 'Logged in to GitHub' });
+          send({ type: 'ghReady' });
+          pollPRs();
+        }
+      }, 3000);
+      break;
+    }
     case 'muteRepo': {
       if (typeof msg.repo === 'string') {
         const s = new Set(settings.prMutedRepos || []); s.add(msg.repo);
@@ -2674,7 +2802,7 @@ function handleIpc(msg) {
       if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
       execFile('gh', ['pr', 'merge', url, '--merge'],
         { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-          if (err) { send({ type: 'prActionError', url, error: ((stderr || '') + err.message).trim() }); return; }
+          if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
           pollPRs(); // merged PR drops from the list
         });
       break;

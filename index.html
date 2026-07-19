@@ -93,6 +93,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-row.pr-conflict:hover { background:rgba(250,179,135,.22); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
 .pr-empty { padding:12px; color:var(--dim); font-size:12px; }
+.gh-fix { display:flex; gap:6px; margin-top:8px; }
+.gh-fix button { font-family:inherit; font-size:11px; padding:4px 10px; border-radius:6px; cursor:pointer;
+  background:var(--accent); color:var(--shadow); border:1px solid var(--accent); font-weight:600; }
+.gh-fix button.alt { background:transparent; color:var(--fg,#cdd6f4); border-color:var(--border); }
+.gh-fix button:disabled { opacity:.5; cursor:default; }
 #header .badge {
   font-family:inherit; font-size:10px; padding:2px 7px; font-weight:500; letter-spacing:.3px;
   border:1px solid; border-radius:10px;
@@ -2278,6 +2283,7 @@ function render() {
   list.innerHTML = html;
   list.scrollTop = scrollTop;
   restoreOpenMenu(); // a re-render mid-interaction shouldn't close an open kebab menu
+  window.restoreAgentTip?.(); // ditto for the hover tooltip on the status dot
 
   // Context warning banner
   const ctxWarn = document.getElementById('ctx-warning');
@@ -3160,18 +3166,26 @@ function handleAgentMsg(msg) {
       scheduleRender();
       break;
     case 'prList': {
-      if (msg.error) { prState.error = msg.error; }
-      else { prState.prs = msg.prs || []; prState.error = null; prState.failedRepos = msg.failedRepos || []; }
+      if (msg.error) { prState.error = msg.error; prState.errorCode = msg.errorCode || null; }
+      else { prState.prs = msg.prs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; }
       renderPrBadge();
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
       break;
     }
     case 'repoList':
-      if (msg.error) { document.getElementById('pr-repo-list').innerHTML = '<div class="pr-empty">Failed: ' + escapeHtml(msg.error) + '. Is <b>gh</b> logged in?</div>'; break; }
+      if (msg.error) { document.getElementById('pr-repo-list').innerHTML = '<div class="pr-empty">Failed: ' + escapeHtml(msg.error) + ghFixHtml(msg.errorCode) + '</div>'; break; }
       allRepos = msg.repos || [];
       renderRepoPicker();
       break;
+    case 'ghReady': {
+      // gh just became usable — refresh whatever the user was blocked on.
+      prState.error = null; prState.errorCode = null;
+      renderPrBadge();
+      const so = document.getElementById('settings-overlay');
+      if (so && so.style.display === 'flex') loadRepos(); // only if they're watching it
+      break;
+    }
     case 'updateDownloaded': {
       const b = document.getElementById('update-btn');
       if (b) { b.style.display = ''; b.textContent = '⬇ Update to ' + msg.version; }
@@ -3631,6 +3645,13 @@ document.addEventListener('keydown', (e) => {
     jumpPrompt(e.key === 'ArrowUp' ? -1 : 1);
     return;
   }
+  // F2 to rename selected agent
+  if (e.key === 'F2' && selectedId && agents.has(selectedId)) {
+    e.preventDefault();
+    const el = document.querySelector(`.agent[data-id="${selectedId}"] .agent-name`);
+    if (el) renameAgent(selectedId, el);
+    return;
+  }
   // Ctrl+R to restart selected agent
   if (e.key === 'r' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
     e.preventDefault();
@@ -3880,7 +3901,7 @@ function onSoundChange(val) {
 }
 
 // ── PR notifications ───────────────────────────────────
-let prState = { prs: [], error: null };
+let prState = { prs: [], error: null, errorCode: null };
 let prSettings = { enabled: false, repos: [], intervalSec: 60 };
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
@@ -3892,7 +3913,7 @@ function renderPrBadge() {
   if (!b) return;
   if (prState.error) {
     b.style.display = 'flex'; b.className = 'err'; b.textContent = '⬢ PRs — check failed';
-    b.title = 'PR check failed — is gh installed and logged in? (' + prState.error + ')';
+    b.title = 'PR check failed — ' + prState.error;
   } else if (prState.prs.some(p => !prSilenced(p))) {
     const active = prState.prs.filter(p => !prSilenced(p));
     const waiting = active.filter(prNeedsApproval).length;
@@ -4058,9 +4079,29 @@ function applySnooze(key) {
 
 function closeSnooze() { const p = document.getElementById('pr-snooze-pop'); if (p) p.remove(); }
 
+// One-click fixes for the two gh failures the user can't be expected to debug.
+// Any other error has no button — it needs reading, not a click.
+function ghFixHtml(code) {
+  if (code === 'missing') return '<div class="gh-fix">'
+    + '<button onclick="ghInstall(this)">Install GitHub CLI</button>'
+    + '<button class="alt" onclick="ghAuthLogin(this)">Log in to GitHub</button></div>';
+  if (code === 'auth') return '<div class="gh-fix">'
+    + '<button onclick="ghAuthLogin(this)">Log in to GitHub</button></div>';
+  return '';
+}
+function ghInstall(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Installing…'; }
+  api.send({ type: 'installGh' });
+}
+function ghAuthLogin(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Check the terminal…'; }
+  api.send({ type: 'ghAuthLogin' });
+}
+
 function prDropdownHtml() {
   const head = prDropdownHead();
-  if (prState.error) return head + '<div class="pr-empty">PR check failed. Ensure <b>gh</b> is installed and you are logged in (<code>gh auth login</code>).</div>';
+  if (prState.error) return head + '<div class="pr-empty">PR check failed. '
+    + escapeHtml(prState.error) + ghFixHtml(prState.errorCode) + '</div>';
   const active = prState.prs.filter(p => !p.muted && !p.repoMuted && !p.snoozed);
   const repoMuted = prState.prs.filter(p => p.repoMuted && !p.muted);
   const snoozed = prState.prs.filter(p => p.snoozed && !p.muted && !p.repoMuted);
@@ -4158,10 +4199,11 @@ document.addEventListener('click', (e) => {
   const tip = document.createElement('div');
   tip.id = 'agent-tip';
   document.body.appendChild(tip);
-  let cur = null;
+  let cur = null, curId = null; // curId survives list re-renders; cur is the (replaceable) node
   function show(dot) {
     const el = dot.closest('.agent'); if (!el) { hide(); return; }
     const a = agents.get(Number(el.dataset.id)); if (!a) { hide(); return; }
+    curId = Number(el.dataset.id);
     const nm = el.dataset.aname || a.agentName || 'Agent', stx = el.dataset.stext || '', st = el.dataset.status || '';
     const prompts = (a.prompts && a.prompts.length ? a.prompts : (a.prompt ? [a.prompt] : [])).slice(-5); // oldest→newest, as written
     if (!prompts.length && !stx) { hide(); return; }
@@ -4188,16 +4230,24 @@ document.addEventListener('click', (e) => {
     requestAnimationFrame(() => tip.classList.add('show'));
     cur = dot;
   }
-  function hide() { tip.classList.remove('show'); tip.style.display = 'none'; cur = null; }
+  function hide() { tip.classList.remove('show'); tip.style.display = 'none'; cur = null; curId = null; }
   document.body.addEventListener('mouseover', (e) => {
     const dot = e.target.closest('.agent-dot');
     if (dot && dot !== cur) show(dot); else if (!dot && cur && !e.target.closest('#agent-tip')) hide();
   });
   document.body.addEventListener('mouseout', (e) => {
     const dot = e.target.closest('.agent-dot');
-    if (dot && cur && (!e.relatedTarget || !dot.contains(e.relatedTarget))) hide();
+    if (!dot || !cur) return;
+    if (!dot.isConnected) return; // node died in a re-render, not a real mouse-out — restoreAgentTip re-anchors it
+    if (!e.relatedTarget || !dot.contains(e.relatedTarget)) hide();
   });
   window.addEventListener('scroll', hide, true);
+  // render() replaces the whole list, killing the hovered dot. Re-anchor to the new one (refreshes contents too).
+  window.restoreAgentTip = () => {
+    if (curId == null) return;
+    const dot = document.querySelector(`.agent[data-id="${curId}"] .agent-dot`);
+    if (!dot) hide(); else if (dot !== cur) show(dot);
+  };
 })();
 
 let allRepos = [];
