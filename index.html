@@ -42,10 +42,58 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .bookmark { white-space:nowrap; flex-shrink:0; border-radius:4px; } /* width follows the name — no truncation */
 .bookmark-add { opacity:.5; }
 .bookmark-add:hover { opacity:1; }
-#pr-badge { align-items:center; gap:8px; padding:5px 12px; border-top:1px solid var(--border); background:var(--title-bg); font-size:11px; color:var(--text); cursor:pointer; letter-spacing:.3px; flex-shrink:0; user-select:none; }
-#pr-badge.err { color:#f38ba8; }
-#pr-badge.alert { background:#f38ba8; color:#11111b; font-weight:700; }
-#pr-dropdown { position:fixed; z-index:50; background:var(--bg2,#1e1e2e); border:1px solid var(--border); border-radius:8px; min-width:280px; max-width:440px; max-height:60vh; overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+#pr-badge, #actions-badge { align-items:center; gap:8px; padding:5px 12px; border-top:1px solid var(--border); background:var(--title-bg); font-size:11px; color:var(--text); cursor:pointer; letter-spacing:.3px; flex-shrink:0; user-select:none; }
+#pr-badge.err, #actions-badge.err { color:#f38ba8; }
+#pr-badge.alert, #actions-badge.alert { background:#f38ba8; color:#11111b; font-weight:700; }
+#pr-badge, #actions-badge { transition:background .12s, color .12s; }
+#pr-badge:hover, #actions-badge:hover { background:var(--bg3); }
+#pr-badge.alert:hover, #actions-badge.alert:hover { background:#f5a3b8; }
+/* Someone else's failed deploy: visible, but not the full-red "you broke it". */
+#actions-badge.warn { color:#fab387; font-weight:600; }
+#actions-badge.running { color:#89b4fa; font-weight:600; }
+#actions-badge.running::before { content:''; width:6px; height:6px; border-radius:50%; background:#89b4fa; animation:act-pulse 1.1s ease-in-out infinite; }
+@keyframes act-pulse { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+/* Rows carry their state on a left border + tint, same language as .pr-row.
+   Hover deepens that row's own tint rather than replacing it — a state colour
+   must never be lost just because the pointer is over it. */
+.act-row { position:relative; padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);
+  border-left:2px solid transparent; font-size:12px; transition:background .12s, border-left-color .12s, opacity .12s; }
+.act-row:last-child { border-bottom:none; }
+.act-row:hover { background:var(--bg3); }
+.act-row.act-running { background:rgba(137,180,250,.13); border-left-color:#89b4fa; }
+.act-row.act-running:hover { background:rgba(137,180,250,.24); }
+.act-row.act-failure { background:rgba(243,139,168,.13); border-left-color:#f38ba8; }
+.act-row.act-failure:hover { background:rgba(243,139,168,.24); }
+.act-row.act-success { border-left-color:#a6e3a1; }
+.act-row.act-success:hover { background:rgba(166,227,161,.15); }
+.act-row.act-cancelled, .act-row.act-none { opacity:.6; }
+/* Dimmed rows come back to full strength on hover so they stay readable. */
+.act-row.act-cancelled:hover, .act-row.act-none:hover { opacity:1; }
+.act-row.act-error { background:rgba(250,179,135,.13); border-left-color:#fab387; }
+.act-row.act-error:hover { background:rgba(250,179,135,.24); }
+/* The pill brightens with the row — one hover, one visual event. */
+.act-row .act-pill { transition:filter .12s; }
+.act-row:hover .act-pill { filter:brightness(1.15); }
+.act-row .act-meta { color:var(--dim); font-size:11px; margin-top:2px; }
+.act-copy { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:none;
+  font-family:inherit; font-size:11px; font-weight:600; padding:3px 9px; background:var(--bg2,#313244);
+  color:var(--text); border:1px solid var(--border); border-radius:4px; cursor:pointer; }
+.act-row:hover .act-copy { display:block; }
+.act-copy:hover { background:var(--border); }
+.act-pill { font-size:10px; font-weight:700; padding:1px 6px; border-radius:999px; margin-left:6px; color:#11111b; vertical-align:1px; }
+.act-pill.act-running { background:#89b4fa; }
+.act-pill.act-success { background:#a6e3a1; }
+.act-pill.act-failure { background:#f38ba8; }
+.act-pill.act-cancelled { background:var(--border); color:var(--text); }
+.act-pill.act-none { background:var(--border); color:var(--text); }
+.act-pill.act-error { background:#fab387; }
+.act-wf { display:flex; align-items:center; gap:6px; font-size:12px; padding:3px 4px; border-radius:4px; transition:background .12s; }
+.act-wf:hover { background:var(--bg3); }
+/* Remove ✕ stays invisible until you're on its row — no wall of red x's. */
+.act-wf button { background:none; border:none; color:var(--dim); cursor:pointer; font-size:12px; padding:0 2px; opacity:0; transition:opacity .12s, color .12s; }
+.act-wf:hover button { opacity:1; }
+.act-wf button:hover { color:#f38ba8; }
+#pr-dropdown, #actions-dropdown { position:fixed; z-index:50; background:var(--bg2,#1e1e2e); border:1px solid var(--border); border-radius:8px; min-width:280px; max-width:440px; max-height:60vh; overflow:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
 .pr-group-header { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; cursor:pointer; font-size:11px; font-weight:600; color:var(--text); background:var(--bg3); border-bottom:1px solid var(--border); user-select:none; }
 .pr-group-header.pr-group-muted { opacity:.55; }
 .pr-ghead-right { display:flex; align-items:center; gap:8px; }
@@ -623,6 +671,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-track { background:transparent; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:var(--surface0); border-radius:5px; border:2px solid transparent; background-clip:padding-box; min-height:40px; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background:var(--surface1); }
+/* Inline ghost-text autocomplete overlay — floats over the terminal canvas, never written to the xterm buffer */
+#ghost-suggest { position:fixed; z-index:50; color:#585b70; opacity:.85; white-space:pre; pointer-events:none; display:none; }
+#ghost-suggest .ghost-hint { font-size:9px; opacity:.7; margin-left:6px; border:1px solid #585b70; border-radius:3px; padding:0 3px; }
 #scroll-bottom-btn {
   display:none; position:absolute; bottom:12px; right:20px; z-index:10;
   width:32px; height:32px; border-radius:50%; border:1px solid var(--border);
@@ -689,8 +740,23 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 .settings-modal {
   background:var(--editor-bg); border:1px solid var(--border-hi);
-  box-shadow:0 8px 32px rgba(0,0,0,.4); padding:20px 24px; min-width:380px; border-radius:8px;
+  box-shadow:0 8px 32px rgba(0,0,0,.4); padding:20px 24px; width:440px; max-width:92vw;
+  max-height:82vh; overflow:auto; border-radius:8px;
 }
+.settings-header { position:sticky; top:-20px; background:var(--editor-bg); z-index:1; padding-bottom:4px; }
+/* Native <details> does the collapsing — the only JS here is the summary chip. */
+.settings-sec { border-top:1px solid var(--border); }
+.settings-sec > summary {
+  display:flex; align-items:center; gap:8px; padding:10px 0; cursor:pointer;
+  font-size:12px; font-weight:600; color:var(--text); letter-spacing:.3px; list-style:none; user-select:none;
+}
+.settings-sec > summary::-webkit-details-marker { display:none; }
+.settings-sec > summary::before { content:'▸'; color:var(--dim); font-size:10px; transition:transform .12s; }
+.settings-sec[open] > summary::before { transform:rotate(90deg); }
+.settings-sec > summary:hover { color:var(--accent); }
+.settings-sec .sec-chip { margin-left:auto; font-size:11px; font-weight:400; color:var(--dim); }
+.settings-sec .sec-chip.on { color:#a6e3a1; }
+.settings-sec > div.sec-body { padding:0 0 10px 18px; }
 .settings-title { font-size:15px; color:var(--text); letter-spacing:.3px; font-weight:600; }
 .settings-close {
   font-family:inherit; background:none; border:none;
@@ -999,6 +1065,8 @@ button:focus-visible { outline-offset:0; }
     <div id="list"></div>
     <div id="pr-dropdown" style="display:none"></div>
     <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
+    <div id="actions-dropdown" style="display:none"></div>
+    <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
     <div id="summary-bar"></div>
   </div>
   <div id="resize"></div>
@@ -1033,6 +1101,9 @@ button:focus-visible { outline-offset:0; }
         <span class="settings-title">Settings</span>
         <button class="settings-close" onclick="toggleSettings()" aria-label="Close settings">&times;</button>
       </div>
+      <details class="settings-sec" open>
+      <summary>General</summary>
+      <div class="sec-body">
       <label class="settings-label">
         <input type="checkbox" id="chk-bypass" onchange="onBypassChange(this.checked)" />
         <span>Bypass permissions (--dangerously-skip-permissions)</span>
@@ -1054,11 +1125,21 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">Plays an audio chime when an agent completes or needs approval.</div>
       <label class="settings-label">
+        <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
+        <span>Prompt autocomplete (ghost text)</span>
+      </label>
+      <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku (needs ANTHROPIC_API_KEY).</div>
+      <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
       </label>
       <div class="settings-hint">Monthly plan budget — used to show usage percentage in the footer.</div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">
+      </div>
+      </details>
+
+      <details class="settings-sec">
+      <summary>Pull requests<span class="sec-chip" id="chip-pr"></span></summary>
+      <div class="sec-body">
       <label class="settings-label">
         <input type="checkbox" id="chk-pr" onchange="onPrEnableChange(this.checked)" />
         <span>PR notifications (watch GitHub repos)</span>
@@ -1076,6 +1157,32 @@ button:focus-visible { outline-offset:0; }
         <span>Poll interval (seconds):</span>
         <input type="number" id="inp-pr-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onPrSettingsChange()" />
       </label>
+      </div>
+      </details>
+
+      <details class="settings-sec">
+      <summary>GitHub Actions<span class="sec-chip" id="chip-actions"></span></summary>
+      <div class="sec-body">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-actions" onchange="onActionsEnableChange(this.checked)" />
+        <span>Track GitHub Actions</span>
+      </label>
+      <div class="settings-hint">Watches specific workflows via the <code>gh</code> CLI. Polls every 10s while a run is in progress.</div>
+      <label class="settings-label" style="display:block;">
+        <span>Add workflow:</span>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="text" id="inp-actions-add" placeholder="Paste workflow URL, or owner/repo" onkeydown="if(event.key==='Enter'){event.preventDefault();addActionsInput();}" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <button onclick="addActionsInput()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Add</button>
+        </div>
+        <div id="actions-repo-wf" style="display:none;max-height:160px;overflow:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;padding:4px;"></div>
+        <div id="actions-wf-list" style="max-height:160px;overflow:auto;margin-top:6px;"></div>
+      </label>
+      <label class="settings-label">
+        <span>Idle poll interval (seconds):</span>
+        <input type="number" id="inp-actions-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onActionsSettingsChange()" />
+      </label>
+      </div>
+      </details>
     </div>
   </div>
   <div id="prompt-overlay" onclick="closePromptOverlay()">
@@ -1163,6 +1270,8 @@ button:focus-visible { outline-offset:0; }
   </div>
 </div>
 <script src="./xterm-bundle.js"></script>
+<script src="./ghost-core.js"></script>
+<script src="./actions-core.js"></script>
 <script>
 function ctxWindow(modelFamily, ctxTok) {
   const base = (modelFamily === 'opus' || modelFamily === 'fable') ? 1000000 : 200000; // sonnet/haiku default 200k
@@ -1198,7 +1307,14 @@ function restoreOpenMenu() {
 }
 function persistProjects() { api.send({ type: 'saveProjects', dirs: [...knownProjects] }); }
 function addKnownProject(cwd) { if (cwd && !knownProjects.has(cwd)) { knownProjects.add(cwd); persistProjects(); } }
-function removeProject(cwd) { knownProjects.delete(cwd); persistProjects(); render(); }
+function removeProject(cwd) {
+  const live = [...agents].filter(([, a]) => a.cwd === cwd && !a.archived);
+  if (live.length && !confirm(`Remove project and close ${live.length} agent${live.length === 1 ? '' : 's'}?\n\n${cwd}`)) return;
+  for (const [id] of live) closeAgent(id);
+  knownProjects.delete(cwd);
+  persistProjects();
+  render();
+}
 
 // ── Worktrees (client) ──────────────────────────────────
 function send(m) { api.send(m); }
@@ -2191,7 +2307,7 @@ function render() {
           ${wtEntry ? `<button onclick="event.stopPropagation();send({type:'createPr',path:'${safeCwd}'});closeGroupMenus()">Create PR &#x2192; ${esc(wtEntry.base)}</button>` : ''}
           ${gDoneCount ? `<button class="danger" onclick="event.stopPropagation();closeDoneInGroup('${safeCwd}');closeGroupMenus()">Close done (${gDoneCount})</button>` : ''}
           ${wtEntry ? `<button class="danger" onclick="event.stopPropagation();removeWorktree('${safeCwd}');closeGroupMenus()">Remove worktree</button>`
-                    : (items.length === 0 ? `<button class="danger" onclick="event.stopPropagation();removeProject('${safeCwd}');closeGroupMenus()">Remove project</button>` : '')}
+                    : `<button class="danger" onclick="event.stopPropagation();removeProject('${safeCwd}');closeGroupMenus()">Remove project</button>`}
         </div>
       </div>
     </div><div class="agents">`;
@@ -2435,14 +2551,17 @@ function createXterm(id) {
       callback(links.length ? links : undefined);
     }
   });
-  terminal.onData((data) => api.send({ type: 'termInput', id, data }));
+  terminal.onData((data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); });
   terminal.onScroll(() => {
+    ghostClear();
     const buf = terminal.buffer.active;
     if (buf.baseY > 0 && buf.baseY - buf.viewportY <= 1) terminal.scrollToBottom();
     updateScrollBtn();
   });
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
+    if (e.key === 'Tab' && ghost.text && id === selectedId) { ghostAccept(); return false; } // accept ghost suggestion
+    if (e.key === 'Escape' && ghost.text) { ghostClear(); } // dismiss, but let Esc pass through too
     if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
     // Ctrl+C with no selection: Claude clears the input box. Copy what was typed first so it isn't lost.
     if (e.ctrlKey && e.key === 'c' && !terminal.hasSelection()) { const t = readPromptBox(terminal); if (t) navigator.clipboard.writeText(t); return true; }
@@ -2526,6 +2645,7 @@ function fitPreservingScroll(x) {
 }
 
 function showXterm(id) {
+  ghostClear(); // stale suggestion from the previously-shown agent
   // visibility, not display — a display:none xterm loses its dims and reflows on re-show
   for (const [xid, x] of xterms) x.el.style.visibility = xid === id ? 'visible' : 'hidden';
   const x = xterms.get(id);
@@ -2565,6 +2685,75 @@ function readPromptBox(terminal) {
   for (let y = top; y <= bot; y++) lines.push(inner(y).replace(/^[>❯]\s?/, ''));
   return lines.join('\n').trim();
 }
+
+// ── Inline ghost-text autocomplete ─────────────────────
+// Overlay-not-buffer: the suggestion is a fixed-position <span> over the canvas,
+// never written into xterm, so the buffer stays in lockstep with the PTY.
+const ghost = { reqId: 0, text: '', prefix: '', id: null, timer: null };
+const lastTermDataAt = new Map(); // id -> ts of last PTY output (idle guard)
+let ghostEnabled = localStorage.getItem('ghostEnabled') !== '0';
+
+function ghostClear() {
+  ghost.text = ''; ghost.id = null;
+  const g = document.getElementById('ghost-suggest'); if (g) g.style.display = 'none';
+}
+function ghostOnInput() { // called after every keystroke on the selected terminal
+  ghostClear();
+  if (!ghostEnabled) return;
+  clearTimeout(ghost.timer);
+  ghost.timer = setTimeout(ghostRequest, 350);
+}
+function ghostReadPrefix(terminal) {
+  const buf = terminal.buffer.active;
+  const ln = buf.getLine(buf.baseY + buf.cursorY);
+  if (!ln) return { ok: false };
+  return parsePromptRow(ln.translateToString(true), buf.cursorX); // ghost-core.js
+}
+function ghostTail(terminal, n) { // last n rows of output, as LLM context
+  const buf = terminal.buffer.active;
+  const end = buf.baseY + buf.cursorY;
+  const lines = [];
+  for (let y = Math.max(0, end - n); y <= end; y++) {
+    const ln = buf.getLine(y); if (ln) lines.push(ln.translateToString(true).replace(/\s+$/, ''));
+  }
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+function ghostRequest() {
+  if (!ghostEnabled || selectedId == null) return;
+  const x = xterms.get(selectedId); if (!x) return;
+  // idle guard: don't fire mid-stream — retry shortly once output settles
+  if (Date.now() - (lastTermDataAt.get(selectedId) || 0) < 200) { ghost.timer = setTimeout(ghostRequest, 200); return; }
+  const p = ghostReadPrefix(x.terminal);
+  if (!p.ok || !p.atEnd || p.prefix.length < 3) return;
+  if (p.prefix.startsWith('/') || /@[\w./-]*$/.test(p.prefix)) return; // slash/@ menus belong to Claude Code
+  ghost.prefix = p.prefix; ghost.id = selectedId;
+  api.send({ type: 'ghostComplete', id: selectedId, reqId: ++ghost.reqId, prefix: p.prefix, context: ghostTail(x.terminal, 40) });
+}
+function ghostShow(text) {
+  const x = selectedId != null ? xterms.get(selectedId) : null; if (!x) return;
+  const screen = x.el.querySelector('.xterm-screen'); if (!screen) return;
+  const buf = x.terminal.buffer.active;
+  const cellW = screen.clientWidth / x.terminal.cols;
+  const cellH = screen.clientHeight / x.terminal.rows;
+  const rect = screen.getBoundingClientRect();
+  let g = document.getElementById('ghost-suggest');
+  if (!g) { g = document.createElement('div'); g.id = 'ghost-suggest'; document.body.appendChild(g); }
+  const cs = getComputedStyle(screen);
+  g.style.fontFamily = cs.fontFamily; g.style.fontSize = cs.fontSize; g.style.lineHeight = cellH + 'px';
+  g.style.left = (rect.left + buf.cursorX * cellW) + 'px';
+  g.style.top = (rect.top + buf.cursorY * cellH) + 'px';
+  g.textContent = text;
+  const hint = document.createElement('span'); hint.className = 'ghost-hint'; hint.textContent = 'Tab'; g.appendChild(hint);
+  g.style.display = 'block';
+  ghost.text = text;
+}
+function ghostAccept() {
+  if (!ghost.text || selectedId == null) return false;
+  api.send({ type: 'termInput', id: selectedId, data: ghost.text });
+  ghostClear();
+  return true;
+}
+function onGhostChange(on) { ghostEnabled = !!on; localStorage.setItem('ghostEnabled', on ? '1' : '0'); if (!on) ghostClear(); }
 
 function sendResize(id, x) {
   const t = x.terminal; api.send({ type: 'termResize', id, cols: t.cols, rows: t.rows });
@@ -3001,7 +3190,19 @@ api.on((msg) => {
     showToast('Image pasted — path inserted');
     return;
   }
+  if (msg.type === 'ghost') {
+    if (msg.id !== selectedId || msg.reqId !== ghost.reqId || !msg.suggestion) return;
+    const cont = extractContinuation(ghost.prefix, msg.suggestion); // ghost-core.js
+    if (!cont) return;
+    const x = xterms.get(selectedId); if (!x) return;
+    const p = ghostReadPrefix(x.terminal); // re-verify line unchanged since we asked
+    if (!p.ok || !p.atEnd || p.prefix !== ghost.prefix) return;
+    ghostShow(cont);
+    return;
+  }
   if (msg.type === 'termData') {
+    lastTermDataAt.set(msg.id, Date.now());
+    if (msg.id === selectedId && ghost.text) ghostClear();
     let x = xterms.get(msg.id);
     if (!x) {
       if (!agents.has(msg.id)) return; // Agent was closed, ignore late data
@@ -3178,10 +3379,26 @@ function handleAgentMsg(msg) {
       allRepos = msg.repos || [];
       renderRepoPicker();
       break;
+    case 'actionsList':
+      // runs:null means the whole poll failed — keep the last good list, flag the error.
+      if (msg.runs) { actionsState.runs = msg.runs; adoptWorkflowNames(msg.runs); }
+      actionsState.error = msg.error || null;
+      actionsState.errorCode = msg.errorCode || null;
+      renderActionsBadge();
+      if (document.getElementById('actions-dropdown').style.display === 'block') {
+        document.getElementById('actions-dropdown').innerHTML = actionsDropdownHtml();
+        startActElapsed(); // fresh rows lost their ticker; re-attach (no-op if already running)
+      }
+      break;
+    case 'workflowList':
+      renderRepoWorkflows(msg.repo, msg.workflows, msg.error);
+      break;
     case 'ghReady': {
       // gh just became usable — refresh whatever the user was blocked on.
       prState.error = null; prState.errorCode = null;
       renderPrBadge();
+      actionsState.error = null; actionsState.errorCode = null;
+      api.send({ type: 'pollActionsNow' });
       const so = document.getElementById('settings-overlay');
       if (so && so.style.display === 'flex') loadRepos(); // only if they're watching it
       break;
@@ -3592,6 +3809,13 @@ function applySettings(s) {
     const i = document.getElementById('inp-pr-interval'); if (i) i.value = prSettings.intervalSec || 60;
     renderRepoPicker();
   }
+  if (s.actionsSettings) {
+    actionsSettings = s.actionsSettings;
+    const c = document.getElementById('chk-actions'); if (c) c.checked = !!actionsSettings.enabled;
+    const i = document.getElementById('inp-actions-interval'); if (i) i.value = actionsSettings.intervalSec || 60;
+    renderTrackedWorkflows();
+    renderActionsBadge();
+  }
   // Restore terminal panel width
   if (s.termWidth) {
     settings_termWidth = s.termWidth;
@@ -3621,7 +3845,10 @@ function toggleSettings() {
     document.getElementById('chk-bypass').checked = bypassPermissions;
     document.getElementById('chk-notif').checked = notificationsEnabled;
     document.getElementById('chk-sound').checked = notificationSoundEnabled;
+    document.getElementById('chk-ghost').checked = ghostEnabled;
     document.getElementById('inp-budget').value = planBudget;
+    renderTrackedWorkflows();
+    renderSettingsChips();
   }
 }
 document.addEventListener('keydown', (e) => {
@@ -4194,6 +4421,233 @@ document.addEventListener('click', (e) => {
   if (d && d.style.display === 'block' && !e.target.closest('#pr-dropdown') && !e.target.closest('#pr-snooze-pop') && e.target.id !== 'pr-badge') d.style.display = 'none';
 });
 
+// ── GitHub Actions tracking ───────────────────────────
+let actionsSettings = { enabled: false, workflows: [], intervalSec: 60 };
+let actionsState = { runs: [], error: null, errorCode: null };
+let actionsPendingRepo = null; // repo whose workflow list is being picked from
+
+function onActionsSettingsChange() {
+  const el = document.getElementById('inp-actions-interval');
+  actionsSettings.intervalSec = Math.max(30, Number(el && el.value) || 60);
+  api.send({ type: 'saveActionsSettings', actionsSettings });
+  renderSettingsChips();
+}
+function onActionsEnableChange(v) {
+  actionsSettings.enabled = !!v;
+  if (!v) { actionsState.runs = []; renderActionsBadge(); }
+  onActionsSettingsChange();
+}
+
+// One box for both paths: a workflow URL tracks directly, a repo opens its picker.
+function addActionsInput() {
+  const el = document.getElementById('inp-actions-add');
+  const parsed = parseWorkflowInput(el.value); // actions-core.js
+  if (!parsed) { showToast('Paste a workflow URL or owner/repo'); return; }
+  if (parsed.file) {
+    el.value = '';
+    document.getElementById('actions-repo-wf').style.display = 'none';
+    addWorkflow(parsed.repo, parsed.file, '');
+    return;
+  }
+  actionsPendingRepo = parsed.repo;
+  const box = document.getElementById('actions-repo-wf');
+  box.style.display = 'block';
+  box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:4px;">Loading workflows…</div>';
+  api.send({ type: 'listWorkflows', repo: parsed.repo });
+}
+
+function renderRepoWorkflows(repo, workflows, error) {
+  if (repo !== actionsPendingRepo) return; // a stale response for a repo they moved on from
+  const box = document.getElementById('actions-repo-wf');
+  if (error) { box.innerHTML = `<div style="color:#f38ba8;font-size:12px;padding:4px;">${escapeHtml(error)}</div>`; return; }
+  if (!workflows || !workflows.length) { box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:4px;">No workflows in this repo.</div>'; return; }
+  const tracked = new Set(actionsSettings.workflows.map(w => w.repo + '/' + w.file));
+  box.innerHTML = `<div style="font-size:11px;color:var(--dim);padding:2px 4px;">${escapeHtml(repo)}</div>`
+    + workflows.map(w => {
+      const on = tracked.has(repo + '/' + w.file);
+      const f = w.file.replace(/'/g, "\\'"), n = (w.name || '').replace(/'/g, "\\'");
+      return `<label class="act-wf" style="cursor:pointer;"><input type="checkbox" ${on ? 'checked' : ''} `
+        + `onchange="toggleWorkflow('${repo.replace(/'/g, "\\'")}','${f}','${n}',this.checked)" />`
+        + `<span>${escapeHtml(w.name || w.file)}</span>`
+        + `<span style="color:var(--dim);font-size:11px;">${escapeHtml(w.file)}</span></label>`;
+    }).join('');
+}
+
+function addWorkflow(repo, file, name) {
+  const k = repo + '/' + file;
+  if (actionsSettings.workflows.some(w => w.repo + '/' + w.file === k)) { showToast('Already tracked'); return; }
+  // Empty name, not the filename: the first poll fills in GitHub's own workflow name.
+  actionsSettings.workflows.push({ repo, file, name: name || '' });
+  if (!actionsSettings.enabled) { // adding one implies wanting it on
+    actionsSettings.enabled = true;
+    const c = document.getElementById('chk-actions'); if (c) c.checked = true;
+  }
+  renderTrackedWorkflows();
+  onActionsSettingsChange();
+}
+
+// Backfill the display name GitHub reports onto the tracked list, so Settings
+// shows the same alias as the badge (and survives a restart once saved).
+function adoptWorkflowNames(runs) {
+  let changed = false;
+  for (const r of runs) {
+    if (!r.name || r.name === r.file) continue;
+    const w = actionsSettings.workflows.find(w => w.repo + '/' + w.file === r.key);
+    if (w && w.name !== r.name) { w.name = r.name; changed = true; }
+  }
+  if (!changed) return;
+  renderTrackedWorkflows();
+  renderSettingsChips();
+  api.send({ type: 'saveActionsSettings', actionsSettings });
+}
+
+function removeWorkflow(key) {
+  actionsSettings.workflows = actionsSettings.workflows.filter(w => w.repo + '/' + w.file !== key);
+  actionsState.runs = actionsState.runs.filter(r => r.key !== key);
+  renderTrackedWorkflows();
+  renderActionsBadge();
+  onActionsSettingsChange();
+}
+
+function toggleWorkflow(repo, file, name, on) {
+  if (on) addWorkflow(repo, file, name); else removeWorkflow(repo + '/' + file);
+}
+
+function renderTrackedWorkflows() {
+  const box = document.getElementById('actions-wf-list');
+  if (!box) return;
+  const list = actionsSettings.workflows || [];
+  if (!list.length) { box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:4px;">Nothing tracked yet.</div>'; return; }
+  box.innerHTML = list.map(w => {
+    const k = (w.repo + '/' + w.file).replace(/'/g, "\\'");
+    return `<div class="act-wf"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">`
+      + `${escapeHtml(w.repo)} <span style="color:var(--dim);">· ${escapeHtml(w.name || w.file)}</span></span>`
+      + `<button title="Stop tracking" onclick="removeWorkflow('${k}')">✕</button></div>`;
+  }).join('');
+}
+
+const ACT_LABEL = { running: 'RUNNING', success: 'OK', failure: 'FAILED', cancelled: 'CANCELLED', none: 'NEVER RUN' };
+
+// "45s" / "3m 12s" / "1h 04m" — elapsed since an ISO timestamp, ticking live.
+function elapsedStr(iso) {
+  const t = new Date(iso).getTime();
+  if (!t) return '';
+  let s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  if (h) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m) return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
+}
+
+function actionsRowHtml(r) {
+  // The workflow's run list, not the single latest run — you almost always want
+  // the history around a deploy, not just the one row already summarised here.
+  const u = `https://github.com/${r.repo}/actions/workflows/${r.file}`.replace(/'/g, "\\'");
+  const state = r.error ? 'error' : r.state;
+  const label = r.error ? 'ERROR' : ACT_LABEL[r.state] || r.state;
+  const when = r.state === 'running' ? r.startedAt : (r.updatedAt || r.startedAt);
+  // A running deploy gets a live ⏱ elapsed clock; everything else gets relative time.
+  const timeHtml = r.state === 'running' && r.startedAt
+    ? `⏱ <span class="act-elapsed" data-started="${escapeHtml(r.startedAt)}">${escapeHtml(elapsedStr(r.startedAt))}</span>`
+    : (when ? escapeHtml(prRelTime(when)) : '');
+  const meta = r.error
+    ? escapeHtml(r.error)
+    : [r.branch && escapeHtml(r.branch), r.actor && '@' + escapeHtml(r.actor),
+       r.runNumber ? '#' + r.runNumber : '', timeHtml].filter(Boolean).join(' · ');
+  // Failed runs get the run's own URL on the clipboard — that's the link you paste
+  // into Claude to have it read the logs. Not the workflow list the row opens.
+  const copyBtn = r.state === 'failure' && r.url
+    ? `<button class="act-copy" title="Copy run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>`
+    : '';
+  return `<div class="act-row act-${state}" onclick="openActionRun('${u}')">${copyBtn}`
+    + `<div>${escapeHtml(r.name || r.file)}<span class="act-pill act-${state}">${label}</span></div>`
+    + `<div class="act-meta">${escapeHtml(r.repo)}${meta ? ' · ' + meta : ''}</div></div>`;
+}
+
+function actionsDropdownHtml() {
+  const head = `<div class="pr-dhead"><span>Tracked Actions</span><div class="pr-dhead-btns">`
+    + `<button class="pr-refresh" title="Refresh" onclick="event.stopPropagation();refreshActions(this)">⟳</button>`
+    + `<button class="pr-refresh pr-close" title="Close" onclick="event.stopPropagation();document.getElementById('actions-dropdown').style.display='none'">✕</button></div></div>`;
+  if (actionsState.error && !actionsState.runs.length) {
+    return head + '<div class="pr-empty">Actions check failed. ' + escapeHtml(actionsState.error)
+      + ghFixHtml(actionsState.errorCode) + '</div>';
+  }
+  if (!actionsState.runs.length) return head + '<div class="pr-empty">No workflows tracked. Add one in Settings.</div>';
+  // Running first, then failures — the two things worth looking at.
+  const rank = { running: 0, failure: 1, cancelled: 2, none: 3, success: 4 };
+  const sorted = [...actionsState.runs].sort((a, b) => (rank[a.state] ?? 5) - (rank[b.state] ?? 5));
+  const stale = actionsState.error ? `<div class="pr-empty" style="color:#fab387">⚠ Last refresh failed: ${escapeHtml(actionsState.error)}</div>` : '';
+  return head + sorted.map(actionsRowHtml).join('') + stale;
+}
+
+function renderActionsBadge() {
+  const el = document.getElementById('actions-badge');
+  if (!el) return;
+  const dd = document.getElementById('actions-dropdown');
+  if (!actionsSettings.enabled || !(actionsSettings.workflows || []).length) {
+    el.style.display = 'none';
+    if (dd) dd.style.display = 'none';
+    return;
+  }
+  if (actionsState.error && !actionsState.runs.length) {
+    el.className = 'err'; el.textContent = '⚙ Actions — check failed'; el.style.display = 'flex'; return;
+  }
+  const { cls, text } = actionsRollup(actionsState.runs); // actions-core.js
+  if (cls === 'hidden') { el.style.display = 'none'; if (dd) dd.style.display = 'none'; return; }
+  el.className = actionsState.error ? 'err' : cls;
+  el.textContent = text;
+  el.style.display = 'flex';
+}
+
+let _actElapsedTimer = null;
+// Repaint the ⏱ spans in place every second — no full re-render, no server round-trip.
+function tickActElapsed() {
+  const spans = document.querySelectorAll('#actions-dropdown .act-elapsed');
+  if (!spans.length) { stopActElapsed(); return; }
+  spans.forEach(s => { s.textContent = elapsedStr(s.dataset.started); });
+}
+function startActElapsed() { if (!_actElapsedTimer) { tickActElapsed(); _actElapsedTimer = setInterval(tickActElapsed, 1000); } }
+function stopActElapsed() { if (_actElapsedTimer) { clearInterval(_actElapsedTimer); _actElapsedTimer = null; } }
+
+function toggleActionsDropdown(e) {
+  if (e) e.stopPropagation();
+  const d = document.getElementById('actions-dropdown');
+  if (d.style.display === 'block') { d.style.display = 'none'; stopActElapsed(); return; }
+  d.innerHTML = actionsDropdownHtml();
+  const r = document.getElementById('actions-badge').getBoundingClientRect();
+  d.style.left = r.left + 'px';
+  d.style.right = 'auto';
+  d.style.top = 'auto';
+  d.style.bottom = (window.innerHeight - r.top + 4) + 'px';
+  d.style.display = 'block';
+  startActElapsed();
+}
+
+function openActionRun(url) {
+  if (url) api.send({ type: 'openUrl', url });
+  document.getElementById('actions-dropdown').style.display = 'none';
+  stopActElapsed();
+}
+
+function copyActionUrl(url, btn) {
+  navigator.clipboard.writeText(url).then(() => {
+    if (!btn) return;
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = '⧉ Copy URL'; }, 1200);
+  }).catch(() => showToast('Copy failed'));
+}
+
+function refreshActions(btn) {
+  if (btn) btn.classList.add('spin');
+  api.send({ type: 'pollActionsNow' });
+}
+
+document.addEventListener('click', (e) => {
+  const d = document.getElementById('actions-dropdown');
+  if (d && d.style.display === 'block' && !e.target.closest('#actions-dropdown') && e.target.id !== 'actions-badge') { d.style.display = 'none'; stopActElapsed(); }
+});
+
 // ── Agent hover tooltip (on the status dot only): last 5 prompts ──
 (function () {
   const tip = document.createElement('div');
@@ -4258,6 +4712,21 @@ function onPrSettingsChange() {
   const intervalSec = Math.max(30, Number(document.getElementById('inp-pr-interval').value) || 60);
   prSettings = { enabled: document.getElementById('chk-pr').checked, repos: [...selectedRepos], intervalSec };
   api.send({ type: 'savePrSettings', prSettings });
+  renderSettingsChips();
+}
+
+// Collapsed sections hide their state, so each summary carries a one-glance chip.
+function renderSettingsChips() {
+  const n = (c, on, text) => {
+    const el = document.getElementById(c);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'sec-chip' + (on ? ' on' : '');
+  };
+  const pr = prSettings.enabled, prN = (prSettings.repos || []).length;
+  n('chip-pr', pr, pr ? `on · ${prN} repo${prN === 1 ? '' : 's'}` : 'off');
+  const ac = actionsSettings.enabled, acN = (actionsSettings.workflows || []).length;
+  n('chip-actions', ac, ac ? `on · ${acN} workflow${acN === 1 ? '' : 's'}` : 'off');
 }
 
 function loadRepos() {

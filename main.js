@@ -343,6 +343,33 @@ async function generateSummaryTitle(id) {
   finally { if (a) a.titlePending = false; }
 }
 
+// Inline ghost-text autocomplete: complete the partial prompt the user is
+// typing into a live agent's terminal. Replies with a `ghost` message the
+// renderer overlays. Silent (empty suggestion) on no key / error / timeout.
+async function ghostComplete(id, reqId, prefix, context) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const reply = (suggestion) => send({ type: 'ghost', id, reqId, suggestion });
+  if (!apiKey || !prefix) return reply('');
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 2500);
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model: TITLE_MODEL, max_tokens: 48,
+        system: 'You are an inline autocomplete for prompts a developer types to a coding agent (Claude Code). Given the recent terminal output and the current partial line, output ONLY the text that should continue the current line after the cursor. No quotes, no explanation, one line, at most ~12 words. If you cannot confidently continue, output nothing.',
+        messages: [{ role: 'user', content: `Recent terminal output:\n${context || '(none)'}\n\nCurrent line so far:\n${prefix}\n\nContinuation:` }],
+      }),
+    });
+    clearTimeout(to);
+    if (!resp.ok) return reply('');
+    const data = await resp.json();
+    reply(data.content?.[0]?.text || '');
+  } catch { reply(''); }
+}
+
 // Check if text is a system/internal message rather than a real user prompt
 const SYSTEM_MSG_RE = /^<(?:command-name|local-command|system-reminder|task-notification|user-prompt-submit-hook|antml:)/;
 function isSystemMessage(text) { return SYSTEM_MSG_RE.test(text.trim()); }
@@ -1676,6 +1703,131 @@ function armPrTimer() {
   prTimer = setInterval(pollPRs, sec * 1000);
 }
 
+// ── GitHub Actions tracking ───────────────────────────
+const { runState, nextPollDelay, diffNewFailures, REPO_RE: WF_REPO_RE } = require('./actions-core');
+const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
+let actionsTimer = null;
+let actionsGhErrorLogged = false;
+
+function wfKey(repo, file) { return `${repo}/${file}`; }
+
+// Keep only entries that survive a round trip through the two regexes — this is
+// the trust boundary for strings that get spliced into a gh api path.
+function sanitizeWorkflows(list) {
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).reduce((acc, w) => {
+    const repo = String((w && w.repo) || '').trim();
+    const file = String((w && w.file) || '').trim();
+    if (!WF_REPO_RE.test(repo) || !WF_FILE_RE.test(file)) return acc;
+    const k = wfKey(repo, file);
+    if (seen.has(k)) return acc;
+    seen.add(k);
+    acc.push({ repo, file, name: String((w && w.name) || '').slice(0, 120) });
+    return acc;
+  }, []);
+}
+
+function ghJson(args, timeout = 20000) {
+  return new Promise((resolve) => {
+    execFile('gh', args, { timeout, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err && !stdout) return resolve({ error: ghErr(err), errorCode: ghErrCode(err) });
+        try { resolve({ data: JSON.parse(stdout) }); }
+        catch (e) { resolve({ error: ghErr(err || e), errorCode: ghErrCode(err || e) }); }
+      });
+  });
+}
+
+// Latest run on any branch for one workflow. per_page=1 keeps it to a single
+// row; a workflow that has never run comes back with an empty list, not an error.
+async function fetchWorkflowRun(w) {
+  const base = { key: wfKey(w.repo, w.file), repo: w.repo, file: w.file, name: w.name || w.file };
+  const res = await ghJson(['api', `/repos/${w.repo}/actions/workflows/${w.file}/runs?per_page=1`]);
+  if (res.error) {
+    return { ...base, state: 'none', error: res.error, errorCode: res.errorCode || null,
+      url: `https://github.com/${w.repo}/actions/workflows/${w.file}` };
+  }
+  const run = (res.data && res.data.workflow_runs && res.data.workflow_runs[0]) || null;
+  const actorOf = (r) => (r.actor && r.actor.login) || (r.triggering_actor && r.triggering_actor.login) || '';
+  if (!run) {
+    return { ...base, state: 'none', url: `https://github.com/${w.repo}/actions/workflows/${w.file}` };
+  }
+  return {
+    ...base,
+    // run.name is the workflow's own `name:` from GitHub — the alias the user sees
+    // there. It wins over anything we cached at add-time, which may just be the file.
+    name: run.name || w.name || w.file,
+    state: runState(run),
+    conclusion: run.conclusion || '',
+    status: run.status || '',
+    branch: run.head_branch || '',
+    actor: actorOf(run),
+    // false ONLY when we know the login and it differs — an unresolved login
+    // leaves this undefined, which the badge treats as mine (fails loud).
+    mine: ghLogin ? actorOf(run) === ghLogin : undefined,
+    event: run.event || '',
+    runNumber: run.run_number || 0,
+    title: run.display_title || run.head_commit && run.head_commit.message || '',
+    startedAt: run.run_started_at || run.created_at || '',
+    updatedAt: run.updated_at || '',
+    url: run.html_url || `https://github.com/${w.repo}/actions/workflows/${w.file}`,
+  };
+}
+
+async function pollActions() {
+  const cfg = settings.actionsSettings;
+  const wfs = sanitizeWorkflows(cfg && cfg.workflows);
+  if (!cfg || !cfg.enabled || !wfs.length) return [];
+  await fetchGhLogin(); // needed to tell my failed deploys from everyone else's
+  const rows = await Promise.all(wfs.map(fetchWorkflowRun));
+  const failed = rows.filter(r => r.error);
+  if (failed.length === rows.length) {
+    // Every workflow failed — almost always gh missing/logged out, not N bad repos.
+    const emsg = failed[0].error;
+    if (!actionsGhErrorLogged) { console.log('[Overlord] Actions poll failed:', emsg); actionsGhErrorLogged = true; }
+    send({ type: 'actionsList', runs: null, error: emsg, errorCode: failed[0].errorCode || null });
+    return rows;
+  }
+  actionsGhErrorLogged = false;
+  // Notify only on the transition into failure — a run that was already red last
+  // poll has been reported once, and a first sighting isn't a transition at all.
+  const prevStates = settings.actionsStates || {};
+  for (const r of diffNewFailures(rows, prevStates)) notifyActionFailed(r);
+  settings.actionsStates = {};
+  for (const r of rows) if (!r.error) settings.actionsStates[r.key] = r.state;
+  saveState();
+  send({ type: 'actionsList', runs: rows, error: null });
+  return rows;
+}
+
+function notifyActionFailed(r) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({
+    title: `❌ Action failed · ${r.repo}`,
+    body: `${r.name || r.file}${r.branch ? ' · ' + r.branch : ''}`,
+    silent: true,
+  });
+  n.on('click', () => shell.openExternal(r.url).catch(() => {}));
+  n.show();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
+}
+
+// setTimeout, not setInterval: the delay depends on what the last poll saw, so
+// a deploy in flight is picked up every 10s and an idle board every intervalSec.
+function armActionsTimer() {
+  if (actionsTimer) { clearTimeout(actionsTimer); actionsTimer = null; }
+  const cfg = settings.actionsSettings;
+  if (!cfg || !cfg.enabled) return;
+  const tick = async () => {
+    let rows = [];
+    try { rows = await pollActions(); } catch (e) { console.log('[Overlord] Actions poll error:', e.message); }
+    const c = settings.actionsSettings;
+    if (!c || !c.enabled) return;
+    actionsTimer = setTimeout(tick, nextPollDelay(rows, c.intervalSec));
+  };
+  tick();
+}
+
 // ── Transcript export ─────────────────────────────────
 async function exportTranscript(id) {
   const a = agents.get(id);
@@ -2493,6 +2645,7 @@ function handleIpc(msg) {
     }
     case 'focusAgent': spawnTerminal(msg.id); send({ type: 'focused', id: msg.id }); break;
     case 'termInput': handleTermInput(msg.id, msg.data); break;
+    case 'ghostComplete': ghostComplete(msg.id, msg.reqId, msg.prefix, msg.context); break;
     case 'stopLoop': { const a = agents.get(msg.id); if (a) { a.cronCount = 0; send({ type: 'looping', id: msg.id, active: false, count: 0 }); } const t = terminals.get(msg.id); if (t) t.write('\x03'); break; }
     case 'compactAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a && t && a.isWaiting) { a.compacting = true; send({ type: 'compacting', id: msg.id, active: true }); t.write('/compact\r'); } break; }
     case 'termResize': { const t = terminals.get(msg.id); if (t) try { t.resize(msg.cols, msg.rows); } catch {} break; }
@@ -2536,6 +2689,32 @@ function handleIpc(msg) {
         });
       break;
     }
+    case 'saveActionsSettings': {
+      const a = msg.actionsSettings || {};
+      settings.actionsSettings = {
+        enabled: !!a.enabled,
+        workflows: sanitizeWorkflows(a.workflows),
+        intervalSec: Math.max(30, Number(a.intervalSec) || 60),
+      };
+      saveState();
+      send({ type: 'settings', settings });
+      armActionsTimer();
+      break;
+    }
+    case 'listWorkflows': {
+      const repo = String(msg.repo || '').trim();
+      if (!WF_REPO_RE.test(repo)) { send({ type: 'workflowList', repo, workflows: null, error: 'Invalid repo' }); break; }
+      ghJson(['api', '--paginate', `/repos/${repo}/actions/workflows?per_page=100`], 30000).then((res) => {
+        if (res.error) { send({ type: 'workflowList', repo, workflows: null, error: res.error, errorCode: res.errorCode || null }); return; }
+        const workflows = ((res.data && res.data.workflows) || [])
+          .filter(w => w && typeof w.path === 'string')
+          .map(w => ({ file: w.path.split('/').pop(), name: w.name || '', state: w.state || '' }))
+          .filter(w => WF_FILE_RE.test(w.file));
+        send({ type: 'workflowList', repo, workflows, error: null });
+      });
+      break;
+    }
+    case 'pollActionsNow': armActionsTimer(); break;
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
@@ -3175,6 +3354,7 @@ app.whenReady().then(() => {
       restoreAgents(state);
       startRemoteServer();
       armPrTimer();
+      armActionsTimer();
     }
     // Runs on every load incl. renderer reload — repaints from in-memory state
     // so a reload (to pick up index.html changes) keeps all live sessions.
