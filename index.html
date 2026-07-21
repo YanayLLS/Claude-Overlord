@@ -1272,6 +1272,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./xterm-bundle.js"></script>
 <script src="./ghost-core.js"></script>
 <script src="./actions-core.js"></script>
+<script src="./update-core.js"></script>
 <script>
 function ctxWindow(modelFamily, ctxTok) {
   const base = (modelFamily === 'opus' || modelFamily === 'fable') ? 1000000 : 200000; // sonnet/haiku default 200k
@@ -3406,6 +3407,34 @@ function handleAgentMsg(msg) {
     case 'updateDownloaded': {
       const b = document.getElementById('update-btn');
       if (b) { b.style.display = ''; b.textContent = '⬇ Update to ' + msg.version; }
+      break;
+    }
+    // Source checkouts (start.bat) update by pulling master. The two update
+    // paths never coexist — packaged builds don't emit this — so they share one button.
+    case 'gitUpdate': {
+      const b = document.getElementById('update-btn');
+      if (!b) break;
+      const label = updateLabel(msg.behind); // update-core.js
+      if (!label) { b.style.display = 'none'; break; }
+      b.style.display = '';
+      b.textContent = label;
+      b.title = 'Pull ' + msg.behind + ' new commit(s) from master and restart';
+      b.onclick = () => {
+        b.disabled = true;
+        b.textContent = 'Updating…';
+        api.send({ type: 'gitPull' });
+      };
+      break;
+    }
+    case 'gitUpdateProgress': {
+      const b = document.getElementById('update-btn');
+      if (b) b.textContent = msg.text;
+      break;
+    }
+    case 'gitUpdateResult': {
+      const b = document.getElementById('update-btn');
+      if (b) { b.disabled = false; b.textContent = '⬇ Update'; }
+      if (!msg.ok) alert('Update failed\n\n' + (msg.error || 'unknown error'));
       break;
     }
     case 'prActionError': {

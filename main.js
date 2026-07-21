@@ -72,6 +72,90 @@ autoUpdater.on('error', err => {
   logToRenderer(`Auto-updater error: ${err.message}`);
 });
 
+// ── Git self-update (source checkouts) ────────────────
+// Packaged builds update through electron-updater above. People who run the
+// repo directly via start.bat get nothing from that, so offer them a pull.
+const { pullBlocker, needsInstall } = require('./update-core');
+const APP_DIR = __dirname;
+let gitUpdateBusy = false;
+
+function gitCmd(args, timeout = 30000) {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd: APP_DIR, timeout, windowsHide: true, shell: process.platform === 'win32' },
+      (err, stdout, stderr) => resolve({
+        ok: !err,
+        out: String(stdout || '').trim(),
+        err: String(stderr || err && err.message || '').trim(),
+      }));
+  });
+}
+
+function isGitCheckout() {
+  if (app.isPackaged) return false; // packaged builds use electron-updater
+  try { return fs.existsSync(path.join(APP_DIR, '.git')); } catch { return false; }
+}
+
+// Fetch master and report how far behind/ahead we are. Never mutates the tree.
+async function checkGitUpdate() {
+  if (!isGitCheckout() || gitUpdateBusy) return;
+  const f = await gitCmd(['fetch', 'origin', 'master', '--quiet']);
+  if (!f.ok) return; // offline or no remote — stay quiet, try again next tick
+  const behind = await gitCmd(['rev-list', '--count', 'HEAD..origin/master']);
+  const ahead = await gitCmd(['rev-list', '--count', 'origin/master..HEAD']);
+  if (!behind.ok || !ahead.ok) return;
+  send({
+    type: 'gitUpdate',
+    behind: Number(behind.out) || 0,
+    ahead: Number(ahead.out) || 0,
+  });
+}
+
+// Fast-forward only: it either applies cleanly or refuses, and can never leave
+// a half-merged tree with conflict markers for the user to discover later.
+async function doGitPull() {
+  if (!isGitCheckout()) return;
+  if (gitUpdateBusy) return;
+  gitUpdateBusy = true;
+  const fail = (m) => { gitUpdateBusy = false; send({ type: 'gitUpdateResult', ok: false, error: m }); };
+  try {
+    const status = await gitCmd(['status', '--porcelain']);
+    if (!status.ok) return fail('Could not read git status: ' + status.err);
+    const ahead = await gitCmd(['rev-list', '--count', 'origin/master..HEAD']);
+    const blocked = pullBlocker({ porcelain: status.out, ahead: Number(ahead.out) || 0 });
+    if (blocked) return fail(blocked);
+
+    const before = await gitCmd(['rev-parse', 'HEAD']);
+    send({ type: 'gitUpdateProgress', text: 'Pulling…' });
+    const merge = await gitCmd(['merge', '--ff-only', 'origin/master']);
+    if (!merge.ok) {
+      return fail('Pull failed (not a fast-forward). Resolve it manually:\n' + (merge.err || merge.out).slice(0, 300));
+    }
+    const after = await gitCmd(['rev-parse', 'HEAD']);
+    if (before.out === after.out) return fail('Already up to date.');
+
+    const changed = await gitCmd(['diff', '--name-only', before.out, after.out]);
+    if (changed.ok && needsInstall(changed.out.split('\n'))) {
+      send({ type: 'gitUpdateProgress', text: 'Installing dependencies…' });
+      const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+      const install = await new Promise((resolve) => {
+        execFile(npm, ['install'], { cwd: APP_DIR, timeout: 300000, windowsHide: true, shell: process.platform === 'win32' },
+          (err, so, se) => resolve({ ok: !err, err: String(se || err && err.message || '') }));
+      });
+      if (!install.ok) {
+        // The code is already updated, so don't pretend nothing happened — tell
+        // them exactly what to run before restarting.
+        return fail('Updated, but npm install failed. Run it manually, then restart.\n' + install.err.slice(0, 300));
+      }
+    }
+    send({ type: 'gitUpdateProgress', text: 'Restarting…' });
+    // before-quit already hands running agents to detached processes that the
+    // next launch reattaches, so a relaunch is a supported path, not a kill.
+    setTimeout(() => { app.relaunch(); app.quit(); }, 400);
+  } catch (e) {
+    fail(e.message);
+  }
+}
+
 function pickAgentName() {
   const used = new Set();
   for (const [, a] of agents) if (a.agentName) used.add(a.agentName);
@@ -2876,6 +2960,8 @@ function handleIpc(msg) {
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'fullRestart': app.relaunch(); app.exit(0); break;
     case 'installUpdate': autoUpdater.quitAndInstall(); break;
+    case 'checkGitUpdate': checkGitUpdate(); break;
+    case 'gitPull': doGitPull(); break;
     case 'approvePr': {
       const url = msg.url;
       if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
@@ -3378,6 +3464,10 @@ app.whenReady().then(() => {
     setTimeout(() => autoUpdater.checkForUpdatesAndNotify(), 3000);
     // Re-check every minute so a long-running app catches new releases without a restart.
     setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 60 * 1000);
+  } else if (isGitCheckout() && !process.env.OVERLORD_STATE_DIR) {
+    // Source checkout: same idea, different mechanism — watch origin/master.
+    setTimeout(checkGitUpdate, 4000);
+    setInterval(checkGitUpdate, 5 * 60 * 1000);
   }
 });
 app.on('before-quit', () => {
