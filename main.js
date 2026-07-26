@@ -76,6 +76,7 @@ autoUpdater.on('error', err => {
 // Packaged builds update through electron-updater above. People who run the
 // repo directly via start.bat get nothing from that, so offer them a pull.
 const { pullBlocker, needsInstall } = require('./update-core');
+const { pickResumedFile } = require('./resume-core');
 const APP_DIR = __dirname;
 let gitUpdateBusy = false;
 
@@ -175,6 +176,44 @@ function modelFamily(model) {
   return 'sonnet';
 }
 
+// Credentials for api.anthropic.com: an API key if one is exported, otherwise
+// the OAuth token Claude Code's /login already wrote to disk. OAuth goes on
+// Authorization: Bearer with its own beta header — not x-api-key.
+// ponytail: no refresh-token flow — Claude Code refreshes on its own use, and
+// this only needs a read-only GET. Add one if the "expired" path ever nags.
+function anthropicAuthHeaders() {
+  const base = { 'anthropic-version': '2023-06-01' };
+  if (process.env.ANTHROPIC_API_KEY) return { ...base, 'x-api-key': process.env.ANTHROPIC_API_KEY };
+  let oauth;
+  try {
+    oauth = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf8')).claudeAiOauth;
+  } catch { return null; }
+  if (!oauth || !oauth.accessToken) return null;
+  if (oauth.expiresAt && oauth.expiresAt < Date.now()) return null;
+  return { ...base, 'authorization': `Bearer ${oauth.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' };
+}
+
+// The model picker is this list, nothing else — no hardcoded models, so one
+// Anthropic ships tomorrow appears without an app release. API order is kept
+// (newest first); [1m] variants aren't API ids, so they're gone.
+async function fetchModels() {
+  const fail = (error) => send({ type: 'models', models: [], error });
+  const headers = anthropicAuthHeaders();
+  if (!headers) return fail('Not logged in — run /login in any agent, then restart the app.');
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers });
+    if (!resp.ok) return fail(`Model list failed: HTTP ${resp.status}`);
+    const j = await resp.json();
+    const models = (j.data || [])
+      .filter(m => m.id && m.id.startsWith('claude-'))
+      .map(m => ({ id: m.id, label: m.display_name || m.id, family: modelFamily(m.id) }));
+    if (!models.length) return fail('API returned no models.');
+    send({ type: 'models', models });
+  } catch (e) {
+    fail('Model list failed: ' + (e.message || 'network error').slice(0, 120));
+  }
+}
+
 // User's default model for new sessions (set via /model in Claude Code)
 function defaultModel() {
   try {
@@ -235,6 +274,20 @@ function markClear(id) {
   pendingClearAgents.add(id);
   const a = agents.get(id);
   if (a) { a.stats.ctxTok = 0; send({ type: 'stats', id, stats: a.stats }); }
+}
+// /resume submitted: unlike /clear it usually lands in an existing JSONL (the picked
+// chat's own), so reconcileResumedAgents() has to go find it. Rewinding to an older
+// message forks a new file instead — markClear() covers that half.
+const pendingResumeAgents = new Map(); // agentId -> ms epoch of the /resume
+const RESUME_WINDOW_MS = 3 * 60 * 1000; // picker is interactive; give it time, then give up
+function markResume(id) { pendingResumeAgents.set(id, Date.now()); }
+// A submitted line that moves the agent to a different session file.
+const SESSION_SWITCH_RE = /^\s*\/(clear|resume)(\s+\S+)?\s*$/;
+function markSessionSwitch(id, line) {
+  const m = SESSION_SWITCH_RE.exec(line);
+  if (!m) return;
+  markClear(id);
+  if (m[1] === 'resume') markResume(id);
 }
 const TERM_BUFFER_MAX = 1_000_000; // ~10k lines — matches xterm scrollback so a reload can restore the whole visible history
 let remoteWs = null; // current WebSocket connection (only one at a time)
@@ -1455,6 +1508,35 @@ function scanForNewJsonlFiles() {
   }
 }
 
+// After /resume the agent is writing to the picked chat's existing JSONL, so it's
+// still tailing — and titled after — the session it left. Re-point it at whichever
+// other transcript in the project dir went live since the /resume.
+// ponytail: mtime is the only signal Claude Code leaves; a session started outside
+// Overlord in the same dir inside the 3-min window could be picked by mistake.
+function reconcileResumedAgents() {
+  for (const [id, since] of pendingResumeAgents) {
+    const a = agents.get(id);
+    if (!a || !terminals.has(id) || Date.now() - since > RESUME_WINDOW_MS) { pendingResumeAgents.delete(id); continue; }
+    const dir = claudeDir(a.cwd);
+    const owned = new Set();
+    for (const [oid, o] of agents) if (oid !== id) owned.add(o.jsonlFile);
+    const entries = [];
+    try {
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const file = path.join(dir, f);
+        try { entries.push({ file, mtimeMs: fs.statSync(file).mtimeMs }); } catch {}
+      }
+    } catch { continue; }
+    const file = pickResumedFile({ entries, since, current: a.jsonlFile, owned });
+    if (!file) continue;
+    pendingResumeAgents.delete(id);
+    pendingClearAgents.delete(id); // resume landed in an existing file, not a fresh one
+    console.log(`[Overlord] /resume detected: agent ${id} -> ${path.basename(file)}`);
+    reassignAgentToFile(id, file);
+  }
+}
+
 // Newest chat name from a session's JSONL — user /rename (custom-title) wins over
 // the auto-generated ai-title. '' if neither (e.g. a fresh /clear session).
 function readSessionTitle(file) {
@@ -1645,7 +1727,7 @@ function fetchAllPRs(repos) {
       const [owner, name] = r.split('/');
       return `r${i}: repository(owner:${JSON.stringify(owner)}, name:${JSON.stringify(name)}) { `
         + `pullRequests(states: OPEN, first: 100) { nodes { number title url isDraft createdAt `
-        + `author { login } reviewDecision mergeable mergeStateStatus `
+        + `author { login } reviewDecision mergeable mergeStateStatus headRefName baseRefName `
         + `reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 20) { nodes { author { login } state } } `
         + `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }`;
@@ -1689,6 +1771,7 @@ function fetchAllPRs(repos) {
             checks: rollupState(rollup && rollup.state),
             mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
             requested, createdAt: pr.createdAt || '', approvedBy, changesBy,
+            headRef: pr.headRefName || '', baseRef: pr.baseRefName || '',
           });
         }
       });
@@ -2325,7 +2408,7 @@ function handleTermInput(id, data) {
     const full = buf + data;
     const lastCR = full.lastIndexOf('\r');
     const remainder = full.slice(lastCR + 1);
-    if (/^\s*\/(clear|resume)(\s+\S+)?\s*$/.test(full.slice(0, lastCR))) markClear(id);
+    markSessionSwitch(id, full.slice(0, lastCR));
     const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     if (data.length > LONG_PASTE_THRESHOLD) {
@@ -2340,8 +2423,8 @@ function handleTermInput(id, data) {
 
   // Single-char handling
   if (data === '\r') {
-    // Detect /clear or /resume — both make Claude write a new JSONL file
-    if (/^\s*\/(clear|resume)(\s+\S+)?\s*$/.test(buf)) markClear(id);
+    // Detect /clear or /resume — both move the agent to a different JSONL file
+    markSessionSwitch(id, buf);
     const renameM = buf.match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameM) { const a = agents.get(id); if (a) { a.title = renameM[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     // Enter pressed — check buffer for mentions
@@ -2973,6 +3056,7 @@ function handleIpc(msg) {
       break;
     }
     case 'pollPrsNow': pollPRs(); break;
+    case 'getModels': fetchModels(); break;
     case 'installGh': {
       if (process.platform !== 'win32') { shell.openExternal('https://cli.github.com').catch(() => {}); break; }
       send({ type: 'toast', text: 'Installing GitHub CLI…' });
@@ -3229,6 +3313,7 @@ ipcMain.on('cmd', (_e, msg) => {
 setInterval(() => {
   for (const [id, a] of agents) send({ type: 'stats', id, stats: a.stats });
   scanForNewJsonlFiles();
+  reconcileResumedAgents();
 }, 5000);
 
 // Status watchdog — reconcile agents stuck on 'active'. The JSONL transcript is the

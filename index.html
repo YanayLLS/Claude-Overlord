@@ -140,6 +140,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-row.pr-conflict, .pr-row.pr-conflict:hover { background:rgba(250,179,135,.15); border-left:2px solid var(--peach); }
 .pr-row.pr-conflict:hover { background:rgba(250,179,135,.22); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
+.pr-row .pr-branch { color:var(--dim); font-size:11px; margin-top:2px; font-family:ui-monospace,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pr-row .pr-branch .pr-arrow { opacity:.7; }
 .pr-empty { padding:12px; color:var(--dim); font-size:12px; }
 .gh-fix { display:flex; gap:6px; margin-top:8px; }
 .gh-fix button { font-family:inherit; font-size:11px; padding:4px 10px; border-radius:6px; cursor:pointer;
@@ -1291,8 +1293,13 @@ function worktreeAt(p) { return worktrees.find(w => w.path === p) || null; }
 let selectedId = null;
 let filterText = '';
 let filterReady = false;
-const collapsedGroups = new Set();
-function toggleGroup(cwd) { if (collapsedGroups.has(cwd)) collapsedGroups.delete(cwd); else collapsedGroups.add(cwd); render(); }
+// ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
+const collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
+function toggleGroup(cwd) {
+  if (collapsedGroups.has(cwd)) collapsedGroups.delete(cwd); else collapsedGroups.add(cwd);
+  localStorage.setItem('collapsedGroups', JSON.stringify([...collapsedGroups]));
+  render();
+}
 
 let _openMenu = null; // dataset.menu key of the currently-open dropdown, so a re-render can restore it
 function toggleGroupMenu(btn) {
@@ -2023,19 +2030,31 @@ function showServerMenu(e, items) {
   const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
-const CLAUDE_MODELS = [
-  { id: 'claude-fable-5', label: 'Fable 5', family: 'fable' },
-  { id: 'claude-fable-5[1m]', label: 'Fable 5 — 1M context', family: 'fable' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8', family: 'opus' },
-  { id: 'claude-opus-4-8[1m]', label: 'Opus 4.8 — 1M context', family: 'opus' },
-  { id: 'claude-opus-4-7', label: 'Opus 4.7', family: 'opus' },
-  { id: 'claude-opus-4-7[1m]', label: 'Opus 4.7 — 1M context', family: 'opus' },
-  { id: 'claude-opus-4-6', label: 'Opus 4.6', family: 'opus' },
-  { id: 'claude-opus-4-6[1m]', label: 'Opus 4.6 — 1M context', family: 'opus' },
-  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', family: 'sonnet' },
-  { id: 'claude-sonnet-4-6[1m]', label: 'Sonnet 4.6 — 1M context', family: 'sonnet' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', family: 'haiku' },
-];
+// The picker is whatever /v1/models returns — no hardcoded list, so a model
+// Anthropic ships tomorrow shows up without an app release. API order is
+// Anthropic's own (newest first), so it's kept as-is.
+let CLAUDE_MODELS = [];
+let modelsError = '';
+function repaintModelMenu() {
+  const menu = document.getElementById('model-ctx-menu');
+  if (menu && menu._repaint) menu._repaint();
+}
+function setModels(models, error) {
+  CLAUDE_MODELS = models;
+  modelsError = error || '';
+  repaintModelMenu();
+}
+// Silence here means the main process never handled 'getModels' — almost always
+// a stale main after a renderer-only reload, which Ctrl+Shift+R doesn't fix.
+function requestModels() {
+  api.send({ type: 'getModels' });
+  setTimeout(() => {
+    if (CLAUDE_MODELS.length || modelsError) return;
+    modelsError = 'No response from the app process — use the 🔄 restart button in the header.';
+    repaintModelMenu();
+  }, 6000);
+}
+requestModels();
 
 function showModelMenu(e, id) {
   e.stopPropagation(); e.preventDefault();
@@ -2055,7 +2074,29 @@ function showModelMenu(e, id) {
   hdr.textContent = 'Switch model';
   menu.appendChild(hdr);
 
-  for (const m of CLAUDE_MODELS) {
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.placeholder = 'Search…';
+  search.style.cssText = 'display:block;width:calc(100% - 16px);margin:4px 8px 6px;padding:4px 6px;font-family:inherit;font-size:12px;'
+    + 'background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;outline:none;';
+  menu.appendChild(search);
+
+  const list = document.createElement('div');
+  list.style.cssText = 'max-height:50vh;overflow:auto;';
+  menu.appendChild(list);
+
+  const paint = () => {
+  list.innerHTML = '';
+  const q = search.value.trim().toLowerCase();
+  const shown = CLAUDE_MODELS.filter(m => !q || m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
+  if (!shown.length) {
+    const none = document.createElement('div');
+    none.style.cssText = 'padding:6px 12px;font-size:12px;color:var(--dim);max-width:260px;';
+    none.textContent = CLAUDE_MODELS.length ? 'No match'
+      : (modelsError || 'Loading models…');
+    list.appendChild(none);
+  }
+  for (const m of shown) {
     const btn = document.createElement('button');
     // Exact model id known from JSONL → exact match; otherwise fall back to family
     const isCurrent = currentModel ? currentModel === m.id : m.family === currentFamily;
@@ -2074,10 +2115,24 @@ function showModelMenu(e, id) {
       }
       api.send({ type: 'termInput', id, data: '/model ' + m.id + '\r' });
     };
-    menu.appendChild(btn);
+    list.appendChild(btn);
   }
+  };
+  paint();
+  // The list lives in main; a fetch landing while the menu is open repaints it.
+  menu._repaint = paint;
+  if (!CLAUDE_MODELS.length) requestModels();
+  search.addEventListener('input', paint);
+  // Enter picks the only remaining match — search then Enter, no mouse.
+  search.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') { menu.remove(); return; }
+    if (ev.key !== 'Enter') return;
+    const first = list.querySelector('button');
+    if (first) first.click();
+  });
 
   document.body.appendChild(menu);
+  search.focus();
   const rect = menu.getBoundingClientRect();
   if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
   if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
@@ -3350,6 +3405,7 @@ function handleAgentMsg(msg) {
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
     case 'toast': showToast(msg.text); break;
+    case 'models': setModels(msg.models || [], msg.error); break;
     case 'branchList': if (_branchCbs[msg.repo]) _branchCbs[msg.repo](msg.branches, msg.error); break;
     case 'featureRepoAdded':
       if (_addRepoFeature) {
@@ -4228,6 +4284,12 @@ function prActionBtn(p, u) {
   return `<button class="pr-approve" title="Approve without a message" onclick="event.stopPropagation();approvePr('${u}',this)">✓ Approve</button>`;
 }
 
+function prBranchHtml(p) {
+  if (!p.headRef || !p.baseRef) return '';
+  return `<div class="pr-branch" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">`
+    + `${escapeHtml(p.headRef)} <span class="pr-arrow">→</span> ${escapeHtml(p.baseRef)}</div>`;
+}
+
 function prRowHtml(p, dim) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
@@ -4250,6 +4312,7 @@ function prRowHtml(p, dim) {
   return `<div class="${cls}" onclick="openPr('${u}')">`
     + `<div class="pr-actions">${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
+    + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
 }
 
@@ -4276,6 +4339,7 @@ function prMutedRowHtml(p) {
   return `<div class="pr-row pr-muted" onclick="openPr('${u}')">`
     + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-mute" onclick="event.stopPropagation();unmutePr('${k}')">🔔 Unmute</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
+    + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`;
 }
 
@@ -4305,6 +4369,7 @@ function prSnoozedRowHtml(p) {
   return `<div class="pr-row pr-muted" onclick="openPr('${u}')">`
     + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Wake now" onclick="event.stopPropagation();unsnoozePr('${k}')">⏰ Wake</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
+    + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)} · ${escapeHtml(prSnoozeLeft(p.snoozeUntil))}</div></div>`;
 }
 
