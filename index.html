@@ -1275,6 +1275,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./ghost-core.js"></script>
 <script src="./actions-core.js"></script>
 <script src="./update-core.js"></script>
+<script src="./term-size-core.js"></script>
 <script>
 function ctxWindow(modelFamily, ctxTok) {
   const base = (modelFamily === 'opus' || modelFamily === 'fable') ? 1000000 : 200000; // sonnet/haiku default 200k
@@ -2631,15 +2632,17 @@ function createXterm(id) {
     if (e.shiftKey && e.key === 'Enter') { api.send({ type: 'termInput', id, data: '\n' }); return false; }
     return true;
   });
-  xterms.set(id, { terminal, fitAddon, searchAddon, el });
+  xterms.set(id, { id, terminal, fitAddon, searchAddon, el });
   const pend = pendingTermData.get(id);
   if (pend) { pendingTermData.delete(id); terminal.write(pend, () => terminal.scrollToBottom()); }
-  return { terminal, fitAddon, searchAddon, el };
+  sendResize(id, xterms.get(id)); // pty spawns at 120x30 — hand it the real width now
+  return xterms.get(id);
 }
 
 function destroyXterm(id) {
   pendingTermData.delete(id);
   const x = xterms.get(id); if (!x) return;
+  clearTimeout(x._resizeTimer);
   x.terminal.dispose(); x.el.remove(); xterms.delete(id);
 }
 
@@ -2698,6 +2701,10 @@ function fitPreservingScroll(x) {
   x.fitAddon.fit();
   if (atBottom) x.terminal.scrollToBottom();
   else x.terminal.scrollToLine(vp);
+  // A fit that the pty never hears about leaves the agent composing frames for the
+  // old width. Its cursor-up counts then land on the wrong rows and the scrollback
+  // shreds — stray leading fragments, text pinned to the right margin.
+  if (x.id != null) sendResize(x.id, x);
 }
 
 function showXterm(id) {
@@ -2811,8 +2818,13 @@ function ghostAccept() {
 }
 function onGhostChange(on) { ghostEnabled = !!on; localStorage.setItem('ghostEnabled', on ? '1' : '0'); if (!on) ghostClear(); }
 
+const RESIZE_SETTLE_MS = 120; // a drag fits every frame; resize the pty once it settles
 function sendResize(id, x) {
-  const t = x.terminal; api.send({ type: 'termResize', id, cols: t.cols, rows: t.rows });
+  const next = { cols: x.terminal.cols, rows: x.terminal.rows };
+  if (!shouldSendResize(x._sentSize, next)) return; // term-size-core.js
+  x._sentSize = next;
+  clearTimeout(x._resizeTimer);
+  x._resizeTimer = setTimeout(() => api.send({ type: 'termResize', id, ...next }), RESIZE_SETTLE_MS);
 }
 
 function openTerm(id) {
