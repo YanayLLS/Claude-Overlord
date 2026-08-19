@@ -86,23 +86,24 @@ assert.ok(pc.validateEnvelope({ ...env, fromAgent: '' }).ok);
 
 // ── buildPeerHeader ──
 let h = pc.buildPeerHeader(env);
-assert.ok(h.includes('[✉ from @Frontend on marcelo-pc — sent by marcelo]'));
-assert.ok(h.includes('hello'));
-assert.ok(h.includes('@Frontend@marcelo-pc')); // reply hint
-assert.ok(!h.includes('\n'), 'header must be a single line (TUI collapses multi-line pastes)');
+assert.strictEqual(h, '[Peer message from marcelo on marcelo-pc, agent Frontend]\nhello');
+// the header itself must never contain @tokens — Claude Code's teams mode
+// intercepts @mentions as teammate DMs and swallows the submission
+assert.ok(!h.includes('@'), 'header must not contain @ tokens (teams DM interception)');
 // control chars from a peer are stripped (no escape-sequence smuggling)
 h = pc.buildPeerHeader({ ...env, text: 'evil\x1b[2Jtext\x07', fromUser: 'a\x1bb' });
 assert.ok(!h.includes('\x1b'));
 assert.ok(!h.includes('\x07'));
 assert.ok(h.includes('evil[2Jtext'));
-// newlines are flattened to the ⏎ marker
+// newlines in the message survive (auto-submitted, so multi-line is fine)
 h = pc.buildPeerHeader({ ...env, text: 'line1\nline2' });
-assert.ok(h.includes('line1 ⏎ line2'));
-assert.ok(!h.includes('\n'));
-// no fromAgent → no reply hint, still well-formed
+assert.ok(h.includes('line1\nline2'));
+// no fromAgent → header still well-formed
 h = pc.buildPeerHeader({ ...env, fromAgent: '' });
-assert.ok(h.includes('[✉ from an agent on marcelo-pc'));
-assert.ok(!h.includes('@@'));
+assert.strictEqual(h, '[Peer message from marcelo on marcelo-pc]\nhello');
+// no user either → sender shown as the peer machine
+h = pc.buildPeerHeader({ ...env, fromAgent: '', fromUser: '' });
+assert.strictEqual(h, '[Peer message from marcelo-pc on marcelo-pc]\nhello');
 
 // ── Masked framing: roundtrip against an RFC 6455 unmasking decoder ──
 function decode(buffer) {

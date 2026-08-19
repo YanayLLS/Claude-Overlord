@@ -102,19 +102,20 @@ function validateEnvelope(m) {
   return { ok: true };
 }
 
-// Header injected into the target agent's input line (bracketed paste, no
-// submit — the human reads it and presses Enter). Single line on purpose: the
-// Claude Code TUI collapses multi-line pastes into a "[Pasted text]"
-// placeholder, which would hide the message; newlines are flattened to ⏎.
-// Control chars are stripped so a malicious peer can't smuggle escape
-// sequences into the terminal.
+// Prompt handed straight to the receiving agent (pasted and auto-submitted).
+// Kept minimal: one context line naming the sender and the return address,
+// then the message. Control chars are stripped so a malicious peer can't
+// smuggle escape sequences into the terminal; newlines survive (bracketed
+// paste keeps them from submitting early).
+// IMPORTANT: the delivered text must contain no @name tokens — Overlord runs
+// Claude Code with agent teams enabled, and the TUI intercepts submissions
+// containing @mentions as teammate DMs ("to must be a bare teammate name"),
+// swallowing the message before it reaches the model.
 function cleanText(s) { return String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ''); }
 function buildPeerHeader(env) {
-  const from = env.fromAgent ? '@' + env.fromAgent : 'an agent';
-  const sender = env.fromUser ? ` — sent by ${cleanText(env.fromUser)}` : '';
-  const text = cleanText(env.text).replace(/\s*\n\s*/g, ' ⏎ ');
-  const reply = env.fromAgent ? ` [reply: include @${cleanText(env.fromAgent)}@${cleanText(env.fromPeer)}]` : '';
-  return `[✉ from ${cleanText(from)} on ${cleanText(env.fromPeer)}${sender}] ${text}${reply}`;
+  const who = cleanText(env.fromUser || env.fromPeer);
+  const agent = env.fromAgent ? `, agent ${cleanText(env.fromAgent)}` : '';
+  return `[Peer message from ${who} on ${cleanText(env.fromPeer)}${agent}]\n${cleanText(env.text)}`;
 }
 
 // ── WebSocket client-side framing ──

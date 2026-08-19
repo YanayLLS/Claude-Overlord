@@ -345,6 +345,10 @@ function sendFullState() {
   if (lastUsage) send({ type: 'usage', usage: lastUsage });
   send({ type: 'accountInfo', ...getCurrentAccountInfo() });
   if (remoteServer) sendPeersState(); // only meaningful once the server picked its port
+  // Replay peer messages still awaiting approval so a renderer reload keeps them visible
+  for (const [aid, q] of peerApprovalQueue) {
+    for (const env of q) send({ type: 'peerMsgPending', id: aid, msgId: env.id, fromPeer: env.fromPeer, fromAgent: env.fromAgent, fromUser: env.fromUser, text: env.text });
+  }
   fetchUsage();
 }
 
@@ -866,7 +870,7 @@ function restoreAgents(state) {
       fileOffset: 0, lineBuffer: '',
       toolIds: new Set(), toolStatuses: new Map(), toolNames: new Map(),
       subToolIds: new Map(), subToolNames: new Map(),
-      isWaiting: true, permSent: false, hadTools: false, turnTools: 0,
+      isWaiting: true, permSent: false, hadTools: false, turnTools: 0, claudeReady: false,
       lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', customName: customName || false,
       promptHistory: entry.promptHistory || [], titlePending: false, createdAt: createdAt || Date.now(),
       crashCount: 0, cronCount: entry.cronCount || 0, compacting: false, orphanAlive: false, agentName: agentName, spinnerText: '',
@@ -1002,6 +1006,8 @@ function handleTermExit(id, exitCode) {
   const a = agents.get(id);
   if (!a) return;
   terminals.delete(id);
+  a.claudeReady = false; // peer messages queue until a new pty shows Claude's prompt
+  if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
   // If we're retrying due to --resume failure, don't treat as crash or send termExit
   if (a._resumeFailed && a._resumeRetrying) { a._resumeRetrying = false; return; }
   // Archiving kills the pty on purpose. Without this, the non-zero exit reads as a crash
@@ -1081,6 +1087,8 @@ function doSpawnTerminal(id) {
   try {
     const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: { ...process.env, ...feat.env } });
     terminals.set(id, proc);
+    a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
+    if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
     // Flush any input that arrived before PTY was ready
     const queued = pendingTermInput.get(id);
     if (queued && queued.length > 0) {
@@ -1095,6 +1103,16 @@ function doSpawnTerminal(id) {
       buf += d;
       if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
       termBuffers.set(id, buf);
+      // Claude boot banner seen → ready after a settle delay (see the matching
+      // detector in createAgent for the reasoning).
+      if (!a.claudeReady && !a._readyTimer) {
+        a._readyBuf = ((a._readyBuf || '') + d).slice(-1024);
+        const cleanR = a._readyBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+        if (/Welcome back|\? for shortcuts|Try ["']/.test(cleanR)) {
+          a._readyBuf = '';
+          a._readyTimer = setTimeout(() => { a._readyTimer = null; a.claudeReady = true; flushPeerMsgs(id); }, 4000);
+        }
+      }
       // Detect resume errors and retry
       if (!a._resumeHandled) {
         resumeErrorBuf += d;
@@ -1157,7 +1175,7 @@ function createAgent(folderPath, initialPrompt) {
     fileOffset: 0, lineBuffer: '',
     toolIds: new Set(), toolStatuses: new Map(), toolNames: new Map(),
     subToolIds: new Map(), subToolNames: new Map(),
-    isWaiting: false, permSent: false, hadTools: false, turnTools: 0,
+    isWaiting: false, permSent: false, hadTools: false, turnTools: 0, claudeReady: false,
     lastText: '', lastPrompt: '', title: '', customName: false,
     promptHistory: [], titlePending: false, createdAt: Date.now(),
     crashCount: 0, cronCount: 0, compacting: false, agentName: pickAgentName(), spinnerText: '',
@@ -1187,6 +1205,20 @@ function createAgent(folderPath, initialPrompt) {
       buf += d;
       if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
       termBuffers.set(id, buf);
+      // Claude boot banner seen → ready to inject queued peer messages after a
+      // short settle (the banner paints before the input handler accepts keys;
+      // injecting at banner-time silently drops the paste). Rolling buffer
+      // because the phrase can straddle chunk boundaries. Deliberately NOT the
+      // `>`-prompt heuristic: a cmd.exe prompt matches that too, and injecting
+      // into a shell would execute the message as a command.
+      if (!agent.claudeReady && !agent._readyTimer) {
+        agent._readyBuf = ((agent._readyBuf || '') + d).slice(-1024);
+        const cleanR = agent._readyBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+        if (/Welcome back|\? for shortcuts|Try ["']/.test(cleanR)) {
+          agent._readyBuf = '';
+          agent._readyTimer = setTimeout(() => { agent._readyTimer = null; agent.claudeReady = true; flushPeerMsgs(id); }, 4000);
+        }
+      }
       // Detect Claude ready prompt and send the initial prompt
       if (!promptSent) {
         const clean = d.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
@@ -1230,6 +1262,8 @@ function closeAgent(id) {
   inBracketedPaste.delete(id);
   bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
+  pendingPeerMsgs.delete(id);
+  peerApprovalQueue.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   agents.delete(id);
   send({ type: 'agentClosed', id });
@@ -2413,6 +2447,17 @@ function handleTermInput(id, data) {
     const full = buf + data;
     const lastCR = full.lastIndexOf('\r');
     const remainder = full.slice(lastCR + 1);
+    // A pasted or phone-sent line with a remote mention is a peer message too —
+    // send it and swallow the chunk instead of submitting it locally. The
+    // pattern is strict (@Agent@<connected-peer-name>), so ordinary pasted
+    // text never matches.
+    const remoteM = pc.parseRemoteMentions(full.slice(0, lastCR), connectedPeerNames());
+    if (remoteM.length > 0) {
+      sendRemoteMentionMessages(id, full.slice(0, lastCR), remoteM);
+      t.write('\x15');
+      inputBuffers.set(id, remainder);
+      return;
+    }
     markSessionSwitch(id, full.slice(0, lastCR));
     const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
@@ -2432,12 +2477,17 @@ function handleTermInput(id, data) {
     markSessionSwitch(id, buf);
     const renameM = buf.match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameM) { const a = agents.get(id); if (a) { a.title = renameM[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
-    // Enter pressed — remote mentions (@Agent@peer) first: send over the peer
-    // socket, then strip them so the local scanner doesn't also fire on the
-    // '@Agent' prefix. Local text still submits to this agent as usual.
+    // Enter pressed — a line with a remote mention (@Agent@peer) is a message
+    // TO the peer, not a prompt for this agent: send it over the peer socket,
+    // clear the typed line, and never submit it locally.
     const remote = pc.parseRemoteMentions(buf, connectedPeerNames());
-    if (remote.length > 0) sendRemoteMentionMessages(id, buf, remote);
-    const mentions = findMentions(remote.length > 0 ? pc.stripRemoteMentions(buf, connectedPeerNames()) : buf);
+    if (remote.length > 0) {
+      sendRemoteMentionMessages(id, buf, remote);
+      t.write('\x15'); // Ctrl+U — wipe the line from the local input box
+      inputBuffers.set(id, '');
+      return;
+    }
+    const mentions = findMentions(buf);
     if (mentions.length > 0) {
       const ctx = buildMentionContext(mentions);
       t.write('\x15'); // Ctrl+U to clear readline
@@ -3094,6 +3144,8 @@ function handleIpc(msg) {
       break;
     }
     case 'getPeersState': sendPeersState(); break;
+    case 'peerMsgApprove': resolvePeerMsg(msg.agentId, msg.msgId, true); break;
+    case 'peerMsgDismiss': resolvePeerMsg(msg.agentId, msg.msgId, false); break;
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'fullRestart': app.relaunch(); app.exit(0); break;
     case 'installUpdate': autoUpdater.quitAndInstall(); break;
@@ -3436,6 +3488,10 @@ function handleRemoteCmd(msg) {
       break;
     }
     case 'termInput': handleTermInput(msg.id, msg.data); break;
+    // Peer-message approvals are allowed from the phone remote too — same
+    // authenticated channel, and approving from your phone is genuinely useful.
+    case 'peerMsgApprove': resolvePeerMsg(msg.agentId, msg.msgId, true); break;
+    case 'peerMsgDismiss': resolvePeerMsg(msg.agentId, msg.msgId, false); break;
     case 'getProjects': {
       const projects = new Set();
       for (const [, a] of agents) if (a.cwd) projects.add(a.cwd);
@@ -3694,46 +3750,90 @@ function handlePeerMsg(conn, msg) {
     return;
   }
   if (msg.type === 'peerAck') {
+    // approved/dismissed arrive later than the initial ack, after the human on
+    // the other side decided — the pendingPeerAcks entry is already resolved.
+    if (msg.status === 'approved' || msg.status === 'dismissed') {
+      const who = `@${msg.toAgent || '?'} on ${conn.name}`;
+      send({ type: 'toast', text: msg.status === 'approved' ? `✓ ${who} approved your message — delivered to their agent` : `✕ ${who} dismissed your message` });
+      return;
+    }
     const p = pendingPeerAcks.get(msg.id);
     if (!p) return;
     clearTimeout(p.timer); pendingPeerAcks.delete(msg.id);
     const who = `@${p.toAgent} on ${p.peerName}`;
-    if (msg.status === 'delivered') send({ type: 'toast', text: `✉ Delivered to ${who}` });
-    else if (msg.status === 'queued') send({ type: 'toast', text: `✉ Queued for ${who} — agent is busy, delivers when idle` });
+    if (msg.status === 'pending') send({ type: 'toast', text: `✉ Sent to ${who} — awaiting their approval` });
+    else if (msg.status === 'delivered') send({ type: 'toast', text: `✉ Delivered to ${who}` }); // older peer versions
+    else if (msg.status === 'queued') send({ type: 'toast', text: `✉ Queued for ${who} — delivers when their agent is ready` }); // older peer versions
     else if (msg.status === 'no-such-agent') send({ type: 'toast', text: `✕ No agent named ${who}` });
     else send({ type: 'toast', text: `✕ ${who}: ${msg.error || msg.status || 'rejected'}` });
   }
 }
 
+// Incoming messages wait for HUMAN APPROVAL on the receiving side: they land
+// in an approval queue, the recipient gets a notification + a review card on
+// the agent, and only an explicit approve injects the message into the agent.
+const peerApprovalQueue = new Map(); // agentId -> [envelope] awaiting approval
+
 function deliverPeerMessage(agentId, env) {
   const a = agents.get(agentId);
   if (!a) return 'no-such-agent';
+  const q = peerApprovalQueue.get(agentId) || [];
+  q.push(env); if (q.length > 50) q.shift();
+  peerApprovalQueue.set(agentId, q);
   notifyPeerMessage(agentId, env);
-  send({ type: 'peerMsg', id: agentId, fromAgent: env.fromAgent, fromPeer: env.fromPeer });
-  // The Claude Code input box accepts a paste at any time (mid-turn it just sits
-  // there unsubmitted), so deliver whenever a live pty exists. Queue only for
-  // agents with no terminal (dead/restored) — flushed by the turn-end hooks
-  // once the terminal is back.
-  if (!terminals.has(agentId)) {
+  send({ type: 'peerMsgPending', id: agentId, msgId: env.id, fromPeer: env.fromPeer, fromAgent: env.fromAgent, fromUser: env.fromUser, text: env.text });
+  return 'pending';
+}
+
+function resolvePeerMsg(agentId, msgId, approve) {
+  const q = peerApprovalQueue.get(agentId) || [];
+  const i = q.findIndex(e => e.id === msgId);
+  if (i === -1) return;
+  const [env] = q.splice(i, 1);
+  if (q.length === 0) peerApprovalQueue.delete(agentId);
+  if (approve) queuePeerInjection(agentId, env);
+  send({ type: 'peerMsgResolved', id: agentId, msgId: env.id });
+  const conn = findPeerConn(env.fromPeer);
+  if (conn) wsSendPeer(conn, { type: 'peerAck', id: env.id, status: approve ? 'approved' : 'dismissed', toAgent: env.toAgent });
+  flog(`peer message ${env.id} ${approve ? 'approved' : 'dismissed'} for agent ${agentId}`);
+}
+
+// Approved messages inject only into a pty where Claude's prompt has been seen
+// (claudeReady) — never into a booting or crashed shell, where auto-submitted
+// text could hit cmd/powershell instead of Claude. Otherwise they queue and
+// flush on the ready signal / turn-end hooks, with a force-flush fallback in
+// case the prompt marker is never recognized.
+function queuePeerInjection(agentId, env) {
+  const a = agents.get(agentId);
+  if (!a) return;
+  if (!terminals.has(agentId) || !a.claudeReady || a.crashed) {
     const q = pendingPeerMsgs.get(agentId) || [];
     q.push(env); if (q.length > 50) q.shift();
     pendingPeerMsgs.set(agentId, q);
-    return 'queued';
+    setTimeout(() => {
+      const a2 = agents.get(agentId);
+      if (a2 && !a2.claudeReady && terminals.has(agentId) && !a2.crashed) { a2.claudeReady = true; flushPeerMsgs(agentId); }
+    }, 45000);
+    return;
   }
   injectPeerMessage(agentId, env);
-  return 'delivered';
 }
 
-// Bracketed paste: the header+text land in the input box without submitting —
-// the human reads, optionally edits, and presses Enter themselves.
+// Bracketed paste (keeps embedded newlines from submitting early) followed by
+// Enter — the message goes straight to the receiving Claude agent as a prompt.
+// Loop-safe: an agent's OUTPUT can never trigger a peer send (only terminal
+// input scanned by handleTermInput can), so two agents cannot ping-pong.
 function injectPeerMessage(agentId, env) {
+  flog(`peer message ${env.id} from ${env.fromPeer} injected into agent ${agentId}`);
   handleTermInput(agentId, '\x1b[200~' + pc.buildPeerHeader(env) + '\x1b[201~');
+  handleTermInput(agentId, '\r');
 }
 
 function flushPeerMsgs(id) {
   const q = pendingPeerMsgs.get(id);
   if (!q || q.length === 0) return;
-  if (!terminals.has(id)) return; // no pty yet — flush fires again on the next turn end
+  const a = agents.get(id);
+  if (!a || !terminals.has(id) || !a.claudeReady || a.crashed) return; // not safe yet — a later ready/turn-end signal retries
   pendingPeerMsgs.delete(id);
   for (const env of q) injectPeerMessage(id, env);
 }
@@ -3744,7 +3844,7 @@ function notifyPeerMessage(id, env) {
   if (!Notification.isSupported()) return;
   const a = agents.get(id);
   const from = (env.fromAgent ? '@' + env.fromAgent + ' ' : '') + 'on ' + env.fromPeer;
-  const n = new Notification({ title: `✉ Message from ${from}`, body: `${(a && (a.agentName || a.title)) || 'Agent ' + id}: ${env.text.slice(0, 120)}`, silent: !settings.notificationSound });
+  const n = new Notification({ title: `✉ Message from ${from} — click to review`, body: `For ${(a && (a.agentName || a.title)) || 'Agent ' + id}: ${env.text.slice(0, 120)}`, silent: !settings.notificationSound });
   n.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); send({ type: 'focusFromNotification', id }); } });
   n.show();
 }
@@ -3752,10 +3852,14 @@ function notifyPeerMessage(id, env) {
 function sendRemoteMentionMessages(id, text, remote) {
   const a = agents.get(id);
   let user = ''; try { user = os.userInfo().username; } catch {}
+  // Strip the @Agent@peer tokens from the message body — on the receiving side
+  // Claude Code's teams mode would intercept them as teammate DMs and swallow
+  // the whole submission.
+  const body = pc.stripRemoteMentions(text, connectedPeerNames()).trim() || text;
   for (const r of remote) {
     const conn = findPeerConn(r.peerName);
     if (!conn) { send({ type: 'toast', text: `✕ Not connected to ${r.peerName}` }); continue; }
-    const env = pc.buildEnvelope({ toAgent: r.agentName, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text, hop: 0 });
+    const env = pc.buildEnvelope({ toAgent: r.agentName, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text: body, hop: 0 });
     sendPeerEnvelope(conn, env, r.peerName);
   }
 }

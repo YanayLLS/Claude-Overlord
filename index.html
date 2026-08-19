@@ -1194,7 +1194,7 @@ button:focus-visible { outline-offset:0; }
         <input type="checkbox" id="chk-peers" onchange="onPeersEnableChange(this.checked)" />
         <span>Enable peer connections (LAN)</span>
       </label>
-      <div class="settings-hint">Pairs this Overlord with a teammate's on the same network. Their agents become addressable as <code>@Agent@peer</code> in any terminal; incoming messages land in the agent's input line for you to review and send.</div>
+      <div class="settings-hint">Pairs this Overlord with a teammate's on the same network. Type <code>@Agent@peer message</code> in any terminal to send — the line goes only to them (not to your agent). They review it on a ✉ badge and approve before it runs on their agent.</div>
       <div class="settings-hint" id="peers-self" style="user-select:text;"></div>
       <label class="settings-label">
         <span>Your peer name:</span>
@@ -1944,7 +1944,7 @@ async function restartAgent(id) {
   api.send({ type: 'restartAgent', id });
 }
 function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
-function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); const a = agents.get(id); if (a && a.peerUnread) { a.peerUnread = 0; scheduleRender(); } if (changed) render(); }
+function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
   _renaming = true;
@@ -2420,7 +2420,7 @@ function render() {
         <div class="agent-right" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${agentCtxWin / 1000}K (${ctxPct}%)">
           <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}" onclick="event.stopPropagation();showModelMenu(event,${id})" style="cursor:pointer" title="Change model">${mf}</span>` : ''}</span>
           <span class="agent-tail">
-            ${a.peerUnread ? `<span title="Unread peer messages — click the agent to read" style="background:var(--purple);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;">&#x2709; ${a.peerUnread}</span>` : ''}
+            ${a.peerPending && a.peerPending.length ? `<span title="Peer messages awaiting your approval — click to review" onclick="event.stopPropagation();openPeerApprovalModal(${id})" style="background:var(--peach);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;cursor:pointer;">&#x2709; ${a.peerPending.length}</span>` : ''}
             <span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>
             <span class="agent-actions">
               ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
@@ -3535,10 +3535,21 @@ function handleAgentMsg(msg) {
     case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
     case 'peersState': { peersState = msg; renderPeersSec(); break; }
-    case 'peerMsg': {
+    case 'peerMsgPending': {
       const a = agents.get(msg.id);
-      if (a && msg.id !== selectedId) { a.peerUnread = (a.peerUnread || 0) + 1; scheduleRender(); }
-      showToast(`✉ Message from ${msg.fromAgent ? '@' + msg.fromAgent + ' ' : ''}on ${msg.fromPeer}`);
+      if (a) {
+        a.peerPending = a.peerPending || [];
+        if (!a.peerPending.some(p => p.msgId === msg.msgId)) a.peerPending.push({ msgId: msg.msgId, fromPeer: msg.fromPeer, fromAgent: msg.fromAgent, fromUser: msg.fromUser, text: msg.text });
+        scheduleRender();
+      }
+      showToast(`✉ Message from ${msg.fromUser || msg.fromPeer} — click the ✉ badge to review`);
+      break;
+    }
+    case 'peerMsgResolved': {
+      const a = agents.get(msg.id);
+      if (a && a.peerPending) { a.peerPending = a.peerPending.filter(p => p.msgId !== msg.msgId); scheduleRender(); }
+      const ov = document.getElementById('peer-approve-overlay');
+      if (ov) { const row = ov.querySelector(`[data-msgid="${msg.msgId}"]`); if (row) row.remove(); if (!ov.querySelector('[data-msgid]')) ov.remove(); }
       break;
     }
     case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
@@ -4321,6 +4332,33 @@ function openPeerMsgModal(id) {
   document.body.appendChild(ov);
   ov._opts = opts;
   document.getElementById('peer-msg-text').focus();
+}
+function openPeerApprovalModal(id) {
+  const a = agents.get(id);
+  const pending = (a && a.peerPending) || [];
+  if (!pending.length) return;
+  const old = document.getElementById('peer-approve-overlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'peer-approve-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;';
+  const btnCss = 'font-family:inherit;font-size:12px;padding:4px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;';
+  const rows = pending.map(p => `
+    <div data-msgid="${escAttr(p.msgId)}" style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:8px;">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:6px;">From <b style="color:var(--text)">${esc(p.fromUser || p.fromPeer)}</b> on ${esc(p.fromPeer)}${p.fromAgent ? ' (agent ' + esc(p.fromAgent) + ')' : ''}</div>
+      <div style="font-size:12px;white-space:pre-wrap;max-height:140px;overflow:auto;">${esc(p.text)}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+        <button onclick="resolvePeerPending(${id},'${escAttr(p.msgId)}',false)" style="${btnCss}color:var(--red);">Dismiss</button>
+        <button onclick="resolvePeerPending(${id},'${escAttr(p.msgId)}',true)" style="${btnCss}color:var(--green);border-color:var(--green);">Send to agent</button>
+      </div>
+    </div>`).join('');
+  ov.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border-hi);border-radius:8px;padding:16px;min-width:420px;max-width:560px;max-height:70vh;overflow:auto;">
+    <h3 style="margin:0;font-size:14px;">✉ Peer messages for ${esc((a && a.agentName) || 'agent')} — approve to run</h3>${rows}
+    <div style="display:flex;justify-content:flex-end;margin-top:10px;"><button onclick="document.getElementById('peer-approve-overlay').remove()" style="${btnCss}color:var(--text);">Close</button></div></div>`;
+  ov.addEventListener('mousedown', (e) => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+function resolvePeerPending(agentId, msgId, approve) {
+  api.send({ type: approve ? 'peerMsgApprove' : 'peerMsgDismiss', agentId, msgId });
 }
 function sendPeerMsgModal(fromId) {
   const ov = document.getElementById('peer-msg-overlay'); if (!ov) return;
