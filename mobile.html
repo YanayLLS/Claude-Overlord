@@ -184,10 +184,18 @@ function stripAnsi(s) {
 }
 
 // ── WebSocket ──
+// The control channel needs the pairing code. It arrives via the QR link
+// (?code=...) and sticks in localStorage so a bookmarked plain URL still works;
+// failing that, we ask once per failed attempt.
+let pairCode = (new URLSearchParams(location.search).get('code') || localStorage.getItem('ovPairCode') || '').replace(/\D/g, '');
+if (pairCode) localStorage.setItem('ovPairCode', pairCode);
+let everOpened = false;
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(proto + '://' + location.host + '/ws');
+  ws = new WebSocket(proto + '://' + location.host + '/ws?code=' + encodeURIComponent(pairCode));
   ws.onopen = () => {
+    everOpened = true;
+    localStorage.setItem('ovPairCode', pairCode);
     document.getElementById('conn-status').style.display = 'none';
     clearTimeout(reconnectTimer);
     ws.send(JSON.stringify({ type: 'getState' }));
@@ -197,6 +205,12 @@ function connect() {
   };
   ws.onclose = () => {
     document.getElementById('conn-status').style.display = 'block';
+    if (!everOpened) {
+      // Never connected with this code — likely wrong or missing. Cancel keeps
+      // retrying quietly (covers a briefly restarting Overlord).
+      const c = prompt('Enter the pairing code shown in Overlord (Settings → Peers):', '');
+      if (c !== null) { pairCode = c.replace(/\D/g, ''); localStorage.setItem('ovPairCode', pairCode); }
+    }
     reconnectTimer = setTimeout(connect, 2000);
   };
   ws.onerror = () => ws.close();
