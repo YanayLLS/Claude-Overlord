@@ -86,23 +86,63 @@ assert.ok(pc.validateEnvelope({ ...env, fromAgent: '' }).ok);
 
 // ── buildPeerHeader ──
 let h = pc.buildPeerHeader(env);
-assert.ok(h.includes('[✉ from @Frontend on marcelo-pc — sent by marcelo]'));
-assert.ok(h.includes('hello'));
-assert.ok(h.includes('@Frontend@marcelo-pc')); // reply hint
-assert.ok(!h.includes('\n'), 'header must be a single line (TUI collapses multi-line pastes)');
+assert.ok(h.startsWith('[Peer message from marcelo on marcelo-pc, agent Frontend]\nhello'));
+assert.ok(h.includes('PEER-REPLY:'), 'header teaches the agent the reply marker');
+// the header itself must never contain @tokens — Claude Code's teams mode
+// intercepts @mentions as teammate DMs and swallows the submission
+assert.ok(!h.includes('@'), 'header must not contain @ tokens (teams DM interception)');
 // control chars from a peer are stripped (no escape-sequence smuggling)
 h = pc.buildPeerHeader({ ...env, text: 'evil\x1b[2Jtext\x07', fromUser: 'a\x1bb' });
 assert.ok(!h.includes('\x1b'));
 assert.ok(!h.includes('\x07'));
 assert.ok(h.includes('evil[2Jtext'));
-// newlines are flattened to the ⏎ marker
+// newlines in the message survive (auto-submitted, so multi-line is fine)
 h = pc.buildPeerHeader({ ...env, text: 'line1\nline2' });
-assert.ok(h.includes('line1 ⏎ line2'));
-assert.ok(!h.includes('\n'));
-// no fromAgent → no reply hint, still well-formed
+assert.ok(h.includes('line1\nline2'));
+// no fromAgent → no reply offer (nowhere to route back), still well-formed
 h = pc.buildPeerHeader({ ...env, fromAgent: '' });
-assert.ok(h.includes('[✉ from an agent on marcelo-pc'));
-assert.ok(!h.includes('@@'));
+assert.strictEqual(h, '[Peer message from marcelo on marcelo-pc]\nhello');
+assert.ok(!h.includes('PEER-REPLY'));
+// no user either → sender shown as the peer machine
+h = pc.buildPeerHeader({ ...env, fromAgent: '', fromUser: '' });
+assert.strictEqual(h, '[Peer message from marcelo-pc on marcelo-pc]\nhello');
+
+// ── Chat messages ──
+const cm = pc.buildChatMsg({ text: 'hey, is the endpoint up?' });
+assert.strictEqual(cm.type, 'peerChat');
+assert.ok(cm.id && typeof cm.ts === 'number');
+assert.deepStrictEqual(pc.validateChatMsg(cm), { ok: true });
+// text cap enforced on build
+assert.strictEqual(pc.buildChatMsg({ text: 'x'.repeat(pc.CHAT_TEXT_MAX + 99) }).text.length, pc.CHAT_TEXT_MAX);
+// rejections
+assert.ok(!pc.validateChatMsg(null).ok);
+assert.ok(!pc.validateChatMsg({ ...cm, text: '   ' }).ok); // whitespace-only
+assert.ok(!pc.validateChatMsg({ ...cm, text: undefined }).ok); // no text, no file
+assert.ok(!pc.validateChatMsg({ ...cm, text: 'x'.repeat(pc.CHAT_TEXT_MAX + 1) }).ok);
+assert.ok(!pc.validateChatMsg({ ...cm, id: '' }).ok);
+// file messages
+const fm = pc.buildChatMsg({ file: { name: 'spec.pdf', size: 12345, fileId: 'f1' } });
+assert.deepStrictEqual(pc.validateChatMsg(fm), { ok: true });
+assert.ok(!pc.validateChatMsg({ ...fm, file: { ...fm.file, size: pc.FILE_MAX_BYTES + 1 } }).ok);
+assert.ok(!pc.validateChatMsg({ ...fm, file: { ...fm.file, size: 0 } }).ok);
+assert.ok(!pc.validateChatMsg({ ...fm, file: { ...fm.file, name: '' } }).ok);
+// group refs
+const g = { id: 'g1', name: 'backend crew', members: ['Marcelo', 'Yoav', 'dana-pc'] };
+assert.deepStrictEqual(pc.validateChatMsg({ ...cm, group: g }), { ok: true });
+assert.ok(!pc.validateChatMsg({ ...cm, group: { ...g, members: ['onlyone'] } }).ok); // <2 members
+assert.ok(!pc.validateChatMsg({ ...cm, group: { ...g, members: ['ok', 'bad name!'] } }).ok);
+assert.ok(!pc.validateChatMsg({ ...cm, group: { ...g, name: '' } }).ok);
+assert.ok(pc.validateGroupRef(g));
+assert.ok(!pc.validateGroupRef({ ...g, id: '' }));
+
+// ── sanitizeFileName ──
+assert.strictEqual(pc.sanitizeFileName('report.pdf'), 'report.pdf');
+assert.strictEqual(pc.sanitizeFileName('..\\..\\windows\\evil.exe'), 'evil.exe');
+assert.strictEqual(pc.sanitizeFileName('/etc/passwd'), 'passwd');
+assert.strictEqual(pc.sanitizeFileName('.hidden'), '_hidden');
+assert.strictEqual(pc.sanitizeFileName('a<b>:c|d?.txt'), 'a_b__c_d_.txt');
+assert.strictEqual(pc.sanitizeFileName(''), 'file');
+assert.ok(pc.sanitizeFileName('x'.repeat(400)).length <= 150);
 
 // ── Masked framing: roundtrip against an RFC 6455 unmasking decoder ──
 function decode(buffer) {

@@ -77,7 +77,9 @@ autoUpdater.on('error', err => {
 // Packaged builds update through electron-updater above. People who run the
 // repo directly via start.bat get nothing from that, so offer them a pull.
 const { pullBlocker, needsInstall } = require('./update-core');
+const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { pickResumedFile } = require('./resume-core');
+const { parseState } = require('./state-core');
 const APP_DIR = __dirname;
 let gitUpdateBusy = false;
 
@@ -152,6 +154,7 @@ async function doGitPull() {
     send({ type: 'gitUpdateProgress', text: 'Restarting…' });
     // before-quit already hands running agents to detached processes that the
     // next launch reattaches, so a relaunch is a supported path, not a kill.
+    forceQuit = true; // this restart was explicitly asked for — skip the close prompt
     setTimeout(() => { app.relaunch(); app.quit(); }, 400);
   } catch (e) {
     fail(e.message);
@@ -185,13 +188,9 @@ function modelFamily(model) {
 function anthropicAuthHeaders() {
   const base = { 'anthropic-version': '2023-06-01' };
   if (process.env.ANTHROPIC_API_KEY) return { ...base, 'x-api-key': process.env.ANTHROPIC_API_KEY };
-  let oauth;
-  try {
-    oauth = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf8')).claudeAiOauth;
-  } catch { return null; }
-  if (!oauth || !oauth.accessToken) return null;
-  if (oauth.expiresAt && oauth.expiresAt < Date.now()) return null;
-  return { ...base, 'authorization': `Bearer ${oauth.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' };
+  const token = getApiKey(); // the /login OAuth access token, same one fetchUsage() uses
+  if (!token) return null;
+  return { ...base, 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' };
 }
 
 // The model picker is this list, nothing else — no hardcoded models, so one
@@ -345,6 +344,10 @@ function sendFullState() {
   if (lastUsage) send({ type: 'usage', usage: lastUsage });
   send({ type: 'accountInfo', ...getCurrentAccountInfo() });
   if (remoteServer) sendPeersState(); // only meaningful once the server picked its port
+  // Replay peer messages still awaiting approval so a renderer reload keeps them visible
+  for (const [aid, q] of peerApprovalQueue) {
+    for (const env of q) send({ type: 'peerMsgPending', id: aid, msgId: env.id, fromPeer: env.fromPeer, fromAgent: env.fromAgent, fromUser: env.fromUser, text: env.text });
+  }
   fetchUsage();
 }
 
@@ -457,14 +460,14 @@ function clearServers(id) {
 async function generateSummaryTitle(id) {
   const a = agents.get(id);
   if (!a || a.customName || !a.promptHistory || a.promptHistory.length === 0 || a.titlePending) return;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return;
+  const auth = anthropicAuthHeaders();
+  if (!auth) return;
   a.titlePending = true;
   const context = a.promptHistory.map((p, i) => `Prompt ${i + 1}: ${p}`).join('\n');
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      headers: { ...auth, 'content-type': 'application/json' },
       body: JSON.stringify({
         model: TITLE_MODEL, max_tokens: 30,
         messages: [{ role: 'user', content: `Summarize this coding session in exactly 5 words. Be specific about what's being worked on. No punctuation, no quotes. Just 5 lowercase words.\n\n${context}` }],
@@ -484,17 +487,17 @@ async function generateSummaryTitle(id) {
 
 // Inline ghost-text autocomplete: complete the partial prompt the user is
 // typing into a live agent's terminal. Replies with a `ghost` message the
-// renderer overlays. Silent (empty suggestion) on no key / error / timeout.
+// renderer overlays. Silent (empty suggestion) on no creds / error / timeout.
 async function ghostComplete(id, reqId, prefix, context) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const auth = anthropicAuthHeaders();
   const reply = (suggestion) => send({ type: 'ghost', id, reqId, suggestion });
-  if (!apiKey || !prefix) return reply('');
+  if (!auth || !prefix) return reply('');
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 2500);
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      headers: { ...auth, 'content-type': 'application/json' },
       signal: ctrl.signal,
       body: JSON.stringify({
         model: TITLE_MODEL, max_tokens: 48,
@@ -824,19 +827,29 @@ function saveState() {
   const state = { agents: agentEntries, settings };
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
+    // Keep the last good file as .bak before replacing it — a power cut during the
+    // write can leave the real one truncated, and .bak is what loadState falls back to.
+    try { if (fs.statSync(STATE_FILE).size > 0) fs.copyFileSync(STATE_FILE, STATE_FILE + '.bak'); } catch {}
     fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(state, null, 2));
     fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
   } catch (e) { console.log('[Overlord] Failed to save state:', e.message); }
 }
 
 function loadState() {
-  try {
-    if (!fs.existsSync(STATE_FILE)) return { agents: [], settings: {} };
-    const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
-    // Handle old format (plain array)
-    if (Array.isArray(data)) return { agents: data, settings: {} };
-    return { agents: data.agents || [], settings: data.settings || {} };
-  } catch { return { agents: [], settings: {} }; }
+  for (const file of [STATE_FILE, STATE_FILE + '.bak']) {
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf-8'); } catch { continue; } // missing is fine
+    const parsed = parseState(raw);
+    if (parsed) {
+      if (file !== STATE_FILE) flog('[Overlord] state file unusable — recovered agents and settings from .bak');
+      return parsed;
+    }
+    // Damaged. Park it under .corrupt so the next save can't overwrite the only
+    // copy, and so there's something left to recover from by hand.
+    try { fs.renameSync(file, file + '.corrupt'); } catch {}
+    flog(`[Overlord] state file ${file} unreadable — kept as ${path.basename(file)}.corrupt`);
+  }
+  return { agents: [], settings: {} };
 }
 
 function restoreAgents(state) {
@@ -866,7 +879,7 @@ function restoreAgents(state) {
       fileOffset: 0, lineBuffer: '',
       toolIds: new Set(), toolStatuses: new Map(), toolNames: new Map(),
       subToolIds: new Map(), subToolNames: new Map(),
-      isWaiting: true, permSent: false, hadTools: false, turnTools: 0,
+      isWaiting: true, permSent: false, hadTools: false, turnTools: 0, claudeReady: false,
       lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', customName: customName || false,
       promptHistory: entry.promptHistory || [], titlePending: false, createdAt: createdAt || Date.now(),
       crashCount: 0, cronCount: entry.cronCount || 0, compacting: false, orphanAlive: false, agentName: agentName, spinnerText: '',
@@ -1002,6 +1015,8 @@ function handleTermExit(id, exitCode) {
   const a = agents.get(id);
   if (!a) return;
   terminals.delete(id);
+  a.claudeReady = false; // peer messages queue until a new pty shows Claude's prompt
+  if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
   // If we're retrying due to --resume failure, don't treat as crash or send termExit
   if (a._resumeFailed && a._resumeRetrying) { a._resumeRetrying = false; return; }
   // Archiving kills the pty on purpose. Without this, the non-zero exit reads as a crash
@@ -1081,6 +1096,8 @@ function doSpawnTerminal(id) {
   try {
     const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: { ...process.env, ...feat.env } });
     terminals.set(id, proc);
+    a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
+    if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
     // Flush any input that arrived before PTY was ready
     const queued = pendingTermInput.get(id);
     if (queued && queued.length > 0) {
@@ -1095,6 +1112,16 @@ function doSpawnTerminal(id) {
       buf += d;
       if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
       termBuffers.set(id, buf);
+      // Claude boot banner seen → ready after a settle delay (see the matching
+      // detector in createAgent for the reasoning).
+      if (!a.claudeReady && !a._readyTimer) {
+        a._readyBuf = ((a._readyBuf || '') + d).slice(-1024);
+        const cleanR = a._readyBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+        if (/Welcome back|\? for shortcuts|Try ["']/.test(cleanR)) {
+          a._readyBuf = '';
+          a._readyTimer = setTimeout(() => { a._readyTimer = null; a.claudeReady = true; flushPeerMsgs(id); }, 4000);
+        }
+      }
       // Detect resume errors and retry
       if (!a._resumeHandled) {
         resumeErrorBuf += d;
@@ -1157,7 +1184,7 @@ function createAgent(folderPath, initialPrompt) {
     fileOffset: 0, lineBuffer: '',
     toolIds: new Set(), toolStatuses: new Map(), toolNames: new Map(),
     subToolIds: new Map(), subToolNames: new Map(),
-    isWaiting: false, permSent: false, hadTools: false, turnTools: 0,
+    isWaiting: false, permSent: false, hadTools: false, turnTools: 0, claudeReady: false,
     lastText: '', lastPrompt: '', title: '', customName: false,
     promptHistory: [], titlePending: false, createdAt: Date.now(),
     crashCount: 0, cronCount: 0, compacting: false, agentName: pickAgentName(), spinnerText: '',
@@ -1187,6 +1214,20 @@ function createAgent(folderPath, initialPrompt) {
       buf += d;
       if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
       termBuffers.set(id, buf);
+      // Claude boot banner seen → ready to inject queued peer messages after a
+      // short settle (the banner paints before the input handler accepts keys;
+      // injecting at banner-time silently drops the paste). Rolling buffer
+      // because the phrase can straddle chunk boundaries. Deliberately NOT the
+      // `>`-prompt heuristic: a cmd.exe prompt matches that too, and injecting
+      // into a shell would execute the message as a command.
+      if (!agent.claudeReady && !agent._readyTimer) {
+        agent._readyBuf = ((agent._readyBuf || '') + d).slice(-1024);
+        const cleanR = agent._readyBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+        if (/Welcome back|\? for shortcuts|Try ["']/.test(cleanR)) {
+          agent._readyBuf = '';
+          agent._readyTimer = setTimeout(() => { agent._readyTimer = null; agent.claudeReady = true; flushPeerMsgs(id); }, 4000);
+        }
+      }
       // Detect Claude ready prompt and send the initial prompt
       if (!promptSent) {
         const clean = d.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
@@ -1230,6 +1271,8 @@ function closeAgent(id) {
   inBracketedPaste.delete(id);
   bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
+  pendingPeerMsgs.delete(id);
+  peerApprovalQueue.delete(id);
   const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
   agents.delete(id);
   send({ type: 'agentClosed', id });
@@ -1335,7 +1378,7 @@ function parseLine(id, line) {
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       const blocks = r.message.content;
-      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); } }
+      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); scanPeerReply(id, a, b.text); } }
       if (blocks.some(b => b.type === 'tool_use')) {
         a.isWaiting = false; a.hadTools = true;
         send({ type: 'status', id, status: 'active' });
@@ -1356,7 +1399,7 @@ function parseLine(id, line) {
         // These tools always block on a human choice — flag now, don't wait out the timer.
         // They also block under bypassPermissions, which startPermTimer skips.
         if (blocks.some(b => b.type === 'tool_use' && (b.name === 'AskUserQuestion' || b.name === 'ExitPlanMode'))) {
-          clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id }); notifyPermission(id, a);
+          clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id, ask: true }); notifyPermission(id, a);
         } else if (nonExempt) startPermTimer(id);
       }
     } else if (r.type === 'user') {
@@ -1735,7 +1778,7 @@ function fetchAllPRs(repos) {
         + `author { login } reviewDecision mergeable mergeStateStatus headRefName baseRefName `
         + `reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 20) { nodes { author { login } state } } `
-        + `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }`;
+        + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state } } } } } } }`;
     });
     const query = `query {\n${parts.join('\n')}\n}`;
     let out = '', errbuf = '', proc, done = false;
@@ -1777,12 +1820,36 @@ function fetchAllPRs(repos) {
             mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
             requested, createdAt: pr.createdAt || '', approvedBy, changesBy,
             headRef: pr.headRefName || '', baseRef: pr.baseRefName || '',
+            commitCount: (pr.commits && pr.commits.totalCount) || 0,
           });
         }
       });
       finish({ prs, failed });
     });
     try { proc.stdin.write(query); proc.stdin.end(); } catch {}
+  });
+}
+
+// Second GraphQL call: how many commits each PR branch trails its base by.
+// Best-effort — any failure resolves to {} and the rows just omit the badge.
+function fetchBehind(prs) {
+  return new Promise((resolve) => {
+    const q = buildBehindQuery(prs);
+    if (!q) return resolve({});
+    let out = '', proc, done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
+    try {
+      proc = spawn('gh', ['api', 'graphql', '-F', 'query=@-'], { windowsHide: true, shell: process.platform === 'win32' });
+    } catch { return resolve({}); }
+    const to = setTimeout(() => { try { proc.kill(); } catch {} finish({}); }, 25000);
+    proc.on('error', () => finish({}));
+    proc.stdout.on('data', d => out += d);
+    proc.stderr.on('data', () => {});
+    proc.on('close', () => {
+      let json; try { json = JSON.parse(out); } catch { return finish({}); }
+      finish(parseBehind(json, q.keys));
+    });
+    try { proc.stdin.write(q.query); proc.stdin.end(); } catch {}
   });
 }
 
@@ -1806,6 +1873,8 @@ async function pollPRs() {
   }
   if (!failedRepos.length) prGhErrorLogged = false;
   const prs = res.prs;
+  const behind = await fetchBehind(prs);
+  prs.forEach(p => { p.behindBy = behind[p.key] ?? null; });
   const currentKeys = prs.map(p => p.key);
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);
@@ -2056,6 +2125,10 @@ async function exportTranscript(id) {
 
 // ── Usage polling (via API rate-limit headers) ────────
 let usageInFlight = false;
+let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
+// Set before any programmatic quit so the close confirmation doesn't block it.
+let forceQuit = false;
+const { parseModelWeekly } = require('./usage-core');
 let lastUsage = null;
 
 function getApiKey() {
@@ -2170,6 +2243,15 @@ function fetchUsage() {
       const r7 = headers['anthropic-ratelimit-unified-7d-reset'];
       if (r5) usage.hourlyReset = parseInt(r5, 10) * 1000;
       if (r7) usage.weeklyReset = parseInt(r7, 10) * 1000;
+      // Per-model weekly caps (Fable, Opus, …) — discovered by header shape, so a
+      // new model tier shows up without a code change. See usage-core.js.
+      const modelWeekly = parseModelWeekly(headers);
+      if (modelWeekly.length) usage.modelWeekly = modelWeekly;
+      if (!usageHeadersLogged) {
+        usageHeadersLogged = true;
+        const rl = Object.keys(headers).filter(k => k.toLowerCase().startsWith('anthropic-ratelimit-'));
+        console.log('[Overlord] Rate-limit headers:', JSON.stringify(rl));
+      }
       if (Object.keys(usage).length > 0) {
         usage.fetchedAt = Date.now();
         lastUsage = usage;
@@ -2367,7 +2449,9 @@ function handleTermInput(id, data) {
     const openIdx = data.indexOf('\x1b[200~') + 6;
     const closeIdx = data.indexOf('\x1b[201~');
     if (closeIdx !== -1) {
-      // Complete paste in single chunk
+      // Complete paste in single chunk. The pasted content joins the line
+      // buffer so a later Enter still scans it for @mentions (peer messages
+      // pasted then submitted used to silently miss the scan).
       const content = data.slice(openIdx, closeIdx);
       if (content.length > LONG_PASTE_THRESHOLD) {
         const filePath = savePasteToFile(content);
@@ -2375,12 +2459,12 @@ function handleTermInput(id, data) {
       } else {
         writePtyChunked(t, data);
       }
+      inputBuffers.set(id, buf + content);
     } else {
       // Multi-chunk paste — start accumulating, don't write yet
       inBracketedPaste.add(id);
       bracketedPasteBuffers.set(id, data.slice(openIdx));
     }
-    inputBuffers.set(id, '');
     return;
   }
   if (inBracketedPaste.has(id)) {
@@ -2395,6 +2479,7 @@ function handleTermInput(id, data) {
       } else {
         writePtyChunked(t, '\x1b[200~' + content + '\x1b[201~');
       }
+      inputBuffers.set(id, buf + content);
     } else {
       bracketedPasteBuffers.set(id, (bracketedPasteBuffers.get(id) || '') + data);
       if (data.length === 1) { // safety: single char means paste mode ended unexpectedly
@@ -2413,6 +2498,17 @@ function handleTermInput(id, data) {
     const full = buf + data;
     const lastCR = full.lastIndexOf('\r');
     const remainder = full.slice(lastCR + 1);
+    // A pasted or phone-sent line with a remote mention is a peer message too —
+    // send it and swallow the chunk instead of submitting it locally. The
+    // pattern is strict (@Agent@<connected-peer-name>), so ordinary pasted
+    // text never matches.
+    const remoteM = pc.parseRemoteMentions(full.slice(0, lastCR), connectedPeerNames());
+    if (remoteM.length > 0) {
+      sendRemoteMentionMessages(id, full.slice(0, lastCR), remoteM);
+      t.write('\x15');
+      inputBuffers.set(id, remainder);
+      return;
+    }
     markSessionSwitch(id, full.slice(0, lastCR));
     const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
@@ -2432,12 +2528,17 @@ function handleTermInput(id, data) {
     markSessionSwitch(id, buf);
     const renameM = buf.match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameM) { const a = agents.get(id); if (a) { a.title = renameM[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
-    // Enter pressed — remote mentions (@Agent@peer) first: send over the peer
-    // socket, then strip them so the local scanner doesn't also fire on the
-    // '@Agent' prefix. Local text still submits to this agent as usual.
+    // Enter pressed — a line with a remote mention (@Agent@peer) is a message
+    // TO the peer, not a prompt for this agent: send it over the peer socket,
+    // clear the typed line, and never submit it locally.
     const remote = pc.parseRemoteMentions(buf, connectedPeerNames());
-    if (remote.length > 0) sendRemoteMentionMessages(id, buf, remote);
-    const mentions = findMentions(remote.length > 0 ? pc.stripRemoteMentions(buf, connectedPeerNames()) : buf);
+    if (remote.length > 0) {
+      sendRemoteMentionMessages(id, buf, remote);
+      t.write('\x15'); // Ctrl+U — wipe the line from the local input box
+      inputBuffers.set(id, '');
+      return;
+    }
+    const mentions = findMentions(buf);
     if (mentions.length > 0) {
       const ctx = buildMentionContext(mentions);
       t.write('\x15'); // Ctrl+U to clear readline
@@ -2919,6 +3020,12 @@ function handleIpc(msg) {
       shell.openPath(p).catch(() => {});
       break;
     }
+    case 'showInFolder': {
+      const p = msg.path;
+      if (typeof p !== 'string' || !fs.existsSync(p)) { send({ type: 'toast', text: 'Not found: ' + p }); break; }
+      shell.showItemInFolder(p);
+      break;
+    }
     case 'addBookmark':
       // Windows/Linux can't show a combined file+directory picker, so the caller picks a mode.
       dialog.showOpenDialog(mainWindow, msg.dir
@@ -3094,9 +3201,31 @@ function handleIpc(msg) {
       break;
     }
     case 'getPeersState': sendPeersState(); break;
+    case 'peerMsgApprove': resolvePeerMsg(msg.agentId, msg.msgId, true); break;
+    case 'peerMsgDismiss': resolvePeerMsg(msg.agentId, msg.msgId, false); break;
+    case 'chatSend': chatSendText(msg.to || {}, msg.text); break;
+    case 'chatTypingPing': { const { conns, group } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerTyping', groupId: group ? group.id : undefined }); break; }
+    case 'chatRead': { const { conns } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerChatRead', ids: msg.ids }); break; }
+    case 'chatSendFilePath': chatSendFile(msg.to || {}, String(msg.filePath || '')); break;
+    case 'pickChatFile': {
+      const to = msg.to || {};
+      dialog.showOpenDialog(mainWindow, { properties: ['openFile'], title: 'Send file to peer' })
+        .then(r => { if (!r.canceled && r.filePaths[0]) chatSendFile(to, r.filePaths[0]); })
+        .catch(() => {});
+      break;
+    }
+    case 'createGroup': createChatGroup(msg.name, msg.members); break;
+    case 'chatOpenFile': {
+      const p = String(msg.path || '');
+      let known = false;
+      for (const arr of Object.values(chats().peers)) if (arr.some(x => x.file && x.file.path === p)) known = true;
+      for (const g of Object.values(chats().groups)) if ((g.msgs || []).some(x => x.file && x.file.path === p)) known = true;
+      if (known) shell.openPath(p);
+      break;
+    }
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'fullRestart': app.relaunch(); app.exit(0); break;
-    case 'installUpdate': autoUpdater.quitAndInstall(); break;
+    case 'installUpdate': forceQuit = true; autoUpdater.quitAndInstall(); break;
     case 'checkGitUpdate': checkGitUpdate(); break;
     case 'gitPull': doGitPull(); break;
     case 'approvePr': {
@@ -3207,6 +3336,19 @@ function handleIpc(msg) {
         { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
           if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
           pollPRs(); // merged PR drops from the list
+        });
+      break;
+    }
+    // Merges the base branch into the PR branch server-side on GitHub — passing
+    // the URL means no local checkout is touched, whatever branch you're on.
+    case 'updatePrBranch': {
+      const url = msg.url;
+      if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
+      execFile('gh', ['pr', 'update-branch', url],
+        { timeout: 60000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+          if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
+          send({ type: 'toast', text: 'PR branch updated from base' });
+          pollPRs();
         });
       break;
     }
@@ -3436,6 +3578,16 @@ function handleRemoteCmd(msg) {
       break;
     }
     case 'termInput': handleTermInput(msg.id, msg.data); break;
+    // Peer-message approvals are allowed from the phone remote too — same
+    // authenticated channel, and approving from your phone is genuinely useful.
+    case 'peerMsgApprove': resolvePeerMsg(msg.agentId, msg.msgId, true); break;
+    case 'peerMsgDismiss': resolvePeerMsg(msg.agentId, msg.msgId, false); break;
+    // Chat from the same authenticated channel (drives the E2E; enables phone chat later)
+    case 'chatSend': chatSendText(msg.to || {}, msg.text); break;
+    case 'chatTypingPing': { const { conns, group } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerTyping', groupId: group ? group.id : undefined }); break; }
+    case 'chatRead': { const { conns } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerChatRead', ids: msg.ids }); break; }
+    case 'chatSendFilePath': chatSendFile(msg.to || {}, String(msg.filePath || '')); break;
+    case 'createGroup': createChatGroup(msg.name, msg.members); break;
     case 'getProjects': {
       const projects = new Set();
       for (const [, a] of agents) if (a.cwd) projects.add(a.cwd);
@@ -3579,6 +3731,11 @@ function peerRoster() {
   return out;
 }
 
+function sanitizePeerNameList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 64).map(n => pc.sanitizePeerName(n)).filter(Boolean);
+}
+
 function sanitizeRoster(list) {
   if (!Array.isArray(list)) return [];
   const out = [];
@@ -3593,12 +3750,12 @@ function sendPeersState() {
   const cfgPeers = Array.isArray(settings.peers) ? settings.peers : [];
   const rows = cfgPeers.map(p => {
     const conn = [...peerConns].find(c => c.helloDone && c.cfg && c.cfg.host === p.host && c.cfg.port === p.port) || (p.name ? findPeerConn(p.name) : null);
-    return { host: p.host, port: p.port, name: (conn && conn.name) || p.name || `${p.host}:${p.port}`, connected: !!conn, agents: conn ? conn.agents : [] };
+    return { host: p.host, port: p.port, name: (conn && conn.name) || p.name || `${p.host}:${p.port}`, connected: !!conn, agents: conn ? conn.agents : [], knows: conn ? (conn.peerNames || []) : [] };
   });
   for (const c of peerConns) { // inbound-only peers (they added us, we never added them)
     if (!c.helloDone || c.cfg) continue;
     if (rows.some(r => r.name.toLowerCase() === (c.name || '').toLowerCase())) continue;
-    rows.push({ host: '', port: 0, name: c.name, connected: true, inbound: true, agents: c.agents });
+    rows.push({ host: '', port: 0, name: c.name, connected: true, inbound: true, agents: c.agents, knows: c.peerNames || [] });
   }
   send({ type: 'peersState', enabled: !!settings.peersEnabled, name: myPeerName(), code: settings.peerCode || '', lanIp: getLanIp(), port: remotePort, peers: rows });
 }
@@ -3607,10 +3764,11 @@ function sendPeersState() {
 let _lastRosterJson = '';
 setInterval(() => {
   if (peerConns.size === 0) { _lastRosterJson = ''; return; }
-  const json = JSON.stringify(peerRoster());
+  const json = JSON.stringify({ a: peerRoster(), p: connectedPeerNames() });
   if (json === _lastRosterJson) return;
   _lastRosterJson = json;
-  for (const c of peerConns) if (c.helloDone) wsSendPeer(c, { type: 'peerAgents', agents: JSON.parse(json) });
+  const parsed = JSON.parse(json);
+  for (const c of peerConns) if (c.helloDone) wsSendPeer(c, { type: 'peerAgents', agents: parsed.a, peers: parsed.p });
 }, 5000);
 
 function closePeerConn(conn) {
@@ -3672,14 +3830,16 @@ function handlePeerMsg(conn, msg) {
     for (const c of [...peerConns]) { if (c !== conn && c.name && c.name.toLowerCase() === name.toLowerCase() && c.isClient === conn.isClient) closePeerConn(c); }
     conn.name = name;
     conn.agents = sanitizeRoster(msg.agents);
+    conn.peerNames = sanitizePeerNameList(msg.peers);
     conn.helloDone = true;
-    if (!conn.isClient) wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster() });
+    if (!conn.isClient) wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster(), peers: connectedPeerNames() });
     flog(`peer connected: ${name}${conn.isClient ? ' (outbound)' : ' (inbound)'}`);
     sendPeersState();
     return;
   }
   if (!conn.helloDone) { closePeerConn(conn); return; } // hello must come first
-  if (msg.type === 'peerAgents') { conn.agents = sanitizeRoster(msg.agents); sendPeersState(); return; }
+  if (handlePeerChatMsg(conn, msg)) return;
+  if (msg.type === 'peerAgents') { conn.agents = sanitizeRoster(msg.agents); conn.peerNames = sanitizePeerNameList(msg.peers); sendPeersState(); return; }
   if (msg.type === 'peerMessage') {
     const v = pc.validateEnvelope(msg);
     if (!v.ok) { wsSendPeer(conn, { type: 'peerAck', id: (msg && typeof msg.id === 'string') ? msg.id.slice(0, 64) : '', status: 'rejected', error: v.error }); return; }
@@ -3694,46 +3854,118 @@ function handlePeerMsg(conn, msg) {
     return;
   }
   if (msg.type === 'peerAck') {
+    // approved/dismissed arrive later than the initial ack, after the human on
+    // the other side decided — the pendingPeerAcks entry is already resolved.
+    if (msg.status === 'approved' || msg.status === 'dismissed') {
+      const who = `@${msg.toAgent || '?'} on ${conn.name}`;
+      send({ type: 'toast', text: msg.status === 'approved' ? `✓ ${who} approved your message — delivered to their agent` : `✕ ${who} dismissed your message` });
+      return;
+    }
     const p = pendingPeerAcks.get(msg.id);
     if (!p) return;
     clearTimeout(p.timer); pendingPeerAcks.delete(msg.id);
     const who = `@${p.toAgent} on ${p.peerName}`;
-    if (msg.status === 'delivered') send({ type: 'toast', text: `✉ Delivered to ${who}` });
-    else if (msg.status === 'queued') send({ type: 'toast', text: `✉ Queued for ${who} — agent is busy, delivers when idle` });
+    if (msg.status === 'pending') send({ type: 'toast', text: `✉ Sent to ${who} — awaiting their approval` });
+    else if (msg.status === 'delivered') send({ type: 'toast', text: `✉ Delivered to ${who}` }); // older peer versions
+    else if (msg.status === 'queued') send({ type: 'toast', text: `✉ Queued for ${who} — delivers when their agent is ready` }); // older peer versions
     else if (msg.status === 'no-such-agent') send({ type: 'toast', text: `✕ No agent named ${who}` });
     else send({ type: 'toast', text: `✕ ${who}: ${msg.error || msg.status || 'rejected'}` });
   }
 }
 
+// Incoming messages wait for HUMAN APPROVAL on the receiving side: they land
+// in an approval queue, the recipient gets a notification + a review card on
+// the agent, and only an explicit approve injects the message into the agent.
+const peerApprovalQueue = new Map(); // agentId -> [envelope] awaiting approval
+
 function deliverPeerMessage(agentId, env) {
   const a = agents.get(agentId);
   if (!a) return 'no-such-agent';
+  const q = peerApprovalQueue.get(agentId) || [];
+  q.push(env); if (q.length > 50) q.shift();
+  peerApprovalQueue.set(agentId, q);
   notifyPeerMessage(agentId, env);
-  send({ type: 'peerMsg', id: agentId, fromAgent: env.fromAgent, fromPeer: env.fromPeer });
-  // The Claude Code input box accepts a paste at any time (mid-turn it just sits
-  // there unsubmitted), so deliver whenever a live pty exists. Queue only for
-  // agents with no terminal (dead/restored) — flushed by the turn-end hooks
-  // once the terminal is back.
-  if (!terminals.has(agentId)) {
+  send({ type: 'peerMsgPending', id: agentId, msgId: env.id, fromPeer: env.fromPeer, fromAgent: env.fromAgent, fromUser: env.fromUser, text: env.text });
+  return 'pending';
+}
+
+function resolvePeerMsg(agentId, msgId, approve) {
+  const q = peerApprovalQueue.get(agentId) || [];
+  const i = q.findIndex(e => e.id === msgId);
+  if (i === -1) return;
+  const [env] = q.splice(i, 1);
+  if (q.length === 0) peerApprovalQueue.delete(agentId);
+  if (approve) queuePeerInjection(agentId, env);
+  send({ type: 'peerMsgResolved', id: agentId, msgId: env.id });
+  const conn = findPeerConn(env.fromPeer);
+  if (conn) wsSendPeer(conn, { type: 'peerAck', id: env.id, status: approve ? 'approved' : 'dismissed', toAgent: env.toAgent });
+  flog(`peer message ${env.id} ${approve ? 'approved' : 'dismissed'} for agent ${agentId}`);
+}
+
+// Approved messages inject only into a pty where Claude's prompt has been seen
+// (claudeReady) — never into a booting or crashed shell, where auto-submitted
+// text could hit cmd/powershell instead of Claude. Otherwise they queue and
+// flush on the ready signal / turn-end hooks, with a force-flush fallback in
+// case the prompt marker is never recognized.
+function queuePeerInjection(agentId, env) {
+  const a = agents.get(agentId);
+  if (!a) return;
+  if (!terminals.has(agentId) || !a.claudeReady || a.crashed) {
     const q = pendingPeerMsgs.get(agentId) || [];
     q.push(env); if (q.length > 50) q.shift();
     pendingPeerMsgs.set(agentId, q);
-    return 'queued';
+    setTimeout(() => {
+      const a2 = agents.get(agentId);
+      if (a2 && !a2.claudeReady && terminals.has(agentId) && !a2.crashed) { a2.claudeReady = true; flushPeerMsgs(agentId); }
+    }, 45000);
+    return;
   }
   injectPeerMessage(agentId, env);
-  return 'delivered';
 }
 
-// Bracketed paste: the header+text land in the input box without submitting —
-// the human reads, optionally edits, and presses Enter themselves.
+// Bracketed paste (keeps embedded newlines from submitting early) followed by
+// Enter — the message goes straight to the receiving Claude agent as a prompt.
+// Loop-safe: an agent's OUTPUT can never trigger a peer send (only terminal
+// input scanned by handleTermInput can), so two agents cannot ping-pong.
 function injectPeerMessage(agentId, env) {
+  flog(`peer message ${env.id} from ${env.fromPeer} injected into agent ${agentId}`);
+  const a = agents.get(agentId);
+  // Remember the return address so a PEER-REPLY line in the agent's answer can
+  // route back. hop+1 keeps the chain bounded; cleared after one reply.
+  if (a && env.fromAgent) a.peerReplyTo = { peer: env.fromPeer, agent: env.fromAgent, hop: (Number(env.hop) || 0) + 1 };
   handleTermInput(agentId, '\x1b[200~' + pc.buildPeerHeader(env) + '\x1b[201~');
+  handleTermInput(agentId, '\r');
+}
+
+// Scan an assistant text block for the PEER-REPLY marker and route it back to
+// the last peer sender. Loop-safe twice over: each reply consumes peerReplyTo
+// (one reply per incoming message), lands in the remote HUMAN's approval
+// queue, and the hop counter hard-stops the chain at MAX_HOP.
+function scanPeerReply(id, a, text) {
+  if (!a.peerReplyTo) return;
+  const m = text.match(/^\s*PEER-REPLY:\s*(.+)$/m);
+  if (!m || !m[1].trim()) return;
+  const replyTo = a.peerReplyTo;
+  a.peerReplyTo = null;
+  const conn = findPeerConn(replyTo.peer);
+  if (!conn) { send({ type: 'toast', text: `✕ Agent reply not sent — ${replyTo.peer} is offline` }); return; }
+  let user = ''; try { user = os.userInfo().username; } catch {}
+  const env = pc.buildEnvelope({ toAgent: replyTo.agent, fromAgent: a.agentName || '', fromPeer: myPeerName(), fromUser: user, text: m[1].trim(), hop: replyTo.hop });
+  const v = pc.validateEnvelope(env);
+  if (!v.ok) {
+    flog(`agent peer-reply blocked (${v.error})`);
+    send({ type: 'toast', text: v.error === 'hop limit reached' ? '✕ Reply chain hit its limit — a human has to continue it' : `✕ Agent reply blocked: ${v.error}` });
+    return;
+  }
+  sendPeerEnvelope(conn, env, conn.name);
+  send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} replied to @${replyTo.agent} on ${replyTo.peer}` });
 }
 
 function flushPeerMsgs(id) {
   const q = pendingPeerMsgs.get(id);
   if (!q || q.length === 0) return;
-  if (!terminals.has(id)) return; // no pty yet — flush fires again on the next turn end
+  const a = agents.get(id);
+  if (!a || !terminals.has(id) || !a.claudeReady || a.crashed) return; // not safe yet — a later ready/turn-end signal retries
   pendingPeerMsgs.delete(id);
   for (const env of q) injectPeerMessage(id, env);
 }
@@ -3744,7 +3976,7 @@ function notifyPeerMessage(id, env) {
   if (!Notification.isSupported()) return;
   const a = agents.get(id);
   const from = (env.fromAgent ? '@' + env.fromAgent + ' ' : '') + 'on ' + env.fromPeer;
-  const n = new Notification({ title: `✉ Message from ${from}`, body: `${(a && (a.agentName || a.title)) || 'Agent ' + id}: ${env.text.slice(0, 120)}`, silent: !settings.notificationSound });
+  const n = new Notification({ title: `✉ Message from ${from} — click to review`, body: `For ${(a && (a.agentName || a.title)) || 'Agent ' + id}: ${env.text.slice(0, 120)}`, silent: !settings.notificationSound });
   n.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); send({ type: 'focusFromNotification', id }); } });
   n.show();
 }
@@ -3752,10 +3984,15 @@ function notifyPeerMessage(id, env) {
 function sendRemoteMentionMessages(id, text, remote) {
   const a = agents.get(id);
   let user = ''; try { user = os.userInfo().username; } catch {}
+  // Strip the @Agent@peer tokens from the message body — on the receiving side
+  // Claude Code's teams mode would intercept them as teammate DMs and swallow
+  // the whole submission.
+  const body = pc.stripRemoteMentions(text, connectedPeerNames()).trim() || text;
   for (const r of remote) {
     const conn = findPeerConn(r.peerName);
+    flog(`peer mention: agent ${id} → @${r.agentName}@${r.peerName} (${conn ? 'sending' : 'NOT CONNECTED'})`);
     if (!conn) { send({ type: 'toast', text: `✕ Not connected to ${r.peerName}` }); continue; }
-    const env = pc.buildEnvelope({ toAgent: r.agentName, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text, hop: 0 });
+    const env = pc.buildEnvelope({ toAgent: r.agentName, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text: body, hop: 0 });
     sendPeerEnvelope(conn, env, r.peerName);
   }
 }
@@ -3799,7 +4036,7 @@ function dialPeer(cfg) {
     if (!pc.checkWsAccept(wsKey, res.headers['sec-websocket-accept'])) { socket.destroy(); schedulePeerRedial(cfg); return; }
     d.backoffMs = PEER_BACKOFF_MIN;
     const conn = attachPeerSocket(socket, { isClient: true, cfg });
-    wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster() });
+    wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster(), peers: connectedPeerNames() });
   });
   req.on('response', (res) => { flog(`peer dial ${key}: HTTP ${res.statusCode} instead of upgrade (wrong code, peers disabled, or old Overlord on the other side)`); req.destroy(); schedulePeerRedial(cfg); });
   req.on('timeout', () => req.destroy(new Error('peer dial timeout')));
@@ -3821,6 +4058,224 @@ function stopAllPeers() {
     try { c.ws.destroy(); } catch {}
   }
   sendPeersState();
+}
+
+// ── Peer chat: human ↔ human, no agent involved ───────
+// History persists in settings.chats (capped per conversation). DMs are keyed
+// by lowercased peer name, groups by group id. Groups are fan-out only — the
+// sender delivers to each member directly, so members only see each other's
+// messages when they are mutually paired (the UI warns about missing pairs).
+const chatFileRx = new Map(); // fileId -> { meta, from, chunks, bytes, timer }
+const CHAT_DL_DIR = path.join(os.homedir(), 'Downloads', 'Overlord');
+let _chatSaveTimer = null;
+
+function chats() {
+  if (!settings.chats || typeof settings.chats !== 'object') settings.chats = {};
+  if (!settings.chats.peers) settings.chats.peers = {};
+  if (!settings.chats.groups) settings.chats.groups = {};
+  return settings.chats;
+}
+function chatSaveSoon() { clearTimeout(_chatSaveTimer); _chatSaveTimer = setTimeout(saveState, 1500); }
+function chatStore(convo, m) {
+  convo.push(m);
+  if (convo.length > pc.CHAT_HISTORY_MAX) convo.splice(0, convo.length - pc.CHAT_HISTORY_MAX);
+  chatSaveSoon();
+}
+function dmHistory(peerName) {
+  const k = String(peerName).toLowerCase();
+  if (!chats().peers[k]) chats().peers[k] = [];
+  return chats().peers[k];
+}
+function groupEntry(gref) {
+  const g = chats().groups;
+  if (!g[gref.id]) g[gref.id] = { id: gref.id, name: gref.name, members: gref.members, msgs: [] };
+  else { if (gref.name) g[gref.id].name = gref.name; if (gref.members && gref.members.length) g[gref.id].members = gref.members; }
+  return g[gref.id];
+}
+function findOwnChatMsg(id) {
+  for (const arr of Object.values(chats().peers)) { const m = arr.find(x => x.id === id && x.from === 'me'); if (m) return m; }
+  for (const g of Object.values(chats().groups)) { const m = (g.msgs || []).find(x => x.id === id && x.from === 'me'); if (m) return m; }
+  return null;
+}
+function markChatDelivered(id, byName) {
+  const m = findOwnChatMsg(id); if (!m) return;
+  m.deliveredBy = m.deliveredBy || [];
+  if (!m.deliveredBy.includes(byName)) m.deliveredBy.push(byName);
+  chatSaveSoon();
+  send({ type: 'chatMsgStatus', id, deliveredBy: m.deliveredBy, readBy: m.readBy || [] });
+}
+function markChatRead(ids, byName) {
+  for (const id of (Array.isArray(ids) ? ids : []).slice(0, 500)) {
+    const m = findOwnChatMsg(id); if (!m) continue;
+    m.readBy = m.readBy || [];
+    if (!m.readBy.includes(byName)) m.readBy.push(byName);
+    send({ type: 'chatMsgStatus', id, deliveredBy: m.deliveredBy || [], readBy: m.readBy });
+  }
+  chatSaveSoon();
+}
+function chatDedupe(id) {
+  if (seenPeerMsgIds.has(id)) return true;
+  seenPeerMsgIds.add(id); seenPeerMsgOrder.push(id);
+  if (seenPeerMsgOrder.length > 1000) seenPeerMsgIds.delete(seenPeerMsgOrder.shift());
+  return false;
+}
+function notifyChat(from, group, preview) {
+  if (!settings.notifications) return;
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.flashFrame(true);
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title: `💬 ${from}${group ? ' · ' + group.name : ''}`, body: String(preview || '').slice(0, 140), silent: !settings.notificationSound });
+  n.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); send({ type: 'chatOpenFromNotification', key: group ? { type: 'group', id: group.id } : { type: 'peer', id: from.toLowerCase() } }); } });
+  n.show();
+}
+
+// Resolve a renderer target ({peer:name} or {group:id}) to live connections.
+function chatTargets(to) {
+  if (to && to.peer) { const c = findPeerConn(to.peer); return { conns: c ? [c] : [], group: null, missing: c ? [] : [String(to.peer)] }; }
+  const g = to && to.group ? chats().groups[to.group] : null;
+  if (!g) return { conns: [], group: null, missing: [] };
+  const me = myPeerName().toLowerCase();
+  const conns = [], missing = [];
+  for (const mname of g.members || []) {
+    if (String(mname).toLowerCase() === me) continue;
+    const c = findPeerConn(mname);
+    if (c) conns.push(c); else missing.push(mname);
+  }
+  return { conns, group: g, missing };
+}
+
+function chatSendText(to, text) {
+  text = String(text || '').trim();
+  if (!text) return;
+  const { conns, group, missing } = chatTargets(to);
+  if (!conns.length) { send({ type: 'toast', text: group ? '✕ No group members are online' : `✕ ${to.peer} is offline — message not sent` }); return; }
+  const gref = group ? { id: group.id, name: group.name, members: group.members } : undefined;
+  const wire = pc.buildChatMsg({ text, group: gref });
+  const entry = { id: wire.id, from: 'me', text: wire.text, ts: wire.ts, deliveredBy: [], readBy: [] };
+  if (group) chatStore(group.msgs, entry); else chatStore(dmHistory(conns[0].name), entry);
+  for (const c of conns) wsSendPeer(c, wire);
+  const key = group ? { type: 'group', id: group.id } : { type: 'peer', id: conns[0].name.toLowerCase() };
+  send({ type: 'chatMsg', key, msg: entry });
+  if (missing.length) send({ type: 'toast', text: `⚠ Not delivered to ${missing.join(', ')} (offline)` });
+}
+
+async function chatSendFile(to, filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile()) throw new Error('not a file');
+    if (st.size > pc.FILE_MAX_BYTES) { send({ type: 'toast', text: `✕ File too big (max ${Math.round(pc.FILE_MAX_BYTES / 1048576)} MB)` }); return; }
+    const { conns, group, missing } = chatTargets(to);
+    if (!conns.length) { send({ type: 'toast', text: '✕ Peer offline — file not sent' }); return; }
+    const name = path.basename(filePath);
+    const fileId = crypto.randomUUID();
+    const gref = group ? { id: group.id, name: group.name, members: group.members } : undefined;
+    const wire = pc.buildChatMsg({ file: { name, size: st.size, fileId }, group: gref });
+    const entry = { id: wire.id, from: 'me', file: { name, size: st.size, path: filePath }, ts: wire.ts, deliveredBy: [], readBy: [] };
+    if (group) chatStore(group.msgs, entry); else chatStore(dmHistory(conns[0].name), entry);
+    const key = group ? { type: 'group', id: group.id } : { type: 'peer', id: conns[0].name.toLowerCase() };
+    send({ type: 'chatMsg', key, msg: entry });
+    const data = await fs.promises.readFile(filePath);
+    for (const c of conns) {
+      wsSendPeer(c, { type: 'peerFileStart', fileId, chatId: wire.id, name, size: st.size, ts: wire.ts, group: wire.group });
+      for (let off = 0; off < data.length; off += pc.FILE_CHUNK_BYTES) {
+        wsSendPeer(c, { type: 'peerFileChunk', fileId, seq: off / pc.FILE_CHUNK_BYTES, data: data.slice(off, off + pc.FILE_CHUNK_BYTES).toString('base64') });
+        send({ type: 'chatFileProgress', id: wire.id, done: Math.min(off + pc.FILE_CHUNK_BYTES, data.length), total: data.length });
+        await new Promise(r => setTimeout(r, 5)); // yield between chunks
+      }
+      wsSendPeer(c, { type: 'peerFileEnd', fileId });
+    }
+    send({ type: 'chatFileProgress', id: wire.id, done: data.length, total: data.length });
+    if (missing.length) send({ type: 'toast', text: `⚠ File not delivered to ${missing.join(', ')} (offline)` });
+  } catch (e) {
+    flog('chatSendFile failed:', e.message);
+    send({ type: 'toast', text: '✕ File send failed: ' + e.message });
+  }
+}
+
+function createChatGroup(name, memberNames) {
+  const members = [...new Set([myPeerName(), ...(Array.isArray(memberNames) ? memberNames.map(String) : [])])];
+  const gref = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 32), name: String(name || 'group').trim().slice(0, 64) || 'group', members };
+  if (!pc.validateGroupRef(gref)) { send({ type: 'toast', text: '✕ A group needs a name and at least one other member' }); return; }
+  groupEntry(gref);
+  chatSaveSoon();
+  for (const mname of members) {
+    if (mname.toLowerCase() === myPeerName().toLowerCase()) continue;
+    const c = findPeerConn(mname);
+    if (c) wsSendPeer(c, { type: 'peerGroupInvite', group: gref });
+  }
+  send({ type: 'chatGroupAdded', group: gref });
+}
+
+// Incoming chat traffic — called from handlePeerMsg (conn.helloDone is guaranteed).
+function handlePeerChatMsg(conn, msg) {
+  if (msg.type === 'peerChat') {
+    const v = pc.validateChatMsg(msg);
+    if (!v.ok || msg.file) return; // file messages arrive via the transfer path only
+    if (msg.group && !pc.validateGroupRef(msg.group)) return;
+    if (chatDedupe(msg.id)) return;
+    const entry = { id: msg.id, from: conn.name, text: msg.text, ts: Number(msg.ts) || Date.now(), readBy: [] };
+    if (msg.group) chatStore(groupEntry(msg.group).msgs, entry); else chatStore(dmHistory(conn.name), entry);
+    const key = msg.group ? { type: 'group', id: msg.group.id } : { type: 'peer', id: conn.name.toLowerCase() };
+    send({ type: 'chatMsg', key, msg: entry, groupName: msg.group ? msg.group.name : undefined });
+    notifyChat(conn.name, msg.group, msg.text);
+    wsSendPeer(conn, { type: 'peerChatDelivered', id: msg.id });
+    return true;
+  }
+  if (msg.type === 'peerChatDelivered') { markChatDelivered(String(msg.id || ''), conn.name); return true; }
+  if (msg.type === 'peerChatRead') { markChatRead(msg.ids, conn.name); return true; }
+  if (msg.type === 'peerTyping') {
+    const key = msg.groupId ? { type: 'group', id: String(msg.groupId).slice(0, 64) } : { type: 'peer', id: conn.name.toLowerCase() };
+    send({ type: 'chatTyping', key, name: conn.name });
+    return true;
+  }
+  if (msg.type === 'peerGroupInvite') {
+    if (!pc.validateGroupRef(msg.group)) return true;
+    const ge = groupEntry(msg.group);
+    chatSaveSoon();
+    send({ type: 'chatGroupAdded', group: { id: ge.id, name: ge.name, members: ge.members } });
+    send({ type: 'toast', text: `💬 ${conn.name} added you to group "${ge.name}"` });
+    return true;
+  }
+  if (msg.type === 'peerFileStart') {
+    const meta = { fileId: String(msg.fileId || '').slice(0, 64), chatId: String(msg.chatId || '').slice(0, 64), name: pc.sanitizeFileName(msg.name), size: Number(msg.size) || 0, ts: Number(msg.ts) || Date.now(), group: msg.group };
+    if (!meta.fileId || !meta.chatId || meta.size <= 0 || meta.size > pc.FILE_MAX_BYTES) return true;
+    if (meta.group && !pc.validateGroupRef(meta.group)) return true;
+    if (chatFileRx.size >= 8) { flog('chat file rejected: too many concurrent transfers'); return true; }
+    const rx = { meta, from: conn.name, chunks: [], bytes: 0, timer: setTimeout(() => chatFileRx.delete(meta.fileId), 5 * 60 * 1000) };
+    chatFileRx.set(meta.fileId, rx);
+    return true;
+  }
+  if (msg.type === 'peerFileChunk') {
+    const rx = chatFileRx.get(msg.fileId);
+    if (!rx || rx.from !== conn.name) return true;
+    const buf = Buffer.from(String(msg.data || ''), 'base64');
+    rx.bytes += buf.length;
+    if (rx.bytes > rx.meta.size) { clearTimeout(rx.timer); chatFileRx.delete(msg.fileId); return true; }
+    rx.chunks.push(buf);
+    send({ type: 'chatFileProgress', id: rx.meta.chatId, done: rx.bytes, total: rx.meta.size });
+    return true;
+  }
+  if (msg.type === 'peerFileEnd') {
+    const rx = chatFileRx.get(msg.fileId);
+    if (!rx || rx.from !== conn.name) return true;
+    clearTimeout(rx.timer); chatFileRx.delete(msg.fileId);
+    if (rx.bytes !== rx.meta.size) { flog(`chat file ${rx.meta.name}: size mismatch ${rx.bytes}/${rx.meta.size} — discarded`); return true; }
+    if (chatDedupe(rx.meta.chatId)) return true;
+    try {
+      fs.mkdirSync(CHAT_DL_DIR, { recursive: true });
+      let dest = path.join(CHAT_DL_DIR, rx.meta.name);
+      const ext = path.extname(rx.meta.name), stem = path.basename(rx.meta.name, ext);
+      for (let i = 1; fs.existsSync(dest); i++) dest = path.join(CHAT_DL_DIR, `${stem} (${i})${ext}`);
+      fs.writeFileSync(dest, Buffer.concat(rx.chunks));
+      const entry = { id: rx.meta.chatId, from: conn.name, file: { name: path.basename(dest), size: rx.meta.size, path: dest }, ts: rx.meta.ts, readBy: [] };
+      if (rx.meta.group) chatStore(groupEntry(rx.meta.group).msgs, entry); else chatStore(dmHistory(conn.name), entry);
+      const key = rx.meta.group ? { type: 'group', id: rx.meta.group.id } : { type: 'peer', id: conn.name.toLowerCase() };
+      send({ type: 'chatMsg', key, msg: entry, groupName: rx.meta.group ? rx.meta.group.name : undefined });
+      notifyChat(conn.name, rx.meta.group, `📎 ${entry.file.name}`);
+      wsSendPeer(conn, { type: 'peerChatDelivered', id: rx.meta.chatId });
+    } catch (e) { flog('chat file save failed:', e.message); }
+    return true;
+  }
+  return false;
 }
 
 // ── Window ─────────────────────────────────────────────
@@ -3879,6 +4334,27 @@ app.whenReady().then(() => {
   });
   mainWindow.on('resize', saveWindowBounds);
   mainWindow.on('move', saveWindowBounds);
+  // Confirm before closing. showMessageBoxSync blocks the close event long enough
+  // to answer it — the async variant would let the window close out from under us.
+  mainWindow.on('close', (e) => {
+    if (forceQuit) return; // relaunch / programmatic quit — already intended
+    const live = [...agents.values()].filter(a => !a.archived).length;
+    const detail = live
+      ? `${live} agent${live === 1 ? '' : 's'} open. Active ones keep running in the background and reattach next launch.`
+      : 'No agents are open.';
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['Close Overlord', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1, // Esc / window-manager dismiss = don't close
+      title: 'Close Overlord',
+      message: 'Close Overlord?',
+      detail,
+      noLink: true,
+    });
+    if (choice !== 0) { e.preventDefault(); return; }
+    forceQuit = true; // don't ask again on the quit that follows
+  });
   mainWindow.on('closed', () => {
     saveState();
     mainWindow = null;

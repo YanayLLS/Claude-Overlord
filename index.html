@@ -34,6 +34,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   -webkit-app-region:drag;
 }
 #header h1 span { color:var(--accent); font-weight:600; }
+#header h1 .app-ver { color:var(--dim); font-weight:400; font-size:11px; }
 #headerBadges { display:flex; gap:4px; align-items:center; }
 #headerBadges:empty { display:none; }
 /* names are no longer truncated, so scroll rather than clip when the row runs long */
@@ -109,6 +110,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-merge { background:#89b4fa; }
 .pr-merge:hover { background:#74a8f7; }
 .pr-approve:disabled { opacity:.6; cursor:default; }
+.pr-update { background:var(--peach,#fab387); }
+.pr-update:hover { background:#f9c096; }
+.pr-conflictbtn { background:#f38ba8; }
+.pr-conflictbtn:hover { background:#f17497; }
+.pr-behind { color:var(--peach,#fab387); font-weight:600; }
 .pr-mute { background:var(--bg2,#313244); color:var(--text); }
 .pr-mute:hover { background:var(--border); }
 .pr-snooze { background:var(--bg2,#313244); color:var(--text); }
@@ -669,14 +675,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #prompt-nav .prompt-counter { font-size:10px; color:var(--dim); min-width:28px; text-align:center; user-select:none; }
 #term-container { flex:1; position:relative; background:#000; overflow:hidden; min-width:0; min-height:0; }
 #term-container .xterm { height:100%; width:100%; }
-#term-container .xterm .xterm-viewport::-webkit-scrollbar { width:10px; }
+/* 18px hit area, 5px transparent border keeps the visible thumb slim — easier to grab, same look */
+#term-container .xterm .xterm-viewport::-webkit-scrollbar { width:18px; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-track { background:transparent; }
-#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:var(--surface0); border-radius:5px; border:2px solid transparent; background-clip:padding-box; min-height:40px; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:var(--surface0); border-radius:9px; border:5px solid transparent; background-clip:padding-box; min-height:48px; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background:var(--surface1); }
 /* Inline ghost-text autocomplete overlay — floats over the terminal canvas, never written to the xterm buffer */
 #ghost-suggest { position:fixed; z-index:50; color:#585b70; opacity:.85; white-space:pre; pointer-events:none; display:none; }
 #ghost-suggest .ghost-hint { font-size:9px; opacity:.7; margin-left:6px; border:1px solid #585b70; border-radius:3px; padding:0 3px; }
-#scroll-bottom-btn {
+#scroll-bottom-btn, #scroll-top-btn {
   display:none; position:absolute; bottom:12px; right:20px; z-index:10;
   width:32px; height:32px; border-radius:50%; border:1px solid var(--border);
   background:var(--surface0); color:var(--text); cursor:pointer;
@@ -684,8 +691,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   opacity:.7; transition:opacity .15s, background .15s;
   box-shadow:0 2px 8px rgba(0,0,0,.4);
 }
-#scroll-bottom-btn:hover { opacity:1; background:var(--surface1); }
-#scroll-bottom-btn.visible { display:block; }
+#scroll-bottom-btn:hover, #scroll-top-btn:hover { opacity:1; background:var(--surface1); }
+#scroll-bottom-btn.visible, #scroll-top-btn.visible { display:block; }
+#scroll-top-btn { bottom:52px; }
 #term-name-chip {
   display:none; position:absolute; bottom:8px; left:10px; z-index:9; pointer-events:none;
   max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -802,6 +810,18 @@ button:focus-visible { outline-offset:0; }
 .agent.selected[data-status="active"],
 .agent.selected[data-status="idle"],
 .agent.selected[data-status="resuming"] { background:var(--accent); border-color:var(--accent); }
+
+/* Answer needed — orange pulse while the agent is blocked on a chat answer */
+@keyframes needs-answer-flash {
+  0%, 100% { box-shadow:0 0 0 0 rgba(250,179,135,.15); border-color:rgba(250,179,135,.3); }
+  50%      { box-shadow:0 0 10px 2px rgba(250,179,135,.55); border-color:var(--peach); }
+}
+.agent.needs-answer { animation:needs-answer-flash 1.4s ease-in-out infinite; }
+.agent.needs-answer:not(.selected) { background:rgba(250,179,135,.07); }
+.agent.needs-answer::before { background:var(--peach) !important; }
+.agent.needs-answer:not(.selected) .agent-dot { background:var(--peach) !important; opacity:1; }
+.agent.needs-answer:not(.selected) .agent-status-line { color:var(--peach); }
+@media (prefers-reduced-motion:reduce) { .agent.needs-answer { animation:none; border-color:var(--peach); } }
 
 /* Done flash — green glow that fades out when agent finishes */
 @keyframes done-flash {
@@ -1038,16 +1058,67 @@ button:focus-visible { outline-offset:0; }
   box-shadow:0 4px 16px rgba(0,0,0,.3);
 }
 .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+.toast.click { pointer-events:auto; cursor:pointer; }
+.toast.click:hover { border-color:var(--border-hi); }
+
+/* ── Peer chat panel ─────────────────────────────── */
+#chat-panel{position:fixed;right:14px;bottom:14px;width:372px;height:540px;max-height:78vh;z-index:9000;
+  display:flex;flex-direction:column;background:var(--bg2);border:1px solid var(--border);
+  border-radius:14px;box-shadow:0 12px 44px rgba(0,0,0,.55);overflow:hidden;font-size:12px;}
+.chat-hdr{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg3);border-bottom:1px solid var(--border);}
+.chat-avatar{position:relative;width:32px;height:32px;border-radius:50%;flex:none;
+  background:linear-gradient(135deg,var(--accent),var(--purple));color:var(--bg);
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;}
+.chat-avatar .dot{position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:50%;border:2px solid var(--bg3);background:var(--dim);}
+.chat-avatar .dot.on{background:var(--green);}
+.chat-hdr-name{font-size:13px;font-weight:600;line-height:1.25;}
+.chat-hdr-sub{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chat-close{background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;padding:2px 7px;border-radius:6px;line-height:1;}
+.chat-close:hover{color:var(--text);background:rgba(205,214,244,.08);}
+#chat-msgs{flex:1;overflow-y:auto;padding:12px 12px 6px;display:flex;flex-direction:column;}
+#chat-msgs::-webkit-scrollbar{width:6px;}
+#chat-msgs::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:3px;}
+#chat-msgs::-webkit-scrollbar-track{background:transparent;}
+.chat-row{display:flex;flex-direction:column;max-width:80%;margin-top:10px;}
+.chat-row.cont{margin-top:2px;}
+.chat-row.mine{align-self:flex-end;align-items:flex-end;}
+.chat-row.theirs{align-self:flex-start;align-items:flex-start;}
+.chat-author{font-size:9px;font-weight:600;color:var(--purple);margin:0 8px 2px;}
+.chat-bubble{padding:7px 11px;border-radius:14px;line-height:1.45;word-break:break-word;white-space:pre-wrap;color:var(--text);}
+.chat-row.mine .chat-bubble{background:rgba(137,180,250,.20);border-bottom-right-radius:4px;}
+.chat-row.theirs .chat-bubble{background:var(--bg3);border-bottom-left-radius:4px;}
+.chat-meta{display:inline-flex;gap:4px;align-items:center;font-size:9px;color:var(--dim);margin:3px 8px 0;}
+.chat-ticks{letter-spacing:-1.5px;}
+.chat-ticks.read{color:var(--accent);}
+.chat-file{display:flex;align-items:center;gap:10px;cursor:pointer;min-width:170px;padding:2px 0;}
+.chat-file:hover .chat-file-name{text-decoration:underline;}
+.chat-file-ico{width:34px;height:34px;border-radius:9px;background:rgba(137,180,250,.16);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none;}
+.chat-file-name{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:185px;}
+.chat-file-size{font-size:9px;color:var(--dim);margin-top:1px;}
+.chat-prog{height:3px;background:rgba(205,214,244,.15);border-radius:2px;margin-top:5px;overflow:hidden;}
+.chat-prog>div{height:100%;background:var(--accent);border-radius:2px;transition:width .2s;}
+.chat-empty{color:var(--dim);font-size:11px;text-align:center;margin:auto;}
+#chat-typing{min-height:15px;font-size:10px;color:var(--dim);padding:2px 16px 0;font-style:italic;}
+.chat-inbar{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border);align-items:flex-end;background:var(--bg3);}
+.chat-attach{background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;padding:6px;border-radius:8px;line-height:1;flex:none;}
+.chat-attach:hover{color:var(--text);background:rgba(205,214,244,.08);}
+#chat-input{flex:1;resize:none;font-family:inherit;font-size:12px;line-height:1.4;padding:7px 13px;color:var(--text);
+  background:var(--bg);border:1px solid var(--border);border-radius:17px;outline:none;max-height:90px;scrollbar-width:none;}
+#chat-input::-webkit-scrollbar{display:none;}
+#chat-input:focus{border-color:var(--border-hi);}
+.chat-send{font-family:inherit;font-size:12px;font-weight:600;padding:7px 16px;color:var(--bg);background:var(--accent);
+  border:none;border-radius:17px;cursor:pointer;flex:none;transition:filter .15s;}
+.chat-send:hover{filter:brightness(1.12);}
 </style>
 </head>
 <body>
 <div id="app">
   <div id="header">
-    <h1><span>Overlord</span></h1>
+    <h1><span>Overlord</span> <span class="app-ver"></span></h1>
     <div id="headerBadges"></div>
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
-    <button class="hdr-btn" id="peer-btn" onclick="openPeersSettings()" title="LAN peers" style="display:none">&#x21C4;</button>
+    <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
@@ -1094,7 +1165,7 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
+    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x25B2;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
     <div id="timeline-events"></div>
   </div>
   </div><!-- end #content -->
@@ -1131,7 +1202,7 @@ button:focus-visible { outline-offset:0; }
         <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
         <span>Prompt autocomplete (ghost text)</span>
       </label>
-      <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku (needs ANTHROPIC_API_KEY).</div>
+      <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -1194,7 +1265,7 @@ button:focus-visible { outline-offset:0; }
         <input type="checkbox" id="chk-peers" onchange="onPeersEnableChange(this.checked)" />
         <span>Enable peer connections (LAN)</span>
       </label>
-      <div class="settings-hint">Pairs this Overlord with a teammate's on the same network. Their agents become addressable as <code>@Agent@peer</code> in any terminal; incoming messages land in the agent's input line for you to review and send.</div>
+      <div class="settings-hint">Pairs this Overlord with a teammate's on the same network. Type <code>@Agent@peer message</code> in any terminal to send — the line goes only to them (not to your agent). They review it on a ✉ badge and approve before it runs on their agent.</div>
       <div class="settings-hint" id="peers-self" style="user-select:text;"></div>
       <label class="settings-label">
         <span>Your peer name:</span>
@@ -1301,8 +1372,13 @@ button:focus-visible { outline-offset:0; }
 <script src="./ghost-core.js"></script>
 <script src="./actions-core.js"></script>
 <script src="./update-core.js"></script>
+<script src="./pr-behind.js"></script>
+<script src="./prompt-copy.js"></script>
 <script src="./term-size-core.js"></script>
+<script src="./usage-core.js"></script>
 <script>
+document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
+
 function ctxWindow(modelFamily, ctxTok) {
   const base = (modelFamily === 'opus' || modelFamily === 'fable') ? 1000000 : 200000; // sonnet/haiku default 200k
   // If usage exceeds the assumed cap, the agent is clearly on the 1M window (e.g. Sonnet[1m]).
@@ -1945,7 +2021,7 @@ async function restartAgent(id) {
   api.send({ type: 'restartAgent', id });
 }
 function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
-function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); const a = agents.get(id); if (a && a.peerUnread) { a.peerUnread = 0; scheduleRender(); } if (changed) render(); }
+function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
   _renaming = true;
@@ -2223,6 +2299,13 @@ function agentStatus(a) {
   return 'idle';
 }
 
+// True only when the agent is blocked on a chat answer (AskUserQuestion / ExitPlanMode),
+// not on a plain tool permission prompt.
+function needsAnswer(a) {
+  for (const t of a.tools.values()) { if (t.perm === 'ask') return true; }
+  return false;
+}
+
 function matchesFilter(a) {
   if (filterReady) { const st = agentStatus(a); if (st === 'active' || st === 'resuming' || st === 'settling') return false; }
   if (!filterText) return true;
@@ -2245,6 +2328,7 @@ function statusVerb(a, st) {
   if (st === 'waiting') return 'Done';
   if (st === 'idle') return 'Idle';
   for (const t of a.tools.values()) {
+    if (t.perm === 'ask') return 'Answer needed in chat';
     if (t.perm) return 'Needs approval';
     if (!t.done) { const s = t.status || 'Working'; return /[.\u2026!?]$/.test(s) ? s : s + '\u2026'; }
   }
@@ -2411,17 +2495,17 @@ function render() {
       const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
       const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
       const mf = a.stats?.modelFamily || '';
-      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
+      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}${needsAnswer(a) ? ' needs-answer' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
-        <span class="agent-name" onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
+        <span class="agent-name" onmouseenter="this.title=this.scrollWidth>this.clientWidth?this.textContent:''" onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
         <div class="agent-mid">
           ${a.currentFileName ? `<span class="agent-current-file" title="${escAttr(a.currentFile)}" data-file="${escAttr(a.currentFile)}" onclick="event.stopPropagation();openFile(${id},this.dataset.file)">${esc(a.currentFileName)}</span>` : ''}
         </div>
         <div class="agent-right" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${agentCtxWin / 1000}K (${ctxPct}%)">
           <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}" onclick="event.stopPropagation();showModelMenu(event,${id})" style="cursor:pointer" title="Change model">${mf}</span>` : ''}</span>
           <span class="agent-tail">
-            ${a.peerUnread ? `<span title="Unread peer messages — click the agent to read" style="background:var(--purple);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;">&#x2709; ${a.peerUnread}</span>` : ''}
+            ${a.peerPending && a.peerPending.length ? `<span title="Peer messages awaiting your approval — click to review" onclick="event.stopPropagation();openPeerApprovalModal(${id})" style="background:var(--peach);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;cursor:pointer;">&#x2709; ${a.peerPending.length}</span>` : ''}
             <span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>
             <span class="agent-actions">
               ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
@@ -2539,6 +2623,10 @@ function render() {
   if (currentUsage && (currentUsage.hourly != null || currentUsage.weekly != null)) {
     if (currentUsage.hourly != null) barHtml += usageRowHTML('Current session', currentUsage.hourly, currentUsage.hourlyReset, false);
     if (currentUsage.weekly != null) barHtml += usageRowHTML('Current week', currentUsage.weekly, currentUsage.weeklyReset, true);
+    // Per-model weekly caps (Fable, Opus, …) sit under the overall week row.
+    for (const m of currentUsage.modelWeekly || []) {
+      barHtml += usageRowHTML(modelLabel(m.model) + ' week', m.pct, m.reset || currentUsage.weeklyReset, true);
+    }
 
     // Info row: agents + pace + age
     let infoHtml = `<span>${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? ` · ${activeCount} active` : ''}</span>`;
@@ -2639,8 +2727,6 @@ function createXterm(id) {
   terminal.onData((data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); });
   terminal.onScroll(() => {
     ghostClear();
-    const buf = terminal.buffer.active;
-    if (buf.baseY > 0 && buf.baseY - buf.viewportY <= 1) terminal.scrollToBottom();
     updateScrollBtn();
   });
   terminal.attachCustomKeyEventHandler((e) => {
@@ -2676,10 +2762,12 @@ function destroyXterm(id) {
 
 function updateScrollBtn() {
   const btn = document.getElementById('scroll-bottom-btn');
+  const top = document.getElementById('scroll-top-btn');
   const x = selectedId != null ? xterms.get(selectedId) : null;
-  if (!x || termTab !== 'terminal') { btn.classList.remove('visible'); return; }
-  const atBottom = x.terminal.buffer.active.viewportY >= x.terminal.buffer.active.baseY;
-  btn.classList.toggle('visible', !atBottom);
+  if (!x || termTab !== 'terminal') { btn.classList.remove('visible'); top.classList.remove('visible'); return; }
+  const buf = x.terminal.buffer.active;
+  btn.classList.toggle('visible', buf.viewportY < buf.baseY);
+  top.classList.toggle('visible', buf.viewportY > 0);
 }
 
 // Park the chip just above Claude's input box. The box is ~4 rows tall (borders + hint
@@ -2722,6 +2810,11 @@ function scrollTermBottom() {
   if (x) { x.terminal.scrollToBottom(); x.terminal.focus(); }
 }
 
+function scrollTermTop() {
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  if (x) { x.terminal.scrollToTop(); x.terminal.focus(); }
+}
+
 // Fit terminal without disrupting scroll position
 function fitPreservingScroll(x) {
   const vp = x.terminal.buffer.active.viewportY;
@@ -2760,21 +2853,18 @@ function showXterm(id) {
 // Extract the text the user typed in Claude's input box from the visible buffer.
 // ponytail: scans the on-screen rows for the bordered box (│ … │) and strips the
 // "> " marker. Handles multi-line input; misses text scrolled out of view (rare).
+// Adapter: hand prompt-copy.js a window of rendered rows around the cursor.
 function readPromptBox(terminal) {
   const buf = terminal.buffer.active;
   const cursorAbs = buf.baseY + buf.cursorY;
-  const inner = (y) => {
-    const ln = buf.getLine(y); if (!ln) return null;
-    const m = ln.translateToString(true).match(/^\s*[│|]\s?(.*?)\s*[│|]\s*$/);
-    return m ? m[1] : null;
-  };
-  if (inner(cursorAbs) === null) return ''; // cursor not in a bordered box → nothing to grab
-  let top = cursorAbs, bot = cursorAbs;
-  while (inner(top - 1) !== null) top--;
-  while (inner(bot + 1) !== null) bot++;
+  const from = Math.max(0, cursorAbs - 40);
+  const to = Math.min(buf.length - 1, cursorAbs + 40);
   const lines = [];
-  for (let y = top; y <= bot; y++) lines.push(inner(y).replace(/^[>❯]\s?/, ''));
-  return lines.join('\n').trim();
+  for (let y = from; y <= to; y++) {
+    const ln = buf.getLine(y);
+    lines.push(ln ? ln.translateToString(true) : '');
+  }
+  return readPromptText(lines, cursorAbs - from);
 }
 
 // ── Inline ghost-text autocomplete ─────────────────────
@@ -2902,17 +2992,28 @@ function closeTermSearch() {
     if (x) { x.searchAddon.clearDecorations(); x.terminal.focus(); }
   }
 }
+// Yellow highlight for Ctrl+F matches; active match is orange so it stands out from the rest
+const TERM_SEARCH_OPTS = {
+  decorations: {
+    matchBackground: '#ffd23f',
+    matchBorder: '#ffd23f',
+    matchOverviewRuler: '#ffd23f',
+    activeMatchBackground: '#ff8c00',
+    activeMatchBorder: '#ffffff',
+    activeMatchColorOverviewRuler: '#ff8c00',
+  },
+};
 function termSearchNext() {
   const query = document.getElementById('term-search-input').value;
   if (!query || selectedId == null) return;
   const x = xterms.get(selectedId);
-  if (x) x.searchAddon.findNext(query);
+  if (x) x.searchAddon.findNext(query, TERM_SEARCH_OPTS);
 }
 function termSearchPrev() {
   const query = document.getElementById('term-search-input').value;
   if (!query || selectedId == null) return;
   const x = xterms.get(selectedId);
-  if (x) x.searchAddon.findPrevious(query);
+  if (x) x.searchAddon.findPrevious(query, TERM_SEARCH_OPTS);
 }
 document.getElementById('term-search-input').addEventListener('input', () => { termSearchNext(); });
 document.getElementById('term-search-input').addEventListener('keydown', (e) => {
@@ -3155,7 +3256,7 @@ function searchResultClick(idx) {
       const input = document.getElementById('term-search-input');
       input.value = query;
       const x = xterms.get(r.agentId);
-      if (x) x.searchAddon.findNext(query);
+      if (x) x.searchAddon.findNext(query, TERM_SEARCH_OPTS);
     }, 150);
   }
 }
@@ -3312,12 +3413,17 @@ api.on((msg) => {
       x = createXterm(msg.id);
     }
     const buf = x.terminal.buffer.active;
-    const nearBottom = buf.baseY - buf.viewportY <= 5;
-    x.terminal.write(msg.data);
-    if (nearBottom) x.terminal.scrollToBottom();
+    // Only auto-follow when pinned to the exact bottom — one line up means the user is
+    // reading, so leave the viewport alone and let the scroll-to-bottom button show.
+    const atBottom = buf.viewportY >= buf.baseY;
+    // write() is async: the button must be recomputed after the data lands, or baseY is stale.
+    x.terminal.write(msg.data, () => {
+      if (atBottom) x.terminal.scrollToBottom();
+      if (msg.id === selectedId) updateScrollBtn();
+    });
     const ag = agents.get(msg.id);
     if (ag && ag.dead) { ag.dead = null; if (msg.id === selectedId) updateDeadOverlay(); scheduleRender(); } // terminal is talking again
-    if (msg.id === selectedId) { schedulePromptNavUpdate(); updateScrollBtn(); }
+    if (msg.id === selectedId) schedulePromptNavUpdate();
     return;
   }
   if (msg.type === 'termExit') {
@@ -3335,6 +3441,12 @@ function handleAgentMsg(msg) {
       const isNew = !agents.has(msg.id);
       if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', currentFile: '', currentFileName: '', archived: msg.archived || false });
       if (msg.cwd) addKnownProject(msg.cwd);
+      // Fresh agent goes last: ids restart at 1 each launch, so a saved order may still
+      // hold this id at a stale position. Re-append it.
+      if (isNew && !msg.title && msg.cwd && agentOrderMap[msg.cwd]) {
+        agentOrderMap[msg.cwd] = agentOrderMap[msg.cwd].filter(x => x !== msg.id).concat(msg.id);
+        saveAgentOrder();
+      }
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
       break;
@@ -3431,7 +3543,7 @@ function handleAgentMsg(msg) {
     case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
-    case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = true; } scheduleRender(); } break; }
+    case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
     case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
@@ -3547,12 +3659,63 @@ function handleAgentMsg(msg) {
     case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
     case 'peersState': { peersState = msg; renderPeersSec(); break; }
-    case 'peerMsg': {
+    case 'peerMsgPending': {
       const a = agents.get(msg.id);
-      if (a && msg.id !== selectedId) { a.peerUnread = (a.peerUnread || 0) + 1; scheduleRender(); }
-      showToast(`✉ Message from ${msg.fromAgent ? '@' + msg.fromAgent + ' ' : ''}on ${msg.fromPeer}`);
+      if (a) {
+        a.peerPending = a.peerPending || [];
+        if (!a.peerPending.some(p => p.msgId === msg.msgId)) a.peerPending.push({ msgId: msg.msgId, fromPeer: msg.fromPeer, fromAgent: msg.fromAgent, fromUser: msg.fromUser, text: msg.text });
+        scheduleRender();
+      }
+      showToast(`✉ Message from ${msg.fromUser || msg.fromPeer} — click the ✉ badge to review`);
       break;
     }
+    case 'peerMsgResolved': {
+      const a = agents.get(msg.id);
+      if (a && a.peerPending) { a.peerPending = a.peerPending.filter(p => p.msgId !== msg.msgId); scheduleRender(); }
+      const ov = document.getElementById('peer-approve-overlay');
+      if (ov) { const row = ov.querySelector(`[data-msgid="${msg.msgId}"]`); if (row) row.remove(); if (!ov.querySelector('[data-msgid]')) ov.remove(); }
+      break;
+    }
+    case 'chatMsg': {
+      const ks = msg.key.type + ':' + msg.key.id;
+      const convo = chatConvo(msg.key, msg.groupName);
+      if (!convo.some(x => x.id === msg.msg.id)) convo.push(msg.msg);
+      const isOpen = chatOpenKey && chatKs(chatOpenKey) === ks && document.getElementById('chat-panel');
+      if (isOpen) renderChatMsgs();
+      else if (msg.msg.from !== 'me') {
+        chatUnread[ks] = (chatUnread[ks] || 0) + 1;
+        renderPeersSec();
+        const chatKey = msg.key;
+        showToast(`💬 ${msg.msg.from}: ${(msg.msg.text || (msg.msg.file ? '📎 ' + msg.msg.file.name : '')).slice(0, 60)} — click to open`, () => openChat(chatKey));
+      }
+      break;
+    }
+    case 'chatMsgStatus': {
+      const upd = (arr) => { const m = (arr || []).find(x => x.id === msg.id); if (m) { m.deliveredBy = msg.deliveredBy; m.readBy = msg.readBy; return true; } return false; };
+      let hit = false;
+      for (const arr of Object.values(chatState.peers)) if (upd(arr)) hit = true;
+      for (const g of Object.values(chatState.groups)) if (upd(g.msgs)) hit = true;
+      if (hit && chatOpenKey && document.getElementById('chat-panel')) renderChatMsgs();
+      break;
+    }
+    case 'chatTyping': {
+      const ks = msg.key.type + ':' + msg.key.id;
+      chatTypingSeen[ks] = chatTypingSeen[ks] || {};
+      chatTypingSeen[ks][msg.name] = Date.now();
+      renderChatTypingLine();
+      break;
+    }
+    case 'chatGroupAdded': {
+      const g = chatState.groups[msg.group.id] = chatState.groups[msg.group.id] || { id: msg.group.id, msgs: [] };
+      g.name = msg.group.name; g.members = msg.group.members;
+      break;
+    }
+    case 'chatFileProgress': {
+      chatProgress[msg.id] = { done: msg.done, total: msg.total };
+      if (chatOpenKey && document.getElementById('chat-panel')) renderChatMsgs();
+      break;
+    }
+    case 'chatOpenFromNotification': openChat(msg.key); break;
     case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
     case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
     case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); } break; }
@@ -3863,11 +4026,12 @@ function renderBookmarks(bookmarks) {
     const btn = document.createElement('button');
     btn.className = 'hdr-btn bookmark';
     btn.textContent = b.name;
-    btn.title = b.path + '\n(right-click to rename or remove)';
+    btn.title = b.path + '\n(right-click for more)';
     btn.onclick = () => api.send({ type: 'openBookmark', path: b.path });
     btn.oncontextmenu = (e) => {
       e.preventDefault();
       showBookmarkMenu(e, [
+        { label: 'Open file location', action: () => api.send({ type: 'showInFolder', path: b.path }) },
         { label: 'Rename', action: () => renameBookmark(b, btn) },
         { label: 'Remove', cls: 'ctx-danger', action: () => api.send({ type: 'removeBookmark', path: b.path }) },
       ]);
@@ -3886,13 +4050,14 @@ function renderBookmarks(bookmarks) {
 }
 
 // ── Toast ──────────────────────────────────────────────
-function showToast(text) {
+function showToast(text, onClick) {
   let el = document.getElementById('toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
   el.textContent = text;
-  el.className = 'toast show';
+  el.className = 'toast show' + (onClick ? ' click' : '');
+  el.onclick = onClick ? () => { el.className = 'toast'; onClick(); } : null;
   clearTimeout(el._timer);
-  el._timer = setTimeout(() => { el.className = 'toast'; }, 2000);
+  el._timer = setTimeout(() => { el.className = 'toast'; }, onClick ? 4000 : 2000);
 }
 
 // ── Settings ───────────────────────────────────────────
@@ -3928,6 +4093,11 @@ function applySettings(s) {
     planBudget = s.planBudget;
     const inp = document.getElementById('inp-budget');
     if (inp) inp.value = planBudget;
+  }
+  if (s.chats) {
+    chatState.peers = s.chats.peers || {};
+    chatState.groups = s.chats.groups || {};
+    if (chatOpenKey && document.getElementById('chat-panel')) renderChatMsgs();
   }
   if (s.knownProjects) { for (const d of s.knownProjects) knownProjects.add(d); scheduleRender(); }
   if (s.worktrees) { worktrees = s.worktrees; for (const w of worktrees) knownProjects.add(w.repo); scheduleRender(); }
@@ -4299,9 +4469,10 @@ function renderPeersSec() {
   if (chip) chip.textContent = connected ? `● ${connected} connected` : '';
   const btn = document.getElementById('peer-btn');
   if (btn) {
+    const unread = chatTotalUnread();
     btn.style.display = peersState.enabled ? '' : 'none';
-    btn.innerHTML = '&#x21C4;' + (connected ? ' ' + connected : '');
-    btn.title = connected ? `${connected} peer Overlord${connected === 1 ? '' : 's'} connected` : 'LAN peers (none connected)';
+    btn.innerHTML = '&#x21C4;' + (connected ? ' ' + connected : '') + (unread ? ` <span style="background:var(--accent);color:var(--bg);border-radius:8px;padding:0 5px;font-size:10px;font-weight:600;">💬${unread}</span>` : '');
+    btn.title = (connected ? `${connected} peer Overlord${connected === 1 ? '' : 's'} connected` : 'LAN peers (none connected)') + ' — click for chat';
   }
 }
 function openPeersSettings() {
@@ -4334,6 +4505,33 @@ function openPeerMsgModal(id) {
   ov._opts = opts;
   document.getElementById('peer-msg-text').focus();
 }
+function openPeerApprovalModal(id) {
+  const a = agents.get(id);
+  const pending = (a && a.peerPending) || [];
+  if (!pending.length) return;
+  const old = document.getElementById('peer-approve-overlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'peer-approve-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;';
+  const btnCss = 'font-family:inherit;font-size:12px;padding:4px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;';
+  const rows = pending.map(p => `
+    <div data-msgid="${escAttr(p.msgId)}" style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:8px;">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:6px;">From <b style="color:var(--text)">${esc(p.fromUser || p.fromPeer)}</b> on ${esc(p.fromPeer)}${p.fromAgent ? ' (agent ' + esc(p.fromAgent) + ')' : ''}</div>
+      <div style="font-size:12px;white-space:pre-wrap;max-height:140px;overflow:auto;">${esc(p.text)}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+        <button onclick="resolvePeerPending(${id},'${escAttr(p.msgId)}',false)" style="${btnCss}color:var(--red);">Dismiss</button>
+        <button onclick="resolvePeerPending(${id},'${escAttr(p.msgId)}',true)" style="${btnCss}color:var(--green);border-color:var(--green);">Send to agent</button>
+      </div>
+    </div>`).join('');
+  ov.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border-hi);border-radius:8px;padding:16px;min-width:420px;max-width:560px;max-height:70vh;overflow:auto;">
+    <h3 style="margin:0;font-size:14px;">✉ Peer messages for ${esc((a && a.agentName) || 'agent')} — approve to run</h3>${rows}
+    <div style="display:flex;justify-content:flex-end;margin-top:10px;"><button onclick="document.getElementById('peer-approve-overlay').remove()" style="${btnCss}color:var(--text);">Close</button></div></div>`;
+  ov.addEventListener('mousedown', (e) => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+function resolvePeerPending(agentId, msgId, approve) {
+  api.send({ type: approve ? 'peerMsgApprove' : 'peerMsgDismiss', agentId, msgId });
+}
 function sendPeerMsgModal(fromId) {
   const ov = document.getElementById('peer-msg-overlay'); if (!ov) return;
   const o = ov._opts[parseInt(document.getElementById('peer-msg-target').value, 10)];
@@ -4341,6 +4539,221 @@ function sendPeerMsgModal(fromId) {
   if (!o || !text) return;
   api.send({ type: 'peerSend', peerName: o.peer, toAgent: o.agent, fromId, text });
   ov.remove();
+}
+
+// ── Peer chat UI (human ↔ human) ──────────────────────
+let chatState = { peers: {}, groups: {} }; // mirror of settings.chats (main is source of truth)
+let chatOpenKey = null;                    // {type:'peer'|'group', id}
+let chatUnread = {};                       // 'type:id' -> count
+let chatTypingSeen = {};                   // 'type:id' -> { name: lastTs }
+let chatProgress = {};                     // msgId -> { done, total }
+let _chatTypingTimer = null, _chatLastPing = 0;
+
+function chatKs(key) { return key.type + ':' + key.id; }
+function chatToFor(key) { return key.type === 'peer' ? { peer: key.id } : { group: key.id }; }
+function chatTotalUnread() { return Object.values(chatUnread).reduce((a, b) => a + b, 0); }
+function chatConvo(key, groupName) {
+  if (key.type === 'peer') { chatState.peers[key.id] = chatState.peers[key.id] || []; return chatState.peers[key.id]; }
+  const g = chatState.groups[key.id] = chatState.groups[key.id] || { id: key.id, name: groupName || 'group', members: [], msgs: [] };
+  g.msgs = g.msgs || [];
+  return g.msgs;
+}
+function chatTitleFor(key) {
+  if (key.type === 'peer') { const p = (peersState.peers || []).find(x => x.name.toLowerCase() === key.id); return p ? p.name : key.id; }
+  const g = chatState.groups[key.id]; return g ? g.name : 'group';
+}
+function peerOnline(idLower) { const p = (peersState.peers || []).find(x => x.name.toLowerCase() === idLower); return !!(p && p.connected); }
+function fmtBytes(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n > 1024 ? Math.round(n / 1024) + ' KB' : n + ' B'; }
+function fmtChatTs(ts) { const d = new Date(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+
+function showChatMenu(e) {
+  const old = document.getElementById('chat-menu'); if (old) { old.remove(); return; }
+  const menu = document.createElement('div');
+  menu.id = 'chat-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:220px;';
+  const r = e.currentTarget.getBoundingClientRect();
+  menu.style.right = (window.innerWidth - r.right) + 'px'; menu.style.top = (r.bottom + 4) + 'px';
+  const rowCss = 'display:flex;align-items:center;gap:8px;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:6px 12px;background:none;border:none;color:var(--text);cursor:pointer;';
+  const addRow = (html, action) => { const b = document.createElement('button'); b.style.cssText = rowCss; b.innerHTML = html; b.onclick = () => { menu.remove(); action(); }; b.addEventListener('mouseenter', () => b.style.background = 'rgba(205,214,244,.06)'); b.addEventListener('mouseleave', () => b.style.background = 'none'); menu.appendChild(b); };
+  const addSep = () => { const hr = document.createElement('div'); hr.style.cssText = 'height:1px;background:var(--border);margin:3px 0;'; menu.appendChild(hr); };
+  const unreadChip = (ks) => chatUnread[ks] ? ` <span style="background:var(--accent);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;">${chatUnread[ks]}</span>` : '';
+  const peers = peersState.peers || [];
+  if (!peers.length) addRow('<span style="color:var(--dim)">No peers yet — open settings</span>', () => openPeersSettings());
+  for (const p of peers) addRow(`<span style="color:${p.connected ? 'var(--green)' : 'var(--dim)'}">&#x25CF;</span> 💬 ${esc(p.name)}${unreadChip('peer:' + p.name.toLowerCase())}`, () => openChat({ type: 'peer', id: p.name.toLowerCase() }));
+  const groups = Object.values(chatState.groups || {});
+  if (groups.length) addSep();
+  for (const g of groups) addRow(`👥 ${esc(g.name)}${unreadChip('group:' + g.id)}`, () => openChat({ type: 'group', id: g.id }));
+  addSep();
+  addRow('＋ New group…', () => openNewGroupModal());
+  addRow('⚙ Peer settings…', () => openPeersSettings());
+  document.body.appendChild(menu);
+  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
+function openChat(key) {
+  chatOpenKey = key;
+  chatUnread[chatKs(key)] = 0;
+  renderPeersSec();
+  buildChatPanel();
+}
+function closeChatPanel() {
+  const p = document.getElementById('chat-panel'); if (p) p.remove();
+  chatOpenKey = null;
+  clearInterval(_chatTypingTimer); _chatTypingTimer = null;
+}
+function buildChatPanel() {
+  const old = document.getElementById('chat-panel'); if (old) old.remove();
+  const key = chatOpenKey;
+  const g = key.type === 'group' ? chatState.groups[key.id] : null;
+  const sub = g ? esc((g.members || []).join(', ')) : (peerOnline(key.id) ? 'online' : 'offline');
+  const title = chatTitleFor(key);
+  const online = key.type === 'group' ? true : peerOnline(key.id);
+  const panel = document.createElement('div');
+  panel.id = 'chat-panel';
+  panel.innerHTML = `
+    <div class="chat-hdr">
+      <div class="chat-avatar">${key.type === 'group' ? '👥' : esc((title[0] || '?').toUpperCase())}<span class="dot${online ? ' on' : ''}"></span></div>
+      <div style="flex:1;min-width:0;">
+        <div class="chat-hdr-name">${esc(title)}</div>
+        <div id="chat-sub" class="chat-hdr-sub">${sub}</div>
+      </div>
+      <button class="chat-close" onclick="closeChatPanel()" aria-label="Close chat">&times;</button>
+    </div>
+    <div id="chat-msgs"></div>
+    <div id="chat-typing"></div>
+    <div class="chat-inbar">
+      <button class="chat-attach" onclick="api.send({type:'pickChatFile',to:chatToFor(chatOpenKey)})" title="Send a file (max 25 MB)">📎</button>
+      <textarea id="chat-input" rows="1" placeholder="Message ${escAttr(title)}"></textarea>
+      <button class="chat-send" onclick="sendChatInput()">Send</button>
+    </div>`;
+  document.body.appendChild(panel);
+  const inp = document.getElementById('chat-input');
+  inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); sendChatInput(); } });
+  inp.addEventListener('input', () => {
+    inp.style.height = 'auto'; inp.style.height = Math.min(90, inp.scrollHeight) + 'px';
+    const now = Date.now();
+    if (now - _chatLastPing > 2000) { _chatLastPing = now; api.send({ type: 'chatTypingPing', to: chatToFor(chatOpenKey) }); }
+  });
+  panel.addEventListener('dragover', (ev) => ev.preventDefault());
+  panel.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    for (const f of ev.dataTransfer.files) {
+      const p = api.getFilePath ? api.getFilePath(f) : null;
+      if (p) api.send({ type: 'chatSendFilePath', to: chatToFor(chatOpenKey), filePath: p });
+    }
+  });
+  clearInterval(_chatTypingTimer);
+  _chatTypingTimer = setInterval(renderChatTypingLine, 1000);
+  renderChatMsgs();
+  inp.focus();
+}
+// WhatsApp-style ticks: ✓ sent · ✓✓ gray delivered · ✓✓ blue read
+function chatTicks(m, key) {
+  if (m.from !== 'me') return '';
+  const g = key.type === 'group' ? chatState.groups[key.id] : null;
+  const need = g ? Math.max(1, (g.members || []).length - 1) : 1;
+  const read = (m.readBy || []).length, del = (m.deliveredBy || []).length;
+  if (read >= need) return '<span class="chat-ticks read">✓✓</span>';
+  if (read > 0) return `<span class="chat-ticks read">✓✓</span><span>${read}/${need}</span>`;
+  if (del > 0) return '<span class="chat-ticks">✓✓</span>';
+  return '<span class="chat-ticks">✓</span>';
+}
+function chatFileIcon(name) {
+  const ext = (String(name).split('.').pop() || '').toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return '🖼️';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜️';
+  if (['mp3', 'wav', 'flac', 'ogg', 'm4a'].includes(ext)) return '🎵';
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) return '🎬';
+  if (ext === 'pdf') return '📕';
+  if (['js', 'ts', 'py', 'cs', 'json', 'html', 'css', 'sh', 'ps1'].includes(ext)) return '💻';
+  return '📄';
+}
+function renderChatMsgs() {
+  const box = document.getElementById('chat-msgs'); if (!box || !chatOpenKey) return;
+  const key = chatOpenKey;
+  const convo = chatConvo(key);
+  const showNames = key.type === 'group';
+  const GROUP_GAP_MS = 3 * 60 * 1000;
+  box.innerHTML = convo.map((m, i) => {
+    const mine = m.from === 'me';
+    const prev = convo[i - 1], next = convo[i + 1];
+    const cont = !!(prev && prev.from === m.from && (m.ts - prev.ts) < GROUP_GAP_MS);
+    const last = !next || next.from !== m.from || (next.ts - m.ts) >= GROUP_GAP_MS;
+    const prog = chatProgress[m.id];
+    const body = m.file
+      ? `<div class="chat-file" data-fpath="${escAttr(m.file.path || '')}" onclick="if(this.dataset.fpath)api.send({type:'chatOpenFile',path:this.dataset.fpath})" title="Open file">
+           <div class="chat-file-ico">${chatFileIcon(m.file.name)}</div>
+           <div style="min-width:0;">
+             <div class="chat-file-name">${esc(m.file.name)}</div>
+             <div class="chat-file-size">${fmtBytes(m.file.size)}</div>
+             ${prog && prog.done < prog.total ? `<div class="chat-prog"><div style="width:${Math.round(prog.done / prog.total * 100)}%"></div></div>` : ''}
+           </div>
+         </div>`
+      : esc(m.text || '');
+    return `<div class="chat-row ${mine ? 'mine' : 'theirs'}${cont ? ' cont' : ''}">
+      ${showNames && !mine && !cont ? `<div class="chat-author">${esc(m.from)}</div>` : ''}
+      <div class="chat-bubble">${body}</div>
+      ${last ? `<div class="chat-meta">${fmtChatTs(m.ts)}${chatTicks(m, key)}</div>` : ''}
+    </div>`;
+  }).join('') || '<div class="chat-empty">No messages yet — say hi 👋</div>';
+  box.scrollTop = box.scrollHeight;
+  // read receipts for everything from others that we now displayed
+  const unreadIds = convo.filter(m => m.from !== 'me' && !m._readSent).map(m => (m._readSent = true, m.id));
+  if (unreadIds.length) api.send({ type: 'chatRead', to: chatToFor(key), ids: unreadIds });
+}
+function renderChatTypingLine() {
+  const el = document.getElementById('chat-typing'); if (!el || !chatOpenKey) return;
+  const t = chatTypingSeen[chatKs(chatOpenKey)] || {};
+  const now = Date.now();
+  const names = Object.keys(t).filter(n => now - t[n] < 3000);
+  el.textContent = names.length ? `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing…` : '';
+}
+function sendChatInput() {
+  const inp = document.getElementById('chat-input'); if (!inp || !chatOpenKey) return;
+  const text = inp.value.trim(); if (!text) return;
+  api.send({ type: 'chatSend', to: chatToFor(chatOpenKey), text });
+  inp.value = ''; inp.style.height = 'auto';
+}
+function openNewGroupModal() {
+  const connected = (peersState.peers || []).filter(p => p.connected);
+  if (!connected.length) { showToast('No connected peers to group with'); return; }
+  const old = document.getElementById('chat-group-overlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'chat-group-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;';
+  const btnCss = 'font-family:inherit;font-size:12px;padding:4px 12px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;';
+  ov.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border-hi);border-radius:8px;padding:16px;min-width:340px;">
+    <h3 style="margin:0 0 10px;font-size:14px;">👥 New group</h3>
+    <input id="chat-group-name" type="text" placeholder="Group name" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;padding:6px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+    <div id="chat-group-members" style="margin-top:8px;">${connected.map(p => `<label style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;cursor:pointer;"><input type="checkbox" value="${escAttr(p.name)}" onchange="updateGroupMeshWarning()"> ${esc(p.name)}</label>`).join('')}</div>
+    <div id="chat-group-warn" style="font-size:10px;color:var(--yellow);margin-top:6px;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+      <button onclick="document.getElementById('chat-group-overlay').remove()" style="${btnCss}">Cancel</button>
+      <button onclick="createGroupFromModal()" style="${btnCss}border-color:var(--accent);color:var(--accent);">Create</button>
+    </div></div>`;
+  ov.addEventListener('mousedown', (e) => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  document.getElementById('chat-group-name').focus();
+}
+function selectedGroupMembers() { return [...document.querySelectorAll('#chat-group-members input:checked')].map(c => c.value); }
+function updateGroupMeshWarning() {
+  const sel = selectedGroupMembers();
+  const warn = [];
+  for (let i = 0; i < sel.length; i++) for (let j = i + 1; j < sel.length; j++) {
+    const pi = (peersState.peers || []).find(p => p.name === sel[i]);
+    const knows = ((pi && pi.knows) || []).map(n => n.toLowerCase());
+    if (!knows.includes(sel[j].toLowerCase())) warn.push(`${sel[i]} ↔ ${sel[j]}`);
+  }
+  const el = document.getElementById('chat-group-warn');
+  if (el) el.textContent = warn.length ? `⚠ Not paired with each other — they won't see each other's messages: ${warn.join(', ')}` : '';
+}
+function createGroupFromModal() {
+  const name = document.getElementById('chat-group-name').value.trim();
+  const members = selectedGroupMembers();
+  if (!name || !members.length) { showToast('Give the group a name and pick members'); return; }
+  api.send({ type: 'createGroup', name, members });
+  document.getElementById('chat-group-overlay').remove();
 }
 
 // ── PR notifications ───────────────────────────────────
@@ -4417,8 +4830,11 @@ function prActionBtn(p, u) {
 
 function prBranchHtml(p) {
   if (!p.headRef || !p.baseRef) return '';
+  const behind = p.behindBy > 0
+    ? ` · <span class="pr-behind" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">↓${p.behindBy} behind</span>`
+    : '';
   return `<div class="pr-branch" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">`
-    + `${escapeHtml(p.headRef)} <span class="pr-arrow">→</span> ${escapeHtml(p.baseRef)}</div>`;
+    + `${escapeHtml(p.headRef)} <span class="pr-arrow">→</span> ${escapeHtml(p.baseRef)}${behind}</div>`;
 }
 
 function prRowHtml(p, dim) {
@@ -4431,6 +4847,7 @@ function prRowHtml(p, dim) {
   const age = p.createdAt ? ' · <span class="pr-age" data-created="' + p.createdAt + '">' + escapeHtml(prRelTime(p.createdAt)) + '</span>' : '';
   const appr = (p.approvedBy && p.approvedBy.length) ? ` · <span class="pr-appr" title="Approved by ${escapeHtml(p.approvedBy.join(', '))}">✓${p.approvedBy.length}</span>` : '';
   const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
+  const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   // Red = waiting on my review. Green = mine and ready to merge. Orange = conflicts.
@@ -4440,11 +4857,17 @@ function prRowHtml(p, dim) {
   const conflict = !dim && mi.label === 'conflicts';
   const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '')
     + (conflict ? ' pr-conflict' : '') + (dim ? ' pr-muted' : '');
-  return `<div class="${cls}" onclick="openPr('${u}')">`
-    + `<div class="pr-actions">${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
+  const act = prBranchAction(p); // pr-behind.js
+  const updBtn = act === 'conflict'
+    ? `<button class="pr-approve pr-conflictbtn" title="Conflicts with ${escapeHtml(p.baseRef)} — resolve them on GitHub, then update" onclick="event.stopPropagation();openPr('${u}/conflicts')">⚠ Conflicts</button>`
+    : act === 'update'
+      ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>`
+      : '';
+  return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
+    + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
-    + `<div class="pr-meta">@${escapeHtml(p.author)}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
+    + `<div class="pr-meta">@${escapeHtml(p.author)}${commits}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
 }
 
 function prGroupHeader(repo, count, muted) {
@@ -4467,7 +4890,7 @@ function prGroupByRepo(list) {
 function prMutedRowHtml(p) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
-  return `<div class="pr-row pr-muted" onclick="openPr('${u}')">`
+  return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-mute" onclick="event.stopPropagation();unmutePr('${k}')">🔔 Unmute</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
@@ -4497,7 +4920,7 @@ function prSnoozeLeft(until) {
 function prSnoozedRowHtml(p) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
-  return `<div class="pr-row pr-muted" onclick="openPr('${u}')">`
+  return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Wake now" onclick="event.stopPropagation();unsnoozePr('${k}')">⏰ Wake</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
@@ -4630,6 +5053,19 @@ function mergePr(url, btn) {
   api.send({ type: 'mergePr', url });
 }
 
+function updatePrBranch(url, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⤴ Updating…'; }
+  api.send({ type: 'updatePrBranch', url });
+}
+
+function prCtx(e, url) {
+  e.preventDefault(); e.stopPropagation();
+  showBookmarkMenu(e, [
+    { label: 'Open PR', action: () => openPr(url) },
+    { label: 'Copy link', action: () => navigator.clipboard.writeText(url) },
+  ]);
+}
+
 function mutePr(key) { api.send({ type: 'mutePr', key }); }
 function unmutePr(key) { api.send({ type: 'unmutePr', key }); }
 function muteRepo(repo) { api.send({ type: 'muteRepo', repo }); }
@@ -4640,11 +5076,15 @@ function refreshPrs(btn) {
   api.send({ type: 'pollPrsNow' });
 }
 
+// Capture phase: rows/buttons elsewhere in the app stopPropagation, which would
+// otherwise leave the panel open when you click them.
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('#pr-snooze-pop') && !e.target.closest('.pr-snooze')) closeSnooze();
+  const t = e.target.closest ? e.target : e.target.parentElement; // text/SVG nodes
+  if (!t) return;
+  if (!t.closest('#pr-snooze-pop') && !t.closest('.pr-snooze')) closeSnooze();
   const d = document.getElementById('pr-dropdown');
-  if (d && d.style.display === 'block' && !e.target.closest('#pr-dropdown') && !e.target.closest('#pr-snooze-pop') && e.target.id !== 'pr-badge') d.style.display = 'none';
-});
+  if (d && d.style.display === 'block' && !t.closest('#pr-dropdown') && !t.closest('#pr-snooze-pop') && !t.closest('#pr-badge')) d.style.display = 'none';
+}, true);
 
 // ── GitHub Actions tracking ───────────────────────────
 let actionsSettings = { enabled: false, workflows: [], intervalSec: 60 };
