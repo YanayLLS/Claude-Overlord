@@ -811,6 +811,18 @@ button:focus-visible { outline-offset:0; }
 .agent.selected[data-status="idle"],
 .agent.selected[data-status="resuming"] { background:var(--accent); border-color:var(--accent); }
 
+/* Answer needed — orange pulse while the agent is blocked on a chat answer */
+@keyframes needs-answer-flash {
+  0%, 100% { box-shadow:0 0 0 0 rgba(250,179,135,.15); border-color:rgba(250,179,135,.3); }
+  50%      { box-shadow:0 0 10px 2px rgba(250,179,135,.55); border-color:var(--peach); }
+}
+.agent.needs-answer { animation:needs-answer-flash 1.4s ease-in-out infinite; }
+.agent.needs-answer:not(.selected) { background:rgba(250,179,135,.07); }
+.agent.needs-answer::before { background:var(--peach) !important; }
+.agent.needs-answer:not(.selected) .agent-dot { background:var(--peach) !important; opacity:1; }
+.agent.needs-answer:not(.selected) .agent-status-line { color:var(--peach); }
+@media (prefers-reduced-motion:reduce) { .agent.needs-answer { animation:none; border-color:var(--peach); } }
+
 /* Done flash — green glow that fades out when agent finishes */
 @keyframes done-flash {
   0%   { box-shadow:0 0 0 0 rgba(166,227,161,.6), inset 0 0 12px rgba(166,227,161,.15); border-color:rgba(166,227,161,.5); }
@@ -1362,6 +1374,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./update-core.js"></script>
 <script src="./pr-behind.js"></script>
 <script src="./prompt-copy.js"></script>
+<script src="./usage-core.js"></script>
 <script>
 document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
 
@@ -2285,6 +2298,13 @@ function agentStatus(a) {
   return 'idle';
 }
 
+// True only when the agent is blocked on a chat answer (AskUserQuestion / ExitPlanMode),
+// not on a plain tool permission prompt.
+function needsAnswer(a) {
+  for (const t of a.tools.values()) { if (t.perm === 'ask') return true; }
+  return false;
+}
+
 function matchesFilter(a) {
   if (filterReady) { const st = agentStatus(a); if (st === 'active' || st === 'resuming' || st === 'settling') return false; }
   if (!filterText) return true;
@@ -2307,6 +2327,7 @@ function statusVerb(a, st) {
   if (st === 'waiting') return 'Done';
   if (st === 'idle') return 'Idle';
   for (const t of a.tools.values()) {
+    if (t.perm === 'ask') return 'Answer needed in chat';
     if (t.perm) return 'Needs approval';
     if (!t.done) { const s = t.status || 'Working'; return /[.\u2026!?]$/.test(s) ? s : s + '\u2026'; }
   }
@@ -2473,7 +2494,7 @@ function render() {
       const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
       const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
       const mf = a.stats?.modelFamily || '';
-      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
+      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}${needsAnswer(a) ? ' needs-answer' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
         <span class="agent-name" onmouseenter="this.title=this.scrollWidth>this.clientWidth?this.textContent:''" onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
@@ -2601,6 +2622,10 @@ function render() {
   if (currentUsage && (currentUsage.hourly != null || currentUsage.weekly != null)) {
     if (currentUsage.hourly != null) barHtml += usageRowHTML('Current session', currentUsage.hourly, currentUsage.hourlyReset, false);
     if (currentUsage.weekly != null) barHtml += usageRowHTML('Current week', currentUsage.weekly, currentUsage.weeklyReset, true);
+    // Per-model weekly caps (Fable, Opus, …) sit under the overall week row.
+    for (const m of currentUsage.modelWeekly || []) {
+      barHtml += usageRowHTML(modelLabel(m.model) + ' week', m.pct, m.reset || currentUsage.weeklyReset, true);
+    }
 
     // Info row: agents + pace + age
     let infoHtml = `<span>${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? ` · ${activeCount} active` : ''}</span>`;
@@ -3506,7 +3531,7 @@ function handleAgentMsg(msg) {
     case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
-    case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = true; } scheduleRender(); } break; }
+    case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
     case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }

@@ -154,6 +154,7 @@ async function doGitPull() {
     send({ type: 'gitUpdateProgress', text: 'Restarting…' });
     // before-quit already hands running agents to detached processes that the
     // next launch reattaches, so a relaunch is a supported path, not a kill.
+    forceQuit = true; // this restart was explicitly asked for — skip the close prompt
     setTimeout(() => { app.relaunch(); app.quit(); }, 400);
   } catch (e) {
     fail(e.message);
@@ -1398,7 +1399,7 @@ function parseLine(id, line) {
         // These tools always block on a human choice — flag now, don't wait out the timer.
         // They also block under bypassPermissions, which startPermTimer skips.
         if (blocks.some(b => b.type === 'tool_use' && (b.name === 'AskUserQuestion' || b.name === 'ExitPlanMode'))) {
-          clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id }); notifyPermission(id, a);
+          clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id, ask: true }); notifyPermission(id, a);
         } else if (nonExempt) startPermTimer(id);
       }
     } else if (r.type === 'user') {
@@ -2124,6 +2125,10 @@ async function exportTranscript(id) {
 
 // ── Usage polling (via API rate-limit headers) ────────
 let usageInFlight = false;
+let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
+// Set before any programmatic quit so the close confirmation doesn't block it.
+let forceQuit = false;
+const { parseModelWeekly } = require('./usage-core');
 let lastUsage = null;
 
 function getApiKey() {
@@ -2238,6 +2243,15 @@ function fetchUsage() {
       const r7 = headers['anthropic-ratelimit-unified-7d-reset'];
       if (r5) usage.hourlyReset = parseInt(r5, 10) * 1000;
       if (r7) usage.weeklyReset = parseInt(r7, 10) * 1000;
+      // Per-model weekly caps (Fable, Opus, …) — discovered by header shape, so a
+      // new model tier shows up without a code change. See usage-core.js.
+      const modelWeekly = parseModelWeekly(headers);
+      if (modelWeekly.length) usage.modelWeekly = modelWeekly;
+      if (!usageHeadersLogged) {
+        usageHeadersLogged = true;
+        const rl = Object.keys(headers).filter(k => k.toLowerCase().startsWith('anthropic-ratelimit-'));
+        console.log('[Overlord] Rate-limit headers:', JSON.stringify(rl));
+      }
       if (Object.keys(usage).length > 0) {
         usage.fetchedAt = Date.now();
         lastUsage = usage;
@@ -3211,7 +3225,7 @@ function handleIpc(msg) {
     }
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'fullRestart': app.relaunch(); app.exit(0); break;
-    case 'installUpdate': autoUpdater.quitAndInstall(); break;
+    case 'installUpdate': forceQuit = true; autoUpdater.quitAndInstall(); break;
     case 'checkGitUpdate': checkGitUpdate(); break;
     case 'gitPull': doGitPull(); break;
     case 'approvePr': {
@@ -4320,6 +4334,27 @@ app.whenReady().then(() => {
   });
   mainWindow.on('resize', saveWindowBounds);
   mainWindow.on('move', saveWindowBounds);
+  // Confirm before closing. showMessageBoxSync blocks the close event long enough
+  // to answer it — the async variant would let the window close out from under us.
+  mainWindow.on('close', (e) => {
+    if (forceQuit) return; // relaunch / programmatic quit — already intended
+    const live = [...agents.values()].filter(a => !a.archived).length;
+    const detail = live
+      ? `${live} agent${live === 1 ? '' : 's'} open. Active ones keep running in the background and reattach next launch.`
+      : 'No agents are open.';
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['Close Overlord', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1, // Esc / window-manager dismiss = don't close
+      title: 'Close Overlord',
+      message: 'Close Overlord?',
+      detail,
+      noLink: true,
+    });
+    if (choice !== 0) { e.preventDefault(); return; }
+    forceQuit = true; // don't ask again on the quit that follows
+  });
   mainWindow.on('closed', () => {
     saveState();
     mainWindow = null;

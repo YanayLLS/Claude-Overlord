@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "1.29.0",
+  "version": "1.30.0",
   "description": "Overlord — Claude Agent Manager",
   "main": "main.js",
   "scripts": {
@@ -67,6 +67,7 @@
       "prompt-copy.js",
       "resume-core.js",
       "state-core.js",
+      "usage-core.js",
       "xterm-bundle.js",
       "xterm.css",
       "qr.js",
