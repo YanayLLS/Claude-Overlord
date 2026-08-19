@@ -9,6 +9,7 @@ const { spawn, exec, execSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const pty = require('node-pty');
 const wt = require('./worktree');
+const pc = require('./peer-core');
 
 
 // ── Constants ──────────────────────────────────────────
@@ -343,6 +344,7 @@ function sendFullState() {
   }
   if (lastUsage) send({ type: 'usage', usage: lastUsage });
   send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+  if (remoteServer) sendPeersState(); // only meaningful once the server picked its port
   fetchUsage();
 }
 
@@ -525,8 +527,10 @@ function getLanIp() {
 function wsHandshake(req, socket) {
   const key = req.headers['sec-websocket-key'];
   if (!key) { socket.destroy(); return null; }
+  // RFC 6455 magic GUID — clients validate Sec-WebSocket-Accept against this
+  // exact constant; anything else fails the browser handshake.
   const accept = crypto.createHash('sha1')
-    .update(key + '258EAFA5-E914-47DA-95CA-5AB5353BE70E')
+    .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
     .digest('base64');
   socket.write(
     'HTTP/1.1 101 Switching Protocols\r\n' +
@@ -632,7 +636,7 @@ function extractSpinnerText(id, data) {
           if (a) {
             if (a.spinnerText) { a.spinnerText = ''; send({ type: 'spinnerText', id, text: '' }); }
             // ponytail: pty completion line = ground-truth turn-done; backstop when turn_duration is missing (else stuck 'active' forever)
-            if (!a.isWaiting) { a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers); send({ type: 'status', id, status: 'waiting' }); }
+            if (!a.isWaiting) { a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers); send({ type: 'status', id, status: 'waiting' }); flushPeerMsgs(id); }
           }
           return;
         }
@@ -806,7 +810,7 @@ function globalSearch(query) {
 }
 
 // ── State persistence ─────────────────────────────────
-let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100 };
+let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100, peersEnabled: false, peerName: null, peerCode: null, peers: [] };
 
 function saveState() {
   const agentEntries = [];
@@ -1399,6 +1403,7 @@ function parseLine(id, line) {
         send({ type: 'termData', id, data: '\x1b[32m[Previous session turn completed. Click to reconnect.]\x1b[0m\r\n' });
       }
       send({ type: 'status', id, status: 'waiting' });
+      flushPeerMsgs(id);
       if (a.stats.turns === 1 || a.stats.turns % TITLE_REGEN_TURNS === 0) generateSummaryTitle(id);
     } else if (r.type === 'progress') {
       const ptid = r.parentToolUseID, d = r.data;
@@ -2427,8 +2432,12 @@ function handleTermInput(id, data) {
     markSessionSwitch(id, buf);
     const renameM = buf.match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameM) { const a = agents.get(id); if (a) { a.title = renameM[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
-    // Enter pressed — check buffer for mentions
-    const mentions = findMentions(buf);
+    // Enter pressed — remote mentions (@Agent@peer) first: send over the peer
+    // socket, then strip them so the local scanner doesn't also fire on the
+    // '@Agent' prefix. Local text still submits to this agent as usual.
+    const remote = pc.parseRemoteMentions(buf, connectedPeerNames());
+    if (remote.length > 0) sendRemoteMentionMessages(id, buf, remote);
+    const mentions = findMentions(remote.length > 0 ? pc.stripRemoteMentions(buf, connectedPeerNames()) : buf);
     if (mentions.length > 0) {
       const ctx = buildMentionContext(mentions);
       t.write('\x15'); // Ctrl+U to clear readline
@@ -3040,6 +3049,51 @@ function handleIpc(msg) {
     }
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;
     case 'saveSettings': Object.assign(settings, msg.settings); saveState(); break;
+    case 'peersEnable': {
+      settings.peersEnabled = !!msg.enabled;
+      saveState();
+      if (settings.peersEnabled) startPeerClients(); else stopAllPeers();
+      sendPeersState();
+      break;
+    }
+    case 'setPeerName': {
+      const n = pc.sanitizePeerName(msg.name);
+      if (n) { settings.peerName = n; saveState(); }
+      sendPeersState();
+      break;
+    }
+    case 'addPeer': {
+      const r = pc.normalizePeer({ host: msg.host, port: msg.port, code: msg.code });
+      if (!r.ok) { send({ type: 'toast', text: '✕ ' + r.error }); break; }
+      settings.peers = Array.isArray(settings.peers) ? settings.peers : [];
+      const dup = settings.peers.find(p => p.host === r.peer.host && p.port === r.peer.port);
+      if (dup) dup.code = r.peer.code; else settings.peers.push(r.peer);
+      saveState();
+      if (settings.peersEnabled) dialPeer(r.peer);
+      sendPeersState();
+      break;
+    }
+    case 'removePeer': {
+      settings.peers = (settings.peers || []).filter(p => !(p.host === msg.host && p.port === msg.port));
+      saveState();
+      for (const c of [...peerConns]) if (c.cfg && c.cfg.host === msg.host && c.cfg.port === msg.port) closePeerConn(c);
+      const d = peerDialers.get(msg.host + ':' + msg.port);
+      if (d) { clearTimeout(d.timer); peerDialers.delete(msg.host + ':' + msg.port); }
+      sendPeersState();
+      break;
+    }
+    case 'peerSend': {
+      const conn = findPeerConn(msg.peerName);
+      if (!conn) { send({ type: 'toast', text: `✕ Not connected to ${msg.peerName}` }); break; }
+      let user = ''; try { user = os.userInfo().username; } catch {}
+      const a = agents.get(msg.fromId);
+      const env = pc.buildEnvelope({ toAgent: msg.toAgent, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text: msg.text, hop: 0 });
+      const v = pc.validateEnvelope(env);
+      if (!v.ok) { send({ type: 'toast', text: '✕ ' + v.error }); break; }
+      sendPeerEnvelope(conn, env, conn.name);
+      break;
+    }
+    case 'getPeersState': sendPeersState(); break;
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'fullRestart': app.relaunch(); app.exit(0); break;
     case 'installUpdate': autoUpdater.quitAndInstall(); break;
@@ -3396,6 +3450,10 @@ let remoteServer = null;
 let remoteUrl = null;
 
 function startRemoteServer() {
+  // Pairing code gates both control channels (/ws for the phone, /peer for other
+  // Overlords). Generated once and persisted. This runs after restoreAgents, so
+  // saveState() here writes the full agent list, not an empty one.
+  if (!settings.peerCode) { settings.peerCode = pc.generatePairingCode(); saveState(); }
   let mobileHtml;
   try { mobileHtml = fs.readFileSync(path.join(__dirname, 'mobile.html'), 'utf-8'); }
   catch { mobileHtml = '<html><body>mobile.html not found</body></html>'; }
@@ -3415,7 +3473,11 @@ function startRemoteServer() {
   });
 
   server.on('upgrade', (req, socket) => {
-    if (req.url !== '/ws') { socket.destroy(); return; }
+    let u;
+    try { u = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
+    if (u.pathname === '/peer') { handlePeerUpgrade(req, socket, u); return; }
+    if (u.pathname !== '/ws') { socket.destroy(); return; }
+    if (!pc.checkCode(settings.peerCode, u.searchParams.get('code'))) { socket.destroy(); return; }
     if (remoteWs && !remoteWs.destroyed) {
       try { remoteWs.end(); } catch {}
       remoteWs = null;
@@ -3475,13 +3537,290 @@ function startRemoteServer() {
     server.listen(port, '0.0.0.0', () => {
       const ip = getLanIp();
       remoteUrl = `http://${ip}:${port}`;
+      remotePort = port;
       remoteServer = server;
-      const svg = generateQRSvg(remoteUrl, 4);
-      send({ type: 'remoteReady', url: remoteUrl, qrSvg: svg });
+      // QR embeds the pairing code — a scan connects without typing it
+      const qrUrl = `${remoteUrl}/?code=${settings.peerCode}`;
+      const svg = generateQRSvg(qrUrl, 4);
+      send({ type: 'remoteReady', url: qrUrl, qrSvg: svg });
       console.log(`[Overlord] Remote access: ${remoteUrl}`);
+      startPeerClients();
+      sendPeersState();
     });
   };
   tryListen(REMOTE_PORT);
+}
+
+// ── LAN peers: Overlord ↔ Overlord messaging ──────────
+// Transport reuses the remote server (path /peer, same pairing code). Outbound
+// dials are hand-rolled HTTP upgrades (stdlib only, like everything else here);
+// client→server frames are masked per RFC 6455 (peer-core.js), server→client
+// frames reuse the unmasked wsEncodeFrame above. Incoming messages are pasted
+// into the target agent's input line WITHOUT submitting — a human presses
+// Enter, so two agents can never ping-pong unattended.
+let remotePort = REMOTE_PORT;
+const peerConns = new Set(); // { ws, isClient, cfg, name, agents, helloDone, lastRecv, pingTimer }
+const peerDialers = new Map(); // 'host:port' -> { timer, backoffMs }
+const pendingPeerMsgs = new Map(); // agentId -> [envelope] queued while the agent works
+const pendingPeerAcks = new Map(); // envelope id -> { peerName, toAgent, timer }
+const seenPeerMsgIds = new Set(); // dedupe: both sides may hold a link each
+const seenPeerMsgOrder = [];
+const PEER_BACKOFF_MIN = 5000, PEER_BACKOFF_MAX = 60000;
+const PEER_PING_MS = 25000, PEER_IDLE_MS = 90000, PEER_ACK_TIMEOUT_MS = 10000;
+
+function myPeerName() { return pc.sanitizePeerName(settings.peerName) || pc.sanitizePeerName(os.hostname()) || 'overlord'; }
+function connectedPeerNames() { const out = []; for (const c of peerConns) if (c.helloDone && c.name) out.push(c.name); return out; }
+function findPeerConn(name) { const n = String(name || '').toLowerCase(); for (const c of peerConns) if (c.helloDone && c.name && c.name.toLowerCase() === n) return c; return null; }
+function wsSendPeer(conn, obj) { if (!conn || !conn.ws || conn.ws.destroyed) return; const s = JSON.stringify(obj); try { conn.ws.write(conn.isClient ? pc.wsEncodeFrameMasked(s) : wsEncodeFrame(s)); } catch {} }
+
+function peerRoster() {
+  const out = [];
+  for (const [, a] of agents) { if (a.agentName && !a.archived) out.push({ agentName: a.agentName, title: a.title || '', status: a.isWaiting ? 'idle' : 'active' }); }
+  return out;
+}
+
+function sanitizeRoster(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const a of list.slice(0, 100)) {
+    if (!a || typeof a.agentName !== 'string' || !a.agentName) continue;
+    out.push({ agentName: a.agentName.slice(0, 64), title: String(a.title || '').slice(0, 120), status: a.status === 'idle' ? 'idle' : 'active' });
+  }
+  return out;
+}
+
+function sendPeersState() {
+  const cfgPeers = Array.isArray(settings.peers) ? settings.peers : [];
+  const rows = cfgPeers.map(p => {
+    const conn = [...peerConns].find(c => c.helloDone && c.cfg && c.cfg.host === p.host && c.cfg.port === p.port) || (p.name ? findPeerConn(p.name) : null);
+    return { host: p.host, port: p.port, name: (conn && conn.name) || p.name || `${p.host}:${p.port}`, connected: !!conn, agents: conn ? conn.agents : [] };
+  });
+  for (const c of peerConns) { // inbound-only peers (they added us, we never added them)
+    if (!c.helloDone || c.cfg) continue;
+    if (rows.some(r => r.name.toLowerCase() === (c.name || '').toLowerCase())) continue;
+    rows.push({ host: '', port: 0, name: c.name, connected: true, inbound: true, agents: c.agents });
+  }
+  send({ type: 'peersState', enabled: !!settings.peersEnabled, name: myPeerName(), code: settings.peerCode || '', lanIp: getLanIp(), port: remotePort, peers: rows });
+}
+
+// Roster push: poll-and-diff instead of hooking every agent mutation site.
+let _lastRosterJson = '';
+setInterval(() => {
+  if (peerConns.size === 0) { _lastRosterJson = ''; return; }
+  const json = JSON.stringify(peerRoster());
+  if (json === _lastRosterJson) return;
+  _lastRosterJson = json;
+  for (const c of peerConns) if (c.helloDone) wsSendPeer(c, { type: 'peerAgents', agents: JSON.parse(json) });
+}, 5000);
+
+function closePeerConn(conn) {
+  if (!peerConns.has(conn)) return; // 'close' event after an explicit close
+  peerConns.delete(conn);
+  if (conn.pingTimer) clearInterval(conn.pingTimer);
+  try { conn.ws.destroy(); } catch {}
+  if (conn.helloDone) flog(`peer disconnected: ${conn.name}`);
+  sendPeersState();
+  if (conn.isClient && conn.cfg) schedulePeerRedial(conn.cfg);
+}
+
+function attachPeerSocket(ws, { isClient, cfg }) {
+  const conn = { ws, isClient, cfg: cfg || null, name: null, agents: [], helloDone: false, lastRecv: Date.now(), pingTimer: null };
+  peerConns.add(conn);
+  let buf = Buffer.alloc(0);
+  ws.on('data', (chunk) => {
+    conn.lastRecv = Date.now();
+    buf = Buffer.concat([buf, chunk]);
+    while (buf.length >= 2) {
+      const frame = wsDecodeFrame(buf);
+      if (!frame) break;
+      buf = buf.slice(frame.totalLen);
+      if (frame.opcode === 0x8) { closePeerConn(conn); return; }
+      if (frame.opcode === 0x9) { // ping → pong (masked when we're the client side)
+        try { ws.write(isClient ? pc.wsEncodeFrameMasked('', 0xA) : Buffer.from([0x8a, 0])); } catch {}
+        continue;
+      }
+      if (frame.opcode === 0xA) continue; // pong — lastRecv already updated
+      if (frame.opcode === 0x1) {
+        try { handlePeerMsg(conn, JSON.parse(frame.data)); }
+        catch (e) { flog('bad peer message:', e.message); }
+      }
+    }
+  });
+  ws.on('close', () => closePeerConn(conn));
+  ws.on('error', () => closePeerConn(conn));
+  conn.pingTimer = setInterval(() => {
+    if (ws.destroyed || Date.now() - conn.lastRecv > PEER_IDLE_MS) { closePeerConn(conn); return; }
+    if (isClient) { try { ws.write(pc.wsEncodePingMasked()); } catch {} }
+  }, PEER_PING_MS);
+  return conn;
+}
+
+function handlePeerUpgrade(req, socket, u) {
+  if (!settings.peersEnabled) { socket.destroy(); return; }
+  if (!pc.checkCode(settings.peerCode, u.searchParams.get('code'))) { socket.destroy(); return; }
+  const ws = wsHandshake(req, socket);
+  if (!ws) return;
+  attachPeerSocket(ws, { isClient: false });
+}
+
+function handlePeerMsg(conn, msg) {
+  if (!msg || typeof msg !== 'object') return;
+  if (msg.type === 'peerHello') {
+    const name = pc.sanitizePeerName(msg.name);
+    if (!name || name.toLowerCase() === myPeerName().toLowerCase()) { closePeerConn(conn); return; }
+    // a same-direction duplicate for this name replaces the old link
+    for (const c of [...peerConns]) { if (c !== conn && c.name && c.name.toLowerCase() === name.toLowerCase() && c.isClient === conn.isClient) closePeerConn(c); }
+    conn.name = name;
+    conn.agents = sanitizeRoster(msg.agents);
+    conn.helloDone = true;
+    if (!conn.isClient) wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster() });
+    flog(`peer connected: ${name}${conn.isClient ? ' (outbound)' : ' (inbound)'}`);
+    sendPeersState();
+    return;
+  }
+  if (!conn.helloDone) { closePeerConn(conn); return; } // hello must come first
+  if (msg.type === 'peerAgents') { conn.agents = sanitizeRoster(msg.agents); sendPeersState(); return; }
+  if (msg.type === 'peerMessage') {
+    const v = pc.validateEnvelope(msg);
+    if (!v.ok) { wsSendPeer(conn, { type: 'peerAck', id: (msg && typeof msg.id === 'string') ? msg.id.slice(0, 64) : '', status: 'rejected', error: v.error }); return; }
+    if (seenPeerMsgIds.has(msg.id)) return; // duplicate over a second link
+    seenPeerMsgIds.add(msg.id); seenPeerMsgOrder.push(msg.id);
+    if (seenPeerMsgOrder.length > 1000) seenPeerMsgIds.delete(seenPeerMsgOrder.shift());
+    msg.fromPeer = conn.name; // identity comes from the authenticated link, never the payload
+    let target = null;
+    for (const [id, a] of agents) { if (a.agentName && !a.archived && a.agentName.toLowerCase() === msg.toAgent.toLowerCase()) { target = id; break; } }
+    if (target === null) { wsSendPeer(conn, { type: 'peerAck', id: msg.id, status: 'no-such-agent' }); return; }
+    wsSendPeer(conn, { type: 'peerAck', id: msg.id, status: deliverPeerMessage(target, msg) });
+    return;
+  }
+  if (msg.type === 'peerAck') {
+    const p = pendingPeerAcks.get(msg.id);
+    if (!p) return;
+    clearTimeout(p.timer); pendingPeerAcks.delete(msg.id);
+    const who = `@${p.toAgent} on ${p.peerName}`;
+    if (msg.status === 'delivered') send({ type: 'toast', text: `✉ Delivered to ${who}` });
+    else if (msg.status === 'queued') send({ type: 'toast', text: `✉ Queued for ${who} — agent is busy, delivers when idle` });
+    else if (msg.status === 'no-such-agent') send({ type: 'toast', text: `✕ No agent named ${who}` });
+    else send({ type: 'toast', text: `✕ ${who}: ${msg.error || msg.status || 'rejected'}` });
+  }
+}
+
+function deliverPeerMessage(agentId, env) {
+  const a = agents.get(agentId);
+  if (!a) return 'no-such-agent';
+  notifyPeerMessage(agentId, env);
+  send({ type: 'peerMsg', id: agentId, fromAgent: env.fromAgent, fromPeer: env.fromPeer });
+  // The Claude Code input box accepts a paste at any time (mid-turn it just sits
+  // there unsubmitted), so deliver whenever a live pty exists. Queue only for
+  // agents with no terminal (dead/restored) — flushed by the turn-end hooks
+  // once the terminal is back.
+  if (!terminals.has(agentId)) {
+    const q = pendingPeerMsgs.get(agentId) || [];
+    q.push(env); if (q.length > 50) q.shift();
+    pendingPeerMsgs.set(agentId, q);
+    return 'queued';
+  }
+  injectPeerMessage(agentId, env);
+  return 'delivered';
+}
+
+// Bracketed paste: the header+text land in the input box without submitting —
+// the human reads, optionally edits, and presses Enter themselves.
+function injectPeerMessage(agentId, env) {
+  handleTermInput(agentId, '\x1b[200~' + pc.buildPeerHeader(env) + '\x1b[201~');
+}
+
+function flushPeerMsgs(id) {
+  const q = pendingPeerMsgs.get(id);
+  if (!q || q.length === 0) return;
+  if (!terminals.has(id)) return; // no pty yet — flush fires again on the next turn end
+  pendingPeerMsgs.delete(id);
+  for (const env of q) injectPeerMessage(id, env);
+}
+
+function notifyPeerMessage(id, env) {
+  if (!settings.notifications) return;
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.flashFrame(true);
+  if (!Notification.isSupported()) return;
+  const a = agents.get(id);
+  const from = (env.fromAgent ? '@' + env.fromAgent + ' ' : '') + 'on ' + env.fromPeer;
+  const n = new Notification({ title: `✉ Message from ${from}`, body: `${(a && (a.agentName || a.title)) || 'Agent ' + id}: ${env.text.slice(0, 120)}`, silent: !settings.notificationSound });
+  n.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); send({ type: 'focusFromNotification', id }); } });
+  n.show();
+}
+
+function sendRemoteMentionMessages(id, text, remote) {
+  const a = agents.get(id);
+  let user = ''; try { user = os.userInfo().username; } catch {}
+  for (const r of remote) {
+    const conn = findPeerConn(r.peerName);
+    if (!conn) { send({ type: 'toast', text: `✕ Not connected to ${r.peerName}` }); continue; }
+    const env = pc.buildEnvelope({ toAgent: r.agentName, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text, hop: 0 });
+    sendPeerEnvelope(conn, env, r.peerName);
+  }
+}
+
+function sendPeerEnvelope(conn, env, peerName) {
+  wsSendPeer(conn, env);
+  const timer = setTimeout(() => {
+    pendingPeerAcks.delete(env.id);
+    send({ type: 'toast', text: `✕ No response from ${peerName} — message may not have arrived` });
+  }, PEER_ACK_TIMEOUT_MS);
+  pendingPeerAcks.set(env.id, { peerName, toAgent: env.toAgent, timer });
+}
+
+function peerKey(cfg) { return cfg.host + ':' + cfg.port; }
+
+function schedulePeerRedial(cfg) {
+  if (!settings.peersEnabled) return;
+  if (!(settings.peers || []).some(p => p.host === cfg.host && p.port === cfg.port)) return; // peer was removed
+  const key = peerKey(cfg);
+  let d = peerDialers.get(key);
+  if (!d) { d = { timer: null, backoffMs: PEER_BACKOFF_MIN }; peerDialers.set(key, d); }
+  if (d.timer) return;
+  d.timer = setTimeout(() => { d.timer = null; dialPeer(cfg); }, d.backoffMs);
+  d.backoffMs = Math.min(PEER_BACKOFF_MAX, d.backoffMs * 2);
+}
+
+function dialPeer(cfg) {
+  if (!settings.peersEnabled) return;
+  const key = peerKey(cfg);
+  for (const c of peerConns) if (c.isClient && c.cfg && peerKey(c.cfg) === key) return; // already connected outbound
+  let d = peerDialers.get(key);
+  if (!d) { d = { timer: null, backoffMs: PEER_BACKOFF_MIN }; peerDialers.set(key, d); }
+  const wsKey = pc.makeWsKey();
+  const req = http.request({
+    host: cfg.host, port: cfg.port,
+    path: '/peer?code=' + encodeURIComponent(cfg.code),
+    headers: { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': wsKey, 'Sec-WebSocket-Version': '13' },
+    timeout: 8000,
+  });
+  req.on('upgrade', (res, socket) => {
+    if (!pc.checkWsAccept(wsKey, res.headers['sec-websocket-accept'])) { socket.destroy(); schedulePeerRedial(cfg); return; }
+    d.backoffMs = PEER_BACKOFF_MIN;
+    const conn = attachPeerSocket(socket, { isClient: true, cfg });
+    wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster() });
+  });
+  req.on('response', (res) => { flog(`peer dial ${key}: HTTP ${res.statusCode} instead of upgrade (wrong code, peers disabled, or old Overlord on the other side)`); req.destroy(); schedulePeerRedial(cfg); });
+  req.on('timeout', () => req.destroy(new Error('peer dial timeout')));
+  req.on('error', () => schedulePeerRedial(cfg));
+  req.end();
+}
+
+function startPeerClients() {
+  if (!settings.peersEnabled) return;
+  for (const p of (settings.peers || [])) dialPeer(p);
+}
+
+function stopAllPeers() {
+  for (const [, d] of peerDialers) clearTimeout(d.timer);
+  peerDialers.clear();
+  for (const c of [...peerConns]) {
+    peerConns.delete(c); // delete first so closePeerConn's redial path never runs
+    if (c.pingTimer) clearInterval(c.pingTimer);
+    try { c.ws.destroy(); } catch {}
+  }
+  sendPeersState();
 }
 
 // ── Window ─────────────────────────────────────────────

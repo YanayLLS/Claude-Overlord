@@ -1047,6 +1047,7 @@ button:focus-visible { outline-offset:0; }
     <div id="headerBadges"></div>
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
+    <button class="hdr-btn" id="peer-btn" onclick="openPeersSettings()" title="LAN peers" style="display:none">&#x21C4;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
@@ -1183,6 +1184,31 @@ button:focus-visible { outline-offset:0; }
         <span>Idle poll interval (seconds):</span>
         <input type="number" id="inp-actions-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onActionsSettingsChange()" />
       </label>
+      </div>
+      </details>
+
+      <details class="settings-sec">
+      <summary>Peers<span class="sec-chip" id="chip-peers"></span></summary>
+      <div class="sec-body">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-peers" onchange="onPeersEnableChange(this.checked)" />
+        <span>Enable peer connections (LAN)</span>
+      </label>
+      <div class="settings-hint">Pairs this Overlord with a teammate's on the same network. Their agents become addressable as <code>@Agent@peer</code> in any terminal; incoming messages land in the agent's input line for you to review and send.</div>
+      <div class="settings-hint" id="peers-self" style="user-select:text;"></div>
+      <label class="settings-label">
+        <span>Your peer name:</span>
+        <input type="text" id="inp-peer-name" placeholder="hostname" style="width:160px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onPeerNameChange(this.value)" />
+      </label>
+      <label class="settings-label" style="display:block;">
+        <span>Add peer:</span>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="text" id="inp-peer-host" placeholder="host or ip:port" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <input type="text" id="inp-peer-code" placeholder="code" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onkeydown="if(event.key==='Enter'){event.preventDefault();addPeerFromInputs();}" />
+          <button onclick="addPeerFromInputs()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Connect</button>
+        </div>
+      </label>
+      <div id="peer-list" style="margin-top:6px;"></div>
       </div>
       </details>
     </div>
@@ -1919,7 +1945,7 @@ async function restartAgent(id) {
   api.send({ type: 'restartAgent', id });
 }
 function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
-function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); }
+function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); const a = agents.get(id); if (a && a.peerUnread) { a.peerUnread = 0; scheduleRender(); } if (changed) render(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
   _renaming = true;
@@ -1959,6 +1985,7 @@ function showAgentMenu(e, id) {
     { label: 'Restart', action: () => restartAgent(id) },
     { label: 'Duplicate', action: () => duplicateAgent(id) },
     { label: 'Export transcript', action: () => exportAgent(id) },
+    ...((peersState.peers || []).some(p => p.connected) ? [{ label: 'Message a peer agent…', action: () => openPeerMsgModal(id) }] : []),
     { sep: true },
     { label: 'Archive', action: () => archiveAgent(id) },
     { label: 'Close', action: () => closeAgent(id), cls: 'ctx-danger' },
@@ -2394,6 +2421,7 @@ function render() {
         <div class="agent-right" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${agentCtxWin / 1000}K (${ctxPct}%)">
           <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}" onclick="event.stopPropagation();showModelMenu(event,${id})" style="cursor:pointer" title="Change model">${mf}</span>` : ''}</span>
           <span class="agent-tail">
+            ${a.peerUnread ? `<span title="Unread peer messages — click the agent to read" style="background:var(--purple);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;">&#x2709; ${a.peerUnread}</span>` : ''}
             <span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>
             <span class="agent-actions">
               ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
@@ -3518,6 +3546,13 @@ function handleAgentMsg(msg) {
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
+    case 'peersState': { peersState = msg; renderPeersSec(); break; }
+    case 'peerMsg': {
+      const a = agents.get(msg.id);
+      if (a && msg.id !== selectedId) { a.peerUnread = (a.peerUnread || 0) + 1; scheduleRender(); }
+      showToast(`✉ Message from ${msg.fromAgent ? '@' + msg.fromAgent + ' ' : ''}on ${msg.fromPeer}`);
+      break;
+    }
     case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
     case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
     case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); } break; }
@@ -4222,6 +4257,90 @@ function onNotifChange(val) {
 function onSoundChange(val) {
   notificationSoundEnabled = val;
   api.send({ type: 'saveSettings', settings: { notificationSound: val } });
+}
+
+// ── LAN peers ──────────────────────────────────────────
+let peersState = { enabled: false, name: '', code: '', lanIp: '', port: 7778, peers: [] };
+function fmtPairCode(c) { return c && c.length === 6 ? c.slice(0, 3) + '-' + c.slice(3) : (c || ''); }
+function onPeersEnableChange(val) { api.send({ type: 'peersEnable', enabled: val }); }
+function onPeerNameChange(val) { api.send({ type: 'setPeerName', name: val }); }
+function addPeerFromInputs() {
+  const host = document.getElementById('inp-peer-host').value.trim();
+  const code = document.getElementById('inp-peer-code').value.trim();
+  if (!host || !code) { showToast('Enter the peer address and pairing code'); return; }
+  api.send({ type: 'addPeer', host, code });
+  document.getElementById('inp-peer-host').value = '';
+  document.getElementById('inp-peer-code').value = '';
+}
+function removePeerRow(host, port) { api.send({ type: 'removePeer', host, port }); }
+function renderPeersSec() {
+  const chk = document.getElementById('chk-peers'); if (chk) chk.checked = !!peersState.enabled;
+  const nameInp = document.getElementById('inp-peer-name');
+  if (nameInp && document.activeElement !== nameInp) nameInp.value = peersState.name || '';
+  const self = document.getElementById('peers-self');
+  if (self) self.innerHTML = peersState.enabled
+    ? `Share with a teammate: <b>${esc(peersState.name)}</b> &middot; <b>${esc(peersState.lanIp)}:${peersState.port}</b> &middot; code <b>${esc(fmtPairCode(peersState.code))}</b>`
+    : '';
+  const list = document.getElementById('peer-list');
+  if (list) {
+    list.innerHTML = (peersState.peers || []).map(p => {
+      const pAgents = (p.agents || []).map(a => '@' + esc(a.agentName)).join(', ');
+      return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px;">
+        <span style="color:${p.connected ? 'var(--green)' : 'var(--dim)'}">&#x25CF;</span>
+        <span style="min-width:110px"><b>${esc(p.name)}</b>${p.inbound ? ' <span style="opacity:.6">(inbound)</span>' : ''}</span>
+        <span style="opacity:.7">${p.host ? esc(p.host + ':' + p.port) : ''}</span>
+        <span style="flex:1;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.connected ? (pAgents || 'no named agents') : 'offline'}</span>
+        ${p.host ? `<button onclick="removePeerRow('${escAttr(p.host)}',${p.port})" title="Remove peer" style="font-family:inherit;font-size:12px;padding:2px 8px;color:var(--red);background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;">&times;</button>` : ''}
+      </div>`;
+    }).join('') || (peersState.enabled ? '<div class="settings-hint">No peers yet — add your teammate\'s address and pairing code.</div>' : '');
+  }
+  const connected = (peersState.peers || []).filter(p => p.connected).length;
+  const chip = document.getElementById('chip-peers');
+  if (chip) chip.textContent = connected ? `● ${connected} connected` : '';
+  const btn = document.getElementById('peer-btn');
+  if (btn) {
+    btn.style.display = peersState.enabled ? '' : 'none';
+    btn.innerHTML = '&#x21C4;' + (connected ? ' ' + connected : '');
+    btn.title = connected ? `${connected} peer Overlord${connected === 1 ? '' : 's'} connected` : 'LAN peers (none connected)';
+  }
+}
+function openPeersSettings() {
+  const el = document.getElementById('settings-overlay');
+  if (el.style.display !== 'flex') toggleSettings();
+  document.querySelectorAll('.settings-sec').forEach(d => { if (d.querySelector('#chk-peers')) d.open = true; });
+}
+function openPeerMsgModal(id) {
+  const opts = [];
+  for (const p of peersState.peers || []) {
+    if (!p.connected) continue;
+    for (const ag of (p.agents || [])) opts.push({ peer: p.name, agent: ag.agentName, label: `@${ag.agentName}@${p.name}${ag.title ? ' — ' + ag.title : ''}` });
+  }
+  if (!opts.length) { showToast('No named agents on connected peers'); return; }
+  const old = document.getElementById('peer-msg-overlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'peer-msg-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;';
+  const btnCss = 'font-family:inherit;font-size:12px;padding:4px 12px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;';
+  ov.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border-hi);border-radius:8px;padding:16px;min-width:380px;max-width:520px;">
+    <h3 style="margin:0 0 10px;font-size:14px;">Message a peer agent</h3>
+    <select id="peer-msg-target" style="width:100%;font-family:inherit;font-size:12px;padding:6px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:4px;">${opts.map((o, i) => `<option value="${i}">${esc(o.label)}</option>`).join('')}</select>
+    <textarea id="peer-msg-text" rows="4" placeholder="Message…" style="width:100%;margin-top:8px;font-family:inherit;font-size:12px;padding:6px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:4px;resize:vertical;box-sizing:border-box;"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">
+      <button onclick="document.getElementById('peer-msg-overlay').remove()" style="${btnCss}">Cancel</button>
+      <button onclick="sendPeerMsgModal(${id})" style="${btnCss}border-color:var(--accent);color:var(--accent);">Send</button>
+    </div></div>`;
+  ov.addEventListener('mousedown', (e) => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  ov._opts = opts;
+  document.getElementById('peer-msg-text').focus();
+}
+function sendPeerMsgModal(fromId) {
+  const ov = document.getElementById('peer-msg-overlay'); if (!ov) return;
+  const o = ov._opts[parseInt(document.getElementById('peer-msg-target').value, 10)];
+  const text = document.getElementById('peer-msg-text').value.trim();
+  if (!o || !text) return;
+  api.send({ type: 'peerSend', peerName: o.peer, toAgent: o.agent, fromId, text });
+  ov.remove();
 }
 
 // ── PR notifications ───────────────────────────────────
