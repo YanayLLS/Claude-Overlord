@@ -34,6 +34,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   -webkit-app-region:drag;
 }
 #header h1 span { color:var(--accent); font-weight:600; }
+#header h1 .app-ver { color:var(--dim); font-weight:400; font-size:11px; }
 #headerBadges { display:flex; gap:4px; align-items:center; }
 #headerBadges:empty { display:none; }
 /* names are no longer truncated, so scroll rather than clip when the row runs long */
@@ -109,6 +110,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-merge { background:#89b4fa; }
 .pr-merge:hover { background:#74a8f7; }
 .pr-approve:disabled { opacity:.6; cursor:default; }
+.pr-update { background:var(--peach,#fab387); }
+.pr-update:hover { background:#f9c096; }
+.pr-conflictbtn { background:#f38ba8; }
+.pr-conflictbtn:hover { background:#f17497; }
+.pr-behind { color:var(--peach,#fab387); font-weight:600; }
 .pr-mute { background:var(--bg2,#313244); color:var(--text); }
 .pr-mute:hover { background:var(--border); }
 .pr-snooze { background:var(--bg2,#313244); color:var(--text); }
@@ -669,14 +675,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #prompt-nav .prompt-counter { font-size:10px; color:var(--dim); min-width:28px; text-align:center; user-select:none; }
 #term-container { flex:1; position:relative; background:#000; overflow:hidden; min-width:0; min-height:0; }
 #term-container .xterm { height:100%; width:100%; }
-#term-container .xterm .xterm-viewport::-webkit-scrollbar { width:10px; }
+/* 18px hit area, 5px transparent border keeps the visible thumb slim — easier to grab, same look */
+#term-container .xterm .xterm-viewport::-webkit-scrollbar { width:18px; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-track { background:transparent; }
-#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:var(--surface0); border-radius:5px; border:2px solid transparent; background-clip:padding-box; min-height:40px; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:var(--surface0); border-radius:9px; border:5px solid transparent; background-clip:padding-box; min-height:48px; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background:var(--surface1); }
 /* Inline ghost-text autocomplete overlay — floats over the terminal canvas, never written to the xterm buffer */
 #ghost-suggest { position:fixed; z-index:50; color:#585b70; opacity:.85; white-space:pre; pointer-events:none; display:none; }
 #ghost-suggest .ghost-hint { font-size:9px; opacity:.7; margin-left:6px; border:1px solid #585b70; border-radius:3px; padding:0 3px; }
-#scroll-bottom-btn {
+#scroll-bottom-btn, #scroll-top-btn {
   display:none; position:absolute; bottom:12px; right:20px; z-index:10;
   width:32px; height:32px; border-radius:50%; border:1px solid var(--border);
   background:var(--surface0); color:var(--text); cursor:pointer;
@@ -684,8 +691,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   opacity:.7; transition:opacity .15s, background .15s;
   box-shadow:0 2px 8px rgba(0,0,0,.4);
 }
-#scroll-bottom-btn:hover { opacity:1; background:var(--surface1); }
-#scroll-bottom-btn.visible { display:block; }
+#scroll-bottom-btn:hover, #scroll-top-btn:hover { opacity:1; background:var(--surface1); }
+#scroll-bottom-btn.visible, #scroll-top-btn.visible { display:block; }
+#scroll-top-btn { bottom:52px; }
 #term-name-chip {
   display:none; position:absolute; bottom:8px; left:10px; z-index:9; pointer-events:none;
   max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -1094,7 +1102,7 @@ button:focus-visible { outline-offset:0; }
 <body>
 <div id="app">
   <div id="header">
-    <h1><span>Overlord</span></h1>
+    <h1><span>Overlord</span> <span class="app-ver"></span></h1>
     <div id="headerBadges"></div>
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
@@ -1145,7 +1153,7 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
+    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x25B2;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
     <div id="timeline-events"></div>
   </div>
   </div><!-- end #content -->
@@ -1182,7 +1190,7 @@ button:focus-visible { outline-offset:0; }
         <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
         <span>Prompt autocomplete (ghost text)</span>
       </label>
-      <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku (needs ANTHROPIC_API_KEY).</div>
+      <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -1352,7 +1360,11 @@ button:focus-visible { outline-offset:0; }
 <script src="./ghost-core.js"></script>
 <script src="./actions-core.js"></script>
 <script src="./update-core.js"></script>
+<script src="./pr-behind.js"></script>
+<script src="./prompt-copy.js"></script>
 <script>
+document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
+
 function ctxWindow(modelFamily, ctxTok) {
   const base = (modelFamily === 'opus' || modelFamily === 'fable') ? 1000000 : 200000; // sonnet/haiku default 200k
   // If usage exceeds the assumed cap, the agent is clearly on the 1M window (e.g. Sonnet[1m]).
@@ -2464,7 +2476,7 @@ function render() {
       html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
-        <span class="agent-name" onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
+        <span class="agent-name" onmouseenter="this.title=this.scrollWidth>this.clientWidth?this.textContent:''" onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
         <div class="agent-mid">
           ${a.currentFileName ? `<span class="agent-current-file" title="${escAttr(a.currentFile)}" data-file="${escAttr(a.currentFile)}" onclick="event.stopPropagation();openFile(${id},this.dataset.file)">${esc(a.currentFileName)}</span>` : ''}
         </div>
@@ -2689,8 +2701,6 @@ function createXterm(id) {
   terminal.onData((data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); });
   terminal.onScroll(() => {
     ghostClear();
-    const buf = terminal.buffer.active;
-    if (buf.baseY > 0 && buf.baseY - buf.viewportY <= 1) terminal.scrollToBottom();
     updateScrollBtn();
   });
   terminal.attachCustomKeyEventHandler((e) => {
@@ -2724,10 +2734,12 @@ function destroyXterm(id) {
 
 function updateScrollBtn() {
   const btn = document.getElementById('scroll-bottom-btn');
+  const top = document.getElementById('scroll-top-btn');
   const x = selectedId != null ? xterms.get(selectedId) : null;
-  if (!x || termTab !== 'terminal') { btn.classList.remove('visible'); return; }
-  const atBottom = x.terminal.buffer.active.viewportY >= x.terminal.buffer.active.baseY;
-  btn.classList.toggle('visible', !atBottom);
+  if (!x || termTab !== 'terminal') { btn.classList.remove('visible'); top.classList.remove('visible'); return; }
+  const buf = x.terminal.buffer.active;
+  btn.classList.toggle('visible', buf.viewportY < buf.baseY);
+  top.classList.toggle('visible', buf.viewportY > 0);
 }
 
 // Park the chip just above Claude's input box. The box is ~4 rows tall (borders + hint
@@ -2770,6 +2782,11 @@ function scrollTermBottom() {
   if (x) { x.terminal.scrollToBottom(); x.terminal.focus(); }
 }
 
+function scrollTermTop() {
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  if (x) { x.terminal.scrollToTop(); x.terminal.focus(); }
+}
+
 // Fit terminal without disrupting scroll position
 function fitPreservingScroll(x) {
   const vp = x.terminal.buffer.active.viewportY;
@@ -2804,21 +2821,18 @@ function showXterm(id) {
 // Extract the text the user typed in Claude's input box from the visible buffer.
 // ponytail: scans the on-screen rows for the bordered box (│ … │) and strips the
 // "> " marker. Handles multi-line input; misses text scrolled out of view (rare).
+// Adapter: hand prompt-copy.js a window of rendered rows around the cursor.
 function readPromptBox(terminal) {
   const buf = terminal.buffer.active;
   const cursorAbs = buf.baseY + buf.cursorY;
-  const inner = (y) => {
-    const ln = buf.getLine(y); if (!ln) return null;
-    const m = ln.translateToString(true).match(/^\s*[│|]\s?(.*?)\s*[│|]\s*$/);
-    return m ? m[1] : null;
-  };
-  if (inner(cursorAbs) === null) return ''; // cursor not in a bordered box → nothing to grab
-  let top = cursorAbs, bot = cursorAbs;
-  while (inner(top - 1) !== null) top--;
-  while (inner(bot + 1) !== null) bot++;
+  const from = Math.max(0, cursorAbs - 40);
+  const to = Math.min(buf.length - 1, cursorAbs + 40);
   const lines = [];
-  for (let y = top; y <= bot; y++) lines.push(inner(y).replace(/^[>❯]\s?/, ''));
-  return lines.join('\n').trim();
+  for (let y = from; y <= to; y++) {
+    const ln = buf.getLine(y);
+    lines.push(ln ? ln.translateToString(true) : '');
+  }
+  return readPromptText(lines, cursorAbs - from);
 }
 
 // ── Inline ghost-text autocomplete ─────────────────────
@@ -2941,17 +2955,28 @@ function closeTermSearch() {
     if (x) { x.searchAddon.clearDecorations(); x.terminal.focus(); }
   }
 }
+// Yellow highlight for Ctrl+F matches; active match is orange so it stands out from the rest
+const TERM_SEARCH_OPTS = {
+  decorations: {
+    matchBackground: '#ffd23f',
+    matchBorder: '#ffd23f',
+    matchOverviewRuler: '#ffd23f',
+    activeMatchBackground: '#ff8c00',
+    activeMatchBorder: '#ffffff',
+    activeMatchColorOverviewRuler: '#ff8c00',
+  },
+};
 function termSearchNext() {
   const query = document.getElementById('term-search-input').value;
   if (!query || selectedId == null) return;
   const x = xterms.get(selectedId);
-  if (x) x.searchAddon.findNext(query);
+  if (x) x.searchAddon.findNext(query, TERM_SEARCH_OPTS);
 }
 function termSearchPrev() {
   const query = document.getElementById('term-search-input').value;
   if (!query || selectedId == null) return;
   const x = xterms.get(selectedId);
-  if (x) x.searchAddon.findPrevious(query);
+  if (x) x.searchAddon.findPrevious(query, TERM_SEARCH_OPTS);
 }
 document.getElementById('term-search-input').addEventListener('input', () => { termSearchNext(); });
 document.getElementById('term-search-input').addEventListener('keydown', (e) => {
@@ -3194,7 +3219,7 @@ function searchResultClick(idx) {
       const input = document.getElementById('term-search-input');
       input.value = query;
       const x = xterms.get(r.agentId);
-      if (x) x.searchAddon.findNext(query);
+      if (x) x.searchAddon.findNext(query, TERM_SEARCH_OPTS);
     }, 150);
   }
 }
@@ -3351,12 +3376,17 @@ api.on((msg) => {
       x = createXterm(msg.id);
     }
     const buf = x.terminal.buffer.active;
-    const nearBottom = buf.baseY - buf.viewportY <= 5;
-    x.terminal.write(msg.data);
-    if (nearBottom) x.terminal.scrollToBottom();
+    // Only auto-follow when pinned to the exact bottom — one line up means the user is
+    // reading, so leave the viewport alone and let the scroll-to-bottom button show.
+    const atBottom = buf.viewportY >= buf.baseY;
+    // write() is async: the button must be recomputed after the data lands, or baseY is stale.
+    x.terminal.write(msg.data, () => {
+      if (atBottom) x.terminal.scrollToBottom();
+      if (msg.id === selectedId) updateScrollBtn();
+    });
     const ag = agents.get(msg.id);
     if (ag && ag.dead) { ag.dead = null; if (msg.id === selectedId) updateDeadOverlay(); scheduleRender(); } // terminal is talking again
-    if (msg.id === selectedId) { schedulePromptNavUpdate(); updateScrollBtn(); }
+    if (msg.id === selectedId) schedulePromptNavUpdate();
     return;
   }
   if (msg.type === 'termExit') {
@@ -3374,6 +3404,12 @@ function handleAgentMsg(msg) {
       const isNew = !agents.has(msg.id);
       if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', currentFile: '', currentFileName: '', archived: msg.archived || false });
       if (msg.cwd) addKnownProject(msg.cwd);
+      // Fresh agent goes last: ids restart at 1 each launch, so a saved order may still
+      // hold this id at a stale position. Re-append it.
+      if (isNew && !msg.title && msg.cwd && agentOrderMap[msg.cwd]) {
+        agentOrderMap[msg.cwd] = agentOrderMap[msg.cwd].filter(x => x !== msg.id).concat(msg.id);
+        saveAgentOrder();
+      }
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
       else scheduleRender();
       break;
@@ -3953,11 +3989,12 @@ function renderBookmarks(bookmarks) {
     const btn = document.createElement('button');
     btn.className = 'hdr-btn bookmark';
     btn.textContent = b.name;
-    btn.title = b.path + '\n(right-click to rename or remove)';
+    btn.title = b.path + '\n(right-click for more)';
     btn.onclick = () => api.send({ type: 'openBookmark', path: b.path });
     btn.oncontextmenu = (e) => {
       e.preventDefault();
       showBookmarkMenu(e, [
+        { label: 'Open file location', action: () => api.send({ type: 'showInFolder', path: b.path }) },
         { label: 'Rename', action: () => renameBookmark(b, btn) },
         { label: 'Remove', cls: 'ctx-danger', action: () => api.send({ type: 'removeBookmark', path: b.path }) },
       ]);
@@ -4756,8 +4793,11 @@ function prActionBtn(p, u) {
 
 function prBranchHtml(p) {
   if (!p.headRef || !p.baseRef) return '';
+  const behind = p.behindBy > 0
+    ? ` · <span class="pr-behind" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">↓${p.behindBy} behind</span>`
+    : '';
   return `<div class="pr-branch" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">`
-    + `${escapeHtml(p.headRef)} <span class="pr-arrow">→</span> ${escapeHtml(p.baseRef)}</div>`;
+    + `${escapeHtml(p.headRef)} <span class="pr-arrow">→</span> ${escapeHtml(p.baseRef)}${behind}</div>`;
 }
 
 function prRowHtml(p, dim) {
@@ -4770,6 +4810,7 @@ function prRowHtml(p, dim) {
   const age = p.createdAt ? ' · <span class="pr-age" data-created="' + p.createdAt + '">' + escapeHtml(prRelTime(p.createdAt)) + '</span>' : '';
   const appr = (p.approvedBy && p.approvedBy.length) ? ` · <span class="pr-appr" title="Approved by ${escapeHtml(p.approvedBy.join(', '))}">✓${p.approvedBy.length}</span>` : '';
   const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
+  const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   // Red = waiting on my review. Green = mine and ready to merge. Orange = conflicts.
@@ -4779,11 +4820,17 @@ function prRowHtml(p, dim) {
   const conflict = !dim && mi.label === 'conflicts';
   const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '')
     + (conflict ? ' pr-conflict' : '') + (dim ? ' pr-muted' : '');
-  return `<div class="${cls}" onclick="openPr('${u}')">`
-    + `<div class="pr-actions">${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
+  const act = prBranchAction(p); // pr-behind.js
+  const updBtn = act === 'conflict'
+    ? `<button class="pr-approve pr-conflictbtn" title="Conflicts with ${escapeHtml(p.baseRef)} — resolve them on GitHub, then update" onclick="event.stopPropagation();openPr('${u}/conflicts')">⚠ Conflicts</button>`
+    : act === 'update'
+      ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>`
+      : '';
+  return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
+    + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
-    + `<div class="pr-meta">@${escapeHtml(p.author)}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
+    + `<div class="pr-meta">@${escapeHtml(p.author)}${commits}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
 }
 
 function prGroupHeader(repo, count, muted) {
@@ -4806,7 +4853,7 @@ function prGroupByRepo(list) {
 function prMutedRowHtml(p) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
-  return `<div class="pr-row pr-muted" onclick="openPr('${u}')">`
+  return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-mute" onclick="event.stopPropagation();unmutePr('${k}')">🔔 Unmute</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
@@ -4836,7 +4883,7 @@ function prSnoozeLeft(until) {
 function prSnoozedRowHtml(p) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
-  return `<div class="pr-row pr-muted" onclick="openPr('${u}')">`
+  return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Wake now" onclick="event.stopPropagation();unsnoozePr('${k}')">⏰ Wake</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
@@ -4969,6 +5016,19 @@ function mergePr(url, btn) {
   api.send({ type: 'mergePr', url });
 }
 
+function updatePrBranch(url, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⤴ Updating…'; }
+  api.send({ type: 'updatePrBranch', url });
+}
+
+function prCtx(e, url) {
+  e.preventDefault(); e.stopPropagation();
+  showBookmarkMenu(e, [
+    { label: 'Open PR', action: () => openPr(url) },
+    { label: 'Copy link', action: () => navigator.clipboard.writeText(url) },
+  ]);
+}
+
 function mutePr(key) { api.send({ type: 'mutePr', key }); }
 function unmutePr(key) { api.send({ type: 'unmutePr', key }); }
 function muteRepo(repo) { api.send({ type: 'muteRepo', repo }); }
@@ -4979,11 +5039,15 @@ function refreshPrs(btn) {
   api.send({ type: 'pollPrsNow' });
 }
 
+// Capture phase: rows/buttons elsewhere in the app stopPropagation, which would
+// otherwise leave the panel open when you click them.
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('#pr-snooze-pop') && !e.target.closest('.pr-snooze')) closeSnooze();
+  const t = e.target.closest ? e.target : e.target.parentElement; // text/SVG nodes
+  if (!t) return;
+  if (!t.closest('#pr-snooze-pop') && !t.closest('.pr-snooze')) closeSnooze();
   const d = document.getElementById('pr-dropdown');
-  if (d && d.style.display === 'block' && !e.target.closest('#pr-dropdown') && !e.target.closest('#pr-snooze-pop') && e.target.id !== 'pr-badge') d.style.display = 'none';
-});
+  if (d && d.style.display === 'block' && !t.closest('#pr-dropdown') && !t.closest('#pr-snooze-pop') && !t.closest('#pr-badge')) d.style.display = 'none';
+}, true);
 
 // ── GitHub Actions tracking ───────────────────────────
 let actionsSettings = { enabled: false, workflows: [], intervalSec: 60 };

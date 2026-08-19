@@ -77,7 +77,9 @@ autoUpdater.on('error', err => {
 // Packaged builds update through electron-updater above. People who run the
 // repo directly via start.bat get nothing from that, so offer them a pull.
 const { pullBlocker, needsInstall } = require('./update-core');
+const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { pickResumedFile } = require('./resume-core');
+const { parseState } = require('./state-core');
 const APP_DIR = __dirname;
 let gitUpdateBusy = false;
 
@@ -185,13 +187,9 @@ function modelFamily(model) {
 function anthropicAuthHeaders() {
   const base = { 'anthropic-version': '2023-06-01' };
   if (process.env.ANTHROPIC_API_KEY) return { ...base, 'x-api-key': process.env.ANTHROPIC_API_KEY };
-  let oauth;
-  try {
-    oauth = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf8')).claudeAiOauth;
-  } catch { return null; }
-  if (!oauth || !oauth.accessToken) return null;
-  if (oauth.expiresAt && oauth.expiresAt < Date.now()) return null;
-  return { ...base, 'authorization': `Bearer ${oauth.accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' };
+  const token = getApiKey(); // the /login OAuth access token, same one fetchUsage() uses
+  if (!token) return null;
+  return { ...base, 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' };
 }
 
 // The model picker is this list, nothing else — no hardcoded models, so one
@@ -461,14 +459,14 @@ function clearServers(id) {
 async function generateSummaryTitle(id) {
   const a = agents.get(id);
   if (!a || a.customName || !a.promptHistory || a.promptHistory.length === 0 || a.titlePending) return;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return;
+  const auth = anthropicAuthHeaders();
+  if (!auth) return;
   a.titlePending = true;
   const context = a.promptHistory.map((p, i) => `Prompt ${i + 1}: ${p}`).join('\n');
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      headers: { ...auth, 'content-type': 'application/json' },
       body: JSON.stringify({
         model: TITLE_MODEL, max_tokens: 30,
         messages: [{ role: 'user', content: `Summarize this coding session in exactly 5 words. Be specific about what's being worked on. No punctuation, no quotes. Just 5 lowercase words.\n\n${context}` }],
@@ -488,17 +486,17 @@ async function generateSummaryTitle(id) {
 
 // Inline ghost-text autocomplete: complete the partial prompt the user is
 // typing into a live agent's terminal. Replies with a `ghost` message the
-// renderer overlays. Silent (empty suggestion) on no key / error / timeout.
+// renderer overlays. Silent (empty suggestion) on no creds / error / timeout.
 async function ghostComplete(id, reqId, prefix, context) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const auth = anthropicAuthHeaders();
   const reply = (suggestion) => send({ type: 'ghost', id, reqId, suggestion });
-  if (!apiKey || !prefix) return reply('');
+  if (!auth || !prefix) return reply('');
   try {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 2500);
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      headers: { ...auth, 'content-type': 'application/json' },
       signal: ctrl.signal,
       body: JSON.stringify({
         model: TITLE_MODEL, max_tokens: 48,
@@ -828,19 +826,29 @@ function saveState() {
   const state = { agents: agentEntries, settings };
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
+    // Keep the last good file as .bak before replacing it — a power cut during the
+    // write can leave the real one truncated, and .bak is what loadState falls back to.
+    try { if (fs.statSync(STATE_FILE).size > 0) fs.copyFileSync(STATE_FILE, STATE_FILE + '.bak'); } catch {}
     fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(state, null, 2));
     fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
   } catch (e) { console.log('[Overlord] Failed to save state:', e.message); }
 }
 
 function loadState() {
-  try {
-    if (!fs.existsSync(STATE_FILE)) return { agents: [], settings: {} };
-    const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
-    // Handle old format (plain array)
-    if (Array.isArray(data)) return { agents: data, settings: {} };
-    return { agents: data.agents || [], settings: data.settings || {} };
-  } catch { return { agents: [], settings: {} }; }
+  for (const file of [STATE_FILE, STATE_FILE + '.bak']) {
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf-8'); } catch { continue; } // missing is fine
+    const parsed = parseState(raw);
+    if (parsed) {
+      if (file !== STATE_FILE) flog('[Overlord] state file unusable — recovered agents and settings from .bak');
+      return parsed;
+    }
+    // Damaged. Park it under .corrupt so the next save can't overwrite the only
+    // copy, and so there's something left to recover from by hand.
+    try { fs.renameSync(file, file + '.corrupt'); } catch {}
+    flog(`[Overlord] state file ${file} unreadable — kept as ${path.basename(file)}.corrupt`);
+  }
+  return { agents: [], settings: {} };
 }
 
 function restoreAgents(state) {
@@ -1769,7 +1777,7 @@ function fetchAllPRs(repos) {
         + `author { login } reviewDecision mergeable mergeStateStatus headRefName baseRefName `
         + `reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 20) { nodes { author { login } state } } `
-        + `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }`;
+        + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state } } } } } } }`;
     });
     const query = `query {\n${parts.join('\n')}\n}`;
     let out = '', errbuf = '', proc, done = false;
@@ -1811,12 +1819,36 @@ function fetchAllPRs(repos) {
             mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
             requested, createdAt: pr.createdAt || '', approvedBy, changesBy,
             headRef: pr.headRefName || '', baseRef: pr.baseRefName || '',
+            commitCount: (pr.commits && pr.commits.totalCount) || 0,
           });
         }
       });
       finish({ prs, failed });
     });
     try { proc.stdin.write(query); proc.stdin.end(); } catch {}
+  });
+}
+
+// Second GraphQL call: how many commits each PR branch trails its base by.
+// Best-effort — any failure resolves to {} and the rows just omit the badge.
+function fetchBehind(prs) {
+  return new Promise((resolve) => {
+    const q = buildBehindQuery(prs);
+    if (!q) return resolve({});
+    let out = '', proc, done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
+    try {
+      proc = spawn('gh', ['api', 'graphql', '-F', 'query=@-'], { windowsHide: true, shell: process.platform === 'win32' });
+    } catch { return resolve({}); }
+    const to = setTimeout(() => { try { proc.kill(); } catch {} finish({}); }, 25000);
+    proc.on('error', () => finish({}));
+    proc.stdout.on('data', d => out += d);
+    proc.stderr.on('data', () => {});
+    proc.on('close', () => {
+      let json; try { json = JSON.parse(out); } catch { return finish({}); }
+      finish(parseBehind(json, q.keys));
+    });
+    try { proc.stdin.write(q.query); proc.stdin.end(); } catch {}
   });
 }
 
@@ -1840,6 +1872,8 @@ async function pollPRs() {
   }
   if (!failedRepos.length) prGhErrorLogged = false;
   const prs = res.prs;
+  const behind = await fetchBehind(prs);
+  prs.forEach(p => { p.behindBy = behind[p.key] ?? null; });
   const currentKeys = prs.map(p => p.key);
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);
@@ -2972,6 +3006,12 @@ function handleIpc(msg) {
       shell.openPath(p).catch(() => {});
       break;
     }
+    case 'showInFolder': {
+      const p = msg.path;
+      if (typeof p !== 'string' || !fs.existsSync(p)) { send({ type: 'toast', text: 'Not found: ' + p }); break; }
+      shell.showItemInFolder(p);
+      break;
+    }
     case 'addBookmark':
       // Windows/Linux can't show a combined file+directory picker, so the caller picks a mode.
       dialog.showOpenDialog(mainWindow, msg.dir
@@ -3282,6 +3322,19 @@ function handleIpc(msg) {
         { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
           if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
           pollPRs(); // merged PR drops from the list
+        });
+      break;
+    }
+    // Merges the base branch into the PR branch server-side on GitHub — passing
+    // the URL means no local checkout is touched, whatever branch you're on.
+    case 'updatePrBranch': {
+      const url = msg.url;
+      if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
+      execFile('gh', ['pr', 'update-branch', url],
+        { timeout: 60000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+          if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
+          send({ type: 'toast', text: 'PR branch updated from base' });
+          pollPRs();
         });
       break;
     }

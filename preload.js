@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld('api', {
   setZoom: (factor) => webFrame.setZoomFactor(factor),
   // Absolute path for a dropped File (File.path is gone in modern Electron)
   getFilePath: (file) => { try { return webUtils.getPathForFile(file); } catch { return null; } },
+  version: require('./package.json').version,
 });
