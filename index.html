@@ -1038,6 +1038,57 @@ button:focus-visible { outline-offset:0; }
   box-shadow:0 4px 16px rgba(0,0,0,.3);
 }
 .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+.toast.click { pointer-events:auto; cursor:pointer; }
+.toast.click:hover { border-color:var(--border-hi); }
+
+/* ── Peer chat panel ─────────────────────────────── */
+#chat-panel{position:fixed;right:14px;bottom:14px;width:372px;height:540px;max-height:78vh;z-index:9000;
+  display:flex;flex-direction:column;background:var(--bg2);border:1px solid var(--border);
+  border-radius:14px;box-shadow:0 12px 44px rgba(0,0,0,.55);overflow:hidden;font-size:12px;}
+.chat-hdr{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg3);border-bottom:1px solid var(--border);}
+.chat-avatar{position:relative;width:32px;height:32px;border-radius:50%;flex:none;
+  background:linear-gradient(135deg,var(--accent),var(--purple));color:var(--bg);
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;}
+.chat-avatar .dot{position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:50%;border:2px solid var(--bg3);background:var(--dim);}
+.chat-avatar .dot.on{background:var(--green);}
+.chat-hdr-name{font-size:13px;font-weight:600;line-height:1.25;}
+.chat-hdr-sub{font-size:10px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chat-close{background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;padding:2px 7px;border-radius:6px;line-height:1;}
+.chat-close:hover{color:var(--text);background:rgba(205,214,244,.08);}
+#chat-msgs{flex:1;overflow-y:auto;padding:12px 12px 6px;display:flex;flex-direction:column;}
+#chat-msgs::-webkit-scrollbar{width:6px;}
+#chat-msgs::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:3px;}
+#chat-msgs::-webkit-scrollbar-track{background:transparent;}
+.chat-row{display:flex;flex-direction:column;max-width:80%;margin-top:10px;}
+.chat-row.cont{margin-top:2px;}
+.chat-row.mine{align-self:flex-end;align-items:flex-end;}
+.chat-row.theirs{align-self:flex-start;align-items:flex-start;}
+.chat-author{font-size:9px;font-weight:600;color:var(--purple);margin:0 8px 2px;}
+.chat-bubble{padding:7px 11px;border-radius:14px;line-height:1.45;word-break:break-word;white-space:pre-wrap;color:var(--text);}
+.chat-row.mine .chat-bubble{background:rgba(137,180,250,.20);border-bottom-right-radius:4px;}
+.chat-row.theirs .chat-bubble{background:var(--bg3);border-bottom-left-radius:4px;}
+.chat-meta{display:inline-flex;gap:4px;align-items:center;font-size:9px;color:var(--dim);margin:3px 8px 0;}
+.chat-ticks{letter-spacing:-1.5px;}
+.chat-ticks.read{color:var(--accent);}
+.chat-file{display:flex;align-items:center;gap:10px;cursor:pointer;min-width:170px;padding:2px 0;}
+.chat-file:hover .chat-file-name{text-decoration:underline;}
+.chat-file-ico{width:34px;height:34px;border-radius:9px;background:rgba(137,180,250,.16);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none;}
+.chat-file-name{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:185px;}
+.chat-file-size{font-size:9px;color:var(--dim);margin-top:1px;}
+.chat-prog{height:3px;background:rgba(205,214,244,.15);border-radius:2px;margin-top:5px;overflow:hidden;}
+.chat-prog>div{height:100%;background:var(--accent);border-radius:2px;transition:width .2s;}
+.chat-empty{color:var(--dim);font-size:11px;text-align:center;margin:auto;}
+#chat-typing{min-height:15px;font-size:10px;color:var(--dim);padding:2px 16px 0;font-style:italic;}
+.chat-inbar{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border);align-items:flex-end;background:var(--bg3);}
+.chat-attach{background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;padding:6px;border-radius:8px;line-height:1;flex:none;}
+.chat-attach:hover{color:var(--text);background:rgba(205,214,244,.08);}
+#chat-input{flex:1;resize:none;font-family:inherit;font-size:12px;line-height:1.4;padding:7px 13px;color:var(--text);
+  background:var(--bg);border:1px solid var(--border);border-radius:17px;outline:none;max-height:90px;scrollbar-width:none;}
+#chat-input::-webkit-scrollbar{display:none;}
+#chat-input:focus{border-color:var(--border-hi);}
+.chat-send{font-family:inherit;font-size:12px;font-weight:600;padding:7px 16px;color:var(--bg);background:var(--accent);
+  border:none;border-radius:17px;cursor:pointer;flex:none;transition:filter .15s;}
+.chat-send:hover{filter:brightness(1.12);}
 </style>
 </head>
 <body>
@@ -1047,7 +1098,7 @@ button:focus-visible { outline-offset:0; }
     <div id="headerBadges"></div>
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
-    <button class="hdr-btn" id="peer-btn" onclick="openPeersSettings()" title="LAN peers" style="display:none">&#x21C4;</button>
+    <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
@@ -3552,6 +3603,46 @@ function handleAgentMsg(msg) {
       if (ov) { const row = ov.querySelector(`[data-msgid="${msg.msgId}"]`); if (row) row.remove(); if (!ov.querySelector('[data-msgid]')) ov.remove(); }
       break;
     }
+    case 'chatMsg': {
+      const ks = msg.key.type + ':' + msg.key.id;
+      const convo = chatConvo(msg.key, msg.groupName);
+      if (!convo.some(x => x.id === msg.msg.id)) convo.push(msg.msg);
+      const isOpen = chatOpenKey && chatKs(chatOpenKey) === ks && document.getElementById('chat-panel');
+      if (isOpen) renderChatMsgs();
+      else if (msg.msg.from !== 'me') {
+        chatUnread[ks] = (chatUnread[ks] || 0) + 1;
+        renderPeersSec();
+        const chatKey = msg.key;
+        showToast(`💬 ${msg.msg.from}: ${(msg.msg.text || (msg.msg.file ? '📎 ' + msg.msg.file.name : '')).slice(0, 60)} — click to open`, () => openChat(chatKey));
+      }
+      break;
+    }
+    case 'chatMsgStatus': {
+      const upd = (arr) => { const m = (arr || []).find(x => x.id === msg.id); if (m) { m.deliveredBy = msg.deliveredBy; m.readBy = msg.readBy; return true; } return false; };
+      let hit = false;
+      for (const arr of Object.values(chatState.peers)) if (upd(arr)) hit = true;
+      for (const g of Object.values(chatState.groups)) if (upd(g.msgs)) hit = true;
+      if (hit && chatOpenKey && document.getElementById('chat-panel')) renderChatMsgs();
+      break;
+    }
+    case 'chatTyping': {
+      const ks = msg.key.type + ':' + msg.key.id;
+      chatTypingSeen[ks] = chatTypingSeen[ks] || {};
+      chatTypingSeen[ks][msg.name] = Date.now();
+      renderChatTypingLine();
+      break;
+    }
+    case 'chatGroupAdded': {
+      const g = chatState.groups[msg.group.id] = chatState.groups[msg.group.id] || { id: msg.group.id, msgs: [] };
+      g.name = msg.group.name; g.members = msg.group.members;
+      break;
+    }
+    case 'chatFileProgress': {
+      chatProgress[msg.id] = { done: msg.done, total: msg.total };
+      if (chatOpenKey && document.getElementById('chat-panel')) renderChatMsgs();
+      break;
+    }
+    case 'chatOpenFromNotification': openChat(msg.key); break;
     case 'serverDetected': { const a = agents.get(msg.id); if (a) { a.servers.set(msg.port, msg.url); scheduleRender(); } break; }
     case 'serversClear': { const a = agents.get(msg.id); if (a) { a.servers.clear(); scheduleRender(); } break; }
     case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); } break; }
@@ -3885,13 +3976,14 @@ function renderBookmarks(bookmarks) {
 }
 
 // ── Toast ──────────────────────────────────────────────
-function showToast(text) {
+function showToast(text, onClick) {
   let el = document.getElementById('toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
   el.textContent = text;
-  el.className = 'toast show';
+  el.className = 'toast show' + (onClick ? ' click' : '');
+  el.onclick = onClick ? () => { el.className = 'toast'; onClick(); } : null;
   clearTimeout(el._timer);
-  el._timer = setTimeout(() => { el.className = 'toast'; }, 2000);
+  el._timer = setTimeout(() => { el.className = 'toast'; }, onClick ? 4000 : 2000);
 }
 
 // ── Settings ───────────────────────────────────────────
@@ -3927,6 +4019,11 @@ function applySettings(s) {
     planBudget = s.planBudget;
     const inp = document.getElementById('inp-budget');
     if (inp) inp.value = planBudget;
+  }
+  if (s.chats) {
+    chatState.peers = s.chats.peers || {};
+    chatState.groups = s.chats.groups || {};
+    if (chatOpenKey && document.getElementById('chat-panel')) renderChatMsgs();
   }
   if (s.knownProjects) { for (const d of s.knownProjects) knownProjects.add(d); scheduleRender(); }
   if (s.worktrees) { worktrees = s.worktrees; for (const w of worktrees) knownProjects.add(w.repo); scheduleRender(); }
@@ -4298,9 +4395,10 @@ function renderPeersSec() {
   if (chip) chip.textContent = connected ? `● ${connected} connected` : '';
   const btn = document.getElementById('peer-btn');
   if (btn) {
+    const unread = chatTotalUnread();
     btn.style.display = peersState.enabled ? '' : 'none';
-    btn.innerHTML = '&#x21C4;' + (connected ? ' ' + connected : '');
-    btn.title = connected ? `${connected} peer Overlord${connected === 1 ? '' : 's'} connected` : 'LAN peers (none connected)';
+    btn.innerHTML = '&#x21C4;' + (connected ? ' ' + connected : '') + (unread ? ` <span style="background:var(--accent);color:var(--bg);border-radius:8px;padding:0 5px;font-size:10px;font-weight:600;">💬${unread}</span>` : '');
+    btn.title = (connected ? `${connected} peer Overlord${connected === 1 ? '' : 's'} connected` : 'LAN peers (none connected)') + ' — click for chat';
   }
 }
 function openPeersSettings() {
@@ -4367,6 +4465,221 @@ function sendPeerMsgModal(fromId) {
   if (!o || !text) return;
   api.send({ type: 'peerSend', peerName: o.peer, toAgent: o.agent, fromId, text });
   ov.remove();
+}
+
+// ── Peer chat UI (human ↔ human) ──────────────────────
+let chatState = { peers: {}, groups: {} }; // mirror of settings.chats (main is source of truth)
+let chatOpenKey = null;                    // {type:'peer'|'group', id}
+let chatUnread = {};                       // 'type:id' -> count
+let chatTypingSeen = {};                   // 'type:id' -> { name: lastTs }
+let chatProgress = {};                     // msgId -> { done, total }
+let _chatTypingTimer = null, _chatLastPing = 0;
+
+function chatKs(key) { return key.type + ':' + key.id; }
+function chatToFor(key) { return key.type === 'peer' ? { peer: key.id } : { group: key.id }; }
+function chatTotalUnread() { return Object.values(chatUnread).reduce((a, b) => a + b, 0); }
+function chatConvo(key, groupName) {
+  if (key.type === 'peer') { chatState.peers[key.id] = chatState.peers[key.id] || []; return chatState.peers[key.id]; }
+  const g = chatState.groups[key.id] = chatState.groups[key.id] || { id: key.id, name: groupName || 'group', members: [], msgs: [] };
+  g.msgs = g.msgs || [];
+  return g.msgs;
+}
+function chatTitleFor(key) {
+  if (key.type === 'peer') { const p = (peersState.peers || []).find(x => x.name.toLowerCase() === key.id); return p ? p.name : key.id; }
+  const g = chatState.groups[key.id]; return g ? g.name : 'group';
+}
+function peerOnline(idLower) { const p = (peersState.peers || []).find(x => x.name.toLowerCase() === idLower); return !!(p && p.connected); }
+function fmtBytes(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n > 1024 ? Math.round(n / 1024) + ' KB' : n + ' B'; }
+function fmtChatTs(ts) { const d = new Date(ts); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+
+function showChatMenu(e) {
+  const old = document.getElementById('chat-menu'); if (old) { old.remove(); return; }
+  const menu = document.createElement('div');
+  menu.id = 'chat-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:220px;';
+  const r = e.currentTarget.getBoundingClientRect();
+  menu.style.right = (window.innerWidth - r.right) + 'px'; menu.style.top = (r.bottom + 4) + 'px';
+  const rowCss = 'display:flex;align-items:center;gap:8px;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:6px 12px;background:none;border:none;color:var(--text);cursor:pointer;';
+  const addRow = (html, action) => { const b = document.createElement('button'); b.style.cssText = rowCss; b.innerHTML = html; b.onclick = () => { menu.remove(); action(); }; b.addEventListener('mouseenter', () => b.style.background = 'rgba(205,214,244,.06)'); b.addEventListener('mouseleave', () => b.style.background = 'none'); menu.appendChild(b); };
+  const addSep = () => { const hr = document.createElement('div'); hr.style.cssText = 'height:1px;background:var(--border);margin:3px 0;'; menu.appendChild(hr); };
+  const unreadChip = (ks) => chatUnread[ks] ? ` <span style="background:var(--accent);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;">${chatUnread[ks]}</span>` : '';
+  const peers = peersState.peers || [];
+  if (!peers.length) addRow('<span style="color:var(--dim)">No peers yet — open settings</span>', () => openPeersSettings());
+  for (const p of peers) addRow(`<span style="color:${p.connected ? 'var(--green)' : 'var(--dim)'}">&#x25CF;</span> 💬 ${esc(p.name)}${unreadChip('peer:' + p.name.toLowerCase())}`, () => openChat({ type: 'peer', id: p.name.toLowerCase() }));
+  const groups = Object.values(chatState.groups || {});
+  if (groups.length) addSep();
+  for (const g of groups) addRow(`👥 ${esc(g.name)}${unreadChip('group:' + g.id)}`, () => openChat({ type: 'group', id: g.id }));
+  addSep();
+  addRow('＋ New group…', () => openNewGroupModal());
+  addRow('⚙ Peer settings…', () => openPeersSettings());
+  document.body.appendChild(menu);
+  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
+function openChat(key) {
+  chatOpenKey = key;
+  chatUnread[chatKs(key)] = 0;
+  renderPeersSec();
+  buildChatPanel();
+}
+function closeChatPanel() {
+  const p = document.getElementById('chat-panel'); if (p) p.remove();
+  chatOpenKey = null;
+  clearInterval(_chatTypingTimer); _chatTypingTimer = null;
+}
+function buildChatPanel() {
+  const old = document.getElementById('chat-panel'); if (old) old.remove();
+  const key = chatOpenKey;
+  const g = key.type === 'group' ? chatState.groups[key.id] : null;
+  const sub = g ? esc((g.members || []).join(', ')) : (peerOnline(key.id) ? 'online' : 'offline');
+  const title = chatTitleFor(key);
+  const online = key.type === 'group' ? true : peerOnline(key.id);
+  const panel = document.createElement('div');
+  panel.id = 'chat-panel';
+  panel.innerHTML = `
+    <div class="chat-hdr">
+      <div class="chat-avatar">${key.type === 'group' ? '👥' : esc((title[0] || '?').toUpperCase())}<span class="dot${online ? ' on' : ''}"></span></div>
+      <div style="flex:1;min-width:0;">
+        <div class="chat-hdr-name">${esc(title)}</div>
+        <div id="chat-sub" class="chat-hdr-sub">${sub}</div>
+      </div>
+      <button class="chat-close" onclick="closeChatPanel()" aria-label="Close chat">&times;</button>
+    </div>
+    <div id="chat-msgs"></div>
+    <div id="chat-typing"></div>
+    <div class="chat-inbar">
+      <button class="chat-attach" onclick="api.send({type:'pickChatFile',to:chatToFor(chatOpenKey)})" title="Send a file (max 25 MB)">📎</button>
+      <textarea id="chat-input" rows="1" placeholder="Message ${escAttr(title)}"></textarea>
+      <button class="chat-send" onclick="sendChatInput()">Send</button>
+    </div>`;
+  document.body.appendChild(panel);
+  const inp = document.getElementById('chat-input');
+  inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); sendChatInput(); } });
+  inp.addEventListener('input', () => {
+    inp.style.height = 'auto'; inp.style.height = Math.min(90, inp.scrollHeight) + 'px';
+    const now = Date.now();
+    if (now - _chatLastPing > 2000) { _chatLastPing = now; api.send({ type: 'chatTypingPing', to: chatToFor(chatOpenKey) }); }
+  });
+  panel.addEventListener('dragover', (ev) => ev.preventDefault());
+  panel.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    for (const f of ev.dataTransfer.files) {
+      const p = api.getFilePath ? api.getFilePath(f) : null;
+      if (p) api.send({ type: 'chatSendFilePath', to: chatToFor(chatOpenKey), filePath: p });
+    }
+  });
+  clearInterval(_chatTypingTimer);
+  _chatTypingTimer = setInterval(renderChatTypingLine, 1000);
+  renderChatMsgs();
+  inp.focus();
+}
+// WhatsApp-style ticks: ✓ sent · ✓✓ gray delivered · ✓✓ blue read
+function chatTicks(m, key) {
+  if (m.from !== 'me') return '';
+  const g = key.type === 'group' ? chatState.groups[key.id] : null;
+  const need = g ? Math.max(1, (g.members || []).length - 1) : 1;
+  const read = (m.readBy || []).length, del = (m.deliveredBy || []).length;
+  if (read >= need) return '<span class="chat-ticks read">✓✓</span>';
+  if (read > 0) return `<span class="chat-ticks read">✓✓</span><span>${read}/${need}</span>`;
+  if (del > 0) return '<span class="chat-ticks">✓✓</span>';
+  return '<span class="chat-ticks">✓</span>';
+}
+function chatFileIcon(name) {
+  const ext = (String(name).split('.').pop() || '').toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return '🖼️';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜️';
+  if (['mp3', 'wav', 'flac', 'ogg', 'm4a'].includes(ext)) return '🎵';
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) return '🎬';
+  if (ext === 'pdf') return '📕';
+  if (['js', 'ts', 'py', 'cs', 'json', 'html', 'css', 'sh', 'ps1'].includes(ext)) return '💻';
+  return '📄';
+}
+function renderChatMsgs() {
+  const box = document.getElementById('chat-msgs'); if (!box || !chatOpenKey) return;
+  const key = chatOpenKey;
+  const convo = chatConvo(key);
+  const showNames = key.type === 'group';
+  const GROUP_GAP_MS = 3 * 60 * 1000;
+  box.innerHTML = convo.map((m, i) => {
+    const mine = m.from === 'me';
+    const prev = convo[i - 1], next = convo[i + 1];
+    const cont = !!(prev && prev.from === m.from && (m.ts - prev.ts) < GROUP_GAP_MS);
+    const last = !next || next.from !== m.from || (next.ts - m.ts) >= GROUP_GAP_MS;
+    const prog = chatProgress[m.id];
+    const body = m.file
+      ? `<div class="chat-file" data-fpath="${escAttr(m.file.path || '')}" onclick="if(this.dataset.fpath)api.send({type:'chatOpenFile',path:this.dataset.fpath})" title="Open file">
+           <div class="chat-file-ico">${chatFileIcon(m.file.name)}</div>
+           <div style="min-width:0;">
+             <div class="chat-file-name">${esc(m.file.name)}</div>
+             <div class="chat-file-size">${fmtBytes(m.file.size)}</div>
+             ${prog && prog.done < prog.total ? `<div class="chat-prog"><div style="width:${Math.round(prog.done / prog.total * 100)}%"></div></div>` : ''}
+           </div>
+         </div>`
+      : esc(m.text || '');
+    return `<div class="chat-row ${mine ? 'mine' : 'theirs'}${cont ? ' cont' : ''}">
+      ${showNames && !mine && !cont ? `<div class="chat-author">${esc(m.from)}</div>` : ''}
+      <div class="chat-bubble">${body}</div>
+      ${last ? `<div class="chat-meta">${fmtChatTs(m.ts)}${chatTicks(m, key)}</div>` : ''}
+    </div>`;
+  }).join('') || '<div class="chat-empty">No messages yet — say hi 👋</div>';
+  box.scrollTop = box.scrollHeight;
+  // read receipts for everything from others that we now displayed
+  const unreadIds = convo.filter(m => m.from !== 'me' && !m._readSent).map(m => (m._readSent = true, m.id));
+  if (unreadIds.length) api.send({ type: 'chatRead', to: chatToFor(key), ids: unreadIds });
+}
+function renderChatTypingLine() {
+  const el = document.getElementById('chat-typing'); if (!el || !chatOpenKey) return;
+  const t = chatTypingSeen[chatKs(chatOpenKey)] || {};
+  const now = Date.now();
+  const names = Object.keys(t).filter(n => now - t[n] < 3000);
+  el.textContent = names.length ? `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing…` : '';
+}
+function sendChatInput() {
+  const inp = document.getElementById('chat-input'); if (!inp || !chatOpenKey) return;
+  const text = inp.value.trim(); if (!text) return;
+  api.send({ type: 'chatSend', to: chatToFor(chatOpenKey), text });
+  inp.value = ''; inp.style.height = 'auto';
+}
+function openNewGroupModal() {
+  const connected = (peersState.peers || []).filter(p => p.connected);
+  if (!connected.length) { showToast('No connected peers to group with'); return; }
+  const old = document.getElementById('chat-group-overlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'chat-group-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:center;justify-content:center;';
+  const btnCss = 'font-family:inherit;font-size:12px;padding:4px 12px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;';
+  ov.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border-hi);border-radius:8px;padding:16px;min-width:340px;">
+    <h3 style="margin:0 0 10px;font-size:14px;">👥 New group</h3>
+    <input id="chat-group-name" type="text" placeholder="Group name" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;padding:6px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+    <div id="chat-group-members" style="margin-top:8px;">${connected.map(p => `<label style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;cursor:pointer;"><input type="checkbox" value="${escAttr(p.name)}" onchange="updateGroupMeshWarning()"> ${esc(p.name)}</label>`).join('')}</div>
+    <div id="chat-group-warn" style="font-size:10px;color:var(--yellow);margin-top:6px;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+      <button onclick="document.getElementById('chat-group-overlay').remove()" style="${btnCss}">Cancel</button>
+      <button onclick="createGroupFromModal()" style="${btnCss}border-color:var(--accent);color:var(--accent);">Create</button>
+    </div></div>`;
+  ov.addEventListener('mousedown', (e) => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  document.getElementById('chat-group-name').focus();
+}
+function selectedGroupMembers() { return [...document.querySelectorAll('#chat-group-members input:checked')].map(c => c.value); }
+function updateGroupMeshWarning() {
+  const sel = selectedGroupMembers();
+  const warn = [];
+  for (let i = 0; i < sel.length; i++) for (let j = i + 1; j < sel.length; j++) {
+    const pi = (peersState.peers || []).find(p => p.name === sel[i]);
+    const knows = ((pi && pi.knows) || []).map(n => n.toLowerCase());
+    if (!knows.includes(sel[j].toLowerCase())) warn.push(`${sel[i]} ↔ ${sel[j]}`);
+  }
+  const el = document.getElementById('chat-group-warn');
+  if (el) el.textContent = warn.length ? `⚠ Not paired with each other — they won't see each other's messages: ${warn.join(', ')}` : '';
+}
+function createGroupFromModal() {
+  const name = document.getElementById('chat-group-name').value.trim();
+  const members = selectedGroupMembers();
+  if (!name || !members.length) { showToast('Give the group a name and pick members'); return; }
+  api.send({ type: 'createGroup', name, members });
+  document.getElementById('chat-group-overlay').remove();
 }
 
 // ── PR notifications ───────────────────────────────────

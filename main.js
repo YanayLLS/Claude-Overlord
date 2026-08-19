@@ -1369,7 +1369,7 @@ function parseLine(id, line) {
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       const blocks = r.message.content;
-      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); } }
+      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); scanPeerReply(id, a, b.text); } }
       if (blocks.some(b => b.type === 'tool_use')) {
         a.isWaiting = false; a.hadTools = true;
         send({ type: 'status', id, status: 'active' });
@@ -2401,7 +2401,9 @@ function handleTermInput(id, data) {
     const openIdx = data.indexOf('\x1b[200~') + 6;
     const closeIdx = data.indexOf('\x1b[201~');
     if (closeIdx !== -1) {
-      // Complete paste in single chunk
+      // Complete paste in single chunk. The pasted content joins the line
+      // buffer so a later Enter still scans it for @mentions (peer messages
+      // pasted then submitted used to silently miss the scan).
       const content = data.slice(openIdx, closeIdx);
       if (content.length > LONG_PASTE_THRESHOLD) {
         const filePath = savePasteToFile(content);
@@ -2409,12 +2411,12 @@ function handleTermInput(id, data) {
       } else {
         writePtyChunked(t, data);
       }
+      inputBuffers.set(id, buf + content);
     } else {
       // Multi-chunk paste — start accumulating, don't write yet
       inBracketedPaste.add(id);
       bracketedPasteBuffers.set(id, data.slice(openIdx));
     }
-    inputBuffers.set(id, '');
     return;
   }
   if (inBracketedPaste.has(id)) {
@@ -2429,6 +2431,7 @@ function handleTermInput(id, data) {
       } else {
         writePtyChunked(t, '\x1b[200~' + content + '\x1b[201~');
       }
+      inputBuffers.set(id, buf + content);
     } else {
       bracketedPasteBuffers.set(id, (bracketedPasteBuffers.get(id) || '') + data);
       if (data.length === 1) { // safety: single char means paste mode ended unexpectedly
@@ -3146,6 +3149,26 @@ function handleIpc(msg) {
     case 'getPeersState': sendPeersState(); break;
     case 'peerMsgApprove': resolvePeerMsg(msg.agentId, msg.msgId, true); break;
     case 'peerMsgDismiss': resolvePeerMsg(msg.agentId, msg.msgId, false); break;
+    case 'chatSend': chatSendText(msg.to || {}, msg.text); break;
+    case 'chatTypingPing': { const { conns, group } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerTyping', groupId: group ? group.id : undefined }); break; }
+    case 'chatRead': { const { conns } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerChatRead', ids: msg.ids }); break; }
+    case 'chatSendFilePath': chatSendFile(msg.to || {}, String(msg.filePath || '')); break;
+    case 'pickChatFile': {
+      const to = msg.to || {};
+      dialog.showOpenDialog(mainWindow, { properties: ['openFile'], title: 'Send file to peer' })
+        .then(r => { if (!r.canceled && r.filePaths[0]) chatSendFile(to, r.filePaths[0]); })
+        .catch(() => {});
+      break;
+    }
+    case 'createGroup': createChatGroup(msg.name, msg.members); break;
+    case 'chatOpenFile': {
+      const p = String(msg.path || '');
+      let known = false;
+      for (const arr of Object.values(chats().peers)) if (arr.some(x => x.file && x.file.path === p)) known = true;
+      for (const g of Object.values(chats().groups)) if ((g.msgs || []).some(x => x.file && x.file.path === p)) known = true;
+      if (known) shell.openPath(p);
+      break;
+    }
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     case 'fullRestart': app.relaunch(); app.exit(0); break;
     case 'installUpdate': autoUpdater.quitAndInstall(); break;
@@ -3492,6 +3515,12 @@ function handleRemoteCmd(msg) {
     // authenticated channel, and approving from your phone is genuinely useful.
     case 'peerMsgApprove': resolvePeerMsg(msg.agentId, msg.msgId, true); break;
     case 'peerMsgDismiss': resolvePeerMsg(msg.agentId, msg.msgId, false); break;
+    // Chat from the same authenticated channel (drives the E2E; enables phone chat later)
+    case 'chatSend': chatSendText(msg.to || {}, msg.text); break;
+    case 'chatTypingPing': { const { conns, group } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerTyping', groupId: group ? group.id : undefined }); break; }
+    case 'chatRead': { const { conns } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerChatRead', ids: msg.ids }); break; }
+    case 'chatSendFilePath': chatSendFile(msg.to || {}, String(msg.filePath || '')); break;
+    case 'createGroup': createChatGroup(msg.name, msg.members); break;
     case 'getProjects': {
       const projects = new Set();
       for (const [, a] of agents) if (a.cwd) projects.add(a.cwd);
@@ -3635,6 +3664,11 @@ function peerRoster() {
   return out;
 }
 
+function sanitizePeerNameList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 64).map(n => pc.sanitizePeerName(n)).filter(Boolean);
+}
+
 function sanitizeRoster(list) {
   if (!Array.isArray(list)) return [];
   const out = [];
@@ -3649,12 +3683,12 @@ function sendPeersState() {
   const cfgPeers = Array.isArray(settings.peers) ? settings.peers : [];
   const rows = cfgPeers.map(p => {
     const conn = [...peerConns].find(c => c.helloDone && c.cfg && c.cfg.host === p.host && c.cfg.port === p.port) || (p.name ? findPeerConn(p.name) : null);
-    return { host: p.host, port: p.port, name: (conn && conn.name) || p.name || `${p.host}:${p.port}`, connected: !!conn, agents: conn ? conn.agents : [] };
+    return { host: p.host, port: p.port, name: (conn && conn.name) || p.name || `${p.host}:${p.port}`, connected: !!conn, agents: conn ? conn.agents : [], knows: conn ? (conn.peerNames || []) : [] };
   });
   for (const c of peerConns) { // inbound-only peers (they added us, we never added them)
     if (!c.helloDone || c.cfg) continue;
     if (rows.some(r => r.name.toLowerCase() === (c.name || '').toLowerCase())) continue;
-    rows.push({ host: '', port: 0, name: c.name, connected: true, inbound: true, agents: c.agents });
+    rows.push({ host: '', port: 0, name: c.name, connected: true, inbound: true, agents: c.agents, knows: c.peerNames || [] });
   }
   send({ type: 'peersState', enabled: !!settings.peersEnabled, name: myPeerName(), code: settings.peerCode || '', lanIp: getLanIp(), port: remotePort, peers: rows });
 }
@@ -3663,10 +3697,11 @@ function sendPeersState() {
 let _lastRosterJson = '';
 setInterval(() => {
   if (peerConns.size === 0) { _lastRosterJson = ''; return; }
-  const json = JSON.stringify(peerRoster());
+  const json = JSON.stringify({ a: peerRoster(), p: connectedPeerNames() });
   if (json === _lastRosterJson) return;
   _lastRosterJson = json;
-  for (const c of peerConns) if (c.helloDone) wsSendPeer(c, { type: 'peerAgents', agents: JSON.parse(json) });
+  const parsed = JSON.parse(json);
+  for (const c of peerConns) if (c.helloDone) wsSendPeer(c, { type: 'peerAgents', agents: parsed.a, peers: parsed.p });
 }, 5000);
 
 function closePeerConn(conn) {
@@ -3728,14 +3763,16 @@ function handlePeerMsg(conn, msg) {
     for (const c of [...peerConns]) { if (c !== conn && c.name && c.name.toLowerCase() === name.toLowerCase() && c.isClient === conn.isClient) closePeerConn(c); }
     conn.name = name;
     conn.agents = sanitizeRoster(msg.agents);
+    conn.peerNames = sanitizePeerNameList(msg.peers);
     conn.helloDone = true;
-    if (!conn.isClient) wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster() });
+    if (!conn.isClient) wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster(), peers: connectedPeerNames() });
     flog(`peer connected: ${name}${conn.isClient ? ' (outbound)' : ' (inbound)'}`);
     sendPeersState();
     return;
   }
   if (!conn.helloDone) { closePeerConn(conn); return; } // hello must come first
-  if (msg.type === 'peerAgents') { conn.agents = sanitizeRoster(msg.agents); sendPeersState(); return; }
+  if (handlePeerChatMsg(conn, msg)) return;
+  if (msg.type === 'peerAgents') { conn.agents = sanitizeRoster(msg.agents); conn.peerNames = sanitizePeerNameList(msg.peers); sendPeersState(); return; }
   if (msg.type === 'peerMessage') {
     const v = pc.validateEnvelope(msg);
     if (!v.ok) { wsSendPeer(conn, { type: 'peerAck', id: (msg && typeof msg.id === 'string') ? msg.id.slice(0, 64) : '', status: 'rejected', error: v.error }); return; }
@@ -3825,8 +3862,36 @@ function queuePeerInjection(agentId, env) {
 // input scanned by handleTermInput can), so two agents cannot ping-pong.
 function injectPeerMessage(agentId, env) {
   flog(`peer message ${env.id} from ${env.fromPeer} injected into agent ${agentId}`);
+  const a = agents.get(agentId);
+  // Remember the return address so a PEER-REPLY line in the agent's answer can
+  // route back. hop+1 keeps the chain bounded; cleared after one reply.
+  if (a && env.fromAgent) a.peerReplyTo = { peer: env.fromPeer, agent: env.fromAgent, hop: (Number(env.hop) || 0) + 1 };
   handleTermInput(agentId, '\x1b[200~' + pc.buildPeerHeader(env) + '\x1b[201~');
   handleTermInput(agentId, '\r');
+}
+
+// Scan an assistant text block for the PEER-REPLY marker and route it back to
+// the last peer sender. Loop-safe twice over: each reply consumes peerReplyTo
+// (one reply per incoming message), lands in the remote HUMAN's approval
+// queue, and the hop counter hard-stops the chain at MAX_HOP.
+function scanPeerReply(id, a, text) {
+  if (!a.peerReplyTo) return;
+  const m = text.match(/^\s*PEER-REPLY:\s*(.+)$/m);
+  if (!m || !m[1].trim()) return;
+  const replyTo = a.peerReplyTo;
+  a.peerReplyTo = null;
+  const conn = findPeerConn(replyTo.peer);
+  if (!conn) { send({ type: 'toast', text: `✕ Agent reply not sent — ${replyTo.peer} is offline` }); return; }
+  let user = ''; try { user = os.userInfo().username; } catch {}
+  const env = pc.buildEnvelope({ toAgent: replyTo.agent, fromAgent: a.agentName || '', fromPeer: myPeerName(), fromUser: user, text: m[1].trim(), hop: replyTo.hop });
+  const v = pc.validateEnvelope(env);
+  if (!v.ok) {
+    flog(`agent peer-reply blocked (${v.error})`);
+    send({ type: 'toast', text: v.error === 'hop limit reached' ? '✕ Reply chain hit its limit — a human has to continue it' : `✕ Agent reply blocked: ${v.error}` });
+    return;
+  }
+  sendPeerEnvelope(conn, env, conn.name);
+  send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} replied to @${replyTo.agent} on ${replyTo.peer}` });
 }
 
 function flushPeerMsgs(id) {
@@ -3858,6 +3923,7 @@ function sendRemoteMentionMessages(id, text, remote) {
   const body = pc.stripRemoteMentions(text, connectedPeerNames()).trim() || text;
   for (const r of remote) {
     const conn = findPeerConn(r.peerName);
+    flog(`peer mention: agent ${id} → @${r.agentName}@${r.peerName} (${conn ? 'sending' : 'NOT CONNECTED'})`);
     if (!conn) { send({ type: 'toast', text: `✕ Not connected to ${r.peerName}` }); continue; }
     const env = pc.buildEnvelope({ toAgent: r.agentName, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text: body, hop: 0 });
     sendPeerEnvelope(conn, env, r.peerName);
@@ -3903,7 +3969,7 @@ function dialPeer(cfg) {
     if (!pc.checkWsAccept(wsKey, res.headers['sec-websocket-accept'])) { socket.destroy(); schedulePeerRedial(cfg); return; }
     d.backoffMs = PEER_BACKOFF_MIN;
     const conn = attachPeerSocket(socket, { isClient: true, cfg });
-    wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster() });
+    wsSendPeer(conn, { type: 'peerHello', name: myPeerName(), version: app.getVersion(), agents: peerRoster(), peers: connectedPeerNames() });
   });
   req.on('response', (res) => { flog(`peer dial ${key}: HTTP ${res.statusCode} instead of upgrade (wrong code, peers disabled, or old Overlord on the other side)`); req.destroy(); schedulePeerRedial(cfg); });
   req.on('timeout', () => req.destroy(new Error('peer dial timeout')));
@@ -3925,6 +3991,224 @@ function stopAllPeers() {
     try { c.ws.destroy(); } catch {}
   }
   sendPeersState();
+}
+
+// ── Peer chat: human ↔ human, no agent involved ───────
+// History persists in settings.chats (capped per conversation). DMs are keyed
+// by lowercased peer name, groups by group id. Groups are fan-out only — the
+// sender delivers to each member directly, so members only see each other's
+// messages when they are mutually paired (the UI warns about missing pairs).
+const chatFileRx = new Map(); // fileId -> { meta, from, chunks, bytes, timer }
+const CHAT_DL_DIR = path.join(os.homedir(), 'Downloads', 'Overlord');
+let _chatSaveTimer = null;
+
+function chats() {
+  if (!settings.chats || typeof settings.chats !== 'object') settings.chats = {};
+  if (!settings.chats.peers) settings.chats.peers = {};
+  if (!settings.chats.groups) settings.chats.groups = {};
+  return settings.chats;
+}
+function chatSaveSoon() { clearTimeout(_chatSaveTimer); _chatSaveTimer = setTimeout(saveState, 1500); }
+function chatStore(convo, m) {
+  convo.push(m);
+  if (convo.length > pc.CHAT_HISTORY_MAX) convo.splice(0, convo.length - pc.CHAT_HISTORY_MAX);
+  chatSaveSoon();
+}
+function dmHistory(peerName) {
+  const k = String(peerName).toLowerCase();
+  if (!chats().peers[k]) chats().peers[k] = [];
+  return chats().peers[k];
+}
+function groupEntry(gref) {
+  const g = chats().groups;
+  if (!g[gref.id]) g[gref.id] = { id: gref.id, name: gref.name, members: gref.members, msgs: [] };
+  else { if (gref.name) g[gref.id].name = gref.name; if (gref.members && gref.members.length) g[gref.id].members = gref.members; }
+  return g[gref.id];
+}
+function findOwnChatMsg(id) {
+  for (const arr of Object.values(chats().peers)) { const m = arr.find(x => x.id === id && x.from === 'me'); if (m) return m; }
+  for (const g of Object.values(chats().groups)) { const m = (g.msgs || []).find(x => x.id === id && x.from === 'me'); if (m) return m; }
+  return null;
+}
+function markChatDelivered(id, byName) {
+  const m = findOwnChatMsg(id); if (!m) return;
+  m.deliveredBy = m.deliveredBy || [];
+  if (!m.deliveredBy.includes(byName)) m.deliveredBy.push(byName);
+  chatSaveSoon();
+  send({ type: 'chatMsgStatus', id, deliveredBy: m.deliveredBy, readBy: m.readBy || [] });
+}
+function markChatRead(ids, byName) {
+  for (const id of (Array.isArray(ids) ? ids : []).slice(0, 500)) {
+    const m = findOwnChatMsg(id); if (!m) continue;
+    m.readBy = m.readBy || [];
+    if (!m.readBy.includes(byName)) m.readBy.push(byName);
+    send({ type: 'chatMsgStatus', id, deliveredBy: m.deliveredBy || [], readBy: m.readBy });
+  }
+  chatSaveSoon();
+}
+function chatDedupe(id) {
+  if (seenPeerMsgIds.has(id)) return true;
+  seenPeerMsgIds.add(id); seenPeerMsgOrder.push(id);
+  if (seenPeerMsgOrder.length > 1000) seenPeerMsgIds.delete(seenPeerMsgOrder.shift());
+  return false;
+}
+function notifyChat(from, group, preview) {
+  if (!settings.notifications) return;
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.flashFrame(true);
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title: `💬 ${from}${group ? ' · ' + group.name : ''}`, body: String(preview || '').slice(0, 140), silent: !settings.notificationSound });
+  n.on('click', () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); send({ type: 'chatOpenFromNotification', key: group ? { type: 'group', id: group.id } : { type: 'peer', id: from.toLowerCase() } }); } });
+  n.show();
+}
+
+// Resolve a renderer target ({peer:name} or {group:id}) to live connections.
+function chatTargets(to) {
+  if (to && to.peer) { const c = findPeerConn(to.peer); return { conns: c ? [c] : [], group: null, missing: c ? [] : [String(to.peer)] }; }
+  const g = to && to.group ? chats().groups[to.group] : null;
+  if (!g) return { conns: [], group: null, missing: [] };
+  const me = myPeerName().toLowerCase();
+  const conns = [], missing = [];
+  for (const mname of g.members || []) {
+    if (String(mname).toLowerCase() === me) continue;
+    const c = findPeerConn(mname);
+    if (c) conns.push(c); else missing.push(mname);
+  }
+  return { conns, group: g, missing };
+}
+
+function chatSendText(to, text) {
+  text = String(text || '').trim();
+  if (!text) return;
+  const { conns, group, missing } = chatTargets(to);
+  if (!conns.length) { send({ type: 'toast', text: group ? '✕ No group members are online' : `✕ ${to.peer} is offline — message not sent` }); return; }
+  const gref = group ? { id: group.id, name: group.name, members: group.members } : undefined;
+  const wire = pc.buildChatMsg({ text, group: gref });
+  const entry = { id: wire.id, from: 'me', text: wire.text, ts: wire.ts, deliveredBy: [], readBy: [] };
+  if (group) chatStore(group.msgs, entry); else chatStore(dmHistory(conns[0].name), entry);
+  for (const c of conns) wsSendPeer(c, wire);
+  const key = group ? { type: 'group', id: group.id } : { type: 'peer', id: conns[0].name.toLowerCase() };
+  send({ type: 'chatMsg', key, msg: entry });
+  if (missing.length) send({ type: 'toast', text: `⚠ Not delivered to ${missing.join(', ')} (offline)` });
+}
+
+async function chatSendFile(to, filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile()) throw new Error('not a file');
+    if (st.size > pc.FILE_MAX_BYTES) { send({ type: 'toast', text: `✕ File too big (max ${Math.round(pc.FILE_MAX_BYTES / 1048576)} MB)` }); return; }
+    const { conns, group, missing } = chatTargets(to);
+    if (!conns.length) { send({ type: 'toast', text: '✕ Peer offline — file not sent' }); return; }
+    const name = path.basename(filePath);
+    const fileId = crypto.randomUUID();
+    const gref = group ? { id: group.id, name: group.name, members: group.members } : undefined;
+    const wire = pc.buildChatMsg({ file: { name, size: st.size, fileId }, group: gref });
+    const entry = { id: wire.id, from: 'me', file: { name, size: st.size, path: filePath }, ts: wire.ts, deliveredBy: [], readBy: [] };
+    if (group) chatStore(group.msgs, entry); else chatStore(dmHistory(conns[0].name), entry);
+    const key = group ? { type: 'group', id: group.id } : { type: 'peer', id: conns[0].name.toLowerCase() };
+    send({ type: 'chatMsg', key, msg: entry });
+    const data = await fs.promises.readFile(filePath);
+    for (const c of conns) {
+      wsSendPeer(c, { type: 'peerFileStart', fileId, chatId: wire.id, name, size: st.size, ts: wire.ts, group: wire.group });
+      for (let off = 0; off < data.length; off += pc.FILE_CHUNK_BYTES) {
+        wsSendPeer(c, { type: 'peerFileChunk', fileId, seq: off / pc.FILE_CHUNK_BYTES, data: data.slice(off, off + pc.FILE_CHUNK_BYTES).toString('base64') });
+        send({ type: 'chatFileProgress', id: wire.id, done: Math.min(off + pc.FILE_CHUNK_BYTES, data.length), total: data.length });
+        await new Promise(r => setTimeout(r, 5)); // yield between chunks
+      }
+      wsSendPeer(c, { type: 'peerFileEnd', fileId });
+    }
+    send({ type: 'chatFileProgress', id: wire.id, done: data.length, total: data.length });
+    if (missing.length) send({ type: 'toast', text: `⚠ File not delivered to ${missing.join(', ')} (offline)` });
+  } catch (e) {
+    flog('chatSendFile failed:', e.message);
+    send({ type: 'toast', text: '✕ File send failed: ' + e.message });
+  }
+}
+
+function createChatGroup(name, memberNames) {
+  const members = [...new Set([myPeerName(), ...(Array.isArray(memberNames) ? memberNames.map(String) : [])])];
+  const gref = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 32), name: String(name || 'group').trim().slice(0, 64) || 'group', members };
+  if (!pc.validateGroupRef(gref)) { send({ type: 'toast', text: '✕ A group needs a name and at least one other member' }); return; }
+  groupEntry(gref);
+  chatSaveSoon();
+  for (const mname of members) {
+    if (mname.toLowerCase() === myPeerName().toLowerCase()) continue;
+    const c = findPeerConn(mname);
+    if (c) wsSendPeer(c, { type: 'peerGroupInvite', group: gref });
+  }
+  send({ type: 'chatGroupAdded', group: gref });
+}
+
+// Incoming chat traffic — called from handlePeerMsg (conn.helloDone is guaranteed).
+function handlePeerChatMsg(conn, msg) {
+  if (msg.type === 'peerChat') {
+    const v = pc.validateChatMsg(msg);
+    if (!v.ok || msg.file) return; // file messages arrive via the transfer path only
+    if (msg.group && !pc.validateGroupRef(msg.group)) return;
+    if (chatDedupe(msg.id)) return;
+    const entry = { id: msg.id, from: conn.name, text: msg.text, ts: Number(msg.ts) || Date.now(), readBy: [] };
+    if (msg.group) chatStore(groupEntry(msg.group).msgs, entry); else chatStore(dmHistory(conn.name), entry);
+    const key = msg.group ? { type: 'group', id: msg.group.id } : { type: 'peer', id: conn.name.toLowerCase() };
+    send({ type: 'chatMsg', key, msg: entry, groupName: msg.group ? msg.group.name : undefined });
+    notifyChat(conn.name, msg.group, msg.text);
+    wsSendPeer(conn, { type: 'peerChatDelivered', id: msg.id });
+    return true;
+  }
+  if (msg.type === 'peerChatDelivered') { markChatDelivered(String(msg.id || ''), conn.name); return true; }
+  if (msg.type === 'peerChatRead') { markChatRead(msg.ids, conn.name); return true; }
+  if (msg.type === 'peerTyping') {
+    const key = msg.groupId ? { type: 'group', id: String(msg.groupId).slice(0, 64) } : { type: 'peer', id: conn.name.toLowerCase() };
+    send({ type: 'chatTyping', key, name: conn.name });
+    return true;
+  }
+  if (msg.type === 'peerGroupInvite') {
+    if (!pc.validateGroupRef(msg.group)) return true;
+    const ge = groupEntry(msg.group);
+    chatSaveSoon();
+    send({ type: 'chatGroupAdded', group: { id: ge.id, name: ge.name, members: ge.members } });
+    send({ type: 'toast', text: `💬 ${conn.name} added you to group "${ge.name}"` });
+    return true;
+  }
+  if (msg.type === 'peerFileStart') {
+    const meta = { fileId: String(msg.fileId || '').slice(0, 64), chatId: String(msg.chatId || '').slice(0, 64), name: pc.sanitizeFileName(msg.name), size: Number(msg.size) || 0, ts: Number(msg.ts) || Date.now(), group: msg.group };
+    if (!meta.fileId || !meta.chatId || meta.size <= 0 || meta.size > pc.FILE_MAX_BYTES) return true;
+    if (meta.group && !pc.validateGroupRef(meta.group)) return true;
+    if (chatFileRx.size >= 8) { flog('chat file rejected: too many concurrent transfers'); return true; }
+    const rx = { meta, from: conn.name, chunks: [], bytes: 0, timer: setTimeout(() => chatFileRx.delete(meta.fileId), 5 * 60 * 1000) };
+    chatFileRx.set(meta.fileId, rx);
+    return true;
+  }
+  if (msg.type === 'peerFileChunk') {
+    const rx = chatFileRx.get(msg.fileId);
+    if (!rx || rx.from !== conn.name) return true;
+    const buf = Buffer.from(String(msg.data || ''), 'base64');
+    rx.bytes += buf.length;
+    if (rx.bytes > rx.meta.size) { clearTimeout(rx.timer); chatFileRx.delete(msg.fileId); return true; }
+    rx.chunks.push(buf);
+    send({ type: 'chatFileProgress', id: rx.meta.chatId, done: rx.bytes, total: rx.meta.size });
+    return true;
+  }
+  if (msg.type === 'peerFileEnd') {
+    const rx = chatFileRx.get(msg.fileId);
+    if (!rx || rx.from !== conn.name) return true;
+    clearTimeout(rx.timer); chatFileRx.delete(msg.fileId);
+    if (rx.bytes !== rx.meta.size) { flog(`chat file ${rx.meta.name}: size mismatch ${rx.bytes}/${rx.meta.size} — discarded`); return true; }
+    if (chatDedupe(rx.meta.chatId)) return true;
+    try {
+      fs.mkdirSync(CHAT_DL_DIR, { recursive: true });
+      let dest = path.join(CHAT_DL_DIR, rx.meta.name);
+      const ext = path.extname(rx.meta.name), stem = path.basename(rx.meta.name, ext);
+      for (let i = 1; fs.existsSync(dest); i++) dest = path.join(CHAT_DL_DIR, `${stem} (${i})${ext}`);
+      fs.writeFileSync(dest, Buffer.concat(rx.chunks));
+      const entry = { id: rx.meta.chatId, from: conn.name, file: { name: path.basename(dest), size: rx.meta.size, path: dest }, ts: rx.meta.ts, readBy: [] };
+      if (rx.meta.group) chatStore(groupEntry(rx.meta.group).msgs, entry); else chatStore(dmHistory(conn.name), entry);
+      const key = rx.meta.group ? { type: 'group', id: rx.meta.group.id } : { type: 'peer', id: conn.name.toLowerCase() };
+      send({ type: 'chatMsg', key, msg: entry, groupName: rx.meta.group ? rx.meta.group.name : undefined });
+      notifyChat(conn.name, rx.meta.group, `📎 ${entry.file.name}`);
+      wsSendPeer(conn, { type: 'peerChatDelivered', id: rx.meta.chatId });
+    } catch (e) { flog('chat file save failed:', e.message); }
+    return true;
+  }
+  return false;
 }
 
 // ── Window ─────────────────────────────────────────────

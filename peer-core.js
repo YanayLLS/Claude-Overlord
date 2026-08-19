@@ -115,7 +115,61 @@ function cleanText(s) { return String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ''
 function buildPeerHeader(env) {
   const who = cleanText(env.fromUser || env.fromPeer);
   const agent = env.fromAgent ? `, agent ${cleanText(env.fromAgent)}` : '';
-  return `[Peer message from ${who} on ${cleanText(env.fromPeer)}${agent}]\n${cleanText(env.text)}`;
+  // Reply path for the receiving AGENT: a "PEER-REPLY:" line in its answer is
+  // detected by Overlord and routed back to the sender (into their approval
+  // queue). Do NOT phrase this as an @mention or a teammate name — teams mode
+  // would intercept it. Only offered when there is an agent to reply to.
+  const reply = env.fromAgent
+    ? `\n[You can reply: include a line starting with "PEER-REPLY: " in your answer and Overlord will route it back to the sender. Do not use SendMessage or teammate mentions for this.]`
+    : '';
+  return `[Peer message from ${who} on ${cleanText(env.fromPeer)}${agent}]\n${cleanText(env.text)}${reply}`;
+}
+
+// ── Chat (human ↔ human, no agent involved) ──
+const CHAT_TEXT_MAX = 4000;
+const CHAT_HISTORY_MAX = 200;
+const FILE_MAX_BYTES = 25 * 1024 * 1024;
+const FILE_CHUNK_BYTES = 512 * 1024;
+const GROUP_MEMBERS_MAX = 16;
+
+function buildChatMsg({ text, group, file }) {
+  const m = { type: 'peerChat', id: crypto.randomUUID(), ts: Date.now() };
+  if (text) m.text = String(text).slice(0, CHAT_TEXT_MAX);
+  if (group) m.group = { id: String(group.id), name: String(group.name).slice(0, 64), members: (group.members || []).slice(0, GROUP_MEMBERS_MAX) };
+  if (file) m.file = { name: String(file.name).slice(0, 200), size: Number(file.size) || 0, fileId: String(file.fileId) };
+  return m;
+}
+
+function validateGroupRef(g) {
+  if (!g || typeof g !== 'object') return false;
+  if (typeof g.id !== 'string' || !g.id || g.id.length > 64) return false;
+  if (typeof g.name !== 'string' || !g.name.trim() || g.name.length > 64) return false;
+  if (!Array.isArray(g.members) || g.members.length < 2 || g.members.length > GROUP_MEMBERS_MAX) return false;
+  return g.members.every(n => typeof n === 'string' && PEER_NAME_RE.test(n));
+}
+
+function validateChatMsg(m) {
+  if (!m || typeof m !== 'object') return { ok: false, error: 'not an object' };
+  if (typeof m.id !== 'string' || !m.id || m.id.length > 64) return { ok: false, error: 'bad id' };
+  const hasText = typeof m.text === 'string' && m.text.trim().length > 0;
+  const hasFile = m.file && typeof m.file === 'object';
+  if (!hasText && !hasFile) return { ok: false, error: 'empty message' };
+  if (hasText && m.text.length > CHAT_TEXT_MAX) return { ok: false, error: 'text too long' };
+  if (hasFile) {
+    if (typeof m.file.name !== 'string' || !m.file.name || m.file.name.length > 200) return { ok: false, error: 'bad file name' };
+    const size = Number(m.file.size);
+    if (!Number.isFinite(size) || size <= 0 || size > FILE_MAX_BYTES) return { ok: false, error: 'bad file size' };
+    if (typeof m.file.fileId !== 'string' || !m.file.fileId || m.file.fileId.length > 64) return { ok: false, error: 'bad file id' };
+  }
+  if (m.group !== undefined && !validateGroupRef(m.group)) return { ok: false, error: 'bad group' };
+  return { ok: true };
+}
+
+// Strip anything path-like or dangerous out of an incoming file name.
+function sanitizeFileName(name) {
+  const base = String(name).split(/[\\/]/).pop() || 'file';
+  const clean = base.replace(/[\x00-\x1f<>:"|?*]/g, '_').replace(/^\.+/, '_').slice(0, 150);
+  return clean || 'file';
 }
 
 // ── WebSocket client-side framing ──
@@ -146,10 +200,12 @@ function checkWsAccept(key, acceptHeader) { return expectedWsAccept(key) === Str
 
 module.exports = {
   MAX_HOP, MAX_TEXT_LEN,
+  CHAT_TEXT_MAX, CHAT_HISTORY_MAX, FILE_MAX_BYTES, FILE_CHUNK_BYTES, GROUP_MEMBERS_MAX,
   generatePairingCode, normalizeCode, formatCode, checkCode,
   sanitizePeerName, normalizePeer,
   parseRemoteMentions, stripRemoteMentions,
   buildEnvelope, validateEnvelope, buildPeerHeader,
+  buildChatMsg, validateChatMsg, validateGroupRef, sanitizeFileName,
   wsEncodeFrameMasked, wsEncodePingMasked,
   makeWsKey, expectedWsAccept, checkWsAccept,
 };
