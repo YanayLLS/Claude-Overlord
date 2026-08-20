@@ -125,6 +125,20 @@ function buildPeerHeader(env) {
   return `[Peer message from ${who} on ${cleanText(env.fromPeer)}${agent}]\n${cleanText(env.text)}${reply}`;
 }
 
+// ── Agent-initiated sends ──
+// Agents are taught (via --append-system-prompt) to emit a line like
+//   PEER-SEND Zephyr@me: composed message …
+// in their answer; Overlord routes it like a typed @mention. The message body
+// runs from the colon to the end of the text block, so it can be multi-line.
+const PEER_SEND_RE = /^\s*PEER-SEND\s+(?:to\s+)?@?([A-Za-z][A-Za-z0-9]*)\s*@\s*([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:\s*([\s\S]+)/m;
+function parsePeerSendMarker(text) {
+  const m = String(text).match(PEER_SEND_RE);
+  if (!m) return null;
+  const body = m[3].trim();
+  if (!body) return null;
+  return { agentName: m[1], target: m[2], text: body.slice(0, MAX_TEXT_LEN) };
+}
+
 // ── Chat (human ↔ human, no agent involved) ──
 const CHAT_TEXT_MAX = 4000;
 const CHAT_HISTORY_MAX = 200;
@@ -204,7 +218,7 @@ module.exports = {
   generatePairingCode, normalizeCode, formatCode, checkCode,
   sanitizePeerName, normalizePeer,
   parseRemoteMentions, stripRemoteMentions,
-  buildEnvelope, validateEnvelope, buildPeerHeader,
+  buildEnvelope, validateEnvelope, buildPeerHeader, parsePeerSendMarker,
   buildChatMsg, validateChatMsg, validateGroupRef, sanitizeFileName,
   wsEncodeFrameMasked, wsEncodePingMasked,
   makeWsKey, expectedWsAccept, checkWsAccept,

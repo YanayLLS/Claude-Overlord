@@ -1094,7 +1094,7 @@ function doSpawnTerminal(id) {
   const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const args = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   try {
-    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: { ...process.env, ...feat.env } });
+    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
     terminals.set(id, proc);
     a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
     if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
@@ -1115,11 +1115,12 @@ function doSpawnTerminal(id) {
       // Claude boot banner seen → ready after a settle delay (see the matching
       // detector in createAgent for the reasoning).
       if (!a.claudeReady && !a._readyTimer) {
-        a._readyBuf = ((a._readyBuf || '') + d).slice(-1024);
-        const cleanR = a._readyBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
-        if (/Welcome back|\? for shortcuts|Try ["']/.test(cleanR)) {
+        const probe = (a._readyBuf || '') + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|[\x00-\x08\x0b-\x1f\x7f]/g, '');
+        if (/Welcome back|\? for shortcuts|Try ["']/.test(probe)) {
           a._readyBuf = '';
           a._readyTimer = setTimeout(() => { a._readyTimer = null; a.claudeReady = true; flushPeerMsgs(id); }, 4000);
+        } else {
+          a._readyBuf = probe.slice(-256);
         }
       }
       // Detect resume errors and retry
@@ -1202,7 +1203,7 @@ function createAgent(folderPath, initialPrompt) {
   send({ type: 'stats', id, stats: agent.stats });
   send({ type: 'focused', id });
 
-  const agentEnv = { ...process.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env };
+  const agentEnv = cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env });
   try {
     const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
@@ -1216,16 +1217,18 @@ function createAgent(folderPath, initialPrompt) {
       termBuffers.set(id, buf);
       // Claude boot banner seen → ready to inject queued peer messages after a
       // short settle (the banner paints before the input handler accepts keys;
-      // injecting at banner-time silently drops the paste). Rolling buffer
-      // because the phrase can straddle chunk boundaries. Deliberately NOT the
-      // `>`-prompt heuristic: a cmd.exe prompt matches that too, and injecting
-      // into a shell would execute the message as a command.
+      // injecting at banner-time silently drops the paste). Strip ANSI FIRST
+      // and test before trimming — the banner often arrives inside one large
+      // chunk, and trimming raw bytes discarded the phrase before the test.
+      // Deliberately NOT the `>`-prompt heuristic: a cmd.exe prompt matches
+      // that too, and injecting into a shell would execute the message.
       if (!agent.claudeReady && !agent._readyTimer) {
-        agent._readyBuf = ((agent._readyBuf || '') + d).slice(-1024);
-        const cleanR = agent._readyBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
-        if (/Welcome back|\? for shortcuts|Try ["']/.test(cleanR)) {
+        const probe = (agent._readyBuf || '') + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|[\x00-\x08\x0b-\x1f\x7f]/g, '');
+        if (/Welcome back|\? for shortcuts|Try ["']/.test(probe)) {
           agent._readyBuf = '';
           agent._readyTimer = setTimeout(() => { agent._readyTimer = null; agent.claudeReady = true; flushPeerMsgs(id); }, 4000);
+        } else {
+          agent._readyBuf = probe.slice(-256);
         }
       }
       // Detect Claude ready prompt and send the initial prompt
@@ -1378,7 +1381,7 @@ function parseLine(id, line) {
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       const blocks = r.message.content;
-      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); scanPeerReply(id, a, b.text); } }
+      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); scanPeerReply(id, a, b.text); scanPeerSend(id, a, b.text); } }
       if (blocks.some(b => b.type === 'tool_use')) {
         a.isWaiting = false; a.hadTools = true;
         send({ type: 'status', id, status: 'active' });
@@ -1419,11 +1422,12 @@ function parseLine(id, line) {
           if (a.toolIds.size === 0) { a.hadTools = false; }
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-          if (txt) { setPrompt(id, a, txt); }
+          if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); }
           clrActivity(id); a.hadTools = false; a.turnTools = 0;
         }
       } else if (typeof c === 'string' && c.trim()) {
         setPrompt(id, a, c);
+        confirmPeerInjection(a, c.trim());
         clrActivity(id); a.hadTools = false; a.turnTools = 0;
       }
     } else if (r.type === 'system' && r.subtype === 'compact_boundary') {
@@ -1438,7 +1442,7 @@ function parseLine(id, line) {
       a.stats.turns++; a.stats.durMs += r.durationMs || 0;
       send({ type: 'stats', id, stats: a.stats });
       if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
-      a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0; a.spinnerText = '';
+      a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0; a.spinnerText = ''; a.peerAutoSends = 0;
       // Orphaned process finished its turn — safe to spawn a real terminal now
       if (a.orphanAlive) {
         a.orphanAlive = false;
@@ -2502,7 +2506,7 @@ function handleTermInput(id, data) {
     // send it and swallow the chunk instead of submitting it locally. The
     // pattern is strict (@Agent@<connected-peer-name>), so ordinary pasted
     // text never matches.
-    const remoteM = pc.parseRemoteMentions(full.slice(0, lastCR), connectedPeerNames());
+    const remoteM = pc.parseRemoteMentions(full.slice(0, lastCR), mentionTargetNames());
     if (remoteM.length > 0) {
       sendRemoteMentionMessages(id, full.slice(0, lastCR), remoteM);
       t.write('\x15');
@@ -2510,6 +2514,7 @@ function handleTermInput(id, data) {
       return;
     }
     markSessionSwitch(id, full.slice(0, lastCR));
+    { const ag = agents.get(id); if (ag) ag.peerHopBase = 0; } // human-submitted line resets the agent-chain budget
     const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     if (data.length > LONG_PASTE_THRESHOLD) {
@@ -2531,13 +2536,14 @@ function handleTermInput(id, data) {
     // Enter pressed — a line with a remote mention (@Agent@peer) is a message
     // TO the peer, not a prompt for this agent: send it over the peer socket,
     // clear the typed line, and never submit it locally.
-    const remote = pc.parseRemoteMentions(buf, connectedPeerNames());
+    const remote = pc.parseRemoteMentions(buf, mentionTargetNames());
     if (remote.length > 0) {
       sendRemoteMentionMessages(id, buf, remote);
       t.write('\x15'); // Ctrl+U — wipe the line from the local input box
       inputBuffers.set(id, '');
       return;
     }
+    { const ag = agents.get(id); if (ag) ag.peerHopBase = 0; } // human prompt resets the agent-chain budget
     const mentions = findMentions(buf);
     if (mentions.length > 0) {
       const ctx = buildMentionContext(mentions);
@@ -2751,23 +2757,47 @@ function stopDevServer(p) {
 
 // If cwd is a worktree in a feature, give the agent tool-access to its sibling repos
 // (--add-dir) and a system-prompt note about them, plus env vars. Returns claude flags + env.
+// Overlord agents must be TOP-LEVEL Claude sessions. If Overlord itself was
+// launched from inside a Claude session (npm start in a Claude terminal, a
+// test harness), the inherited session markers make the CLI treat agents as
+// child sessions and silently disable transcript saving — which kills all of
+// Overlord's JSONL-based tracking (status, prompts, stats, peer scanning).
+function cleanAgentEnv(extra) {
+  const env = { ...process.env, ...extra };
+  delete env.CLAUDE_CODE_CHILD_SESSION;
+  delete env.CLAUDE_CODE_SESSION_ID;
+  delete env.CLAUDE_CODE_ENTRYPOINT;
+  delete env.CLAUDE_PID;
+  delete env.CLAUDECODE;
+  return env;
+}
+
 function featureAgentArgs(cwd) {
+  const notes = [];
+  let addDirs = '';
+  const env = {};
   const self = findWorktree(cwd);
-  if (!self || !self.feature) return { flags: '', env: {} };
-  const siblings = (settings.worktrees || []).filter(w => w.feature === self.feature && w.path !== cwd && fs.existsSync(w.path));
-  const env = {
-    OVERLORD_FEATURE: self.feature,
-    OVERLORD_FEATURE_BRANCH: self.branch || '',
-    OVERLORD_FEATURE_REPOS: siblings.map(w => `${path.basename(w.repo)}=${w.path}`).join(';'),
-  };
-  if (!siblings.length) return { flags: '', env };
-  const list = siblings.map(w => `${path.basename(w.repo)} (${w.path})`).join('; ');
-  const note = (`This git worktree is part of feature "${self.feature}" on branch ${self.branch}, spanning multiple repos. `
-    + `Sibling repos in the same feature (same branch) are: ${list}. They are already in your allowed directories — `
-    + `read and edit files in them when the task spans repos.`)
-    .replace(/"/g, "'").replace(/[\r\n]+/g, ' ').replace(/%/g, 'pct');
-  const addDirs = siblings.map(w => `--add-dir "${w.path}"`).join(' ');
-  return { flags: ` ${addDirs} --append-system-prompt "${note}"`, env };
+  if (self && self.feature) {
+    const siblings = (settings.worktrees || []).filter(w => w.feature === self.feature && w.path !== cwd && fs.existsSync(w.path));
+    env.OVERLORD_FEATURE = self.feature;
+    env.OVERLORD_FEATURE_BRANCH = self.branch || '';
+    env.OVERLORD_FEATURE_REPOS = siblings.map(w => `${path.basename(w.repo)}=${w.path}`).join(';');
+    if (siblings.length) {
+      const list = siblings.map(w => `${path.basename(w.repo)} (${w.path})`).join('; ');
+      notes.push(`This git worktree is part of feature "${self.feature}" on branch ${self.branch}, spanning multiple repos. `
+        + `Sibling repos in the same feature (same branch) are: ${list}. They are already in your allowed directories — `
+        + `read and edit files in them when the task spans repos.`);
+      addDirs = ' ' + siblings.map(w => `--add-dir "${w.path}"`).join(' ');
+    }
+  }
+  // Every agent learns how to message other agents through Overlord. Local
+  // (target: me) works always; cross-machine targets are the paired peer names.
+  notes.push('Overlord peer messaging: when the user asks you to send or forward a message to another agent, '
+    + 'end your reply with a line: PEER-SEND AgentName@target: followed by the message you compose (it may continue to the end of your reply). '
+    + 'Use target me for an agent in this same Overlord, or the peer machine name for an agent on a teammates machine. '
+    + 'Only do this when the user asks you to message another agent. Never use SendMessage or teammate mentions for cross-Overlord messaging.');
+  const note = notes.join(' ').replace(/"/g, "'").replace(/[\r\n]+/g, ' ').replace(/%/g, 'pct');
+  return { flags: `${addDirs} --append-system-prompt "${note}"`, env };
 }
 
 function handleIpc(msg) {
@@ -3722,6 +3752,19 @@ const PEER_PING_MS = 25000, PEER_IDLE_MS = 90000, PEER_ACK_TIMEOUT_MS = 10000;
 
 function myPeerName() { return pc.sanitizePeerName(settings.peerName) || pc.sanitizePeerName(os.hostname()) || 'overlord'; }
 function connectedPeerNames() { const out = []; for (const c of peerConns) if (c.helloDone && c.name) out.push(c.name); return out; }
+// Valid @Agent@<target> names: connected peers, plus 'me' / own peer name for
+// delivering to another LOCAL agent. A real connected peer always wins the
+// name; the local aliases only apply when no such peer exists.
+function mentionTargetNames() { return [...connectedPeerNames(), 'me', myPeerName()]; }
+function isLocalMentionTarget(name) {
+  if (findPeerConn(name)) return false;
+  const n = String(name).toLowerCase();
+  return n === 'me' || n === myPeerName().toLowerCase();
+}
+function findLocalAgentByName(name) {
+  for (const [aid, ag] of agents) if (ag.agentName && !ag.archived && ag.agentName.toLowerCase() === String(name).toLowerCase()) return aid;
+  return null;
+}
 function findPeerConn(name) { const n = String(name || '').toLowerCase(); for (const c of peerConns) if (c.helloDone && c.name && c.name.toLowerCase() === n) return c; return null; }
 function wsSendPeer(conn, obj) { if (!conn || !conn.ws || conn.ws.destroyed) return; const s = JSON.stringify(obj); try { conn.ws.write(conn.isClient ? pc.wsEncodeFrameMasked(s) : wsEncodeFrame(s)); } catch {} }
 
@@ -3917,7 +3960,7 @@ function queuePeerInjection(agentId, env) {
     setTimeout(() => {
       const a2 = agents.get(agentId);
       if (a2 && !a2.claudeReady && terminals.has(agentId) && !a2.crashed) { a2.claudeReady = true; flushPeerMsgs(agentId); }
-    }, 45000);
+    }, 15000);
     return;
   }
   injectPeerMessage(agentId, env);
@@ -3930,11 +3973,56 @@ function queuePeerInjection(agentId, env) {
 function injectPeerMessage(agentId, env) {
   flog(`peer message ${env.id} from ${env.fromPeer} injected into agent ${agentId}`);
   const a = agents.get(agentId);
-  // Remember the return address so a PEER-REPLY line in the agent's answer can
-  // route back. hop+1 keeps the chain bounded; cleared after one reply.
-  if (a && env.fromAgent) a.peerReplyTo = { peer: env.fromPeer, agent: env.fromAgent, hop: (Number(env.hop) || 0) + 1 };
-  handleTermInput(agentId, '\x1b[200~' + pc.buildPeerHeader(env) + '\x1b[201~');
-  handleTermInput(agentId, '\r');
+  const t = terminals.get(agentId);
+  if (!t) return;
+  if (a) {
+    // Chain budget: anything this agent sends after receiving a peer message
+    // (PEER-REPLY or PEER-SEND) inherits hop+1, so automated back-and-forth is
+    // bounded. A human-submitted prompt resets it to 0.
+    a.peerHopBase = (Number(env.hop) || 0) + 1;
+    // Return address so a PEER-REPLY line can route back; consumed by one reply.
+    if (env.fromAgent) a.peerReplyTo = { peer: env.fromPeer, agent: env.fromAgent, hop: a.peerHopBase };
+  }
+  // Write straight to the pty, NOT through handleTermInput: injected content
+  // must never enter the input scanner, or a message whose text contains an
+  // @mention would bounce a duplicate send on the injected Enter. Always paste
+  // the actual text (no temp-file spillover — that mechanism is for human
+  // pastes); the TUI collapses a long paste visually but submits it in full.
+  const text = pc.buildPeerHeader(env);
+  const paste = '\x1b[200~' + text + '\x1b[201~';
+  writePtyChunked(t, paste);
+  const settleMs = Math.ceil(paste.length / 1024) * 8 + 80; // after the last chunk lands
+  setTimeout(() => { try { t.write('\r'); } catch {} }, settleMs);
+  // Delivery is VERIFIED, not assumed: the transcript is ground truth. If the
+  // injected message doesn't appear there as a user prompt within a few
+  // seconds, re-inject once; if that also fails, say so instead of losing it.
+  if (a) {
+    if (a._injectVerify) clearTimeout(a._injectVerify.timer);
+    const attempt = Number(env._attempt) || 0;
+    a._injectVerify = {
+      envId: env.id,
+      timer: setTimeout(() => {
+        a._injectVerify = null;
+        if (!agents.has(agentId) || !terminals.has(agentId)) return;
+        if (attempt === 0) {
+          flog(`peer message ${env.id} not confirmed in transcript after 12s — re-injecting`);
+          env._attempt = 1;
+          injectPeerMessage(agentId, env);
+        } else {
+          flog(`peer message ${env.id} delivery FAILED after retry`);
+          send({ type: 'toast', text: `✕ Delivery to @${a.agentName || 'agent ' + agentId} could not be confirmed — check its terminal` });
+        }
+      }, 12000),
+    };
+  }
+}
+
+// Transcript confirmed the injected message arrived as a real prompt.
+function confirmPeerInjection(a, txt) {
+  if (a && a._injectVerify && typeof txt === 'string' && txt.startsWith('[Peer message from')) {
+    clearTimeout(a._injectVerify.timer);
+    a._injectVerify = null;
+  }
 }
 
 // Scan an assistant text block for the PEER-REPLY marker and route it back to
@@ -3947,8 +4035,6 @@ function scanPeerReply(id, a, text) {
   if (!m || !m[1].trim()) return;
   const replyTo = a.peerReplyTo;
   a.peerReplyTo = null;
-  const conn = findPeerConn(replyTo.peer);
-  if (!conn) { send({ type: 'toast', text: `✕ Agent reply not sent — ${replyTo.peer} is offline` }); return; }
   let user = ''; try { user = os.userInfo().username; } catch {}
   const env = pc.buildEnvelope({ toAgent: replyTo.agent, fromAgent: a.agentName || '', fromPeer: myPeerName(), fromUser: user, text: m[1].trim(), hop: replyTo.hop });
   const v = pc.validateEnvelope(env);
@@ -3957,8 +4043,51 @@ function scanPeerReply(id, a, text) {
     send({ type: 'toast', text: v.error === 'hop limit reached' ? '✕ Reply chain hit its limit — a human has to continue it' : `✕ Agent reply blocked: ${v.error}` });
     return;
   }
+  // Local loopback: the message came from another agent on THIS machine —
+  // same approval queue as everything else; hop counter still bounds the chain.
+  if (replyTo.peer.toLowerCase() === myPeerName().toLowerCase() && !findPeerConn(replyTo.peer)) {
+    const target = findLocalAgentByName(replyTo.agent);
+    if (target === null || target === id) { send({ type: 'toast', text: `✕ Agent reply not delivered — no local agent named @${replyTo.agent}` }); return; }
+    deliverPeerMessage(target, env);
+    send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} replied to @${replyTo.agent} — awaiting your approval` });
+    return;
+  }
+  const conn = findPeerConn(replyTo.peer);
+  if (!conn) { send({ type: 'toast', text: `✕ Agent reply not sent — ${replyTo.peer} is offline` }); return; }
   sendPeerEnvelope(conn, env, conn.name);
   send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} replied to @${replyTo.agent} on ${replyTo.peer}` });
+}
+
+// Agent-initiated send: a PEER-SEND marker in an assistant text block. Taught
+// via the spawn system prompt, so "send our findings to Zephyr" in plain
+// English becomes a routed message. Remote targets still pass through the
+// recipient's approval queue; local targets inject directly (same gate);
+// hop inheritance + a per-turn cap keep agent↔agent chains bounded.
+function scanPeerSend(id, a, text) {
+  const p = pc.parsePeerSendMarker(text);
+  if (!p) return;
+  a.peerAutoSends = (a.peerAutoSends || 0) + 1;
+  if (a.peerAutoSends > 3) { flog(`agent ${id} PEER-SEND rate-capped this turn`); return; }
+  let user = ''; try { user = os.userInfo().username; } catch {}
+  const env = pc.buildEnvelope({ toAgent: p.agentName, fromAgent: a.agentName || '', fromPeer: myPeerName(), fromUser: user, text: p.text, hop: a.peerHopBase || 0 });
+  const v = pc.validateEnvelope(env);
+  if (!v.ok) {
+    send({ type: 'toast', text: v.error === 'hop limit reached' ? '✕ Agent message chain hit its limit — a human has to continue it' : `✕ Agent message blocked: ${v.error}` });
+    return;
+  }
+  if (isLocalMentionTarget(p.target)) {
+    const target = findLocalAgentByName(p.agentName);
+    flog(`agent ${id} PEER-SEND → @${p.agentName} (local ${target === null ? 'NOT FOUND' : 'agent ' + target})`);
+    if (target === null || target === id) { send({ type: 'toast', text: `✕ ${a.agentName || 'Agent'} tried to message @${p.agentName} (local) — no such agent` }); return; }
+    deliverPeerMessage(target, env);
+    send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} sent a message to @${p.agentName} — awaiting your approval` });
+    return;
+  }
+  const conn = findPeerConn(p.target);
+  flog(`agent ${id} PEER-SEND → @${p.agentName}@${p.target} (${conn ? 'sending' : 'NOT CONNECTED'})`);
+  if (!conn) { send({ type: 'toast', text: `✕ ${a.agentName || 'Agent'} tried to message ${p.target} — not connected` }); return; }
+  sendPeerEnvelope(conn, env, conn.name);
+  send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} sent a message to @${p.agentName} on ${conn.name}` });
 }
 
 function flushPeerMsgs(id) {
@@ -3987,8 +4116,21 @@ function sendRemoteMentionMessages(id, text, remote) {
   // Strip the @Agent@peer tokens from the message body — on the receiving side
   // Claude Code's teams mode would intercept them as teammate DMs and swallow
   // the whole submission.
-  const body = pc.stripRemoteMentions(text, connectedPeerNames()).trim() || text;
+  const body = pc.stripRemoteMentions(text, mentionTargetNames()).trim() || text;
   for (const r of remote) {
+    // @Agent@me (or own peer name): deliver to another LOCAL agent through the
+    // same approval queue as remote messages — nothing runs until it is
+    // approved on the target agent's ✉ badge.
+    if (isLocalMentionTarget(r.peerName)) {
+      const env = pc.buildEnvelope({ toAgent: r.agentName, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text: body, hop: 0 });
+      const target = findLocalAgentByName(r.agentName);
+      flog(`peer mention: agent ${id} → @${r.agentName} (local ${target === null ? 'NOT FOUND' : 'agent ' + target})`);
+      if (target === null) { send({ type: 'toast', text: `✕ No local agent named @${r.agentName}` }); continue; }
+      if (target === id) { send({ type: 'toast', text: `✕ @${r.agentName} is this agent — not sent to itself` }); continue; }
+      deliverPeerMessage(target, env);
+      send({ type: 'toast', text: `✉ Sent to @${r.agentName} — approve it on their ✉ badge` });
+      continue;
+    }
     const conn = findPeerConn(r.peerName);
     flog(`peer mention: agent ${id} → @${r.agentName}@${r.peerName} (${conn ? 'sending' : 'NOT CONNECTED'})`);
     if (!conn) { send({ type: 'toast', text: `✕ Not connected to ${r.peerName}` }); continue; }
