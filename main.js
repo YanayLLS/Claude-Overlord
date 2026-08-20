@@ -2790,14 +2790,15 @@ function featureAgentArgs(cwd) {
       addDirs = ' ' + siblings.map(w => `--add-dir "${w.path}"`).join(' ');
     }
   }
-  // Every agent learns how to message other agents through Overlord. Local
-  // (target: me) works always; cross-machine targets are the paired peer names.
-  notes.push('Overlord peer messaging: when the user asks you to send or forward a message to another agent, '
+  // Agents learn how to message other agents through Overlord — but only when
+  // the Peers toggle is on (read at spawn time; toggling later applies to
+  // newly started agents).
+  if (settings.peersEnabled) notes.push('Overlord peer messaging: when the user asks you to send or forward a message to another agent, '
     + 'end your reply with a line: PEER-SEND AgentName@target: followed by the message you compose (it may continue to the end of your reply). '
     + 'Use target me for an agent in this same Overlord, or the peer machine name for an agent on a teammates machine. '
     + 'Only do this when the user asks you to message another agent. Never use SendMessage or teammate mentions for cross-Overlord messaging.');
   const note = notes.join(' ').replace(/"/g, "'").replace(/[\r\n]+/g, ' ').replace(/%/g, 'pct');
-  return { flags: `${addDirs} --append-system-prompt "${note}"`, env };
+  return { flags: `${addDirs}${note ? ` --append-system-prompt "${note}"` : ''}`, env };
 }
 
 function handleIpc(msg) {
@@ -3754,8 +3755,10 @@ function myPeerName() { return pc.sanitizePeerName(settings.peerName) || pc.sani
 function connectedPeerNames() { const out = []; for (const c of peerConns) if (c.helloDone && c.name) out.push(c.name); return out; }
 // Valid @Agent@<target> names: connected peers, plus 'me' / own peer name for
 // delivering to another LOCAL agent. A real connected peer always wins the
-// name; the local aliases only apply when no such peer exists.
-function mentionTargetNames() { return [...connectedPeerNames(), 'me', myPeerName()]; }
+// name; the local aliases only apply when no such peer exists. The whole
+// messaging system is gated on the Peers toggle — disabled means no names
+// match, so mention lines are just ordinary prompts.
+function mentionTargetNames() { return settings.peersEnabled ? [...connectedPeerNames(), 'me', myPeerName()] : []; }
 function isLocalMentionTarget(name) {
   if (findPeerConn(name)) return false;
   const n = String(name).toLowerCase();
@@ -4030,6 +4033,7 @@ function confirmPeerInjection(a, txt) {
 // (one reply per incoming message), lands in the remote HUMAN's approval
 // queue, and the hop counter hard-stops the chain at MAX_HOP.
 function scanPeerReply(id, a, text) {
+  if (!settings.peersEnabled) return;
   if (!a.peerReplyTo) return;
   const m = text.match(/^\s*PEER-REPLY:\s*(.+)$/m);
   if (!m || !m[1].trim()) return;
@@ -4064,6 +4068,7 @@ function scanPeerReply(id, a, text) {
 // recipient's approval queue; local targets inject directly (same gate);
 // hop inheritance + a per-turn cap keep agent↔agent chains bounded.
 function scanPeerSend(id, a, text) {
+  if (!settings.peersEnabled) return;
   const p = pc.parsePeerSendMarker(text);
   if (!p) return;
   a.peerAutoSends = (a.peerAutoSends || 0) + 1;
