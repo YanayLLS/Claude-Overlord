@@ -14,6 +14,7 @@ const pc = require('./peer-core');
 
 // ── Constants ──────────────────────────────────────────
 const JSONL_POLL_MS = 1000;
+const RECOVER_DAYS = 7; // how far back to rebuild the agent list from transcripts when state is lost
 const TOOL_DONE_DELAY_MS = 300;
 const PERMISSION_TIMER_MS = 7000;
 // TEXT_IDLE_DELAY_MS removed — turn_duration is the authoritative "done" signal
@@ -80,6 +81,7 @@ const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { pickResumedFile } = require('./resume-core');
 const { parseState } = require('./state-core');
+const { scanSessions, mergeRecovered } = require('./recover-core');
 const APP_DIR = __dirname;
 let gitUpdateBusy = false;
 
@@ -834,15 +836,32 @@ function saveState() {
   const state = { agents: agentEntries, settings };
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
-    // Keep the last good file as .bak before replacing it — a power cut during the
-    // write can leave the real one truncated, and .bak is what loadState falls back to.
-    try { if (fs.statSync(STATE_FILE).size > 0) fs.copyFileSync(STATE_FILE, STATE_FILE + '.bak'); } catch {}
-    fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(state, null, 2));
+    writeDurable(STATE_FILE + '.tmp', JSON.stringify(state, null, 2));
+    // Rotate by rename, never by copy. NTFS journals the rename but not the file
+    // data, so copying the old file here re-wrote .bak inside the same unflushed
+    // window as the new one — a hard reset then zero-filled BOTH and every agent,
+    // bookmark and setting was gone. A rename leaves .bak pointing at bytes that
+    // were fsynced on an earlier save, so it survives the same power cut.
+    try { fs.renameSync(STATE_FILE, STATE_FILE + '.bak'); } catch {}
     fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
   } catch (e) { console.log('[Overlord] Failed to save state:', e.message); }
 }
 
+// fs.writeFileSync alone only hands the bytes to the OS cache; on an unclean
+// shutdown the file comes back the right size and full of NULs. fsync before the
+// rename is what makes the save actually survive a reboot.
+function writeDurable(file, data) {
+  const fd = fs.openSync(file, 'w');
+  try {
+    fs.writeFileSync(fd, data);
+    fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
+}
+
+let recoveryNote = null; // surfaced as a toast once the renderer is up
+
 function loadState() {
+  let damaged = false;
   for (const file of [STATE_FILE, STATE_FILE + '.bak']) {
     let raw;
     try { raw = fs.readFileSync(file, 'utf-8'); } catch { continue; } // missing is fine
@@ -853,10 +872,20 @@ function loadState() {
     }
     // Damaged. Park it under .corrupt so the next save can't overwrite the only
     // copy, and so there's something left to recover from by hand.
+    damaged = true;
     try { fs.renameSync(file, file + '.corrupt'); } catch {}
     flog(`[Overlord] state file ${file} unreadable — kept as ${path.basename(file)}.corrupt`);
   }
-  return { agents: [], settings: {} };
+  // Both copies unreadable — but only when one actually existed. A first launch has
+  // nothing to recover, and importing every recent session there would be noise.
+  if (!damaged) return { agents: [], settings: {} };
+  const state = { agents: [], settings: {} };
+  try {
+    const n = mergeRecovered(state, scanSessions(path.join(os.homedir(), '.claude', 'projects'), RECOVER_DAYS));
+    if (n) recoveryNote = `State file was damaged — restored ${n} agent${n === 1 ? '' : 's'} from Claude's transcripts (archived).`;
+    flog(`[Overlord] state lost — rebuilt ${n} agents from transcripts`);
+  } catch (e) { flog(`[Overlord] transcript recovery failed: ${e.message}`); }
+  return state;
 }
 
 function restoreAgents(state) {
@@ -4525,6 +4554,7 @@ app.whenReady().then(() => {
     // Runs on every load incl. renderer reload — repaints from in-memory state
     // so a reload (to pick up index.html changes) keeps all live sessions.
     sendFullState();
+    if (recoveryNote) { send({ type: 'toast', text: recoveryNote }); recoveryNote = null; }
   });
   mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); });
   mainWindow.on('blur', () => { _windowFocused = false; });
@@ -4603,7 +4633,7 @@ app.on('before-quit', () => {
         const dpid = detachedPids.get(entry.sessionId);
         if (dpid) entry.pid = dpid;
       }
-      fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
+      writeDurable(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
       fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
     } catch (e) {
       console.log('[Overlord] Failed to save detached PIDs:', e.message);
