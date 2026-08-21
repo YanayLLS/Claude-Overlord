@@ -229,6 +229,11 @@ function defaultModel() {
 // restores (and never kills) the sessions of a concurrently running install.
 const STATE_DIR = process.env.OVERLORD_STATE_DIR || path.join(os.homedir(), '.pixel-agents');
 const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
+// Settings live in the state file too, but they also get their own copy: the agent
+// list is rewritten on every prompt, title and window move, and config that took
+// real work to set up (watched PR repos, workflows, bookmarks) should not share a
+// blast radius with it.
+const SETTINGS_FILE = path.join(STATE_DIR, 'overlord-settings.json');
 const CLAUDE_JSON = path.join(os.homedir(), '.claude.json');
 
 function protectClaudeConfig() {
@@ -845,6 +850,28 @@ function saveState() {
     try { fs.renameSync(STATE_FILE, STATE_FILE + '.bak'); } catch {}
     fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
   } catch (e) { console.log('[Overlord] Failed to save state:', e.message); }
+  saveSettingsCopy();
+}
+
+// Third copy of just the settings, written only when they actually change. Rare
+// writes mean a much smaller window in which a power cut can catch this file
+// mid-flight, so it outlives the state file it was copied from.
+let _lastSettingsJson = null;
+function saveSettingsCopy() {
+  try {
+    const js = JSON.stringify(settings, null, 2);
+    if (js === _lastSettingsJson) return;
+    writeDurable(SETTINGS_FILE + '.tmp', js);
+    fs.renameSync(SETTINGS_FILE + '.tmp', SETTINGS_FILE);
+    _lastSettingsJson = js;
+  } catch (e) { console.log('[Overlord] Failed to save settings copy:', e.message); }
+}
+
+function loadSettingsCopy() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+    return (s && typeof s === 'object' && !Array.isArray(s)) ? s : null;
+  } catch { return null; }
 }
 
 // fs.writeFileSync alone only hands the bytes to the OS cache; on an unclean
@@ -868,6 +895,10 @@ function loadState() {
     const parsed = parseState(raw);
     if (parsed) {
       if (file !== STATE_FILE) flog('[Overlord] state file unusable — recovered agents and settings from .bak');
+      // A .bak can be a save or two behind; anything the settings copy knows that
+      // it doesn't is newer, so fill the gaps rather than losing that config.
+      const copy = loadSettingsCopy();
+      if (copy) parsed.settings = { ...copy, ...parsed.settings };
       return parsed;
     }
     // Damaged. Park it under .corrupt so the next save can't overwrite the only
@@ -879,7 +910,11 @@ function loadState() {
   // Both copies unreadable — but only when one actually existed. A first launch has
   // nothing to recover, and importing every recent session there would be noise.
   if (!damaged) return { agents: [], settings: {} };
-  const state = { agents: [], settings: {} };
+  // The settings copy is written only on change, so it usually survives whatever
+  // killed the state file — watched PR repos, workflows and bookmarks come back
+  // without the user re-entering them.
+  const state = { agents: [], settings: loadSettingsCopy() || {} };
+  if (state.settings.bookmarks) flog('[Overlord] state lost — settings restored from overlord-settings.json');
   try {
     const n = mergeRecovered(state, scanSessions(path.join(os.homedir(), '.claude', 'projects'), RECOVER_DAYS));
     if (n) recoveryNote = `State file was damaged — restored ${n} agent${n === 1 ? '' : 's'} from Claude's transcripts (archived).`;
