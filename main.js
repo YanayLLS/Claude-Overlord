@@ -82,6 +82,7 @@ const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { pickResumedFile } = require('./resume-core');
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered } = require('./recover-core');
+const { migrateLegacy } = require('./state-dir');
 const APP_DIR = __dirname;
 let gitUpdateBusy = false;
 
@@ -227,7 +228,14 @@ function defaultModel() {
 
 // OVERLORD_STATE_DIR sandboxes a test instance: own state/accounts, so it never
 // restores (and never kills) the sessions of a concurrently running install.
-const STATE_DIR = process.env.OVERLORD_STATE_DIR || path.join(os.homedir(), '.pixel-agents');
+const STATE_DIR = process.env.OVERLORD_STATE_DIR || path.join(os.homedir(), '.overlord');
+// The state used to live in ~/.pixel-agents, from before the app was called
+// Overlord. First launch after the rename carries the config across; the old
+// directory is left intact so a rollback still finds it.
+if (!process.env.OVERLORD_STATE_DIR) {
+  const n = migrateLegacy(path.join(os.homedir(), '.pixel-agents'), STATE_DIR);
+  if (n) console.log(`[Overlord] migrated ${n} file(s) from ~/.pixel-agents to ~/.overlord`);
+}
 const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
 // Settings live in the state file too, but they also get their own copy: the agent
 // list is rewritten on every prompt, title and window move, and config that took
