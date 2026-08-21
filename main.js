@@ -815,7 +815,14 @@ function globalSearch(query) {
 // ── State persistence ─────────────────────────────────
 let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100, peersEnabled: false, peerName: null, peerCode: null, peers: [] };
 
+// restoreAgents() runs on the renderer's did-finish-load, but saves fire earlier
+// (window move/resize, a crash-time close). Saving before the restore writes an
+// empty agent list over the real one, and the save after that copies the empty
+// file over the .bak too — both copies of the user's agents gone.
+let _stateRestored = false;
+
 function saveState() {
+  if (!_stateRestored) return;
   const agentEntries = [];
   for (const [id, a] of agents) {
     const wasActive = !a.isWaiting;
@@ -856,6 +863,7 @@ function restoreAgents(state) {
   if (!state) state = loadState();
   if (!settings._merged) { settings = { ...settings, ...state.settings }; settings._merged = true; }
   const saved = state.agents;
+  _stateRestored = true; // from here on the in-memory agent list is the truth; saving is safe
   if (saved.length === 0) return;
 
   // ── Phase 1: Instant — create agent entries from saved metadata (no I/O) ──
@@ -1011,6 +1019,17 @@ function queuePrewarm(id) {
   }));
 }
 
+// node-pty on Windows implements kill() as ClosePseudoConsole() on a handle
+// table with no lock, and destroy() is just another kill(). Killing a pty twice
+// (or killing one that already exited) double-closes the HPCON and corrupts the
+// process heap — Electron dies with 0xc0000374 and takes every agent with it.
+// One kill per pty, never after exit.
+function killPty(t) {
+  if (!t || t._ovKilled) return;
+  t._ovKilled = true;
+  try { t.kill(); } catch {}
+}
+
 function handleTermExit(id, exitCode) {
   const a = agents.get(id);
   if (!a) return;
@@ -1132,7 +1151,7 @@ function doSpawnTerminal(id) {
           a._onboardingHandled = true;
           console.log(`[Overlord] Onboarding screen detected for agent ${id} — auto-selecting theme and restarting`);
           protectClaudeConfig();
-          try { proc.kill(); } catch {}
+          killPty(proc);
           setTimeout(() => { if (agents.has(id)) { terminals.delete(id); spawnTerminal(id); } }, 1000);
         } else if (useResume && !a._resumeFailed && /No conversation found with session ID/i.test(clean)) {
           a._resumeFailed = true;
@@ -1141,7 +1160,7 @@ function doSpawnTerminal(id) {
           resumeErrorBuf = '';
           console.log(`[Overlord] --resume failed for agent ${id} (session not found), retrying with --session-id`);
           send({ type: 'termData', id, data: '\r\n\x1b[33m[Session expired — starting fresh conversation...]\x1b[0m\r\n' });
-          try { proc.kill(); } catch {}
+          killPty(proc);
           setTimeout(() => { if (agents.has(id)) { terminals.delete(id); spawnTerminal(id); } }, 500);
         } else if (/session.{0,5}id.{0,30}already in use/i.test(clean)) {
           const retries = a._lockRetries || 0;
@@ -1152,7 +1171,7 @@ function doSpawnTerminal(id) {
             const delay = 2000 * a._lockRetries;
             console.log(`[Overlord] Session lock busy for agent ${id}, retry ${a._lockRetries}/5 in ${delay}ms`);
             send({ type: 'termData', id, data: `\r\n\x1b[33m[Session locked — retrying in ${delay / 1000}s (${a._lockRetries}/5)...]\x1b[0m\r\n` });
-            try { proc.kill(); } catch {}
+            killPty(proc);
             setTimeout(() => {
               if (!agents.has(id)) return;
               terminals.delete(id);
@@ -1166,7 +1185,7 @@ function doSpawnTerminal(id) {
         }
       }
     });
-    proc.onExit((e) => { handleTermExit(id, e?.exitCode); try { proc.destroy(); } catch {} });
+    proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
   } catch (e) {
     console.log(`[Overlord] Failed to spawn terminal for agent ${id}:`, e.message);
     send({ type: 'termData', id, data: `\r\n\x1b[31mFailed to start terminal: ${e.message}\x1b[0m\r\n` });
@@ -1240,7 +1259,7 @@ function createAgent(folderPath, initialPrompt) {
         }
       }
     });
-    proc.onExit((e) => { handleTermExit(id, e?.exitCode); try { proc.destroy(); } catch {} });
+    proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
     // Fallback: send prompt after timeout if ready-detection didn't fire
     if (initialPrompt) {
       setTimeout(() => { if (!promptSent) { promptSent = true; try { proc.write(initialPrompt + '\r'); } catch {} } }, 8000);
@@ -1276,7 +1295,7 @@ function closeAgent(id) {
   termBuffers.delete(id);
   pendingPeerMsgs.delete(id);
   peerApprovalQueue.delete(id);
-  const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
+  const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
   agents.delete(id);
   send({ type: 'agentClosed', id });
   saveState();
@@ -1297,7 +1316,7 @@ function archiveAgent(id) {
   inBracketedPaste.delete(id);
   bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
-  const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
+  const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
   send({ type: 'agentArchived', id });
   saveState();
 }
@@ -1352,7 +1371,7 @@ function readLines(id) {
     a.fileOffset = st.size;
     const text = a.lineBuffer + buf.toString('utf-8');
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
-    if (lines.some(l => l.trim())) { a.crashed = false; clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; send({ type: 'permClear', id }); } }
+    if (lines.some(l => l.trim())) { a.crashed = false; clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
     for (const line of lines) { if (line.trim()) parseLine(id, line); }
   } catch (e) { logToRenderer(`[readLines] Agent ${id} error: ${e.message} — file: ${a.jsonlFile}`); }
 }
@@ -1402,6 +1421,7 @@ function parseLine(id, line) {
         // These tools always block on a human choice — flag now, don't wait out the timer.
         // They also block under bypassPermissions, which startPermTimer skips.
         if (blocks.some(b => b.type === 'tool_use' && (b.name === 'AskUserQuestion' || b.name === 'ExitPlanMode'))) {
+          logToRenderer(`[ASKDBG] agent ${id}: ask tool_use parsed at ${new Date().toISOString()} -> sending perm ask`);
           clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id, ask: true }); notifyPermission(id, a);
         } else if (nonExempt) startPermTimer(id);
       }
@@ -1950,6 +1970,7 @@ function armPrTimer() {
 
 // ── GitHub Actions tracking ───────────────────────────
 const { runState, nextPollDelay, diffNewFailures, REPO_RE: WF_REPO_RE } = require('./actions-core');
+const { checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
 const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
 let actionsTimer = null;
 let actionsGhErrorLogged = false;
@@ -2019,6 +2040,38 @@ async function fetchWorkflowRun(w) {
   };
 }
 
+// The local checkouts Overlord already knows about: every agent's cwd plus every
+// feature worktree. No new setting — a repo you never open can't have work waiting.
+function localCheckoutDirs() {
+  const dirs = new Set();
+  for (const a of agents.values()) if (a.cwd) dirs.add(a.cwd);
+  for (const w of settings.worktrees || []) if (w.path) dirs.add(w.path);
+  return [...dirs].filter(d => fs.existsSync(d));
+}
+
+// Hang an { count, title } badge on each row: how far your local branches run
+// ahead of the branch that workflow last deployed. That gap is the PR you owe.
+async function annotateAhead(rows) {
+  const targets = rows.filter(r => !r.error && r.branch);
+  if (!targets.length) return;
+  const infos = (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean);
+  if (!infos.length) return;
+  const now = Date.now();
+  await Promise.all(targets.map(async (r) => {
+    // Same branch checked out twice (repo + worktree) counts once. A checkout
+    // sitting ON the deploy branch is skipped — no PR to open from dev to dev.
+    const seen = new Set();
+    const mine = infos.filter(i => i.repo.toLowerCase() === r.repo.toLowerCase()
+      && i.branch !== r.branch && !seen.has(i.branch) && seen.add(i.branch));
+    const counts = [];
+    for (const i of mine) {
+      const n = await aheadOf(i.dir, r.branch, now);
+      if (n) counts.push({ branch: i.branch, count: n });
+    }
+    r.ahead = aheadSummary(counts, r.branch);
+  }));
+}
+
 async function pollActions() {
   const cfg = settings.actionsSettings;
   const wfs = sanitizeWorkflows(cfg && cfg.workflows);
@@ -2034,6 +2087,7 @@ async function pollActions() {
     return rows;
   }
   actionsGhErrorLogged = false;
+  try { await annotateAhead(rows); } catch (e) { console.log('[Overlord] Ahead-count failed:', e.message); }
   // Notify only on the transition into failure — a run that was already red last
   // poll has been reported once, and a first sighting isn't a transition at all.
   const prevStates = settings.actionsStates || {};
@@ -2751,7 +2805,7 @@ function startDevServer(p) {
 
 function stopDevServer(p) {
   const s = devServers.get(p);
-  if (s) { try { s.proc.kill(); } catch {} killPortProcess(s.port); devServers.delete(p); }
+  if (s) { killPty(s.proc); killPortProcess(s.port); devServers.delete(p); }
   send({ type: 'wtServer', path: p, running: false });
 }
 
