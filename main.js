@@ -4582,6 +4582,10 @@ app.whenReady().then(() => {
     if (!_didRestore) {
       _didRestore = true;
       restoreAgents(state);
+      // Seed the settings copy at boot. Nothing else saves until the user changes
+      // something, so on the launch right after an update — exactly when the old
+      // state file is the only copy — there would otherwise be no second copy yet.
+      saveSettingsCopy();
       startRemoteServer();
       armPrTimer();
       armActionsTimer();
