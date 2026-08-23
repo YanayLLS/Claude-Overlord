@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "1.34.0",
+  "version": "1.35.0",
   "description": "Overlord — Claude Agent Manager",
   "main": "main.js",
   "scripts": {
@@ -82,7 +82,11 @@
       "browser/registry.js",
       "mcp/tools.js",
       "mcp/server.js",
-      "mcp/agent-config.js"
+      "mcp/agent-config.js",
+      "preview-pane.js",
+      "preview-ui.js",
+      "preview-ui-dom.js",
+      "preview-ui-device.js"
     ],
     "directories": {
       "output": "out"

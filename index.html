@@ -1111,6 +1111,33 @@ button:focus-visible { outline-offset:0; }
 .chat-send{font-family:inherit;font-size:12px;font-weight:600;padding:7px 16px;color:var(--bg);background:var(--accent);
   border:none;border-radius:17px;cursor:pointer;flex:none;transition:filter .15s;}
 .chat-send:hover{filter:brightness(1.12);}
+/* Web preview pane — the focused agent's embedded browser */
+#preview-toggle.active { color:var(--cyan); background:rgba(148,226,213,.12); }
+#preview-resize { width:4px; height:auto; background:transparent; cursor:ew-resize; flex-shrink:0; display:none; position:relative; border-left:1px solid var(--border); }
+#preview-resize::after { content:''; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:2px; height:24px; background:transparent; border-radius:1px; transition:background .15s; }
+#preview-resize:hover::after { background:var(--cyan); }
+#preview-resize.open { display:block; }
+#preview-col { display:none; flex-direction:column; flex-shrink:0; width:520px; min-width:280px; border-left:1px solid var(--border); background:var(--editor-bg); position:relative; }
+#preview-col.open { display:flex; }
+/* List-col stays flex:1 (fills leftover); term + preview-col use inline px widths set on toggle and by the drag handles. */
+#content.preview-open #list-col { min-width: 200px; }
+#preview-header { display:flex; align-items:center; gap:6px; padding:0 6px; height:35px; background:var(--panel-bg); border-bottom:1px solid var(--border); flex-shrink:0; }
+#preview-header input { flex:1; min-width:0; background:var(--bg2); border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:11px; padding:4px 8px; border-radius:4px; outline:none; }
+#preview-header button { background:none; border:none; color:var(--dim); cursor:pointer; font-size:14px; padding:4px 8px; border-radius:4px; transition:background .1s, color .1s; }
+#preview-header button:hover { color:var(--text); background:rgba(205,214,244,.06); }
+#preview-header button.active { color:var(--cyan); background:rgba(148,226,213,.12); }
+#preview-device-menu { position:fixed; z-index:9999; background:var(--bg3); border:1px solid var(--border-hi); border-radius:6px; padding:4px 0; min-width:140px; box-shadow:0 4px 16px rgba(0,0,0,.3); }
+#preview-device-menu button { display:block; width:100%; text-align:left; font-family:inherit; font-size:12px; padding:6px 14px; background:none; border:none; color:var(--text); cursor:pointer; }
+#preview-device-menu button:hover { background:rgba(205,214,244,.06); }
+#preview-host { flex:1; min-height:0; position:relative; background:#000; }
+#preview-status { position:absolute; left:0; right:0; top:35px; bottom:36px; display:none; align-items:center; justify-content:center; color:var(--dim); font-size:12px; pointer-events:none; }
+#preview-errors { display:flex; align-items:center; gap:8px; padding:6px 10px; height:36px; background:var(--panel-bg); border-top:1px solid var(--border); flex-shrink:0; font-size:11px; }
+#preview-error-badge { color:var(--dim); }
+#preview-error-badge.has-errors { color:var(--red); font-weight:600; }
+#preview-errors button { margin-left:auto; background:var(--bg2); border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:11px; padding:3px 10px; border-radius:4px; cursor:pointer; transition:background .1s, border-color .1s; }
+#preview-errors button:nth-of-type(2) { margin-left:0; }
+#preview-errors button:hover:not(:disabled) { background:var(--bg3); border-color:var(--cyan); }
+#preview-errors button:disabled { opacity:.4; cursor:not-allowed; }
 </style>
 </head>
 <body>
@@ -1378,6 +1405,9 @@ button:focus-visible { outline-offset:0; }
 <script src="./prompt-copy.js"></script>
 <script src="./term-size-core.js"></script>
 <script src="./usage-core.js"></script>
+<script src="./preview-ui-dom.js"></script>
+<script src="./preview-ui-device.js"></script>
+<script src="./preview-ui.js"></script>
 <script>
 document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
 
@@ -2023,7 +2053,9 @@ async function restartAgent(id) {
   api.send({ type: 'restartAgent', id });
 }
 function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
-function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); }
+function urlForAgent(id) { const a = agents.get(id); if (!a || !a.servers || a.servers.size === 0) return ''; const sorted = [...a.servers.entries()].sort((x, y) => x[0] - y[0]); return sorted[0][1]; }
+function syncPreview() { if (!window.preview) return; window.preview.setActiveAgent(selectedId); window.preview.setUrl(selectedId != null ? urlForAgent(selectedId) : ''); }
+function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
   _renaming = true;

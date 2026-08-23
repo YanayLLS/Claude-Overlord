@@ -13,6 +13,7 @@ const pc = require('./peer-core');
 const { createRegistry } = require('./browser/registry');
 const { createMcpServer } = require('./mcp/server');
 const { writeAgentConfig, settingsFlags, removeAgentConfig } = require('./mcp/agent-config');
+const { createPreviewController } = require('./preview-pane');
 
 
 // ── Constants ──────────────────────────────────────────
@@ -275,6 +276,7 @@ process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
 let mainWindow = null;
 let browserRegistry = null;
 let mcpServer = null;
+let preview = null;
 
 // CLI flags binding one agent to its own embedded browser, and denying the
 // Chrome-extension MCP server that relays to whatever machine has the extension
@@ -1398,6 +1400,7 @@ function closeAgent(id) {
   pendingPeerMsgs.delete(id);
   peerApprovalQueue.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
+  if (preview) preview.onAgentClosed(id);
   if (browserRegistry) browserRegistry.destroy(id);
   if (mcpServer) mcpServer.revokeToken(id);
   removeAgentConfig(id);
@@ -1424,6 +1427,7 @@ function archiveAgent(id) {
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
   // Archiving reclaims resources — a view is a whole renderer process. The token
   // and temp config stay: the agent can be unarchived and ensure() is lazy.
+  if (preview) preview.onAgentClosed(id);
   if (browserRegistry) browserRegistry.destroy(id);
   send({ type: 'agentArchived', id });
   saveState();
@@ -3113,7 +3117,18 @@ function handleIpc(msg) {
       }
       break;
     }
-    case 'focusAgent': spawnTerminal(msg.id); send({ type: 'focused', id: msg.id }); break;
+    case 'focusAgent':
+      spawnTerminal(msg.id);
+      if (preview) preview.setAgent(msg.id);
+      send({ type: 'focused', id: msg.id });
+      break;
+    case 'previewToggle': if (preview) (msg.visible ? preview.show() : preview.hide()); break;
+    case 'previewSetBounds': if (preview) preview.setBounds(msg.bounds); break;
+    case 'previewLoad': if (preview) preview.load(msg.url); break;
+    case 'previewReload': if (preview) preview.reload(); break;
+    case 'previewSetDevice': if (preview) preview.setDevice(msg.device); break;
+    case 'previewSendErrors': if (preview) preview.sendErrors(msg.id); break;
+    case 'previewClearErrors': if (preview) preview.clearErrors(msg.id); break;
     case 'termInput': handleTermInput(msg.id, msg.data); break;
     case 'ghostComplete': ghostComplete(msg.id, msg.reqId, msg.prefix, msg.context); break;
     case 'stopLoop': { const a = agents.get(msg.id); if (a) { a.cronCount = 0; send({ type: 'looping', id: msg.id, active: false, count: 0 }); } const t = terminals.get(msg.id); if (t) t.write('\x03'); break; }
@@ -4629,10 +4644,11 @@ app.whenReady().then(() => {
       return `persist:overlord-agent-${a && a.sessionId ? a.sessionId : id}`;
     },
     onErrorCount: (id, count, last) => send({ type: 'previewError', id, count, last }),
-    onNavigated: (id, url) => send({ type: 'previewLoaded', id, url }),
+    onNavigated: (id, url) => { send({ type: 'previewLoaded', id, url }); if (preview) preview.onAgentNavigated(id, url); },
   });
   mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
   mcpServer.start().catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
+  preview = createPreviewController({ window: mainWindow, registry: browserRegistry, send, writeToAgent: (id, text) => handleTermInput(id, text) });
   if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   mainWindow.setMenuBarVisibility(false);
@@ -4706,6 +4722,7 @@ app.on('before-quit', () => {
   if (remoteServer) { try { remoteServer.close(); } catch {} }
   if (remoteWs) { try { remoteWs.destroy(); } catch {} }
   if (mcpServer) { try { mcpServer.stop(); } catch {} }
+  if (preview) { try { preview.destroy(); } catch {} }
   if (browserRegistry) { try { browserRegistry.destroyAll(); } catch {} }
   // Spawn detached Claude processes for active agents so they survive the app restart.
   // The detached process continues the current turn headlessly; on restore the app
