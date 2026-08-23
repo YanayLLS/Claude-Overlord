@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "preinstall": "node scripts/check-prerequisites.js",
+    "test": "node --test",
     "start": "node scripts/bundle-xterm.js && electron .",
     "dev": "node scripts/bundle-xterm.js && electronmon .",
     "package": "node scripts/bundle-xterm.js && electron-builder --dir",
@@ -72,7 +73,16 @@
       "xterm-bundle.js",
       "xterm.css",
       "qr.js",
-      "mobile.html"
+      "mobile.html",
+      "browser/errors.js",
+      "browser/view-wiring.js",
+      "browser/snapshot-script.js",
+      "browser/input-rebind.js",
+      "browser/actions.js",
+      "browser/registry.js",
+      "mcp/tools.js",
+      "mcp/server.js",
+      "mcp/agent-config.js"
     ],
     "directories": {
       "output": "out"
