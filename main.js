@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification, clipboard } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, dialog, shell, Notification, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -10,6 +10,9 @@ const { autoUpdater } = require('electron-updater');
 const pty = require('node-pty');
 const wt = require('./worktree');
 const pc = require('./peer-core');
+const { createRegistry } = require('./browser/registry');
+const { createMcpServer } = require('./mcp/server');
+const { writeAgentConfig, settingsFlags, removeAgentConfig } = require('./mcp/agent-config');
 
 
 // ── Constants ──────────────────────────────────────────
@@ -270,6 +273,28 @@ process.on('uncaughtException', (e) => flog('uncaughtException:', e));
 process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
 
 let mainWindow = null;
+let browserRegistry = null;
+let mcpServer = null;
+
+// CLI flags binding one agent to its own embedded browser, and denying the
+// Chrome-extension MCP server that relays to whatever machine has the extension
+// paired. Never throws: a failure here degrades to "this agent spawns without a
+// browser", it must never block agent creation.
+// browser:false is the app-quit detached spawn — the MCP port dies with the app,
+// but the deny rule still has to travel with it.
+function agentClaudeFlags(id, { browser = true } = {}) {
+  try {
+    if (!browser) return settingsFlags(id);
+    if (!mcpServer || !mcpServer.port()) {
+      console.log(`[Overlord] Browser MCP not ready for agent ${id} — spawning with deny rule only`);
+      return settingsFlags(id);
+    }
+    return writeAgentConfig({ id, port: mcpServer.port(), token: mcpServer.mintToken(id) }).flags;
+  } catch (e) {
+    console.log(`[Overlord] Browser config failed for agent ${id}: ${e.message}`);
+    return '';
+  }
+}
 const agents = new Map();
 const terminals = new Map();
 const watchers = new Map();
@@ -443,6 +468,11 @@ function scanForServers(id, text) {
       ports.set(port, normalUrl);
       console.log(`[Overlord] Server detected for agent ${id}: ${normalUrl}`);
       send({ type: 'serverDetected', id, port, url: normalUrl });
+      // Point this agent's own browser at its dev server, whether or not anyone is watching.
+      if (browserRegistry) {
+        const actions = browserRegistry.actionsFor(id);
+        if (actions) actions.navigate(normalUrl).catch(() => {});
+      }
     }
   }
 }
@@ -1181,7 +1211,7 @@ function doSpawnTerminal(id) {
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const useResume = hasJsonl && !a._resumeFailed;
   const feat = featureAgentArgs(a.cwd);
-  const claudeCmd = (useResume ? `claude --resume ${a.sessionId}${skip}` : `claude --session-id ${a.sessionId}${skip}`) + feat.flags;
+  const claudeCmd = (useResume ? `claude --resume ${a.sessionId}${skip}` : `claude --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id);
   const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const args = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   try {
@@ -1287,7 +1317,7 @@ function createAgent(folderPath, initialPrompt) {
 
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const feat = featureAgentArgs(cwd);
-  const claudeCmd = `claude --session-id ${sessionId}${skip}${feat.flags}`;
+  const claudeCmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}`;
   const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const shellArgs = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
@@ -1368,6 +1398,9 @@ function closeAgent(id) {
   pendingPeerMsgs.delete(id);
   peerApprovalQueue.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
+  if (browserRegistry) browserRegistry.destroy(id);
+  if (mcpServer) mcpServer.revokeToken(id);
+  removeAgentConfig(id);
   agents.delete(id);
   send({ type: 'agentClosed', id });
   saveState();
@@ -1389,6 +1422,9 @@ function archiveAgent(id) {
   bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
+  // Archiving reclaims resources — a view is a whole renderer process. The token
+  // and temp config stay: the agent can be unarchived and ensure() is lazy.
+  if (browserRegistry) browserRegistry.destroy(id);
   send({ type: 'agentArchived', id });
   saveState();
 }
@@ -4579,6 +4615,24 @@ app.whenReady().then(() => {
   if (bounds.x !== undefined && bounds.y !== undefined) { opts.x = bounds.x; opts.y = bounds.y; }
   mainWindow = new BrowserWindow(opts);
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, cb) => cb(true));
+  browserRegistry = createRegistry({
+    makeView: (partition) => new WebContentsView({
+      webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true },
+    }),
+    attach: (view) => mainWindow.contentView.addChildView(view),
+    detach: (view) => mainWindow.contentView.removeChildView(view),
+    // Partitions are keyed off the agent's sessionId UUID, not its numeric id:
+    // ids restart at 1 each launch while partitions persist on disk, so numeric
+    // keys would hand a new agent a previous one's cookies and logins.
+    partitionFor: (id) => {
+      const a = agents.get(id);
+      return `persist:overlord-agent-${a && a.sessionId ? a.sessionId : id}`;
+    },
+    onErrorCount: (id, count, last) => send({ type: 'previewError', id, count, last }),
+    onNavigated: (id, url) => send({ type: 'previewLoaded', id, url }),
+  });
+  mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
+  mcpServer.start().catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   mainWindow.setMenuBarVisibility(false);
@@ -4651,6 +4705,8 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   if (remoteServer) { try { remoteServer.close(); } catch {} }
   if (remoteWs) { try { remoteWs.destroy(); } catch {} }
+  if (mcpServer) { try { mcpServer.stop(); } catch {} }
+  if (browserRegistry) { try { browserRegistry.destroyAll(); } catch {} }
   // Spawn detached Claude processes for active agents so they survive the app restart.
   // The detached process continues the current turn headlessly; on restore the app
   // kills it via saved PID before reconnecting.
@@ -4660,7 +4716,7 @@ app.on('before-quit', () => {
     const wasActive = !a.isWaiting;
     if (!wasActive) continue;
     const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
-    const cmd = `claude --resume ${a.sessionId}${skip}`;
+    const cmd = `claude --resume ${a.sessionId}${skip}${agentClaudeFlags(id, { browser: false })}`;
     try {
       const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
       const args = process.platform === 'win32' ? ['/c', cmd] : ['-c', cmd];
