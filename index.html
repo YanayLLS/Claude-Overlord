@@ -88,6 +88,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .act-pill.act-cancelled { background:var(--border); color:var(--text); }
 .act-pill.act-none { background:var(--border); color:var(--text); }
 .act-pill.act-error { background:#fab387; }
+.act-ahead { font-size:10px; font-weight:700; padding:1px 5px; margin-left:6px; border-radius:999px;
+  border:1px solid #fab387; color:#fab387; vertical-align:1px; cursor:help; }
 .act-wf { display:flex; align-items:center; gap:6px; font-size:12px; padding:3px 4px; border-radius:4px; transition:background .12s; }
 .act-wf:hover { background:var(--bg3); }
 /* Remove ✕ stays invisible until you're on its row — no wall of red x's. */
@@ -5225,8 +5227,11 @@ function actionsRowHtml(r) {
   const copyBtn = r.state === 'failure' && r.url
     ? `<button class="act-copy" title="Copy run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>`
     : '';
+  // Commits of yours that this workflow's branch hasn't got — i.e. the PR you owe.
+  const ahead = r.ahead
+    ? `<span class="act-ahead" title="${escapeHtml(r.ahead.title)}">+${r.ahead.count}</span>` : '';
   return `<div class="act-row act-${state}" onclick="openActionRun('${u}')">${copyBtn}`
-    + `<div>${escapeHtml(r.name || r.file)}<span class="act-pill act-${state}">${label}</span></div>`
+    + `<div>${escapeHtml(r.name || r.file)}<span class="act-pill act-${state}">${label}</span>${ahead}</div>`
     + `<div class="act-meta">${escapeHtml(r.repo)}${meta ? ' · ' + meta : ''}</div></div>`;
 }
 

@@ -14,6 +14,7 @@ const pc = require('./peer-core');
 
 // ── Constants ──────────────────────────────────────────
 const JSONL_POLL_MS = 1000;
+const RECOVER_DAYS = 7; // how far back to rebuild the agent list from transcripts when state is lost
 const TOOL_DONE_DELAY_MS = 300;
 const PERMISSION_TIMER_MS = 7000;
 // TEXT_IDLE_DELAY_MS removed — turn_duration is the authoritative "done" signal
@@ -80,6 +81,8 @@ const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { pickResumedFile } = require('./resume-core');
 const { parseState } = require('./state-core');
+const { scanSessions, mergeRecovered } = require('./recover-core');
+const { migrateLegacy } = require('./state-dir');
 const APP_DIR = __dirname;
 let gitUpdateBusy = false;
 
@@ -225,8 +228,20 @@ function defaultModel() {
 
 // OVERLORD_STATE_DIR sandboxes a test instance: own state/accounts, so it never
 // restores (and never kills) the sessions of a concurrently running install.
-const STATE_DIR = process.env.OVERLORD_STATE_DIR || path.join(os.homedir(), '.pixel-agents');
+const STATE_DIR = process.env.OVERLORD_STATE_DIR || path.join(os.homedir(), '.overlord');
+// The state used to live in ~/.pixel-agents, from before the app was called
+// Overlord. First launch after the rename carries the config across; the old
+// directory is left intact so a rollback still finds it.
+if (!process.env.OVERLORD_STATE_DIR) {
+  const n = migrateLegacy(path.join(os.homedir(), '.pixel-agents'), STATE_DIR);
+  if (n) console.log(`[Overlord] migrated ${n} file(s) from ~/.pixel-agents to ~/.overlord`);
+}
 const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
+// Settings live in the state file too, but they also get their own copy: the agent
+// list is rewritten on every prompt, title and window move, and config that took
+// real work to set up (watched PR repos, workflows, bookmarks) should not share a
+// blast radius with it.
+const SETTINGS_FILE = path.join(STATE_DIR, 'overlord-settings.json');
 const CLAUDE_JSON = path.join(os.homedir(), '.claude.json');
 
 function protectClaudeConfig() {
@@ -815,7 +830,14 @@ function globalSearch(query) {
 // ── State persistence ─────────────────────────────────
 let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100, peersEnabled: false, peerName: null, peerCode: null, peers: [] };
 
+// restoreAgents() runs on the renderer's did-finish-load, but saves fire earlier
+// (window move/resize, a crash-time close). Saving before the restore writes an
+// empty agent list over the real one, and the save after that copies the empty
+// file over the .bak too — both copies of the user's agents gone.
+let _stateRestored = false;
+
 function saveState() {
+  if (!_stateRestored) return;
   const agentEntries = [];
   for (const [id, a] of agents) {
     const wasActive = !a.isWaiting;
@@ -827,35 +849,93 @@ function saveState() {
   const state = { agents: agentEntries, settings };
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
-    // Keep the last good file as .bak before replacing it — a power cut during the
-    // write can leave the real one truncated, and .bak is what loadState falls back to.
-    try { if (fs.statSync(STATE_FILE).size > 0) fs.copyFileSync(STATE_FILE, STATE_FILE + '.bak'); } catch {}
-    fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(state, null, 2));
+    writeDurable(STATE_FILE + '.tmp', JSON.stringify(state, null, 2));
+    // Rotate by rename, never by copy. NTFS journals the rename but not the file
+    // data, so copying the old file here re-wrote .bak inside the same unflushed
+    // window as the new one — a hard reset then zero-filled BOTH and every agent,
+    // bookmark and setting was gone. A rename leaves .bak pointing at bytes that
+    // were fsynced on an earlier save, so it survives the same power cut.
+    try { fs.renameSync(STATE_FILE, STATE_FILE + '.bak'); } catch {}
     fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
   } catch (e) { console.log('[Overlord] Failed to save state:', e.message); }
+  saveSettingsCopy();
 }
 
+// Third copy of just the settings, written only when they actually change. Rare
+// writes mean a much smaller window in which a power cut can catch this file
+// mid-flight, so it outlives the state file it was copied from.
+let _lastSettingsJson = null;
+function saveSettingsCopy() {
+  try {
+    const js = JSON.stringify(settings, null, 2);
+    if (js === _lastSettingsJson) return;
+    writeDurable(SETTINGS_FILE + '.tmp', js);
+    fs.renameSync(SETTINGS_FILE + '.tmp', SETTINGS_FILE);
+    _lastSettingsJson = js;
+  } catch (e) { console.log('[Overlord] Failed to save settings copy:', e.message); }
+}
+
+function loadSettingsCopy() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+    return (s && typeof s === 'object' && !Array.isArray(s)) ? s : null;
+  } catch { return null; }
+}
+
+// fs.writeFileSync alone only hands the bytes to the OS cache; on an unclean
+// shutdown the file comes back the right size and full of NULs. fsync before the
+// rename is what makes the save actually survive a reboot.
+function writeDurable(file, data) {
+  const fd = fs.openSync(file, 'w');
+  try {
+    fs.writeFileSync(fd, data);
+    fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
+}
+
+let recoveryNote = null; // surfaced as a toast once the renderer is up
+
 function loadState() {
+  let damaged = false;
   for (const file of [STATE_FILE, STATE_FILE + '.bak']) {
     let raw;
     try { raw = fs.readFileSync(file, 'utf-8'); } catch { continue; } // missing is fine
     const parsed = parseState(raw);
     if (parsed) {
       if (file !== STATE_FILE) flog('[Overlord] state file unusable — recovered agents and settings from .bak');
+      // A .bak can be a save or two behind; anything the settings copy knows that
+      // it doesn't is newer, so fill the gaps rather than losing that config.
+      const copy = loadSettingsCopy();
+      if (copy) parsed.settings = { ...copy, ...parsed.settings };
       return parsed;
     }
     // Damaged. Park it under .corrupt so the next save can't overwrite the only
     // copy, and so there's something left to recover from by hand.
+    damaged = true;
     try { fs.renameSync(file, file + '.corrupt'); } catch {}
     flog(`[Overlord] state file ${file} unreadable — kept as ${path.basename(file)}.corrupt`);
   }
-  return { agents: [], settings: {} };
+  // Both copies unreadable — but only when one actually existed. A first launch has
+  // nothing to recover, and importing every recent session there would be noise.
+  if (!damaged) return { agents: [], settings: {} };
+  // The settings copy is written only on change, so it usually survives whatever
+  // killed the state file — watched PR repos, workflows and bookmarks come back
+  // without the user re-entering them.
+  const state = { agents: [], settings: loadSettingsCopy() || {} };
+  if (state.settings.bookmarks) flog('[Overlord] state lost — settings restored from overlord-settings.json');
+  try {
+    const n = mergeRecovered(state, scanSessions(path.join(os.homedir(), '.claude', 'projects'), RECOVER_DAYS));
+    if (n) recoveryNote = `State file was damaged — restored ${n} agent${n === 1 ? '' : 's'} from Claude's transcripts (archived).`;
+    flog(`[Overlord] state lost — rebuilt ${n} agents from transcripts`);
+  } catch (e) { flog(`[Overlord] transcript recovery failed: ${e.message}`); }
+  return state;
 }
 
 function restoreAgents(state) {
   if (!state) state = loadState();
   if (!settings._merged) { settings = { ...settings, ...state.settings }; settings._merged = true; }
   const saved = state.agents;
+  _stateRestored = true; // from here on the in-memory agent list is the truth; saving is safe
   if (saved.length === 0) return;
 
   // ── Phase 1: Instant — create agent entries from saved metadata (no I/O) ──
@@ -1011,6 +1091,17 @@ function queuePrewarm(id) {
   }));
 }
 
+// node-pty on Windows implements kill() as ClosePseudoConsole() on a handle
+// table with no lock, and destroy() is just another kill(). Killing a pty twice
+// (or killing one that already exited) double-closes the HPCON and corrupts the
+// process heap — Electron dies with 0xc0000374 and takes every agent with it.
+// One kill per pty, never after exit.
+function killPty(t) {
+  if (!t || t._ovKilled) return;
+  t._ovKilled = true;
+  try { t.kill(); } catch {}
+}
+
 function handleTermExit(id, exitCode) {
   const a = agents.get(id);
   if (!a) return;
@@ -1094,7 +1185,7 @@ function doSpawnTerminal(id) {
   const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const args = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   try {
-    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: { ...process.env, ...feat.env } });
+    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
     terminals.set(id, proc);
     a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
     if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
@@ -1115,11 +1206,12 @@ function doSpawnTerminal(id) {
       // Claude boot banner seen → ready after a settle delay (see the matching
       // detector in createAgent for the reasoning).
       if (!a.claudeReady && !a._readyTimer) {
-        a._readyBuf = ((a._readyBuf || '') + d).slice(-1024);
-        const cleanR = a._readyBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
-        if (/Welcome back|\? for shortcuts|Try ["']/.test(cleanR)) {
+        const probe = (a._readyBuf || '') + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|[\x00-\x08\x0b-\x1f\x7f]/g, '');
+        if (/Welcome back|\? for shortcuts|Try ["']/.test(probe)) {
           a._readyBuf = '';
           a._readyTimer = setTimeout(() => { a._readyTimer = null; a.claudeReady = true; flushPeerMsgs(id); }, 4000);
+        } else {
+          a._readyBuf = probe.slice(-256);
         }
       }
       // Detect resume errors and retry
@@ -1131,7 +1223,7 @@ function doSpawnTerminal(id) {
           a._onboardingHandled = true;
           console.log(`[Overlord] Onboarding screen detected for agent ${id} — auto-selecting theme and restarting`);
           protectClaudeConfig();
-          try { proc.kill(); } catch {}
+          killPty(proc);
           setTimeout(() => { if (agents.has(id)) { terminals.delete(id); spawnTerminal(id); } }, 1000);
         } else if (useResume && !a._resumeFailed && /No conversation found with session ID/i.test(clean)) {
           a._resumeFailed = true;
@@ -1140,7 +1232,7 @@ function doSpawnTerminal(id) {
           resumeErrorBuf = '';
           console.log(`[Overlord] --resume failed for agent ${id} (session not found), retrying with --session-id`);
           send({ type: 'termData', id, data: '\r\n\x1b[33m[Session expired — starting fresh conversation...]\x1b[0m\r\n' });
-          try { proc.kill(); } catch {}
+          killPty(proc);
           setTimeout(() => { if (agents.has(id)) { terminals.delete(id); spawnTerminal(id); } }, 500);
         } else if (/session.{0,5}id.{0,30}already in use/i.test(clean)) {
           const retries = a._lockRetries || 0;
@@ -1151,7 +1243,7 @@ function doSpawnTerminal(id) {
             const delay = 2000 * a._lockRetries;
             console.log(`[Overlord] Session lock busy for agent ${id}, retry ${a._lockRetries}/5 in ${delay}ms`);
             send({ type: 'termData', id, data: `\r\n\x1b[33m[Session locked — retrying in ${delay / 1000}s (${a._lockRetries}/5)...]\x1b[0m\r\n` });
-            try { proc.kill(); } catch {}
+            killPty(proc);
             setTimeout(() => {
               if (!agents.has(id)) return;
               terminals.delete(id);
@@ -1165,7 +1257,7 @@ function doSpawnTerminal(id) {
         }
       }
     });
-    proc.onExit((e) => { handleTermExit(id, e?.exitCode); try { proc.destroy(); } catch {} });
+    proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
   } catch (e) {
     console.log(`[Overlord] Failed to spawn terminal for agent ${id}:`, e.message);
     send({ type: 'termData', id, data: `\r\n\x1b[31mFailed to start terminal: ${e.message}\x1b[0m\r\n` });
@@ -1202,7 +1294,7 @@ function createAgent(folderPath, initialPrompt) {
   send({ type: 'stats', id, stats: agent.stats });
   send({ type: 'focused', id });
 
-  const agentEnv = { ...process.env, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env };
+  const agentEnv = cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env });
   try {
     const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
@@ -1216,16 +1308,18 @@ function createAgent(folderPath, initialPrompt) {
       termBuffers.set(id, buf);
       // Claude boot banner seen → ready to inject queued peer messages after a
       // short settle (the banner paints before the input handler accepts keys;
-      // injecting at banner-time silently drops the paste). Rolling buffer
-      // because the phrase can straddle chunk boundaries. Deliberately NOT the
-      // `>`-prompt heuristic: a cmd.exe prompt matches that too, and injecting
-      // into a shell would execute the message as a command.
+      // injecting at banner-time silently drops the paste). Strip ANSI FIRST
+      // and test before trimming — the banner often arrives inside one large
+      // chunk, and trimming raw bytes discarded the phrase before the test.
+      // Deliberately NOT the `>`-prompt heuristic: a cmd.exe prompt matches
+      // that too, and injecting into a shell would execute the message.
       if (!agent.claudeReady && !agent._readyTimer) {
-        agent._readyBuf = ((agent._readyBuf || '') + d).slice(-1024);
-        const cleanR = agent._readyBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
-        if (/Welcome back|\? for shortcuts|Try ["']/.test(cleanR)) {
+        const probe = (agent._readyBuf || '') + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|[\x00-\x08\x0b-\x1f\x7f]/g, '');
+        if (/Welcome back|\? for shortcuts|Try ["']/.test(probe)) {
           agent._readyBuf = '';
           agent._readyTimer = setTimeout(() => { agent._readyTimer = null; agent.claudeReady = true; flushPeerMsgs(id); }, 4000);
+        } else {
+          agent._readyBuf = probe.slice(-256);
         }
       }
       // Detect Claude ready prompt and send the initial prompt
@@ -1237,7 +1331,7 @@ function createAgent(folderPath, initialPrompt) {
         }
       }
     });
-    proc.onExit((e) => { handleTermExit(id, e?.exitCode); try { proc.destroy(); } catch {} });
+    proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
     // Fallback: send prompt after timeout if ready-detection didn't fire
     if (initialPrompt) {
       setTimeout(() => { if (!promptSent) { promptSent = true; try { proc.write(initialPrompt + '\r'); } catch {} } }, 8000);
@@ -1273,7 +1367,7 @@ function closeAgent(id) {
   termBuffers.delete(id);
   pendingPeerMsgs.delete(id);
   peerApprovalQueue.delete(id);
-  const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
+  const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
   agents.delete(id);
   send({ type: 'agentClosed', id });
   saveState();
@@ -1294,7 +1388,7 @@ function archiveAgent(id) {
   inBracketedPaste.delete(id);
   bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
-  const t = terminals.get(id); if (t) { try { t.kill(); } catch {} terminals.delete(id); setTimeout(() => { try { t.destroy(); } catch {} }, 2000); }
+  const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
   send({ type: 'agentArchived', id });
   saveState();
 }
@@ -1349,7 +1443,7 @@ function readLines(id) {
     a.fileOffset = st.size;
     const text = a.lineBuffer + buf.toString('utf-8');
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
-    if (lines.some(l => l.trim())) { a.crashed = false; clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; send({ type: 'permClear', id }); } }
+    if (lines.some(l => l.trim())) { a.crashed = false; clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
     for (const line of lines) { if (line.trim()) parseLine(id, line); }
   } catch (e) { logToRenderer(`[readLines] Agent ${id} error: ${e.message} — file: ${a.jsonlFile}`); }
 }
@@ -1378,7 +1472,7 @@ function parseLine(id, line) {
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       const blocks = r.message.content;
-      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); scanPeerReply(id, a, b.text); } }
+      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); scanPeerReply(id, a, b.text); scanPeerSend(id, a, b.text); } }
       if (blocks.some(b => b.type === 'tool_use')) {
         a.isWaiting = false; a.hadTools = true;
         send({ type: 'status', id, status: 'active' });
@@ -1399,6 +1493,7 @@ function parseLine(id, line) {
         // These tools always block on a human choice — flag now, don't wait out the timer.
         // They also block under bypassPermissions, which startPermTimer skips.
         if (blocks.some(b => b.type === 'tool_use' && (b.name === 'AskUserQuestion' || b.name === 'ExitPlanMode'))) {
+          logToRenderer(`[ASKDBG] agent ${id}: ask tool_use parsed at ${new Date().toISOString()} -> sending perm ask`);
           clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id, ask: true }); notifyPermission(id, a);
         } else if (nonExempt) startPermTimer(id);
       }
@@ -1419,11 +1514,12 @@ function parseLine(id, line) {
           if (a.toolIds.size === 0) { a.hadTools = false; }
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-          if (txt) { setPrompt(id, a, txt); }
+          if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); }
           clrActivity(id); a.hadTools = false; a.turnTools = 0;
         }
       } else if (typeof c === 'string' && c.trim()) {
         setPrompt(id, a, c);
+        confirmPeerInjection(a, c.trim());
         clrActivity(id); a.hadTools = false; a.turnTools = 0;
       }
     } else if (r.type === 'system' && r.subtype === 'compact_boundary') {
@@ -1438,7 +1534,7 @@ function parseLine(id, line) {
       a.stats.turns++; a.stats.durMs += r.durationMs || 0;
       send({ type: 'stats', id, stats: a.stats });
       if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
-      a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0; a.spinnerText = '';
+      a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0; a.spinnerText = ''; a.peerAutoSends = 0;
       // Orphaned process finished its turn — safe to spawn a real terminal now
       if (a.orphanAlive) {
         a.orphanAlive = false;
@@ -1946,6 +2042,7 @@ function armPrTimer() {
 
 // ── GitHub Actions tracking ───────────────────────────
 const { runState, nextPollDelay, diffNewFailures, REPO_RE: WF_REPO_RE } = require('./actions-core');
+const { checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
 const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
 let actionsTimer = null;
 let actionsGhErrorLogged = false;
@@ -2015,6 +2112,38 @@ async function fetchWorkflowRun(w) {
   };
 }
 
+// The local checkouts Overlord already knows about: every agent's cwd plus every
+// feature worktree. No new setting — a repo you never open can't have work waiting.
+function localCheckoutDirs() {
+  const dirs = new Set();
+  for (const a of agents.values()) if (a.cwd) dirs.add(a.cwd);
+  for (const w of settings.worktrees || []) if (w.path) dirs.add(w.path);
+  return [...dirs].filter(d => fs.existsSync(d));
+}
+
+// Hang an { count, title } badge on each row: how far your local branches run
+// ahead of the branch that workflow last deployed. That gap is the PR you owe.
+async function annotateAhead(rows) {
+  const targets = rows.filter(r => !r.error && r.branch);
+  if (!targets.length) return;
+  const infos = (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean);
+  if (!infos.length) return;
+  const now = Date.now();
+  await Promise.all(targets.map(async (r) => {
+    // Same branch checked out twice (repo + worktree) counts once. A checkout
+    // sitting ON the deploy branch is skipped — no PR to open from dev to dev.
+    const seen = new Set();
+    const mine = infos.filter(i => i.repo.toLowerCase() === r.repo.toLowerCase()
+      && i.branch !== r.branch && !seen.has(i.branch) && seen.add(i.branch));
+    const counts = [];
+    for (const i of mine) {
+      const n = await aheadOf(i.dir, r.branch, now);
+      if (n) counts.push({ branch: i.branch, count: n });
+    }
+    r.ahead = aheadSummary(counts, r.branch);
+  }));
+}
+
 async function pollActions() {
   const cfg = settings.actionsSettings;
   const wfs = sanitizeWorkflows(cfg && cfg.workflows);
@@ -2030,6 +2159,7 @@ async function pollActions() {
     return rows;
   }
   actionsGhErrorLogged = false;
+  try { await annotateAhead(rows); } catch (e) { console.log('[Overlord] Ahead-count failed:', e.message); }
   // Notify only on the transition into failure — a run that was already red last
   // poll has been reported once, and a first sighting isn't a transition at all.
   const prevStates = settings.actionsStates || {};
@@ -2502,7 +2632,7 @@ function handleTermInput(id, data) {
     // send it and swallow the chunk instead of submitting it locally. The
     // pattern is strict (@Agent@<connected-peer-name>), so ordinary pasted
     // text never matches.
-    const remoteM = pc.parseRemoteMentions(full.slice(0, lastCR), connectedPeerNames());
+    const remoteM = pc.parseRemoteMentions(full.slice(0, lastCR), mentionTargetNames());
     if (remoteM.length > 0) {
       sendRemoteMentionMessages(id, full.slice(0, lastCR), remoteM);
       t.write('\x15');
@@ -2510,6 +2640,7 @@ function handleTermInput(id, data) {
       return;
     }
     markSessionSwitch(id, full.slice(0, lastCR));
+    { const ag = agents.get(id); if (ag) ag.peerHopBase = 0; } // human-submitted line resets the agent-chain budget
     const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     if (data.length > LONG_PASTE_THRESHOLD) {
@@ -2531,13 +2662,14 @@ function handleTermInput(id, data) {
     // Enter pressed — a line with a remote mention (@Agent@peer) is a message
     // TO the peer, not a prompt for this agent: send it over the peer socket,
     // clear the typed line, and never submit it locally.
-    const remote = pc.parseRemoteMentions(buf, connectedPeerNames());
+    const remote = pc.parseRemoteMentions(buf, mentionTargetNames());
     if (remote.length > 0) {
       sendRemoteMentionMessages(id, buf, remote);
       t.write('\x15'); // Ctrl+U — wipe the line from the local input box
       inputBuffers.set(id, '');
       return;
     }
+    { const ag = agents.get(id); if (ag) ag.peerHopBase = 0; } // human prompt resets the agent-chain budget
     const mentions = findMentions(buf);
     if (mentions.length > 0) {
       const ctx = buildMentionContext(mentions);
@@ -2745,29 +2877,54 @@ function startDevServer(p) {
 
 function stopDevServer(p) {
   const s = devServers.get(p);
-  if (s) { try { s.proc.kill(); } catch {} killPortProcess(s.port); devServers.delete(p); }
+  if (s) { killPty(s.proc); killPortProcess(s.port); devServers.delete(p); }
   send({ type: 'wtServer', path: p, running: false });
 }
 
 // If cwd is a worktree in a feature, give the agent tool-access to its sibling repos
 // (--add-dir) and a system-prompt note about them, plus env vars. Returns claude flags + env.
+// Overlord agents must be TOP-LEVEL Claude sessions. If Overlord itself was
+// launched from inside a Claude session (npm start in a Claude terminal, a
+// test harness), the inherited session markers make the CLI treat agents as
+// child sessions and silently disable transcript saving — which kills all of
+// Overlord's JSONL-based tracking (status, prompts, stats, peer scanning).
+function cleanAgentEnv(extra) {
+  const env = { ...process.env, ...extra };
+  delete env.CLAUDE_CODE_CHILD_SESSION;
+  delete env.CLAUDE_CODE_SESSION_ID;
+  delete env.CLAUDE_CODE_ENTRYPOINT;
+  delete env.CLAUDE_PID;
+  delete env.CLAUDECODE;
+  return env;
+}
+
 function featureAgentArgs(cwd) {
+  const notes = [];
+  let addDirs = '';
+  const env = {};
   const self = findWorktree(cwd);
-  if (!self || !self.feature) return { flags: '', env: {} };
-  const siblings = (settings.worktrees || []).filter(w => w.feature === self.feature && w.path !== cwd && fs.existsSync(w.path));
-  const env = {
-    OVERLORD_FEATURE: self.feature,
-    OVERLORD_FEATURE_BRANCH: self.branch || '',
-    OVERLORD_FEATURE_REPOS: siblings.map(w => `${path.basename(w.repo)}=${w.path}`).join(';'),
-  };
-  if (!siblings.length) return { flags: '', env };
-  const list = siblings.map(w => `${path.basename(w.repo)} (${w.path})`).join('; ');
-  const note = (`This git worktree is part of feature "${self.feature}" on branch ${self.branch}, spanning multiple repos. `
-    + `Sibling repos in the same feature (same branch) are: ${list}. They are already in your allowed directories — `
-    + `read and edit files in them when the task spans repos.`)
-    .replace(/"/g, "'").replace(/[\r\n]+/g, ' ').replace(/%/g, 'pct');
-  const addDirs = siblings.map(w => `--add-dir "${w.path}"`).join(' ');
-  return { flags: ` ${addDirs} --append-system-prompt "${note}"`, env };
+  if (self && self.feature) {
+    const siblings = (settings.worktrees || []).filter(w => w.feature === self.feature && w.path !== cwd && fs.existsSync(w.path));
+    env.OVERLORD_FEATURE = self.feature;
+    env.OVERLORD_FEATURE_BRANCH = self.branch || '';
+    env.OVERLORD_FEATURE_REPOS = siblings.map(w => `${path.basename(w.repo)}=${w.path}`).join(';');
+    if (siblings.length) {
+      const list = siblings.map(w => `${path.basename(w.repo)} (${w.path})`).join('; ');
+      notes.push(`This git worktree is part of feature "${self.feature}" on branch ${self.branch}, spanning multiple repos. `
+        + `Sibling repos in the same feature (same branch) are: ${list}. They are already in your allowed directories — `
+        + `read and edit files in them when the task spans repos.`);
+      addDirs = ' ' + siblings.map(w => `--add-dir "${w.path}"`).join(' ');
+    }
+  }
+  // Agents learn how to message other agents through Overlord — but only when
+  // the Peers toggle is on (read at spawn time; toggling later applies to
+  // newly started agents).
+  if (settings.peersEnabled) notes.push('Overlord peer messaging: when the user asks you to send or forward a message to another agent, '
+    + 'end your reply with a line: PEER-SEND AgentName@target: followed by the message you compose (it may continue to the end of your reply). '
+    + 'Use target me for an agent in this same Overlord, or the peer machine name for an agent on a teammates machine. '
+    + 'Only do this when the user asks you to message another agent. Never use SendMessage or teammate mentions for cross-Overlord messaging.');
+  const note = notes.join(' ').replace(/"/g, "'").replace(/[\r\n]+/g, ' ').replace(/%/g, 'pct');
+  return { flags: `${addDirs}${note ? ` --append-system-prompt "${note}"` : ''}`, env };
 }
 
 function handleIpc(msg) {
@@ -3722,6 +3879,21 @@ const PEER_PING_MS = 25000, PEER_IDLE_MS = 90000, PEER_ACK_TIMEOUT_MS = 10000;
 
 function myPeerName() { return pc.sanitizePeerName(settings.peerName) || pc.sanitizePeerName(os.hostname()) || 'overlord'; }
 function connectedPeerNames() { const out = []; for (const c of peerConns) if (c.helloDone && c.name) out.push(c.name); return out; }
+// Valid @Agent@<target> names: connected peers, plus 'me' / own peer name for
+// delivering to another LOCAL agent. A real connected peer always wins the
+// name; the local aliases only apply when no such peer exists. The whole
+// messaging system is gated on the Peers toggle — disabled means no names
+// match, so mention lines are just ordinary prompts.
+function mentionTargetNames() { return settings.peersEnabled ? [...connectedPeerNames(), 'me', myPeerName()] : []; }
+function isLocalMentionTarget(name) {
+  if (findPeerConn(name)) return false;
+  const n = String(name).toLowerCase();
+  return n === 'me' || n === myPeerName().toLowerCase();
+}
+function findLocalAgentByName(name) {
+  for (const [aid, ag] of agents) if (ag.agentName && !ag.archived && ag.agentName.toLowerCase() === String(name).toLowerCase()) return aid;
+  return null;
+}
 function findPeerConn(name) { const n = String(name || '').toLowerCase(); for (const c of peerConns) if (c.helloDone && c.name && c.name.toLowerCase() === n) return c; return null; }
 function wsSendPeer(conn, obj) { if (!conn || !conn.ws || conn.ws.destroyed) return; const s = JSON.stringify(obj); try { conn.ws.write(conn.isClient ? pc.wsEncodeFrameMasked(s) : wsEncodeFrame(s)); } catch {} }
 
@@ -3917,7 +4089,7 @@ function queuePeerInjection(agentId, env) {
     setTimeout(() => {
       const a2 = agents.get(agentId);
       if (a2 && !a2.claudeReady && terminals.has(agentId) && !a2.crashed) { a2.claudeReady = true; flushPeerMsgs(agentId); }
-    }, 45000);
+    }, 15000);
     return;
   }
   injectPeerMessage(agentId, env);
@@ -3930,11 +4102,56 @@ function queuePeerInjection(agentId, env) {
 function injectPeerMessage(agentId, env) {
   flog(`peer message ${env.id} from ${env.fromPeer} injected into agent ${agentId}`);
   const a = agents.get(agentId);
-  // Remember the return address so a PEER-REPLY line in the agent's answer can
-  // route back. hop+1 keeps the chain bounded; cleared after one reply.
-  if (a && env.fromAgent) a.peerReplyTo = { peer: env.fromPeer, agent: env.fromAgent, hop: (Number(env.hop) || 0) + 1 };
-  handleTermInput(agentId, '\x1b[200~' + pc.buildPeerHeader(env) + '\x1b[201~');
-  handleTermInput(agentId, '\r');
+  const t = terminals.get(agentId);
+  if (!t) return;
+  if (a) {
+    // Chain budget: anything this agent sends after receiving a peer message
+    // (PEER-REPLY or PEER-SEND) inherits hop+1, so automated back-and-forth is
+    // bounded. A human-submitted prompt resets it to 0.
+    a.peerHopBase = (Number(env.hop) || 0) + 1;
+    // Return address so a PEER-REPLY line can route back; consumed by one reply.
+    if (env.fromAgent) a.peerReplyTo = { peer: env.fromPeer, agent: env.fromAgent, hop: a.peerHopBase };
+  }
+  // Write straight to the pty, NOT through handleTermInput: injected content
+  // must never enter the input scanner, or a message whose text contains an
+  // @mention would bounce a duplicate send on the injected Enter. Always paste
+  // the actual text (no temp-file spillover — that mechanism is for human
+  // pastes); the TUI collapses a long paste visually but submits it in full.
+  const text = pc.buildPeerHeader(env);
+  const paste = '\x1b[200~' + text + '\x1b[201~';
+  writePtyChunked(t, paste);
+  const settleMs = Math.ceil(paste.length / 1024) * 8 + 80; // after the last chunk lands
+  setTimeout(() => { try { t.write('\r'); } catch {} }, settleMs);
+  // Delivery is VERIFIED, not assumed: the transcript is ground truth. If the
+  // injected message doesn't appear there as a user prompt within a few
+  // seconds, re-inject once; if that also fails, say so instead of losing it.
+  if (a) {
+    if (a._injectVerify) clearTimeout(a._injectVerify.timer);
+    const attempt = Number(env._attempt) || 0;
+    a._injectVerify = {
+      envId: env.id,
+      timer: setTimeout(() => {
+        a._injectVerify = null;
+        if (!agents.has(agentId) || !terminals.has(agentId)) return;
+        if (attempt === 0) {
+          flog(`peer message ${env.id} not confirmed in transcript after 12s — re-injecting`);
+          env._attempt = 1;
+          injectPeerMessage(agentId, env);
+        } else {
+          flog(`peer message ${env.id} delivery FAILED after retry`);
+          send({ type: 'toast', text: `✕ Delivery to @${a.agentName || 'agent ' + agentId} could not be confirmed — check its terminal` });
+        }
+      }, 12000),
+    };
+  }
+}
+
+// Transcript confirmed the injected message arrived as a real prompt.
+function confirmPeerInjection(a, txt) {
+  if (a && a._injectVerify && typeof txt === 'string' && txt.startsWith('[Peer message from')) {
+    clearTimeout(a._injectVerify.timer);
+    a._injectVerify = null;
+  }
 }
 
 // Scan an assistant text block for the PEER-REPLY marker and route it back to
@@ -3942,13 +4159,12 @@ function injectPeerMessage(agentId, env) {
 // (one reply per incoming message), lands in the remote HUMAN's approval
 // queue, and the hop counter hard-stops the chain at MAX_HOP.
 function scanPeerReply(id, a, text) {
+  if (!settings.peersEnabled) return;
   if (!a.peerReplyTo) return;
   const m = text.match(/^\s*PEER-REPLY:\s*(.+)$/m);
   if (!m || !m[1].trim()) return;
   const replyTo = a.peerReplyTo;
   a.peerReplyTo = null;
-  const conn = findPeerConn(replyTo.peer);
-  if (!conn) { send({ type: 'toast', text: `✕ Agent reply not sent — ${replyTo.peer} is offline` }); return; }
   let user = ''; try { user = os.userInfo().username; } catch {}
   const env = pc.buildEnvelope({ toAgent: replyTo.agent, fromAgent: a.agentName || '', fromPeer: myPeerName(), fromUser: user, text: m[1].trim(), hop: replyTo.hop });
   const v = pc.validateEnvelope(env);
@@ -3957,8 +4173,52 @@ function scanPeerReply(id, a, text) {
     send({ type: 'toast', text: v.error === 'hop limit reached' ? '✕ Reply chain hit its limit — a human has to continue it' : `✕ Agent reply blocked: ${v.error}` });
     return;
   }
+  // Local loopback: the message came from another agent on THIS machine —
+  // same approval queue as everything else; hop counter still bounds the chain.
+  if (replyTo.peer.toLowerCase() === myPeerName().toLowerCase() && !findPeerConn(replyTo.peer)) {
+    const target = findLocalAgentByName(replyTo.agent);
+    if (target === null || target === id) { send({ type: 'toast', text: `✕ Agent reply not delivered — no local agent named @${replyTo.agent}` }); return; }
+    deliverPeerMessage(target, env);
+    send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} replied to @${replyTo.agent} — awaiting your approval` });
+    return;
+  }
+  const conn = findPeerConn(replyTo.peer);
+  if (!conn) { send({ type: 'toast', text: `✕ Agent reply not sent — ${replyTo.peer} is offline` }); return; }
   sendPeerEnvelope(conn, env, conn.name);
   send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} replied to @${replyTo.agent} on ${replyTo.peer}` });
+}
+
+// Agent-initiated send: a PEER-SEND marker in an assistant text block. Taught
+// via the spawn system prompt, so "send our findings to Zephyr" in plain
+// English becomes a routed message. Remote targets still pass through the
+// recipient's approval queue; local targets inject directly (same gate);
+// hop inheritance + a per-turn cap keep agent↔agent chains bounded.
+function scanPeerSend(id, a, text) {
+  if (!settings.peersEnabled) return;
+  const p = pc.parsePeerSendMarker(text);
+  if (!p) return;
+  a.peerAutoSends = (a.peerAutoSends || 0) + 1;
+  if (a.peerAutoSends > 3) { flog(`agent ${id} PEER-SEND rate-capped this turn`); return; }
+  let user = ''; try { user = os.userInfo().username; } catch {}
+  const env = pc.buildEnvelope({ toAgent: p.agentName, fromAgent: a.agentName || '', fromPeer: myPeerName(), fromUser: user, text: p.text, hop: a.peerHopBase || 0 });
+  const v = pc.validateEnvelope(env);
+  if (!v.ok) {
+    send({ type: 'toast', text: v.error === 'hop limit reached' ? '✕ Agent message chain hit its limit — a human has to continue it' : `✕ Agent message blocked: ${v.error}` });
+    return;
+  }
+  if (isLocalMentionTarget(p.target)) {
+    const target = findLocalAgentByName(p.agentName);
+    flog(`agent ${id} PEER-SEND → @${p.agentName} (local ${target === null ? 'NOT FOUND' : 'agent ' + target})`);
+    if (target === null || target === id) { send({ type: 'toast', text: `✕ ${a.agentName || 'Agent'} tried to message @${p.agentName} (local) — no such agent` }); return; }
+    deliverPeerMessage(target, env);
+    send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} sent a message to @${p.agentName} — awaiting your approval` });
+    return;
+  }
+  const conn = findPeerConn(p.target);
+  flog(`agent ${id} PEER-SEND → @${p.agentName}@${p.target} (${conn ? 'sending' : 'NOT CONNECTED'})`);
+  if (!conn) { send({ type: 'toast', text: `✕ ${a.agentName || 'Agent'} tried to message ${p.target} — not connected` }); return; }
+  sendPeerEnvelope(conn, env, conn.name);
+  send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} sent a message to @${p.agentName} on ${conn.name}` });
 }
 
 function flushPeerMsgs(id) {
@@ -3987,8 +4247,21 @@ function sendRemoteMentionMessages(id, text, remote) {
   // Strip the @Agent@peer tokens from the message body — on the receiving side
   // Claude Code's teams mode would intercept them as teammate DMs and swallow
   // the whole submission.
-  const body = pc.stripRemoteMentions(text, connectedPeerNames()).trim() || text;
+  const body = pc.stripRemoteMentions(text, mentionTargetNames()).trim() || text;
   for (const r of remote) {
+    // @Agent@me (or own peer name): deliver to another LOCAL agent through the
+    // same approval queue as remote messages — nothing runs until it is
+    // approved on the target agent's ✉ badge.
+    if (isLocalMentionTarget(r.peerName)) {
+      const env = pc.buildEnvelope({ toAgent: r.agentName, fromAgent: (a && a.agentName) || '', fromPeer: myPeerName(), fromUser: user, text: body, hop: 0 });
+      const target = findLocalAgentByName(r.agentName);
+      flog(`peer mention: agent ${id} → @${r.agentName} (local ${target === null ? 'NOT FOUND' : 'agent ' + target})`);
+      if (target === null) { send({ type: 'toast', text: `✕ No local agent named @${r.agentName}` }); continue; }
+      if (target === id) { send({ type: 'toast', text: `✕ @${r.agentName} is this agent — not sent to itself` }); continue; }
+      deliverPeerMessage(target, env);
+      send({ type: 'toast', text: `✉ Sent to @${r.agentName} — approve it on their ✉ badge` });
+      continue;
+    }
     const conn = findPeerConn(r.peerName);
     flog(`peer mention: agent ${id} → @${r.agentName}@${r.peerName} (${conn ? 'sending' : 'NOT CONNECTED'})`);
     if (!conn) { send({ type: 'toast', text: `✕ Not connected to ${r.peerName}` }); continue; }
@@ -4317,6 +4590,10 @@ app.whenReady().then(() => {
     if (!_didRestore) {
       _didRestore = true;
       restoreAgents(state);
+      // Seed the settings copy at boot. Nothing else saves until the user changes
+      // something, so on the launch right after an update — exactly when the old
+      // state file is the only copy — there would otherwise be no second copy yet.
+      saveSettingsCopy();
       startRemoteServer();
       armPrTimer();
       armActionsTimer();
@@ -4324,6 +4601,7 @@ app.whenReady().then(() => {
     // Runs on every load incl. renderer reload — repaints from in-memory state
     // so a reload (to pick up index.html changes) keeps all live sessions.
     sendFullState();
+    if (recoveryNote) { send({ type: 'toast', text: recoveryNote }); recoveryNote = null; }
   });
   mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); });
   mainWindow.on('blur', () => { _windowFocused = false; });
@@ -4402,7 +4680,7 @@ app.on('before-quit', () => {
         const dpid = detachedPids.get(entry.sessionId);
         if (dpid) entry.pid = dpid;
       }
-      fs.writeFileSync(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
+      writeDurable(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
       fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
     } catch (e) {
       console.log('[Overlord] Failed to save detached PIDs:', e.message);

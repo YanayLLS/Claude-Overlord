@@ -135,6 +135,19 @@ assert.ok(!pc.validateChatMsg({ ...cm, group: { ...g, name: '' } }).ok);
 assert.ok(pc.validateGroupRef(g));
 assert.ok(!pc.validateGroupRef({ ...g, id: '' }));
 
+// ── parsePeerSendMarker ──
+let ps = pc.parsePeerSendMarker('Here is my summary.\nPEER-SEND Zephyr@me: check these findings');
+assert.deepStrictEqual(ps, { agentName: 'Zephyr', target: 'me', text: 'check these findings' });
+// multi-line body runs to the end of the block; "to" and leading @ optional
+ps = pc.parsePeerSendMarker('PEER-SEND to @Koda@Yoav: hello there\nsecond line of the message');
+assert.deepStrictEqual(ps, { agentName: 'Koda', target: 'Yoav', text: 'hello there\nsecond line of the message' });
+assert.strictEqual(pc.parsePeerSendMarker('no marker here'), null);
+assert.strictEqual(pc.parsePeerSendMarker('PEER-SEND Zephyr@me:   '), null); // empty body
+assert.strictEqual(pc.parsePeerSendMarker('PEER-SEND Bad name@x: hi'), null); // malformed name
+// body capped at MAX_TEXT_LEN
+ps = pc.parsePeerSendMarker('PEER-SEND A@me: ' + 'x'.repeat(pc.MAX_TEXT_LEN + 500));
+assert.strictEqual(ps.text.length, pc.MAX_TEXT_LEN);
+
 // ── sanitizeFileName ──
 assert.strictEqual(pc.sanitizeFileName('report.pdf'), 'report.pdf');
 assert.strictEqual(pc.sanitizeFileName('..\\..\\windows\\evil.exe'), 'evil.exe');
