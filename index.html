@@ -685,17 +685,21 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 /* Inline ghost-text autocomplete overlay — floats over the terminal canvas, never written to the xterm buffer */
 #ghost-suggest { position:fixed; z-index:50; color:#585b70; opacity:.85; white-space:pre; pointer-events:none; display:none; }
 #ghost-suggest .ghost-hint { font-size:9px; opacity:.7; margin-left:6px; border:1px solid #585b70; border-radius:3px; padding:0 3px; }
-#scroll-bottom-btn, #scroll-top-btn {
-  display:none; position:absolute; bottom:12px; right:20px; z-index:10;
+/* Always-visible scroll/prompt nav stack: prev prompt, top, bottom, next prompt */
+#term-scroll-nav {
+  display:none; position:absolute; top:50%; transform:translateY(-50%); right:20px; z-index:10;
+  flex-direction:column; gap:6px;
+}
+#term-scroll-nav.visible { display:flex; }
+#term-scroll-nav button {
   width:32px; height:32px; border-radius:50%; border:1px solid var(--border);
   background:var(--surface0); color:var(--text); cursor:pointer;
-  font-size:14px; line-height:30px; text-align:center;
+  font-size:14px; line-height:30px; text-align:center; padding:0;
   opacity:.7; transition:opacity .15s, background .15s;
   box-shadow:0 2px 8px rgba(0,0,0,.4);
 }
-#scroll-bottom-btn:hover, #scroll-top-btn:hover { opacity:1; background:var(--surface1); }
-#scroll-bottom-btn.visible, #scroll-top-btn.visible { display:block; }
-#scroll-top-btn { bottom:52px; }
+#term-scroll-nav button:hover { opacity:1; background:var(--surface1); }
+#term-scroll-nav button.prompt-jump { width:22px; height:22px; font-size:10px; line-height:20px; align-self:center; }
 #term-name-chip {
   display:none; position:absolute; bottom:8px; left:10px; z-index:9; pointer-events:none;
   max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -1167,7 +1171,7 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x25B2;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
+    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x2912;</button><button class="prompt-jump" onclick="jumpPrompt(-1)" title="Previous prompt (Ctrl+&#x2191;)">&#x25B2;</button><button class="prompt-jump" onclick="jumpPrompt(1)" title="Next prompt (Ctrl+&#x2193;)">&#x25BC;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x2913;</button></div></div>
     <div id="timeline-events"></div>
   </div>
   </div><!-- end #content -->
@@ -1376,6 +1380,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./update-core.js"></script>
 <script src="./pr-behind.js"></script>
 <script src="./prompt-copy.js"></script>
+<script src="./prompt-nav.js"></script>
 <script src="./term-size-core.js"></script>
 <script src="./usage-core.js"></script>
 <script>
@@ -2762,14 +2767,12 @@ function destroyXterm(id) {
   x.terminal.dispose(); x.el.remove(); xterms.delete(id);
 }
 
+// The nav stack stays put whenever a terminal is on screen — no scroll-position gating,
+// so the buttons never move under the cursor.
 function updateScrollBtn() {
-  const btn = document.getElementById('scroll-bottom-btn');
-  const top = document.getElementById('scroll-top-btn');
+  const nav = document.getElementById('term-scroll-nav');
   const x = selectedId != null ? xterms.get(selectedId) : null;
-  if (!x || termTab !== 'terminal') { btn.classList.remove('visible'); top.classList.remove('visible'); return; }
-  const buf = x.terminal.buffer.active;
-  btn.classList.toggle('visible', buf.viewportY < buf.baseY);
-  top.classList.toggle('visible', buf.viewportY > 0);
+  nav.classList.toggle('visible', !!x && termTab === 'terminal');
 }
 
 // Park the chip just above Claude's input box. The box is ~4 rows tall (borders + hint
@@ -3031,19 +3034,19 @@ function schedulePromptNavUpdate() {
   _promptNavTimer = setTimeout(() => { _promptNavTimer = null; updatePromptNav(); }, 300);
 }
 
-// Scan terminal buffer for prompt marker lines (❯)
+// Scan terminal scrollback for submitted prompts. Rows on the current screen
+// (>= baseY) are skipped by promptRows — the live input line wears the same
+// marker, and jumping to it scrolls nowhere. Adapter for prompt-nav.js.
 function getPromptLines() {
   const x = selectedId != null ? xterms.get(selectedId) : null;
   if (!x) return [];
   const buf = x.terminal.buffer.normal;
-  const lines = [];
+  const rows = [];
   for (let i = 0; i < buf.length; i++) {
     const line = buf.getLine(i);
-    if (!line) continue;
-    const text = line.translateToString(true);
-    if (/^\s*❯/.test(text) || /^\s*[│┃]\s+>\s/.test(text)) lines.push(i);
+    rows.push(line ? line.translateToString(true) : '');
   }
-  return lines;
+  return promptRows(rows, buf.baseY); // prompt-nav.js
 }
 
 function updatePromptNav() {
@@ -3060,29 +3063,40 @@ function updatePromptNav() {
     return;
   }
   const promptLines = getPromptLines();
-  const total = promptLines.length || (a?.prompts?.length ?? 0);
+  const total = promptLines.length;
   if (!a || total === 0) { counter.textContent = '0/0'; return; }
-  const label = a.promptNavIdx >= total ? '◇' : String(a.promptNavIdx + 1);
+  const inRange = a.promptNavIdx >= 0 && a.promptNavIdx < total;
+  const label = inRange ? String(a.promptNavIdx + 1) : '◇';
   counter.textContent = label + '/' + total;
 }
 
+// DIAG (temporary): every click reports what the scan saw and where the
+// viewport ended up. Remove once prompt jumping is confirmed working.
 function jumpPrompt(dir) {
+ try {
   const a = selectedId != null ? agents.get(selectedId) : null;
-  if (!a) return;
+  if (!a) { showToast('jump: no agent selected'); return; }
   if (termTab === 'timeline') { jumpTimelinePrompt(dir); return; }
+  const x = xterms.get(selectedId);
   const promptLines = getPromptLines();
-  const total = promptLines.length || (a.prompts?.length ?? 0);
-  if (total === 0) return;
-  if (a.promptNavIdx < 0 || a.promptNavIdx > total) a.promptNavIdx = total;
-  const newIdx = a.promptNavIdx + dir;
-  if (newIdx < 0 || newIdx > total) return;
+  const total = promptLines.length;
+  const buf = x ? x.terminal.buffer.normal : null;
+  const before = buf ? buf.viewportY : -1;
+  if (total === 0) {
+    showToast('jump: 0 prompts found (buffer ' + (buf ? buf.length : '?') + ' lines, baseY ' + (buf ? buf.baseY : '?') + ')');
+    return;
+  }
+  const newIdx = nextNavIdx(a.promptNavIdx, dir, total); // prompt-nav.js
   a.promptNavIdx = newIdx;
   updatePromptNav();
-  if (!promptLines.length) return;
-  const x = xterms.get(selectedId);
-  if (!x) return;
-  if (newIdx >= promptLines.length) { x.terminal.scrollToBottom(); return; }
-  x.terminal.scrollToLine(Math.max(0, promptLines[newIdx] - 1));
+  if (!x) { showToast('jump: no terminal'); return; }
+  if (newIdx >= total) { x.terminal.scrollToBottom(); }
+  else x.terminal.scrollToLine(Math.max(0, promptLines[newIdx] - 1));
+  const target = newIdx >= total ? 'bottom' : String(promptLines[newIdx]);
+  showToast('jump: ' + total + ' prompts, idx ' + newIdx + ', line ' + target
+    + ', viewportY ' + before + '→' + x.terminal.buffer.normal.viewportY
+    + ', baseY ' + x.terminal.buffer.normal.baseY);
+ } catch (e) { showToast('jump error: ' + e.message); }
 }
 
 let _tlPromptIdx = -1;
@@ -3550,7 +3564,7 @@ function handleAgentMsg(msg) {
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
-    case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = msg.prompts.length - 1; if (selectedId === msg.id) updatePromptNav(); } break; }
+    case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = -1; /* -1 = at bottom; the buffer scan owns the real range */ if (selectedId === msg.id) updatePromptNav(); } break; }
     case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
