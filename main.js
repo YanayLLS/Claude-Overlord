@@ -3243,12 +3243,8 @@ function handleIpc(msg) {
       const filePath = path.join(dir, filename);
       fs.writeFileSync(filePath, img.toPNG());
       const insertPath = filePath.replace(/\\/g, '/');
-      // Create thumbnail for inline terminal preview (max 400px wide)
-      const sz = img.getSize();
-      const thumb = sz.width > 400 ? img.resize({ width: 400 }) : img;
-      const base64 = thumb.toPNG().toString('base64');
       handleTermInput(msg.id, insertPath + ' ');
-      send({ type: 'imagePasted', id: msg.id, path: insertPath, base64 });
+      send({ type: 'imagePasted', id: msg.id, path: insertPath });
       break;
     }
     case 'pasteFiles': {

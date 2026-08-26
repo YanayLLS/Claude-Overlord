@@ -3395,11 +3395,8 @@ api.onMainLog((msg) => console.log('%c[main]', 'color:#888', msg));
 // ── Message handling ───────────────────────────────────
 api.on((msg) => {
   if (msg.type === 'imagePasted') {
-    const x = xterms.get(msg.id);
-    if (x && msg.base64) {
-      // Show inline image thumbnail via iTerm2 inline image protocol
-      x.terminal.write('\r\n\x1b]1337;File=inline=1;width=auto;height=8;preserveAspectRatio=1:' + msg.base64 + '\x07\r\n');
-    }
+    // ponytail: no inline thumbnail. Writing to xterm out-of-band desyncs the
+    // TUI's own redraw (it does not know those rows exist) and scrambles the prompt.
     showToast('Image pasted — path inserted');
     return;
   }
