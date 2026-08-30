@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "1.36.2",
+  "version": "1.36.3",
   "description": "Overlord — Claude Agent Manager",
   "main": "main.js",
   "scripts": {
@@ -55,25 +55,11 @@
       "shortcutName": "Overlord"
     },
     "files": [
-      "main.js",
-      "worktree.js",
-      "preload.js",
-      "index.html",
-      "ghost-core.js",
-      "actions-core.js",
-      "peer-core.js",
-      "update-core.js",
-      "pr-behind.js",
-      "prompt-copy.js",
-      "prompt-nav.js",
-      "term-size-core.js",
-      "resume-core.js",
-      "state-core.js",
-      "usage-core.js",
-      "xterm-bundle.js",
-      "xterm.css",
-      "qr.js",
-      "mobile.html"
+      "**/*",
+      "!**/*.test.js",
+      "!scripts/**",
+      "!docs/**",
+      "!*.md"
     ],
     "directories": {
       "output": "out"
