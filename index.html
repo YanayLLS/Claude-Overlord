@@ -4775,7 +4775,7 @@ let prSettings = { enabled: false, repos: [], intervalSec: 60 };
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function prNeedsApproval(p) { return !p.mine && p.reviewDecision !== 'CHANGES_REQUESTED'; }
-function prSilenced(p) { return p.muted || p.repoMuted || p.snoozed; }
+function prSilenced(p) { return p.muted || p.repoMuted || p.snoozed || p.archived; }
 
 function renderPrBadge() {
   const b = document.getElementById('pr-badge');
@@ -4789,18 +4789,24 @@ function renderPrBadge() {
     b.style.display = 'flex'; b.className = waiting > 0 ? 'alert' : '';
     b.textContent = '⬢ ' + active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '');
     b.title = waiting > 0 ? waiting + ' PR(s) waiting for approval' : active.length + ' open PR(s)';
-  } else if (prState.prs.length > 0) {
+  } else if (prState.prs.some(p => !p.archived)) {
     // Only muted PRs remain — keep a quiet entry so the dropdown stays reachable to un-mute.
+    const n = prState.prs.filter(p => !p.archived).length;
     b.style.display = 'flex'; b.className = '';
-    b.textContent = '🔕 ' + prState.prs.length + ' muted';
+    b.textContent = '🔕 ' + n + ' muted';
     b.title = 'All watched PRs are muted — click to manage';
+  } else if (prState.prs.length > 0) {
+    // Everything archived — a minimal badge, otherwise the dropdown is unreachable.
+    b.style.display = 'flex'; b.className = '';
+    b.textContent = '📦 ' + prState.prs.length + ' archived';
+    b.title = 'All watched PRs are archived — click to manage';
   } else {
     b.style.display = 'none';
     document.getElementById('pr-dropdown').style.display = 'none';
   }
 }
 
-let prCollapsed = new Set();
+let prCollapsed = new Set(['__archived__']); // archived stays out of sight until asked for
 
 function prCiIcon(c) {
   if (c === 'pass') return '<span title="checks passing" style="color:#a6e3a1">✓</span> ';
@@ -4863,6 +4869,7 @@ function prRowHtml(p, dim) {
   const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
+  const archBtn = `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦</button>`;
   // Red = waiting on my review. Green = mine and ready to merge. Orange = conflicts.
   // All three reuse prMergeInfo(), the same test that gates the Merge button.
   const mi = prMergeInfo(p);
@@ -4877,7 +4884,7 @@ function prRowHtml(p, dim) {
       ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>`
       : '';
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
-    + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
+    + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)}${commits}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
@@ -4904,7 +4911,18 @@ function prMutedRowHtml(p) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
   return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
-    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-mute" onclick="event.stopPropagation();unmutePr('${k}')">🔔 Unmute</button></div>`
+    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-mute" onclick="event.stopPropagation();unmutePr('${k}')">🔔 Unmute</button>`
+    + `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely" onclick="event.stopPropagation();archivePr('${k}')">📦</button></div>`
+    + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
+    + prBranchHtml(p)
+    + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`;
+}
+
+function prArchivedRowHtml(p) {
+  const u = p.url.replace(/'/g, "\\'");
+  const k = p.key.replace(/'/g, "\\'");
+  return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
+    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-archive" onclick="event.stopPropagation();unarchivePr('${k}')">📤 Unarchive</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`;
@@ -4934,7 +4952,8 @@ function prSnoozedRowHtml(p) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
   return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
-    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Wake now" onclick="event.stopPropagation();unsnoozePr('${k}')">⏰ Wake</button></div>`
+    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Wake now" onclick="event.stopPropagation();unsnoozePr('${k}')">⏰ Wake</button>`
+    + `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely" onclick="event.stopPropagation();archivePr('${k}')">📦</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)} · ${escapeHtml(prSnoozeLeft(p.snoozeUntil))}</div></div>`;
@@ -4990,11 +5009,13 @@ function prDropdownHtml() {
   const head = prDropdownHead();
   if (prState.error) return head + '<div class="pr-empty">PR check failed. '
     + escapeHtml(prState.error) + ghFixHtml(prState.errorCode) + '</div>';
-  const active = prState.prs.filter(p => !p.muted && !p.repoMuted && !p.snoozed);
-  const repoMuted = prState.prs.filter(p => p.repoMuted && !p.muted);
-  const snoozed = prState.prs.filter(p => p.snoozed && !p.muted && !p.repoMuted);
-  const muted = prState.prs.filter(p => p.muted);
-  if (!active.length && !repoMuted.length && !snoozed.length && !muted.length) return head + '<div class="pr-empty">No open PRs.</div>';
+  const live = prState.prs.filter(p => !p.archived);
+  const archived = prState.prs.filter(p => p.archived);
+  const active = live.filter(p => !p.muted && !p.repoMuted && !p.snoozed);
+  const repoMuted = live.filter(p => p.repoMuted && !p.muted);
+  const snoozed = live.filter(p => p.snoozed && !p.muted && !p.repoMuted);
+  const muted = live.filter(p => p.muted);
+  if (!live.length && !archived.length) return head + '<div class="pr-empty">No open PRs.</div>';
   let html = head;
   // Active repos
   for (const [repo, prs] of prGroupByRepo(active)) {
@@ -5023,6 +5044,13 @@ function prDropdownHtml() {
     html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__muted__')">`
       + `<span>${collapsed ? '▸' : '▾'} 🔕 Muted</span><span class="pr-count">${muted.length}</span></div>`;
     if (!collapsed) html += muted.map(prMutedRowHtml).join('');
+  }
+  // Archived PRs — collapsed by default, the only way back from archive
+  if (archived.length) {
+    const collapsed = prCollapsed.has('__archived__');
+    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__archived__')">`
+      + `<span>${collapsed ? '▸' : '▾'} 📦 Archived</span><span class="pr-count">${archived.length}</span></div>`;
+    if (!collapsed) html += archived.map(prArchivedRowHtml).join('');
   }
   if (prState.failedRepos && prState.failedRepos.length) {
     html += `<div class="pr-empty" style="color:#f38ba8">⚠ Couldn't reach: ${escapeHtml(prState.failedRepos.join(', '))}</div>`;
@@ -5081,6 +5109,8 @@ function prCtx(e, url) {
 
 function mutePr(key) { api.send({ type: 'mutePr', key }); }
 function unmutePr(key) { api.send({ type: 'unmutePr', key }); }
+function archivePr(key) { api.send({ type: 'archivePr', key }); }
+function unarchivePr(key) { api.send({ type: 'unarchivePr', key }); }
 function muteRepo(repo) { api.send({ type: 'muteRepo', repo }); }
 function unmuteRepo(repo) { api.send({ type: 'unmuteRepo', repo }); }
 

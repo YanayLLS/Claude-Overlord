@@ -1974,6 +1974,7 @@ async function pollPRs() {
   const currentKeys = prs.map(p => p.key);
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);
+  const archived = new Set(settings.prArchived || []);
   const nowMs = Date.now();
   const snoozes = settings.prSnoozed || {};
   for (const k of Object.keys(snoozes)) if (snoozes[k] <= nowMs) delete snoozes[k]; // drop expired
@@ -1982,6 +1983,7 @@ async function pollPRs() {
     p.muted = muted.has(p.key);
     p.repoMuted = mutedRepos.has(p.repo);
     p.snoozed = snoozes[p.key] > nowMs;
+    p.archived = archived.has(p.key);
     p.snoozeUntil = snoozes[p.key] || 0;
   });
   const seen = settings.prSeen || [];
@@ -1991,14 +1993,14 @@ async function pollPRs() {
   } else {
     for (const k of diffNewPRKeys(currentKeys, seen)) {
       const pr = prs.find(p => p.key === k);
-      if (!pr || pr.muted || pr.repoMuted || pr.snoozed) continue; // muted/snoozed doesn't notify
+      if (!pr || pr.muted || pr.repoMuted || pr.snoozed || pr.archived) continue; // muted/snoozed/archived doesn't notify
       notifyNewPR(pr);
     }
   }
   // Notify when MY PR's review state changes (approved / changes requested).
   const prevDecisions = settings.prDecisions || {};
   for (const p of prs) {
-    if (!p.mine || p.muted || p.repoMuted || p.snoozed) continue;
+    if (!p.mine || p.muted || p.repoMuted || p.snoozed || p.archived) continue;
     const prev = prevDecisions[p.key];
     if (prev === undefined) continue; // no prior state — a new PR, not a transition
     if (p.reviewDecision === 'APPROVED' && prev !== 'APPROVED') notifyPrDecision(p, 'approved');
@@ -2009,6 +2011,7 @@ async function pollPRs() {
   settings.prSeen = currentKeys;
   // Drop mutes for PRs that are no longer open (merged/closed) — keeps the list tidy.
   settings.prMuted = (settings.prMuted || []).filter(k => currentKeys.includes(k));
+  settings.prArchived = (settings.prArchived || []).filter(k => currentKeys.includes(k));
   prSeenSeeded = true;
   saveState();
   send({ type: 'prList', prs, error: null, failedRepos });
@@ -3478,6 +3481,21 @@ function handleIpc(msg) {
     case 'unmutePr': {
       if (typeof msg.key === 'string') {
         settings.prMuted = (settings.prMuted || []).filter(k => k !== msg.key);
+        saveState(); pollPRs();
+      }
+      break;
+    }
+    // Archive is local-only: it hides the PR from Overlord, GitHub is untouched.
+    case 'archivePr': {
+      if (typeof msg.key === 'string') {
+        const s = new Set(settings.prArchived || []); s.add(msg.key);
+        settings.prArchived = [...s]; saveState(); pollPRs();
+      }
+      break;
+    }
+    case 'unarchivePr': {
+      if (typeof msg.key === 'string') {
+        settings.prArchived = (settings.prArchived || []).filter(k => k !== msg.key);
         saveState(); pollPRs();
       }
       break;
