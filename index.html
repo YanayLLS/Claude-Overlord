@@ -296,7 +296,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 /* ── Agent card ── */
 .agents { padding:2px 8px 2px 10px; margin-left:10px; border-left:1px solid rgba(49,50,68,.6); display:flex; flex-direction:column; gap:2px; }
 .agent {
-  position:relative; display:flex; align-items:center; gap:7px; height:30px; padding:0 10px;
+  position:relative; display:flex; align-items:center; gap:5px; height:30px; padding:0 7px;
   cursor:pointer; border:1px solid transparent; background:transparent;
   border-radius:5px; transition:background .1s, border-color .1s, opacity .15s; overflow:hidden;
 }
@@ -315,17 +315,17 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent[data-status="crashed"] .agent-dot { background:var(--red); opacity:1; }
 .agent[data-status="resuming"] .agent-dot { background:var(--yellow); opacity:1; animation:pulse 2s ease-in-out infinite; }
 /* Middle flexible zone (status + current file) keeps the right cluster right-anchored */
-.agent-mid { flex:0 1 auto; min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
+.agent-mid { flex:0 1 auto; min-width:0; display:flex; align-items:center; gap:5px; overflow:hidden; }
 /* Right cluster — fixed-width columns so model + ctx% line up across rows */
-.agent-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
-.agent-model-slot { width:54px; display:flex; justify-content:flex-end; flex-shrink:0; }
+.agent-right { display:flex; align-items:center; gap:5px; flex-shrink:0; }
+.agent-model-slot { width:62px; display:flex; justify-content:flex-end; flex-shrink:0; }
 /* Fixed tail slot: ctx% normally, hover actions swap in — model chip left of it never moves */
-.agent-tail { position:relative; display:flex; align-items:center; justify-content:flex-end; min-width:38px; flex-shrink:0; }
-.ctx-pct { font-size:10px; font-variant-numeric:tabular-nums; color:var(--dim); min-width:34px; text-align:right; flex-shrink:0; }
+.agent-tail { position:relative; display:flex; align-items:center; justify-content:flex-end; min-width:28px; flex-shrink:0; }
+.ctx-pct { font-size:10px; font-variant-numeric:tabular-nums; color:var(--dim); min-width:28px; text-align:right; flex-shrink:0; }
 .ctx-pct.warn { color:var(--yellow); } .ctx-pct.danger { color:var(--red); }
 /* Hover actions — overlaid at the right (over the ctx%), model chip stays put */
 .agent-actions { position:absolute; right:0; top:50%; transform:translateY(-50%); display:none; align-items:center; gap:1px; z-index:3;
-  padding-left:22px; }
+  padding-left:18px; }
 .agent:hover .agent-actions { display:flex; }
 .agent:hover .agent-tail .ctx-pct { visibility:hidden; }
 .agent-actions .agent-btn { opacity:1; }
@@ -605,13 +605,16 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #summary-bar .pace-ok { color:var(--green); }
 #summary-bar .pace-warn { color:var(--yellow); }
 #summary-bar .pace-over { color:var(--red); }
-.model-tag { font-size:9px; padding:1px 5px; letter-spacing:.4px; text-transform:uppercase;
-  border:1px solid var(--border); border-radius:3px; color:var(--dim); margin-left:3px; vertical-align:1px; }
+.model-tag { font-size:9px; letter-spacing:.2px; text-transform:uppercase;
+  border:1px solid var(--border); border-radius:3px; color:var(--dim); margin-left:3px; vertical-align:1px;
+  display:inline-flex; align-items:stretch; overflow:hidden; cursor:pointer; }
+.model-tag > span { padding:1px 4px; }
+.model-tag .mt-chev { padding:1px 2px; border-left:1px solid currentColor; display:flex; align-items:center; opacity:.65; }
 .model-tag.fable { color:var(--pink); border-color:rgba(245,194,231,.4); }
 .model-tag.opus { color:var(--purple); border-color:rgba(203,166,247,.4); }
 .model-tag.sonnet { color:var(--accent); border-color:rgba(137,180,250,.4); }
 .model-tag.haiku { color:var(--cyan); border-color:rgba(148,226,213,.4); }
-.model-tag:hover { opacity:.8; filter:brightness(1.2); }
+.model-tag > span:hover { background:rgba(205,214,244,.14); filter:brightness(1.2); }
 .group-servers { display:flex; gap:4px; flex-shrink:0; flex-wrap:wrap; }
 .group-servers:empty { display:none; }
 .server-badge {
@@ -2251,6 +2254,35 @@ function showModelMenu(e, id) {
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
+// The chevron half of the model tag. Levels come out of the same /v1/models
+// payload as the picker — capabilities.effort says which rungs a model has, so
+// a model that gains `max` tomorrow gets it here without an app release.
+const agentEffort = new Map(); // agent id -> effort last set from this menu
+function showEffortMenu(e, id) {
+  const a = agents.get(id);
+  const m = CLAUDE_MODELS.find(x => x.id === (a?.stats?.model || ''))
+         || CLAUDE_MODELS.find(x => x.family === (a?.stats?.modelFamily || ''));
+  const levels = m?.efforts || [];
+  const cur = agentEffort.get(id);
+  const items = [{ header: 'Effort level' }];
+  if (!levels.length) {
+    if (!CLAUDE_MODELS.length) requestModels();
+    items.push({ label: CLAUDE_MODELS.length ? 'No effort levels for this model'
+      : (modelsError || 'Loading models…'), action: () => {} });
+  } else {
+    for (const lv of ['auto', ...levels]) {
+      items.push({ label: lv + (cur === lv ? '  · current' : ''), action: () => setEffort(id, lv) });
+    }
+  }
+  showServerMenu(e, items);
+}
+function setEffort(id, level) {
+  const a = agents.get(id);
+  if (a && a.status === 'active') { showToast('Agent must be idle to change effort'); return; }
+  agentEffort.set(id, level);
+  api.send({ type: 'termInput', id, data: '/effort ' + level + '\r' });
+}
+
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
 function openFile(id, filePath) { if (filePath) api.send({ type: 'openFile', id, path: filePath }); }
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
@@ -2510,7 +2542,7 @@ function render() {
           ${a.currentFileName ? `<span class="agent-current-file" title="${escAttr(a.currentFile)}" data-file="${escAttr(a.currentFile)}" onclick="event.stopPropagation();openFile(${id},this.dataset.file)">${esc(a.currentFileName)}</span>` : ''}
         </div>
         <div class="agent-right" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${agentCtxWin / 1000}K (${ctxPct}%)">
-          <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}" onclick="event.stopPropagation();showModelMenu(event,${id})" style="cursor:pointer" title="Change model">${mf}</span>` : ''}</span>
+          <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}"><span onclick="event.stopPropagation();showModelMenu(event,${id})" title="Change model">${mf}</span><span class="mt-chev" onclick="event.stopPropagation();showEffortMenu(event,${id})" title="Change effort level">&#9662;</span></span>` : ''}</span>
           <span class="agent-tail">
             ${a.peerPending && a.peerPending.length ? `<span title="Peer messages awaiting your approval — click to review" onclick="event.stopPropagation();openPeerApprovalModal(${id})" style="background:var(--peach);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;cursor:pointer;">&#x2709; ${a.peerPending.length}</span>` : ''}
             <span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>

@@ -199,6 +199,7 @@ function anthropicAuthHeaders() {
 // The model picker is this list, nothing else — no hardcoded models, so one
 // Anthropic ships tomorrow appears without an app release. API order is kept
 // (newest first); [1m] variants aren't API ids, so they're gone.
+const EFFORT_LADDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 async function fetchModels() {
   const fail = (error) => send({ type: 'models', models: [], error });
   const headers = anthropicAuthHeaders();
@@ -209,7 +210,8 @@ async function fetchModels() {
     const j = await resp.json();
     const models = (j.data || [])
       .filter(m => m.id && m.id.startsWith('claude-'))
-      .map(m => ({ id: m.id, label: m.display_name || m.id, family: modelFamily(m.id) }));
+      .map(m => ({ id: m.id, label: m.display_name || m.id, family: modelFamily(m.id),
+                   efforts: EFFORT_LADDER.filter(l => m.capabilities?.effort?.[l]?.supported) }));
     if (!models.length) return fail('API returned no models.');
     send({ type: 'models', models });
   } catch (e) {
