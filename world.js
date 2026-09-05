@@ -908,7 +908,7 @@ function updateDaylight() {
   for (const b of beacons) b.userData.nightBoost = night * .8;
 }
 function updateLife(t, dt) {
-  updateDaylight(); const rx = terrain.rx + 30, night = 1 - life.dayK;
+  updateDaylight(); const rx = terrain.rx + 30, night = 1 - life.dayK, gh = sites.get('github');
   // Weather follows the army's health: overcast with one unit down, a storm with two or more.
   const storm = life.weather === 'storm', overcast = life.weather === 'overcast';
   sun.intensity = life.sunBase * (storm ? .6 : overcast ? .8 : 1);
@@ -930,7 +930,7 @@ function updateLife(t, dt) {
     for (const b of f.birds) { b.s.position.set(f.x + b.ox * f.dir, f.y + Math.sin(t * 1.3 + b.ph) * .6, f.z + b.oz); b.s.scale.set(1.6 * f.dir, .8 * (.55 + .45 * Math.abs(Math.sin(t * 9 + b.ph))), 1); }
   }
   if (life.flyHomes.length) for (let i = 0; i < life.flies.length; i++) { const fl = life.flies[i], home = life.flyHomes[i]; if (!home || night > .8) { fl.s.visible = false; continue; } fl.s.visible = true; fl.s.position.set(home.x + Math.sin(t * .9 + fl.ph) * 1.6 + Math.sin(t * 3.1 + fl.ph) * .3, home.h + 1.4 + Math.sin(t * 2.2 + fl.ph * 2) * .5, home.z + Math.cos(t * .7 + fl.ph) * 1.6); fl.s.scale.set(.5, .5 * (.5 + .5 * Math.abs(Math.sin(t * 14 + fl.ph))), 1); }
-  const gh = sites.get('github'); const F = life.fish;
+  const F = life.fish;
   if (F && gh) { F.next -= dt; if (F.next <= 0 && !F.from) { F.from = new THREE.Vector3(gh.x - gh.extra.cx + (Math.random() - .5) * gh.extra.hr, PLAT + .6, gh.z + 2 + (Math.random() - .5) * gh.extra.hr * .9); F.t0 = t; F.s.visible = true; F.ring.visible = true; F.ring.position.copy(F.from); F.ring.position.y += .02; }
     if (F.from) { const k = (t - F.t0) / 1.1; if (k >= 1) { F.from = null; F.s.visible = false; F.ring.visible = false; F.next = 4 + Math.random() * 7; } else { F.s.position.set(F.from.x + k * 2.2, F.from.y + Math.sin(k * Math.PI) * 2.2, F.from.z); F.s.scale.set(1.4 * (k < .5 ? 1 : -1), .7, 1); F.s.material.rotation = (k < .5 ? 1 : -1) * (.6 - k * 1.2); F.ring.scale.setScalar(1 + k * 4); F.ring.material.opacity = .6 * (1 - k); } } }
   for (let i = life.chimneys.length - 1; i >= 0; i--) { const c = life.chimneys[i]; if (!c.g.parent) { life.chimneys.splice(i, 1); continue; } for (const sm of c.smoke) { const f = ((t * .35 + sm.ph) % 1 + 1) % 1; sm.m.position.set(c.at[0] + Math.sin(f * 5 + sm.ph * 9) * .25, c.at[1] + f * 2.4, c.at[2]); sm.m.scale.setScalar(.5 + f * 1.6); sm.m.material.opacity = .5 * (1 - f); } }
