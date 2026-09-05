@@ -199,12 +199,6 @@ body.world-mode #world-attn { order: -1; }
 body.world-mode #list { order: 0; }
 body.world-mode #world-extra { order: 1; }
 body.world-mode #pr-dropdown, body.world-mode #pr-badge, body.world-mode #actions-dropdown, body.world-mode #actions-badge { order: 2; }
-body.world-mode #world-map { order: 3; }
-#world-map { display: none; }
-body.world-mode #world-map { display: block; flex: none; padding: 8px 12px 10px; border-top: 1px solid var(--w-line); background: var(--w-panel-2); }
-#world-map .w-map-head { display: flex; justify-content: space-between; font-family: var(--w-display); font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
-#world-map .w-map-head span:last-child { font-family: var(--w-mono); letter-spacing: 0; }
-#world-map #world-mini { position: static; width: 100%; height: 150px; opacity: 1; display: block; }
 /* Agent cards become two-line roster rows: name, then what the agent is doing (the card's own status text). */
 body.world-mode .agent { display: grid; grid-template-columns: 14px 1fr auto; grid-template-rows: auto auto; column-gap: 8px; row-gap: 1px; height: auto; padding: 6px 10px 6px 12px; align-items: center; }
 body.world-mode .agent-dot { grid-row: 1 / span 2; grid-column: 1; justify-self: center; }
@@ -250,8 +244,6 @@ body.world-mode .group-name > * { overflow: hidden; text-overflow: ellipsis; }
 body.world-mode .wt-branch { font-family: var(--w-mono); font-size: 10px; letter-spacing: 0; text-transform: none; color: var(--dim); flex: none; }
 body.world-mode #list-col { height: 100%; }
 body.world-mode #list { min-height: 0; flex: 1 1 0; }
-body.world-mode #world-map { flex: 0 0 auto; height: 178px; overflow: hidden; }
-#world-map #world-mini { height: 140px; }
 /* Group headers: the name gets the room; chips and buttons stay compact */
 body.world-mode .group-header { padding: 8px 10px 3px 10px; gap: 5px; }
 body.world-mode .group-info { flex: 1 1 100px; }

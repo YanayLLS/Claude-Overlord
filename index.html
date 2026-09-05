@@ -1156,7 +1156,6 @@ button:focus-visible { outline-offset:0; }
     <div id="actions-dropdown" style="display:none"></div>
     <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
     <div id="summary-bar"></div>
-    <div id="world-map"></div>
   </div>
   <div id="world-stage"></div>
   <div id="resize"></div>
@@ -5598,7 +5597,6 @@ function setWorldView(on, persist = true) {
       openPr: (url) => openPr(url),
       openRun: (url) => openActionRun(url),
       openChat: (name) => openChat({ type: 'peer', id: String(name).toLowerCase() }),
-      miniSlot: document.getElementById('world-map'),
     }); window.World.ready = true; worldSync(); }
     catch (e) {
       // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.
