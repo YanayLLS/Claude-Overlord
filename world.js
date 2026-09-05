@@ -192,7 +192,7 @@ function tower(parent, x, z, built, color, active, prev) {
   const FLOORS = 5, FH = 1.5, R = 2.6, n = Math.round(built * FLOORS), pn = prev == null ? n : Math.round(prev * FLOORS);
   for (let i = 0; i < FLOORS; i++) {
     const y = i * FH;
-    if (i < n) { const f = hexPrism(R, FH, i % 2 ? mats.stone : mats.stoneDark); f.position.y = y + FH / 2; g.add(f); const trim = hexPrism(R + .2, .18, mat(color)); trim.position.y = y + FH; g.add(trim); const win = box(.5, .6, .12, mats.dark); win.position.set(0, y + FH / 2, R * .866 + .02); g.add(win);
+    if (i < n) { const f = hexPrism(R, FH, i % 2 ? mats.stone : mats.stoneDark); f.position.y = y + FH / 2; g.add(f); const trim = hexPrism(R + .2, .18, mat(color)); trim.position.y = y + FH; g.add(trim); const win = box(.5, .6, .12, mats.window); win.position.set(0, y + FH / 2, R * .866 + .02); g.add(win);
       if (i >= pn) { const fl = [f, trim, win]; fl.forEach(o => { o.scale.set(.01, .01, .01); }); tween(500, k => fl.forEach(o => o.scale.setScalar(Math.max(.01, k))), null, easeOutBack, (i - pn) * 120); if (puffs) { const wp = new THREE.Vector3(); f.getWorldPosition(wp); setTimeout(() => burst(wp, hexStr(color), 14, 3, 2), (i - pn) * 120 + 60); } } }
     else { const e = hexEdge(R + .3, y + FH / 2, 0xc39a55); g.add(e); const e2 = hexEdge(R + .3, y + FH, 0xc39a55, .5); g.add(e2);
       if (i === n) for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, FH * (FLOORS - n), 5), mats.scaffold); pole.position.set(Math.cos(a) * (R + .3), y + FH * (FLOORS - n) / 2, Math.sin(a) * (R + .3)); pole.castShadow = true; g.add(pole); } }
