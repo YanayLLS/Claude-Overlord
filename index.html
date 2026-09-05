@@ -5636,11 +5636,13 @@ function worldSnapshot() {
     if (lead) { const [name, t] = lead; const members = t.members.filter(m => m.agentType !== 'team-lead').map(m => { const task = t.tasks.find(k => k.owner === m.name && k.status !== 'completed'); return { name: m.name, agentType: m.agentType || '', task: task ? (task.activeForm || task.subject || '') : '' }; }); team = { name, members, done: t.tasks.filter(k => k.status === 'completed').length, total: t.tasks.length }; }
     agentRows.push({ id, cwd: a.cwd || '(unknown)', title: a.customName ? a.title : (a.prompt || a.title || 'New agent'), status: needsAnswer(a) && st === 'permission' ? 'question' : st,
       verb: statusVerb(a, st), ctxPct, cost: calcCost(a.stats), costStr: fmtCost(calcCost(a.stats)), model: a.stats?.modelFamily || '', looping: !!a.looping,
+      tool: ([...a.tools.values()].find(t => !t.done) || {}).name || '',
       crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', currentFileName: a.currentFileName || '', team });
   }
-  const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.mergeState === 'BEHIND') return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
+  // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
+  const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.checks === 'FAILURE') return 'blocked'; if (p.mergeState === 'BEHIND' || p.behindBy > 0) return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
   const prs = prState.prs.filter(p => !prSilenced(p)).map(p => ({ key: p.key, repo: p.repo, number: p.number, title: p.title, url: p.url, author: p.author, state: prState_(p), checks: p.checks || '', behindBy: p.behindBy || 0, commitCount: p.commitCount || 0, headRef: p.headRef || '', baseRef: p.baseRef || '', mine: !!p.mine, needsApproval: prNeedsApproval(p) }));
-  const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '' }));
+  const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '', actor: r.actor || '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length) };
 }
@@ -5669,7 +5671,7 @@ function renderWorldRoster(s) {
   attnEl.innerHTML = attn ? `<div class="wr-sec wr-attn"><h3><i class="hexi"></i>Needs you<span class="n">${attnN}</span></h3>${attn}</div>` : '';
   let extra = '';
   if (s.github) {
-    const prSt = { ready: ['Ready to merge', 'var(--green)'], open: ['Open', 'var(--cyan)'], behind: ['Behind base', 'var(--yellow)'], changes: ['Changes requested', 'var(--red)'], conflict: ['Conflicts', 'var(--red)'], blocked: ['Blocked', 'var(--peach)'] };
+    const prSt = { ready: ['Ready to merge', 'var(--green)'], open: ['Open', 'var(--cyan)'], behind: ['Behind base', 'var(--yellow)'], changes: ['Changes requested', 'var(--red)'], conflict: ['Conflicts', 'var(--red)'], blocked: ['Checks failing', 'var(--peach)'] };
     const runSt = { running: ['Running', 'var(--yellow)'], success: ['Passed', 'var(--green)'], failure: ['Failed', 'var(--red)'], cancelled: ['Cancelled', 'var(--dim)'], none: ['No runs yet', 'var(--dim)'] };
     extra += `<div class="wr-sec"><h3 style="--c:#c9d1d9"><i class="hexi"></i>GitHub quarter<span class="n">${s.prs.length} PR${s.prs.length === 1 ? '' : 's'} · ${s.runs.length} run${s.runs.length === 1 ? '' : 's'}</span></h3>`;
     extra += `<div class="wr-lot" style="color:#3fbfd6">Docks · pull requests</div>`;
@@ -5694,7 +5696,7 @@ function renderDossierHead(s) {
   if (!a) { el.innerHTML = ''; return; }
   const p = s.projects.find(p => p.cwd === a.cwd), st = { active: ['Working', 'var(--accent)'], settling: ['Finishing', 'var(--accent)'], permission: ['Needs approval', 'var(--yellow)'], question: ['Needs an answer', 'var(--purple)'], waiting: ['Done', 'var(--green)'], idle: ['Idle', 'var(--dim)'], crashed: ['Crashed', 'var(--red)'], resuming: ['Resuming', 'var(--purple)'] }[a.status] || ['', 'var(--dim)'];
   const crumb = p && p.feature ? `Feature <b>${esc(p.feature)}</b> · ${esc(p.label)}` : `Workshop <b>${esc(p ? p.label : pathLabel(a.cwd))}</b>${p && p.branch ? ' · ⑂ ' + esc(p.branch) : ''}`;
-  el.innerHTML = `<div class="wd-portrait">${esc((a.model || 's')[0].toUpperCase())}</div><div class="wd-main"><div class="wd-crumb">${crumb}</div><h2>${esc(a.title)}</h2></div><div class="wd-stats"><span title="Context used">ctx <b class="${a.ctxPct >= 80 ? 'danger' : a.ctxPct >= 60 ? 'warn' : ''}">${a.ctxPct}%</b></span><span title="Model">${esc(a.model || '?')}</span><span title="Cost" style="color:var(--w-gold)">${esc(a.costStr)}</span></div><span class="wd-chip" style="--c:${st[1]}">${st[0]}</span>`;
+  el.innerHTML = `<div class="wd-portrait">${esc((a.model || 's')[0].toUpperCase())}</div><div class="wd-main"><div class="wd-crumb">${crumb}</div><h2>${esc(a.title)}</h2></div><div class="wd-stats"><span title="Context used">ctx <b class="${a.ctxPct >= 80 ? 'danger' : a.ctxPct >= 60 ? 'warn' : ''}">${a.ctxPct}%</b></span><span title="Model">${esc(a.model || '?')}</span><span title="Cost" style="color:var(--w-gold)">${esc(a.costStr)}</span></div><span class="wd-chip" style="--c:${st[1]}">${st[0]}</span><button class="wd-close" title="Hide the terminal (Esc). Click the agent again to bring it back." onclick="closeTerm()">&times;</button>`;
 }
 function renderConversation() {
   const el = document.getElementById('conversation'); if (!el || !el.classList.contains('open')) return;
@@ -5729,6 +5731,8 @@ function sendOrder() { const inp = document.getElementById('term-order-input'); 
 // Hovering an agent card in the list lights its unit on the map.
 document.getElementById('list').addEventListener('mouseover', (e) => { if (!worldView || !window.World) return; const card = e.target.closest('.agent[data-id]'); if (card) World.hover(+card.dataset.id); });
 document.getElementById('list').addEventListener('mouseleave', () => { if (worldView && window.World) World.hover(null); });
+// Clicking a card (its existing onclick still focuses the agent) also flies the camera to the unit and zooms in.
+document.getElementById('list').addEventListener('click', (e) => { if (!worldView || !window.World) return; if (e.target.closest('button, .model-tag, .agent-current-file, .agent-actions')) return; const card = e.target.closest('.agent[data-id]'); if (card) World.focus(+card.dataset.id, .9); });
 
 // Initial render
 render();

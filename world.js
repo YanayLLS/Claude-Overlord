@@ -26,7 +26,7 @@ const STATUS = {
   idle:       { label: 'Idle',            css: '--w-idle',     hex: 0x7d8ca3, sym: '○', order: 4 },
   crashed:    { label: 'Crashed',         css: '--w-crashed',  hex: 0xf38ba8, sym: '✕', order: 5 },
 };
-const PR_STATE = { ready: { label: 'Ready to merge', hex: '#a6e3a1', color: 0xa6e3a1 }, open: { label: 'Open', hex: '#94e2d5', color: 0x94e2d5 }, behind: { label: 'Behind base', hex: '#f9e2af', color: 0xf9e2af }, changes: { label: 'Changes requested', hex: '#f38ba8', color: 0xf38ba8 }, conflict: { label: 'Conflicts', hex: '#f38ba8', color: 0xf38ba8 }, blocked: { label: 'Blocked', hex: '#fab387', color: 0xfab387 } };
+const PR_STATE = { ready: { label: 'Ready to merge', hex: '#a6e3a1', color: 0xa6e3a1 }, open: { label: 'Open', hex: '#94e2d5', color: 0x94e2d5 }, behind: { label: 'Behind base', hex: '#f9e2af', color: 0xf9e2af }, changes: { label: 'Changes requested', hex: '#f38ba8', color: 0xf38ba8 }, conflict: { label: 'Conflicts', hex: '#f38ba8', color: 0xf38ba8 }, blocked: { label: 'Checks failing', hex: '#fab387', color: 0xfab387 } };
 const RUN_STATE = { running: { label: 'Running', hex: '#f9e2af', color: 0xf9e2af }, success: { label: 'Passed', hex: '#a6e3a1', color: 0xa6e3a1 }, failure: { label: 'Failed', hex: '#f38ba8', color: 0xf38ba8 }, cancelled: { label: 'Cancelled', hex: '#7d8ca3', color: 0x7d8ca3 }, none: { label: 'No runs yet', hex: '#7d8ca3', color: 0x585b70 } };
 const SITE_COLORS = [0xd6a545, 0x3fbfa6, 0x4f8fe0, 0xd05a92, 0xfab387, 0x94e2d5, 0xcba6f7, 0xa6e3a1];
 const hexStr = c => '#' + c.toString(16).padStart(6, '0');
@@ -250,7 +250,7 @@ function planSites(s) {
   order.features.forEach((f, i) => { const R = fR[i]; plan.push({ key: 'f:' + f, kind: 'feature', name: f, repos: feats.get(f), x: x + R, z: fRowZ, R }); x += 2 * R + GAP; });
   const RW = 11, sTotal = order.shops.length * 2 * RW + Math.max(0, order.shops.length - 1) * 3; x = -sTotal / 2;
   for (const cwd of order.shops) { plan.push({ key: 'w:' + cwd, kind: 'workshop', project: shops.find(p => p.cwd === cwd), x: x + RW, z: 20, R: RW }); x += 2 * RW + 3; }
-  if (s.github) plan.push({ key: 'github', kind: 'github', x: sTotal / 2 + GAP + 24, z: 22, R: 24 });
+  if (s.github) { const R = githubRadius(s); plan.push({ key: 'github', kind: 'github', x: sTotal / 2 + GAP + R, z: R - 2, R }); }
   if (s.peers && s.peers.length) plan.push({ key: 'allies', kind: 'allies', x: -(sTotal / 2 + GAP + 13), z: 22, R: 13 });
   return plan;
 }
@@ -318,7 +318,7 @@ function syncSite(site, p, s) {
     });
     for (const [cwd, lot] of site.lots) if (!seen.has(cwd)) { for (const u of lot.units.values()) destroyUnit(u); dropLabel(lot.el); disposeObj(lot.g); site.lots.delete(cwd); }
     if (site.el) { const all = repos.flatMap(r => s.agents.filter(a => a.cwd === r.cwd)); const built = repos.length ? repos.reduce((acc, r) => acc + (site.lots.get(r.cwd)?.built ?? 1), 0) / repos.length : 0; setLabel(site.el, `<div class="w-eyebrow">Feature</div><b>${esc(p.name)}</b><div class="w-prog"><i style="width:${Math.round(built * 100)}%"></i></div><span class="w-cnt">${all.length} unit${all.length === 1 ? '' : 's'} &middot; ${repos.length} repo${repos.length === 1 ? '' : 's'} &middot; ${Math.round(built * 100)}%</span>`); site.built = built; site.name = p.name; }
-  } else if (p.kind === 'github') syncGithub(site, s);
+  } else if (p.kind === 'github') { if (site.R !== p.R) { destroySite(site); const ns = createSite(p); syncGithub(ns, s); return; } syncGithub(site, s); }
   else if (p.kind === 'allies') syncAllies(site, s);
 }
 
@@ -338,7 +338,6 @@ function makeUnitBody(u) {
   else { const cp = box(.56, .16, .56, mat(0x2a3f66)); cp.position.y = .3; const brim = box(.3, .05, .3, mat(0x2a3f66)); brim.position.set(0, .24, .38); p.head.add(cp, brim); }
   inner.add(p.legL, p.legR, p.torso, belt, p.head, p.armL, p.armR);
   if (st === 'active' || st === 'settling') {
-    const bench = box(1.3, .5, .6, mats.wood); bench.position.set(0, .25, .95); const anvil = box(.5, .22, .3, mats.iron); anvil.position.set(0, .61, .95); inner.add(bench, anvil);
     const hammer = new THREE.Group(); hammer.position.y = -.7; const handle = box(.07, .55, .07, mats.wood); handle.position.set(0, -.05, .2); handle.rotation.x = Math.PI / 2; const head = box(.2, .16, .3, mats.iron); head.position.set(0, -.05, .48); hammer.add(handle, head); p.armR.add(hammer);
     p.sparks = []; const sm = new THREE.MeshBasicMaterial({ color: 0xffd36b }); for (let i = 0; i < 7; i++) { const sp = new THREE.Mesh(new THREE.BoxGeometry(.06, .06, .06), sm); sp.visible = false; inner.add(sp); p.sparks.push({ m: sp, v: new THREE.Vector3(), life: 0 }); }
   }
@@ -348,22 +347,39 @@ function makeUnitBody(u) {
   if (st === 'resuming') { p.arc = new THREE.Mesh(new THREE.RingGeometry(.92, 1.06, 24, 1, 0, Math.PI * 1.25), new THREE.MeshBasicMaterial({ color: sc, transparent: true, opacity: .9, side: THREE.DoubleSide })); p.arc.rotation.x = -Math.PI / 2; p.arc.position.y = .025; u.g.add(p.arc); }
   const bub = { permission: ['!', '#f9e2af'], question: ['?', '#cba6f7'], waiting: ['✓', '#a6e3a1'], idle: ['z', '#7d8ca3'], crashed: ['✕', '#f38ba8'], resuming: ['↻', '#cba6f7'] }[st];
   if (bub) { p.bubble = textSprite(bub[0], bub[1], 'rgba(8,12,18,.92)'); p.bubble.position.y = 2.45 * scale; if (st === 'idle') p.bubble.scale.setScalar(.5); u.g.add(p.bubble); }
+  // Working units think out loud: a cloud with the glyph of the tool they are using right now.
+  if (st === 'active' || st === 'settling') { p.think = cloudSprite(toolGlyph(a.tool)); p.think.position.y = 2.6 * scale; u.g.add(p.think); }
   u.inner = inner; u.p = p;
+}
+const TOOL_GLYPH = { Edit: '✎', Write: '✎', MultiEdit: '✎', NotebookEdit: '✎', Read: '☰', Bash: '>_', PowerShell: '>_', Grep: '⌕', Glob: '⌕', Task: '⚑', Agent: '⚑', WebFetch: '⇣', WebSearch: '⇣', TodoWrite: '☑', LSP: '{}' };
+function toolGlyph(name) { if (!name) return '…'; return TOOL_GLYPH[name] || TOOL_GLYPH[Object.keys(TOOL_GLYPH).find(k => name.startsWith(k)) || ''] || '⚙'; }
+function cloudSprite(glyph) {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  g.fillStyle = 'rgba(245,247,250,.96)'; g.beginPath(); g.ellipse(68, 50, 50, 36, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(30, 96, 9, 0, Math.PI * 2); g.fill(); g.beginPath(); g.arc(16, 114, 5, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#0b1118'; g.font = glyph.length > 1 ? '700 40px Consolas, monospace' : GLYPH_FONT.replace('70px', '52px'); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(glyph, 68, 54);
+  const tex = new THREE.CanvasTexture(c); const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })); s.scale.set(1.15, 1.15, 1); s.renderOrder = 10; return s;
+}
+// The workbench stays at the unit's post while the unit wanders; it lives in the lot, not in the unit.
+function ensureBench(u) {
+  const want = u.a.status === 'active' || u.a.status === 'settling';
+  if (want && !u.bench) { const b = new THREE.Group(); b.position.set(u.tx, .56, u.tz); b.rotation.y = u.face; const bench = box(1.3, .5, .6, mats.wood); bench.position.set(0, .25, .95); const anvil = box(.5, .22, .3, mats.iron); anvil.position.set(0, .61, .95); b.add(bench, anvil); b.scale.setScalar(u.scale); u.lot.g.add(b); u.bench = b; }
+  else if (!want && u.bench) { disposeObj(u.bench); u.bench = null; }
 }
 function createUnit(a, lot, lx, lz, opts) {
   const g = new THREE.Group(); g.position.set(lx, .56, lz); lot.g.add(g);
   const u = { a, lot, g, scale: opts.scale || 1, phase: Math.random() * 6.28, mini: !!opts.mini, lead: opts.lead || null, key: null, tx: lx, tz: lz, face: opts.face ?? (.15 - Math.random() * .3) };
   const hit = new THREE.Mesh(new THREE.BoxGeometry(1.6 * u.scale, 2.3 * u.scale, 1.6 * u.scale), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); hit.position.y = 1.1 * u.scale; g.add(hit); hit.userData.pick = { unit: u }; u.hit = hit; pickables.add(hit);
-  makeUnitBody(u); u.key = unitKey(a);
-  u.pill = label('w-pill', esc(a.title), g, null, (u.p.bubble ? 3.05 : 2.35) * u.scale);
+  makeUnitBody(u); u.key = unitKey(a); ensureBench(u);
+  u.pill = label('w-pill', esc(a.title), g, null, (u.p.bubble || u.p.think ? 3.2 : 2.35) * u.scale);
   // Spawn: pop up out of the ground with a burst in the team colour.
   g.scale.setScalar(.01); tween(520, k => g.scale.setScalar(Math.max(.01, k)), null, easeOutBack, 80);
   const wp = new THREE.Vector3(); g.getWorldPosition(wp); setTimeout(() => burst(wp, hexStr(lot.spec.color), 16, 1.4, 3), 100);
   return u;
 }
-const unitKey = a => `${a.status}|${a.model}|${a.title}|${a.looping}`;
+const unitKey = a => `${a.status}|${a.model}|${a.title}|${a.looping}|${a.tool || ''}`;
 function destroyUnit(u, quiet) {
-  if (u.mini) u.lead?.crew?.delete(u.a.id); units.delete(u.a.id); u.lot.units.delete(u.a.id); dropLabel(u.pill); pickables.delete(u.hit);
+  if (u.mini) u.lead?.crew?.delete(u.a.id); units.delete(u.a.id); u.lot.units.delete(u.a.id); dropLabel(u.pill); pickables.delete(u.hit); if (u.bench) { disposeObj(u.bench); u.bench = null; }
   if (hovered === u) hovered = null; if (selected.unit === u) { selected = {}; renderSel(); }
   const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); if (!quiet) burst(wp, '#8a98ab', 16, 1.2, 2.5);
   const g = u.g; tween(quiet ? 200 : 450, k => { g.scale.setScalar(Math.max(.01, 1 - k)); g.position.y = .56 - k * .8; }, () => disposeObj(g), easeInCubic);
@@ -376,8 +392,8 @@ function syncLotUnits(lot, agents, s) {
     if (!u) { u = createUnit(a, lot, lx, lz, {}); lot.units.set(a.id, u); units.set(a.id, u); }
     else {
       const nk = unitKey(a); u.a = a;
-      if (u.key !== nk) { const wasStatus = u.key.split('|')[0]; disposeObj(u.inner); for (const k of ['disc', 'ring', 'arc', 'bubble']) if (u.p[k]) disposeObj(u.p[k]); makeUnitBody(u); u.key = nk; u.pill.dy = (u.p.bubble ? 3.05 : 2.35) * u.scale; setLabel(u.pill, esc(a.title)); if (wasStatus !== a.status) { const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); wp.y += 1; burst(wp, hexStr(STATUS[a.status].hex), 14, 1, 2.5); } }
-      if (u.tx !== lx || u.tz !== lz) { const fx = u.tx, fz = u.tz; u.tx = lx; u.tz = lz; tween(600, k => u.g.position.set(fx + (lx - fx) * k, u.g.position.y, fz + (lz - fz) * k)); }
+      if (u.key !== nk) { const wasStatus = u.key.split('|')[0]; disposeObj(u.inner); for (const k of ['disc', 'ring', 'arc', 'bubble', 'think']) if (u.p[k]) { disposeObj(u.p[k]); } u.walk = null; makeUnitBody(u); u.key = nk; ensureBench(u); u.pill.dy = (u.p.bubble || u.p.think ? 3.2 : 2.35) * u.scale; setLabel(u.pill, esc(a.title)); if (wasStatus !== a.status) { const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); wp.y += 1; burst(wp, hexStr(STATUS[a.status].hex), 14, 1, 2.5); } }
+      if (u.tx !== lx || u.tz !== lz) { const fx = u.tx, fz = u.tz; u.tx = lx; u.tz = lz; u.walk = null; tween(600, k => { u.g.position.set(fx + (lx - fx) * k, u.g.position.y, fz + (lz - fz) * k); if (u.bench) u.bench.position.set(u.g.position.x, .56, u.g.position.z); }); }
     }
     // Crew: a lead's team members stand behind it, smaller.
     const members = a.team ? a.team.members : [];
@@ -406,27 +422,57 @@ function activity(a) {
   }
 }
 
-/* ────────────────────────── GitHub quarter: docks (PRs) and proving grounds (Actions) ────────────────────────── */
+/* ────────────────────────── GitHub quarter: docks (PRs) and proving grounds (Actions) ──────────────────────────
+   Ships moor along one pier per repo, machines stand on one slab per repo, so a crowded quarter still reads by repo. */
+const byRepo = list => { const m = new Map(); for (const it of list) { if (!m.has(it.repo)) m.set(it.repo, []); m.get(it.repo).push(it); } return m; };
+function quarterHalfRadius(s) {
+  const pr = byRepo(s.prs || []), rn = byRepo(s.runs || []);
+  const rows = Math.max(1, pr.size, rn.size), cols = Math.max(1, ...[...pr.values(), ...rn.values()].map(l => l.length));
+  return Math.max(10.5, rows * 5 / 1.4 + 4, cols * 4.6 / 1.5 + 4);
+}
+function githubRadius(s) { return Math.min(70, Math.round(quarterHalfRadius(s) * 2 + 4)); }
+const GLYPH_FONT = '700 70px "Segoe UI Symbol", "Segoe UI", sans-serif';
 function buildGithub(site, GR) {
   const g = site.g; site.color = 0xc9d1d9;
   const plat = hexPrism(GR, .5, mat(0x22272e)); plat.position.y = .25; g.add(plat); g.add(hexEdge(GR, .52, 0xc9d1d9, .7)); site.plat = plat; plat.userData.pick = { site };
-  const col = hexPrism(2.2, 7, mat(0x161b22)); col.position.set(0, 4, -13); g.add(col);
+  const col = hexPrism(2.2, 7, mat(0x161b22)); col.position.set(0, 4, -(GR - 11)); g.add(col);
   const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
   x.fillStyle = '#f0f6fc'; x.beginPath(); x.arc(128, 128, 118, 0, Math.PI * 2); x.fill();
   x.fillStyle = '#0d1117'; x.beginPath(); x.arc(128, 122, 62, 0, Math.PI * 2); x.fill();
   x.beginPath(); x.moveTo(78, 90); x.lineTo(72, 40); x.lineTo(112, 66); x.closePath(); x.fill(); x.beginPath(); x.moveTo(178, 90); x.lineTo(184, 40); x.lineTo(144, 66); x.closePath(); x.fill();
   x.fillStyle = '#f0f6fc'; x.beginPath(); x.ellipse(105, 118, 16, 12, 0, 0, Math.PI * 2); x.ellipse(151, 118, 16, 12, 0, 0, Math.PI * 2); x.fill();
   x.fillStyle = '#0d1117'; x.beginPath(); x.roundRect(96, 178, 64, 44, 10); x.fill(); x.strokeStyle = '#0d1117'; x.lineWidth = 12; x.lineCap = 'round'; x.beginPath(); x.moveTo(96, 200); x.quadraticCurveTo(40, 200, 44, 150); x.stroke();
-  const mark = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true })); mark.scale.setScalar(5.5); mark.position.set(0, 10.9, -13); g.add(mark); site.extra.mark = mark;
-  const anchor = new THREE.Object3D(); anchor.position.set(0, 14.6, -13); g.add(anchor); site.el = label('w-site w-big', '', anchor, '#c9d1d9');
-  const pool = hexPrism(10.5, .1, mats.water); pool.position.set(-11, .5, 2); g.add(pool); const pe = hexEdge(10.5, .58, 0x3fbfd6, .6); pe.position.set(-11, .58, 2); g.add(pe);
-  const pier = box(12, .3, 1.4, mats.wood); pier.position.set(-11, .65, 11); g.add(pier);
-  const da = new THREE.Object3D(); da.position.set(-11, 5.1, 12); g.add(da); label('w-lot', 'Docks &middot; pull requests', da, '#3fbfd6');
-  const floor = hexPrism(10.5, .08, mat(0x2b3238)); floor.position.set(11, .52, 2); g.add(floor); const fe = hexEdge(10.5, .58, 0xa78bfa, .6); fe.position.set(11, .58, 2); g.add(fe);
-  const pa = new THREE.Object3D(); pa.position.set(11, 5.1, 12); g.add(pa); label('w-lot', 'Proving grounds &middot; Actions', pa, '#a78bfa');
+  const mark = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true })); mark.scale.setScalar(5.5); mark.position.set(0, 10.9, -(GR - 11)); g.add(mark); site.extra.mark = mark; site.extra.markY = 10.9;
+  const anchor = new THREE.Object3D(); anchor.position.set(0, 14.6, -(GR - 11)); g.add(anchor); site.el = label('w-site w-big', '', anchor, '#c9d1d9');
+  const hr = (GR - 4) / 2, cx = hr + 1; site.extra.hr = hr; site.extra.cx = cx;
+  const pool = hexPrism(hr, .1, mats.water); pool.position.set(-cx, .5, 2); g.add(pool); const pe = hexEdge(hr, .58, 0x3fbfd6, .6); pe.position.set(-cx, .58, 2); g.add(pe);
+  const da = new THREE.Object3D(); da.position.set(-cx, 5.1, 2 + hr * .866 + .5); g.add(da); label('w-lot', 'Docks &middot; pull requests', da, '#3fbfd6');
+  const floor = hexPrism(hr, .08, mat(0x2b3238)); floor.position.set(cx, .52, 2); g.add(floor); const fe = hexEdge(hr, .58, 0xa78bfa, .6); fe.position.set(cx, .58, 2); g.add(fe);
+  const pa = new THREE.Object3D(); pa.position.set(cx, 5.1, 2 + hr * .866 + .5); g.add(pa); label('w-lot', 'Proving grounds &middot; Actions', pa, '#a78bfa');
+  site.extra.piers = new Map(); site.extra.slabs = new Map();
 }
-function shipSlot(i, n) { const a = Math.PI * (0.15 + (n > 1 ? i * 0.7 / (n - 1) : .35)) + Math.PI; return { x: -11 + Math.cos(a) * -6.2, z: 2 + Math.sin(a) * -5.2, rot: -a + Math.PI / 2 }; }
-function machineSlot(i, n) { const a = Math.PI * (0.15 + (n > 1 ? i * 0.7 / (n - 1) : .35)); return { x: 11 + Math.cos(a) * 6.4, z: 2 + Math.sin(a) * 5.4, rot: -a + Math.PI / 2 }; }
+// Row i of a half (docks or grounds): its z inside the half, and the x of column j along it.
+function rowZ(site, i, n) { return 2 - (n - 1) * 2.5 + i * 5; }
+function shipSlot(site, i, j, nRows, nCols) { const hr = site.extra.hr, cx = site.extra.cx; return { x: -cx - hr * .55 + 3.2 + j * 4.6, z: rowZ(site, i, nRows), rot: 0 }; }
+function machineSlot(site, i, j, nRows, nCols) { const hr = site.extra.hr, cx = site.extra.cx; return { x: cx - hr * .55 + 3 + j * 4.4, z: rowZ(site, i, nRows), rot: 0 }; }
+// One pier per repo in the pool, one slab per repo on the grounds, each with the repo's name at its head.
+function syncRepoRows(site, kind, repos) {
+  const store = kind === 'pier' ? site.extra.piers : site.extra.slabs, hr = site.extra.hr, cx = site.extra.cx, seen = new Set();
+  repos.forEach((repo, i) => {
+    seen.add(repo); const z = rowZ(site, i, repos.length), x = kind === 'pier' ? -cx - hr * .55 : cx - hr * .55, len = hr * 1.25;
+    let row = store.get(repo);
+    if (!row) {
+      const m = kind === 'pier' ? box(len, .3, 1.1, mats.wood) : box(len, .2, 3.2, mat(0x353d45)); m.position.set(x + len / 2 - 1, kind === 'pier' ? .65 : .6, z + (kind === 'pier' ? 1.6 : 0)); site.g.add(m);
+      if (kind === 'pier') for (let k = 0; k < Math.floor(len / 4); k++) { const post = new THREE.Mesh(new THREE.CylinderGeometry(.12, .14, 1.2, 6), mats.wood); post.position.set(x + 1 + k * 4, .9, z + 2.1); m.parent.add(post); (row = row || { posts: [] }).posts.push(post); }
+      row = Object.assign(row || { posts: [] }, { m, z }); const an = new THREE.Object3D(); an.position.set(x - 1.5, 3.4, z); site.g.add(an); row.an = an;
+      row.el = label('w-obj w-repo', esc(repo.split('/').pop()), an, kind === 'pier' ? '#3fbfd6' : '#a78bfa'); store.set(repo, row);
+      m.scale.set(.01, 1, 1); tween(600, k => m.scale.x = Math.max(.01, k));
+    } else if (row.z !== z) { const fz = row.z; row.z = z; tween(700, k => { const nz = fz + (z - fz) * k; row.m.position.z = nz + (kind === 'pier' ? 1.6 : 0); row.an.position.z = nz; row.posts.forEach(p => p.position.z = nz + 2.1); }); }
+  });
+  for (const [repo, row] of store) if (!seen.has(repo)) { store.delete(repo); dropLabel(row.el); disposeObj(row.m); row.posts.forEach(p => disposeObj(p)); disposeObj(row.an); }
+}
+const PR_GLYPH = pr => pr.state === 'ready' ? ['✓', '#a6e3a1'] : pr.state === 'changes' || pr.state === 'conflict' ? ['✗', '#f38ba8'] : pr.state === 'behind' ? ['⚓', '#f9e2af'] : pr.needsApproval ? ['!', '#f9e2af'] : pr.state === 'blocked' ? ['■', '#fab387'] : ['○', '#94e2d5'];
+const RUN_GLYPH = run => run.state === 'running' ? ['⟳', '#f9e2af'] : run.state === 'success' ? ['✓', '#a6e3a1'] : run.state === 'failure' ? ['✗', '#f38ba8'] : run.state === 'cancelled' ? ['–', '#7d8ca3'] : ['○', '#7d8ca3'];
 const shipKey = pr => `${pr.state}|${pr.checks}|${pr.behindBy}|${pr.commitCount}|${pr.needsApproval}`;
 function makeShipBody(sh) {
   const pr = sh.pr, st = PR_STATE[pr.state] || PR_STATE.open, sg = new THREE.Group(); sh.g.add(sg); sh.body = sg;
@@ -438,41 +484,46 @@ function makeShipBody(sh) {
   const pennant = new THREE.Mesh(new THREE.PlaneGeometry(.9, .4), mat(pc, { side: THREE.DoubleSide })); pennant.position.set(.85, 4.9, 0); sg.add(pennant); flags.push(pennant); sh.pennant = pennant;
   if (pr.behindBy > 0) { const chain = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, 2.6, 4), mats.iron); chain.position.set(-2.6, .3, .6); chain.rotation.z = .6; sg.add(chain); }
   sh.smoke = null; if (pr.checks === 'FAILURE' || pr.state === 'conflict') { sh.smoke = []; for (let k = 0; k < 4; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.16, 7, 6), new THREE.MeshStandardMaterial({ color: 0x4a3a3a, transparent: true, opacity: .7 })); sg.add(s); sh.smoke.push({ m: s, ph: k / 4 }); } }
-  if (pr.needsApproval) { const b = textSprite('!', '#f9e2af', 'rgba(8,12,18,.92)', .8); b.position.set(.4, 5.9, 0); sg.add(b); sh.bubble = b; } else sh.bubble = null;
+  // Status flag at the masthead: readable from any distance.
+  const [gl, gc] = PR_GLYPH(pr); const b = textSprite(gl, gc, 'rgba(8,12,18,.92)', .9); b.position.set(.4, 5.9, 0); sg.add(b); sh.bubble = b;
 }
 function syncGithub(site, s) {
   const seen = new Set(); const prs = s.prs || [], runs = s.runs || [];
-  prs.forEach((pr, i) => {
-    seen.add(pr.key); const slot = shipSlot(i, prs.length); let sh = ships.get(pr.key);
+  const prRepos = [...byRepo(prs).keys()].sort(), runRepos = [...byRepo(runs).keys()].sort();
+  syncRepoRows(site, 'pier', prRepos); syncRepoRows(site, 'slab', runRepos);
+  const shipLabel = pr => `#${pr.number}${pr.author ? ' <span class="w-who">@' + esc(pr.author) + '</span>' : ''}`;
+  for (const [repo, list] of byRepo(prs)) list.sort((a, b) => a.number - b.number).forEach((pr, j) => {
+    const i = prRepos.indexOf(repo), slot = shipSlot(site, i, j, prRepos.length, list.length); seen.add(pr.key); let sh = ships.get(pr.key);
     if (!sh) {
       const g = new THREE.Group(); site.g.add(g); g.position.set(slot.x - 16, .8, slot.z); g.rotation.y = slot.rot;
       sh = { pr, g, site, ph: Math.random() * 6, key: shipKey(pr), baseY: .8, slot }; ships.set(pr.key, sh); makeShipBody(sh);
       const hit = new THREE.Mesh(new THREE.BoxGeometry(5, 5.4, 2.6), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); hit.position.y = 2.4; hit.userData.pick = { pr, ship: sh }; g.add(hit); sh.hit = hit; pickables.add(hit);
-      sh.el = label('w-obj', '#' + pr.number, g, (PR_STATE[pr.state] || PR_STATE.open).hex, 5.7);
+      sh.el = label('w-obj', shipLabel(pr), g, (PR_STATE[pr.state] || PR_STATE.open).hex, 6.4);
       // Sail in from the open water.
       tween(1400, k => g.position.x = slot.x - 16 + 16 * k, () => { const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#9fd8e8', 12, 2, 1.5); });
     } else {
       sh.pr = pr; const nk = shipKey(pr);
       if (sh.key !== nk) { const pi = flags.indexOf(sh.pennant); if (pi >= 0) flags.splice(pi, 1); disposeObj(sh.body); sh.key = nk; makeShipBody(sh); sh.el.el.style.setProperty('--c', (PR_STATE[pr.state] || PR_STATE.open).hex); const wp = new THREE.Vector3(); sh.g.getWorldPosition(wp); wp.y += 3; burst(wp, (PR_STATE[pr.state] || PR_STATE.open).hex, 12, 1.5, 2); }
-      if (sh.slot.x !== slot.x || sh.slot.z !== slot.z) { const f = { ...sh.slot }; sh.slot = slot; tween(900, k => { sh.g.position.x = f.x + (slot.x - f.x) * k; sh.g.position.z = f.z + (slot.z - f.z) * k; sh.g.rotation.y = f.rot + (slot.rot - f.rot) * k; }); }
-      setLabel(sh.el, '#' + pr.number);
+      if (sh.slot.x !== slot.x || sh.slot.z !== slot.z) { const f = { ...sh.slot }; sh.slot = slot; tween(900, k => { sh.g.position.x = f.x + (slot.x - f.x) * k; sh.g.position.z = f.z + (slot.z - f.z) * k; }); }
+      setLabel(sh.el, shipLabel(pr));
     }
   });
   for (const [k, sh] of ships) if (!seen.has(k)) destroyShip(sh);
   const rseen = new Set();
-  runs.forEach((run, i) => {
-    rseen.add(run.key); const slot = machineSlot(i, runs.length); let m = machines.get(run.key);
+  const runLabel = run => `${esc(run.name)}${run.runNumber ? ' #' + run.runNumber : ''}${run.actor ? ' <span class="w-who">@' + esc(run.actor) + '</span>' : ''}`;
+  for (const [repo, list] of byRepo(runs)) list.forEach((run, j) => {
+    const i = runRepos.indexOf(repo), slot = machineSlot(site, i, j, runRepos.length, list.length); rseen.add(run.key); let m = machines.get(run.key);
     if (!m) {
       const g = new THREE.Group(); site.g.add(g); g.position.set(slot.x, .56 - 6, slot.z); g.rotation.y = slot.rot;
       m = { run, g, site, ph: Math.random() * 6, key: run.state, slot }; machines.set(run.key, m); makeMachineBody(m);
       const hit = new THREE.Mesh(new THREE.BoxGeometry(4, 4.6, 3.2), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); hit.position.y = 2.2; hit.userData.pick = { run, machine: m }; g.add(hit); m.hit = hit; pickables.add(hit);
-      m.el = label('w-obj', esc(run.name), g, (RUN_STATE[run.state] || RUN_STATE.none).hex, 5.2);
+      m.el = label('w-obj', runLabel(run), g, (RUN_STATE[run.state] || RUN_STATE.none).hex, 5.6);
       tween(800, k => g.position.y = .56 - 6 + 6 * k, () => { const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#cba6f7', 16, 2.5, 2); }, easeOutCubic);
     } else {
       m.run = run;
       if (m.key !== run.state) { disposeObj(m.body); m.key = run.state; makeMachineBody(m); m.el.el.style.setProperty('--c', (RUN_STATE[run.state] || RUN_STATE.none).hex); const wp = new THREE.Vector3(); m.g.getWorldPosition(wp); wp.y += 3.5; burst(wp, (RUN_STATE[run.state] || RUN_STATE.none).hex, 16, 1.5, 2.5); }
-      if (m.slot.x !== slot.x || m.slot.z !== slot.z) { const f = { ...m.slot }; m.slot = slot; tween(700, k => { m.g.position.x = f.x + (slot.x - f.x) * k; m.g.position.z = f.z + (slot.z - f.z) * k; m.g.rotation.y = f.rot + (slot.rot - f.rot) * k; }); }
-      setLabel(m.el, esc(run.name));
+      if (m.slot.x !== slot.x || m.slot.z !== slot.z) { const f = { ...m.slot }; m.slot = slot; tween(700, k => { m.g.position.x = f.x + (slot.x - f.x) * k; m.g.position.z = f.z + (slot.z - f.z) * k; }); }
+      setLabel(m.el, runLabel(run));
     }
   });
   for (const [k, m] of machines) if (!rseen.has(k)) destroyMachine(m);
@@ -488,6 +539,7 @@ function makeMachineBody(m) {
   const hub = new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, .5, 6), mats.gold); hub.rotation.x = Math.PI / 2; gear.add(hub); mg.add(gear); m.gear = gear;
   const axle = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 1.4, 6), mats.dark); axle.position.set(.5, 2.2, 0); mg.add(axle);
   m.lamp = new THREE.MeshStandardMaterial({ color: st.color, emissive: st.color, emissiveIntensity: run.state === 'none' ? .3 : 1.3 }); const lamp = new THREE.Mesh(new THREE.SphereGeometry(.3, 10, 8), m.lamp); lamp.position.set(-1, 3.9, -.6); mg.add(lamp);
+  const [gl, gc] = RUN_GLYPH(run); const flag = textSprite(gl, gc, 'rgba(8,12,18,.92)', .9); flag.position.set(.5, 5, 0); mg.add(flag); m.flag = flag;
   if (run.state === 'success') banner(mg, 1.4, 0, -.9, st.color);
   m.smoke = null; if (run.state === 'running' || run.state === 'failure') { m.smoke = []; for (let k = 0; k < 5; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.18, 7, 6), new THREE.MeshStandardMaterial({ color: run.state === 'failure' ? 0x4a2a2a : 0x3a3f47, transparent: true, opacity: .7 })); mg.add(s); m.smoke.push({ m: s, ph: k / 5 }); } }
 }
@@ -540,6 +592,7 @@ W.sync = function (s) {
   if (!alive) return; snap = s;
   const plan = planSites(s), seen = new Set();
   for (const p of plan) { seen.add(p.key); let site = sites.get(p.key); if (!site) site = createSite(p); syncSite(site, p, s); }
+  for (const p of plan) { const site = sites.get(p.key); if (site && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); } }
   for (const [k, site] of sites) if (!seen.has(k)) destroySite(site);
   layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R })));
   // Until the commander pans or zooms, keep the whole settlement framed.
@@ -661,13 +714,31 @@ function command(cmd, ev) {
 /* ────────────────────────── Animation ────────────────────────── */
 function animateUnit(u, t, dt) {
   const { p: m, inner, a } = u, s = a.status, T = reduceMotion() ? 0 : t;
-  m.armL.rotation.set(0, 0, 0); m.armR.rotation.set(0, 0, 0); inner.rotation.set(0, u.face, 0); inner.position.y = 0; inner.scale.setScalar(u.scale); m.head.rotation.x = 0;
+  m.armL.rotation.set(0, 0, 0); m.armR.rotation.set(0, 0, 0); inner.rotation.set(0, u.face, 0); inner.position.y = 0; inner.scale.setScalar(u.scale); m.head.rotation.set(0, 0, 0);
   m.ring.material.opacity = u === selected.unit ? .95 : u === hovered ? .5 : 0; m.disc.scale.setScalar(1); m.disc.material.opacity = .32;
+  if (m.think) { m.think.position.y = 2.6 * u.scale + Math.sin(T * 2.2 + u.phase) * .08; m.think.position.x = .35 * u.scale; }
   switch (s) {
-    case 'active': case 'settling': { const sp = s === 'active' ? 9 : 4, ph = Math.sin(T * sp + u.phase); m.armR.rotation.x = -1.2 + ph * .8; m.armL.rotation.x = .35; inner.position.y = Math.max(0, -ph) * .03;
+    case 'active': case 'settling': {
+      // Every so often a working unit leaves its bench for a short errand across the lot, then comes back to hammer.
+      if (!reduceMotion() && !u.mini) {
+        if (!u.walk && Math.random() < dt / 9) { const lim = u.lot.R - 1.8; let ang = Math.random() * Math.PI * 2, r = 2 + Math.random() * 2.5, tx = u.tx + Math.cos(ang) * r, tz = u.tz + Math.sin(ang) * r; if (Math.hypot(tx, tz) > lim) { r *= .4; tx = u.tx + Math.cos(ang) * r; tz = u.tz + Math.sin(ang) * r; } u.walk = { fx: u.tx, fz: u.tz, tx, tz, t: 0, dur: Math.max(.6, r / 2), back: false, pause: 0 }; }
+        if (u.walk) {
+          const w = u.walk;
+          if (w.pause > 0) { w.pause -= dt; m.head.rotation.x = .25; m.armL.rotation.x = .2; m.armR.rotation.x = .2; }
+          else {
+            w.t += dt; const k = Math.min(1, w.t / w.dur), ax = w.back ? w.tx : w.fx, az = w.back ? w.tz : w.fz, bx = w.back ? w.fx : w.tx, bz = w.back ? w.fz : w.tz;
+            u.g.position.x = ax + (bx - ax) * k; u.g.position.z = az + (bz - az) * k; inner.rotation.y = Math.atan2(bx - ax, bz - az);
+            const st = Math.sin(T * 11); m.legL.rotation.x = st * .55; m.legR.rotation.x = -st * .55; m.armL.rotation.x = -st * .45; m.armR.rotation.x = st * .45; inner.position.y = Math.abs(st) * .05;
+            if (k >= 1) { if (!w.back) { w.back = true; w.t = 0; w.pause = .8 + Math.random(); } else { u.walk = null; u.g.position.set(u.tx, u.g.position.y, u.tz); } }
+          }
+          break;
+        }
+      }
+      m.legL.rotation.x = 0; m.legR.rotation.x = 0;
+      const sp = s === 'active' ? 9 : 4, ph = Math.sin(T * sp + u.phase); m.armR.rotation.x = -1.2 + ph * .8; m.armL.rotation.x = .35; inner.position.y = Math.max(0, -ph) * .03;
       if (m.sparks && !reduceMotion()) { if (ph > .97 && !u.sparked) { u.sparked = true; for (const k of m.sparks) { k.life = .35 + Math.random() * .2; k.m.position.set((Math.random() - .5) * .3, .75, .95); k.v.set((Math.random() - .5) * 3, 2 + Math.random() * 2, (Math.random() - .5) * 3); } } if (ph < 0) u.sparked = false; for (const k of m.sparks) { if (k.life <= 0) { k.m.visible = false; continue; } k.life -= dt; k.m.visible = true; k.v.y -= 12 * dt; k.m.position.addScaledVector(k.v, dt); } } break; }
     case 'permission': case 'question': m.armR.rotation.x = -2.9 + Math.sin(T * 7 + u.phase) * .18; m.armR.rotation.z = -.35; inner.position.y = Math.abs(Math.sin(T * 5 + u.phase)) * .12; m.bubble.position.y = 2.55 * u.scale + Math.sin(T * 3 + u.phase) * .1; { const k = .5 + .5 * Math.sin(T * 4 + u.phase); m.disc.scale.setScalar(1 + k * .4); m.disc.material.opacity = .25 + k * .35; } break;
-    case 'waiting': inner.scale.y = u.scale * (1 + Math.sin(T * 2 + u.phase) * .015); m.armL.rotation.x = .2; m.armR.rotation.x = .2; break;
+    case 'waiting': inner.scale.y = u.scale * (1 + Math.sin(T * 2 + u.phase) * .015); m.armL.rotation.x = .2; m.armR.rotation.x = .2; m.head.rotation.y = Math.sin(T * .6 + u.phase) * .6; m.legL.rotation.x = 0; m.legR.rotation.x = 0; break;
     case 'idle': inner.rotation.z = Math.sin(T * .9 + u.phase) * .06; m.head.rotation.x = .38 + Math.sin(T * 1.2) * .04; m.armL.rotation.x = .25; m.armR.rotation.x = .25; { const f = ((T * .35 + u.phase) % 1 + 1) % 1; m.bubble.position.set(.35 + f * .3, 2.1 + f * .9, 0); m.bubble.material.opacity = 1 - f; } break;
     case 'crashed': inner.rotation.z = -Math.PI / 2 + .1; inner.rotation.y = u.face + .6; inner.position.y = .38; m.armL.rotation.x = -.4; m.armR.rotation.x = .6; for (const sm of m.smoke) { const f = ((T * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(.4 + Math.sin(f * 6 + sm.ph * 9) * .15 - f * .3, .4 + f * 1.8, .2 + Math.cos(f * 5) * .15); sm.m.scale.setScalar(.6 + f * 1.3); sm.m.material.opacity = .65 * (1 - f); } m.bubble.position.set(0, 1.6, 0); break;
     case 'resuming': inner.rotation.y = T * 3.2; inner.position.y = .12 + Math.abs(Math.sin(T * 4)) * .14; m.arc.rotation.z = -T * 2.4; m.bubble.material.rotation = -T * 2; break;
@@ -707,14 +778,15 @@ function tick(now) {
     for (const c of cranes) { c.jib.rotation.y = Math.sin(t * .35 + c.ph) * .9; c.block.position.y = -2.4 + Math.sin(t * .7 + c.ph) * .5; }
     for (const sh of ships.values()) { sh.g.position.y = sh.baseY + Math.sin(t * 1.1 + sh.ph) * .08; sh.g.rotation.z = Math.sin(t * .8 + sh.ph) * .035 + (sh.pr.behindBy ? .1 : 0); if (sh.smoke) for (const sm of sh.smoke) { const f = ((t * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1.5 + f * .4, 1.4 + f * 1.6, Math.sin(f * 7) * .2); sm.m.scale.setScalar(.6 + f * 1.2); sm.m.material.opacity = .6 * (1 - f); } }
     for (const m of machines.values()) { if (m.run.state === 'running') { m.gear.rotation.z = t * 1.6 + m.ph; m.lamp.emissiveIntensity = 1 + Math.sin(t * 5 + m.ph) * .6; } if (m.smoke) for (const sm of m.smoke) { const f = ((t * (m.run.state === 'failure' ? .22 : .4) + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1 + Math.sin(f * 6 + sm.ph * 9) * .2, 3.5 + f * 2.2, -.6); sm.m.scale.setScalar(.5 + f * 1.4); sm.m.material.opacity = .65 * (1 - f); } }
-    for (const s of sites.values()) if (s.extra.mark) s.extra.mark.position.y = 10.9 + Math.sin(t * 1.2) * .25;
+    for (const s of sites.values()) if (s.extra.mark) s.extra.mark.position.y = s.extra.markY + Math.sin(t * 1.2) * .25;
+    for (const m of machines.values()) if (m.flag && m.run.state === 'running') m.flag.material.rotation = -t * 2;
   }
   renderer.render(scene, camera); updateLabels(); drawMinimap();
 }
 
 // Roster hooks: the list on the left can highlight and fly to a unit.
 W.hover = function (id) { if (!alive) return; hovered = id == null ? null : (units.get(id) || null); };
-W.focus = function (id) { if (!alive) return; const u = units.get(id); if (u) { cam.userMoved = true; flyTo(u.g); } };
+W.focus = function (id, zoom) { if (!alive) return; const u = units.get(id); if (!u) return; cam.userMoved = true; const p = new THREE.Vector3(); u.g.getWorldPosition(p); const fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom, tz = zoom || Math.min(cam.zoom, 1.1); tween(700, k => { cam.target.x = fx + (p.x - fx) * k; cam.target.z = fz + (p.z - fz) * k; cam.zoom = fzoom + (tz - fzoom) * k; }); };
 W.focusKey = function (kind, key) { if (!alive) return; const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
 
 window.World = W;

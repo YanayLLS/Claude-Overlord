@@ -299,3 +299,8 @@ body.world-mode #term-order.open { display: flex; gap: 6px; padding: 10px 12px; 
 #conversation .row2 .yes { background: var(--c, var(--w-gold)); color: #0b1118; font-weight: 700; }
 #conversation .msg.err { border-left: 2px solid var(--red); padding: 6px 10px; background: rgba(243,139,168,.08); font-family: var(--w-mono); font-size: 11px; color: #f0b3bb; --c: var(--red); }
 body.world-mode #term-header .term-title { display: none; }
+/* Ships and machines say who and where; repo rows carry their name at the head of the pier or slab */
+.w-obj .w-who { color: var(--dim); margin-left: 4px; }
+.w-obj.w-repo { font-family: var(--w-display); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; background: rgba(8,12,18,.85); padding: 2px 10px; }
+.wd-close { flex: none; width: 28px; height: 28px; margin-left: 4px; color: var(--dim); font-size: 18px; background: rgba(255,255,255,.06); clip-path: var(--w-hexw); border: 0; cursor: pointer; }
+.wd-close:hover { color: var(--text); background: rgba(243,139,168,.25); }
