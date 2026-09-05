@@ -2277,7 +2277,7 @@ let usageInFlight = false;
 let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
 // Set before any programmatic quit so the close confirmation doesn't block it.
 let forceQuit = false;
-const { parseModelWeekly } = require('./usage-core');
+const { parseModelWeekly, parseOauthUsage } = require('./usage-core');
 let lastUsage = null;
 
 function getApiKey() {
@@ -2352,6 +2352,10 @@ function getCurrentAccountInfo() {
   };
 }
 
+// Usage comes from the OAuth usage endpoint first (one GET, every bucket incl. per-model caps,
+// no tokens spent — what Claude Code's /usage screen reads). It is undocumented, so any failure
+// falls back to the 1-token header probe below, which only sees the buckets of the model it calls.
+let usageEndpointFailed = false; // log the fallback once, not every poll
 function fetchUsage() {
   if (usageInFlight) return;
   const apiKey = getApiKey();
@@ -2360,6 +2364,36 @@ function fetchUsage() {
     return;
   }
   usageInFlight = true;
+  let settled = false; // destroy() on timeout also raises 'error': fall back exactly once
+  const fallback = (why) => { if (settled) return; settled = true; if (!usageEndpointFailed) { usageEndpointFailed = true; console.log('[Overlord] Usage endpoint ' + why + ' — falling back to the header probe'); } fetchUsageFromHeaders(apiKey); };
+  const req = https.request({
+    hostname: 'api.anthropic.com',
+    path: '/api/oauth/usage',
+    method: 'GET',
+    headers: { 'authorization': `Bearer ${apiKey}`, 'anthropic-beta': 'oauth-2025-04-20', 'accept': 'application/json' },
+    timeout: USAGE_TIMEOUT_MS,
+  }, (res) => {
+    let data = '';
+    res.on('data', (chunk) => { data += chunk; });
+    res.on('end', () => {
+      let usage = null;
+      if (res.statusCode === 200) { try { usage = parseOauthUsage(JSON.parse(data)); } catch (e) { usage = null; } }
+      if (usage) {
+        settled = true;
+        usageInFlight = false;
+        usage.fetchedAt = Date.now();
+        lastUsage = usage;
+        send({ type: 'usage', usage });
+        console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
+      } else fallback('gave ' + res.statusCode);
+    });
+  });
+  req.on('error', (e) => fallback('error: ' + e.message));
+  req.on('timeout', () => { req.destroy(); fallback('timed out'); });
+  req.end();
+}
+// The original probe: a 1-token Haiku call whose rate-limit response headers carry the unified buckets.
+function fetchUsageFromHeaders(apiKey) {
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 1,
