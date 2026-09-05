@@ -486,6 +486,14 @@ function makeShipBody(sh) {
   sh.smoke = null; if (pr.checks === 'FAILURE' || pr.state === 'conflict') { sh.smoke = []; for (let k = 0; k < 4; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.16, 7, 6), new THREE.MeshStandardMaterial({ color: 0x4a3a3a, transparent: true, opacity: .7 })); sg.add(s); sh.smoke.push({ m: s, ph: k / 4 }); } }
   // Status flag at the masthead: readable from any distance.
   const [gl, gc] = PR_GLYPH(pr); const b = textSprite(gl, gc, 'rgba(8,12,18,.92)', .9); b.position.set(.4, 5.9, 0); sg.add(b); sh.bubble = b;
+  // A ship that waits on the commander signals: a light column over the mast and ripples in the water.
+  sh.beam = null; sh.ripples = null;
+  const want = pr.needsApproval ? 0xf9e2af : pr.state === 'ready' && pr.mine ? 0xa6e3a1 : 0;
+  if (want) {
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(.35, .9, 9, 12, 1, true), new THREE.MeshBasicMaterial({ color: want, transparent: true, opacity: .22, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); beam.position.set(.4, 5.2, 0); sg.add(beam); sh.beam = beam;
+    sh.ripples = []; for (let k = 0; k < 3; k++) { const r = new THREE.Mesh(new THREE.RingGeometry(2.4, 2.7, 40), new THREE.MeshBasicMaterial({ color: want, transparent: true, opacity: .5, depthWrite: false, side: THREE.DoubleSide })); r.rotation.x = -Math.PI / 2; r.position.y = -.2; sg.add(r); sh.ripples.push({ m: r, ph: k / 3 }); }
+    sh.signal = want;
+  }
 }
 function syncGithub(site, s) {
   const seen = new Set(); const prs = s.prs || [], runs = s.runs || [];
@@ -527,8 +535,8 @@ function syncGithub(site, s) {
     }
   });
   for (const [k, m] of machines) if (!rseen.has(k)) destroyMachine(m);
-  const live = runs.filter(r => r.state === 'running').length, ready = prs.filter(p => p.state === 'ready').length;
-  setLabel(site.el, `<div class="w-eyebrow">GitHub quarter</div><b>Pull requests &amp; Actions</b><span class="w-cnt">${prs.length} PR${prs.length === 1 ? '' : 's'}${ready ? ' · ' + ready + ' ready' : ''} · ${runs.length} run${runs.length === 1 ? '' : 's'}${live ? ' · ' + live + ' live' : ''}</span>`);
+  const live = runs.filter(r => r.state === 'running').length, ready = prs.filter(p => p.state === 'ready').length, waiting = prs.filter(p => p.needsApproval).length, failed = runs.filter(r => r.state === 'failure').length;
+  setLabel(site.el, `<div class="w-eyebrow">GitHub quarter</div><b>Pull requests &amp; Actions</b><span class="w-cnt">${prs.length} PR${prs.length === 1 ? '' : 's'}${ready ? ' · ' + ready + ' ready' : ''} · ${runs.length} run${runs.length === 1 ? '' : 's'}${live ? ' · ' + live + ' live' : ''}</span>${waiting ? `<span class="w-cnt w-alert">⚑ ${waiting} waiting for your review</span>` : ''}${failed ? `<span class="w-cnt w-alert w-bad">✗ ${failed} run${failed === 1 ? '' : 's'} failed</span>` : ''}`);
 }
 function makeMachineBody(m) {
   const run = m.run, st = RUN_STATE[run.state] || RUN_STATE.none, mg = new THREE.Group(); m.g.add(mg); m.body = mg;
@@ -778,7 +786,8 @@ function tick(now) {
   if (!reduceMotion()) {
     flags.forEach((f, i) => { f.rotation.y = Math.sin(t * 2.2 + i) * .18; }); for (const b of beacons) b.material.emissiveIntensity = 1 + Math.sin(t * 3) * .7;
     for (const c of cranes) { c.jib.rotation.y = Math.sin(t * .35 + c.ph) * .9; c.block.position.y = -2.4 + Math.sin(t * .7 + c.ph) * .5; }
-    for (const sh of ships.values()) { sh.g.position.y = sh.baseY + Math.sin(t * 1.1 + sh.ph) * .08; sh.g.rotation.z = Math.sin(t * .8 + sh.ph) * .035 + (sh.pr.behindBy ? .1 : 0); if (sh.smoke) for (const sm of sh.smoke) { const f = ((t * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1.5 + f * .4, 1.4 + f * 1.6, Math.sin(f * 7) * .2); sm.m.scale.setScalar(.6 + f * 1.2); sm.m.material.opacity = .6 * (1 - f); } }
+    for (const sh of ships.values()) { sh.g.position.y = sh.baseY + Math.sin(t * 1.1 + sh.ph) * .08; sh.g.rotation.z = Math.sin(t * .8 + sh.ph) * .035 + (sh.pr.behindBy ? .1 : 0); if (sh.smoke) for (const sm of sh.smoke) { const f = ((t * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1.5 + f * .4, 1.4 + f * 1.6, Math.sin(f * 7) * .2); sm.m.scale.setScalar(.6 + f * 1.2); sm.m.material.opacity = .6 * (1 - f); }
+      if (sh.beam) { const k = .5 + .5 * Math.sin(t * 2.6 + sh.ph); sh.beam.material.opacity = .12 + k * .22; sh.beam.scale.set(1 + k * .25, 1, 1 + k * .25); sh.bubble.scale.setScalar(.9 + k * .35); sh.bubble.position.y = 5.9 + k * .3; for (const r of sh.ripples) { const f = ((t * .45 + r.ph) % 1 + 1) % 1; r.m.scale.setScalar(.6 + f * 1.6); r.m.material.opacity = .55 * (1 - f); } } }
     for (const m of machines.values()) { if (m.run.state === 'running') { m.gear.rotation.z = t * 1.6 + m.ph; m.lamp.emissiveIntensity = 1 + Math.sin(t * 5 + m.ph) * .6; } if (m.smoke) for (const sm of m.smoke) { const f = ((t * (m.run.state === 'failure' ? .22 : .4) + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1 + Math.sin(f * 6 + sm.ph * 9) * .2, 3.5 + f * 2.2, -.6); sm.m.scale.setScalar(.5 + f * 1.4); sm.m.material.opacity = .65 * (1 - f); } }
     for (const s of sites.values()) if (s.extra.mark) s.extra.mark.position.y = s.extra.markY + Math.sin(t * 1.2) * .25;
     for (const m of machines.values()) if (m.flag && m.run.state === 'running') m.flag.material.rotation = -t * 2;

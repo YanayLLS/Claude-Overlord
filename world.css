@@ -303,3 +303,8 @@ body.world-mode #term-header .term-title { display: none; }
 #world-sel .w-orders-html .pr-approve.pr-conflictbtn { background: var(--peach, #fab387); }
 #world-sel .w-orders-html .pr-approve.pr-mute, #world-sel .w-orders-html .pr-approve.pr-snooze { background: rgba(255,255,255,.08); color: var(--text); }
 #world-sel .w-orders-html .pr-approve:disabled { opacity: .45; }
+/* Docks banner calls out what waits on the commander */
+.w-site .w-alert { color: var(--w-perm); font-family: var(--w-display); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; animation: w-alert 1.4s ease-in-out infinite; }
+.w-site .w-alert.w-bad { color: var(--w-crashed); }
+@keyframes w-alert { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .w-site .w-alert { animation: none; } }
