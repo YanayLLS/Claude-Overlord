@@ -5742,7 +5742,7 @@ function worldDailyStreak() {
 }
 function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { worldBuildsTick(); const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
 setInterval(() => { if (worldView && Object.keys(worldEconomy.builds).length) worldSync(); }, 1000); // construction timers tick even when nothing else changes
-// The roster extras the classic list doesn't have: header counters, a "Needs you" block on top,
+// The roster extras the classic list doesn't have: header counters on top,
 // and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
 function renderWorldRoster(s) {
   const st = { work: 0, need: 0, done: 0, down: 0 }; let cost = 0;
@@ -5755,26 +5755,16 @@ function renderWorldRoster(s) {
   const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
   const agentGo = (id) => (id > 0 ? `focusAgent(${id});` : '') + `window.World&&World.focus(${id})`; // demo agents (negative ids) only move the camera
   const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
-  let attn = '';
-  for (const a of s.agents) {
-    if (a.status === 'permission' || a.status === 'question') attn += row(a.status === 'question' ? 'var(--purple)' : 'var(--yellow)', true, a.title, (a.status === 'question' ? 'Needs an answer' : 'Needs approval') + ' · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
-    else if (a.status === 'crashed') attn += row('var(--red)', true, a.title, 'Crashed ' + esc(a.crash) + ' · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
-    else if (a.ctxPct >= 80) attn += row('var(--red)', true, a.title, 'Context at ' + a.ctxPct + '% · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
-    else if (a.idleMin >= 5) attn += row('var(--dim)', false, a.title, 'Idle for ' + (a.idleMin >= 60 ? Math.floor(a.idleMin / 60) + 'h ' + (a.idleMin % 60) + 'm' : a.idleMin + 'm') + ' · give an order or close · ' + esc(projLabel(a.cwd)), `<button class="wr-mini" title="Close this agent" onclick="event.stopPropagation();closeAgent(${a.id})">✕</button>`, agentGo(a.id) + ";openTerm(" + a.id + ");switchTermTab('conversation')", a.id);
-  }
-  for (const r of s.runs) if (r.state === 'failure') attn += row('var(--red)', false, r.name + ' failed · ' + r.repo, esc(r.branch || r.title || ''), '', `openActionRun('${escAttr(r.url).replace(/'/g, '\\\'')}')`);
-  for (const p of s.prs) if (p.state === 'changes' || p.state === 'conflict' || p.behindBy > 0 || p.needsApproval) attn += row(p.state === 'changes' || p.state === 'conflict' ? 'var(--red)' : 'var(--yellow)', false, '#' + p.number + ' ' + p.title, p.state === 'conflict' ? 'Conflicts with ' + esc(p.baseRef) : p.state === 'changes' ? 'Changes requested' : p.behindBy > 0 ? p.behindBy + ' commit' + (p.behindBy === 1 ? '' : 's') + ' behind ' + esc(p.baseRef) : 'Waiting for your review', '', `openPr('${escAttr(p.url).replace(/'/g, '\\\'')}')`);
-  const attnEl = document.getElementById('world-attn'); const attnN = (attn.match(/class="wr-row"/g) || []).length;
-  attnEl.innerHTML = attn ? `<div class="wr-sec wr-attn"><h3><i class="hexi"></i>Needs you<span class="n">${attnN}</span></h3>${attn}</div>` : '';
+  document.getElementById('world-attn').innerHTML = ''; // no "Needs you" block: it buried the agent list; the header counter jumps to the next one
   let extra = '';
   if (s.github) {
     const prSt = { ready: ['Ready to merge', 'var(--green)'], open: ['Open', 'var(--cyan)'], behind: ['Behind base', 'var(--yellow)'], changes: ['Changes requested', 'var(--red)'], conflict: ['Conflicts', 'var(--red)'], blocked: ['Checks failing', 'var(--peach)'] };
     const runSt = { running: ['Running', 'var(--yellow)'], success: ['Passed', 'var(--green)'], failure: ['Failed', 'var(--red)'], cancelled: ['Cancelled', 'var(--dim)'], none: ['No runs yet', 'var(--dim)'] };
-    extra += `<div class="wr-sec"><h3 style="--c:#c9d1d9"><i class="hexi"></i>GitHub quarter<span class="n">${s.prs.length} PR${s.prs.length === 1 ? '' : 's'} · ${s.runs.length} run${s.runs.length === 1 ? '' : 's'}</span></h3>`;
-    extra += `<div class="wr-lot" style="color:#3fbfd6">Docks · pull requests</div>`;
+    extra += `<div class="wr-sec"><h3 style="--c:#c9d1d9"><i class="hexi"></i>GitHub harbour<span class="n">${s.prs.length} PR${s.prs.length === 1 ? '' : 's'} · ${s.runs.length} run${s.runs.length === 1 ? '' : 's'}</span></h3>`;
+    extra += `<div class="wr-lot" style="color:#3fbfd6">Cove · pull requests</div>`;
     if (!s.prs.length) extra += `<div class="wr-empty">${prSettings.enabled ? 'No open PRs' : 'PR tracking is off — enable it in Settings'}</div>`;
     for (const p of s.prs) { const [l, c] = prSt[p.state] || prSt.open; extra += row(c, p.state === 'open', '#' + p.number + ' ' + p.title, esc(l) + (p.checks ? ' · checks ' + esc(p.checks.toLowerCase()) : '') + (p.behindBy ? ' · ' + p.behindBy + ' behind' : ''), '+' + p.commitCount, `window.World&&World.focusKey('pr','${escAttr(p.key).replace(/'/g, '\\\'')}')`); }
-    extra += `<div class="wr-lot" style="color:#a78bfa">Proving grounds · Actions</div>`;
+    extra += `<div class="wr-lot" style="color:#a78bfa">Signal yard · Actions</div>`;
     if (!s.runs.length) extra += `<div class="wr-empty">${actionsSettings.enabled ? 'No tracked runs yet' : 'Actions tracking is off — add workflows in Settings'}</div>`;
     for (const r of s.runs) { const [l, c] = runSt[r.state] || runSt.none; extra += row(c, r.state === 'running', r.name + ' · ' + r.repo, esc(l) + (r.branch ? ' · ⑂ ' + esc(r.branch) : ''), r.runNumber ? '#' + r.runNumber : '', `window.World&&World.focusKey('run','${escAttr(r.key).replace(/'/g, '\\\'')}')`); }
     extra += `</div>`;

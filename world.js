@@ -32,6 +32,8 @@ const SITE_COLORS = [0xd6a545, 0x3fbfa6, 0x4f8fe0, 0xd05a92, 0xfab387, 0x94e2d5,
 const hexStr = c => '#' + c.toString(16).padStart(6, '0');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const PLAT = 2.4;           // plateau height every site sits on
+const SAND = 1.1, WATER = .55; // beach and sea level (the harbour sits on the beach, its ships on the water)
+const SHIP_Y = WATER - SAND + .35; // a ship's group height inside the harbour: hull settles to the waterline
 const TILE = 2.6;           // hex tile radius
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -162,10 +164,17 @@ function layoutTerrain(siteList) {
     else if (e < 1.35) { th = .55; biome = 'water'; }
     // Sites flatten the tiles under them into a plateau; a ring outside eases down.
     let site = null;
-    for (const s of siteList) { const d = Math.hypot(t.x - s.x, t.z - s.z); if (d < s.R + TILE * .8) { site = s; biome = 'plot'; th = PLAT; break; } else if (d < s.R + TILE * 2.6 && biome !== 'hidden') { th = Math.max(th, PLAT - 1.2 * (d - s.R - TILE * .8) / (TILE * 1.8)); if (biome === 'water') { biome = 'sand'; } } }
+    for (const s of siteList) { const d = Math.hypot(t.x - s.x, t.z - s.z);
+      if (s.kind === 'github') { // a sand yard west of the quay, a cove east of it that opens through a channel to the sea, headlands at the east corners
+        const lx = t.x - s.x, lz = t.z - s.z, az = Math.abs(lz), R = s.R;
+        if (d < R + TILE * .8) { site = s; const cove = lx > s.quay && (az < .45 * R || (d < R - 4.5 && lx <= .6 * R)); biome = cove ? 'bay' : 'sand'; th = cove ? WATER : SAND; break; }
+        else if (lx > s.quay && az < .45 * R && biome !== 'hidden') { biome = 'bay'; th = WATER; break; }
+        else if (d < R + TILE * 2.6 && biome !== 'hidden' && biome !== 'water') { th = Math.min(th, SAND + 1.3 * (d - R - TILE * .8) / (TILE * 1.8)); if (d < R + TILE * 1.6) biome = 'sand'; }
+        continue; }
+      if (d < s.R + TILE * .8) { site = s; biome = 'plot'; th = PLAT; break; } else if (d < s.R + TILE * 2.6 && biome !== 'hidden') { th = Math.max(th, PLAT - 1.2 * (d - s.R - TILE * .8) / (TILE * 1.8)); if (biome === 'water') { biome = 'sand'; } } }
     t.site = site; t.th = th; t.biome = biome;
-    t.cap.copy(biome === 'plot' ? plot : biome === 'water' ? water : biome === 'sand' ? sand : biome === 'rock' ? (th > 4 ? snow : rock) : biome === 'forest' ? forest : grass[Math.floor(t.n2 * 3) % 3]);
-    t.col.copy(biome === 'water' ? deep : biome === 'plot' ? plot : earth);
+    t.cap.copy(biome === 'plot' ? plot : biome === 'water' || biome === 'bay' ? water : biome === 'sand' ? sand : biome === 'rock' ? (th > 4 ? snow : rock) : biome === 'forest' ? forest : grass[Math.floor(t.n2 * 3) % 3]);
+    t.col.copy(biome === 'water' || biome === 'bay' ? deep : biome === 'plot' ? plot : earth);
     if (t.h === 0 && th > 0) t.h = .01; // new land rises from the sea floor
   }
   T.dirty = true; if (life.flies.length) pickFlyHomes();
@@ -298,7 +307,7 @@ function planSites(s) {
   order.features.forEach((f, i) => { const R = fR[i]; plan.push({ key: 'f:' + f, kind: 'feature', name: f, repos: feats.get(f), x: x + R, z: fRowZ, R }); x += 2 * R + GAP; });
   const RW = 11, sTotal = order.shops.length * 2 * RW + Math.max(0, order.shops.length - 1) * 3; x = -sTotal / 2;
   for (const cwd of order.shops) { plan.push({ key: 'w:' + cwd, kind: 'workshop', project: shops.find(p => p.cwd === cwd), x: x + RW, z: 20, R: RW }); x += 2 * RW + 3; }
-  if (s.github) { const R = githubRadius(s); plan.push({ key: 'github', kind: 'github', x: sTotal / 2 + GAP + R, z: R - 2, R }); }
+  if (s.github) { const lay = githubLayout(s); plan.push({ key: 'github', kind: 'github', x: sTotal / 2 + GAP + lay.R + 1, z: lay.R - 2, R: lay.R, lay }); }
   if (plan.length) plan.push({ key: 'treasury', kind: 'treasury', x: 0, z: 2.5, R: 7 }); // today's spend as a coin pile at the crossroads
   if (s.peers && s.peers.length) plan.push({ key: 'allies', kind: 'allies', x: -(sTotal / 2 + GAP + 13), z: 22, R: 13 });
   return plan;
@@ -340,7 +349,7 @@ function createSite(p) {
     site.el = label('w-site', '', anchor, hexStr(site.color));
   } else if (p.kind === 'workshop') {
     site.color = siteColor(p.key); const plat = hexPrism(p.R, .5, mats.plot); plat.position.y = .25; g.add(plat); g.add(hexEdge(p.R, .52, site.color, .8)); site.plat = plat; plat.userData.pick = { site };
-  } else if (p.kind === 'github') buildGithub(site, p.R);
+  } else if (p.kind === 'github') buildGithub(site, p);
   else if (p.kind === 'allies') buildAllies(site, p.R);
   else if (p.kind === 'treasury') { site.color = 0xe1b453; const plat = hexPrism(p.R, .5, mats.plot); plat.position.y = .25; g.add(plat); g.add(hexEdge(p.R, .52, 0xe1b453, .6)); site.plat = plat; plat.userData.pick = { site }; const an = new THREE.Object3D(); an.position.set(0, 4.2, 0); g.add(an); site.el = label('w-lot', 'Treasury', an, '#e1b453'); site.extra.coins = new THREE.Group(); g.add(site.extra.coins); site.extra.coinsN = -1; }
   // Spawn: rise from below with a dust burst.
@@ -375,7 +384,7 @@ function syncSite(site, p, s) {
     if (site.anchor) { let tallest = 0; for (const lot of site.lots.values()) if (lot.building) tallest = Math.max(tallest, lot.building.userData.topY + lot.building.position.y); site.anchor.position.y = Math.max(9, tallest + 2.5); } // the banner clears the tallest tower
     if (site.el) { const all = repos.flatMap(r => s.agents.filter(a => a.cwd === r.cwd)); const built = repos.length ? repos.reduce((acc, r) => acc + (site.lots.get(r.cwd)?.built ?? 1), 0) / repos.length : 0;
       const tierName = (p.kind === 'feature' ? TOWER_TIERS : HALL_TIERS)[tierOf(site.key) - 1]; if (site.built != null && site.built < 1 && built >= 1) { const wp = new THREE.Vector3(); site.anchor.getWorldPosition(wp); fireworks(wp.setY(wp.y + 6), 6); } /* the feature's work is complete */ setLabel(site.el, `<div class="w-eyebrow">Feature</div><b>${esc(p.name)}</b><div class="w-prog"><i style="width:${Math.round(built * 100)}%"></i></div><span class="w-cnt">${all.length} unit${all.length === 1 ? '' : 's'} &middot; ${repos.length} repo${repos.length === 1 ? '' : 's'} &middot; ${Math.round(built * 100)}%</span>`); site.built = built; site.name = p.name; }
-  } else if (p.kind === 'github') { if (site.R !== p.R || site.tier !== tierOf('github')) { const up = site.tier != null && site.tier !== tierOf('github'); destroySite(site); const ns = createSite(p); syncGithub(ns, s); if (up) { const wp = new THREE.Vector3(); ns.g.getWorldPosition(wp); wp.y += 8; fireworks(wp, 4); } return; } syncGithub(site, s); }
+  } else if (p.kind === 'github') { if (site.R !== p.R || site.extra.lay.quay !== p.lay.quay || site.extra.lay.jettyL !== p.lay.jettyL || site.extra.lay.rows !== p.lay.rows || site.tier !== tierOf('github')) { const up = site.tier != null && site.tier !== tierOf('github'); destroySite(site); const ns = createSite(p); syncGithub(ns, s); if (up) { const wp = new THREE.Vector3(); ns.g.getWorldPosition(wp); wp.y += 8; fireworks(wp, 4); } return; } syncGithub(site, s); }
   else if (p.kind === 'treasury') syncTreasury(site, s);
   else if (p.kind === 'allies') syncAllies(site, s);
 }
@@ -494,77 +503,100 @@ function activity(a) {
   }
 }
 
-/* ────────────────────────── GitHub quarter: docks (PRs) and proving grounds (Actions) ──────────────────────────
-   Ships moor along one pier per repo, machines stand on one slab per repo, so a crowded quarter still reads by repo. */
+/* ────────────────────────── GitHub harbour: one row per repo — signboard, signal beacons (runs), jetty with ships (PRs) ────────────────────────── */
 const byRepo = list => { const m = new Map(); for (const it of list) { if (!m.has(it.repo)) m.set(it.repo, []); m.get(it.repo).push(it); } return m; };
-function quarterHalfRadius(s) {
+const ROW_GAP = 9, BEACON_GAP = 5.6, BERTH_GAP = 5.6;
+const repoColor = repo => siteColor('repo:' + repo);
+// The harbour's measurements: a sand yard on the west (signboards and beacons), a quay, then the cove with jetties opening east to the sea.
+function githubLayout(s) {
   const pr = byRepo(s.prs || []), rn = byRepo(s.runs || []);
-  const rows = Math.max(1, pr.size, rn.size), cols = Math.max(1, ...[...pr.values(), ...rn.values()].map(l => l.length));
-  return Math.max(10.5, rows * 7 / 1.4 + 5, cols * 4.6 / 1.5 + 4);
+  const rows = new Set([...pr.keys(), ...rn.keys()]).size || 1;
+  const runsMax = Math.max(0, ...[...rn.values()].map(l => l.length)), shipsMax = Math.max(0, ...[...pr.values()].map(l => l.length));
+  const yardW = 7 + (runsMax ? runsMax * BEACON_GAP + 1 : 1), jettyL = shipsMax ? 4 + Math.ceil(shipsMax / 2) * BERTH_GAP : 6;
+  const W = yardW + jettyL + 6, zMax = (rows - 1) * ROW_GAP / 2 + 7; // content width; the rows' half-extent plus the harbour sign
+  const R = Math.min(90, Math.ceil(Math.max(22, Math.hypot(zMax + 10, W / 2) + 2)));
+  const yardX0 = -W / 2 + 1, xa = yardX0 + 7, quay = yardX0 + yardW;
+  return { R, yardX0, xa, quay, runsMax, shipsMax, jettyL, rows, zMax };
 }
-function githubRadius(s) { return Math.min(70, Math.round(quarterHalfRadius(s) * 2 + 4)); }
 const GLYPH_FONT = '700 70px "Segoe UI Symbol", "Segoe UI", sans-serif';
-function buildGithub(site, GR) {
-  const g = site.g; site.color = 0xc9d1d9; site.tier = tierOf('github'); const dt = site.tier;
-  const plat = hexPrism(GR, .5, mat(dt >= 3 ? 0x2a3138 : 0x22272e)); plat.position.y = .25; g.add(plat); g.add(hexEdge(GR, .52, dt >= 2 ? 0xd6a545 : 0xc9d1d9, .7)); site.plat = plat; plat.userData.pick = { site };
-  const col = hexPrism(2.2, 7, mat(0x161b22)); col.position.set(0, 4, -(GR - 11)); g.add(col);
+function catMark() {
   const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
   x.fillStyle = '#f0f6fc'; x.beginPath(); x.arc(128, 128, 118, 0, Math.PI * 2); x.fill();
   x.fillStyle = '#0d1117'; x.beginPath(); x.arc(128, 122, 62, 0, Math.PI * 2); x.fill();
   x.beginPath(); x.moveTo(78, 90); x.lineTo(72, 40); x.lineTo(112, 66); x.closePath(); x.fill(); x.beginPath(); x.moveTo(178, 90); x.lineTo(184, 40); x.lineTo(144, 66); x.closePath(); x.fill();
   x.fillStyle = '#f0f6fc'; x.beginPath(); x.ellipse(105, 118, 16, 12, 0, 0, Math.PI * 2); x.ellipse(151, 118, 16, 12, 0, 0, Math.PI * 2); x.fill();
   x.fillStyle = '#0d1117'; x.beginPath(); x.roundRect(96, 178, 64, 44, 10); x.fill(); x.strokeStyle = '#0d1117'; x.lineWidth = 12; x.lineCap = 'round'; x.beginPath(); x.moveTo(96, 200); x.quadraticCurveTo(40, 200, 44, 150); x.stroke();
-  const mark = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true })); mark.scale.setScalar(5.5); mark.position.set(0, 10.9, -(GR - 11)); g.add(mark); site.extra.mark = mark; site.extra.markY = 10.9;
-  const anchor = new THREE.Object3D(); anchor.position.set(0, 14.6, -(GR - 11)); g.add(anchor); site.el = label('w-site w-big', '', anchor, '#c9d1d9');
-  const hr = (GR - 4) / 2, cx = hr + 1; site.extra.hr = hr; site.extra.cx = cx;
-  const pool = hexPrism(hr, .1, mats.water); pool.position.set(-cx, .5, 2); g.add(pool); const pe = hexEdge(hr, .58, 0x3fbfd6, .6); pe.position.set(-cx, .58, 2); g.add(pe);
-  const da = new THREE.Object3D(); da.position.set(-cx, 5.1, 2 + hr * .866 + .5); g.add(da); label('w-lot', 'Docks &middot; pull requests', da, '#3fbfd6');
-  const floor = hexPrism(hr, .08, mat(0x2b3238)); floor.position.set(cx, .52, 2); g.add(floor); const fe = hexEdge(hr, .58, 0xa78bfa, .6); fe.position.set(cx, .58, 2); g.add(fe);
-  const pa = new THREE.Object3D(); pa.position.set(cx, 5.1, 2 + hr * .866 + .5); g.add(pa); label('w-lot', 'Proving grounds &middot; Actions', pa, '#a78bfa');
-  site.extra.piers = new Map(); site.extra.slabs = new Map();
-  // Tier 2: a lighthouse at the harbour mouth with a sweeping beam. Tier 3: cranes over the quay.
-  if (dt >= 2) { const lh = new THREE.Group(); lh.position.set(-cx - hr * .82, .5, 2 + hr * .55); const base = hexPrism(1, 1, mats.stone); base.position.y = .5; const tw = new THREE.Mesh(new THREE.CylinderGeometry(.55, .8, 6, 8), mat(0xe8e4dc)); tw.position.y = 4; tw.castShadow = true; const band = new THREE.Mesh(new THREE.CylinderGeometry(.62, .62, .8, 8), mat(0xe85d6c)); band.position.y = 3.2; const lamp = new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, .9, 8), new THREE.MeshStandardMaterial({ color: 0xfff1c4, emissive: 0xffd27a, emissiveIntensity: 1.3, transparent: true, opacity: .9 })); lamp.position.y = 7.4; const cap = new THREE.Mesh(new THREE.ConeGeometry(.8, .8, 8), mat(0xe85d6c)); cap.position.y = 8.2; const beam = new THREE.Mesh(new THREE.CylinderGeometry(.05, 1.6, 22, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff1c4, transparent: true, opacity: .14, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); beam.rotation.z = Math.PI / 2; beam.position.set(11, 7.4, 0); const pivot = new THREE.Group(); pivot.position.y = 0; pivot.add(beam); lh.add(base, tw, band, lamp, cap, pivot); g.add(lh); life.lighthouse = pivot; }
-  // Tier 4: a shipyard with a dry dock and warehouse. Tier 5: breakwaters, beacon buoys and two more cranes.
-  if (dt >= 4) { const dd = new THREE.Group(); dd.position.set(-cx + hr * .35, .5, 2 - hr * .62); const basin = box(7, .6, 3.4, mats.stoneDark); basin.position.y = .3; const keel = box(4.6, 1.1, 1.8, mat(0x6b5a48, { transparent: true, opacity: .7 })); keel.position.y = 1.15; const ribs = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(5, 2.2, 2.2)), new THREE.LineBasicMaterial({ color: 0xc39a55 })); ribs.position.y = 1.5; dd.add(basin, keel, ribs); for (let k = 0; k < 4; k++) { const p = new THREE.Mesh(new THREE.CylinderGeometry(.08, .08, 3, 5), mats.scaffold); p.position.set(-2.4 + k * 1.6, 1.8, 1.4); dd.add(p); } g.add(dd);
-    const wh = new THREE.Group(); wh.position.set(-cx - hr * .5, .5, 2 - hr * .62); const body = box(5, 2.2, 3, mats.stone); body.position.y = 1.1; const roof = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 5.2, 3), mats.wood); roof.rotation.z = Math.PI / 2; roof.rotation.y = 0; roof.position.y = 2.2 + .95; roof.scale.set(1, 1, .6); const sign = box(2.4, .5, .08, mat(0xd6a545)); sign.position.set(0, 1.9, 1.55); wh.add(body, roof, sign); for (let k = 0; k < 3; k++) { const cr = box(.7, .7, .7, k % 2 ? mats.wood : mats.scaffold); cr.position.set(-1.6 + k * 1.2, .35, 2.4); wh.add(cr); } g.add(wh); }
-  if (dt >= 5) { for (const sx of [-1, 1]) { const bw = box(hr * .9, 1.2, 1.2, mat(0x8c8579)); bw.position.set(-cx + sx * hr * .55, .5 + .6, 2 - hr * .95); bw.rotation.y = sx * .35; g.add(bw); } for (let k = 0; k < 4; k++) { const a = Math.PI * (1.05 + k * .3); const buoy = new THREE.Mesh(new THREE.SphereGeometry(.35, 8, 6), mat(0xe85d6c)); buoy.position.set(-cx + Math.cos(a) * hr * .85, .8, 2 + Math.sin(a) * hr * .85); g.add(buoy); const lt = new THREE.Mesh(new THREE.SphereGeometry(.12, 8, 6), new THREE.MeshStandardMaterial({ color: 0xfff1c4, emissive: 0xffd27a, emissiveIntensity: 1.5 })); lt.position.set(buoy.position.x, 1.25, buoy.position.z); g.add(lt); beacons.push(lt); ships.size; life.buoys.push(buoy); }
-    for (const sx of [-1, 1]) { const c = new THREE.Group(); c.position.set(cx + sx * hr * .5, .5, 2 + hr * .866 - .2); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.16, .18, 9, 6), mats.gold); mast.position.y = 4.5; const jib = new THREE.Group(); jib.position.y = 9; const arm = box(9, .22, .22, mats.gold); arm.position.x = 3; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, 4, 4), mats.dark); cable.position.set(6, -2, 0); const block = box(.9, .9, .9, mats.iron); block.position.set(6, -4.3, 0); jib.add(arm, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: sx * 2, g: c }); } }
-  if (dt >= 3) for (const sx of [-1, 1]) { const c = new THREE.Group(); c.position.set(-cx + sx * hr * .5, .5, 2 + hr * .866 - .2); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.16, .18, 8, 6), mats.gold); mast.position.y = 4; mast.castShadow = true; const jib = new THREE.Group(); jib.position.y = 8; const arm = box(8, .22, .22, mats.gold); arm.position.x = 2.6; const back = box(2.2, .22, .22, mats.gold); back.position.x = -1.8; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, 3.5, 4), mats.dark); cable.position.set(5.5, -1.75, 0); const block = box(.8, .8, .8, mats.wood); block.position.set(5.5, -3.8, 0); jib.add(arm, back, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: sx, g: c }); }
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
 }
-// Row i of a half (docks or grounds): its z inside the half, and the x of column j along it.
-const ROW_GAP = 7; // a pier or slab per repo, far enough apart that ships and labels never touch
-function rowZ(site, i, n) { return 2 - (n - 1) * ROW_GAP / 2 + i * ROW_GAP; }
-function shipSlot(site, i, j, nRows, nCols) { const hr = site.extra.hr, cx = site.extra.cx; return { x: -cx - hr * .55 + 3.2 + j * 5.2, z: rowZ(site, i, nRows), rot: 0 }; }
-function machineSlot(site, i, j, nRows, nCols) { const hr = site.extra.hr, cx = site.extra.cx; return { x: cx - hr * .55 + 3 + j * 4.4, z: rowZ(site, i, nRows), rot: 0 }; }
-// One pier per repo in the pool, one slab per repo on the grounds, each with the repo's name at its head.
-function syncRepoRows(site, kind, repos) {
-  const store = kind === 'pier' ? site.extra.piers : site.extra.slabs, hr = site.extra.hr, cx = site.extra.cx, seen = new Set();
+function buildGithub(site, p) {
+  const g = site.g, lay = p.lay, R = lay.R; site.color = 0xc9d1d9; site.tier = tierOf('github'); const dt = site.tier; site.extra.lay = lay;
+  g.position.y = SAND; // the harbour sits at beach level, not on a plateau
+  // An invisible hex at water level catches clicks on the harbour itself.
+  const plat = hexPrism(R, .05, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); plat.castShadow = plat.receiveShadow = false; plat.position.y = WATER - SAND + .02; g.add(plat); site.plat = plat; plat.userData.pick = { site };
+  // Harbour sign: a tall post with the cat mark and the harbour's name, on the yard's north end.
+  const sx = lay.yardX0 + 9, sz = -lay.zMax; site.extra.sign = { x: sx, z: sz };
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(.22, .28, 7, 6), mats.wood); post.position.set(sx, 3.5, sz); post.castShadow = true; g.add(post);
+  const board = box(4.6, 2.2, .3, mat(0x161b22)); board.position.set(sx, 5.2, sz); g.add(board); const rim = box(4.9, 2.5, .2, mat(dt >= 2 ? 0xd6a545 : 0xc9d1d9)); rim.position.set(sx, 5.2, sz - .02); g.add(rim);
+  const mark = catMark(); mark.scale.setScalar(2.4); mark.position.set(sx, 5.2, sz + .4); g.add(mark); site.extra.mark = mark; site.extra.markY = 5.2;
+  const anchor = new THREE.Object3D(); anchor.position.set(sx, 8.4, sz); g.add(anchor); site.el = label('w-site w-big', '', anchor, '#c9d1d9');
+  // Quay wall: a stone lip where the yard meets the water, the full height of the hex.
+  const qh = 2 * Math.sqrt(Math.max(1, R * R - lay.quay * lay.quay)) - 5; const quayWall = box(1.2, 1.1, qh, mats.stoneDark); quayWall.position.set(lay.quay - .6, -.45, 0); g.add(quayWall);
+  for (let k = -Math.floor(qh / 6); k <= Math.floor(qh / 6); k++) { const bol = new THREE.Mesh(new THREE.CylinderGeometry(.18, .2, .5, 6), mats.iron); bol.position.set(lay.quay - .8, .3, k * 6 + 3); g.add(bol); }
+  const yardLabel = new THREE.Object3D(); yardLabel.position.set((lay.xa + lay.quay) / 2, 4.2, lay.zMax + 2); g.add(yardLabel); label('w-lot', 'Signal yard &middot; Actions', yardLabel, '#a78bfa');
+  const coveLabel = new THREE.Object3D(); coveLabel.position.set(lay.quay + lay.jettyL / 2 + 2, 4.2, lay.zMax + 2); g.add(coveLabel); label('w-lot', 'Cove &middot; pull requests', coveLabel, '#3fbfd6');
+  site.extra.rows = new Map();
+  // Tier 2: a lighthouse on the north headland with a sweeping beam.
+  if (dt >= 2) { const lh = new THREE.Group(); lh.position.set(.68 * R, 0, -.6 * R); const base = hexPrism(1.1, 1, mats.stone); base.position.y = .5; const tw = new THREE.Mesh(new THREE.CylinderGeometry(.55, .8, 6, 8), mat(0xe8e4dc)); tw.position.y = 4; tw.castShadow = true; const band = new THREE.Mesh(new THREE.CylinderGeometry(.62, .62, .8, 8), mat(0xe85d6c)); band.position.y = 3.2; const lamp = new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, .9, 8), new THREE.MeshStandardMaterial({ color: 0xfff1c4, emissive: 0xffd27a, emissiveIntensity: 1.3, transparent: true, opacity: .9 })); lamp.position.y = 7.4; const cap = new THREE.Mesh(new THREE.ConeGeometry(.8, .8, 8), mat(0xe85d6c)); cap.position.y = 8.2; const beam = new THREE.Mesh(new THREE.CylinderGeometry(.05, 1.6, 22, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff1c4, transparent: true, opacity: .14, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); beam.rotation.z = Math.PI / 2; beam.position.set(11, 7.4, 0); const pivot = new THREE.Group(); pivot.add(beam); lh.add(base, tw, band, lamp, cap, pivot); g.add(lh); life.lighthouse = pivot; }
+  // Tier 3: cranes on the quay at both ends of the rows.
+  if (dt >= 3) for (const sgn of [-1, 1]) { const c = new THREE.Group(); c.position.set(lay.quay - 2.2, 0, sgn * (lay.zMax + 4)); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.16, .18, 8, 6), mats.gold); mast.position.y = 4; mast.castShadow = true; const jib = new THREE.Group(); jib.position.y = 8; const arm = box(8, .22, .22, mats.gold); arm.position.x = 2.6; const back = box(2.2, .22, .22, mats.gold); back.position.x = -1.8; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, 3.5, 4), mats.dark); cable.position.set(5.5, -1.75, 0); const block = box(.8, .8, .8, mats.wood); block.position.set(5.5, -3.8, 0); jib.add(arm, back, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: sgn, g: c }); }
+  // Tier 4: a shipyard on the south yard — dry dock with a hull on the stocks, and a warehouse.
+  if (dt >= 4) { const dd = new THREE.Group(); dd.position.set(lay.yardX0 + 5, 0, lay.zMax + 4); const basin = box(7, .6, 3.4, mats.stoneDark); basin.position.y = .3; const keel = box(4.6, 1.1, 1.8, mat(0x6b5a48, { transparent: true, opacity: .7 })); keel.position.y = 1.15; const ribs = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(5, 2.2, 2.2)), new THREE.LineBasicMaterial({ color: 0xc39a55 })); ribs.position.y = 1.5; dd.add(basin, keel, ribs); for (let k = 0; k < 4; k++) { const pp = new THREE.Mesh(new THREE.CylinderGeometry(.08, .08, 3, 5), mats.scaffold); pp.position.set(-2.4 + k * 1.6, 1.8, 1.4); dd.add(pp); } g.add(dd);
+    const wh = new THREE.Group(); wh.position.set(lay.yardX0 + 5, 0, lay.zMax + 9); const body = box(5, 2.2, 3, mats.stone); body.position.y = 1.1; const roof = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 5.2, 3), mats.wood); roof.rotation.z = Math.PI / 2; roof.position.y = 3.15; roof.scale.set(1, 1, .6); const sign = box(2.4, .5, .08, mat(0xd6a545)); sign.position.set(0, 1.9, 1.55); wh.add(body, roof, sign); for (let k = 0; k < 3; k++) { const cr = box(.7, .7, .7, k % 2 ? mats.wood : mats.scaffold); cr.position.set(-1.6 + k * 1.2, .35, 2.4); wh.add(cr); } g.add(wh); }
+  // Tier 5: breakwaters off both headlands, beacon buoys down the channel, and two heavy cranes.
+  if (dt >= 5) { for (const sgn of [-1, 1]) { const bw = box(R * .42, 1.2, 1.4, mat(0x8c8579)); bw.position.set(.82 * R, WATER - SAND + .5, sgn * .36 * R); bw.rotation.y = sgn * .3; g.add(bw); }
+    for (let k = 0; k < 4; k++) { const bx = .5 * R + k * .12 * R, bz = (k % 2 ? 1 : -1) * .22 * R; const buoy = new THREE.Mesh(new THREE.SphereGeometry(.35, 8, 6), mat(0xe85d6c)); buoy.position.set(bx, WATER - SAND + .3, bz); g.add(buoy); const lt = new THREE.Mesh(new THREE.SphereGeometry(.12, 8, 6), new THREE.MeshStandardMaterial({ color: 0xfff1c4, emissive: 0xffd27a, emissiveIntensity: 1.5 })); lt.position.set(bx, WATER - SAND + .75, bz); g.add(lt); beacons.push(lt); life.buoys.push(buoy); }
+    for (const sgn of [-1, 1]) { const c = new THREE.Group(); c.position.set(lay.xa + 5, 0, sgn * (lay.zMax + 4)); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.16, .18, 9, 6), mats.gold); mast.position.y = 4.5; const jib = new THREE.Group(); jib.position.y = 9; const arm = box(9, .22, .22, mats.gold); arm.position.x = 3; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, 4, 4), mats.dark); cable.position.set(6, -2, 0); const block = box(.9, .9, .9, mats.iron); block.position.set(6, -4.3, 0); jib.add(arm, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: sgn * 2, g: c }); } }
+}
+const rowZ = (i, n) => -(n - 1) * ROW_GAP / 2 + i * ROW_GAP;
+// Ships moor on alternating sides of their repo's jetty; beacons zigzag along the yard so their cards never stack.
+function shipSlot(site, row, j) { const lay = site.extra.lay; return { x: lay.quay + 3.6 + Math.floor(j / 2) * BERTH_GAP, z: row.z + (j % 2 ? 2.5 : -2.5), rot: 0 }; }
+function beaconSlot(site, row, j) { const lay = site.extra.lay; return { x: lay.xa + 2.2 + j * BEACON_GAP, z: row.z + (j % 2 ? 1.5 : -1.5), rot: 0 }; }
+// One row per repo: a signboard at the west end, a slab for its beacons, a jetty into the cove for its ships.
+function syncRepoRows(site, repos, prRepos, runRepos) {
+  const store = site.extra.rows, lay = site.extra.lay, seen = new Set();
   repos.forEach((repo, i) => {
-    seen.add(repo); const z = rowZ(site, i, repos.length), x = kind === 'pier' ? -cx - hr * .55 : cx - hr * .55, len = hr * 1.25;
+    seen.add(repo); const z = rowZ(i, repos.length), col = repoColor(repo), hasRuns = runRepos.includes(repo), hasPrs = prRepos.includes(repo);
     let row = store.get(repo);
     if (!row) {
-      const m = kind === 'pier' ? box(len, .3, 1.1, mats.wood) : box(len, .2, 3.2, mat(0x353d45)); m.position.set(x + len / 2 - 1, kind === 'pier' ? .65 : .6, z + (kind === 'pier' ? 1.6 : 0)); site.g.add(m);
-      if (kind === 'pier') for (let k = 0; k < Math.floor(len / 4); k++) { const post = new THREE.Mesh(new THREE.CylinderGeometry(.12, .14, 1.2, 6), mats.wood); post.position.set(x + 1 + k * 4, .9, z + 2.1); m.parent.add(post); (row = row || { posts: [] }).posts.push(post); }
-      row = Object.assign(row || { posts: [] }, { m, z }); const an = new THREE.Object3D(); an.position.set(x - 1.5, 3.4, z); site.g.add(an); row.an = an;
-      row.el = label('w-obj w-repo', esc(repo.split('/').pop()), an, kind === 'pier' ? '#3fbfd6' : '#a78bfa'); store.set(repo, row);
-      m.scale.set(.01, 1, 1); tween(600, k => m.scale.x = Math.max(.01, k));
-    } else if (row.z !== z) { const fz = row.z; row.z = z; tween(700, k => { const nz = fz + (z - fz) * k; row.m.position.z = nz + (kind === 'pier' ? 1.6 : 0); row.an.position.z = nz; row.posts.forEach(p => p.position.z = nz + 2.1); }); }
+      row = { z, parts: [], jetty: null, slab: null, color: col }; const g = new THREE.Group(); g.position.set(0, 0, z); site.g.add(g); row.g = g;
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(.12, .14, 2.6, 6), mats.wood); post.position.set(lay.yardX0 + 2.5, 1.3, 0); g.add(post);
+      const board = box(3.4, 1.1, .16, mats.wood); board.position.set(lay.yardX0 + 2.5, 2.4, 0); g.add(board); const stripe = box(3.4, .22, .18, mat(col, { emissive: col, emissiveIntensity: .25 })); stripe.position.set(lay.yardX0 + 2.5, 3.05, 0); g.add(stripe);
+      const lane = box(lay.quay - lay.yardX0 - 1, .08, .5, mat(col, { transparent: true, opacity: .45 })); lane.position.set((lay.quay + lay.yardX0 - 1) / 2, .05, 0); g.add(lane);
+      const an = new THREE.Object3D(); an.position.set(lay.yardX0 + 2.5, 4.3, 0); g.add(an); row.an = an;
+      row.el = label('w-obj w-repo w-row', esc(repo.split('/').pop()), an, hexStr(col)); store.set(repo, row);
+      g.scale.set(.01, 1, 1); tween(600, k => g.scale.x = Math.max(.01, k));
+    } else if (row.z !== z) { const fz = row.z; row.z = z; tween(700, k => row.g.position.z = fz + (z - fz) * k); }
+    if (hasRuns && !row.slab) { const w = lay.runsMax * BEACON_GAP + 1; const slab = box(w, .14, 5.2, mat(0x8f8a7e)); slab.position.set(lay.xa + w / 2 - .5, .07, 0); row.g.add(slab); row.slab = slab; }
+    else if (!hasRuns && row.slab) { disposeObj(row.slab); row.slab = null; }
+    if (hasPrs && !row.jetty) { const jg = new THREE.Group(); jg.position.set(lay.quay, 0, 0); row.g.add(jg); const L = lay.jettyL; const deck = box(L, .3, 1.4, mats.wood); deck.position.set(L / 2, .05, 0); jg.add(deck); for (let k = 0; k <= Math.floor(L / 3.5); k++) for (const sd of [-1, 1]) { const pl = new THREE.Mesh(new THREE.CylinderGeometry(.12, .14, 1.8, 6), mats.wood); pl.position.set(1 + k * 3.5, -.7, sd * .75); jg.add(pl); } const lamp = new THREE.Mesh(new THREE.SphereGeometry(.16, 8, 6), new THREE.MeshStandardMaterial({ color: 0xfff1c4, emissive: 0xffd27a, emissiveIntensity: 1.4 })); const lp = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, 1.6, 5), mats.iron); lp.position.set(L - .6, .95, 0); lamp.position.set(L - .6, 1.85, 0); jg.add(lp, lamp); beacons.push(lamp); row.jetty = jg; jg.scale.set(.01, 1, 1); tween(600, k => jg.scale.x = Math.max(.01, k)); }
+    else if (!hasPrs && row.jetty) { disposeObj(row.jetty); row.jetty = null; }
   });
-  for (const [repo, row] of store) if (!seen.has(repo)) { store.delete(repo); dropLabel(row.el); disposeObj(row.m); row.posts.forEach(p => disposeObj(p)); disposeObj(row.an); }
+  for (const [repo, row] of store) if (!seen.has(repo)) { store.delete(repo); dropLabel(row.el); disposeObj(row.g); }
 }
 const PR_GLYPH = pr => pr.state === 'ready' ? ['✓', '#a6e3a1'] : pr.state === 'changes' || pr.state === 'conflict' ? ['✗', '#f38ba8'] : pr.state === 'behind' ? ['⚓', '#f9e2af'] : pr.needsApproval ? ['!', '#f9e2af'] : pr.state === 'blocked' ? ['■', '#fab387'] : ['○', '#94e2d5'];
 const RUN_GLYPH = run => run.state === 'running' ? ['⟳', '#f9e2af'] : run.state === 'success' ? ['✓', '#a6e3a1'] : run.state === 'failure' ? ['✗', '#f38ba8'] : run.state === 'cancelled' ? ['–', '#7d8ca3'] : ['○', '#7d8ca3'];
 const shipKey = pr => `${pr.state}|${pr.checks}|${pr.behindBy}|${pr.commitCount}|${pr.needsApproval}`;
 function makeShipBody(sh) {
-  const pr = sh.pr, st = PR_STATE[pr.state] || PR_STATE.open, sg = new THREE.Group(); sh.g.add(sg); sh.body = sg;
+  const pr = sh.pr, st = PR_STATE[pr.state] || PR_STATE.open, sg = new THREE.Group(); sh.g.add(sg); sh.body = sg; const rc = repoColor(pr.repo);
   const hull = box(4.2, 1, 1.9, mats.wood); hull.position.y = .5; const bow = new THREE.Mesh(new THREE.ConeGeometry(.95, 1.6, 4), mats.wood); bow.rotation.z = -Math.PI / 2; bow.position.set(2.9, .5, 0); bow.castShadow = true; const deck = box(4.4, .12, 2.1, mats.stoneDark); deck.position.y = 1.02; sg.add(hull, bow, deck);
+  const stripe = box(4.3, .22, 1.96, mat(rc)); stripe.position.y = .82; sg.add(stripe); // the repo's colour along the hull
   const crates = Math.min(6, Math.ceil((pr.commitCount || 1) / 4)); for (let c = 0; c < crates; c++) { const cr = box(.55, .55, .55, c % 2 ? mats.wood : mats.scaffold); cr.position.set(-1.6 + (c % 3) * .7, 1.36 + Math.floor(c / 3) * .56, c < 3 ? .45 : -.45); sg.add(cr); }
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(.07, .09, 4, 6), mats.dark); mast.position.set(.4, 3, 0); sg.add(mast);
   const sail = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), mat(st.color, { side: THREE.DoubleSide, emissive: st.color, emissiveIntensity: .1 })); sail.position.set(.4, 3.2, 0); sail.rotation.y = Math.PI / 2; sg.add(sail);
   const pc = pr.checks === 'pass' ? 0xa6e3a1 : pr.checks === 'fail' ? 0xf38ba8 : pr.checks === 'pending' ? 0xf9e2af : 0x7d8ca3; // pass | fail | pending | none, as the PR badge reports them
   const pennant = new THREE.Mesh(new THREE.PlaneGeometry(.9, .4), mat(pc, { side: THREE.DoubleSide })); pennant.position.set(.85, 4.9, 0); sg.add(pennant); flags.push(pennant); sh.pennant = pennant;
   if (pr.behindBy > 0) { const chain = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, 2.6, 4), mats.iron); chain.position.set(-2.6, .3, .6); chain.rotation.z = .6; sg.add(chain); }
-  sh.smoke = null; if (pr.checks === 'fail' || pr.state === 'conflict') { sh.smoke = []; for (let k = 0; k < 4; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.16, 7, 6), new THREE.MeshStandardMaterial({ color: 0x4a3a3a, transparent: true, opacity: .7 })); sg.add(s); sh.smoke.push({ m: s, ph: k / 4 }); } }
+  sh.smoke = null; if (pr.checks === 'fail' || pr.state === 'conflict') { sh.smoke = []; for (let k = 0; k < 4; k++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(.16, 7, 6), new THREE.MeshStandardMaterial({ color: 0x4a3a3a, transparent: true, opacity: .7 })); sg.add(sm); sh.smoke.push({ m: sm, ph: k / 4 }); } }
   // Status flag at the masthead: readable from any distance.
   const [gl, gc] = PR_GLYPH(pr); const b = textSprite(gl, gc, 'rgba(8,12,18,.92)', .9); b.position.set(.4, 5.9, 0); sg.add(b); sh.bubble = b;
   // A ship that waits on the commander signals: a light column over the mast and ripples in the water.
@@ -572,24 +604,27 @@ function makeShipBody(sh) {
   const want = pr.needsApproval ? 0xf9e2af : pr.state === 'ready' && pr.mine ? 0xa6e3a1 : 0;
   if (want) {
     const beam = new THREE.Mesh(new THREE.CylinderGeometry(.35, .9, 9, 12, 1, true), new THREE.MeshBasicMaterial({ color: want, transparent: true, opacity: .22, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); beam.position.set(.4, 5.2, 0); sg.add(beam); sh.beam = beam;
-    sh.ripples = []; for (let k = 0; k < 3; k++) { const r = new THREE.Mesh(new THREE.RingGeometry(2.4, 2.7, 40), new THREE.MeshBasicMaterial({ color: want, transparent: true, opacity: .5, depthWrite: false, side: THREE.DoubleSide })); r.rotation.x = -Math.PI / 2; r.position.y = -.2; sg.add(r); sh.ripples.push({ m: r, ph: k / 3 }); }
+    sh.ripples = []; for (let k = 0; k < 3; k++) { const r = new THREE.Mesh(new THREE.RingGeometry(2.4, 2.7, 40), new THREE.MeshBasicMaterial({ color: want, transparent: true, opacity: .5, depthWrite: false, side: THREE.DoubleSide })); r.rotation.x = -Math.PI / 2; r.position.y = .42; sg.add(r); sh.ripples.push({ m: r, ph: k / 3 }); }
     sh.signal = want;
   }
 }
+// Cards that read from afar: number and author on one line, the state in words underneath (hidden when zoomed out).
+const prWords = pr => { const st = PR_STATE[pr.state] || PR_STATE.open; let w = pr.needsApproval ? 'Needs your review' : st.label; if (pr.checks === 'fail' && pr.state !== 'blocked') w += ' · checks failing'; else if (pr.checks === 'pending') w += ' · checks running'; if (pr.behindBy) w += ' · ' + pr.behindBy + ' behind'; return w; };
+const shipLabel = pr => { const [gl] = PR_GLYPH(pr); return `<b>#${pr.number}</b><span class="w-who">@${esc(pr.author || "?")}</span><small>${gl} ${esc(prWords(pr))}</small>`; };
+const runLabel = run => { const [gl] = RUN_GLYPH(run), st = RUN_STATE[run.state] || RUN_STATE.none; return `<b>${esc(run.name)}</b><span class="w-who">@${esc(run.actor || "?")}</span><small>${gl} ${st.label}${run.runNumber ? " · #" + run.runNumber : ""}</small>`; };
 function syncGithub(site, s) {
   const seen = new Set(); const prs = s.prs || [], runs = s.runs || [];
-  const prRepos = [...byRepo(prs).keys()].sort(), runRepos = [...byRepo(runs).keys()].sort();
-  syncRepoRows(site, 'pier', prRepos); syncRepoRows(site, 'slab', runRepos);
-  const shipLabel = pr => `#${pr.number}${pr.author ? ' <span class="w-who">@' + esc(pr.author) + '</span>' : ''}`;
+  const prRepos = [...byRepo(prs).keys()], runRepos = [...byRepo(runs).keys()], repos = [...new Set([...prRepos, ...runRepos])].sort();
+  syncRepoRows(site, repos, prRepos, runRepos);
   for (const [repo, list] of byRepo(prs)) list.sort((a, b) => a.number - b.number).forEach((pr, j) => {
-    const i = prRepos.indexOf(repo), slot = shipSlot(site, i, j, prRepos.length, list.length); seen.add(pr.key); let sh = ships.get(pr.key);
+    const row = site.extra.rows.get(repo), slot = shipSlot(site, row, j); seen.add(pr.key); let sh = ships.get(pr.key);
     if (!sh) {
-      const g = new THREE.Group(); site.g.add(g); g.position.set(slot.x - 16, .8, slot.z); g.rotation.y = slot.rot;
-      sh = { pr, g, site, ph: Math.random() * 6, key: shipKey(pr), baseY: .8, slot }; ships.set(pr.key, sh); makeShipBody(sh);
+      const g = new THREE.Group(); site.g.add(g); g.position.set(slot.x + 24, SHIP_Y, slot.z); g.rotation.y = slot.rot;
+      sh = { pr, g, site, ph: Math.random() * 6, key: shipKey(pr), baseY: SHIP_Y, slot }; ships.set(pr.key, sh); makeShipBody(sh);
       const hit = new THREE.Mesh(new THREE.BoxGeometry(5, 5.4, 2.6), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); hit.position.y = 2.4; hit.userData.pick = { pr, ship: sh }; g.add(hit); sh.hit = hit; pickables.add(hit);
-      sh.el = label('w-obj', shipLabel(pr), g, (PR_STATE[pr.state] || PR_STATE.open).hex, 6.4);
-      // Sail in from the open water.
-      tween(1400, k => g.position.x = slot.x - 16 + 16 * k, () => { const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#9fd8e8', 12, 2, 1.5); });
+      sh.el = label('w-obj w-gh', shipLabel(pr), g, (PR_STATE[pr.state] || PR_STATE.open).hex, 6.4);
+      // Sail in from the open sea to the east.
+      tween(1600, k => g.position.x = slot.x + 24 * (1 - k), () => { const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#9fd8e8', 12, 2, 1.5); }, easeOutCubic);
     } else {
       sh.pr = pr; const nk = shipKey(pr);
       if (sh.key !== nk) { const pi = flags.indexOf(sh.pennant); if (pi >= 0) flags.splice(pi, 1); disposeObj(sh.body); sh.key = nk; makeShipBody(sh); sh.el.el.style.setProperty('--c', (PR_STATE[pr.state] || PR_STATE.open).hex); const wp = new THREE.Vector3(); sh.g.getWorldPosition(wp); wp.y += 3; burst(wp, (PR_STATE[pr.state] || PR_STATE.open).hex, 12, 1.5, 2); }
@@ -599,53 +634,52 @@ function syncGithub(site, s) {
   });
   for (const [k, sh] of ships) if (!seen.has(k)) destroyShip(sh);
   const rseen = new Set();
-  const runLabel = run => `${esc(run.name)}${run.runNumber ? ' #' + run.runNumber : ''}${run.actor ? ' <span class="w-who">@' + esc(run.actor) + '</span>' : ''}`;
   for (const [repo, list] of byRepo(runs)) list.forEach((run, j) => {
-    const i = runRepos.indexOf(repo), slot = machineSlot(site, i, j, runRepos.length, list.length); rseen.add(run.key); let m = machines.get(run.key);
+    const row = site.extra.rows.get(repo), slot = beaconSlot(site, row, j); rseen.add(run.key); let m = machines.get(run.key);
     if (!m) {
-      const g = new THREE.Group(); site.g.add(g); g.position.set(slot.x, .56 - 6, slot.z); g.rotation.y = slot.rot;
+      const g = new THREE.Group(); site.g.add(g); g.position.set(slot.x, -6, slot.z); g.rotation.y = slot.rot;
       m = { run, g, site, ph: Math.random() * 6, key: run.state, slot }; machines.set(run.key, m); makeMachineBody(m);
-      const hit = new THREE.Mesh(new THREE.BoxGeometry(4, 4.6, 3.2), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); hit.position.y = 2.2; hit.userData.pick = { run, machine: m }; g.add(hit); m.hit = hit; pickables.add(hit);
-      m.el = label('w-obj', runLabel(run), g, (RUN_STATE[run.state] || RUN_STATE.none).hex, 5.6);
-      tween(800, k => g.position.y = .56 - 6 + 6 * k, () => { const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#cba6f7', 16, 2.5, 2); }, easeOutCubic);
+      const hit = new THREE.Mesh(new THREE.BoxGeometry(3, 5.6, 3), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); hit.position.y = 2.6; hit.userData.pick = { run, machine: m }; g.add(hit); m.hit = hit; pickables.add(hit);
+      m.el = label('w-obj w-gh', runLabel(run), g, (RUN_STATE[run.state] || RUN_STATE.none).hex, j % 2 ? 6.8 : 5.8);
+      tween(800, k => g.position.y = -6 + 6 * k, () => { const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#cba6f7', 16, 2.5, 2); }, easeOutCubic);
     } else {
       m.run = run;
-      if (m.key !== run.state) { disposeObj(m.body); m.key = run.state; makeMachineBody(m); m.el.el.style.setProperty('--c', (RUN_STATE[run.state] || RUN_STATE.none).hex); const wp = new THREE.Vector3(); m.g.getWorldPosition(wp); wp.y += 3.5; burst(wp, (RUN_STATE[run.state] || RUN_STATE.none).hex, 16, 1.5, 2.5); }
-      if (m.slot.x !== slot.x || m.slot.z !== slot.z) { const f = { ...m.slot }; m.slot = slot; tween(700, k => { m.g.position.x = f.x + (slot.x - f.x) * k; m.g.position.z = f.z + (slot.z - f.z) * k; }); }
+      if (m.key !== run.state) { disposeObj(m.body); m.key = run.state; makeMachineBody(m); m.el.el.style.setProperty('--c', (RUN_STATE[run.state] || RUN_STATE.none).hex); const wp = new THREE.Vector3(); m.g.getWorldPosition(wp); wp.y += 4; burst(wp, (RUN_STATE[run.state] || RUN_STATE.none).hex, 16, 1.5, 2.5); }
+      if (m.slot.x !== slot.x || m.slot.z !== slot.z) { const f = { ...m.slot }; m.slot = slot; tween(700, k => { m.g.position.x = f.x + (slot.x - f.x) * k; m.g.position.z = f.z + (slot.z - f.z) * k; }); m.el.dy = j % 2 ? 6.8 : 5.8; }
       setLabel(m.el, runLabel(run));
     }
   });
   for (const [k, m] of machines) if (!rseen.has(k)) destroyMachine(m);
-  const dbld = buildOf('github'); if (dbld && !site.extra.cage) { site.extra.cage = buildCage(site.g, 3.4, 9, 0xd6a545); site.extra.cage.position.set(0, .5, -(site.R - 11)); } else if (!dbld && site.extra.cage) { for (let i = cranes.length - 1; i >= 0; i--) if (site.extra.cage.getObjectById(cranes[i].g.id)) cranes.splice(i, 1); disposeObj(site.extra.cage); site.extra.cage = null; }
+  const dbld = buildOf('github'), sg = site.extra.sign; if (dbld && !site.extra.cage) { site.extra.cage = buildCage(site.g, 3, 7.5, 0xd6a545); site.extra.cage.position.set(sg.x, 0, sg.z); } else if (!dbld && site.extra.cage) { for (let i = cranes.length - 1; i >= 0; i--) if (site.extra.cage.getObjectById(cranes[i].g.id)) cranes.splice(i, 1); disposeObj(site.extra.cage); site.extra.cage = null; }
   const live = runs.filter(r => r.state === 'running').length, ready = prs.filter(p => p.state === 'ready').length, waiting = prs.filter(p => p.needsApproval).length, failed = runs.filter(r => r.state === 'failure').length;
-  setLabel(site.el, `<div class="w-eyebrow">GitHub quarter</div><b>Pull requests &amp; Actions</b><span class="w-cnt">${prs.length} PR${prs.length === 1 ? '' : 's'}${ready ? ' · ' + ready + ' ready' : ''} · ${runs.length} run${runs.length === 1 ? '' : 's'}${live ? ' · ' + live + ' live' : ''}</span>${dbld ? `<span class="w-cnt">${buildHtml(dbld)}</span>` : ''}${waiting ? `<span class="w-cnt w-alert">⚑ ${waiting} waiting for your review</span>` : ''}${failed ? `<span class="w-cnt w-alert w-bad">✗ ${failed} run${failed === 1 ? '' : 's'} failed</span>` : ''}`);
+  setLabel(site.el, `<div class="w-eyebrow">GitHub harbour</div><b>Pull requests &amp; Actions</b><span class="w-cnt">${prs.length} PR${prs.length === 1 ? "" : "s"}${ready ? " · " + ready + " ready" : ""} · ${runs.length} run${runs.length === 1 ? "" : "s"}${live ? " · " + live + " live" : ""}</span>${dbld ? `<span class="w-cnt">${buildHtml(dbld)}</span>` : ""}${waiting ? `<span class="w-cnt w-alert">⚑ ${waiting} waiting for your review</span>` : ""}${failed ? `<span class="w-cnt w-alert w-bad">✗ ${failed} run${failed === 1 ? "" : "s"} failed</span>` : ""}`);
 }
+// A signal beacon per run: a brazier that burns while the run is live, a green lamp when it passed, red smoke when it failed.
 function makeMachineBody(m) {
-  const run = m.run, st = RUN_STATE[run.state] || RUN_STATE.none, mg = new THREE.Group(); m.g.add(mg); m.body = mg;
-  const base = hexPrism(1.8, 1.7, mats.stone); base.position.y = .85; const hearth = box(1.2, .8, .1, new THREE.MeshStandardMaterial({ color: 0x120a06, emissive: run.state === 'running' ? 0xff7a2a : 0x000000, emissiveIntensity: 1.4 })); hearth.position.set(0, .7, 1.5); mg.add(base, hearth);
-  const chimney = new THREE.Mesh(new THREE.CylinderGeometry(.28, .34, 1.8, 6), mats.stoneDark); chimney.position.set(-1, 2.6, -.6); mg.add(chimney);
-  const gear = new THREE.Group(); gear.position.set(.5, 2.9, 0); const wheel = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, .32, 6), mats.iron); wheel.rotation.x = Math.PI / 2; wheel.castShadow = true; gear.add(wheel);
-  for (let k = 0; k < 6; k++) { const tooth = box(.34, .4, .3, mats.iron); const an = k * Math.PI / 3; tooth.position.set(Math.cos(an) * 1.15, Math.sin(an) * 1.15, 0); tooth.rotation.z = an; gear.add(tooth); }
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, .5, 6), mats.gold); hub.rotation.x = Math.PI / 2; gear.add(hub); mg.add(gear); m.gear = gear;
-  const axle = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 1.4, 6), mats.dark); axle.position.set(.5, 2.2, 0); mg.add(axle);
-  m.lamp = new THREE.MeshStandardMaterial({ color: st.color, emissive: st.color, emissiveIntensity: run.state === 'none' ? .3 : 1.3 }); const lamp = new THREE.Mesh(new THREE.SphereGeometry(.3, 10, 8), m.lamp); lamp.position.set(-1, 3.9, -.6); mg.add(lamp);
-  const [gl, gc] = RUN_GLYPH(run); const flag = textSprite(gl, gc, 'rgba(8,12,18,.92)', .9); flag.position.set(.5, 5, 0); mg.add(flag); m.flag = flag;
-  if (run.state === 'success') banner(mg, 1.4, 0, -.9, st.color);
-  m.smoke = null; if (run.state === 'running' || run.state === 'failure') { m.smoke = []; for (let k = 0; k < 5; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.18, 7, 6), new THREE.MeshStandardMaterial({ color: run.state === 'failure' ? 0x4a2a2a : 0x3a3f47, transparent: true, opacity: .7 })); mg.add(s); m.smoke.push({ m: s, ph: k / 5 }); } }
+  const run = m.run, st = RUN_STATE[run.state] || RUN_STATE.none, mg = new THREE.Group(); m.g.add(mg); m.body = mg; const lit = run.state === 'success' || run.state === 'failure' || run.state === 'running';
+  const base = hexPrism(1.15, .8, mats.stone); base.position.y = .4; const step = hexPrism(.8, .5, mats.stoneDark); step.position.y = 1.05; mg.add(base, step);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(.13, .18, 2.7, 6), mats.iron); pole.position.y = 2.6; pole.castShadow = true; mg.add(pole);
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(.78, .42, .7, 7), mats.dark); bowl.position.y = 4.1; mg.add(bowl);
+  for (let k = 0; k < 3; k++) { const a = k * Math.PI * 2 / 3; const strut = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, 1.2, 4), mats.iron); strut.position.set(Math.cos(a) * .5, 3.5, Math.sin(a) * .5); strut.rotation.z = Math.cos(a) * .35; strut.rotation.x = -Math.sin(a) * .35; mg.add(strut); }
+  m.lamp = new THREE.MeshStandardMaterial({ color: st.color, emissive: st.color, emissiveIntensity: lit ? 1.4 : .15, transparent: true, opacity: lit ? .95 : .5 });
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(run.state === 'running' ? .3 : .5, 10, 8), m.lamp); lamp.position.y = 4.65; mg.add(lamp);
+  m.fire = null; if (run.state === 'running') { const f = new THREE.Group(); f.position.y = 4.35; const outer = new THREE.Mesh(new THREE.ConeGeometry(.62, 1.7, 7), new THREE.MeshStandardMaterial({ color: 0xff7a2a, emissive: 0xff5a1a, emissiveIntensity: 1.6, transparent: true, opacity: .85 })); outer.position.y = .85; const inner = new THREE.Mesh(new THREE.ConeGeometry(.32, 1.1, 6), new THREE.MeshStandardMaterial({ color: 0xffe08a, emissive: 0xffd24a, emissiveIntensity: 2, transparent: true, opacity: .95 })); inner.position.y = .55; f.add(outer, inner); mg.add(f); m.fire = f; const glow = new THREE.Mesh(new THREE.RingGeometry(1.2, 2.2, 24), new THREE.MeshBasicMaterial({ color: 0xff9a3a, transparent: true, opacity: .18, depthWrite: false, side: THREE.DoubleSide })); glow.rotation.x = -Math.PI / 2; glow.position.y = .82; mg.add(glow); }
+  const [gl, gc] = RUN_GLYPH(run); const flag = textSprite(gl, gc, 'rgba(8,12,18,.92)', .9); flag.position.set(0, 6.3, 0); mg.add(flag); m.flag = flag;
+  if (run.state === 'success') banner(mg, 1.2, 0, -.9, st.color);
+  m.smoke = null; if (run.state === 'running' || run.state === 'failure') { m.smoke = []; for (let k = 0; k < 5; k++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(.18, 7, 6), new THREE.MeshStandardMaterial({ color: run.state === 'failure' ? 0x4a2a2a : 0x3a3f47, transparent: true, opacity: .7 })); mg.add(sm); m.smoke.push({ m: sm, ph: k / 5 }); } }
 }
 function destroyShip(sh, quiet) {
   ships.delete(sh.pr.key); dropLabel(sh.el); pickables.delete(sh.hit); const pi = flags.indexOf(sh.pennant); if (pi >= 0) flags.splice(pi, 1); if (selected.pr === sh.pr) { selected = {}; renderSel(); }
   const g = sh.g, x0 = g.position.x; if (quiet) { disposeObj(g); return; }
-  const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#9fd8e8', 14, 2, 1.5); fireworks(wp.clone().setY(wp.y + 9), 4); // a PR closed or merged: send it off
-  tween(1400, k => { g.position.x = x0 - 18 * k; g.position.y = .8 - k * k * 2.2; }, () => disposeObj(g), easeInCubic);
+  const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#9fd8e8', 14, 2, 1.5); fireworks(wp.clone().setY(wp.y + 9), 4); // a PR closed or merged: it sails out to sea
+  tween(1800, k => { g.position.x = x0 + 30 * k; g.position.y = SHIP_Y - k * k * 1.2; }, () => disposeObj(g), easeInCubic);
 }
 function destroyMachine(m, quiet) {
   machines.delete(m.run.key); dropLabel(m.el); pickables.delete(m.hit); if (selected.run === m.run) { selected = {}; renderSel(); }
   const g = m.g; if (quiet) { disposeObj(g); return; }
   const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#7d8ca3', 16, 2, 2);
-  tween(700, k => { g.position.y = .56 - 6 * k; }, () => disposeObj(g), easeInCubic);
+  tween(700, k => { g.position.y = -6 * k; }, () => disposeObj(g), easeInCubic);
 }
-
 /* ────────────────────────── Allied camp (peers) ────────────────────────── */
 function buildAllies(site, AR) {
   const g = site.g; site.color = 0x89b4fa;
@@ -686,7 +720,7 @@ W.sync = function (s) {
   for (const p of plan) { seen.add(p.key); let site = sites.get(p.key); if (!site) site = createSite(p); syncSite(site, p, s); }
   for (const p of plan) { const site = sites.get(p.key); if (site && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); } }
   for (const [k, site] of sites) if (!seen.has(k)) destroySite(site);
-  layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R })));
+  layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R, kind: st.kind, quay: st.extra.lay ? st.extra.lay.quay : 0 })));
   // Until the commander pans or zooms, keep the whole settlement framed.
   if (!cam.userMoved && sites.size) frameAll();
   const crashed = s.agents.filter(a => a.status === 'crashed').length; life.weather = crashed >= 2 ? 'storm' : crashed === 1 ? 'overcast' : 'clear';
@@ -741,14 +775,14 @@ function bindInput() {
     else if (r.pr) select({ pr: r.pr }); else if (r.run) select({ run: r.run }); else if (r.peer) select({ peer: r.peer }); else if (r.site) select({ site: r.site }); else select({});
   });
   canvas.addEventListener('dblclick', e => { const r = pick(e); if (r.unit && !r.unit.mini) { flyTo(r.unit.g); hooks.openAgent && hooks.openAgent(r.unit.a.id); } else if (r.pr) hooks.openPr && hooks.openPr(r.pr.url); else if (r.run) hooks.openRun && hooks.openRun(r.run.url); else if (r.peer) hooks.openChat && hooks.openChat(r.peer.name); });
-  canvas.addEventListener('wheel', e => { e.preventDefault(); if (e.ctrlKey) return; cam.userMoved = true; cam.zoom = Math.min(3.2, Math.max(.4, cam.zoom * (e.deltaY > 0 ? 1.1 : .91))); }, { passive: false });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); if (e.ctrlKey) return; cam.userMoved = true; cam.zoom = Math.min(6.5, Math.max(.4, cam.zoom * (e.deltaY > 0 ? 1.1 : .91))); }, { passive: false });
   const onKey = e => { if (!cam.hover || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.ctrlKey || e.metaKey || e.altKey) return; const k = e.key.toLowerCase(); touched(); if ('wasdqe'.includes(k) || k.startsWith('arrow')) { keys.add(k); cam.userMoved = true; } else if (k === 'f' || k === 'home') frameAll(true); };
   addEventListener('keydown', onKey); addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
   miniEl.addEventListener('pointerdown', e => { cam.userMoved = true; const r = miniEl.getBoundingClientRect(); cam.target.x = ((e.clientX - r.left) / r.width - .5) * terrain.rx * 2.3; cam.target.z = ((e.clientY - r.top) / r.height - .5) * terrain.rz * 2.3; });
   cam.keys = keys;
 }
 // The frame that shows every site; used at start, on F, and as the war-room orbit's anchor.
-function frameBox() { let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity; for (const st of sites.values()) { minX = Math.min(minX, st.x - st.R); maxX = Math.max(maxX, st.x + st.R); minZ = Math.min(minZ, st.z - st.R); maxZ = Math.max(maxZ, st.z + st.R); } const span = Math.max(maxX - minX, (maxZ - minZ) * 1.6); return { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2 + 2, zoom: Math.min(3, Math.max(1.1, span / 34)) }; }
+function frameBox() { let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity; for (const st of sites.values()) { minX = Math.min(minX, st.x - st.R); maxX = Math.max(maxX, st.x + st.R); minZ = Math.min(minZ, st.z - st.R); maxZ = Math.max(maxZ, st.z + st.R); } const span = Math.max(maxX - minX, (maxZ - minZ) * 1.6); return { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2 + 2, zoom: Math.min(6, Math.max(1.1, span / 34)) }; }
 function frameAll(force) {
   if (!sites.size) return; if (force) { cam.userMoved = false; cam.cine = false; }
   const { cx, cz, zoom } = frameBox(), fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom, fyaw = cam.yaw;
@@ -767,6 +801,7 @@ function updateCamera(dt) {
   cam.target.x = Math.max(-lim.x, Math.min(lim.x, cam.target.x)); cam.target.z = Math.max(-lim.z, Math.min(lim.z, cam.target.z)); cam.target.y = PLAT;
   const off = cam.base.clone().multiplyScalar(cam.zoom).applyAxisAngle(new THREE.Vector3(0, 1, 0), cam.yaw);
   camera.position.copy(cam.target).add(off); camera.lookAt(cam.target);
+  if (scene.fog) { const dist = off.length(); scene.fog.near = dist + 45; scene.fog.far = dist + 170; }
   const pos = hooks.miniSlot && hooks.miniSlot.querySelector('#world-mini-pos'); if (pos) { const txt = `${Math.round(cam.target.x)}, ${Math.round(cam.target.z)}`; if (pos.textContent !== txt) pos.textContent = txt; }
 }
 
@@ -786,7 +821,7 @@ function renderSel() {
     const s = selected.site, first = [...s.lots.values()][0];
     if (s.kind === 'feature' || s.kind === 'workshop') h = `<div class="w-portrait" style="--c:${hexStr(s.color)}">${s.kind === 'feature' ? '&#x2691;' : '&#x2302;'}</div><div class="w-main" style="--c:${hexStr(s.color)};--sc:var(--dim)"><div class="w-crumb">${s.kind === 'feature' ? 'Feature &middot; <b>' + s.lots.size + ' repo' + (s.lots.size === 1 ? '' : 's') + '</b>' : 'Workshop &middot; <b>directory</b>'}</div><h2>${esc(s.kind === 'feature' ? s.name : first?.spec.title || '')}</h2><div class="w-act">${[...s.lots.values()].map(l => esc(l.spec.title) + (l.spec.server ? ' · :' + l.spec.port : '')).join(' · ')}</div></div><div class="w-orders">${ob('+', 'Agent', 'addAgent') + ob('&#x1F4C2;', 'Folder', 'folder') + upgradeBtn(s)}</div>`;
     else if (s.kind === 'treasury') { const sn = snap || {}, done = (sn.agents || []).filter(a => a.status === 'waiting').length; const fk = n => n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'M' : n + 'K'; h = `<div class="w-portrait" style="--c:#e1b453">$</div><div class="w-main" style="--c:#e1b453;--sc:var(--dim)"><div class="w-crumb">Treasury &middot; <b>today</b></div><h2>${esc(fmtMoney(sn.cost || 0))} spent</h2><div class="w-act">${(sn.agents || []).length} units afield &middot; ${done} done &middot; ${sn.turns || 0} turns served</div></div><div class="w-stats"><div class="w-stat"><span class="k">Tokens in</span><span class="v">${fk(Math.round((sn.tokIn || 0) / 1000))}</span></div><div class="w-stat"><span class="k">Tokens out</span><span class="v">${fk(Math.round((sn.tokOut || 0) / 1000))}</span></div><div class="w-stat"><span class="k">Balance</span><span class="v" style="color:var(--w-gold)">⬡ ${coins().toLocaleString()}</span></div><div class="w-stat"><span class="k">Title</span><span class="v">${esc(sn.title || 'Overseer')}</span></div></div><div class="w-orders w-shop">${shopButtons()}</div>`; }
-    else if (s.kind === 'github') h = `<div class="w-portrait" style="--c:#c9d1d9">GH</div><div class="w-main" style="--c:#c9d1d9;--sc:var(--dim)"><div class="w-crumb">GitHub quarter</div><h2>Pull requests &amp; Actions</h2><div class="w-act">${DOCK_TIERS[tierOf('github') - 1]} &middot; ships are open PRs, machines are tracked runs. Double-click one to open it on GitHub.</div></div><div class="w-orders">${upgradeBtn(s)}</div>`;
+    else if (s.kind === 'github') h = `<div class="w-portrait" style="--c:#c9d1d9">GH</div><div class="w-main" style="--c:#c9d1d9;--sc:var(--dim)"><div class="w-crumb">GitHub harbour</div><h2>Pull requests &amp; Actions</h2><div class="w-act">${DOCK_TIERS[tierOf('github') - 1]} &middot; one row per repo: signal beacons are tracked runs, ships at the jetty are open PRs. Double-click one to open it on GitHub.</div></div><div class="w-orders">${upgradeBtn(s)}</div>`;
     else h = `<div class="w-portrait" style="--c:#89b4fa">&#x21C4;</div><div class="w-main" style="--c:#89b4fa;--sc:var(--dim)"><div class="w-crumb">Allied camp</div><h2>Peers</h2><div class="w-act">Tents are paired Overlords on your LAN. Double-click one to chat.</div></div>`;
   } else if (selected.pr) {
     const pr = selected.pr, st = PR_STATE[pr.state] || PR_STATE.open;
@@ -947,7 +982,7 @@ function animateUnit(u, t, dt) {
 }
 const v3 = () => new THREE.Vector3();
 function updateLabels() {
-  const w = canvas.clientWidth, h = canvas.clientHeight, p = v3(); labelsEl.classList.toggle('far', cam.zoom > 2.4); labelsEl.classList.toggle('near', cam.zoom < 1.05);
+  const w = canvas.clientWidth, h = canvas.clientHeight, p = v3(); labelsEl.classList.toggle('far', cam.zoom > 2.4); labelsEl.classList.toggle('vfar', cam.zoom > 4.2); labelsEl.classList.toggle('near', cam.zoom < 1.05);
   const place = (el, v) => { if (v.z > 1) { el.style.opacity = 0; return; } el.style.opacity = 1; el.style.transform = `translate(${(v.x + 1) / 2 * w}px, ${(1 - v.y) / 2 * h}px) translate(-50%, -100%)`; };
   for (const a of anchors) { if (!a.obj) continue; a.obj.getWorldPosition(p); p.y += a.dy || 0; p.project(camera); place(a.el, p); }
   const u = selected.unit || hovered;
@@ -961,7 +996,7 @@ function drawMinimap() {
   mg.fillStyle = '#0d1a2a'; mg.fillRect(0, 0, Wm, Hm);
   mg.fillStyle = '#2b5b3e'; mg.beginPath(); mg.ellipse(Wm / 2, Hm / 2, Wm / 2 / 1.15, Hm / 2 / 1.15, 0, 0, Math.PI * 2); mg.fill();
   const hexPath = (cx, cy, r) => { mg.beginPath(); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; k ? mg.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)) : mg.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); } mg.closePath(); };
-  for (const s of sites.values()) { hexPath(X(s.x), Z(s.z), s.R * Wm / rx / 2); mg.fillStyle = 'rgba(60,74,82,.95)'; mg.fill(); mg.strokeStyle = hexStr(s.color || 0xc9d1d9); mg.lineWidth = 1.5; mg.stroke(); }
+  for (const s of sites.values()) { hexPath(X(s.x), Z(s.z), s.R * Wm / rx / 2); mg.fillStyle = s.kind === 'github' ? 'rgba(27,75,94,.95)' : 'rgba(60,74,82,.95)'; mg.fill(); mg.strokeStyle = hexStr(s.color || 0xc9d1d9); mg.lineWidth = 1.5; mg.stroke(); }
   const dot = (o, hex, r, on) => { o.getWorldPosition(p); hexPath(X(p.x), Z(p.z), r); mg.fillStyle = hex; mg.fill(); if (on) { mg.strokeStyle = '#fff'; mg.lineWidth = 1.2; hexPath(X(p.x), Z(p.z), r + 2.5); mg.stroke(); } };
   for (const sh of ships.values()) dot(sh.g, (PR_STATE[sh.pr.state] || PR_STATE.open).hex, 3, sh.pr === selected.pr);
   for (const m of machines.values()) dot(m.g, (RUN_STATE[m.run.state] || RUN_STATE.none).hex, 3, m.run === selected.run);
@@ -983,7 +1018,7 @@ function tick(now) {
     for (const c of cranes) { if (c.spin) { c.jib.rotation.z = t * 1.1; continue; } c.jib.rotation.y = Math.sin(t * .35 + c.ph) * .9; c.block.position.y = -2.4 + Math.sin(t * .7 + c.ph) * .5; }
     for (const sh of ships.values()) { sh.g.position.y = sh.baseY + Math.sin(t * 1.1 + sh.ph) * .08; sh.g.rotation.z = Math.sin(t * .8 + sh.ph) * .035 + (sh.pr.behindBy ? .1 : 0); if (sh.smoke) for (const sm of sh.smoke) { const f = ((t * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1.5 + f * .4, 1.4 + f * 1.6, Math.sin(f * 7) * .2); sm.m.scale.setScalar(.6 + f * 1.2); sm.m.material.opacity = .6 * (1 - f); }
       if (sh.beam) { const k = .5 + .5 * Math.sin(t * 2.6 + sh.ph); sh.beam.material.opacity = .12 + k * .22; sh.beam.scale.set(1 + k * .25, 1, 1 + k * .25); sh.bubble.scale.setScalar(.9 + k * .35); sh.bubble.position.y = 5.9 + k * .3; for (const r of sh.ripples) { const f = ((t * .45 + r.ph) % 1 + 1) % 1; r.m.scale.setScalar(.6 + f * 1.6); r.m.material.opacity = .55 * (1 - f); } } }
-    for (const m of machines.values()) { if (m.run.state === 'running') { m.gear.rotation.z = t * 1.6 + m.ph; m.lamp.emissiveIntensity = 1 + Math.sin(t * 5 + m.ph) * .6; } if (m.smoke) for (const sm of m.smoke) { const f = ((t * (m.run.state === 'failure' ? .22 : .4) + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1 + Math.sin(f * 6 + sm.ph * 9) * .2, 3.5 + f * 2.2, -.6); sm.m.scale.setScalar(.5 + f * 1.4); sm.m.material.opacity = .65 * (1 - f); } }
+    for (const m of machines.values()) { if (m.fire) { const k = .8 + .2 * Math.sin(t * 9 + m.ph) + .12 * Math.sin(t * 23 + m.ph * 3); m.fire.scale.set(k, .75 + k * .5, k); m.fire.rotation.y = t * 2.5; m.lamp.emissiveIntensity = 1 + Math.sin(t * 5 + m.ph) * .6; } if (m.smoke) for (const sm of m.smoke) { const f = ((t * (m.run.state === 'failure' ? .22 : .4) + sm.ph) % 1 + 1) % 1; sm.m.position.set(Math.sin(f * 6 + sm.ph * 9) * .25, 4.9 + f * 2.4, Math.cos(f * 5 + sm.ph * 7) * .2); sm.m.scale.setScalar(.5 + f * 1.4); sm.m.material.opacity = .65 * (1 - f); } }
     for (const s of sites.values()) if (s.extra.mark) s.extra.mark.position.y = s.extra.markY + Math.sin(t * 1.2) * .25;
     for (const m of machines.values()) if (m.flag && m.run.state === 'running') m.flag.material.rotation = -t * 2;
   }
@@ -1046,7 +1081,7 @@ function updateLife(t, dt) {
   const M = life.meteor; if (M && night > .5) { M.next -= dt; if (M.next <= 0 && !M.from) { M.from = new THREE.Vector3((Math.random() - .5) * 200, 60 + Math.random() * 30, (Math.random() - .5) * 120); M.t0 = t; M.s.visible = true; M.s.material.rotation = -.5; } if (M.from) { const k = (t - M.t0) / .9; if (k >= 1) { M.from = null; M.s.visible = false; M.next = 18 + Math.random() * 30; } else { M.s.position.set(M.from.x + k * 70, M.from.y - k * 32, M.from.z); M.s.material.opacity = Math.sin(k * Math.PI); } } }
   const A = life.ship; if (A) { if (!A.g.visible) { A.wait -= dt; if (A.wait <= 0) { A.dir = Math.random() < .5 ? 1 : -1; A.x = -A.dir * (rx + 20); A.z = (Math.random() - .5) * terrain.rz * 1.2; A.g.visible = true; setBanner(A, headline()); } }
     else { A.x += A.dir * 4.2 * dt; A.g.position.set(A.x, 27 + Math.sin(t * .4) * .8, A.z); A.g.rotation.y = A.dir > 0 ? 0 : Math.PI; if (Math.abs(A.x) > rx + 30) { A.g.visible = false; A.wait = 90 + Math.random() * 90; } } }
-  if (gh) for (const gl of life.gulls) { gl.s.visible = night < .8; const cx = gh.x - gh.extra.cx, cz = gh.z + 2; gl.s.position.set(cx + Math.cos(t * .5 + gl.ph) * 6, PLAT + 8 + Math.sin(t * 1.4 + gl.ph) * 1.2, cz + Math.sin(t * .5 + gl.ph) * 5); gl.s.scale.set(1.2 * (Math.cos(t * .5 + gl.ph + Math.PI / 2) > 0 ? 1 : -1), .6 * (.5 + .5 * Math.abs(Math.sin(t * 10 + gl.ph))), 1); } else for (const gl of life.gulls) gl.s.visible = false;
+  if (gh) for (const gl of life.gulls) { gl.s.visible = night < .8; const cx = gh.x + (gh.extra.lay.quay + gh.R * .6) / 2, cz = gh.z; gl.s.position.set(cx + Math.cos(t * .5 + gl.ph) * 7, SAND + 9 + Math.sin(t * 1.4 + gl.ph) * 1.2, cz + Math.sin(t * .5 + gl.ph) * 6); gl.s.scale.set(1.2 * (Math.cos(t * .5 + gl.ph + Math.PI / 2) > 0 ? 1 : -1), .6 * (.5 + .5 * Math.abs(Math.sin(t * 10 + gl.ph))), 1); } else for (const gl of life.gulls) gl.s.visible = false;
   if (life.spot) { const u = selected.unit; life.spot.visible = !!u; if (u) { const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); life.spot.position.set(wp.x, wp.y + 6, wp.z); life.spot.material.opacity = .08 + .04 * Math.sin(t * 3); } }
   updateMedics(t, dt);
   for (let i = life.orbits.length - 1; i >= 0; i--) { const o = life.orbits[i]; if (!o.g.parent) { life.orbits.splice(i, 1); continue; } o.g.rotation.y = t * o.speed; o.g.position.y = o.base + Math.sin(t * 1.3 + i) * o.bob; }
@@ -1062,7 +1097,7 @@ function updateLife(t, dt) {
   }
   if (life.flyHomes.length) for (let i = 0; i < life.flies.length; i++) { const fl = life.flies[i], home = life.flyHomes[i]; if (!home || night > .8) { fl.s.visible = false; continue; } fl.s.visible = true; fl.s.position.set(home.x + Math.sin(t * .9 + fl.ph) * 1.6 + Math.sin(t * 3.1 + fl.ph) * .3, home.h + 1.4 + Math.sin(t * 2.2 + fl.ph * 2) * .5, home.z + Math.cos(t * .7 + fl.ph) * 1.6); fl.s.scale.set(.5, .5 * (.5 + .5 * Math.abs(Math.sin(t * 14 + fl.ph))), 1); }
   const F = life.fish;
-  if (F && gh) { F.next -= dt; if (F.next <= 0 && !F.from) { F.from = new THREE.Vector3(gh.x - gh.extra.cx + (Math.random() - .5) * gh.extra.hr, PLAT + .6, gh.z + 2 + (Math.random() - .5) * gh.extra.hr * .9); F.t0 = t; F.s.visible = true; F.ring.visible = true; F.ring.position.copy(F.from); F.ring.position.y += .02; }
+  if (F && gh) { F.next -= dt; if (F.next <= 0 && !F.from) { F.from = new THREE.Vector3(gh.x + gh.extra.lay.quay + 2 + Math.random() * Math.max(2, gh.R * .55 - gh.extra.lay.quay), WATER + .1, gh.z + (Math.random() - .5) * gh.R * .8); F.t0 = t; F.s.visible = true; F.ring.visible = true; F.ring.position.copy(F.from); F.ring.position.y += .02; }
     if (F.from) { const k = (t - F.t0) / 1.1; if (k >= 1) { F.from = null; F.s.visible = false; F.ring.visible = false; F.next = 4 + Math.random() * 7; } else { F.s.position.set(F.from.x + k * 2.2, F.from.y + Math.sin(k * Math.PI) * 2.2, F.from.z); F.s.scale.set(1.4 * (k < .5 ? 1 : -1), .7, 1); F.s.material.rotation = (k < .5 ? 1 : -1) * (.6 - k * 1.2); F.ring.scale.setScalar(1 + k * 4); F.ring.material.opacity = .6 * (1 - k); } } }
   for (let i = life.chimneys.length - 1; i >= 0; i--) { const c = life.chimneys[i]; if (!c.g.parent) { life.chimneys.splice(i, 1); continue; } for (const sm of c.smoke) { const f = ((t * .35 + sm.ph) % 1 + 1) % 1; sm.m.position.set(c.at[0] + Math.sin(f * 5 + sm.ph * 9) * .25, c.at[1] + f * 2.4, c.at[2]); sm.m.scale.setScalar(.5 + f * 1.6); sm.m.material.opacity = .5 * (1 - f); } }
   if (night > 0) for (const tr of life.torches) tr.material.emissiveIntensity = night * (1.2 + Math.sin(t * 13 + tr.position.x) * .4 + Math.sin(t * 7.3) * .2);
@@ -1132,6 +1167,7 @@ W.refreshSel = function () { if (alive) renderSel(); };
 // Roster hooks: the list on the left can highlight and fly to a unit.
 W.hover = function (id) { if (!alive) return; hovered = id == null ? null : (units.get(id) || null); };
 W.focus = function (id, zoom) { if (!alive) return; const u = units.get(id); if (!u) return; cam.userMoved = true; const p = new THREE.Vector3(); u.g.getWorldPosition(p); const fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom, tz = zoom || Math.min(cam.zoom, 1.1); tween(700, k => { cam.target.x = fx + (p.x - fx) * k; cam.target.z = fz + (p.z - fz) * k; cam.zoom = fzoom + (tz - fzoom) * k; }); };
+W.devCam = function (zoom, key, yaw) { if (!alive) return null; cam.userMoved = true; cam.cine = false; cam.lastInput = performance.now() / 1000; if (zoom) cam.zoom = zoom; if (yaw != null) cam.yaw = yaw; const st = key && sites.get(key); if (st) { cam.target.x = st.x; cam.target.z = st.z; } return { zoom: cam.zoom, yaw: cam.yaw, x: cam.target.x, z: cam.target.z, R: st && st.R }; }; // test hook: place the camera exactly
 W.focusKey = function (kind, key) { if (!alive) return; if (kind === 'treasury') { const st = sites.get('treasury'); if (st) { cam.userMoved = true; flyTo(st.g); select({ site: st }); } return; } const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
 
 window.World = W;

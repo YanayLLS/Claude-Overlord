@@ -244,6 +244,9 @@ body.world-mode .group-name > * { overflow: hidden; text-overflow: ellipsis; }
 body.world-mode .wt-branch { font-family: var(--w-mono); font-size: 10px; letter-spacing: 0; text-transform: none; color: var(--dim); flex: none; }
 body.world-mode #list-col { height: 100%; }
 body.world-mode #list { min-height: 0; flex: 1 1 0; }
+/* The agents keep the column: the GitHub / peers extras below them are capped and scroll on their own. */
+body.world-mode #list { min-height: 45%; }
+body.world-mode #world-extra { flex: 0 1 auto; min-height: 0; max-height: 42%; overflow-y: auto; border-top: 1px solid var(--w-line); }
 /* Group headers: the name gets the room; chips and buttons stay compact */
 body.world-mode .group-header { padding: 8px 10px 3px 10px; gap: 5px; }
 body.world-mode .group-info { flex: 1 1 100px; }
@@ -322,3 +325,15 @@ body.world-mode #term-header .term-title { display: none; }
 .w-build i { display: inline-block; width: 46px; height: 5px; background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.25); vertical-align: middle; position: relative; }
 .w-build i b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--w-gold); }
 .w-done { font-family: var(--w-display); font-weight: 700; font-size: 22px; letter-spacing: .12em; text-transform: uppercase; color: #fff; text-shadow: 0 2px 4px #000, 0 0 16px var(--w-gold); pointer-events: none; }
+
+/* Harbour cards: number/name + who on one line, the state in words below; the words go when zoomed out, the card stays */
+.w-obj.w-gh { display: grid; grid-template-columns: auto auto; column-gap: 6px; align-items: baseline; text-align: left; padding: 2px 9px 2px 7px; border-left: 3px solid var(--c); clip-path: none; background: rgba(8,12,18,.88); color: #e6edf3; line-height: 1.2; white-space: nowrap; }
+.w-obj.w-gh b { color: #fff; font-weight: 700; }
+.w-obj.w-gh .w-who { margin-left: 0; color: #aab4c3; }
+.w-obj.w-gh small { grid-column: 1 / 3; font-size: 9.5px; color: var(--c); letter-spacing: .03em; }
+.w-obj.w-gh.sel { background: rgba(214,165,69,.45); }
+#world-labels.far .w-obj.w-gh { opacity: 1 !important; font-size: 9.5px; padding: 1px 6px 1px 5px; }
+#world-labels.far .w-obj.w-gh small { display: none; }
+#world-labels.vfar .w-obj.w-gh { opacity: 0 !important; }
+.w-obj.w-repo.w-row { font-size: 12px; padding: 3px 12px; border-left: 4px solid var(--c); clip-path: none; color: #fff; }
+#world-labels.far .w-obj.w-repo.w-row { opacity: 1 !important; }
