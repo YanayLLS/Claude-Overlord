@@ -328,12 +328,11 @@ body.world-mode #term-header .term-title { display: none; }
 @media (prefers-reduced-motion: reduce) { .w-site .w-alert { animation: none; } }
 .wr-row .wr-mini { width: 22px; height: 22px; clip-path: var(--w-hexw); background: rgba(255,255,255,.08); color: var(--dim); border: 0; cursor: pointer; font-size: 11px; }
 .wr-row .wr-mini:hover { background: rgba(243,139,168,.3); color: var(--text); }
-/* Coins and title in the header; dev cheat button */
+/* Coins and title in the header */
 .wc.wc-coins { background: rgba(214,165,69,.16); cursor: pointer; }
 .wc.wc-coins b { color: var(--w-gold); }
 .wc i.hexcoin { width: 11px; height: 12px; clip-path: var(--w-hex); background: linear-gradient(135deg, #ffe3a0, var(--w-gold) 55%, #8f6d2b); }
 .w-btn.buy .g { color: var(--w-gold); } .w-btn.buy:disabled { opacity: .35; }
-.w-btn.dev { background: rgba(203,166,247,.18); } .w-btn.dev .g { color: var(--purple, #cba6f7); }
 .w-award { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); font-family: var(--w-display); font-weight: 700; font-size: 15px; color: var(--w-gold); text-shadow: 0 1px 2px #000, 0 0 8px rgba(0,0,0,.8); pointer-events: none; white-space: nowrap; }
 /* Construction progress on labels */
 .w-build { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-family: var(--w-mono); font-size: 10px; color: var(--w-gold); text-transform: none; letter-spacing: 0; }

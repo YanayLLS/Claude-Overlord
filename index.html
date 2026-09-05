@@ -4176,7 +4176,6 @@ function applySettings(s) {
     const chk = document.getElementById('chk-sound');
     if (chk) chk.checked = notificationSoundEnabled;
   }
-  if (s.worldDev !== undefined) worldDev = !!s.worldDev;
   if (s.worldEconomy) { worldEconomy = Object.assign(worldEconomyDefault(), s.worldEconomy); worldEconomy.stats = Object.assign(worldEconomyDefault().stats, worldEconomy.stats || {}); }
   if (s.worldView !== undefined) setWorldView(!!s.worldView, false);
   if (s.worldRosterW) worldRosterW = Math.max(200, Math.min(600, +s.worldRosterW || 300));
@@ -5613,7 +5612,6 @@ function setWorldView(on, persist = true) {
   const chk = document.getElementById('chk-world'); if (chk) chk.checked = on;
   if (on && window.World && (changed || !window.World.ready)) {
     try { window.World.init(document.getElementById('world-stage'), {
-      // Demo agents carry negative ids and never reach the real handlers.
       selectAgent: (id) => { if (id > 0) focusAgent(id); },
       openAgent: (id) => { if (id > 0) openTerm(id); },
       agentMenu: (ev, id) => { if (id > 0) showAgentMenu(ev, id); },
@@ -5629,9 +5627,6 @@ function setWorldView(on, persist = true) {
       openChat: (name) => openChat({ type: 'peer', id: String(name).toLowerCase() }),
       award: (kind, amount, label) => worldAward(kind, amount, label),
       spend: (cost, patch) => worldSpend(cost, patch),
-      finishBuilds: () => worldFinishBuilds(),
-      resetEconomy: () => { if (!worldDev) return; worldEconomy = worldEconomyDefault(); worldEconomySave(); worldSync(); },
-      toggleMock: () => { if (!worldDev) return; worldMock = !worldMock; worldSync(); },
       refreshUsage: () => refreshUsage(),
     }); window.World.ready = true; worldDailyStreak(); worldSync(); }
     catch (e) {
@@ -5706,46 +5701,14 @@ function worldSnapshot() {
     actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
-  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), dev: worldDev, mock: worldMock, usage: worldUsage() };
-  if (worldDev && worldMock) worldMockMerge(snapshot);
+  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), usage: worldUsage() };
   return snapshot;
-}
-// ── Demo population (test instance only): a synthetic army, docks and allies overlaid on the live snapshot. ──
-let worldMock = false;
-function worldMockMerge(s) {
-  const t = Math.floor(s.now / 1000), cyc = (seed, arr, period) => arr[Math.floor((t / period + seed) % arr.length)];
-  const feats = [
-    { feature: 'checkout-v2', repos: ['shop-web', 'shop-api', 'payments'] },
-    { feature: 'mobile-onboarding', repos: ['mobile-app', 'auth-service'] },
-  ];
-  const shops = ['design-system', 'infra-terraform', 'docs-site'];
-  const prompts = ['Migrate cart to server components', 'Fix flaky checkout e2e', 'Add Apple Pay to the sheet', 'Retry webhooks with backoff', 'Passkey enrolment screen', 'Tighten JWT rotation', 'Token colours for dark mode', 'Terraform the new region', 'Rewrite the quickstart', 'Trace slow GraphQL resolvers', 'Split the billing module', 'Bump node and fix the CI', 'Accessibility sweep on forms', 'Cache product images', 'Loop: watch main for red builds'];
-  const cycles = [['active', 'active', 'permission', 'active', 'waiting'], ['active', 'question', 'active', 'waiting', 'waiting'], ['active', 'active', 'active', 'settling', 'waiting'], ['idle'], ['active', 'crashed', 'resuming', 'active'], ['waiting'], ['active']];
-  const tools = ['Edit', 'Read', 'Bash', 'Grep', 'Task', 'WebSearch', ''];
-  const models = ['fable', 'opus', 'sonnet', 'haiku'];
-  let id = -1, k = 0;
-  const addAgents = (cwd, n, lead) => { for (let i = 0; i < n; i++, k++) {
-    const cycle = cycles[k % cycles.length], status = cyc(k, cycle, 18), tool = status === 'active' ? tools[k % tools.length] : '', ctx = (k * 37) % 97, turns = (k * 7) % 140;
-    const a = { id: id--, cwd, title: prompts[k % prompts.length], status, verb: status === 'active' ? (tool ? tool + ': ' + ['world.js', 'cart.ts', 'npm test', 'useCheckout', 'sub-review', 'docs'][k % 6] : 'Thinking…') : status === 'permission' ? 'Bash: npm run build' : status === 'question' ? 'Asking: keep the fallback?' : '', ctxPct: ctx, cost: ((k * 13) % 50) / 10, costStr: '$' + (((k * 13) % 50) / 10).toFixed(2), model: models[k % models.length], looping: k % 11 === 0, crash: status === 'crashed' || status === 'resuming' ? '1/3' : '', currentFileName: tool === 'Edit' ? 'cart.ts' : '', team: null, tool, idleMin: status === 'waiting' ? (k % 3 === 0 ? 7 : 1) : status === 'idle' ? 12 : 0, turns, toolsUsed: turns * 3, tokIn: turns * 900, tokOut: turns * 120, mock: true };
-    if (lead && i === 0) a.team = { name: 'crew-' + k, members: [{ name: 'tester', agentType: 'qa', task: 'Running the suite' }, { name: 'reviewer', agentType: 'review', task: 'Reading the diff' }], done: 2, total: 5 };
-    s.agents.push(a); } };
-  for (const f of feats) for (const [i, r] of f.repos.entries()) { const cwd = 'D:\\mock\\' + f.feature + '\\' + r; s.projects.push({ cwd, label: r, branch: 'feat/' + f.feature, feature: f.feature, port: 7900 + s.projects.length, status: i === 1 && f.feature === 'checkout-v2' ? 'setup' : 'ready', serverUrl: i === 0 ? 'http://x' : '' }); addAgents(cwd, 3 + (i % 2), i === 0); }
-  for (const w of shops) { const cwd = 'D:\\mock\\' + w; s.projects.push({ cwd, label: w, branch: 'main', feature: null, port: 0, status: 'ready', serverUrl: '' }); addAgents(cwd, 4, false); }
-  const prAuthors = ['marcelo', 'yanay', 'dana', 'ron', 'noa'], prStates = ['ready', 'open', 'behind', 'changes', 'conflict', 'blocked', 'open', 'ready'], prRepos = ['LLSLtd/shop-web', 'LLSLtd/shop-api', 'LLSLtd/payments', 'LLSLtd/mobile-app', 'LLSLtd/design-system'];
-  for (let i = 0; i < 12; i++) { const state = prStates[i % prStates.length]; s.prs.push({ key: 'mock/' + i, repo: prRepos[i % prRepos.length], number: 700 + i * 3, title: prompts[(i * 2) % prompts.length], url: '', author: prAuthors[i % prAuthors.length], state, checks: state === 'blocked' ? 'fail' : state === 'open' ? 'pending' : 'pass', behindBy: state === 'behind' ? 3 + i : state === 'conflict' ? 2 : 0, commitCount: 2 + (i * 5) % 20, headRef: 'feat/' + prompts[i % prompts.length].toLowerCase().split(' ').slice(0, 2).join('-'), baseRef: i % 2 ? 'main' : 'develop', mine: i % 3 === 0, needsApproval: i % 4 === 1, reviewDecision: state === 'changes' ? 'CHANGES_REQUESTED' : i % 3 === 0 ? 'APPROVED' : '', approvedBy: i % 3 === 0 ? ['yanay'] : [], changesBy: state === 'changes' ? ['dana'] : [], createdAt: '', actionsHtml: '<button class="pr-approve" disabled title="Demo PR">demo</button>', mock: true }); }
-  const runStates = ['running', 'success', 'failure', 'running', 'success', 'cancelled', 'success', 'running'], wfs = ['CI', 'Release', 'Deploy preview', 'Nightly e2e', 'Lint', 'CI', 'Publish', 'Security scan'];
-  for (let i = 0; i < 8; i++) s.runs.push({ key: 'mock-run/' + i, name: wfs[i], repo: prRepos[i % prRepos.length], branch: i % 2 ? 'main' : 'feat/checkout-v2', state: cyc(i, runStates, 40), url: '', runNumber: 1200 + i * 7, title: '', actor: prAuthors[(i + 1) % prAuthors.length], startedAt: new Date(s.now - i * 600000).toISOString(), actionsHtml: '<button class="pr-approve" disabled title="Demo run">demo</button>', mock: true });
-  for (const [i, name] of ['yanay-desk', 'build-box', 'noa-laptop'].entries()) if (!s.peers.some(p => p.name === name)) s.peers.push({ name, connected: i !== 1, host: '192.168.68.' + (30 + i), port: 7778, agents: i !== 1 ? 3 + i : 0, mock: true });
-  s.github = true;
-  // Demo supply: a third cell for the per-model (Fable) weekly cap when the real reading has none.
-  if (!s.usage) s.usage = { bars: [{ key: 'session', label: 'Current session', pct: 31, reset: s.now + 3.2e6, date: false }, { key: 'week', label: 'Current week', pct: 19, reset: s.now + 4.1e8, date: true }], pace: { expected: 31.2, actual: 19, state: 'ok', label: 'On track' }, fetchedAt: s.now };
-  if (!s.usage.bars.some(b => b.key.startsWith('m:'))) s.usage.bars.push({ key: 'm:fable', label: 'Fable week', pct: 74.5, reset: s.usage.bars[1] ? s.usage.bars[1].reset : 0, date: true });
 }
 const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
 
 // ── World economy: coins for outcomes and attentiveness, spent on cosmetic upgrades. Saved in settings; classic mode never reads it. ──
 function worldEconomyDefault() { return { coins: 0, earned: 0, upgrades: {}, deco: {}, builds: {}, streak: { last: '', days: 0 }, stats: { reviews: 0, merges: 0, updates: 0, jobs: 0, turns: 0, quick: 0, resumes: 0, closes: 0 } }; }
-let worldEconomy = worldEconomyDefault(), worldDev = false, _ecoSaveTimer = null;
+let worldEconomy = worldEconomyDefault(), _ecoSaveTimer = null;
 function worldEconomySave() { clearTimeout(_ecoSaveTimer); _ecoSaveTimer = setTimeout(() => api.send({ type: 'saveSettings', settings: { worldEconomy } }), 400); }
 const WORLD_TITLES = [[0, 'Overseer'], [500, 'Marshal'], [2000, 'Overlord'], [10000, 'High Overlord']];
 function worldTitle() { let t = WORLD_TITLES[0][1]; for (const [n, name] of WORLD_TITLES) if (worldEconomy.earned >= n) t = name; return t; }
@@ -5775,7 +5738,6 @@ function worldBuildsTick() {
   }
   if (changed) worldEconomySave();
 }
-function worldFinishBuilds() { if (!worldDev) return; for (const b of Object.values(worldEconomy.builds)) b.start = 0; worldBuildsTick(); worldSync(); }
 function worldDailyStreak() {
   const today = new Date().toISOString().slice(0, 10); if (worldEconomy.streak.last === today) return;
   const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10); worldEconomy.streak.days = worldEconomy.streak.last === y ? worldEconomy.streak.days + 1 : 1; worldEconomy.streak.last = today;
@@ -5795,7 +5757,7 @@ function renderWorldRoster(s) {
     + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`
     + `<span class="wc wc-coins" title="Coins: earned by reviewing and merging PRs, answering agents quickly, finished jobs and turns. Spend them at the treasury and on station upgrades." onclick="window.World&&World.focusKey('treasury')"><i class="hexcoin"></i><b>${worldEconomy.coins.toLocaleString()}</b>${esc(worldTitle())}</span>`;
   const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
-  const agentGo = (id) => (id > 0 ? `focusAgent(${id});` : '') + `window.World&&World.focus(${id})`; // demo agents (negative ids) only move the camera
+  const agentGo = (id) => `focusAgent(${id});window.World&&World.focus(${id})`;
   const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
   document.getElementById('world-attn').innerHTML = ''; // no "Needs you" block: it buried the agent list; the header counter jumps to the next one
   document.getElementById('world-extra').innerHTML = ''; // the roster is the agent list alone; PRs, runs and peers live in the world
