@@ -5587,13 +5587,14 @@ function setWorldView(on, persist = true) {
   const chk = document.getElementById('chk-world'); if (chk) chk.checked = on;
   if (on && window.World && (changed || !window.World.ready)) {
     try { window.World.init(document.getElementById('world-stage'), {
-      selectAgent: (id) => focusAgent(id),
-      openAgent: (id) => openTerm(id),
-      agentMenu: (ev, id) => showAgentMenu(ev, id),
-      closeAgent: (id) => closeAgent(id),
-      stopLoop: (id) => stopLoop(id),
-      showModelMenu: (ev, id) => showModelMenu(ev, id),
-      showEffortMenu: (ev, id) => showEffortMenu(ev, id),
+      // Demo agents carry negative ids and never reach the real handlers.
+      selectAgent: (id) => { if (id > 0) focusAgent(id); },
+      openAgent: (id) => { if (id > 0) openTerm(id); },
+      agentMenu: (ev, id) => { if (id > 0) showAgentMenu(ev, id); },
+      closeAgent: (id) => { if (id > 0) closeAgent(id); },
+      stopLoop: (id) => { if (id > 0) stopLoop(id); },
+      showModelMenu: (ev, id) => { if (id > 0) showModelMenu(ev, id); },
+      showEffortMenu: (ev, id) => { if (id > 0) showEffortMenu(ev, id); },
       focusTeamMember: (team, member, isLead) => focusTeamMember(team, member, isLead),
       addAgent: (cwd) => addAgent(cwd),
       openFolder: (p) => openFolder(p),
@@ -5604,6 +5605,7 @@ function setWorldView(on, persist = true) {
       spend: (cost, patch) => worldSpend(cost, patch),
       finishBuilds: () => worldFinishBuilds(),
       resetEconomy: () => { if (!worldDev) return; worldEconomy = worldEconomyDefault(); worldEconomySave(); worldSync(); },
+      toggleMock: () => { if (!worldDev) return; worldMock = !worldMock; worldSync(); },
     }); window.World.ready = true; worldDailyStreak(); worldSync(); }
     catch (e) {
       // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.
@@ -5666,7 +5668,37 @@ function worldSnapshot() {
     actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
-  return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), dev: worldDev };
+  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), dev: worldDev, mock: worldMock };
+  if (worldDev && worldMock) worldMockMerge(snapshot);
+  return snapshot;
+}
+// ── Demo population (test instance only): a synthetic army, docks and allies overlaid on the live snapshot. ──
+let worldMock = false;
+function worldMockMerge(s) {
+  const t = Math.floor(s.now / 1000), cyc = (seed, arr, period) => arr[Math.floor((t / period + seed) % arr.length)];
+  const feats = [
+    { feature: 'checkout-v2', repos: ['shop-web', 'shop-api', 'payments'] },
+    { feature: 'mobile-onboarding', repos: ['mobile-app', 'auth-service'] },
+  ];
+  const shops = ['design-system', 'infra-terraform', 'docs-site'];
+  const prompts = ['Migrate cart to server components', 'Fix flaky checkout e2e', 'Add Apple Pay to the sheet', 'Retry webhooks with backoff', 'Passkey enrolment screen', 'Tighten JWT rotation', 'Token colours for dark mode', 'Terraform the new region', 'Rewrite the quickstart', 'Trace slow GraphQL resolvers', 'Split the billing module', 'Bump node and fix the CI', 'Accessibility sweep on forms', 'Cache product images', 'Loop: watch main for red builds'];
+  const cycles = [['active', 'active', 'permission', 'active', 'waiting'], ['active', 'question', 'active', 'waiting', 'waiting'], ['active', 'active', 'active', 'settling', 'waiting'], ['idle'], ['active', 'crashed', 'resuming', 'active'], ['waiting'], ['active']];
+  const tools = ['Edit', 'Read', 'Bash', 'Grep', 'Task', 'WebSearch', ''];
+  const models = ['fable', 'opus', 'sonnet', 'haiku'];
+  let id = -1, k = 0;
+  const addAgents = (cwd, n, lead) => { for (let i = 0; i < n; i++, k++) {
+    const cycle = cycles[k % cycles.length], status = cyc(k, cycle, 18), tool = status === 'active' ? tools[k % tools.length] : '', ctx = (k * 37) % 97, turns = (k * 7) % 140;
+    const a = { id: id--, cwd, title: prompts[k % prompts.length], status, verb: status === 'active' ? (tool ? tool + ': ' + ['world.js', 'cart.ts', 'npm test', 'useCheckout', 'sub-review', 'docs'][k % 6] : 'Thinking…') : status === 'permission' ? 'Bash: npm run build' : status === 'question' ? 'Asking: keep the fallback?' : '', ctxPct: ctx, cost: ((k * 13) % 50) / 10, costStr: '$' + (((k * 13) % 50) / 10).toFixed(2), model: models[k % models.length], looping: k % 11 === 0, crash: status === 'crashed' || status === 'resuming' ? '1/3' : '', currentFileName: tool === 'Edit' ? 'cart.ts' : '', team: null, tool, idleMin: status === 'waiting' ? (k % 3 === 0 ? 7 : 1) : status === 'idle' ? 12 : 0, turns, toolsUsed: turns * 3, tokIn: turns * 900, tokOut: turns * 120, mock: true };
+    if (lead && i === 0) a.team = { name: 'crew-' + k, members: [{ name: 'tester', agentType: 'qa', task: 'Running the suite' }, { name: 'reviewer', agentType: 'review', task: 'Reading the diff' }], done: 2, total: 5 };
+    s.agents.push(a); } };
+  for (const f of feats) for (const [i, r] of f.repos.entries()) { const cwd = 'D:\\mock\\' + f.feature + '\\' + r; s.projects.push({ cwd, label: r, branch: 'feat/' + f.feature, feature: f.feature, port: 7900 + s.projects.length, status: i === 1 && f.feature === 'checkout-v2' ? 'setup' : 'ready', serverUrl: i === 0 ? 'http://x' : '' }); addAgents(cwd, 3 + (i % 2), i === 0); }
+  for (const w of shops) { const cwd = 'D:\\mock\\' + w; s.projects.push({ cwd, label: w, branch: 'main', feature: null, port: 0, status: 'ready', serverUrl: '' }); addAgents(cwd, 4, false); }
+  const prAuthors = ['marcelo', 'yanay', 'dana', 'ron', 'noa'], prStates = ['ready', 'open', 'behind', 'changes', 'conflict', 'blocked', 'open', 'ready'], prRepos = ['LLSLtd/shop-web', 'LLSLtd/shop-api', 'LLSLtd/payments', 'LLSLtd/mobile-app', 'LLSLtd/design-system'];
+  for (let i = 0; i < 12; i++) { const state = prStates[i % prStates.length]; s.prs.push({ key: 'mock/' + i, repo: prRepos[i % prRepos.length], number: 700 + i * 3, title: prompts[(i * 2) % prompts.length], url: '', author: prAuthors[i % prAuthors.length], state, checks: state === 'blocked' ? 'fail' : state === 'open' ? 'pending' : 'pass', behindBy: state === 'behind' ? 3 + i : state === 'conflict' ? 2 : 0, commitCount: 2 + (i * 5) % 20, headRef: 'feat/' + prompts[i % prompts.length].toLowerCase().split(' ').slice(0, 2).join('-'), baseRef: i % 2 ? 'main' : 'develop', mine: i % 3 === 0, needsApproval: i % 4 === 1, reviewDecision: state === 'changes' ? 'CHANGES_REQUESTED' : i % 3 === 0 ? 'APPROVED' : '', approvedBy: i % 3 === 0 ? ['yanay'] : [], changesBy: state === 'changes' ? ['dana'] : [], createdAt: '', actionsHtml: '<button class="pr-approve" disabled title="Demo PR">demo</button>', mock: true }); }
+  const runStates = ['running', 'success', 'failure', 'running', 'success', 'cancelled', 'success', 'running'], wfs = ['CI', 'Release', 'Deploy preview', 'Nightly e2e', 'Lint', 'CI', 'Publish', 'Security scan'];
+  for (let i = 0; i < 8; i++) s.runs.push({ key: 'mock-run/' + i, name: wfs[i], repo: prRepos[i % prRepos.length], branch: i % 2 ? 'main' : 'feat/checkout-v2', state: cyc(i, runStates, 40), url: '', runNumber: 1200 + i * 7, title: '', actor: prAuthors[(i + 1) % prAuthors.length], startedAt: new Date(s.now - i * 600000).toISOString(), actionsHtml: '<button class="pr-approve" disabled title="Demo run">demo</button>', mock: true });
+  for (const [i, name] of ['yanay-desk', 'build-box', 'noa-laptop'].entries()) if (!s.peers.some(p => p.name === name)) s.peers.push({ name, connected: i !== 1, host: '192.168.68.' + (30 + i), port: 7778, agents: i !== 1 ? 3 + i : 0, mock: true });
+  s.github = true;
 }
 const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
 
@@ -5721,7 +5753,7 @@ function renderWorldRoster(s) {
     + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`
     + `<span class="wc wc-coins" title="Coins: earned by reviewing and merging PRs, answering agents quickly, finished jobs and turns. Spend them at the treasury and on station upgrades." onclick="window.World&&World.focusKey('treasury')"><i class="hexcoin"></i><b>${worldEconomy.coins.toLocaleString()}</b>${esc(worldTitle())}</span>`;
   const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
-  const agentGo = (id) => `focusAgent(${id});window.World&&World.focus(${id})`;
+  const agentGo = (id) => (id > 0 ? `focusAgent(${id});` : '') + `window.World&&World.focus(${id})`; // demo agents (negative ids) only move the camera
   const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
   let attn = '';
   for (const a of s.agents) {
