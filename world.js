@@ -97,6 +97,8 @@ W.init = function (stageEl, h) {
   hooks = h || {}; stage = stageEl; alive = true;
   stage.innerHTML = '<canvas class="gl"></canvas><div id="world-labels"></div><canvas id="world-mini" width="400" height="232"></canvas><div id="world-sel" hidden></div><div id="world-toast"></div><div id="world-hint">drag / <kbd>WASD</kbd> pan &middot; wheel zoom &middot; <kbd>Q</kbd><kbd>E</kbd> rotate &middot; click select &middot; double-click terminal &middot; right-click menu</div>';
   canvas = stage.querySelector('canvas.gl'); labelsEl = stage.querySelector('#world-labels'); selEl = stage.querySelector('#world-sel'); miniEl = stage.querySelector('#world-mini'); toastEl = stage.querySelector('#world-toast');
+  // The minimap can live in the roster column (below the usage bars) instead of over the stage.
+  if (hooks.miniSlot) { hooks.miniSlot.innerHTML = '<div class="w-map-head"><span>Map</span><span id="world-mini-pos">0, 0</span></div>'; hooks.miniSlot.appendChild(miniEl); }
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -119,7 +121,7 @@ W.dispose = function () {
   sites.clear(); units.clear(); ships.clear(); machines.clear(); tents.clear(); anchors.clear(); pickables.clear(); lastSel = undefined; flags.length = 0; cranes.length = 0; beacons.length = 0; order.features.length = 0; order.shops.length = 0;
   if (scene) scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } } });
   if (renderer) renderer.dispose(); renderer = scene = camera = null; terrain = null; puffs = null; selected = {}; hovered = null; snap = null;
-  if (stage) stage.innerHTML = '';
+  if (stage) stage.innerHTML = ''; if (hooks.miniSlot) hooks.miniSlot.innerHTML = '';
 };
 function resize() { if (!renderer) return; const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 
@@ -601,6 +603,7 @@ function updateCamera(dt) {
   cam.target.x = Math.max(-lim.x, Math.min(lim.x, cam.target.x)); cam.target.z = Math.max(-lim.z, Math.min(lim.z, cam.target.z)); cam.target.y = PLAT;
   const off = cam.base.clone().multiplyScalar(cam.zoom).applyAxisAngle(new THREE.Vector3(0, 1, 0), cam.yaw);
   camera.position.copy(cam.target).add(off); camera.lookAt(cam.target);
+  const pos = hooks.miniSlot && hooks.miniSlot.querySelector('#world-mini-pos'); if (pos) { const txt = `${Math.round(cam.target.x)}, ${Math.round(cam.target.z)}`; if (pos.textContent !== txt) pos.textContent = txt; }
 }
 
 /* ────────────────────────── Selection bar ────────────────────────── */

@@ -1156,6 +1156,7 @@ button:focus-visible { outline-offset:0; }
     <div id="actions-dropdown" style="display:none"></div>
     <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
     <div id="summary-bar"></div>
+    <div id="world-map"></div>
   </div>
   <div id="world-stage"></div>
   <div id="resize"></div>
@@ -1348,6 +1349,10 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+U</span><span class="help-desc">Refresh usage stats</span></div>
       <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close overlay / filter</span></div>
       <div class="help-row"><span class="help-key">?</span><span class="help-desc">Show this help</span></div>
+      <div class="help-row help-world"><span class="help-key">&#x2B22;</span><span class="help-desc">World view: the roster as a 3D map (header button or Settings)</span></div>
+      <div class="help-row help-world"><span class="help-key">Drag / WASD</span><span class="help-desc">Pan the map &middot; wheel zooms &middot; Q / E rotate</span></div>
+      <div class="help-row help-world"><span class="help-key">Click</span><span class="help-desc">Select a unit &middot; double-click opens its terminal &middot; right-click its menu</span></div>
+      <div class="help-row help-world"><span class="help-key">Roster</span><span class="help-desc">Needs-you block on top; hover a card to light its unit; GitHub and peers below</span></div>
     </div>
   </div>
   <div id="search-overlay" onclick="closeSearch()">
@@ -5577,6 +5582,7 @@ function setWorldView(on, persist = true) {
       openPr: (url) => openPr(url),
       openRun: (url) => openActionRun(url),
       openChat: (name) => openChat({ type: 'peer', id: String(name).toLowerCase() }),
+      miniSlot: document.getElementById('world-map'),
     }); window.World.ready = true; worldSync(); }
     catch (e) {
       // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.

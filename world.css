@@ -187,3 +187,76 @@ body.world-mode #filter-bar { display: flex; }
 .w-main { min-width: 160px; }
 @container (max-width: 900px) { #world-sel { flex-wrap: wrap; } .w-orders { margin-left: auto; flex-basis: 100%; justify-content: flex-end; } .w-close { position: absolute; right: 8px; top: 8px; } }
 @container (max-width: 640px) { .w-stats .w-stat:nth-child(n+3) { display: none; } }
+
+/* ── World palette and layout: the artifact's navy ground, roster order, two-line rows ── */
+body.world-mode { --bg: #0b1118; --bg2: #0e161f; --bg3: #172230; --border: #223140; --border-hi: #34465a; --title-bg: #121b26; --panel-bg: #0e161f; --editor-bg: #0e161f; --card: #0e161f; --shadow: #05080c; --tab-active-bg: #121b26; --tab-inactive-bg: #0e161f; --surface0: #223140; --surface1: #34465a; --surface2: #46596f; }
+body.world-mode #hdr-world::after { content: ' World'; font-family: var(--w-display); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+/* Roster column order: warning, Supply, filter, Needs you, list, extras, badges, map */
+body.world-mode #ctx-warning { order: -4; }
+body.world-mode #summary-bar { order: -3; border-top: 0; border-bottom: 1px solid var(--w-line); }
+body.world-mode #filter-bar { order: -2; }
+body.world-mode #world-attn { order: -1; }
+body.world-mode #list { order: 0; }
+body.world-mode #world-extra { order: 1; }
+body.world-mode #pr-dropdown, body.world-mode #pr-badge, body.world-mode #actions-dropdown, body.world-mode #actions-badge { order: 2; }
+body.world-mode #world-map { order: 3; }
+#world-map { display: none; }
+body.world-mode #world-map { display: block; flex: none; padding: 8px 12px 10px; border-top: 1px solid var(--w-line); background: var(--w-panel-2); }
+#world-map .w-map-head { display: flex; justify-content: space-between; font-family: var(--w-display); font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+#world-map .w-map-head span:last-child { font-family: var(--w-mono); letter-spacing: 0; }
+#world-map #world-mini { position: static; width: 100%; height: 150px; opacity: 1; display: block; }
+/* Agent cards become two-line roster rows: name, then what the agent is doing (the card's own status text). */
+body.world-mode .agent { display: grid; grid-template-columns: 14px 1fr auto; grid-template-rows: auto auto; column-gap: 8px; row-gap: 1px; height: auto; padding: 6px 10px 6px 12px; align-items: center; }
+body.world-mode .agent-dot { grid-row: 1 / span 2; grid-column: 1; justify-self: center; }
+body.world-mode .agent-name { grid-row: 1; grid-column: 2; }
+body.world-mode .agent-right { grid-row: 1; grid-column: 3; }
+body.world-mode .agent-mid { grid-row: 2; grid-column: 3; justify-self: end; }
+body.world-mode .agent::after { content: attr(data-stext); grid-row: 2; grid-column: 2; min-width: 0; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; z-index: 1; }
+body.world-mode .agent[data-status="active"]::after { color: var(--accent); }
+body.world-mode .agent[data-status="permission"]::after { color: var(--yellow); }
+body.world-mode .agent.needs-answer::after { color: var(--purple); }
+body.world-mode .agent[data-status="waiting"]::after { color: var(--green); }
+body.world-mode .agent[data-status="crashed"]::after { color: var(--red); }
+body.world-mode .agent[data-status="resuming"]::after { color: var(--purple); }
+body.world-mode .agent-fill { grid-row: 1 / span 2; grid-column: 1 / -1; }
+body.world-mode .agent-team { margin-left: 22px; }
+/* Feature headers read like the compound banners on the map */
+body.world-mode .feature-header { padding: 9px 12px 3px; }
+body.world-mode .feature-header:hover { background: rgba(255,255,255,.03); }
+body.world-mode .feature-icon { display: none; }
+body.world-mode .feature-name { font-family: var(--w-display); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--w-gold); display: inline-flex; align-items: center; gap: 8px; }
+body.world-mode .feature-name::before { content: ''; width: 9px; height: 10px; clip-path: var(--w-hex); background: currentColor; flex: none; }
+body.world-mode .feature-summary { font-family: var(--w-mono); font-size: 10px; color: var(--dim); }
+body.world-mode .feature > .group .group-name { color: var(--text); font-size: 11px; letter-spacing: .1em; }
+body.world-mode .feature > .group .group-name::before { display: none; }
+/* Overlays and menus take the same chamfered, hex language */
+body.world-mode .settings-modal, body.world-mode .help-modal, body.world-mode .prompt-modal, body.world-mode #agent-ctx-menu, body.world-mode .group-dropdown, body.world-mode #agent-tip { border-radius: 0; clip-path: var(--w-cham); background: var(--w-panel); border-color: var(--w-line-hi); }
+body.world-mode .settings-modal h3, body.world-mode .help-modal h3 { font-family: var(--w-display); letter-spacing: .12em; text-transform: uppercase; }
+body.world-mode .help-key { font-family: var(--w-mono); }
+body.world-mode .settings-label input[type="checkbox"] { border-radius: 0; clip-path: var(--w-hex); }
+body.world-mode .prompt-actions button, body.world-mode .settings-modal button { border-radius: 0 !important; clip-path: var(--w-hexw); }
+body.world-mode .empty-icon { display: none; }
+
+/* ── Fit and overflow fixes ── */
+body.world-mode #header { flex-wrap: nowrap; overflow: hidden; gap: 6px; }
+body.world-mode .hdr-btn { padding: 5px 10px; }
+body.world-mode .wc { padding: 0 10px; height: 26px; gap: 5px; }
+body.world-mode #addBtn, body.world-mode #featBtn { padding: 5px 12px; }
+body.world-mode #account-btn { max-width: 150px; }
+body.world-mode .group-header { flex-wrap: nowrap; }
+body.world-mode .group-info { min-width: 0; flex: 1 1 auto; overflow: hidden; }
+body.world-mode .group-name { display: flex; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .08em; }
+body.world-mode .group-name > * { overflow: hidden; text-overflow: ellipsis; }
+body.world-mode .wt-branch { font-family: var(--w-mono); font-size: 10px; letter-spacing: 0; text-transform: none; color: var(--dim); flex: none; }
+body.world-mode #list-col { height: 100%; }
+body.world-mode #list { min-height: 0; flex: 1 1 0; }
+body.world-mode #world-map { flex: 0 0 auto; height: 178px; overflow: hidden; }
+#world-map #world-mini { height: 140px; }
+/* Group headers: the name gets the room; chips and buttons stay compact */
+body.world-mode .group-header { padding: 8px 10px 3px 10px; gap: 5px; }
+body.world-mode .group-info { flex: 1 1 100px; }
+body.world-mode .group-name { font-size: 11px; letter-spacing: .06em; }
+body.world-mode .group-actions button { padding: 2px 8px; font-size: 10px; }
+body.world-mode .group-menu-btn { padding: 2px 6px; }
+body.world-mode .wt-port, body.world-mode .server-badge { padding: 1px 7px; font-size: 10px; }
+body.world-mode .feature > .group .group-header { padding-left: 18px; }
