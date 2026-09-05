@@ -1142,6 +1142,8 @@ button:focus-visible { outline-offset:0; }
   </div>
   <div id="content">
   <div id="list-col">
+    <div id="world-roster-grip" title="Drag to resize the roster"></div>
+    <button id="world-roster-hide" onclick="setWorldRosterHidden(true)" title="Hide the roster (it slides away; a tab brings it back)">&#x2039;</button>
     <div id="ctx-warning" onclick="focusNextCtxDanger()"><span class="ctx-warning-icon">&#x26A0;</span><span id="ctx-warning-text"></span></div>
     <div id="filter-bar">
       <input id="filter-input" type="text" placeholder="Filter agents... (Esc to close)" />
@@ -1157,6 +1159,7 @@ button:focus-visible { outline-offset:0; }
     <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
     <div id="summary-bar"></div>
   </div>
+  <button id="world-roster-tab" onclick="setWorldRosterHidden(false)" title="Show the roster"><span>&#x203A;</span><b id="world-roster-tab-n"></b>Agents</button>
   <div id="world-stage"></div>
   <div id="resize"></div>
   <div id="term">
@@ -4176,6 +4179,9 @@ function applySettings(s) {
   if (s.worldDev !== undefined) worldDev = !!s.worldDev;
   if (s.worldEconomy) { worldEconomy = Object.assign(worldEconomyDefault(), s.worldEconomy); worldEconomy.stats = Object.assign(worldEconomyDefault().stats, worldEconomy.stats || {}); }
   if (s.worldView !== undefined) setWorldView(!!s.worldView, false);
+  if (s.worldRosterW) worldRosterW = Math.max(200, Math.min(600, +s.worldRosterW || 300));
+  if (s.worldRosterHidden !== undefined) worldRosterHidden = !!s.worldRosterHidden;
+  applyWorldRoster();
   if (s.planBudget !== undefined) {
     planBudget = s.planBudget;
     const inp = document.getElementById('inp-budget');
@@ -5577,6 +5583,26 @@ setInterval(() => {
 // Off by default. When on, world.js draws the same state the list shows, beside it.
 // Every click in the world calls the same functions the list calls; nothing here changes behavior.
 // (worldView itself is declared with the other view state near the top.)
+// The roster column in World view: resizable by its grip, and it can slide away (a tab on the stage brings it back).
+let worldRosterW = 300, worldRosterHidden = false;
+function applyWorldRoster() {
+  document.body.style.setProperty('--w-roster', (worldRosterHidden ? 0 : worldRosterW) + 'px');
+  document.body.classList.toggle('roster-hidden', worldRosterHidden);
+  const n = document.getElementById('world-roster-tab-n'); if (n) { let live = 0; for (const [, a] of agents) if (!a.archived) live++; n.textContent = live; }
+}
+function setWorldRosterHidden(h, persist = true) {
+  worldRosterHidden = !!h; applyWorldRoster();
+  if (persist) api.send({ type: 'saveSettings', settings: { worldRosterHidden } });
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 340); // the stage and terminal refit once the slide ends
+}
+(function initWorldRosterGrip() {
+  const grip = document.getElementById('world-roster-grip'); if (!grip) return; let drag = null;
+  grip.addEventListener('pointerdown', e => { drag = { x: e.clientX, w: worldRosterW }; grip.setPointerCapture(e.pointerId); document.body.classList.add('roster-resizing'); e.preventDefault(); });
+  grip.addEventListener('pointermove', e => { if (!drag) return; worldRosterW = Math.max(200, Math.min(600, drag.w + e.clientX - drag.x)); applyWorldRoster(); });
+  const end = e => { if (!drag) return; drag = null; document.body.classList.remove('roster-resizing'); api.send({ type: 'saveSettings', settings: { worldRosterW } }); window.dispatchEvent(new Event('resize')); };
+  grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+  grip.addEventListener('dblclick', () => { worldRosterW = 300; applyWorldRoster(); api.send({ type: 'saveSettings', settings: { worldRosterW } }); });
+})();
 function setWorldView(on, persist = true) {
   on = !!on;
   if (persist && on !== worldView) api.send({ type: 'saveSettings', settings: { worldView: on } });
@@ -5606,6 +5632,7 @@ function setWorldView(on, persist = true) {
       finishBuilds: () => worldFinishBuilds(),
       resetEconomy: () => { if (!worldDev) return; worldEconomy = worldEconomyDefault(); worldEconomySave(); worldSync(); },
       toggleMock: () => { if (!worldDev) return; worldMock = !worldMock; worldSync(); },
+      refreshUsage: () => refreshUsage(),
     }); window.World.ready = true; worldDailyStreak(); worldSync(); }
     catch (e) {
       // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.
@@ -5625,6 +5652,17 @@ function setWorldView(on, persist = true) {
 }
 function toggleWorldView() { setWorldView(!worldView); }
 // Snapshot of renderer state for the world. Plain data, read-only, built from the same maps the list uses.
+// The usage caps the summary bar shows, for the world's power plant: one bar per cap plus the weekly pace.
+function worldUsage() {
+  const u = currentUsage; if (!u || (u.hourly == null && u.weekly == null)) return null;
+  const bars = [];
+  if (u.hourly != null) bars.push({ key: 'session', label: 'Current session', pct: u.hourly, reset: u.hourlyReset || 0, date: false });
+  if (u.weekly != null) bars.push({ key: 'week', label: 'Current week', pct: u.weekly, reset: u.weeklyReset || 0, date: true });
+  for (const m of u.modelWeekly || []) bars.push({ key: 'm:' + m.model, label: modelLabel(m.model) + ' week', pct: m.pct, reset: m.reset || u.weeklyReset || 0, date: true });
+  let pace = null;
+  if (u.weekly != null && u.weeklyReset) { const daysLeft = (u.weeklyReset - Date.now()) / 86400000, daysElapsed = 7 - daysLeft; if (daysElapsed > .01 && daysLeft > 0) { const expected = daysElapsed / 7 * 100, actual = u.weekly; pace = { expected, actual, state: actual <= expected * .85 ? 'ok' : actual <= expected * 1.1 ? 'warn' : 'over', label: actual <= expected * 1.1 ? 'On track' : 'Too fast' }; } }
+  return { bars, pace, fetchedAt: u.fetchedAt || 0 };
+}
 function worldSnapshot() {
   const projects = new Map();
   const addProject = (cwd) => { if (!cwd || projects.has(cwd)) return; const w = worktreeAt(cwd); const running = wtRunning.get(cwd);
@@ -5668,7 +5706,7 @@ function worldSnapshot() {
     actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
-  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), dev: worldDev, mock: worldMock };
+  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), dev: worldDev, mock: worldMock, usage: worldUsage() };
   if (worldDev && worldMock) worldMockMerge(snapshot);
   return snapshot;
 }
@@ -5699,6 +5737,9 @@ function worldMockMerge(s) {
   for (let i = 0; i < 8; i++) s.runs.push({ key: 'mock-run/' + i, name: wfs[i], repo: prRepos[i % prRepos.length], branch: i % 2 ? 'main' : 'feat/checkout-v2', state: cyc(i, runStates, 40), url: '', runNumber: 1200 + i * 7, title: '', actor: prAuthors[(i + 1) % prAuthors.length], startedAt: new Date(s.now - i * 600000).toISOString(), actionsHtml: '<button class="pr-approve" disabled title="Demo run">demo</button>', mock: true });
   for (const [i, name] of ['yanay-desk', 'build-box', 'noa-laptop'].entries()) if (!s.peers.some(p => p.name === name)) s.peers.push({ name, connected: i !== 1, host: '192.168.68.' + (30 + i), port: 7778, agents: i !== 1 ? 3 + i : 0, mock: true });
   s.github = true;
+  // Demo supply: a third cell for the per-model (Fable) weekly cap when the real reading has none.
+  if (!s.usage) s.usage = { bars: [{ key: 'session', label: 'Current session', pct: 31, reset: s.now + 3.2e6, date: false }, { key: 'week', label: 'Current week', pct: 19, reset: s.now + 4.1e8, date: true }], pace: { expected: 31.2, actual: 19, state: 'ok', label: 'On track' }, fetchedAt: s.now };
+  if (!s.usage.bars.some(b => b.key.startsWith('m:'))) s.usage.bars.push({ key: 'm:fable', label: 'Fable week', pct: 74.5, reset: s.usage.bars[1] ? s.usage.bars[1].reset : 0, date: true });
 }
 const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
 
@@ -5742,9 +5783,10 @@ function worldDailyStreak() {
 }
 function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { worldBuildsTick(); const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
 setInterval(() => { if (worldView && Object.keys(worldEconomy.builds).length) worldSync(); }, 1000); // construction timers tick even when nothing else changes
-// The roster extras the classic list doesn't have: header counters on top,
+// The roster extras the classic list doesn't have: header counters on top (the list itself is untouched),
 // and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
 function renderWorldRoster(s) {
+  { const n = document.getElementById('world-roster-tab-n'); if (n) n.textContent = s.agents.length; }
   const st = { work: 0, need: 0, done: 0, down: 0 }; let cost = 0;
   for (const a of s.agents) { if (a.status === 'active' || a.status === 'settling' || a.status === 'resuming') st.work++; else if (a.status === 'permission' || a.status === 'question') st.need++; else if (a.status === 'waiting') st.done++; else if (a.status === 'crashed') st.down++; cost += a.cost; }
   const chip = (c, n, label, onclick, title) => `<span class="wc" style="--c:${c}" ${onclick ? `onclick="${onclick}"` : ''} title="${escAttr(title || label)}"><i></i><b>${n}</b>${label}</span>`;
@@ -5756,25 +5798,7 @@ function renderWorldRoster(s) {
   const agentGo = (id) => (id > 0 ? `focusAgent(${id});` : '') + `window.World&&World.focus(${id})`; // demo agents (negative ids) only move the camera
   const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
   document.getElementById('world-attn').innerHTML = ''; // no "Needs you" block: it buried the agent list; the header counter jumps to the next one
-  let extra = '';
-  if (s.github) {
-    const prSt = { ready: ['Ready to merge', 'var(--green)'], open: ['Open', 'var(--cyan)'], behind: ['Behind base', 'var(--yellow)'], changes: ['Changes requested', 'var(--red)'], conflict: ['Conflicts', 'var(--red)'], blocked: ['Checks failing', 'var(--peach)'] };
-    const runSt = { running: ['Running', 'var(--yellow)'], success: ['Passed', 'var(--green)'], failure: ['Failed', 'var(--red)'], cancelled: ['Cancelled', 'var(--dim)'], none: ['No runs yet', 'var(--dim)'] };
-    extra += `<div class="wr-sec"><h3 style="--c:#c9d1d9"><i class="hexi"></i>GitHub harbour<span class="n">${s.prs.length} PR${s.prs.length === 1 ? '' : 's'} · ${s.runs.length} run${s.runs.length === 1 ? '' : 's'}</span></h3>`;
-    extra += `<div class="wr-lot" style="color:#3fbfd6">Cove · pull requests</div>`;
-    if (!s.prs.length) extra += `<div class="wr-empty">${prSettings.enabled ? 'No open PRs' : 'PR tracking is off — enable it in Settings'}</div>`;
-    for (const p of s.prs) { const [l, c] = prSt[p.state] || prSt.open; extra += row(c, p.state === 'open', '#' + p.number + ' ' + p.title, esc(l) + (p.checks ? ' · checks ' + esc(p.checks.toLowerCase()) : '') + (p.behindBy ? ' · ' + p.behindBy + ' behind' : ''), '+' + p.commitCount, `window.World&&World.focusKey('pr','${escAttr(p.key).replace(/'/g, '\\\'')}')`); }
-    extra += `<div class="wr-lot" style="color:#a78bfa">Signal yard · Actions</div>`;
-    if (!s.runs.length) extra += `<div class="wr-empty">${actionsSettings.enabled ? 'No tracked runs yet' : 'Actions tracking is off — add workflows in Settings'}</div>`;
-    for (const r of s.runs) { const [l, c] = runSt[r.state] || runSt.none; extra += row(c, r.state === 'running', r.name + ' · ' + r.repo, esc(l) + (r.branch ? ' · ⑂ ' + esc(r.branch) : ''), r.runNumber ? '#' + r.runNumber : '', `window.World&&World.focusKey('run','${escAttr(r.key).replace(/'/g, '\\\'')}')`); }
-    extra += `</div>`;
-  }
-  if (s.peers.length) {
-    extra += `<div class="wr-sec"><h3 style="--c:var(--accent)"><i class="hexi"></i>Allied camp · peers<span class="n">${s.peers.filter(p => p.connected).length}/${s.peers.length} online</span></h3>`;
-    for (const p of s.peers) extra += row(p.connected ? 'var(--accent)' : 'var(--dim)', false, p.name, p.connected ? 'online' + (p.agents ? ' · ' + p.agents + ' unit' + (p.agents === 1 ? '' : 's') + ' afield' : '') : 'offline', '', `openChat({type:'peer',id:'${escAttr(p.name).toLowerCase().replace(/'/g, '\\\'')}'})`);
-    extra += `</div>`;
-  }
-  document.getElementById('world-extra').innerHTML = extra;
+  document.getElementById('world-extra').innerHTML = ''; // the roster is the agent list alone; PRs, runs and peers live in the world
 }
 // ── Dossier: the terminal pane's head, Conversation tab and order box (world mode) ──
 function renderDossierHead(s) {

@@ -309,6 +309,7 @@ function planSites(s) {
   for (const cwd of order.shops) { plan.push({ key: 'w:' + cwd, kind: 'workshop', project: shops.find(p => p.cwd === cwd), x: x + RW, z: 20, R: RW }); x += 2 * RW + 3; }
   if (s.github) { const lay = githubLayout(s); plan.push({ key: 'github', kind: 'github', x: sTotal / 2 + GAP + lay.R + 1, z: lay.R - 2, R: lay.R, lay }); }
   if (plan.length) plan.push({ key: 'treasury', kind: 'treasury', x: 0, z: 2.5, R: 7 }); // today's spend as a coin pile at the crossroads
+  if (plan.length) plan.push({ key: 'plant', kind: 'plant', x: -17, z: 2.5, R: 7 }); // the power plant: session / week / per-model supply
   if (s.peers && s.peers.length) plan.push({ key: 'allies', kind: 'allies', x: -(sTotal / 2 + GAP + 13), z: 22, R: 13 });
   return plan;
 }
@@ -351,6 +352,7 @@ function createSite(p) {
     site.color = siteColor(p.key); const plat = hexPrism(p.R, .5, mats.plot); plat.position.y = .25; g.add(plat); g.add(hexEdge(p.R, .52, site.color, .8)); site.plat = plat; plat.userData.pick = { site };
   } else if (p.kind === 'github') buildGithub(site, p);
   else if (p.kind === 'allies') buildAllies(site, p.R);
+  else if (p.kind === 'plant') buildPlant(site, p.R);
   else if (p.kind === 'treasury') { site.color = 0xe1b453; const plat = hexPrism(p.R, .5, mats.plot); plat.position.y = .25; g.add(plat); g.add(hexEdge(p.R, .52, 0xe1b453, .6)); site.plat = plat; plat.userData.pick = { site }; const an = new THREE.Object3D(); an.position.set(0, 4.2, 0); g.add(an); site.el = label('w-lot', 'Treasury', an, '#e1b453'); site.extra.coins = new THREE.Group(); g.add(site.extra.coins); site.extra.coinsN = -1; }
   // Spawn: rise from below with a dust burst.
   g.position.y = PLAT - 9; tween(900, k => { g.position.y = PLAT - 9 + 9 * k; }, () => burst(new THREE.Vector3(p.x, PLAT + .5, p.z), '#e6d7b8', 40, p.R * 1.2, 2), easeOutCubic, 250);
@@ -386,6 +388,7 @@ function syncSite(site, p, s) {
       const tierName = (p.kind === 'feature' ? TOWER_TIERS : HALL_TIERS)[tierOf(site.key) - 1]; if (site.built != null && site.built < 1 && built >= 1) { const wp = new THREE.Vector3(); site.anchor.getWorldPosition(wp); fireworks(wp.setY(wp.y + 6), 6); } /* the feature's work is complete */ setLabel(site.el, `<div class="w-eyebrow">Feature</div><b>${esc(p.name)}</b><div class="w-prog"><i style="width:${Math.round(built * 100)}%"></i></div><span class="w-cnt">${all.length} unit${all.length === 1 ? '' : 's'} &middot; ${repos.length} repo${repos.length === 1 ? '' : 's'} &middot; ${Math.round(built * 100)}%</span>`); site.built = built; site.name = p.name; }
   } else if (p.kind === 'github') { if (site.R !== p.R || site.extra.lay.quay !== p.lay.quay || site.extra.lay.jettyL !== p.lay.jettyL || site.extra.lay.rows !== p.lay.rows || site.tier !== tierOf('github')) { const up = site.tier != null && site.tier !== tierOf('github'); destroySite(site); const ns = createSite(p); syncGithub(ns, s); if (up) { const wp = new THREE.Vector3(); ns.g.getWorldPosition(wp); wp.y += 8; fireworks(wp, 4); } return; } syncGithub(site, s); }
   else if (p.kind === 'treasury') syncTreasury(site, s);
+  else if (p.kind === 'plant') syncPlant(site, s);
   else if (p.kind === 'allies') syncAllies(site, s);
 }
 
@@ -821,6 +824,8 @@ function renderSel() {
     const s = selected.site, first = [...s.lots.values()][0];
     if (s.kind === 'feature' || s.kind === 'workshop') h = `<div class="w-portrait" style="--c:${hexStr(s.color)}">${s.kind === 'feature' ? '&#x2691;' : '&#x2302;'}</div><div class="w-main" style="--c:${hexStr(s.color)};--sc:var(--dim)"><div class="w-crumb">${s.kind === 'feature' ? 'Feature &middot; <b>' + s.lots.size + ' repo' + (s.lots.size === 1 ? '' : 's') + '</b>' : 'Workshop &middot; <b>directory</b>'}</div><h2>${esc(s.kind === 'feature' ? s.name : first?.spec.title || '')}</h2><div class="w-act">${[...s.lots.values()].map(l => esc(l.spec.title) + (l.spec.server ? ' · :' + l.spec.port : '')).join(' · ')}</div></div><div class="w-orders">${ob('+', 'Agent', 'addAgent') + ob('&#x1F4C2;', 'Folder', 'folder') + upgradeBtn(s)}</div>`;
     else if (s.kind === 'treasury') { const sn = snap || {}, done = (sn.agents || []).filter(a => a.status === 'waiting').length; const fk = n => n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'M' : n + 'K'; h = `<div class="w-portrait" style="--c:#e1b453">$</div><div class="w-main" style="--c:#e1b453;--sc:var(--dim)"><div class="w-crumb">Treasury &middot; <b>today</b></div><h2>${esc(fmtMoney(sn.cost || 0))} spent</h2><div class="w-act">${(sn.agents || []).length} units afield &middot; ${done} done &middot; ${sn.turns || 0} turns served</div></div><div class="w-stats"><div class="w-stat"><span class="k">Tokens in</span><span class="v">${fk(Math.round((sn.tokIn || 0) / 1000))}</span></div><div class="w-stat"><span class="k">Tokens out</span><span class="v">${fk(Math.round((sn.tokOut || 0) / 1000))}</span></div><div class="w-stat"><span class="k">Balance</span><span class="v" style="color:var(--w-gold)">⬡ ${coins().toLocaleString()}</span></div><div class="w-stat"><span class="k">Title</span><span class="v">${esc(sn.title || 'Overseer')}</span></div></div><div class="w-orders w-shop">${shopButtons()}</div>`; }
+    else if (s.kind === 'plant') { const u = (snap && snap.usage) || null, bars = (u && u.bars) || []; const ago = u && u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 1000) : 0; const ageStr = !u || !u.fetchedAt ? '' : ago < 60 ? ago + 's ago' : Math.round(ago / 60) + 'm ago';
+      h = `<div class="w-portrait" style="--c:${PLANT_HEX}">&#x26A1;</div><div class="w-main" style="--c:${PLANT_HEX};--sc:var(--dim)"><div class="w-crumb">Power plant &middot; <b>supply</b></div><h2>${bars.length ? bars.map(b => esc(b.label) + ' ' + b.pct.toFixed(1) + '%').join(' &middot; ') : 'No reading yet'}</h2><div class="w-act">${u && u.pace ? `<span class="w-pace ${u.pace.state}">${u.pace.label}</span> &middot; used ${u.pace.actual.toFixed(1)}% of the week, expected ${u.pace.expected.toFixed(1)}%` : 'Session, week and per-model caps as read from Claude'}${ageStr ? ' &middot; read ' + ageStr : ''}</div></div><div class="w-stats">${bars.map(b => `<div class="w-stat"><span class="k">${esc(b.label)}</span><span class="v" style="color:${usageTone(b.pct).css}">${b.pct.toFixed(1)}%</span><span class="k">${esc(fmtReset(b.reset, b.date))}</span></div>`).join('')}</div><div class="w-orders"><button class="w-btn" data-cmd="usage" title="Fetch the latest usage reading"><span class="g">&#x21bb;</span>Refresh</button></div>`; }
     else if (s.kind === 'github') h = `<div class="w-portrait" style="--c:#c9d1d9">GH</div><div class="w-main" style="--c:#c9d1d9;--sc:var(--dim)"><div class="w-crumb">GitHub harbour</div><h2>Pull requests &amp; Actions</h2><div class="w-act">${DOCK_TIERS[tierOf('github') - 1]} &middot; one row per repo: signal beacons are tracked runs, ships at the jetty are open PRs. Double-click one to open it on GitHub.</div></div><div class="w-orders">${upgradeBtn(s)}</div>`;
     else h = `<div class="w-portrait" style="--c:#89b4fa">&#x21C4;</div><div class="w-main" style="--c:#89b4fa;--sc:var(--dim)"><div class="w-crumb">Allied camp</div><h2>Peers</h2><div class="w-act">Tents are paired Overlords on your LAN. Double-click one to chat.</div></div>`;
   } else if (selected.pr) {
@@ -859,6 +864,7 @@ function command(cmd, ev) {
     case 'chat': hooks.openChat && hooks.openChat(selected.peer.name); break;
     case 'upgrade': { const st = selected.site; if (!st) break; const up = upgradeInfo(st); if (!up || !hooks.spend) break; if (hooks.spend(up.cost, { upgrade: st.key, tier: up.next, label: up.name, dur: up.dur })) toast(`${up.name}: construction started — ${up.cost} ⬡`); break; }
     case 'finish': hooks.finishBuilds && hooks.finishBuilds(); break;
+    case 'usage': hooks.refreshUsage && hooks.refreshUsage(); toast('Reading the meters…'); break;
     case 'reset': hooks.resetEconomy && hooks.resetEconomy(); break;
     case 'mock': hooks.toggleMock && hooks.toggleMock(); break;
     case 'dev': hooks.award && hooks.award('dev', 500, 'dev cheat'); break;
@@ -996,7 +1002,7 @@ function drawMinimap() {
   mg.fillStyle = '#0d1a2a'; mg.fillRect(0, 0, Wm, Hm);
   mg.fillStyle = '#2b5b3e'; mg.beginPath(); mg.ellipse(Wm / 2, Hm / 2, Wm / 2 / 1.15, Hm / 2 / 1.15, 0, 0, Math.PI * 2); mg.fill();
   const hexPath = (cx, cy, r) => { mg.beginPath(); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; k ? mg.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)) : mg.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); } mg.closePath(); };
-  for (const s of sites.values()) { hexPath(X(s.x), Z(s.z), s.R * Wm / rx / 2); mg.fillStyle = s.kind === 'github' ? 'rgba(27,75,94,.95)' : 'rgba(60,74,82,.95)'; mg.fill(); mg.strokeStyle = hexStr(s.color || 0xc9d1d9); mg.lineWidth = 1.5; mg.stroke(); }
+  for (const s of sites.values()) { hexPath(X(s.x), Z(s.z), s.R * Wm / rx / 2); mg.fillStyle = s.kind === 'github' ? 'rgba(27,75,94,.95)' : s.kind === 'plant' ? 'rgba(46,88,98,.95)' : 'rgba(60,74,82,.95)'; mg.fill(); mg.strokeStyle = hexStr(s.color || 0xc9d1d9); mg.lineWidth = 1.5; mg.stroke(); }
   const dot = (o, hex, r, on) => { o.getWorldPosition(p); hexPath(X(p.x), Z(p.z), r); mg.fillStyle = hex; mg.fill(); if (on) { mg.strokeStyle = '#fff'; mg.lineWidth = 1.2; hexPath(X(p.x), Z(p.z), r + 2.5); mg.stroke(); } };
   for (const sh of ships.values()) dot(sh.g, (PR_STATE[sh.pr.state] || PR_STATE.open).hex, 3, sh.pr === selected.pr);
   for (const m of machines.values()) dot(m.g, (RUN_STATE[m.run.state] || RUN_STATE.none).hex, 3, m.run === selected.run);
@@ -1019,6 +1025,7 @@ function tick(now) {
     for (const sh of ships.values()) { sh.g.position.y = sh.baseY + Math.sin(t * 1.1 + sh.ph) * .08; sh.g.rotation.z = Math.sin(t * .8 + sh.ph) * .035 + (sh.pr.behindBy ? .1 : 0); if (sh.smoke) for (const sm of sh.smoke) { const f = ((t * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1.5 + f * .4, 1.4 + f * 1.6, Math.sin(f * 7) * .2); sm.m.scale.setScalar(.6 + f * 1.2); sm.m.material.opacity = .6 * (1 - f); }
       if (sh.beam) { const k = .5 + .5 * Math.sin(t * 2.6 + sh.ph); sh.beam.material.opacity = .12 + k * .22; sh.beam.scale.set(1 + k * .25, 1, 1 + k * .25); sh.bubble.scale.setScalar(.9 + k * .35); sh.bubble.position.y = 5.9 + k * .3; for (const r of sh.ripples) { const f = ((t * .45 + r.ph) % 1 + 1) % 1; r.m.scale.setScalar(.6 + f * 1.6); r.m.material.opacity = .55 * (1 - f); } } }
     for (const m of machines.values()) { if (m.fire) { const k = .8 + .2 * Math.sin(t * 9 + m.ph) + .12 * Math.sin(t * 23 + m.ph * 3); m.fire.scale.set(k, .75 + k * .5, k); m.fire.rotation.y = t * 2.5; m.lamp.emissiveIntensity = 1 + Math.sin(t * 5 + m.ph) * .6; } if (m.smoke) for (const sm of m.smoke) { const f = ((t * (m.run.state === 'failure' ? .22 : .4) + sm.ph) % 1 + 1) % 1; sm.m.position.set(Math.sin(f * 6 + sm.ph * 9) * .25, 4.9 + f * 2.4, Math.cos(f * 5 + sm.ph * 7) * .2); sm.m.scale.setScalar(.5 + f * 1.4); sm.m.material.opacity = .65 * (1 - f); } }
+    for (const s of sites.values()) if (s.extra.plant) { const P = s.extra.plant, load = .25 + P.load; P.core.material.emissiveIntensity = 1.2 + Math.sin(t * 3) * .5; P.core.scale.setScalar(1 + Math.sin(t * 3) * .06); P.turbine.rotation.z = t * (.6 + P.load * 2.4); for (const sm of P.steam) { const f = ((t * .28 * load + sm.ph) % 1 + 1) % 1; sm.m.position.set(-4.2 + Math.sin(f * 5 + sm.ph * 9) * .5, 5.2 + f * 3.2, -1.6 + Math.cos(f * 4 + sm.ph * 7) * .4); sm.m.scale.setScalar(.5 + f * 1.6); sm.m.material.opacity = .5 * (1 - f) * Math.min(1, .3 + P.load * 1.4); } }
     for (const s of sites.values()) if (s.extra.mark) s.extra.mark.position.y = s.extra.markY + Math.sin(t * 1.2) * .25;
     for (const m of machines.values()) if (m.flag && m.run.state === 'running') m.flag.material.rotation = -t * 2;
   }
@@ -1151,6 +1158,53 @@ function updateMedics(t, dt) {
 }
 function confetti(pos) { for (const c of ['#f9e2af', '#a6e3a1', '#89b4fa', '#f5c2e7', '#fab387']) burst(pos, c, 8, 1.4, 4); }
 function fireworks(pos, n) { for (let k = 0; k < n; k++) setTimeout(() => { if (!alive) return; const p = pos.clone().add(new THREE.Vector3((Math.random() - .5) * 8, Math.random() * 4, (Math.random() - .5) * 6)); burst(p, ['#f9e2af', '#a6e3a1', '#89b4fa', '#f5c2e7', '#fab387'][k % 5], 34, 2.5, 4); }, k * 380); }
+/* ────────────────────────── Power plant: the usage caps as energy cells ────────────────────────── */
+const PLANT_C = 0x89dceb, PLANT_HEX = '#89dceb';
+const usageTone = pct => pct >= 90 ? { c: 0xf38ba8, css: 'var(--w-crashed)' } : pct >= 70 ? { c: 0xf9e2af, css: 'var(--w-perm)' } : { c: 0xa6e3a1, css: 'var(--w-done)' };
+function fmtReset(ts, withDate) { if (!ts) return ''; if (ts - Date.now() <= 0) return 'resets now'; const d = new Date(ts), h = d.getHours(), h12 = h % 12 || 12, mi = d.getMinutes(), t = (mi ? h12 + ':' + String(mi).padStart(2, '0') : h12) + (h >= 12 ? 'pm' : 'am'); if (!withDate) return 'resets ' + t; const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return 'resets ' + mo[d.getMonth()] + ' ' + d.getDate() + ', ' + t; }
+function buildPlant(site, R) {
+  const g = site.g; site.color = PLANT_C;
+  const plat = hexPrism(R, .5, mats.plot); plat.position.y = .25; g.add(plat); g.add(hexEdge(R, .52, PLANT_C, .6)); site.plat = plat; plat.userData.pick = { site };
+  // Reactor hall at the back: a dome over a glowing core, a cooling tower beside it that steams harder the more is used.
+  const hall = box(5.2, 2.2, 3.2, mats.stone); hall.position.set(0, 1.6, -2.6); g.add(hall);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(1.7, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xb9c2cc, { metalness: .4, roughness: .45 })); dome.position.set(0, 2.7, -2.6); dome.castShadow = true; g.add(dome);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(.55, 12, 10), new THREE.MeshStandardMaterial({ color: 0x89dceb, emissive: 0x89dceb, emissiveIntensity: 1.6, transparent: true, opacity: .9 })); core.position.set(0, 3.1, -2.6); g.add(core);
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.5, 4.4, 12), mat(0xd8d3c8)); tower.position.set(-4.2, 2.7, -1.6); tower.castShadow = true; g.add(tower);
+  const lip = new THREE.Mesh(new THREE.TorusGeometry(1.1, .12, 6, 14), mats.stoneDark); lip.rotation.x = Math.PI / 2; lip.position.set(-4.2, 4.9, -1.6); g.add(lip);
+  const steam = []; for (let k = 0; k < 6; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.34, 7, 6), new THREE.MeshStandardMaterial({ color: 0xe8eef4, transparent: true, opacity: .55 })); s.position.set(-4.2, 5.2, -1.6); g.add(s); steam.push({ m: s, ph: k / 6 }); }
+  // Turbine: a wheel on the east side that spins with the session load.
+  const tg = new THREE.Group(); tg.position.set(4.2, 2.4, -1.6); const wheel = new THREE.Mesh(new THREE.TorusGeometry(1.1, .14, 6, 16), mats.iron); tg.add(wheel); for (let k = 0; k < 6; k++) { const bl = box(2, .16, .3, mats.iron); bl.rotation.z = k * Math.PI / 3; tg.add(bl); } g.add(tg); const post = new THREE.Mesh(new THREE.CylinderGeometry(.14, .18, 2.4, 6), mats.dark); post.position.set(4.2, 1.2, -1.6); g.add(post);
+  // Pylons carry the supply out to the settlement.
+  for (const sx of [-1, 1]) { const py = new THREE.Mesh(new THREE.CylinderGeometry(.06, .12, 5, 4), mats.iron); py.position.set(sx * (R - 1.2), 3, 3.5); g.add(py); const bar = box(1.4, .08, .08, mats.iron); bar.position.set(sx * (R - 1.2), 5.2, 3.5); g.add(bar); }
+  site.extra.plant = { core, steam, turbine: tg, cells: [], cellsKey: '', load: 0 };
+  const an = new THREE.Object3D(); an.position.set(0, 8.2, -1); g.add(an); site.el = label('w-plant', '', an, PLANT_HEX);
+}
+// One glass cell per cap, in a row along the front: the fill rises to the percentage in the cap's colour.
+function plantCells(site, bars) {
+  const P = site.extra.plant, key = bars.map(b => b.key).join('|'); if (P.cellsKey === key) return; P.cellsKey = key;
+  for (const c of P.cells) disposeObj(c.g); P.cells = [];
+  const n = bars.length, gap = Math.min(2.6, 9 / Math.max(1, n)); bars.forEach((b, i) => {
+    const cg = new THREE.Group(); cg.position.set((i - (n - 1) / 2) * gap, .5, 1.4); site.g.add(cg);
+    const base = hexPrism(.72, .3, mats.stoneDark); base.position.y = .15; cg.add(base);
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, 3.2, 12, 1, true), new THREE.MeshStandardMaterial({ color: 0xcfe9f2, transparent: true, opacity: .22, roughness: .2, metalness: .1, side: THREE.DoubleSide, depthWrite: false })); glass.position.y = 1.9; cg.add(glass);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(.58, .58, .18, 12), mats.iron); cap.position.y = 3.6; cg.add(cap);
+    const fillMat = new THREE.MeshStandardMaterial({ color: 0xa6e3a1, emissive: 0xa6e3a1, emissiveIntensity: .9, transparent: true, opacity: .85 });
+    const fill = new THREE.Mesh(new THREE.CylinderGeometry(.42, .42, 1, 12), fillMat); fill.position.y = .3; fill.scale.y = .01; cg.add(fill);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(.16, 8, 6), fillMat); bulb.position.y = 3.95; cg.add(bulb);
+    P.cells.push({ g: cg, fill, fillMat, key: b.key, pct: 0 });
+  });
+}
+function syncPlant(site, s) {
+  const P = site.extra.plant, u = s.usage, bars = (u && u.bars) || [];
+  plantCells(site, bars);
+  bars.forEach((b, i) => { const c = P.cells[i]; if (!c) return; const tone = usageTone(b.pct); c.fillMat.color.setHex(tone.c); c.fillMat.emissive.setHex(tone.c); const target = Math.max(.01, Math.min(100, b.pct) / 100 * 3); if (Math.abs(c.pct - b.pct) > .05) { const from = c.fill.scale.y; c.pct = b.pct; tween(900, k => { c.fill.scale.y = from + (target - from) * k; c.fill.position.y = .3 + c.fill.scale.y / 2; }, null, easeOutCubic); } });
+  P.load = bars.length ? Math.min(1, (bars[0].pct || 0) / 100) : 0;
+  let h = `<div class="w-eyebrow">Power plant</div><b>Supply</b>`;
+  if (!bars.length) h += `<div class="w-pbar w-pnone">No reading yet &middot; select the plant to fetch</div>`;
+  for (const b of bars) { const tone = usageTone(b.pct); h += `<div class="w-pbar" style="--c:${tone.css}"><span>${esc(b.label)}</span><i><b style="width:${Math.min(100, b.pct).toFixed(1)}%"></b></i><em>${b.pct.toFixed(1)}%</em>${b.reset ? `<small>${esc(fmtReset(b.reset, b.date))}</small>` : ''}</div>`; }
+  if (u && u.pace) h += `<span class="w-cnt w-pace ${u.pace.state}">${u.pace.label} &middot; used ${u.pace.actual.toFixed(1)}% &middot; expected ${u.pace.expected.toFixed(1)}%</span>`;
+  setLabel(site.el, h);
+}
 function syncTreasury(site, s) {
   const n = Math.min(60, Math.round((s.cost || 0) * 6)); const decoBuilds = Object.entries((economy && economy.builds) || {}).filter(([k]) => k.startsWith('deco:')).map(([, b]) => buildHtml(b)).join('');
   setLabel(site.el, `Treasury · ${esc(fmtMoney(s.cost || 0))} today · ⬡ ${coins().toLocaleString()}${decoBuilds}`);
