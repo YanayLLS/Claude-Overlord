@@ -6,14 +6,14 @@
 // skin). The live line must be excluded: it sits on the current screen, so
 // "jump to it" scrolls nowhere and reads as a broken button.
 
-const MARKER = /^\s*(?:❯|[│┃]\s+>\s)/;
+const PROMPT_ROW_MARKER = /^\s*(?:❯|[│┃]\s+>\s)/;
 
 // rows: rendered buffer lines, baseY: index of the first row of the current
 // screen. Returns the buffer indices of submitted prompts, oldest first.
 function promptRows(rows, baseY) {
   const out = [];
   for (let i = 0; i < rows.length && i < baseY; i++) {
-    if (MARKER.test(rows[i])) out.push(i);
+    if (PROMPT_ROW_MARKER.test(rows[i])) out.push(i);
   }
   return out;
 }

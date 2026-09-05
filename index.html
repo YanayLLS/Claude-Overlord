@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <title>Overlord</title>
 <link rel="stylesheet" href="./xterm.css" />
+<link rel="stylesheet" href="./world.css" />
 <style>
 :root {
   --bg: #1e1e2e; --bg2: #181825; --bg3: #252536; --border: #313244; --border-hi: #45475a;
@@ -1125,11 +1126,13 @@ button:focus-visible { outline-offset:0; }
   <div id="header">
     <h1><span>Overlord</span> <span class="app-ver"></span></h1>
     <div id="headerBadges"></div>
+    <div id="world-counters"></div>
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
+    <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map">&#x2B22;</button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Restart app">&#x1F504;</button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
@@ -1139,23 +1142,31 @@ button:focus-visible { outline-offset:0; }
   </div>
   <div id="content">
   <div id="list-col">
+    <div id="world-roster-grip" title="Drag to resize the roster"></div>
+    <button id="world-roster-hide" onclick="setWorldRosterHidden(true)" title="Hide the roster (it slides away; a tab brings it back)">&#x2039;</button>
     <div id="ctx-warning" onclick="focusNextCtxDanger()"><span class="ctx-warning-icon">&#x26A0;</span><span id="ctx-warning-text"></span></div>
     <div id="filter-bar">
       <input id="filter-input" type="text" placeholder="Filter agents... (Esc to close)" />
       <span id="filter-count"></span>
       <button id="filter-close" onclick="closeFilter()" aria-label="Close filter">&times;</button>
     </div>
+    <div id="world-attn"></div>
     <div id="list"></div>
+    <div id="world-extra"></div>
     <div id="pr-dropdown" style="display:none"></div>
     <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
     <div id="actions-dropdown" style="display:none"></div>
     <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
     <div id="summary-bar"></div>
   </div>
+  <button id="world-roster-tab" onclick="setWorldRosterHidden(false)" title="Show the roster"><span>&#x203A;</span><b id="world-roster-tab-n"></b>Agents</button>
+  <div id="world-stage"></div>
   <div id="resize"></div>
   <div id="term">
+    <div id="term-dossier"></div>
     <div id="term-header">
       <div class="term-tabs">
+        <button class="term-tab" id="tab-conversation" onclick="switchTermTab('conversation')">Conversation</button>
         <button class="term-tab active" id="tab-terminal" onclick="switchTermTab('terminal')">Terminal</button>
         <button class="term-tab" id="tab-timeline" onclick="switchTermTab('timeline')">Timeline</button>
       </div>
@@ -1176,6 +1187,8 @@ button:focus-visible { outline-offset:0; }
     </div>
     <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x2912;</button><button class="prompt-jump" onclick="jumpPrompt(-1)" title="Previous prompt (Ctrl+&#x2191;)">&#x25B2;</button><button class="prompt-jump" onclick="jumpPrompt(1)" title="Next prompt (Ctrl+&#x2193;)">&#x25BC;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x2913;</button></div></div>
     <div id="timeline-events"></div>
+    <div id="conversation"></div>
+    <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
   </div>
   </div><!-- end #content -->
   <div id="settings-overlay" style="display:none" onclick="toggleSettings()">
@@ -1212,6 +1225,11 @@ button:focus-visible { outline-offset:0; }
         <span>Prompt autocomplete (ghost text)</span>
       </label>
       <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-world" onchange="setWorldView(this.checked)" />
+        <span>World view (3D map)</span>
+      </label>
+      <div class="settings-hint">Shows your agents as a hex-tile island beside the list: features are walled compounds, directories are workshops, PRs and Actions dock in the GitHub quarter. Everything you can do in the list still works; the map is another way to look at the same state. Toggle with the &#x2B22; button in the header.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -1337,6 +1355,10 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+U</span><span class="help-desc">Refresh usage stats</span></div>
       <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close overlay / filter</span></div>
       <div class="help-row"><span class="help-key">?</span><span class="help-desc">Show this help</span></div>
+      <div class="help-row help-world"><span class="help-key">&#x2B22;</span><span class="help-desc">World view: the roster as a 3D map (header button or Settings)</span></div>
+      <div class="help-row help-world"><span class="help-key">Drag / WASD</span><span class="help-desc">Pan the map &middot; wheel zooms &middot; Q / E rotate</span></div>
+      <div class="help-row help-world"><span class="help-key">Click</span><span class="help-desc">Select a unit &middot; double-click opens its terminal &middot; right-click its menu</span></div>
+      <div class="help-row help-world"><span class="help-key">Roster</span><span class="help-desc">Needs-you block on top; hover a card to light its unit; GitHub and peers below</span></div>
     </div>
   </div>
   <div id="search-overlay" onclick="closeSearch()">
@@ -1386,6 +1408,8 @@ button:focus-visible { outline-offset:0; }
 <script src="./prompt-nav.js"></script>
 <script src="./term-size-core.js"></script>
 <script src="./usage-core.js"></script>
+<script src="./three-bundle.js"></script>
+<script src="./world.js"></script>
 <script>
 document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
 
@@ -1405,6 +1429,8 @@ const wtRunning = new Map(); // worktree path -> {port, url} for a running dev s
 function worktreeAt(p) { return worktrees.find(w => w.path === p) || null; }
 let selectedId = null;
 let filterText = '';
+let worldView = false; // World view (3D map) — off by default; see setWorldView() at the bottom
+let worldTl = null; // { id, events } — copy of the selected agent's timeline for the Conversation tab
 let filterReady = false;
 // ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
 const collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
@@ -2400,6 +2426,7 @@ function render() {
     list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
     document.getElementById('headerBadges').innerHTML = '';
     document.title = 'Overlord';
+    if (worldView) worldSync();
     return;
   }
 
@@ -2695,6 +2722,7 @@ function render() {
   bar.innerHTML = barHtml;
   bar.onclick = () => refreshUsage();
   bar.classList.add('show');
+  if (worldView) worldSync();
 }
 
 // ── Terminal panel (real xterm.js) ──────────────────────
@@ -3159,11 +3187,19 @@ function switchTermTab(tab) {
   termTab = tab;
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
   document.getElementById('tab-timeline').classList.toggle('active', tab === 'timeline');
+  document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
   const tc = document.getElementById('term-container');
   const tl = document.getElementById('timeline-events');
+  const cv = document.getElementById('conversation'), od = document.getElementById('term-order');
+  cv.classList.toggle('open', tab === 'conversation'); od.classList.toggle('open', tab === 'conversation');
   if (tab === 'terminal') {
     tc.style.display = ''; tl.classList.remove('open');
     if (selectedId) showXterm(selectedId);
+  } else if (tab === 'conversation') {
+    // World view's readable transcript: fed by the same timeline events, plus the live tool state.
+    tc.style.display = 'none'; tl.classList.remove('open');
+    if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
+    renderConversation();
   } else {
     _tlPromptIdx = -1;
     tc.style.display = 'none'; tl.classList.add('open');
@@ -3206,6 +3242,8 @@ function renderTlEvent(ev) {
 function handleTimelineData(msg) {
   if (msg.id !== timelineAgentId) return;
   const el = document.getElementById('timeline-events');
+  worldTl = { id: msg.id, events: (msg.events || []).slice() }; // the conversation view reads the same events
+  if (termTab === 'conversation') renderConversation();
   if (!msg.events || msg.events.length === 0) {
     el.innerHTML = '<div class="tl-empty">No events yet</div>';
     return;
@@ -3216,6 +3254,7 @@ function handleTimelineData(msg) {
 
 function handleTimelineEvent(msg) {
   if (msg.id !== timelineAgentId) return;
+  if (worldTl && worldTl.id === msg.id) { worldTl.events.push(msg.event); if (termTab === 'conversation') renderConversation(); }
   const el = document.getElementById('timeline-events');
   // Remove empty message if present
   const empty = el.querySelector('.tl-empty');
@@ -3626,6 +3665,7 @@ function handleAgentMsg(msg) {
       renderPrBadge();
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
+      if (worldView) scheduleRender();
       break;
     }
     case 'repoList':
@@ -3639,6 +3679,7 @@ function handleAgentMsg(msg) {
       actionsState.error = msg.error || null;
       actionsState.errorCode = msg.errorCode || null;
       renderActionsBadge();
+      if (worldView) scheduleRender();
       if (document.getElementById('actions-dropdown').style.display === 'block') {
         document.getElementById('actions-dropdown').innerHTML = actionsDropdownHtml();
         startActElapsed(); // fresh rows lost their ticker; re-attach (no-op if already running)
@@ -3694,6 +3735,7 @@ function handleAgentMsg(msg) {
       alert('PR action failed: ' + (msg.error || 'unknown error'));
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
+      if (worldView && window.World && window.World.ready) window.World.refreshSel(); // put the ship's buttons back
       break;
     }
     case 'timelineData': handleTimelineData(msg); break;
@@ -3703,7 +3745,7 @@ function handleAgentMsg(msg) {
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
-    case 'peersState': { peersState = msg; renderPeersSec(); break; }
+    case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);
       if (a) {
@@ -4134,6 +4176,11 @@ function applySettings(s) {
     const chk = document.getElementById('chk-sound');
     if (chk) chk.checked = notificationSoundEnabled;
   }
+  if (s.worldEconomy) { worldEconomy = Object.assign(worldEconomyDefault(), s.worldEconomy); worldEconomy.stats = Object.assign(worldEconomyDefault().stats, worldEconomy.stats || {}); }
+  if (s.worldView !== undefined) setWorldView(!!s.worldView, false);
+  if (s.worldRosterW) worldRosterW = Math.max(200, Math.min(600, +s.worldRosterW || 300));
+  if (s.worldRosterHidden !== undefined) worldRosterHidden = !!s.worldRosterHidden;
+  applyWorldRoster();
   if (s.planBudget !== undefined) {
     planBudget = s.planBudget;
     const inp = document.getElementById('inp-budget');
@@ -4193,6 +4240,7 @@ function toggleSettings() {
     document.getElementById('chk-notif').checked = notificationsEnabled;
     document.getElementById('chk-sound').checked = notificationSoundEnabled;
     document.getElementById('chk-ghost').checked = ghostEnabled;
+    document.getElementById('chk-world').checked = worldView;
     document.getElementById('inp-budget').value = planBudget;
     renderTrackedWorkflows();
     renderSettingsChips();
@@ -5529,6 +5577,235 @@ setInterval(() => {
     if (txt) el.textContent = txt; else el.textContent = '';
   }
 }, 1000);
+
+// ── World view (3D map) ─────────────────────────────────
+// Off by default. When on, world.js draws the same state the list shows, beside it.
+// Every click in the world calls the same functions the list calls; nothing here changes behavior.
+// (worldView itself is declared with the other view state near the top.)
+// The roster column in World view: resizable by its grip, and it can slide away (a tab on the stage brings it back).
+let worldRosterW = 300, worldRosterHidden = false;
+function applyWorldRoster() {
+  document.body.style.setProperty('--w-roster', (worldRosterHidden ? 0 : worldRosterW) + 'px');
+  document.body.classList.toggle('roster-hidden', worldRosterHidden);
+  const n = document.getElementById('world-roster-tab-n'); if (n) { let live = 0; for (const [, a] of agents) if (!a.archived) live++; n.textContent = live; }
+}
+function setWorldRosterHidden(h, persist = true) {
+  worldRosterHidden = !!h; applyWorldRoster();
+  if (persist) api.send({ type: 'saveSettings', settings: { worldRosterHidden } });
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 340); // the stage and terminal refit once the slide ends
+}
+(function initWorldRosterGrip() {
+  const grip = document.getElementById('world-roster-grip'); if (!grip) return; let drag = null;
+  grip.addEventListener('pointerdown', e => { drag = { x: e.clientX, w: worldRosterW }; grip.setPointerCapture(e.pointerId); document.body.classList.add('roster-resizing'); e.preventDefault(); });
+  grip.addEventListener('pointermove', e => { if (!drag) return; worldRosterW = Math.max(200, Math.min(600, drag.w + e.clientX - drag.x)); applyWorldRoster(); });
+  const end = e => { if (!drag) return; drag = null; document.body.classList.remove('roster-resizing'); api.send({ type: 'saveSettings', settings: { worldRosterW } }); window.dispatchEvent(new Event('resize')); };
+  grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+  grip.addEventListener('dblclick', () => { worldRosterW = 300; applyWorldRoster(); api.send({ type: 'saveSettings', settings: { worldRosterW } }); });
+})();
+function setWorldView(on, persist = true) {
+  on = !!on;
+  if (persist && on !== worldView) api.send({ type: 'saveSettings', settings: { worldView: on } });
+  const changed = on !== worldView;
+  worldView = on;
+  document.body.classList.toggle('world-mode', on);
+  const hb = document.getElementById('hdr-world'); if (hb) hb.classList.toggle('on', on);
+  const chk = document.getElementById('chk-world'); if (chk) chk.checked = on;
+  if (on && window.World && (changed || !window.World.ready)) {
+    try { window.World.init(document.getElementById('world-stage'), {
+      selectAgent: (id) => { if (id > 0) focusAgent(id); },
+      openAgent: (id) => { if (id > 0) openTerm(id); },
+      agentMenu: (ev, id) => { if (id > 0) showAgentMenu(ev, id); },
+      closeAgent: (id) => { if (id > 0) closeAgent(id); },
+      stopLoop: (id) => { if (id > 0) stopLoop(id); },
+      showModelMenu: (ev, id) => { if (id > 0) showModelMenu(ev, id); },
+      showEffortMenu: (ev, id) => { if (id > 0) showEffortMenu(ev, id); },
+      focusTeamMember: (team, member, isLead) => focusTeamMember(team, member, isLead),
+      addAgent: (cwd) => addAgent(cwd),
+      openFolder: (p) => openFolder(p),
+      openPr: (url) => openPr(url),
+      openRun: (url) => openActionRun(url),
+      openChat: (name) => openChat({ type: 'peer', id: String(name).toLowerCase() }),
+      award: (kind, amount, label) => worldAward(kind, amount, label),
+      spend: (cost, patch) => worldSpend(cost, patch),
+      refreshUsage: () => refreshUsage(),
+    }); window.World.ready = true; worldDailyStreak(); worldSync(); }
+    catch (e) {
+      // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.
+      console.error('[world] init failed', e);
+      try { window.World.dispose(); } catch {}
+      window.World.ready = false; worldView = false; document.body.classList.remove('world-mode');
+      if (hb) hb.classList.remove('on'); if (chk) chk.checked = false;
+      if (persist) api.send({ type: 'saveSettings', settings: { worldView: false } });
+      if (typeof showToast === 'function') showToast('World view could not start on this machine');
+    }
+  } else if (!on && window.World && window.World.ready) {
+    window.World.dispose(); window.World.ready = false;
+  }
+  if (!on && termTab === 'conversation') switchTermTab('terminal'); // that tab only exists in world mode
+  // The terminal's xterm needs a refit after the columns change width; schedFit is the same path the window resize uses.
+  if (typeof schedFit === 'function') schedFit();
+}
+function toggleWorldView() { setWorldView(!worldView); }
+// Snapshot of renderer state for the world. Plain data, read-only, built from the same maps the list uses.
+// The usage caps the summary bar shows, for the world's power plant: one bar per cap plus the weekly pace.
+function worldUsage() {
+  const u = currentUsage; if (!u || (u.hourly == null && u.weekly == null)) return null;
+  const bars = [];
+  if (u.hourly != null) bars.push({ key: 'session', label: 'Current session', pct: u.hourly, reset: u.hourlyReset || 0, date: false });
+  if (u.weekly != null) bars.push({ key: 'week', label: 'Current week', pct: u.weekly, reset: u.weeklyReset || 0, date: true });
+  for (const m of u.modelWeekly || []) bars.push({ key: 'm:' + m.model, label: modelLabel(m.model) + ' week', pct: m.pct, reset: m.reset || u.weeklyReset || 0, date: true });
+  let pace = null;
+  if (u.weekly != null && u.weeklyReset) { const daysLeft = (u.weeklyReset - Date.now()) / 86400000, daysElapsed = 7 - daysLeft; if (daysElapsed > .01 && daysLeft > 0) { const expected = daysElapsed / 7 * 100, actual = u.weekly; pace = { expected, actual, state: actual <= expected * .85 ? 'ok' : actual <= expected * 1.1 ? 'warn' : 'over', label: actual <= expected * 1.1 ? 'On track' : 'Too fast' }; } }
+  return { bars, pace, fetchedAt: u.fetchedAt || 0 };
+}
+function worldSnapshot() {
+  const projects = new Map();
+  const addProject = (cwd) => { if (!cwd || projects.has(cwd)) return; const w = worktreeAt(cwd); const running = wtRunning.get(cwd);
+    projects.set(cwd, w
+      ? { cwd, label: pathLabel(w.repo), branch: w.branch || '', feature: w.feature || null, port: w.port || 0, status: w.status || 'ready', serverUrl: running ? running.url : '' }
+      : { cwd, label: pathLabel(cwd), branch: '', feature: null, port: 0, status: 'ready', serverUrl: '' }); };
+  for (const cwd of knownProjects) addProject(cwd);
+  for (const w of worktrees) addProject(w.path);
+  for (const [, a] of agents) if (!a.archived) addProject(a.cwd || '(unknown)');
+  const agentRows = [], now = Date.now();
+  for (const [id, a] of agents) {
+    if (a.archived) continue;
+    const st = agentStatus(a), win = ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok);
+    // How long the agent has had nothing to do: the world uses it to make idle units call for orders.
+    if (st === 'waiting' || st === 'idle') { if (!_worldIdleSince.has(id)) _worldIdleSince.set(id, now); } else _worldIdleSince.delete(id);
+    const idleMin = _worldIdleSince.has(id) ? Math.floor((now - _worldIdleSince.get(id)) / 60000) : 0;
+    const ctxPct = a.stats?.ctxTok ? Math.min(100, Math.round((a.stats.ctxTok / win) * 100)) : 0;
+    const lead = [...teamMap.entries()].find(([, t]) => t.leadAgentId === id);
+    let team = null;
+    if (lead) { const [name, t] = lead; const members = t.members.filter(m => m.agentType !== 'team-lead').map(m => { const task = t.tasks.find(k => k.owner === m.name && k.status !== 'completed'); return { name: m.name, agentType: m.agentType || '', task: task ? (task.activeForm || task.subject || '') : '' }; }); team = { name, members, done: t.tasks.filter(k => k.status === 'completed').length, total: t.tasks.length }; }
+    agentRows.push({ id, cwd: a.cwd || '(unknown)', title: a.customName ? a.title : (a.prompt || a.title || 'New agent'), status: needsAnswer(a) && st === 'permission' ? 'question' : st,
+      verb: statusVerb(a, st), ctxPct, cost: calcCost(a.stats), costStr: fmtCost(calcCost(a.stats)), model: a.stats?.modelFamily || '', looping: !!a.looping,
+      tool: ([...a.tools.values()].find(t => !t.done) || {}).name || '', idleMin,
+      turns: a.stats?.turns || 0, toolsUsed: Object.values(a.stats?.tools || {}).reduce((x, y) => x + (y || 0), 0), tokIn: a.stats?.inTok || 0, tokOut: a.stats?.outTok || 0,
+      crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', currentFileName: a.currentFileName || '', team });
+  }
+  // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
+  const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.checks === 'fail') return 'blocked'; if (p.mergeState === 'BEHIND' || p.behindBy > 0) return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
+  // The ship's action buttons are the PR dropdown's own buttons (same gating, same handlers), just shown in the selection bar.
+  const prWorldActions = (p) => {
+    const u = p.url.replace(/'/g, "\\'"), k = p.key.replace(/'/g, "\\'"), act = prBranchAction(p); // pr-behind.js
+    const upd = act === 'conflict' ? `<button class="pr-approve pr-conflictbtn" title="Conflicts with ${escapeHtml(p.baseRef)} — resolve them on GitHub, then update" onclick="event.stopPropagation();openPr('${u}/conflicts')">⚠ Conflicts</button>`
+      : act === 'update' ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>` : '';
+    return upd + prActionBtn(p, u)
+      + `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰ Snooze</button>`
+      + `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕 Mute</button>`
+      + `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦 Archive</button>`;
+  };
+  const prs = prState.prs.filter(p => !prSilenced(p)).map(p => ({ key: p.key, repo: p.repo, number: p.number, title: p.title, url: p.url, author: p.author, state: prState_(p), checks: p.checks || '', behindBy: p.behindBy || 0, commitCount: p.commitCount || 0, headRef: p.headRef || '', baseRef: p.baseRef || '', mine: !!p.mine, needsApproval: prNeedsApproval(p), reviewDecision: p.reviewDecision || '', approvedBy: p.approvedBy || [], changesBy: p.changesBy || [], createdAt: p.createdAt || '', actionsHtml: prWorldActions(p) }));
+  const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '', actor: r.actor || '', startedAt: r.startedAt || '',
+    actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
+  const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
+  let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
+  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), usage: worldUsage() };
+  return snapshot;
+}
+const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
+
+// ── World economy: coins for outcomes and attentiveness, spent on cosmetic upgrades. Saved in settings; classic mode never reads it. ──
+function worldEconomyDefault() { return { coins: 0, earned: 0, upgrades: {}, deco: {}, builds: {}, streak: { last: '', days: 0 }, stats: { reviews: 0, merges: 0, updates: 0, jobs: 0, turns: 0, quick: 0, resumes: 0, closes: 0 } }; }
+let worldEconomy = worldEconomyDefault(), _ecoSaveTimer = null;
+function worldEconomySave() { clearTimeout(_ecoSaveTimer); _ecoSaveTimer = setTimeout(() => api.send({ type: 'saveSettings', settings: { worldEconomy } }), 400); }
+const WORLD_TITLES = [[0, 'Overseer'], [500, 'Marshal'], [2000, 'Overlord'], [10000, 'High Overlord']];
+function worldTitle() { let t = WORLD_TITLES[0][1]; for (const [n, name] of WORLD_TITLES) if (worldEconomy.earned >= n) t = name; return t; }
+// kind: reviews | merges | updates | jobs | turns | quick | resumes | closes | streak | dev
+function worldAward(kind, amount, label) {
+  amount = Math.round(amount); if (!(amount > 0)) return;
+  worldEconomy.coins += amount; worldEconomy.earned += amount; if (kind in worldEconomy.stats) worldEconomy.stats[kind] += 1;
+  worldEconomySave(); if (window.World && window.World.ready) window.World.coinsChanged(worldEconomy, `+${amount} ⬡ ${label}`);
+  if (worldView) renderWorldRoster(worldSnapshot()); // header coin chip
+}
+// Paying starts a timed construction; worldBuildsTick() applies the result when the timer runs out.
+function worldSpend(cost, patch) {
+  if (worldEconomy.coins < cost) return false;
+  const key = patch.upgrade || ('deco:' + patch.deco); if (worldEconomy.builds[key]) return false; // one build per site at a time
+  worldEconomy.coins -= cost;
+  worldEconomy.builds[key] = { kind: patch.upgrade ? 'upgrade' : 'deco', target: patch.upgrade || patch.deco, tier: patch.tier || 0, name: patch.label || '', start: Date.now(), dur: Math.max(5, patch.dur || 60) };
+  worldEconomySave(); if (window.World && window.World.ready) window.World.coinsChanged(worldEconomy, `−${cost} ⬡ ${patch.label || ''} under construction`);
+  return true;
+}
+function worldBuildsTick() {
+  const now = Date.now(); let changed = false;
+  for (const [key, b] of Object.entries(worldEconomy.builds)) {
+    if (now < b.start + b.dur * 1000) continue;
+    if (b.kind === 'upgrade') worldEconomy.upgrades[b.target] = b.tier; else worldEconomy.deco[b.target] = true;
+    delete worldEconomy.builds[key]; changed = true;
+    if (window.World && window.World.ready) window.World.buildComplete(key, b);
+  }
+  if (changed) worldEconomySave();
+}
+function worldDailyStreak() {
+  const today = new Date().toISOString().slice(0, 10); if (worldEconomy.streak.last === today) return;
+  const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10); worldEconomy.streak.days = worldEconomy.streak.last === y ? worldEconomy.streak.days + 1 : 1; worldEconomy.streak.last = today;
+  worldAward('streak', 20, `day ${worldEconomy.streak.days} on the island`);
+}
+function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { worldBuildsTick(); const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
+setInterval(() => { if (worldView && Object.keys(worldEconomy.builds).length) worldSync(); }, 1000); // construction timers tick even when nothing else changes
+// The roster extras the classic list doesn't have: header counters on top (the list itself is untouched),
+// and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
+function renderWorldRoster(s) {
+  { const n = document.getElementById('world-roster-tab-n'); if (n) n.textContent = s.agents.length; }
+  const st = { work: 0, need: 0, done: 0, down: 0 }; let cost = 0;
+  for (const a of s.agents) { if (a.status === 'active' || a.status === 'settling' || a.status === 'resuming') st.work++; else if (a.status === 'permission' || a.status === 'question') st.need++; else if (a.status === 'waiting') st.done++; else if (a.status === 'crashed') st.down++; cost += a.cost; }
+  const chip = (c, n, label, onclick, title) => `<span class="wc" style="--c:${c}" ${onclick ? `onclick="${onclick}"` : ''} title="${escAttr(title || label)}"><i></i><b>${n}</b>${label}</span>`;
+  document.getElementById('world-counters').innerHTML =
+    chip('var(--accent)', st.work, 'working') + chip('var(--yellow)', st.need, 'need you', 'focusNextPerm()', 'Units waiting for approval or an answer — click to jump') + chip('var(--green)', st.done, 'done') + chip('var(--red)', st.down, 'down')
+    + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`
+    + `<span class="wc wc-coins" title="Coins: earned by reviewing and merging PRs, answering agents quickly, finished jobs and turns. Spend them at the treasury and on station upgrades." onclick="window.World&&World.focusKey('treasury')"><i class="hexcoin"></i><b>${worldEconomy.coins.toLocaleString()}</b>${esc(worldTitle())}</span>`;
+  const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
+  const agentGo = (id) => `focusAgent(${id});window.World&&World.focus(${id})`;
+  const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
+  document.getElementById('world-attn').innerHTML = ''; // no "Needs you" block: it buried the agent list; the header counter jumps to the next one
+  document.getElementById('world-extra').innerHTML = ''; // the roster is the agent list alone; PRs, runs and peers live in the world
+}
+// ── Dossier: the terminal pane's head, Conversation tab and order box (world mode) ──
+function renderDossierHead(s) {
+  const el = document.getElementById('term-dossier'); if (!el) return;
+  const a = selectedId != null ? s.agents.find(x => x.id === selectedId) : null;
+  if (!a) { el.innerHTML = ''; return; }
+  const p = s.projects.find(p => p.cwd === a.cwd), st = { active: ['Working', 'var(--accent)'], settling: ['Finishing', 'var(--accent)'], permission: ['Needs approval', 'var(--yellow)'], question: ['Needs an answer', 'var(--purple)'], waiting: ['Done', 'var(--green)'], idle: ['Idle', 'var(--dim)'], crashed: ['Crashed', 'var(--red)'], resuming: ['Resuming', 'var(--purple)'] }[a.status] || ['', 'var(--dim)'];
+  const crumb = p && p.feature ? `Feature <b>${esc(p.feature)}</b> · ${esc(p.label)}` : `Workshop <b>${esc(p ? p.label : pathLabel(a.cwd))}</b>${p && p.branch ? ' · ⑂ ' + esc(p.branch) : ''}`;
+  el.innerHTML = `<div class="wd-portrait">${esc((a.model || 's')[0].toUpperCase())}</div><div class="wd-main"><div class="wd-crumb">${crumb}</div><h2>${esc(a.title)}</h2></div><div class="wd-stats"><span title="Context used">ctx <b class="${a.ctxPct >= 80 ? 'danger' : a.ctxPct >= 60 ? 'warn' : ''}">${a.ctxPct}%</b></span><span title="Model">${esc(a.model || '?')}</span><span title="Cost" style="color:var(--w-gold)">${esc(a.costStr)}</span></div><span class="wd-chip" style="--c:${st[1]}">${st[0]}</span><button class="wd-close" title="Hide the terminal (Esc). Click the agent again to bring it back." onclick="closeTerm()">&times;</button>`;
+}
+function renderConversation() {
+  const el = document.getElementById('conversation'); if (!el || !el.classList.contains('open')) return;
+  const a = selectedId != null ? agents.get(selectedId) : null;
+  if (!a) { el.innerHTML = '<div class="tl-empty">Select an agent to read its conversation</div>'; return; }
+  const evs = worldTl && worldTl.id === selectedId ? worldTl.events : null;
+  const stuck = el.scrollTop + el.clientHeight < el.scrollHeight - 30 && el.dataset.for === String(selectedId);
+  const doneBy = new Map(); if (evs) for (const ev of evs) if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev);
+  const name = a.customName ? a.title : (a.agentName || 'Agent');
+  let h = '';
+  if (!evs) h += '<div class="tl-empty">Loading conversation…</div>';
+  else if (!evs.length) h += `<div class="msg ai"><div class="eyebrow">${esc(name)}</div><p>Nothing yet. Give an order below to put this agent to work.</p></div>`;
+  for (const ev of evs || []) {
+    if (ev.type === 'prompt') h += `<div class="msg user"><div class="eyebrow">You<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(ev.text)}</p></div>`;
+    else if (ev.type === 'text') h += `<div class="msg ai"><div class="eyebrow">${esc(name)}<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(ev.text)}</p></div>`;
+    else if (ev.type === 'tool' || ev.type === 'subtask') { const d = ev.toolId ? doneBy.get(ev.toolId) : null; h += `<div class="msg tool${ev.type === 'subtask' ? ' sub' : ''}${!d && ev.toolId ? ' running' : ''}"><span class="t">${esc(ev.name || '')}</span><span class="f" title="${escAttr(ev.text || '')}">${esc(ev.text || '')}</span>${d && d.text ? `<span class="d" title="${escAttr(d.text)}">${esc(d.text.slice(0, 40))}</span>` : ''}</div>`; }
+    else if (ev.type === 'turn') h += `<div class="msg turn">${esc(ev.text)}</div>`;
+  }
+  // Live state on top of the transcript: tools still running, a permission prompt, a question, a crash.
+  const live = [...a.tools.values()].filter(t => !t.done);
+  const perm = live.find(t => t.perm);
+  if (perm && perm.perm === 'ask') h += `<div class="msg ask" style="--c:var(--purple)"><div class="eyebrow">Question for you</div><p>${esc(perm.status || 'The agent is waiting for your answer in the terminal.')}</p><div class="row2"><button class="yes" onclick="switchTermTab('terminal');const x=xterms.get(selectedId);if(x)x.terminal.focus()">Answer in terminal</button></div></div>`;
+  else if (perm) h += `<div class="msg ask" style="--c:var(--yellow)"><div class="eyebrow">Wants to run</div><pre>${esc(perm.status || perm.name || '')}</pre><div class="row2"><button class="yes" onclick="worldReply('1\\r')">Approve</button><button onclick="worldReply('2\\r')">Always this session</button><button onclick="worldReply('\\x1b')">Deny</button></div></div>`;
+  else for (const t of live) h += `<div class="msg tool running"><span class="t">${esc(t.name || 'tool')}</span><span class="f">${esc(t.status || 'running…')}</span></div>`;
+  if (a.crashed === 'fatal') h += `<div class="msg err">Process exited (${a.crashCount}/${a.crashMax} attempts).<div class="row2"><button class="yes" onclick="resumeSelected()">Resume</button></div></div>`;
+  el.innerHTML = h; el.dataset.for = String(selectedId);
+  if (!stuck) el.scrollTop = el.scrollHeight;
+}
+// The order box and approval buttons type into the agent's pty exactly as the terminal would.
+function worldReply(data) { if (selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data }); }
+function sendOrder() { const inp = document.getElementById('term-order-input'); const text = inp.value.trim(); if (!text || selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data: text + '\r' }); inp.value = ''; }
+// Hovering an agent card in the list lights its unit on the map.
+document.getElementById('list').addEventListener('mouseover', (e) => { if (!worldView || !window.World) return; const card = e.target.closest('.agent[data-id]'); if (card) World.hover(+card.dataset.id); });
+document.getElementById('list').addEventListener('mouseleave', () => { if (worldView && window.World) World.hover(null); });
+// Clicking a card (its existing onclick still focuses the agent) also flies the camera to the unit and zooms in.
+document.getElementById('list').addEventListener('click', (e) => { if (!worldView || !window.World) return; if (e.target.closest('button, .model-tag, .agent-current-file, .agent-actions')) return; const card = e.target.closest('.agent[data-id]'); if (card) World.focus(+card.dataset.id, .9); });
 
 // Initial render
 render();
