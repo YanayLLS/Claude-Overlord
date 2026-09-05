@@ -500,7 +500,7 @@ const byRepo = list => { const m = new Map(); for (const it of list) { if (!m.ha
 function quarterHalfRadius(s) {
   const pr = byRepo(s.prs || []), rn = byRepo(s.runs || []);
   const rows = Math.max(1, pr.size, rn.size), cols = Math.max(1, ...[...pr.values(), ...rn.values()].map(l => l.length));
-  return Math.max(10.5, rows * 5 / 1.4 + 4, cols * 4.6 / 1.5 + 4);
+  return Math.max(10.5, rows * 7 / 1.4 + 5, cols * 4.6 / 1.5 + 4);
 }
 function githubRadius(s) { return Math.min(70, Math.round(quarterHalfRadius(s) * 2 + 4)); }
 const GLYPH_FONT = '700 70px "Segoe UI Symbol", "Segoe UI", sans-serif';
@@ -532,8 +532,9 @@ function buildGithub(site, GR) {
   if (dt >= 3) for (const sx of [-1, 1]) { const c = new THREE.Group(); c.position.set(-cx + sx * hr * .5, .5, 2 + hr * .866 - .2); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.16, .18, 8, 6), mats.gold); mast.position.y = 4; mast.castShadow = true; const jib = new THREE.Group(); jib.position.y = 8; const arm = box(8, .22, .22, mats.gold); arm.position.x = 2.6; const back = box(2.2, .22, .22, mats.gold); back.position.x = -1.8; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, 3.5, 4), mats.dark); cable.position.set(5.5, -1.75, 0); const block = box(.8, .8, .8, mats.wood); block.position.set(5.5, -3.8, 0); jib.add(arm, back, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: sx, g: c }); }
 }
 // Row i of a half (docks or grounds): its z inside the half, and the x of column j along it.
-function rowZ(site, i, n) { return 2 - (n - 1) * 2.5 + i * 5; }
-function shipSlot(site, i, j, nRows, nCols) { const hr = site.extra.hr, cx = site.extra.cx; return { x: -cx - hr * .55 + 3.2 + j * 4.6, z: rowZ(site, i, nRows), rot: 0 }; }
+const ROW_GAP = 7; // a pier or slab per repo, far enough apart that ships and labels never touch
+function rowZ(site, i, n) { return 2 - (n - 1) * ROW_GAP / 2 + i * ROW_GAP; }
+function shipSlot(site, i, j, nRows, nCols) { const hr = site.extra.hr, cx = site.extra.cx; return { x: -cx - hr * .55 + 3.2 + j * 5.2, z: rowZ(site, i, nRows), rot: 0 }; }
 function machineSlot(site, i, j, nRows, nCols) { const hr = site.extra.hr, cx = site.extra.cx; return { x: cx - hr * .55 + 3 + j * 4.4, z: rowZ(site, i, nRows), rot: 0 }; }
 // One pier per repo in the pool, one slab per repo on the grounds, each with the repo's name at its head.
 function syncRepoRows(site, kind, repos) {
