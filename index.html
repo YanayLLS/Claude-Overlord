@@ -5639,8 +5639,19 @@ function worldSnapshot() {
   }
   // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
   const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.checks === 'FAILURE') return 'blocked'; if (p.mergeState === 'BEHIND' || p.behindBy > 0) return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
-  const prs = prState.prs.filter(p => !prSilenced(p)).map(p => ({ key: p.key, repo: p.repo, number: p.number, title: p.title, url: p.url, author: p.author, state: prState_(p), checks: p.checks || '', behindBy: p.behindBy || 0, commitCount: p.commitCount || 0, headRef: p.headRef || '', baseRef: p.baseRef || '', mine: !!p.mine, needsApproval: prNeedsApproval(p) }));
-  const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '', actor: r.actor || '' }));
+  // The ship's action buttons are the PR dropdown's own buttons (same gating, same handlers), just shown in the selection bar.
+  const prWorldActions = (p) => {
+    const u = p.url.replace(/'/g, "\\'"), k = p.key.replace(/'/g, "\\'"), act = prBranchAction(p); // pr-behind.js
+    const upd = act === 'conflict' ? `<button class="pr-approve pr-conflictbtn" title="Conflicts with ${escapeHtml(p.baseRef)} — resolve them on GitHub, then update" onclick="event.stopPropagation();openPr('${u}/conflicts')">⚠ Conflicts</button>`
+      : act === 'update' ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>` : '';
+    return upd + prActionBtn(p, u)
+      + `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰ Snooze</button>`
+      + `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕 Mute</button>`
+      + `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦 Archive</button>`;
+  };
+  const prs = prState.prs.filter(p => !prSilenced(p)).map(p => ({ key: p.key, repo: p.repo, number: p.number, title: p.title, url: p.url, author: p.author, state: prState_(p), checks: p.checks || '', behindBy: p.behindBy || 0, commitCount: p.commitCount || 0, headRef: p.headRef || '', baseRef: p.baseRef || '', mine: !!p.mine, needsApproval: prNeedsApproval(p), reviewDecision: p.reviewDecision || '', approvedBy: p.approvedBy || [], changesBy: p.changesBy || [], createdAt: p.createdAt || '', actionsHtml: prWorldActions(p) }));
+  const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '', actor: r.actor || '', startedAt: r.startedAt || '',
+    actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length) };
 }
