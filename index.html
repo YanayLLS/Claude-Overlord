@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <title>Overlord</title>
 <link rel="stylesheet" href="./xterm.css" />
+<link rel="stylesheet" href="./world.css" />
 <style>
 :root {
   --bg: #1e1e2e; --bg2: #181825; --bg3: #252536; --border: #313244; --border-hi: #45475a;
@@ -1130,6 +1131,7 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
+    <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map">&#x2B22;</button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Restart app">&#x1F504;</button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
@@ -1152,6 +1154,7 @@ button:focus-visible { outline-offset:0; }
     <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
     <div id="summary-bar"></div>
   </div>
+  <div id="world-stage"></div>
   <div id="resize"></div>
   <div id="term">
     <div id="term-header">
@@ -1212,6 +1215,11 @@ button:focus-visible { outline-offset:0; }
         <span>Prompt autocomplete (ghost text)</span>
       </label>
       <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-world" onchange="setWorldView(this.checked)" />
+        <span>World view (3D map)</span>
+      </label>
+      <div class="settings-hint">Shows your agents as a hex-tile island beside the list: features are walled compounds, directories are workshops, PRs and Actions dock in the GitHub quarter. Everything you can do in the list still works; the map is another way to look at the same state. Toggle with the &#x2B22; button in the header.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -1386,6 +1394,8 @@ button:focus-visible { outline-offset:0; }
 <script src="./prompt-nav.js"></script>
 <script src="./term-size-core.js"></script>
 <script src="./usage-core.js"></script>
+<script src="./three-bundle.js"></script>
+<script src="./world.js"></script>
 <script>
 document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
 
@@ -1405,6 +1415,7 @@ const wtRunning = new Map(); // worktree path -> {port, url} for a running dev s
 function worktreeAt(p) { return worktrees.find(w => w.path === p) || null; }
 let selectedId = null;
 let filterText = '';
+let worldView = false; // World view (3D map) — off by default; see setWorldView() at the bottom
 let filterReady = false;
 // ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
 const collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
@@ -2400,6 +2411,7 @@ function render() {
     list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
     document.getElementById('headerBadges').innerHTML = '';
     document.title = 'Overlord';
+    if (worldView) worldSync();
     return;
   }
 
@@ -2695,6 +2707,7 @@ function render() {
   bar.innerHTML = barHtml;
   bar.onclick = () => refreshUsage();
   bar.classList.add('show');
+  if (worldView) worldSync();
 }
 
 // ── Terminal panel (real xterm.js) ──────────────────────
@@ -3626,6 +3639,7 @@ function handleAgentMsg(msg) {
       renderPrBadge();
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
+      if (worldView) scheduleRender();
       break;
     }
     case 'repoList':
@@ -3639,6 +3653,7 @@ function handleAgentMsg(msg) {
       actionsState.error = msg.error || null;
       actionsState.errorCode = msg.errorCode || null;
       renderActionsBadge();
+      if (worldView) scheduleRender();
       if (document.getElementById('actions-dropdown').style.display === 'block') {
         document.getElementById('actions-dropdown').innerHTML = actionsDropdownHtml();
         startActElapsed(); // fresh rows lost their ticker; re-attach (no-op if already running)
@@ -3703,7 +3718,7 @@ function handleAgentMsg(msg) {
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
-    case 'peersState': { peersState = msg; renderPeersSec(); break; }
+    case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);
       if (a) {
@@ -4134,6 +4149,7 @@ function applySettings(s) {
     const chk = document.getElementById('chk-sound');
     if (chk) chk.checked = notificationSoundEnabled;
   }
+  if (s.worldView !== undefined) setWorldView(!!s.worldView, false);
   if (s.planBudget !== undefined) {
     planBudget = s.planBudget;
     const inp = document.getElementById('inp-budget');
@@ -4193,6 +4209,7 @@ function toggleSettings() {
     document.getElementById('chk-notif').checked = notificationsEnabled;
     document.getElementById('chk-sound').checked = notificationSoundEnabled;
     document.getElementById('chk-ghost').checked = ghostEnabled;
+    document.getElementById('chk-world').checked = worldView;
     document.getElementById('inp-budget').value = planBudget;
     renderTrackedWorkflows();
     renderSettingsChips();
@@ -5529,6 +5546,80 @@ setInterval(() => {
     if (txt) el.textContent = txt; else el.textContent = '';
   }
 }, 1000);
+
+// ── World view (3D map) ─────────────────────────────────
+// Off by default. When on, world.js draws the same state the list shows, beside it.
+// Every click in the world calls the same functions the list calls; nothing here changes behavior.
+// (worldView itself is declared with the other view state near the top.)
+function setWorldView(on, persist = true) {
+  on = !!on;
+  if (persist && on !== worldView) api.send({ type: 'saveSettings', settings: { worldView: on } });
+  const changed = on !== worldView;
+  worldView = on;
+  document.body.classList.toggle('world-mode', on);
+  const hb = document.getElementById('hdr-world'); if (hb) hb.classList.toggle('on', on);
+  const chk = document.getElementById('chk-world'); if (chk) chk.checked = on;
+  if (on && window.World && (changed || !window.World.ready)) {
+    try { window.World.init(document.getElementById('world-stage'), {
+      selectAgent: (id) => focusAgent(id),
+      openAgent: (id) => openTerm(id),
+      agentMenu: (ev, id) => showAgentMenu(ev, id),
+      closeAgent: (id) => closeAgent(id),
+      stopLoop: (id) => stopLoop(id),
+      showModelMenu: (ev, id) => showModelMenu(ev, id),
+      showEffortMenu: (ev, id) => showEffortMenu(ev, id),
+      focusTeamMember: (team, member, isLead) => focusTeamMember(team, member, isLead),
+      addAgent: (cwd) => addAgent(cwd),
+      openFolder: (p) => openFolder(p),
+      openPr: (url) => openPr(url),
+      openRun: (url) => openActionRun(url),
+      openChat: (name) => openChat({ type: 'peer', id: String(name).toLowerCase() }),
+    }); window.World.ready = true; worldSync(); }
+    catch (e) {
+      // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.
+      console.error('[world] init failed', e);
+      try { window.World.dispose(); } catch {}
+      window.World.ready = false; worldView = false; document.body.classList.remove('world-mode');
+      if (hb) hb.classList.remove('on'); if (chk) chk.checked = false;
+      if (persist) api.send({ type: 'saveSettings', settings: { worldView: false } });
+      if (typeof showToast === 'function') showToast('World view could not start on this machine');
+    }
+  } else if (!on && window.World && window.World.ready) {
+    window.World.dispose(); window.World.ready = false;
+  }
+  // The terminal's xterm needs a refit after the columns change width; schedFit is the same path the window resize uses.
+  if (typeof schedFit === 'function') schedFit();
+}
+function toggleWorldView() { setWorldView(!worldView); }
+// Snapshot of renderer state for the world. Plain data, read-only, built from the same maps the list uses.
+function worldSnapshot() {
+  const projects = new Map();
+  const addProject = (cwd) => { if (!cwd || projects.has(cwd)) return; const w = worktreeAt(cwd); const running = wtRunning.get(cwd);
+    projects.set(cwd, w
+      ? { cwd, label: pathLabel(w.repo), branch: w.branch || '', feature: w.feature || null, port: w.port || 0, status: w.status || 'ready', serverUrl: running ? running.url : '' }
+      : { cwd, label: pathLabel(cwd), branch: '', feature: null, port: 0, status: 'ready', serverUrl: '' }); };
+  for (const cwd of knownProjects) addProject(cwd);
+  for (const w of worktrees) addProject(w.path);
+  for (const [, a] of agents) if (!a.archived) addProject(a.cwd || '(unknown)');
+  const agentRows = [];
+  for (const [id, a] of agents) {
+    if (a.archived) continue;
+    const st = agentStatus(a), win = ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok);
+    const ctxPct = a.stats?.ctxTok ? Math.min(100, Math.round((a.stats.ctxTok / win) * 100)) : 0;
+    const lead = [...teamMap.entries()].find(([, t]) => t.leadAgentId === id);
+    let team = null;
+    if (lead) { const [name, t] = lead; const members = t.members.filter(m => m.agentType !== 'team-lead').map(m => { const task = t.tasks.find(k => k.owner === m.name && k.status !== 'completed'); return { name: m.name, agentType: m.agentType || '', task: task ? (task.activeForm || task.subject || '') : '' }; }); team = { name, members, done: t.tasks.filter(k => k.status === 'completed').length, total: t.tasks.length }; }
+    agentRows.push({ id, cwd: a.cwd || '(unknown)', title: a.customName ? a.title : (a.prompt || a.title || 'New agent'), status: needsAnswer(a) && st === 'permission' ? 'question' : st,
+      verb: statusVerb(a, st), ctxPct, cost: calcCost(a.stats), costStr: fmtCost(calcCost(a.stats)), model: a.stats?.modelFamily || '', looping: !!a.looping,
+      crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', currentFileName: a.currentFileName || '', team });
+  }
+  const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.mergeState === 'BEHIND') return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
+  const prs = prState.prs.filter(p => !prSilenced(p)).map(p => ({ key: p.key, repo: p.repo, number: p.number, title: p.title, url: p.url, author: p.author, state: prState_(p), checks: p.checks || '', behindBy: p.behindBy || 0, commitCount: p.commitCount || 0, headRef: p.headRef || '', baseRef: p.baseRef || '', mine: !!p.mine, needsApproval: prNeedsApproval(p) }));
+  const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '' }));
+  const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
+  return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length) };
+}
+function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { window.World.sync(worldSnapshot()); } catch (e) { console.error('[world] sync failed', e); } }
 
 // Initial render
 render();
