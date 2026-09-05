@@ -795,8 +795,20 @@ function animateUnit(u, t, dt) {
     case 'waiting': case 'idle':
       if (u.cheerUntil && t < u.cheerUntil) { m.armL.rotation.x = -3; m.armR.rotation.x = -3; inner.position.y = Math.abs(Math.sin(T * 6)) * .35; inner.rotation.y = u.face + Math.sin(T * 3) * .3; break; }
       if (a.idleMin >= IDLE_CALL_MIN && !u.mini) { idleCall(u, t, T); break; }
-      if (s === 'waiting') { inner.scale.y = u.scale * (1 + Math.sin(T * 2 + u.phase) * .015); m.armL.rotation.x = .2; m.armR.rotation.x = .2; m.head.rotation.y = Math.sin(T * .6 + u.phase) * .6; m.legL.rotation.x = 0; m.legR.rotation.x = 0; }
-      else { inner.rotation.z = Math.sin(T * .9 + u.phase) * .06; m.head.rotation.x = .38 + Math.sin(T * 1.2) * .04; m.armL.rotation.x = .25; m.armR.rotation.x = .25; const f = ((T * .35 + u.phase) % 1 + 1) % 1; m.bubble.position.set(.35 + f * .3, 2.1 + f * .9, 0); m.bubble.material.opacity = 1 - f; }
+      if (s === 'waiting') {
+        // Done and waiting: at ease, looking around; after a minute it leans on the bench and kicks its heels.
+        const lean = a.idleMin >= 1 && !u.mini; inner.scale.y = u.scale * (1 + Math.sin(T * 2 + u.phase) * .015); m.head.rotation.y = Math.sin(T * .6 + u.phase) * .6;
+        if (lean) { inner.rotation.z = .12; m.armL.rotation.x = .2; m.armR.rotation.x = -.9; m.armR.rotation.z = -.5; m.legL.rotation.x = Math.max(0, Math.sin(T * 2.4 + u.phase)) * .6; m.legR.rotation.x = 0; }
+        else { m.armL.rotation.x = .2; m.armR.rotation.x = .2; m.legL.rotation.x = 0; m.legR.rotation.x = 0; }
+      }
+      else {
+        // Idle from the first minute: the unit sits down, dozes with drifting z's, and stretches now and then.
+        const stretch = Math.sin(T * .3 + u.phase) > .9; inner.position.y = -.28 * u.scale; m.legL.rotation.x = -1.5; m.legR.rotation.x = -1.5;
+        if (stretch) { m.armL.rotation.x = -2.9; m.armR.rotation.x = -2.9; m.head.rotation.x = -.3; }
+        else { inner.rotation.z = Math.sin(T * .9 + u.phase) * .05; m.head.rotation.x = .42 + Math.sin(T * 1.2) * .04; m.armL.rotation.x = -.6; m.armR.rotation.x = -.6; }
+        const f = ((T * .35 + u.phase) % 1 + 1) % 1; m.bubble.position.set(.35 + f * .3, 1.9 + f * .9, 0); m.bubble.material.opacity = 1 - f;
+        if (a.idleMin >= 1 && !u.mini && t > (u.yawnAt || u.phase * 5)) { u.yawnAt = t + 20 + Math.random() * 20; const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); wp.y += 1.6 * u.scale; burst(wp, '#cfd7e2', 3, .3, 1.2); }
+      }
       break;
     case 'crashed': inner.rotation.z = -Math.PI / 2 + .1; inner.rotation.y = u.face + .6; inner.position.y = .38; m.armL.rotation.x = -.4; m.armR.rotation.x = .6; for (const sm of m.smoke) { const f = ((T * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(.4 + Math.sin(f * 6 + sm.ph * 9) * .15 - f * .3, .4 + f * 1.8, .2 + Math.cos(f * 5) * .15); sm.m.scale.setScalar(.6 + f * 1.3); sm.m.material.opacity = .65 * (1 - f); } m.bubble.position.set(0, 1.6, 0); break;
     case 'resuming': inner.rotation.y = T * 3.2; inner.position.y = .12 + Math.abs(Math.sin(T * 4)) * .14; m.arc.rotation.z = -T * 2.4; m.bubble.material.rotation = -T * 2; break;
@@ -846,7 +858,7 @@ function tick(now) {
 
 /* ────────────────────────── Life: daylight, creatures, idle calls, celebrations, treasury ────────────────────────── */
 const life = { clouds: [], birds: [], flies: [], fish: null, torches: [], chimneys: [], fires: [], flyHomes: [], dayK: 1, lastDay: -1, weather: 'clear', rain: null, sky: null, sunBase: 1.6, flashUntil: 0 };
-const IDLE_CALL_MIN = 5;
+const IDLE_CALL_MIN = 3; // minutes of nothing to do before a unit starts calling for orders
 const PHRASES = ['Standing by, commander.', 'Anything else?', 'Ready for orders!', 'All quiet here.', 'Shall I keep going?', 'Awaiting instructions…', 'Free for a new task.', 'Done. What next?', 'Idle hands, commander.'];
 function softSprite(w, h, draw, opacity = 1) { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d')); const tex = new THREE.CanvasTexture(c); return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity, depthWrite: false })); }
 function speechSprite(text) {
