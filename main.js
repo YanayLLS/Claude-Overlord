@@ -279,6 +279,8 @@ const terminals = new Map();
 // 120 columns inside a wider xterm and the terminal looks broken until the next
 // resize happens to change the size. Self-check: term-size-core.test.js
 const lastTermSize = new Map();
+let lastAnyTermSize = null; // the most recent size any terminal asked for: what a brand-new agent's pty should start at
+function spawnSize(id) { const sz = lastTermSize.get(id) || lastAnyTermSize; return sz && sz.cols > 0 && sz.rows > 0 ? { cols: sz.cols, rows: sz.rows } : { cols: 120, rows: 30 }; }
 function applyLastTermSize(id, proc) { const sz = lastTermSize.get(id); if (sz && sz.cols > 0 && sz.rows > 0) { try { proc.resize(sz.cols, sz.rows); } catch {} } }
 const watchers = new Map();
 const polls = new Map();
@@ -852,7 +854,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false });
+    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -940,6 +942,7 @@ function loadState() {
 }
 
 function restoreAgents(state) {
+  const savedSz = state && state.settings && state.settings.lastTermSize; if (savedSz && savedSz.cols > 0) lastAnyTermSize = savedSz; // settings survive parseState; a top-level field would not
   if (!state) state = loadState();
   if (!settings._merged) { settings = { ...settings, ...state.settings }; settings._merged = true; }
   const saved = state.agents;
@@ -956,6 +959,7 @@ function restoreAgents(state) {
     if (!cwd || !sessionId) continue; // skip corrupted entries
     const jsonlFile = path.join(claudeDir(cwd), `${sessionId}.jsonl`);
     const id = nextId++;
+    if (entry.termSize && entry.termSize.cols > 0) lastTermSize.set(id, entry.termSize); // spawn at the size this terminal had last time
 
     let agentName = entry.agentName || null;
     if (!agentName || restoredNames.has(agentName)) agentName = null;
@@ -1193,7 +1197,7 @@ function doSpawnTerminal(id) {
   const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const args = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
   try {
-    const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
+    const proc = pty.spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
     terminals.set(id, proc);
     applyLastTermSize(id, proc);
     a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
@@ -1305,7 +1309,7 @@ function createAgent(folderPath, initialPrompt) {
 
   const agentEnv = cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env });
   try {
-    const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(cwd), env: agentEnv });
+    const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
     applyLastTermSize(id, proc);
     let promptSent = !initialPrompt;
@@ -3095,7 +3099,7 @@ function handleIpc(msg) {
     case 'ghostComplete': ghostComplete(msg.id, msg.reqId, msg.prefix, msg.context); break;
     case 'stopLoop': { const a = agents.get(msg.id); if (a) { a.cronCount = 0; send({ type: 'looping', id: msg.id, active: false, count: 0 }); } const t = terminals.get(msg.id); if (t) t.write('\x03'); break; }
     case 'compactAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a && t && a.isWaiting) { a.compacting = true; send({ type: 'compacting', id: msg.id, active: true }); t.write('/compact\r'); } break; }
-    case 'termResize': { if (msg.cols > 0 && msg.rows > 0) lastTermSize.set(msg.id, { cols: msg.cols, rows: msg.rows }); const t = terminals.get(msg.id); if (t) try { t.resize(msg.cols, msg.rows); } catch {} break; }
+    case 'termResize': { if (msg.cols > 0 && msg.rows > 0) { lastTermSize.set(msg.id, { cols: msg.cols, rows: msg.rows }); lastAnyTermSize = { cols: msg.cols, rows: msg.rows }; settings.lastTermSize = lastAnyTermSize; } const t = terminals.get(msg.id); if (t) try { t.resize(msg.cols, msg.rows); } catch {} break; }
     case 'browseFolder':
       dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: 'Select Project Folder' })
         .then(r => { if (!r.canceled && r.filePaths[0]) send({ type: 'folderSelected', path: r.filePaths[0] }); });
