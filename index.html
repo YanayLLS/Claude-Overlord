@@ -4173,6 +4173,8 @@ function applySettings(s) {
     const chk = document.getElementById('chk-sound');
     if (chk) chk.checked = notificationSoundEnabled;
   }
+  if (s.worldDev !== undefined) worldDev = !!s.worldDev;
+  if (s.worldEconomy) { worldEconomy = Object.assign(worldEconomyDefault(), s.worldEconomy); worldEconomy.stats = Object.assign(worldEconomyDefault().stats, worldEconomy.stats || {}); }
   if (s.worldView !== undefined) setWorldView(!!s.worldView, false);
   if (s.planBudget !== undefined) {
     planBudget = s.planBudget;
@@ -5598,7 +5600,10 @@ function setWorldView(on, persist = true) {
       openPr: (url) => openPr(url),
       openRun: (url) => openActionRun(url),
       openChat: (name) => openChat({ type: 'peer', id: String(name).toLowerCase() }),
-    }); window.World.ready = true; worldSync(); }
+      award: (kind, amount, label) => worldAward(kind, amount, label),
+      spend: (cost, patch) => worldSpend(cost, patch),
+      finishBuilds: () => worldFinishBuilds(),
+    }); window.World.ready = true; worldDailyStreak(); worldSync(); }
     catch (e) {
       // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.
       console.error('[world] init failed', e);
@@ -5660,10 +5665,50 @@ function worldSnapshot() {
     actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
-  return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now };
+  return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), dev: worldDev };
 }
 const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
-function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
+
+// ── World economy: coins for outcomes and attentiveness, spent on cosmetic upgrades. Saved in settings; classic mode never reads it. ──
+function worldEconomyDefault() { return { coins: 0, earned: 0, upgrades: {}, deco: {}, builds: {}, streak: { last: '', days: 0 }, stats: { reviews: 0, merges: 0, updates: 0, jobs: 0, turns: 0, quick: 0, resumes: 0, closes: 0 } }; }
+let worldEconomy = worldEconomyDefault(), worldDev = false, _ecoSaveTimer = null;
+function worldEconomySave() { clearTimeout(_ecoSaveTimer); _ecoSaveTimer = setTimeout(() => api.send({ type: 'saveSettings', settings: { worldEconomy } }), 400); }
+const WORLD_TITLES = [[0, 'Overseer'], [500, 'Marshal'], [2000, 'Overlord'], [10000, 'High Overlord']];
+function worldTitle() { let t = WORLD_TITLES[0][1]; for (const [n, name] of WORLD_TITLES) if (worldEconomy.earned >= n) t = name; return t; }
+// kind: reviews | merges | updates | jobs | turns | quick | resumes | closes | streak | dev
+function worldAward(kind, amount, label) {
+  amount = Math.round(amount); if (!(amount > 0)) return;
+  worldEconomy.coins += amount; worldEconomy.earned += amount; if (kind in worldEconomy.stats) worldEconomy.stats[kind] += 1;
+  worldEconomySave(); if (window.World && window.World.ready) window.World.coinsChanged(worldEconomy, `+${amount} ⬡ ${label}`);
+  if (worldView) renderWorldRoster(worldSnapshot()); // header coin chip
+}
+// Paying starts a timed construction; worldBuildsTick() applies the result when the timer runs out.
+function worldSpend(cost, patch) {
+  if (worldEconomy.coins < cost) return false;
+  const key = patch.upgrade || ('deco:' + patch.deco); if (worldEconomy.builds[key]) return false; // one build per site at a time
+  worldEconomy.coins -= cost;
+  worldEconomy.builds[key] = { kind: patch.upgrade ? 'upgrade' : 'deco', target: patch.upgrade || patch.deco, tier: patch.tier || 0, name: patch.label || '', start: Date.now(), dur: Math.max(5, patch.dur || 60) };
+  worldEconomySave(); if (window.World && window.World.ready) window.World.coinsChanged(worldEconomy, `−${cost} ⬡ ${patch.label || ''} under construction`);
+  return true;
+}
+function worldBuildsTick() {
+  const now = Date.now(); let changed = false;
+  for (const [key, b] of Object.entries(worldEconomy.builds)) {
+    if (now < b.start + b.dur * 1000) continue;
+    if (b.kind === 'upgrade') worldEconomy.upgrades[b.target] = b.tier; else worldEconomy.deco[b.target] = true;
+    delete worldEconomy.builds[key]; changed = true;
+    if (window.World && window.World.ready) window.World.buildComplete(key, b);
+  }
+  if (changed) worldEconomySave();
+}
+function worldFinishBuilds() { if (!worldDev) return; for (const b of Object.values(worldEconomy.builds)) b.start = 0; worldBuildsTick(); worldSync(); }
+function worldDailyStreak() {
+  const today = new Date().toISOString().slice(0, 10); if (worldEconomy.streak.last === today) return;
+  const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10); worldEconomy.streak.days = worldEconomy.streak.last === y ? worldEconomy.streak.days + 1 : 1; worldEconomy.streak.last = today;
+  worldAward('streak', 20, `day ${worldEconomy.streak.days} on the island`);
+}
+function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { worldBuildsTick(); const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
+setInterval(() => { if (worldView && Object.keys(worldEconomy.builds).length) worldSync(); }, 1000); // construction timers tick even when nothing else changes
 // The roster extras the classic list doesn't have: header counters, a "Needs you" block on top,
 // and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
 function renderWorldRoster(s) {
@@ -5672,7 +5717,8 @@ function renderWorldRoster(s) {
   const chip = (c, n, label, onclick, title) => `<span class="wc" style="--c:${c}" ${onclick ? `onclick="${onclick}"` : ''} title="${escAttr(title || label)}"><i></i><b>${n}</b>${label}</span>`;
   document.getElementById('world-counters').innerHTML =
     chip('var(--accent)', st.work, 'working') + chip('var(--yellow)', st.need, 'need you', 'focusNextPerm()', 'Units waiting for approval or an answer — click to jump') + chip('var(--green)', st.done, 'done') + chip('var(--red)', st.down, 'down')
-    + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`;
+    + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`
+    + `<span class="wc wc-coins" title="Coins: earned by reviewing and merging PRs, answering agents quickly, finished jobs and turns. Spend them at the treasury and on station upgrades." onclick="window.World&&World.focusKey('treasury')"><i class="hexcoin"></i><b>${worldEconomy.coins.toLocaleString()}</b>${esc(worldTitle())}</span>`;
   const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
   const agentGo = (id) => `focusAgent(${id});window.World&&World.focus(${id})`;
   const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };

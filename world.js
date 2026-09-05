@@ -118,7 +118,7 @@ W.init = function (stageEl, h) {
 W.dispose = function () {
   alive = false; cancelAnimationFrame(raf); if (ro) ro.disconnect(); ro = null;
   for (const s of tweens) tweens.delete(s);
-  sites.clear(); units.clear(); ships.clear(); machines.clear(); tents.clear(); anchors.clear(); pickables.clear(); lastSel = undefined; flags.length = 0; life.clouds.length = 0; life.birds.length = 0; life.flies.length = 0; life.torches.length = 0; life.chimneys.length = 0; life.fires.length = 0; life.fish = null; life.rain = null; life.sky = null; life.stars = null; life.meteor = null; life.ship = null; life.gulls.length = 0; life.spot = null; life.medics.clear(); cam.cine = false; cam.lastInput = null; cranes.length = 0; beacons.length = 0; order.features.length = 0; order.shops.length = 0;
+  sites.clear(); units.clear(); ships.clear(); machines.clear(); tents.clear(); anchors.clear(); pickables.clear(); lastSel = undefined; flags.length = 0; life.clouds.length = 0; life.birds.length = 0; life.flies.length = 0; life.torches.length = 0; life.chimneys.length = 0; life.fires.length = 0; life.fish = null; life.rain = null; life.sky = null; life.stars = null; life.meteor = null; life.ship = null; life.gulls.length = 0; life.spot = null; life.medics.clear(); life.fountains.length = 0; life.lighthouse = null; prevAg.clear(); intents.clear(); awardsArmed = false; economy = null; cam.cine = false; cam.lastInput = null; cranes.length = 0; beacons.length = 0; order.features.length = 0; order.shops.length = 0;
   if (scene) scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } } });
   if (renderer) renderer.dispose(); renderer = scene = camera = null; terrain = null; puffs = null; selected = {}; hovered = null; snap = null;
   if (stage) stage.innerHTML = ''; if (hooks.miniSlot) hooks.miniSlot.innerHTML = '';
@@ -187,31 +187,60 @@ function updateTerrain(dt) {
 }
 
 /* ────────────────────────── Buildings ────────────────────────── */
-function tower(parent, x, z, built, color, active, prev) {
+/* ────────────────────────── Economy: tiers and prices (cosmetic only) ────────────────────────── */
+const TOWER_TIERS = ['Stone tower', 'Timber & brass', 'Marble keep', 'Crystal spire'], HALL_TIERS = ['Hut', 'Hall', 'Guild house', 'Manufactory'], DOCK_TIERS = ['Pier', 'Harbour & lighthouse', 'Crane docks'];
+const TIER_COST = [0, 200, 600, 1500], DOCK_COST = [0, 400, 1200];
+const DECOS = { fountain: { name: 'Fountain', cost: 150 }, statue: { name: 'Statue of the Overlord', cost: 300 }, lanterns: { name: 'Lanterns', cost: 120 }, gardens: { name: 'Gardens', cost: 100 } };
+let economy = null; // the last snapshot's economy (coins, upgrades, deco)
+const tierOf = key => Math.max(1, Math.min(4, (economy && economy.upgrades && economy.upgrades[key]) || 1));
+const coins = () => (economy && economy.coins) || 0;
+const TIER_TIME = [0, 120, 300, 600], DOCK_TIME = [0, 180, 480], DECO_TIME = 60; // seconds of construction per tier
+const buildOf = key => (economy && economy.builds && economy.builds[key]) || null;
+function buildProgress(b) { const now = Date.now(), pct = Math.max(0, Math.min(1, (now - b.start) / (b.dur * 1000))), left = Math.max(0, Math.ceil((b.start + b.dur * 1000 - now) / 1000)); return { pct, left: Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') }; }
+const buildHtml = b => { if (!b) return ''; const p = buildProgress(b); return `<span class="w-build">⚒ ${esc(b.name)} <i><b style="width:${Math.round(p.pct * 100)}%"></b></i>${p.left}</span>`; };
+// A scaffold cage with a crane: the "under construction" look while a build timer runs.
+function buildCage(parent, R, h, color) { const g = new THREE.Group(); parent.add(g); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; const pole = new THREE.Mesh(new THREE.CylinderGeometry(.07, .07, h, 5), mats.scaffold); pole.position.set(Math.cos(a) * R, h / 2, Math.sin(a) * R); pole.castShadow = true; g.add(pole); } for (let y = 1.4; y < h; y += 1.6) g.add(hexEdge(R, y, 0xc39a55, .7)); const c = new THREE.Group(); c.position.set(R + .6, 0, -R * .4); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, h + 2, 6), mats.scaffold); mast.position.y = (h + 2) / 2; const jib = new THREE.Group(); jib.position.y = h + 2; const arm = box(R + 3, .18, .18, mats.scaffold); arm.position.x = (R + 3) / 2 - .8; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, 2.4, 4), mats.dark); cable.position.set(R + 1.2, -1.2, 0); const block = hexPrism(.35, .5, mat(color)); block.position.set(R + 1.2, -2.5, 0); jib.add(arm, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: Math.random() * 6, g: c }); for (let i = 0; i < 3; i++) { const fl = new THREE.Mesh(new THREE.PlaneGeometry(.6, .4), mat(color, { side: THREE.DoubleSide })); const a = i * 2.1; fl.position.set(Math.cos(a) * R, h + .3, Math.sin(a) * R); g.add(fl); flags.push(fl); } return g; }
+function tower(parent, x, z, built, color, active, prev, tier = 1) {
   const g = new THREE.Group(); g.position.set(x, 0, z); parent.add(g);
-  const FLOORS = 5, FH = 1.5, R = 2.6, n = Math.round(built * FLOORS), pn = prev == null ? n : Math.round(prev * FLOORS);
+  const FLOORS = 4 + tier, FH = 1.5, R = 2.6 + (tier - 1) * .15, n = Math.round(built * FLOORS), pn = prev == null ? n : Math.round(prev * FLOORS);
+  const marble = mat(0xe8e4dc), marbleDark = mat(0xcfc9be), crystal = new THREE.MeshStandardMaterial({ color: 0x9fe3ff, emissive: 0x3fbfd6, emissiveIntensity: .35, transparent: true, opacity: .82, roughness: .2 });
+  const floorMat = i => tier === 1 ? (i % 2 ? mats.stone : mats.stoneDark) : tier === 2 ? (i % 2 ? mats.wood : mats.stone) : tier === 3 ? (i % 2 ? marble : marbleDark) : (i < 4 ? marble : crystal);
+  const trimMat = tier >= 2 ? mats.gold : mat(color);
   for (let i = 0; i < FLOORS; i++) {
     const y = i * FH;
-    if (i < n) { const f = hexPrism(R, FH, i % 2 ? mats.stone : mats.stoneDark); f.position.y = y + FH / 2; g.add(f); const trim = hexPrism(R + .2, .18, mat(color)); trim.position.y = y + FH; g.add(trim); const win = box(.5, .6, .12, mats.window); win.position.set(0, y + FH / 2, R * .866 + .02); g.add(win);
-      if (i >= pn) { const fl = [f, trim, win]; fl.forEach(o => { o.scale.set(.01, .01, .01); }); tween(500, k => fl.forEach(o => o.scale.setScalar(Math.max(.01, k))), null, easeOutBack, (i - pn) * 120); if (puffs) { const wp = new THREE.Vector3(); f.getWorldPosition(wp); setTimeout(() => burst(wp, hexStr(color), 14, 3, 2), (i - pn) * 120 + 60); } } }
-    else { const e = hexEdge(R + .3, y + FH / 2, 0xc39a55); g.add(e); const e2 = hexEdge(R + .3, y + FH, 0xc39a55, .5); g.add(e2);
-      if (i === n) for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, FH * (FLOORS - n), 5), mats.scaffold); pole.position.set(Math.cos(a) * (R + .3), y + FH * (FLOORS - n) / 2, Math.sin(a) * (R + .3)); pole.castShadow = true; g.add(pole); } }
+    if (i < n) {
+      const f = hexPrism(R, FH, floorMat(i)); f.position.y = y + FH / 2; g.add(f); const trim = hexPrism(R + .2, .18, trimMat); trim.position.y = y + FH; g.add(trim); const win = box(.5, .6, .12, mats.window); win.position.set(0, y + FH / 2, R * .866 + .02); g.add(win);
+      if (tier >= 3 && i % 2 === 1) for (const sx of [-1, 1]) { const bn = new THREE.Mesh(new THREE.PlaneGeometry(.7, 1.1), mat(color, { side: THREE.DoubleSide })); bn.position.set(sx * (R * .5 + .05), y + FH / 2, R * .866 + .08); g.add(bn); }
+      if (i >= pn) { const fl = [f, trim, win]; fl.forEach(o => { o.scale.set(.01, .01, .01); }); tween(500, k => fl.forEach(o => o.scale.setScalar(Math.max(.01, k))), null, easeOutBack, (i - pn) * 120); if (puffs) { const wp = new THREE.Vector3(); f.getWorldPosition(wp); setTimeout(() => burst(wp, hexStr(color), 14, 3, 2), (i - pn) * 120 + 60); } }
+    } else {
+      const e = hexEdge(R + .3, y + FH / 2, 0xc39a55); g.add(e); const e2 = hexEdge(R + .3, y + FH, 0xc39a55, .5); g.add(e2);
+      if (i === n) for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, FH * (FLOORS - n), 5), mats.scaffold); pole.position.set(Math.cos(a) * (R + .3), y + FH * (FLOORS - n) / 2, Math.sin(a) * (R + .3)); pole.castShadow = true; g.add(pole); }
+    }
   }
-  if (n >= FLOORS) { const roof = new THREE.Mesh(new THREE.ConeGeometry(R * 1.05, 2, 6), mat(color)); roof.position.y = FLOORS * FH + 1; roof.rotation.y = Math.PI / 6; roof.castShadow = true; g.add(roof); }
-  else if (active) { const c = new THREE.Group(); c.position.set(R + .8, n * FH, -R); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 5, 6), mats.scaffold); mast.position.y = 2.5; mast.castShadow = true; const jib = new THREE.Group(); jib.position.y = 5; const arm = box(5, .18, .18, mats.scaffold); arm.position.x = 1.6; const back = box(1.4, .18, .18, mats.scaffold); back.position.x = -1.1; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, 2.2, 4), mats.dark); cable.position.set(3.4, -1.1, 0); const block = hexPrism(.35, .5, mat(color)); block.position.set(3.4, -2.4, 0); jib.add(arm, back, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: Math.random() * 6, g }); }
-  g.userData.topY = FLOORS * FH + 2.6; return g;
+  if (n >= FLOORS) {
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(R * 1.05, tier >= 4 ? 3.2 : 2, 6), tier >= 4 ? crystal : tier >= 2 ? mats.gold : mat(color)); roof.position.y = FLOORS * FH + (tier >= 4 ? 1.6 : 1); roof.rotation.y = Math.PI / 6; roof.castShadow = true; g.add(roof);
+    if (tier >= 3) { const fin = new THREE.Mesh(new THREE.SphereGeometry(.3, 8, 6), mats.gold); fin.position.y = FLOORS * FH + (tier >= 4 ? 3.3 : 2.1); g.add(fin); }
+    if (tier >= 4) for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; const l = new THREE.Mesh(new THREE.SphereGeometry(.16, 8, 6), new THREE.MeshStandardMaterial({ color: 0xbff4ff, emissive: 0x7fe0ff, emissiveIntensity: 1.6 })); l.position.set(Math.cos(a) * (R + .4), FLOORS * FH - .4, Math.sin(a) * (R + .4)); g.add(l); beacons.push(l); }
+  } else if (active) { const c = new THREE.Group(); c.position.set(R + .8, n * FH, -R); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, 5, 6), mats.scaffold); mast.position.y = 2.5; mast.castShadow = true; const jib = new THREE.Group(); jib.position.y = 5; const arm = box(5, .18, .18, mats.scaffold); arm.position.x = 1.6; const back = box(1.4, .18, .18, mats.scaffold); back.position.x = -1.1; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, 2.2, 4), mats.dark); cable.position.set(3.4, -1.1, 0); const block = hexPrism(.35, .5, mat(color)); block.position.set(3.4, -2.4, 0); jib.add(arm, back, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: Math.random() * 6, g }); }
+  g.userData.topY = FLOORS * FH + 2.6 + (tier >= 4 ? 1.4 : 0); return g;
 }
-function hall(parent, x, z, built, color, active, prev) {
+function hall(parent, x, z, built, color, active, prev, tier = 1) {
   const g = new THREE.Group(); g.position.set(x, 0, z); parent.add(g);
-  const walls = hexPrism(2.6, 2.1, mats.stone); walls.position.y = 1.05; const door = box(.8, 1.1, .1, mats.dark); door.position.set(0, .55, 2.3); const trim = hexPrism(2.75, .16, mat(color)); trim.position.y = 2.1; g.add(walls, door, trim);
-  const win = box(.5, .6, .12, mats.window); win.position.set(1.3, 1.1, 2.05); g.add(win); const win2 = box(.5, .6, .12, mats.window); win2.position.set(-1.3, 1.1, 2.05); g.add(win2);
+  const wallMat = tier === 1 ? mats.stone : tier === 2 ? mats.wood : tier === 3 ? mat(0xe8e4dc) : mat(0x6b7280), trimMat = tier >= 2 ? mats.gold : mat(color), H = 2.1 + (tier - 1) * .3, R1 = 2.6 + (tier - 1) * .25;
+  const walls = hexPrism(R1, H, wallMat); walls.position.y = H / 2; const door = box(.8, 1.1, .1, mats.dark); door.position.set(0, .55, R1 * .866 + .02); const trim = hexPrism(R1 + .15, .16, trimMat); trim.position.y = H; g.add(walls, door, trim);
+  for (const sx of [-1, 1]) { const win = box(.5, .6, .12, mats.window); win.position.set(sx * 1.3, H / 2, R1 * .866 + .02); g.add(win); }
+  let top = H;
+  if (tier >= 2) { const up = hexPrism(R1 * .7, 1.6, wallMat); up.position.y = H + .8; g.add(up); const t2 = hexPrism(R1 * .7 + .15, .14, trimMat); t2.position.y = H + 1.6; g.add(t2); top = H + 1.6; }
+  if (tier >= 3) { const up2 = hexPrism(R1 * .45, 1.4, wallMat); up2.position.y = top + .7; g.add(up2); top += 1.4; for (const sx of [-1, 1]) { const bn = new THREE.Mesh(new THREE.PlaneGeometry(.7, 1.2), mat(color, { side: THREE.DoubleSide })); bn.position.set(sx * (R1 * .6), H * .6, R1 * .866 + .08); g.add(bn); } }
+  if (tier >= 4) { const ch = new THREE.Mesh(new THREE.CylinderGeometry(.35, .45, 3.2, 6), mats.stoneDark); ch.position.set(-R1 * .55, top + 1.2, -R1 * .5); g.add(ch); const gear = new THREE.Group(); gear.position.set(R1 * .866 + .3, H * .55, 0); gear.rotation.y = Math.PI / 2; const wheel = new THREE.Mesh(new THREE.CylinderGeometry(.9, .9, .25, 6), mats.iron); wheel.rotation.x = Math.PI / 2; gear.add(wheel); for (let k = 0; k < 6; k++) { const tooth = box(.3, .34, .24, mats.iron); const an = k * Math.PI / 3; tooth.position.set(Math.cos(an) * 1, Math.sin(an) * 1, 0); tooth.rotation.z = an; gear.add(tooth); } g.add(gear); cranes.push({ jib: gear, block: { position: { y: 0 } }, ph: 0, g, spin: true }); }
   // A chimney smokes while there is work going on inside.
-  if (active) { const ch = new THREE.Mesh(new THREE.CylinderGeometry(.22, .26, 1.4, 6), mats.stoneDark); ch.position.set(-1.4, 2.9, -.8); g.add(ch); const smoke = []; for (let k = 0; k < 4; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.14, 7, 6), new THREE.MeshStandardMaterial({ color: 0xcfd4da, transparent: true, opacity: .55 })); g.add(s); smoke.push({ m: s, ph: k / 4 }); } life.chimneys.push({ smoke, at: [-1.4, 3.6, -.8], g }); }
-  if (built >= 1) { const roof = new THREE.Mesh(new THREE.ConeGeometry(2.9, 1.6, 6), mat(color)); roof.position.y = 2.9; roof.rotation.y = Math.PI / 6; roof.castShadow = true; g.add(roof); if (prev != null && prev < 1) { roof.scale.setScalar(.01); tween(600, k => roof.scale.setScalar(Math.max(.01, k)), null, easeOutBack); const wp = new THREE.Vector3(); roof.getWorldPosition(wp); burst(wp, hexStr(color), 18, 3, 3); } }
-  else { g.add(hexEdge(2.9, 2.9, 0xc39a55), hexEdge(2.9, 3.8, 0xc39a55, .5)); const part = new THREE.Mesh(new THREE.ConeGeometry(2.9, 1.6, 6), mat(color)); part.scale.setScalar(Math.max(.01, built)); part.rotation.y = Math.PI / 6; part.position.y = 2.1 + .8 * built; part.castShadow = true; g.add(part);
-    for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; const pole = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, 3.8, 5), mats.scaffold); pole.position.set(Math.cos(a) * 2.9, 1.9, Math.sin(a) * 2.9); g.add(pole); }
-    if (active) { const c = new THREE.Group(); c.position.set(3.4, 0, -2.4); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, 4.2, 6), mats.scaffold); mast.position.y = 2.1; const jib = new THREE.Group(); jib.position.y = 4.2; const arm = box(3.6, .16, .16, mats.scaffold); arm.position.x = 1.2; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, 1.6, 4), mats.dark); cable.position.set(2.6, -.8, 0); const block = hexPrism(.3, .4, mat(color)); block.position.set(2.6, -1.8, 0); jib.add(arm, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: Math.random() * 6, g }); } }
-  g.userData.topY = 5.2; return g;
+  if (active) { const cy = top + .8; const ch = new THREE.Mesh(new THREE.CylinderGeometry(.22, .26, 1.4, 6), mats.stoneDark); ch.position.set(-1.4, cy, -.8); g.add(ch); const smoke = []; for (let k = 0; k < 4; k++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(.14, 7, 6), new THREE.MeshStandardMaterial({ color: 0xcfd4da, transparent: true, opacity: .55 })); g.add(sm); smoke.push({ m: sm, ph: k / 4 }); } life.chimneys.push({ smoke, at: [-1.4, cy + .7, -.8], g }); }
+  const roofR = (tier >= 3 ? R1 * .45 : tier >= 2 ? R1 * .7 : R1) * 1.12, roofMat = tier >= 2 ? mats.gold : mat(color);
+  if (built >= 1) { const roof = new THREE.Mesh(new THREE.ConeGeometry(roofR, 1.6, 6), roofMat); roof.position.y = top + .8; roof.rotation.y = Math.PI / 6; roof.castShadow = true; g.add(roof); if (prev != null && prev < 1) { roof.scale.setScalar(.01); tween(600, k => roof.scale.setScalar(Math.max(.01, k)), null, easeOutBack); const wp = new THREE.Vector3(); roof.getWorldPosition(wp); burst(wp, hexStr(color), 18, 3, 3); } }
+  else { g.add(hexEdge(roofR, top + .8, 0xc39a55), hexEdge(roofR, top + 1.7, 0xc39a55, .5)); const part = new THREE.Mesh(new THREE.ConeGeometry(roofR, 1.6, 6), roofMat); part.scale.setScalar(Math.max(.01, built)); part.rotation.y = Math.PI / 6; part.position.y = top + .8 * built; part.castShadow = true; g.add(part);
+    for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; const pole = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, top + 1.7, 5), mats.scaffold); pole.position.set(Math.cos(a) * roofR, (top + 1.7) / 2, Math.sin(a) * roofR); g.add(pole); }
+    if (active) { const c = new THREE.Group(); c.position.set(R1 + .8, 0, -R1 + .2); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, top + 2.2, 6), mats.scaffold); mast.position.y = (top + 2.2) / 2; const jib = new THREE.Group(); jib.position.y = top + 2.2; const arm = box(3.6, .16, .16, mats.scaffold); arm.position.x = 1.2; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, 1.6, 4), mats.dark); cable.position.set(2.6, -.8, 0); const block = hexPrism(.3, .4, mat(color)); block.position.set(2.6, -1.8, 0); jib.add(arm, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: Math.random() * 6, g }); } }
+  g.userData.topY = top + 3.2; return g;
 }
 function banner(parent, x, y, z, color) {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .08, 3.6, 6), mats.wood); pole.position.set(x, y + 1.8, z); pole.castShadow = true; parent.add(pole);
@@ -256,7 +285,7 @@ function planSites(s) {
   const RW = 11, sTotal = order.shops.length * 2 * RW + Math.max(0, order.shops.length - 1) * 3; x = -sTotal / 2;
   for (const cwd of order.shops) { plan.push({ key: 'w:' + cwd, kind: 'workshop', project: shops.find(p => p.cwd === cwd), x: x + RW, z: 20, R: RW }); x += 2 * RW + 3; }
   if (s.github) { const R = githubRadius(s); plan.push({ key: 'github', kind: 'github', x: sTotal / 2 + GAP + R, z: R - 2, R }); }
-  if (plan.length) plan.push({ key: 'treasury', kind: 'treasury', x: 0, z: 1.5, R: 4 }); // today's spend as a coin pile at the crossroads
+  if (plan.length) plan.push({ key: 'treasury', kind: 'treasury', x: 0, z: 2.5, R: 7 }); // today's spend as a coin pile at the crossroads
   if (s.peers && s.peers.length) plan.push({ key: 'allies', kind: 'allies', x: -(sTotal / 2 + GAP + 13), z: 22, R: 13 });
   return plan;
 }
@@ -275,11 +304,15 @@ function buildLot(site, lx, lz, R, spec) {
   return lot;
 }
 function rebuildLotBuilding(lot, spec) {
-  const built = lotBuilt(spec.agents), active = spec.agents.some(a => a.status === 'active' || a.status === 'settling'), key = `${spec.kind}|${built.toFixed(2)}|${active}|${spec.server}|${spec.status}`;
+  const built = lotBuilt(spec.agents), active = spec.agents.some(a => a.status === 'active' || a.status === 'settling'), tier = spec.tier || 1, bld = buildOf(lot.site.key), key = `${spec.kind}|${built.toFixed(2)}|${active}|${spec.server}|${spec.status}|${tier}|${!!bld}`;
   if (lot.key === key) return; const prev = lot.built; lot.key = key; lot.built = built;
-  if (lot.building) { for (let i = cranes.length - 1; i >= 0; i--) if (lot.building.getObjectById(cranes[i].g.id)) cranes.splice(i, 1); disposeObj(lot.building); }
+  if (lot.building) { for (let i = cranes.length - 1; i >= 0; i--) if (lot.building.getObjectById(cranes[i].g.id)) cranes.splice(i, 1); disposeObj(lot.building); for (let i = beacons.length - 1; i >= 0; i--) if (!beacons[i].parent) beacons.splice(i, 1); }
+  const upgraded = lot.tier != null && tier !== lot.tier; lot.tier = tier;
   if (lot.beacon) { const bi = beacons.indexOf(lot.beacon); if (bi >= 0) beacons.splice(bi, 1); disposeObj(lot.beacon); lot.beacon = null; }
-  lot.building = spec.kind === 'feature' ? tower(lot.g, 0, -3.4, built, spec.color, active, prev) : hall(lot.g, 0, -3.4, built, spec.color, active, prev);
+  lot.building = spec.kind === 'feature' ? tower(lot.g, 0, -3.4, built, spec.color, active, prev, tier) : hall(lot.g, 0, -3.4, built, spec.color, active, prev, tier);
+  if (upgraded) { const wp = new THREE.Vector3(); lot.building.getWorldPosition(wp); wp.y += 3; fireworks(wp, 3); lot.building.scale.set(.01, .01, .01); tween(700, k => lot.building.scale.setScalar(Math.max(.01, k)), null, easeOutBack); }
+  if (lot.cage) { for (let i = cranes.length - 1; i >= 0; i--) if (lot.cage.getObjectById(cranes[i].g.id)) cranes.splice(i, 1); for (let i = flags.length - 1; i >= 0; i--) if (lot.cage.getObjectById(flags[i].id)) flags.splice(i, 1); disposeObj(lot.cage); lot.cage = null; }
+  if (bld) { const R = spec.kind === 'feature' ? 3.6 + tier * .2 : 3.4 + tier * .3; lot.cage = buildCage(lot.g, R, lot.building.userData.topY - 1.2, spec.color); lot.cage.position.set(0, 0, -3.4); }
   lot.el.obj.position.y = lot.building.userData.topY;
   if (spec.server) { const b = new THREE.Mesh(new THREE.SphereGeometry(.22, 10, 8), new THREE.MeshStandardMaterial({ color: 0xa6e3a1, emissive: 0xa6e3a1, emissiveIntensity: 1.6 })); b.position.set(3.6, 3.2, -3.4); lot.g.add(b); beacons.push(b); lot.beacon = b; const p = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, 2.4, 5), mats.dark); p.position.set(3.6, 2, -3.4); b.add(p); p.position.set(0, -1.2, 0); }
   if (spec.status === 'failed' && !lot.smoke) { /* setup failed: keep it visible via the label chip */ }
@@ -317,16 +350,17 @@ function syncSite(site, p, s) {
     const seen = new Set();
     repos.forEach((proj, i) => {
       seen.add(proj.cwd); const agents = s.agents.filter(a => a.cwd === proj.cwd);
-      const spec = { kind: p.kind, cwd: proj.cwd, title: proj.label, color: site.color, server: !!proj.serverUrl, port: proj.port, status: proj.status, agents, branch: proj.branch };
+      const spec = { kind: p.kind, cwd: proj.cwd, title: proj.label, color: site.color, server: !!proj.serverUrl, port: proj.port, status: proj.status, agents, branch: proj.branch, tier: tierOf(site.key) };
       let lot = site.lots.get(proj.cwd);
       if (!lot) { lot = buildLot(site, pos[i][0], pos[i][1], R, spec); site.lots.set(proj.cwd, lot); if (p.kind === 'feature') banner(site.g, pos[i][0] + 6.5, .5, pos[i][1] - 5.5, site.color); else banner(site.g, 6.5, .5, -6.5, site.color); }
       else { lot.spec = spec; rebuildLotBuilding(lot, spec); }
+      { const bld = buildOf(site.key); const base = `${esc(spec.title)}${spec.server ? '<i></i>' : ''}${spec.status === 'setup' ? ' <span style="color:var(--w-perm)">setting up…</span>' : spec.status === 'failed' ? ' <span style="color:var(--w-crashed)">setup failed</span>' : ''}`; setLabel(lot.el, base + buildHtml(bld)); }
       syncLotUnits(lot, agents, s);
     });
     for (const [cwd, lot] of site.lots) if (!seen.has(cwd)) { for (const u of lot.units.values()) destroyUnit(u); dropLabel(lot.el); disposeObj(lot.g); site.lots.delete(cwd); }
     if (site.el) { const all = repos.flatMap(r => s.agents.filter(a => a.cwd === r.cwd)); const built = repos.length ? repos.reduce((acc, r) => acc + (site.lots.get(r.cwd)?.built ?? 1), 0) / repos.length : 0;
-      if (site.built != null && site.built < 1 && built >= 1) { const wp = new THREE.Vector3(); site.anchor.getWorldPosition(wp); fireworks(wp.setY(wp.y + 6), 6); } /* the feature's work is complete */ setLabel(site.el, `<div class="w-eyebrow">Feature</div><b>${esc(p.name)}</b><div class="w-prog"><i style="width:${Math.round(built * 100)}%"></i></div><span class="w-cnt">${all.length} unit${all.length === 1 ? '' : 's'} &middot; ${repos.length} repo${repos.length === 1 ? '' : 's'} &middot; ${Math.round(built * 100)}%</span>`); site.built = built; site.name = p.name; }
-  } else if (p.kind === 'github') { if (site.R !== p.R) { destroySite(site); const ns = createSite(p); syncGithub(ns, s); return; } syncGithub(site, s); }
+      const tierName = (p.kind === 'feature' ? TOWER_TIERS : HALL_TIERS)[tierOf(site.key) - 1]; if (site.built != null && site.built < 1 && built >= 1) { const wp = new THREE.Vector3(); site.anchor.getWorldPosition(wp); fireworks(wp.setY(wp.y + 6), 6); } /* the feature's work is complete */ setLabel(site.el, `<div class="w-eyebrow">Feature</div><b>${esc(p.name)}</b><div class="w-prog"><i style="width:${Math.round(built * 100)}%"></i></div><span class="w-cnt">${all.length} unit${all.length === 1 ? '' : 's'} &middot; ${repos.length} repo${repos.length === 1 ? '' : 's'} &middot; ${Math.round(built * 100)}%</span>`); site.built = built; site.name = p.name; }
+  } else if (p.kind === 'github') { if (site.R !== p.R || site.tier !== tierOf('github')) { const up = site.tier != null && site.tier !== tierOf('github'); destroySite(site); const ns = createSite(p); syncGithub(ns, s); if (up) { const wp = new THREE.Vector3(); ns.g.getWorldPosition(wp); wp.y += 8; fireworks(wp, 4); } return; } syncGithub(site, s); }
   else if (p.kind === 'treasury') syncTreasury(site, s);
   else if (p.kind === 'allies') syncAllies(site, s);
 }
@@ -398,6 +432,7 @@ function destroyUnit(u, quiet) {
   if (u.mini) u.lead?.crew?.delete(u.a.id); units.delete(u.a.id); u.lot.units.delete(u.a.id); dropLabel(u.pill); pickables.delete(u.hit); if (u.bench) { disposeObj(u.bench); u.bench = null; }
   if (hovered === u) hovered = null; if (selected.unit === u) { selected = {}; renderSel(); }
   const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); if (!quiet) burst(wp, '#8a98ab', 16, 1.2, 2.5);
+  if (!quiet && !u.mini && u.a.idleMin >= IDLE_CALL_MIN) give('closes', 3, 'tidied up ' + u.a.title.slice(0, 28));
   // A closed unit's work is banked: a gold orb arcs to the treasury and clinks in.
   const tre = !quiet && !u.mini && sites.get('treasury'); if (tre) { const orb = textSprite('◆', '#f9e2af', 'rgba(249,226,175,.4)', .7); orb.position.copy(wp); orb.position.y += 1.5; scene.add(orb); const from = orb.position.clone(), to = new THREE.Vector3(); tre.g.getWorldPosition(to); to.y += 2; tween(1300, k => { orb.position.lerpVectors(from, to, k); orb.position.y += Math.sin(k * Math.PI) * 7; }, () => { burst(to, '#f9e2af', 16, 1.5, 3); disposeObj(orb); }, easeInCubic); }
   const g = u.g; tween(quiet ? 200 : 450, k => { g.scale.setScalar(Math.max(.01, 1 - k)); g.position.y = .56 - k * .8; }, () => disposeObj(g), easeInCubic);
@@ -455,8 +490,8 @@ function quarterHalfRadius(s) {
 function githubRadius(s) { return Math.min(70, Math.round(quarterHalfRadius(s) * 2 + 4)); }
 const GLYPH_FONT = '700 70px "Segoe UI Symbol", "Segoe UI", sans-serif';
 function buildGithub(site, GR) {
-  const g = site.g; site.color = 0xc9d1d9;
-  const plat = hexPrism(GR, .5, mat(0x22272e)); plat.position.y = .25; g.add(plat); g.add(hexEdge(GR, .52, 0xc9d1d9, .7)); site.plat = plat; plat.userData.pick = { site };
+  const g = site.g; site.color = 0xc9d1d9; site.tier = tierOf('github'); const dt = site.tier;
+  const plat = hexPrism(GR, .5, mat(dt >= 3 ? 0x2a3138 : 0x22272e)); plat.position.y = .25; g.add(plat); g.add(hexEdge(GR, .52, dt >= 2 ? 0xd6a545 : 0xc9d1d9, .7)); site.plat = plat; plat.userData.pick = { site };
   const col = hexPrism(2.2, 7, mat(0x161b22)); col.position.set(0, 4, -(GR - 11)); g.add(col);
   const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
   x.fillStyle = '#f0f6fc'; x.beginPath(); x.arc(128, 128, 118, 0, Math.PI * 2); x.fill();
@@ -472,6 +507,9 @@ function buildGithub(site, GR) {
   const floor = hexPrism(hr, .08, mat(0x2b3238)); floor.position.set(cx, .52, 2); g.add(floor); const fe = hexEdge(hr, .58, 0xa78bfa, .6); fe.position.set(cx, .58, 2); g.add(fe);
   const pa = new THREE.Object3D(); pa.position.set(cx, 5.1, 2 + hr * .866 + .5); g.add(pa); label('w-lot', 'Proving grounds &middot; Actions', pa, '#a78bfa');
   site.extra.piers = new Map(); site.extra.slabs = new Map();
+  // Tier 2: a lighthouse at the harbour mouth with a sweeping beam. Tier 3: cranes over the quay.
+  if (dt >= 2) { const lh = new THREE.Group(); lh.position.set(-cx - hr * .82, .5, 2 + hr * .55); const base = hexPrism(1, 1, mats.stone); base.position.y = .5; const tw = new THREE.Mesh(new THREE.CylinderGeometry(.55, .8, 6, 8), mat(0xe8e4dc)); tw.position.y = 4; tw.castShadow = true; const band = new THREE.Mesh(new THREE.CylinderGeometry(.62, .62, .8, 8), mat(0xe85d6c)); band.position.y = 3.2; const lamp = new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, .9, 8), new THREE.MeshStandardMaterial({ color: 0xfff1c4, emissive: 0xffd27a, emissiveIntensity: 1.3, transparent: true, opacity: .9 })); lamp.position.y = 7.4; const cap = new THREE.Mesh(new THREE.ConeGeometry(.8, .8, 8), mat(0xe85d6c)); cap.position.y = 8.2; const beam = new THREE.Mesh(new THREE.CylinderGeometry(.05, 1.6, 22, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff1c4, transparent: true, opacity: .14, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); beam.rotation.z = Math.PI / 2; beam.position.set(11, 7.4, 0); const pivot = new THREE.Group(); pivot.position.y = 0; pivot.add(beam); lh.add(base, tw, band, lamp, cap, pivot); g.add(lh); life.lighthouse = pivot; }
+  if (dt >= 3) for (const sx of [-1, 1]) { const c = new THREE.Group(); c.position.set(-cx + sx * hr * .5, .5, 2 + hr * .866 - .2); const mast = new THREE.Mesh(new THREE.CylinderGeometry(.16, .18, 8, 6), mats.gold); mast.position.y = 4; mast.castShadow = true; const jib = new THREE.Group(); jib.position.y = 8; const arm = box(8, .22, .22, mats.gold); arm.position.x = 2.6; const back = box(2.2, .22, .22, mats.gold); back.position.x = -1.8; const cable = new THREE.Mesh(new THREE.CylinderGeometry(.03, .03, 3.5, 4), mats.dark); cable.position.set(5.5, -1.75, 0); const block = box(.8, .8, .8, mats.wood); block.position.set(5.5, -3.8, 0); jib.add(arm, back, cable, block); c.add(mast, jib); g.add(c); cranes.push({ jib, block, ph: sx, g: c }); }
 }
 // Row i of a half (docks or grounds): its z inside the half, and the x of column j along it.
 function rowZ(site, i, n) { return 2 - (n - 1) * 2.5 + i * 5; }
@@ -557,8 +595,9 @@ function syncGithub(site, s) {
     }
   });
   for (const [k, m] of machines) if (!rseen.has(k)) destroyMachine(m);
+  const dbld = buildOf('github'); if (dbld && !site.extra.cage) { site.extra.cage = buildCage(site.g, 3.4, 9, 0xd6a545); site.extra.cage.position.set(0, .5, -(site.R - 11)); } else if (!dbld && site.extra.cage) { for (let i = cranes.length - 1; i >= 0; i--) if (site.extra.cage.getObjectById(cranes[i].g.id)) cranes.splice(i, 1); disposeObj(site.extra.cage); site.extra.cage = null; }
   const live = runs.filter(r => r.state === 'running').length, ready = prs.filter(p => p.state === 'ready').length, waiting = prs.filter(p => p.needsApproval).length, failed = runs.filter(r => r.state === 'failure').length;
-  setLabel(site.el, `<div class="w-eyebrow">GitHub quarter</div><b>Pull requests &amp; Actions</b><span class="w-cnt">${prs.length} PR${prs.length === 1 ? '' : 's'}${ready ? ' · ' + ready + ' ready' : ''} · ${runs.length} run${runs.length === 1 ? '' : 's'}${live ? ' · ' + live + ' live' : ''}</span>${waiting ? `<span class="w-cnt w-alert">⚑ ${waiting} waiting for your review</span>` : ''}${failed ? `<span class="w-cnt w-alert w-bad">✗ ${failed} run${failed === 1 ? '' : 's'} failed</span>` : ''}`);
+  setLabel(site.el, `<div class="w-eyebrow">GitHub quarter</div><b>Pull requests &amp; Actions</b><span class="w-cnt">${prs.length} PR${prs.length === 1 ? '' : 's'}${ready ? ' · ' + ready + ' ready' : ''} · ${runs.length} run${runs.length === 1 ? '' : 's'}${live ? ' · ' + live + ' live' : ''}</span>${dbld ? `<span class="w-cnt">${buildHtml(dbld)}</span>` : ''}${waiting ? `<span class="w-cnt w-alert">⚑ ${waiting} waiting for your review</span>` : ''}${failed ? `<span class="w-cnt w-alert w-bad">✗ ${failed} run${failed === 1 ? '' : 's'} failed</span>` : ''}`);
 }
 function makeMachineBody(m) {
   const run = m.run, st = RUN_STATE[run.state] || RUN_STATE.none, mg = new THREE.Group(); m.g.add(mg); m.body = mg;
@@ -621,7 +660,7 @@ function destroyTent(t, quiet) { tents.delete(t.peer.name); dropLabel(t.el); pic
 
 /* ────────────────────────── Sync entry point ────────────────────────── */
 W.sync = function (s) {
-  if (!alive) return; snap = s;
+  if (!alive) return; snap = s; economy = s.economy || null;
   const plan = planSites(s), seen = new Set();
   for (const p of plan) { seen.add(p.key); let site = sites.get(p.key); if (!site) site = createSite(p); syncSite(site, p, s); }
   for (const p of plan) { const site = sites.get(p.key); if (site && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); } }
@@ -639,6 +678,7 @@ W.sync = function (s) {
   else if (selected.run) { const nr = (s.runs || []).find(r => r.key === selected.run.key); if (!nr) select({}); else { const sig = nr.actionsHtml + nr.state + nr.runNumber; if (selected.run !== nr || sig !== selSig) { selected.run = nr; selSig = sig; renderSel(); } } }
   else if (selected.peer) { const npr = (s.peers || []).find(p => p.name === selected.peer.name); if (!npr) select({}); else { const sig = String(npr.connected) + npr.agents; if (selected.peer !== npr || sig !== selSig) { selected.peer = npr; selSig = sig; renderSel(); } } }
   else if (selected.site && !sites.has(selected.site.key)) select({});
+  detectAwards(s);
 };
 
 /* ────────────────────────── Selection & input ────────────────────────── */
@@ -661,6 +701,7 @@ function bindInput() {
   const keys = new Set(); let drag = null;
   stage.addEventListener('contextmenu', e => e.preventDefault());
   stage.addEventListener('pointerenter', () => cam.hover = true); stage.addEventListener('pointerleave', () => { cam.hover = false; keys.clear(); });
+  selEl.addEventListener('click', e => { const b = e.target.closest && e.target.closest('button.pr-approve'); if (!b || !selected.pr) return; const cl = b.classList, kind = cl.contains('pr-merge') ? 'merge' : cl.contains('pr-update') ? 'update' : (cl.contains('pr-mute') || cl.contains('pr-snooze') || cl.contains('pr-conflictbtn')) ? null : 'review'; if (kind && !b.disabled) intents.set(selected.pr.key, { kind, t: Date.now(), behind: selected.pr.behindBy || 0, number: selected.pr.number }); }, true);
   const touched = () => { cam.lastInput = performance.now() / 1000; if (cam.cine) { cam.cine = false; cam.userMoved = true; } };
   for (const ev of ['pointerdown', 'pointermove', 'wheel']) canvas.addEventListener(ev, touched, { passive: true });
   canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, moved: false, btn: e.button }; canvas.setPointerCapture(e.pointerId); });
@@ -721,9 +762,9 @@ function renderSel() {
       <div class="w-orders">${ob('&#x25A3;', 'Terminal', 'term') + ob('&#x2699;', 'Model', 'model') + ob('&#x25B2;', 'Effort', 'effort') + (a.looping ? ob('&#x25A0;', 'Stop loop', 'stoploop', { cls: 'danger' }) : '') + ob('&#x2715;', 'Close', 'close', { cls: 'danger' }) + ob('&#x22EF;', 'More', 'menu')}</div>`;
   } else if (selected.site) {
     const s = selected.site, first = [...s.lots.values()][0];
-    if (s.kind === 'feature' || s.kind === 'workshop') h = `<div class="w-portrait" style="--c:${hexStr(s.color)}">${s.kind === 'feature' ? '&#x2691;' : '&#x2302;'}</div><div class="w-main" style="--c:${hexStr(s.color)};--sc:var(--dim)"><div class="w-crumb">${s.kind === 'feature' ? 'Feature &middot; <b>' + s.lots.size + ' repo' + (s.lots.size === 1 ? '' : 's') + '</b>' : 'Workshop &middot; <b>directory</b>'}</div><h2>${esc(s.kind === 'feature' ? s.name : first?.spec.title || '')}</h2><div class="w-act">${[...s.lots.values()].map(l => esc(l.spec.title) + (l.spec.server ? ' · :' + l.spec.port : '')).join(' · ')}</div></div><div class="w-orders">${ob('+', 'Agent', 'addAgent') + ob('&#x1F4C2;', 'Folder', 'folder')}</div>`;
-    else if (s.kind === 'treasury') { const sn = snap || {}, done = (sn.agents || []).filter(a => a.status === 'waiting').length; const fk = n => n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'M' : n + 'K'; h = `<div class="w-portrait" style="--c:#e1b453">$</div><div class="w-main" style="--c:#e1b453;--sc:var(--dim)"><div class="w-crumb">Treasury &middot; <b>today</b></div><h2>${esc(fmtMoney(sn.cost || 0))} spent</h2><div class="w-act">${(sn.agents || []).length} units afield &middot; ${done} done &middot; ${sn.turns || 0} turns served</div></div><div class="w-stats"><div class="w-stat"><span class="k">Tokens in</span><span class="v">${fk(Math.round((sn.tokIn || 0) / 1000))}</span></div><div class="w-stat"><span class="k">Tokens out</span><span class="v">${fk(Math.round((sn.tokOut || 0) / 1000))}</span></div><div class="w-stat"><span class="k">Coins</span><span class="v">${s.extra.coinsN < 0 ? 0 : s.extra.coinsN}</span></div></div>`; }
-    else if (s.kind === 'github') h = `<div class="w-portrait" style="--c:#c9d1d9">GH</div><div class="w-main" style="--c:#c9d1d9;--sc:var(--dim)"><div class="w-crumb">GitHub quarter</div><h2>Pull requests &amp; Actions</h2><div class="w-act">Ships are open PRs, machines are tracked workflow runs. Double-click one to open it on GitHub.</div></div>`;
+    if (s.kind === 'feature' || s.kind === 'workshop') h = `<div class="w-portrait" style="--c:${hexStr(s.color)}">${s.kind === 'feature' ? '&#x2691;' : '&#x2302;'}</div><div class="w-main" style="--c:${hexStr(s.color)};--sc:var(--dim)"><div class="w-crumb">${s.kind === 'feature' ? 'Feature &middot; <b>' + s.lots.size + ' repo' + (s.lots.size === 1 ? '' : 's') + '</b>' : 'Workshop &middot; <b>directory</b>'}</div><h2>${esc(s.kind === 'feature' ? s.name : first?.spec.title || '')}</h2><div class="w-act">${[...s.lots.values()].map(l => esc(l.spec.title) + (l.spec.server ? ' · :' + l.spec.port : '')).join(' · ')}</div></div><div class="w-orders">${ob('+', 'Agent', 'addAgent') + ob('&#x1F4C2;', 'Folder', 'folder') + upgradeBtn(s)}</div>`;
+    else if (s.kind === 'treasury') { const sn = snap || {}, done = (sn.agents || []).filter(a => a.status === 'waiting').length; const fk = n => n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'M' : n + 'K'; h = `<div class="w-portrait" style="--c:#e1b453">$</div><div class="w-main" style="--c:#e1b453;--sc:var(--dim)"><div class="w-crumb">Treasury &middot; <b>today</b></div><h2>${esc(fmtMoney(sn.cost || 0))} spent</h2><div class="w-act">${(sn.agents || []).length} units afield &middot; ${done} done &middot; ${sn.turns || 0} turns served</div></div><div class="w-stats"><div class="w-stat"><span class="k">Tokens in</span><span class="v">${fk(Math.round((sn.tokIn || 0) / 1000))}</span></div><div class="w-stat"><span class="k">Tokens out</span><span class="v">${fk(Math.round((sn.tokOut || 0) / 1000))}</span></div><div class="w-stat"><span class="k">Balance</span><span class="v" style="color:var(--w-gold)">⬡ ${coins().toLocaleString()}</span></div><div class="w-stat"><span class="k">Title</span><span class="v">${esc(sn.title || 'Overseer')}</span></div></div><div class="w-orders w-shop">${shopButtons()}</div>`; }
+    else if (s.kind === 'github') h = `<div class="w-portrait" style="--c:#c9d1d9">GH</div><div class="w-main" style="--c:#c9d1d9;--sc:var(--dim)"><div class="w-crumb">GitHub quarter</div><h2>Pull requests &amp; Actions</h2><div class="w-act">${DOCK_TIERS[tierOf('github') - 1]} &middot; ships are open PRs, machines are tracked runs. Double-click one to open it on GitHub.</div></div><div class="w-orders">${upgradeBtn(s)}</div>`;
     else h = `<div class="w-portrait" style="--c:#89b4fa">&#x21C4;</div><div class="w-main" style="--c:#89b4fa;--sc:var(--dim)"><div class="w-crumb">Allied camp</div><h2>Peers</h2><div class="w-act">Tents are paired Overlords on your LAN. Double-click one to chat.</div></div>`;
   } else if (selected.pr) {
     const pr = selected.pr, st = PR_STATE[pr.state] || PR_STATE.open;
@@ -759,8 +800,69 @@ function command(cmd, ev) {
     case 'openPr': hooks.openPr && hooks.openPr(selected.pr.url); break;
     case 'openRun': hooks.openRun && hooks.openRun(selected.run.url); break;
     case 'chat': hooks.openChat && hooks.openChat(selected.peer.name); break;
+    case 'upgrade': { const st = selected.site; if (!st) break; const up = upgradeInfo(st); if (!up || !hooks.spend) break; if (hooks.spend(up.cost, { upgrade: st.key, tier: up.next, label: up.name, dur: up.dur })) toast(`${up.name}: construction started — ${up.cost} ⬡`); break; }
+    case 'finish': hooks.finishBuilds && hooks.finishBuilds(); break;
+    case 'dev': hooks.award && hooks.award('dev', 500, 'dev cheat'); break;
+    default: if (cmd.startsWith('buy:')) { const id = cmd.slice(4), d = DECOS[id]; if (d && hooks.spend && hooks.spend(d.cost, { deco: id, label: d.name, dur: DECO_TIME })) toast(`${d.name}: construction started — ${d.cost} ⬡`); }
   }
 }
+function upgradeInfo(site) {
+  const isDock = site.kind === 'github', names = isDock ? DOCK_TIERS : site.kind === 'feature' ? TOWER_TIERS : HALL_TIERS, costs = isDock ? DOCK_COST : TIER_COST, cur = tierOf(site.key);
+  if (cur >= names.length) return null; return { next: cur + 1, name: names[cur], cost: costs[cur], curName: names[cur - 1], dur: (isDock ? DOCK_TIME : TIER_TIME)[cur] };
+}
+function upgradeBtn(site) { const b = buildOf(site.key); if (b) { const p = buildProgress(b); return `<button class="w-btn buy" disabled title="${esc(b.name)}: ${Math.round(p.pct * 100)}% built, ${p.left} to go"><span class="g">⚒ ${p.left}</span>Building…</button>`; } const up = upgradeInfo(site); if (!up) return `<button class="w-btn buy" disabled title="Top tier reached"><span class="g">⬡</span>Max</button>`; return `<button class="w-btn buy" data-cmd="upgrade" ${coins() < up.cost ? 'disabled' : ''} title="Upgrade to ${up.name} for ${up.cost} coins (you have ${coins()})"><span class="g">⬡ ${up.cost}</span>${up.name}</button>`; }
+function shopButtons() {
+  let h = ''; for (const [id, d] of Object.entries(DECOS)) { const owned = economy && economy.deco && economy.deco[id], bb = buildOf('deco:' + id); if (bb) { const p = buildProgress(bb); h += `<button class="w-btn buy" disabled title="${d.name}: ${p.left} to go"><span class="g">⚒ ${p.left}</span>Building…</button>`; continue; } h += owned ? `<button class="w-btn buy" disabled title="${d.name}: built"><span class="g">✓</span>${d.name}</button>` : `<button class="w-btn buy" data-cmd="buy:${id}" ${coins() < d.cost ? 'disabled' : ''} title="${d.name} for ${d.cost} coins"><span class="g">⬡ ${d.cost}</span>${d.name}</button>`; }
+  if (snap && snap.dev) h += `<button class="w-btn dev" data-cmd="dev" title="Test instance only: adds 500 coins"><span class="g">+500</span>dev cheat</button><button class="w-btn dev" data-cmd="finish" title="Test instance only: complete every build now"><span class="g">⏩</span>finish builds</button>`;
+  return h;
+}
+// Decorations bought at the treasury.
+function syncDecos(site) {
+  const own = (economy && economy.deco) || {}; site.extra.decos = site.extra.decos || {};
+  const add = (id, build) => { if (own[id] && !site.extra.decos[id]) { const g = new THREE.Group(); site.g.add(g); build(g); site.extra.decos[id] = g; g.scale.setScalar(.01); tween(700, k => g.scale.setScalar(Math.max(.01, k)), null, easeOutBack); } else if (!own[id] && site.extra.decos[id]) { disposeObj(site.extra.decos[id]); delete site.extra.decos[id]; } };
+  add('fountain', g => { g.position.set(-4, .5, 1.5); const basin = hexPrism(1.5, .5, mat(0xe8e4dc)); basin.position.y = .25; const water = hexPrism(1.3, .1, mats.water); water.position.y = .52; const col = new THREE.Mesh(new THREE.CylinderGeometry(.18, .25, 1.4, 6), mat(0xe8e4dc)); col.position.y = 1.2; const bowl = hexPrism(.6, .12, mat(0xe8e4dc)); bowl.position.y = 1.9; g.add(basin, water, col, bowl); life.fountains.push(g); });
+  add('statue', g => { g.position.set(4, .5, 1.5); const ped = hexPrism(1, .9, mat(0xe8e4dc)); ped.position.y = .45; const body = box(.8, .9, .5, mats.gold); body.position.y = 1.5; const head = box(.55, .5, .55, mats.gold); head.position.y = 2.25; const crown = new THREE.Mesh(new THREE.CylinderGeometry(.34, .3, .2, 6), mats.gold); crown.position.y = 2.6; const armL = box(.22, .8, .22, mats.gold); armL.position.set(-.55, 1.9, 0); armL.rotation.z = .5; const armR = box(.22, .8, .22, mats.gold); armR.position.set(.55, 2.1, 0); armR.rotation.z = -2.6; g.add(ped, body, head, crown, armL, armR); });
+  add('lanterns', g => { for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3, r = site.R - 1; const pole = new THREE.Mesh(new THREE.CylinderGeometry(.05, .07, 2.2, 5), mats.dark); pole.position.set(Math.cos(a) * r, .5 + 1.1, Math.sin(a) * r); const l = new THREE.Mesh(new THREE.SphereGeometry(.2, 8, 6), mats.torch); l.position.set(Math.cos(a) * r, .5 + 2.35, Math.sin(a) * r); g.add(pole, l); life.torches.push(l); } });
+  add('gardens', g => { for (let k = 0; k < 14; k++) { const a = k / 14 * Math.PI * 2, r = site.R - 2.2 + Math.sin(k * 3) * .4; const f = new THREE.Mesh(new THREE.SphereGeometry(.16 + Math.random() * .08, 6, 5), mat([0xf5c2e7, 0xf9e2af, 0xfab387, 0x94e2d5][k % 4])); f.position.set(Math.cos(a) * r, .5 + .16, Math.sin(a) * r); const leaf = new THREE.Mesh(new THREE.SphereGeometry(.24, 6, 5), mat(0x4f9645)); leaf.position.set(Math.cos(a) * r, .5, Math.sin(a) * r); leaf.scale.y = .5; g.add(leaf, f); } });
+}
+// ── Awards: read from transitions in the snapshot, never from spend. ──
+const prevAg = new Map(), intents = new Map(), quickTimes = []; let awardsArmed = false;
+const rankMult = turns => [1, 1, 1.5, 2, 3][rankOf(turns).stripes] || 1;
+function give(kind, amount, text) { if (!hooks.award) return; setTimeout(() => hooks.award(kind, amount, text), 0); }
+function detectAwards(s) {
+  const now = s.now || Date.now();
+  if (awardsArmed) {
+    for (const a of s.agents) {
+      const p = prevAg.get(a.id); if (!p) continue;
+      if (a.turns > p.turns) give('turns', 2 * (a.turns - p.turns) * rankMult(a.turns), `${a.turns - p.turns} turn${a.turns - p.turns === 1 ? '' : 's'} by ${a.title.slice(0, 28)}`);
+      const wasNeed = p.status === 'permission' || p.status === 'question', wasBusy = ['active', 'settling', 'permission', 'question'].includes(p.status);
+      if (a.status === 'waiting' && wasBusy) give('jobs', 10, `${a.title.slice(0, 28)} finished the job`);
+      if (wasNeed && !(a.status === 'permission' || a.status === 'question') && a.status !== 'crashed' && p.askAt && now - p.askAt <= 120000) { const cut = now - 3600000; while (quickTimes.length && quickTimes[0] < cut) quickTimes.shift(); if (quickTimes.length < 12) { quickTimes.push(now); give('quick', 5, 'quick answer for ' + a.title.slice(0, 28)); } }
+      if ((p.status === 'crashed' || p.status === 'resuming') && (a.status === 'active' || a.status === 'waiting')) give('resumes', 10, a.title.slice(0, 28) + ' is back on its feet');
+    }
+    for (const [key, it] of intents) {
+      const pr = (s.prs || []).find(p => p.key === key); if (now - it.t > 300000) { intents.delete(key); continue; }
+      if (it.kind === 'merge' && !pr) { give('merges', 50, 'merged PR #' + it.number); intents.delete(key); }
+      else if (it.kind === 'review' && (!pr || pr.reviewDecision === 'APPROVED')) { give('reviews', 25, 'reviewed PR #' + it.number); intents.delete(key); }
+      else if (it.kind === 'update' && pr && it.behind > 0 && pr.behindBy === 0) { give('updates', 10, 'updated PR #' + it.number); intents.delete(key); }
+    }
+  }
+  const seen = new Set();
+  for (const a of s.agents) { seen.add(a.id); const p = prevAg.get(a.id), need = a.status === 'permission' || a.status === 'question'; prevAg.set(a.id, { turns: a.turns, status: a.status, askAt: need ? (p && p.askAt) || now : null }); }
+  for (const id of [...prevAg.keys()]) if (!seen.has(id)) prevAg.delete(id);
+  awardsArmed = true;
+}
+W.buildComplete = function (key, b) {
+  if (!alive) return; const site = key.startsWith('deco:') ? sites.get('treasury') : sites.get(key); if (!site) return;
+  const wp = new THREE.Vector3(); site.g.getWorldPosition(wp); wp.y += 8; fireworks(wp, 8); toast(`${b.name} complete!`);
+  const an = label('w-done', esc(b.name) + ' complete!', site.g, '#f9e2af', 9); tween(3200, k => { an.dy = 9 + k * 3; an.el.style.opacity = String(k < .8 ? 1 : (1 - k) * 5); }, () => dropLabel(an));
+  const t = performance.now() / 1000; for (const lot of site.lots.values()) for (const u of lot.units.values()) u.cheerUntil = t + 3;
+};
+W.coinsChanged = function (eco, text) {
+  if (!alive) return; economy = eco; toast(text); renderSel();
+  const st = sites.get('treasury'); if (st) { const an = label('w-award', esc(text), st.g, '#f9e2af', 4); tween(1600, k => { an.dy = 4 + k * 5; an.el.style.opacity = String(1 - k); }, () => dropLabel(an)); const wp = new THREE.Vector3(); st.g.getWorldPosition(wp); wp.y += 2; burst(wp, '#f9e2af', 14, 1.5, 3); }
+  if (st) setLabel(st.el, `Treasury · ${esc(fmtMoney((snap && snap.cost) || 0))} today · ⬡ ${coins().toLocaleString()}`);
+};
 
 /* ────────────────────────── Animation ────────────────────────── */
 function animateUnit(u, t, dt) {
@@ -854,7 +956,7 @@ function tick(now) {
   for (const u of units.values()) if (u.p) animateUnit(u, t, dt);
   if (!reduceMotion()) {
     flags.forEach((f, i) => { f.rotation.y = Math.sin(t * 2.2 + i) * .18; }); for (const b of beacons) b.material.emissiveIntensity = 1 + (b.userData.nightBoost || 0) + Math.sin(t * 3) * .7;
-    for (const c of cranes) { c.jib.rotation.y = Math.sin(t * .35 + c.ph) * .9; c.block.position.y = -2.4 + Math.sin(t * .7 + c.ph) * .5; }
+    for (const c of cranes) { if (c.spin) { c.jib.rotation.z = t * 1.1; continue; } c.jib.rotation.y = Math.sin(t * .35 + c.ph) * .9; c.block.position.y = -2.4 + Math.sin(t * .7 + c.ph) * .5; }
     for (const sh of ships.values()) { sh.g.position.y = sh.baseY + Math.sin(t * 1.1 + sh.ph) * .08; sh.g.rotation.z = Math.sin(t * .8 + sh.ph) * .035 + (sh.pr.behindBy ? .1 : 0); if (sh.smoke) for (const sm of sh.smoke) { const f = ((t * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1.5 + f * .4, 1.4 + f * 1.6, Math.sin(f * 7) * .2); sm.m.scale.setScalar(.6 + f * 1.2); sm.m.material.opacity = .6 * (1 - f); }
       if (sh.beam) { const k = .5 + .5 * Math.sin(t * 2.6 + sh.ph); sh.beam.material.opacity = .12 + k * .22; sh.beam.scale.set(1 + k * .25, 1, 1 + k * .25); sh.bubble.scale.setScalar(.9 + k * .35); sh.bubble.position.y = 5.9 + k * .3; for (const r of sh.ripples) { const f = ((t * .45 + r.ph) % 1 + 1) % 1; r.m.scale.setScalar(.6 + f * 1.6); r.m.material.opacity = .55 * (1 - f); } } }
     for (const m of machines.values()) { if (m.run.state === 'running') { m.gear.rotation.z = t * 1.6 + m.ph; m.lamp.emissiveIntensity = 1 + Math.sin(t * 5 + m.ph) * .6; } if (m.smoke) for (const sm of m.smoke) { const f = ((t * (m.run.state === 'failure' ? .22 : .4) + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1 + Math.sin(f * 6 + sm.ph * 9) * .2, 3.5 + f * 2.2, -.6); sm.m.scale.setScalar(.5 + f * 1.4); sm.m.material.opacity = .65 * (1 - f); } }
@@ -866,7 +968,7 @@ function tick(now) {
 }
 
 /* ────────────────────────── Life: daylight, creatures, idle calls, celebrations, treasury ────────────────────────── */
-const life = { clouds: [], birds: [], flies: [], fish: null, torches: [], chimneys: [], fires: [], flyHomes: [], dayK: 1, lastDay: -1, weather: 'clear', rain: null, sky: null, sunBase: 1.6, flashUntil: 0, stars: null, meteor: null, ship: null, gulls: [], spot: null, medics: new Map() };
+const life = { clouds: [], birds: [], flies: [], fish: null, torches: [], chimneys: [], fires: [], flyHomes: [], dayK: 1, lastDay: -1, weather: 'clear', rain: null, sky: null, sunBase: 1.6, flashUntil: 0, stars: null, meteor: null, ship: null, gulls: [], spot: null, medics: new Map(), fountains: [], lighthouse: null };
 const IDLE_CALL_MIN = 3; // minutes of nothing to do before a unit starts calling for orders
 const PHRASES = ['Standing by, commander.', 'Anything else?', 'Ready for orders!', 'All quiet here.', 'Shall I keep going?', 'Awaiting instructions…', 'Free for a new task.', 'Done. What next?', 'Idle hands, commander.'];
 function softSprite(w, h, draw, opacity = 1) { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d')); const tex = new THREE.CanvasTexture(c); return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity, depthWrite: false })); }
@@ -923,6 +1025,8 @@ function updateLife(t, dt) {
   if (gh) for (const gl of life.gulls) { gl.s.visible = night < .8; const cx = gh.x - gh.extra.cx, cz = gh.z + 2; gl.s.position.set(cx + Math.cos(t * .5 + gl.ph) * 6, PLAT + 8 + Math.sin(t * 1.4 + gl.ph) * 1.2, cz + Math.sin(t * .5 + gl.ph) * 5); gl.s.scale.set(1.2 * (Math.cos(t * .5 + gl.ph + Math.PI / 2) > 0 ? 1 : -1), .6 * (.5 + .5 * Math.abs(Math.sin(t * 10 + gl.ph))), 1); } else for (const gl of life.gulls) gl.s.visible = false;
   if (life.spot) { const u = selected.unit; life.spot.visible = !!u; if (u) { const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); life.spot.position.set(wp.x, wp.y + 6, wp.z); life.spot.material.opacity = .08 + .04 * Math.sin(t * 3); } }
   updateMedics(t, dt);
+  for (let i = life.fountains.length - 1; i >= 0; i--) { const f = life.fountains[i]; if (!f.parent) { life.fountains.splice(i, 1); continue; } if (t > (f.userData.next || 0)) { f.userData.next = t + .35; const wp = new THREE.Vector3(0, 2, 0); f.localToWorld(wp); burst(wp, '#bfe9f5', 3, .3, 2.2); } }
+  if (life.lighthouse) { if (!life.lighthouse.parent || !life.lighthouse.parent.parent) life.lighthouse = null; else { life.lighthouse.rotation.y = t * .7; life.lighthouse.visible = night > .25; } }
   for (let i = life.fires.length - 1; i >= 0; i--) { const f = life.fires[i]; if (!f.parent) { life.fires.splice(i, 1); continue; } f.scale.set(1 + Math.sin(t * 17 + i) * .12, .8 + Math.sin(t * 13 + i * 2) * .25 + Math.sin(t * 29) * .08, 1); f.material.emissiveIntensity = 1.2 + Math.sin(t * 21 + i) * .4; }
   for (const f of life.birds) {
     if (f.wait) { f.t -= dt; if (f.t <= 0) { f.wait = false; f.dir = Math.random() < .5 ? 1 : -1; f.x = -f.dir * rx; f.z = (Math.random() - .5) * terrain.rz * 1.4; f.y = 13 + Math.random() * 5; f.birds.forEach(b => b.s.visible = true); } continue; }
@@ -986,7 +1090,9 @@ function updateMedics(t, dt) {
 function confetti(pos) { for (const c of ['#f9e2af', '#a6e3a1', '#89b4fa', '#f5c2e7', '#fab387']) burst(pos, c, 8, 1.4, 4); }
 function fireworks(pos, n) { for (let k = 0; k < n; k++) setTimeout(() => { if (!alive) return; const p = pos.clone().add(new THREE.Vector3((Math.random() - .5) * 8, Math.random() * 4, (Math.random() - .5) * 6)); burst(p, ['#f9e2af', '#a6e3a1', '#89b4fa', '#f5c2e7', '#fab387'][k % 5], 34, 2.5, 4); }, k * 380); }
 function syncTreasury(site, s) {
-  const n = Math.min(60, Math.round((s.cost || 0) * 6)); setLabel(site.el, `Treasury · ${esc(fmtMoney(s.cost || 0))} today`);
+  const n = Math.min(60, Math.round((s.cost || 0) * 6)); const decoBuilds = Object.entries((economy && economy.builds) || {}).filter(([k]) => k.startsWith('deco:')).map(([, b]) => buildHtml(b)).join('');
+  setLabel(site.el, `Treasury · ${esc(fmtMoney(s.cost || 0))} today · ⬡ ${coins().toLocaleString()}${decoBuilds}`);
+  syncDecos(site);
   if (n === site.extra.coinsN) return; const grew = site.extra.coinsN >= 0 && n > site.extra.coinsN; site.extra.coinsN = n;
   disposeObj(site.extra.coins); const g = new THREE.Group(); site.g.add(g); site.extra.coins = g;
   for (let i = 0; i < n; i++) { const pile = i % 5, level = Math.floor(i / 5); const a = pile * 1.257; const coin = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, .12, 6), mats.gold); coin.position.set(Math.cos(a) * 1.5 * (pile ? 1 : 0), .56 + level * .13, Math.sin(a) * 1.5 * (pile ? 1 : 0)); coin.rotation.y = i * .3; coin.castShadow = true; g.add(coin); }
@@ -999,7 +1105,7 @@ W.refreshSel = function () { if (alive) renderSel(); };
 // Roster hooks: the list on the left can highlight and fly to a unit.
 W.hover = function (id) { if (!alive) return; hovered = id == null ? null : (units.get(id) || null); };
 W.focus = function (id, zoom) { if (!alive) return; const u = units.get(id); if (!u) return; cam.userMoved = true; const p = new THREE.Vector3(); u.g.getWorldPosition(p); const fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom, tz = zoom || Math.min(cam.zoom, 1.1); tween(700, k => { cam.target.x = fx + (p.x - fx) * k; cam.target.z = fz + (p.z - fz) * k; cam.zoom = fzoom + (tz - fzoom) * k; }); };
-W.focusKey = function (kind, key) { if (!alive) return; const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
+W.focusKey = function (kind, key) { if (!alive) return; if (kind === 'treasury') { const st = sites.get('treasury'); if (st) { cam.userMoved = true; flyTo(st.g); select({ site: st }); } return; } const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
 
 window.World = W;
 })();

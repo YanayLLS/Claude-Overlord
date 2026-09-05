@@ -338,6 +338,8 @@ function logToRenderer(...args) {
 }
 
 function sendFullState() {
+  // World view dev cheats (coins) exist only in a --ovtest launch; recomputed every start so it never sticks.
+  settings.worldDev = process.argv.includes('--ovtest');
   send({ type: 'settings', settings });
   for (const [id, a] of agents) {
     send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false });
