@@ -3732,6 +3732,7 @@ function handleAgentMsg(msg) {
       alert('PR action failed: ' + (msg.error || 'unknown error'));
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
+      if (worldView && window.World && window.World.ready) window.World.refreshSel(); // put the ship's buttons back
       break;
     }
     case 'timelineData': handleTimelineData(msg); break;
@@ -5610,6 +5611,7 @@ function setWorldView(on, persist = true) {
   } else if (!on && window.World && window.World.ready) {
     window.World.dispose(); window.World.ready = false;
   }
+  if (!on && termTab === 'conversation') switchTermTab('terminal'); // that tab only exists in world mode
   // The terminal's xterm needs a refit after the columns change width; schedFit is the same path the window resize uses.
   if (typeof schedFit === 'function') schedFit();
 }

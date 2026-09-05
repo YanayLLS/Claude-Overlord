@@ -42,7 +42,7 @@ const cam = { target: null, zoom: 2.0, yaw: 0, base: null, hover: false };
 const sites = new Map(), units = new Map(), ships = new Map(), machines = new Map(), tents = new Map();
 const order = { features: [], shops: [] };
 const anchors = new Set(), tweens = new Set(), flags = [], cranes = [], beacons = [];
-let selected = {}, hovered = null, snap = null, terrain = null, mats = null, card = null, cardFor = null, siteColorIdx = 0, lastSel;
+let selected = {}, hovered = null, snap = null, terrain = null, mats = null, card = null, cardFor = null, siteColorIdx = 0, lastSel, selSig = '';
 const pickables = new Set(); // every hit mesh in the scene, kept in step with create/destroy
 const colorFor = new Map(); // site key -> color (stable across syncs)
 
@@ -237,9 +237,11 @@ function textSprite(text, color, bg, size = .85) {
 
 /* ────────────────────────── Layout ────────────────────────── */
 function keepOrder(arr, keys) { const set = new Set(keys); for (let i = arr.length - 1; i >= 0; i--) if (!set.has(arr[i])) arr.splice(i, 1); for (const k of keys) if (!arr.includes(k)) arr.push(k); }
-const LOT_POS = n => n <= 1 ? [[0, 0]] : n === 2 ? [[-7.4, 3.8], [7.4, -4.2]] : [[-7.4, 3.8], [7.4, -4.2], [-7.4, -12], [7.4, -20], [-7.4, -28], [7.4, -36]].slice(0, n);
-const COMPOUND_R = n => n <= 1 ? 14 : n === 2 ? 21 : n === 3 ? 26 : 30 + (n - 4) * 4;
+// Lots inside a compound tile as a staggered column of flat-top hexes, centred on the compound, for any repo count.
+const LOT_POS = n => { if (n <= 1) return [[0, 0]]; const zc = -(n - 1) * 4, out = []; for (let i = 0; i < n; i++) out.push([i % 2 ? 7.4 : -7.4, 3.8 - Math.floor(i / 2) * 16 - (i % 2) * 8 - zc]); return out; };
+const COMPOUND_R = n => n <= 1 ? 14 : Math.max(19, Math.ceil(((n - 1) * 4 + 12.5) / .866));
 const SLOTS = (() => { const s = []; const ring = (r, angs) => angs.forEach(a => s.push([Math.cos(a * Math.PI / 180) * r, Math.sin(a * Math.PI / 180) * r])); ring(6.6, [35, 90, 145]); ring(4.2, [20, 70, 110, 160]); ring(8.4, [30, 60, 90, 120, 150]); return s; })();
+const slotAt = i => { const [x, z] = SLOTS[i % SLOTS.length], k = Math.floor(i / SLOTS.length); return [x + (k % 2 ? .9 : -.9) * k, z - .8 * k]; }; // beyond 12 units a lot doubles up with a small offset
 function planSites(s) {
   const feats = new Map(), shops = [];
   for (const p of s.projects) { if (p.feature) { if (!feats.has(p.feature)) feats.set(p.feature, []); feats.get(p.feature).push(p); } else shops.push(p); }
@@ -387,7 +389,7 @@ function destroyUnit(u, quiet) {
 function syncLotUnits(lot, agents, s) {
   const sorted = [...agents].sort((a, b) => STATUS[a.status].order - STATUS[b.status].order || a.id - b.id), seen = new Set();
   sorted.forEach((a, i) => {
-    const [lx, lz] = SLOTS[i % SLOTS.length]; seen.add(a.id);
+    const [lx, lz] = slotAt(i); seen.add(a.id);
     let u = lot.units.get(a.id);
     if (!u) { u = createUnit(a, lot, lx, lz, {}); lot.units.set(a.id, u); units.set(a.id, u); }
     else {
@@ -613,6 +615,12 @@ W.sync = function (s) {
   // Selection follows the app's selected agent whenever that changes; a ship or machine picked here stays picked otherwise.
   if (s.selectedId !== lastSel) { lastSel = s.selectedId; const u = s.selectedId != null ? units.get(s.selectedId) : null; if (u) select({ unit: u }); else if (selected.unit) select({}); }
   else if (selected.unit) renderSel(); // stats may have changed
+  // A selected ship, machine or tent points at the object from the latest snapshot; the bar re-renders when its facts
+  // change (a button label set by a click, like "Updating…", therefore clears exactly when the PR list comes back).
+  if (selected.pr) { const np = (s.prs || []).find(p => p.key === selected.pr.key); if (!np) select({}); else { const sig = np.actionsHtml + np.state + np.checks + np.behindBy + np.commitCount + np.reviewDecision; if (selected.pr !== np || sig !== selSig) { selected.pr = np; selSig = sig; renderSel(); } } }
+  else if (selected.run) { const nr = (s.runs || []).find(r => r.key === selected.run.key); if (!nr) select({}); else { const sig = nr.actionsHtml + nr.state + nr.runNumber; if (selected.run !== nr || sig !== selSig) { selected.run = nr; selSig = sig; renderSel(); } } }
+  else if (selected.peer) { const npr = (s.peers || []).find(p => p.name === selected.peer.name); if (!npr) select({}); else { const sig = String(npr.connected) + npr.agents; if (selected.peer !== npr || sig !== selSig) { selected.peer = npr; selSig = sig; renderSel(); } } }
+  else if (selected.site && !sites.has(selected.site.key)) select({});
 };
 
 /* ────────────────────────── Selection & input ────────────────────────── */
@@ -625,7 +633,7 @@ function pick(ev) {
 }
 function flyTo(obj) { const p = new THREE.Vector3(); obj.getWorldPosition(p); cam.target.copy(p); }
 function select(what) {
-  selected = what || {}; renderSel();
+  selected = what || {}; selSig = ''; renderSel();
   for (const sh of ships.values()) sh.el.el.classList.toggle('sel', sh.pr === selected.pr);
   for (const m of machines.values()) m.el.el.classList.toggle('sel', m.run === selected.run);
   for (const t of tents.values()) t.el.el.classList.toggle('sel', t.peer === selected.peer);
@@ -795,6 +803,8 @@ function tick(now) {
   renderer.render(scene, camera); updateLabels(); drawMinimap();
 }
 
+// Re-render the selection bar from the current facts (after a failed action, for instance).
+W.refreshSel = function () { if (alive) renderSel(); };
 // Roster hooks: the list on the left can highlight and fly to a unit.
 W.hover = function (id) { if (!alive) return; hovered = id == null ? null : (units.get(id) || null); };
 W.focus = function (id, zoom) { if (!alive) return; const u = units.get(id); if (!u) return; cam.userMoved = true; const p = new THREE.Vector3(); u.g.getWorldPosition(p); const fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom, tz = zoom || Math.min(cam.zoom, 1.1); tween(700, k => { cam.target.x = fx + (p.x - fx) * k; cam.target.z = fz + (p.z - fz) * k; cam.zoom = fzoom + (tz - fzoom) * k; }); };
