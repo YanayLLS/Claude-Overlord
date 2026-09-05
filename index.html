@@ -1161,8 +1161,10 @@ button:focus-visible { outline-offset:0; }
   <div id="world-stage"></div>
   <div id="resize"></div>
   <div id="term">
+    <div id="term-dossier"></div>
     <div id="term-header">
       <div class="term-tabs">
+        <button class="term-tab" id="tab-conversation" onclick="switchTermTab('conversation')">Conversation</button>
         <button class="term-tab active" id="tab-terminal" onclick="switchTermTab('terminal')">Terminal</button>
         <button class="term-tab" id="tab-timeline" onclick="switchTermTab('timeline')">Timeline</button>
       </div>
@@ -1183,6 +1185,8 @@ button:focus-visible { outline-offset:0; }
     </div>
     <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x2912;</button><button class="prompt-jump" onclick="jumpPrompt(-1)" title="Previous prompt (Ctrl+&#x2191;)">&#x25B2;</button><button class="prompt-jump" onclick="jumpPrompt(1)" title="Next prompt (Ctrl+&#x2193;)">&#x25BC;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x2913;</button></div></div>
     <div id="timeline-events"></div>
+    <div id="conversation"></div>
+    <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
   </div>
   </div><!-- end #content -->
   <div id="settings-overlay" style="display:none" onclick="toggleSettings()">
@@ -1424,6 +1428,7 @@ function worktreeAt(p) { return worktrees.find(w => w.path === p) || null; }
 let selectedId = null;
 let filterText = '';
 let worldView = false; // World view (3D map) — off by default; see setWorldView() at the bottom
+let worldTl = null; // { id, events } — copy of the selected agent's timeline for the Conversation tab
 let filterReady = false;
 // ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
 const collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
@@ -3180,11 +3185,19 @@ function switchTermTab(tab) {
   termTab = tab;
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
   document.getElementById('tab-timeline').classList.toggle('active', tab === 'timeline');
+  document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
   const tc = document.getElementById('term-container');
   const tl = document.getElementById('timeline-events');
+  const cv = document.getElementById('conversation'), od = document.getElementById('term-order');
+  cv.classList.toggle('open', tab === 'conversation'); od.classList.toggle('open', tab === 'conversation');
   if (tab === 'terminal') {
     tc.style.display = ''; tl.classList.remove('open');
     if (selectedId) showXterm(selectedId);
+  } else if (tab === 'conversation') {
+    // World view's readable transcript: fed by the same timeline events, plus the live tool state.
+    tc.style.display = 'none'; tl.classList.remove('open');
+    if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
+    renderConversation();
   } else {
     _tlPromptIdx = -1;
     tc.style.display = 'none'; tl.classList.add('open');
@@ -3227,6 +3240,8 @@ function renderTlEvent(ev) {
 function handleTimelineData(msg) {
   if (msg.id !== timelineAgentId) return;
   const el = document.getElementById('timeline-events');
+  worldTl = { id: msg.id, events: (msg.events || []).slice() }; // the conversation view reads the same events
+  if (termTab === 'conversation') renderConversation();
   if (!msg.events || msg.events.length === 0) {
     el.innerHTML = '<div class="tl-empty">No events yet</div>';
     return;
@@ -3237,6 +3252,7 @@ function handleTimelineData(msg) {
 
 function handleTimelineEvent(msg) {
   if (msg.id !== timelineAgentId) return;
+  if (worldTl && worldTl.id === msg.id) { worldTl.events.push(msg.event); if (termTab === 'conversation') renderConversation(); }
   const el = document.getElementById('timeline-events');
   // Remove empty message if present
   const empty = el.querySelector('.tl-empty');
@@ -5628,7 +5644,7 @@ function worldSnapshot() {
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length) };
 }
-function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); } catch (e) { console.error('[world] sync failed', e); } }
+function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
 // The roster extras the classic list doesn't have: header counters, a "Needs you" block on top,
 // and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
 function renderWorldRoster(s) {
@@ -5671,6 +5687,45 @@ function renderWorldRoster(s) {
   }
   document.getElementById('world-extra').innerHTML = extra;
 }
+// ── Dossier: the terminal pane's head, Conversation tab and order box (world mode) ──
+function renderDossierHead(s) {
+  const el = document.getElementById('term-dossier'); if (!el) return;
+  const a = selectedId != null ? s.agents.find(x => x.id === selectedId) : null;
+  if (!a) { el.innerHTML = ''; return; }
+  const p = s.projects.find(p => p.cwd === a.cwd), st = { active: ['Working', 'var(--accent)'], settling: ['Finishing', 'var(--accent)'], permission: ['Needs approval', 'var(--yellow)'], question: ['Needs an answer', 'var(--purple)'], waiting: ['Done', 'var(--green)'], idle: ['Idle', 'var(--dim)'], crashed: ['Crashed', 'var(--red)'], resuming: ['Resuming', 'var(--purple)'] }[a.status] || ['', 'var(--dim)'];
+  const crumb = p && p.feature ? `Feature <b>${esc(p.feature)}</b> · ${esc(p.label)}` : `Workshop <b>${esc(p ? p.label : pathLabel(a.cwd))}</b>${p && p.branch ? ' · ⑂ ' + esc(p.branch) : ''}`;
+  el.innerHTML = `<div class="wd-portrait">${esc((a.model || 's')[0].toUpperCase())}</div><div class="wd-main"><div class="wd-crumb">${crumb}</div><h2>${esc(a.title)}</h2></div><div class="wd-stats"><span title="Context used">ctx <b class="${a.ctxPct >= 80 ? 'danger' : a.ctxPct >= 60 ? 'warn' : ''}">${a.ctxPct}%</b></span><span title="Model">${esc(a.model || '?')}</span><span title="Cost" style="color:var(--w-gold)">${esc(a.costStr)}</span></div><span class="wd-chip" style="--c:${st[1]}">${st[0]}</span>`;
+}
+function renderConversation() {
+  const el = document.getElementById('conversation'); if (!el || !el.classList.contains('open')) return;
+  const a = selectedId != null ? agents.get(selectedId) : null;
+  if (!a) { el.innerHTML = '<div class="tl-empty">Select an agent to read its conversation</div>'; return; }
+  const evs = worldTl && worldTl.id === selectedId ? worldTl.events : null;
+  const stuck = el.scrollTop + el.clientHeight < el.scrollHeight - 30 && el.dataset.for === String(selectedId);
+  const doneBy = new Map(); if (evs) for (const ev of evs) if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev);
+  const name = a.customName ? a.title : (a.agentName || 'Agent');
+  let h = '';
+  if (!evs) h += '<div class="tl-empty">Loading conversation…</div>';
+  else if (!evs.length) h += `<div class="msg ai"><div class="eyebrow">${esc(name)}</div><p>Nothing yet. Give an order below to put this agent to work.</p></div>`;
+  for (const ev of evs || []) {
+    if (ev.type === 'prompt') h += `<div class="msg user"><div class="eyebrow">You<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(ev.text)}</p></div>`;
+    else if (ev.type === 'text') h += `<div class="msg ai"><div class="eyebrow">${esc(name)}<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(ev.text)}</p></div>`;
+    else if (ev.type === 'tool' || ev.type === 'subtask') { const d = ev.toolId ? doneBy.get(ev.toolId) : null; h += `<div class="msg tool${ev.type === 'subtask' ? ' sub' : ''}${!d && ev.toolId ? ' running' : ''}"><span class="t">${esc(ev.name || '')}</span><span class="f" title="${escAttr(ev.text || '')}">${esc(ev.text || '')}</span>${d && d.text ? `<span class="d" title="${escAttr(d.text)}">${esc(d.text.slice(0, 40))}</span>` : ''}</div>`; }
+    else if (ev.type === 'turn') h += `<div class="msg turn">${esc(ev.text)}</div>`;
+  }
+  // Live state on top of the transcript: tools still running, a permission prompt, a question, a crash.
+  const live = [...a.tools.values()].filter(t => !t.done);
+  const perm = live.find(t => t.perm);
+  if (perm && perm.perm === 'ask') h += `<div class="msg ask" style="--c:var(--purple)"><div class="eyebrow">Question for you</div><p>${esc(perm.status || 'The agent is waiting for your answer in the terminal.')}</p><div class="row2"><button class="yes" onclick="switchTermTab('terminal');const x=xterms.get(selectedId);if(x)x.terminal.focus()">Answer in terminal</button></div></div>`;
+  else if (perm) h += `<div class="msg ask" style="--c:var(--yellow)"><div class="eyebrow">Wants to run</div><pre>${esc(perm.status || perm.name || '')}</pre><div class="row2"><button class="yes" onclick="worldReply('1\\r')">Approve</button><button onclick="worldReply('2\\r')">Always this session</button><button onclick="worldReply('\\x1b')">Deny</button></div></div>`;
+  else for (const t of live) h += `<div class="msg tool running"><span class="t">${esc(t.name || 'tool')}</span><span class="f">${esc(t.status || 'running…')}</span></div>`;
+  if (a.crashed === 'fatal') h += `<div class="msg err">Process exited (${a.crashCount}/${a.crashMax} attempts).<div class="row2"><button class="yes" onclick="resumeSelected()">Resume</button></div></div>`;
+  el.innerHTML = h; el.dataset.for = String(selectedId);
+  if (!stuck) el.scrollTop = el.scrollHeight;
+}
+// The order box and approval buttons type into the agent's pty exactly as the terminal would.
+function worldReply(data) { if (selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data }); }
+function sendOrder() { const inp = document.getElementById('term-order-input'); const text = inp.value.trim(); if (!text || selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data: text + '\r' }); inp.value = ''; }
 // Hovering an agent card in the list lights its unit on the map.
 document.getElementById('list').addEventListener('mouseover', (e) => { if (!worldView || !window.World) return; const card = e.target.closest('.agent[data-id]'); if (card) World.hover(+card.dataset.id); });
 document.getElementById('list').addEventListener('mouseleave', () => { if (worldView && window.World) World.hover(null); });

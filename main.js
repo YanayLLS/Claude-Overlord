@@ -274,6 +274,12 @@ process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
 let mainWindow = null;
 const agents = new Map();
 const terminals = new Map();
+// The size the renderer last asked for, per agent. A respawned pty (resume, crash
+// restart) starts at 120x30; without re-applying this the agent keeps drawing for
+// 120 columns inside a wider xterm and the terminal looks broken until the next
+// resize happens to change the size. Self-check: term-size-core.test.js
+const lastTermSize = new Map();
+function applyLastTermSize(id, proc) { const sz = lastTermSize.get(id); if (sz && sz.cols > 0 && sz.rows > 0) { try { proc.resize(sz.cols, sz.rows); } catch {} } }
 const watchers = new Map();
 const polls = new Map();
 const permTimers = new Map();
@@ -1189,6 +1195,7 @@ function doSpawnTerminal(id) {
   try {
     const proc = pty.spawn(sh, args, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
     terminals.set(id, proc);
+    applyLastTermSize(id, proc);
     a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
     if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
     // Flush any input that arrived before PTY was ready
@@ -1300,6 +1307,7 @@ function createAgent(folderPath, initialPrompt) {
   try {
     const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
+    applyLastTermSize(id, proc);
     let promptSent = !initialPrompt;
     proc.onData((d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
@@ -3087,7 +3095,7 @@ function handleIpc(msg) {
     case 'ghostComplete': ghostComplete(msg.id, msg.reqId, msg.prefix, msg.context); break;
     case 'stopLoop': { const a = agents.get(msg.id); if (a) { a.cronCount = 0; send({ type: 'looping', id: msg.id, active: false, count: 0 }); } const t = terminals.get(msg.id); if (t) t.write('\x03'); break; }
     case 'compactAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a && t && a.isWaiting) { a.compacting = true; send({ type: 'compacting', id: msg.id, active: true }); t.write('/compact\r'); } break; }
-    case 'termResize': { const t = terminals.get(msg.id); if (t) try { t.resize(msg.cols, msg.rows); } catch {} break; }
+    case 'termResize': { if (msg.cols > 0 && msg.rows > 0) lastTermSize.set(msg.id, { cols: msg.cols, rows: msg.rows }); const t = terminals.get(msg.id); if (t) try { t.resize(msg.cols, msg.rows); } catch {} break; }
     case 'browseFolder':
       dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: 'Select Project Folder' })
         .then(r => { if (!r.canceled && r.filePaths[0]) send({ type: 'folderSelected', path: r.filePaths[0] }); });
