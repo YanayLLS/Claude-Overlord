@@ -108,8 +108,8 @@ W.init = function (stageEl, h) {
   scene.add(new THREE.HemisphereLight(0xbcd6f0, 0x2a3b2c, 0.7));
   sun = new THREE.DirectionalLight(0xfff0d2, 1.6); sun.position.set(40, 70, 30); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 1, far: 220 }); sun.shadow.bias = -0.0006; scene.add(sun);
-  mats = { stone: mat(0x9a9285), stoneDark: mat(0x7a746a), wood: mat(0x8a6a48), scaffold: mat(0xc39a55), dark: mat(0x2b2f36), skin: mat(0xf0d2b0), iron: mat(0xb9c2cc, { metalness: .5, roughness: .4 }), gold: mat(0xe1b453, { metalness: .6, roughness: .35 }), plot: mat(0x3c4a52), yard: mat(0x46565f), wall: mat(0x8c8579), canvas: mat(0xe0d6bf), water: new THREE.MeshStandardMaterial({ color: 0x2c86a8, roughness: .3, metalness: .05 }) };
-  initPuffs(); buildTerrain();
+  mats = { stone: mat(0x9a9285), stoneDark: mat(0x7a746a), wood: mat(0x8a6a48), scaffold: mat(0xc39a55), dark: mat(0x2b2f36), skin: mat(0xf0d2b0), iron: mat(0xb9c2cc, { metalness: .5, roughness: .4 }), gold: mat(0xe1b453, { metalness: .6, roughness: .35 }), plot: mat(0x3c4a52), yard: mat(0x46565f), wall: mat(0x8c8579), canvas: mat(0xe0d6bf), water: new THREE.MeshStandardMaterial({ color: 0x2c86a8, roughness: .3, metalness: .05 }), window: new THREE.MeshStandardMaterial({ color: 0x2b2f36, emissive: 0xffb060, emissiveIntensity: 0, roughness: .6 }), torch: new THREE.MeshStandardMaterial({ color: 0xffb060, emissive: 0xff9a3c, emissiveIntensity: 0, transparent: true, opacity: 0 }) };
+  initPuffs(); buildTerrain(); initLife();
   card = document.createElement('div'); card.className = 'w-lab w-card'; card.hidden = true; labelsEl.appendChild(card);
   bindInput();
   ro = new ResizeObserver(resize); ro.observe(stage); resize();
@@ -118,7 +118,7 @@ W.init = function (stageEl, h) {
 W.dispose = function () {
   alive = false; cancelAnimationFrame(raf); if (ro) ro.disconnect(); ro = null;
   for (const s of tweens) tweens.delete(s);
-  sites.clear(); units.clear(); ships.clear(); machines.clear(); tents.clear(); anchors.clear(); pickables.clear(); lastSel = undefined; flags.length = 0; cranes.length = 0; beacons.length = 0; order.features.length = 0; order.shops.length = 0;
+  sites.clear(); units.clear(); ships.clear(); machines.clear(); tents.clear(); anchors.clear(); pickables.clear(); lastSel = undefined; flags.length = 0; life.clouds.length = 0; life.birds.length = 0; life.flies.length = 0; life.torches.length = 0; life.chimneys.length = 0; life.fish = null; cranes.length = 0; beacons.length = 0; order.features.length = 0; order.shops.length = 0;
   if (scene) scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } } });
   if (renderer) renderer.dispose(); renderer = scene = camera = null; terrain = null; puffs = null; selected = {}; hovered = null; snap = null;
   if (stage) stage.innerHTML = ''; if (hooks.miniSlot) hooks.miniSlot.innerHTML = '';
@@ -168,7 +168,7 @@ function layoutTerrain(siteList) {
     t.col.copy(biome === 'water' ? deep : biome === 'plot' ? plot : earth);
     if (t.h === 0 && th > 0) t.h = .01; // new land rises from the sea floor
   }
-  T.dirty = true;
+  T.dirty = true; if (life.flies.length) pickFlyHomes();
 }
 function updateTerrain(dt) {
   const T = terrain; let any = false; const k = reduceMotion() ? 1 : Math.min(1, dt * 4.2);
@@ -204,6 +204,9 @@ function tower(parent, x, z, built, color, active, prev) {
 function hall(parent, x, z, built, color, active, prev) {
   const g = new THREE.Group(); g.position.set(x, 0, z); parent.add(g);
   const walls = hexPrism(2.6, 2.1, mats.stone); walls.position.y = 1.05; const door = box(.8, 1.1, .1, mats.dark); door.position.set(0, .55, 2.3); const trim = hexPrism(2.75, .16, mat(color)); trim.position.y = 2.1; g.add(walls, door, trim);
+  const win = box(.5, .6, .12, mats.window); win.position.set(1.3, 1.1, 2.05); g.add(win); const win2 = box(.5, .6, .12, mats.window); win2.position.set(-1.3, 1.1, 2.05); g.add(win2);
+  // A chimney smokes while there is work going on inside.
+  if (active) { const ch = new THREE.Mesh(new THREE.CylinderGeometry(.22, .26, 1.4, 6), mats.stoneDark); ch.position.set(-1.4, 2.9, -.8); g.add(ch); const smoke = []; for (let k = 0; k < 4; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.14, 7, 6), new THREE.MeshStandardMaterial({ color: 0xcfd4da, transparent: true, opacity: .55 })); g.add(s); smoke.push({ m: s, ph: k / 4 }); } life.chimneys.push({ smoke, at: [-1.4, 3.6, -.8], g }); }
   if (built >= 1) { const roof = new THREE.Mesh(new THREE.ConeGeometry(2.9, 1.6, 6), mat(color)); roof.position.y = 2.9; roof.rotation.y = Math.PI / 6; roof.castShadow = true; g.add(roof); if (prev != null && prev < 1) { roof.scale.setScalar(.01); tween(600, k => roof.scale.setScalar(Math.max(.01, k)), null, easeOutBack); const wp = new THREE.Vector3(); roof.getWorldPosition(wp); burst(wp, hexStr(color), 18, 3, 3); } }
   else { g.add(hexEdge(2.9, 2.9, 0xc39a55), hexEdge(2.9, 3.8, 0xc39a55, .5)); const part = new THREE.Mesh(new THREE.ConeGeometry(2.9, 1.6, 6), mat(color)); part.scale.setScalar(Math.max(.01, built)); part.rotation.y = Math.PI / 6; part.position.y = 2.1 + .8 * built; part.castShadow = true; g.add(part);
     for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; const pole = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, 3.8, 5), mats.scaffold); pole.position.set(Math.cos(a) * 2.9, 1.9, Math.sin(a) * 2.9); g.add(pole); }
@@ -225,7 +228,7 @@ function compoundWalls(g, R, color, gate) {
     const cap = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 6), mat(color)); cap.position.set(x1, 4, z1); cap.castShadow = true; g.add(cap);
   }
   const fz = verts[1][1];
-  if (gate) { for (const sx of [-1, 1]) { const post = box(.6, 4.2, .6, mats.wood); post.position.set(sx * gate / 2, 2.6, fz); g.add(post); } const beam = box(gate + .6, .4, .6, mats.wood); beam.position.set(0, 4.8, fz); g.add(beam); const cloth = new THREE.Mesh(new THREE.PlaneGeometry(gate - .6, 1.6), mat(color, { side: THREE.DoubleSide, emissive: color, emissiveIntensity: .15 })); cloth.position.set(0, 3.8, fz + .05); g.add(cloth); }
+  if (gate) { for (const sx of [-1, 1]) { const post = box(.6, 4.2, .6, mats.wood); post.position.set(sx * gate / 2, 2.6, fz); g.add(post); const torch = new THREE.Mesh(new THREE.SphereGeometry(.28, 8, 6), mats.torch); torch.position.set(sx * gate / 2, 5.1, fz + .4); g.add(torch); life.torches.push(torch); } const beam = box(gate + .6, .4, .6, mats.wood); beam.position.set(0, 4.8, fz); g.add(beam); const cloth = new THREE.Mesh(new THREE.PlaneGeometry(gate - .6, 1.6), mat(color, { side: THREE.DoubleSide, emissive: color, emissiveIntensity: .15 })); cloth.position.set(0, 3.8, fz + .05); g.add(cloth); }
   const anchor = new THREE.Object3D(); anchor.position.set(0, 8.6, -fz); g.add(anchor); return { plat, anchor };
 }
 function textSprite(text, color, bg, size = .85) {
@@ -253,6 +256,7 @@ function planSites(s) {
   const RW = 11, sTotal = order.shops.length * 2 * RW + Math.max(0, order.shops.length - 1) * 3; x = -sTotal / 2;
   for (const cwd of order.shops) { plan.push({ key: 'w:' + cwd, kind: 'workshop', project: shops.find(p => p.cwd === cwd), x: x + RW, z: 20, R: RW }); x += 2 * RW + 3; }
   if (s.github) { const R = githubRadius(s); plan.push({ key: 'github', kind: 'github', x: sTotal / 2 + GAP + R, z: R - 2, R }); }
+  if (plan.length) plan.push({ key: 'treasury', kind: 'treasury', x: 0, z: 1.5, R: 4 }); // today's spend as a coin pile at the crossroads
   if (s.peers && s.peers.length) plan.push({ key: 'allies', kind: 'allies', x: -(sTotal / 2 + GAP + 13), z: 22, R: 13 });
   return plan;
 }
@@ -291,6 +295,7 @@ function createSite(p) {
     site.color = siteColor(p.key); const plat = hexPrism(p.R, .5, mats.plot); plat.position.y = .25; g.add(plat); g.add(hexEdge(p.R, .52, site.color, .8)); site.plat = plat; plat.userData.pick = { site };
   } else if (p.kind === 'github') buildGithub(site, p.R);
   else if (p.kind === 'allies') buildAllies(site, p.R);
+  else if (p.kind === 'treasury') { site.color = 0xe1b453; const plat = hexPrism(p.R, .5, mats.plot); plat.position.y = .25; g.add(plat); g.add(hexEdge(p.R, .52, 0xe1b453, .6)); site.plat = plat; plat.userData.pick = { site }; const an = new THREE.Object3D(); an.position.set(0, 4.2, 0); g.add(an); site.el = label('w-lot', 'Treasury', an, '#e1b453'); site.extra.coins = new THREE.Group(); g.add(site.extra.coins); site.extra.coinsN = -1; }
   // Spawn: rise from below with a dust burst.
   g.position.y = PLAT - 9; tween(900, k => { g.position.y = PLAT - 9 + 9 * k; }, () => burst(new THREE.Vector3(p.x, PLAT + .5, p.z), '#e6d7b8', 40, p.R * 1.2, 2), easeOutCubic, 250);
   sites.set(p.key, site); return site;
@@ -319,8 +324,10 @@ function syncSite(site, p, s) {
       syncLotUnits(lot, agents, s);
     });
     for (const [cwd, lot] of site.lots) if (!seen.has(cwd)) { for (const u of lot.units.values()) destroyUnit(u); dropLabel(lot.el); disposeObj(lot.g); site.lots.delete(cwd); }
-    if (site.el) { const all = repos.flatMap(r => s.agents.filter(a => a.cwd === r.cwd)); const built = repos.length ? repos.reduce((acc, r) => acc + (site.lots.get(r.cwd)?.built ?? 1), 0) / repos.length : 0; setLabel(site.el, `<div class="w-eyebrow">Feature</div><b>${esc(p.name)}</b><div class="w-prog"><i style="width:${Math.round(built * 100)}%"></i></div><span class="w-cnt">${all.length} unit${all.length === 1 ? '' : 's'} &middot; ${repos.length} repo${repos.length === 1 ? '' : 's'} &middot; ${Math.round(built * 100)}%</span>`); site.built = built; site.name = p.name; }
+    if (site.el) { const all = repos.flatMap(r => s.agents.filter(a => a.cwd === r.cwd)); const built = repos.length ? repos.reduce((acc, r) => acc + (site.lots.get(r.cwd)?.built ?? 1), 0) / repos.length : 0;
+      if (site.built != null && site.built < 1 && built >= 1) { const wp = new THREE.Vector3(); site.anchor.getWorldPosition(wp); fireworks(wp.setY(wp.y + 6), 6); } /* the feature's work is complete */ setLabel(site.el, `<div class="w-eyebrow">Feature</div><b>${esc(p.name)}</b><div class="w-prog"><i style="width:${Math.round(built * 100)}%"></i></div><span class="w-cnt">${all.length} unit${all.length === 1 ? '' : 's'} &middot; ${repos.length} repo${repos.length === 1 ? '' : 's'} &middot; ${Math.round(built * 100)}%</span>`); site.built = built; site.name = p.name; }
   } else if (p.kind === 'github') { if (site.R !== p.R) { destroySite(site); const ns = createSite(p); syncGithub(ns, s); return; } syncGithub(site, s); }
+  else if (p.kind === 'treasury') syncTreasury(site, s);
   else if (p.kind === 'allies') syncAllies(site, s);
 }
 
@@ -394,7 +401,10 @@ function syncLotUnits(lot, agents, s) {
     if (!u) { u = createUnit(a, lot, lx, lz, {}); lot.units.set(a.id, u); units.set(a.id, u); }
     else {
       const nk = unitKey(a); u.a = a;
-      if (u.key !== nk) { const wasStatus = u.key.split('|')[0]; disposeObj(u.inner); for (const k of ['disc', 'ring', 'arc', 'bubble', 'think']) if (u.p[k]) { disposeObj(u.p[k]); } u.walk = null; makeUnitBody(u); u.key = nk; ensureBench(u); u.pill.dy = (u.p.bubble || u.p.think ? 3.2 : 2.35) * u.scale; setLabel(u.pill, esc(a.title)); if (wasStatus !== a.status) { const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); wp.y += 1; burst(wp, hexStr(STATUS[a.status].hex), 14, 1, 2.5); } }
+      if (u.key !== nk) { const wasStatus = u.key.split('|')[0]; disposeObj(u.inner); for (const k of ['disc', 'ring', 'arc', 'bubble', 'think']) if (u.p[k]) { disposeObj(u.p[k]); } u.walk = null; if (u.say) { disposeObj(u.say); u.say = null; } makeUnitBody(u); u.key = nk; ensureBench(u); u.pill.dy = (u.p.bubble || u.p.think ? 3.2 : 2.35) * u.scale; setLabel(u.pill, esc(a.title));
+        if (wasStatus !== a.status) { const wp = new THREE.Vector3(); u.g.getWorldPosition(wp); wp.y += 1; burst(wp, hexStr(STATUS[a.status].hex), 14, 1, 2.5);
+          // Finished a job: confetti and a victory jump.
+          if (a.status === 'waiting' && ['active', 'settling', 'permission', 'question'].includes(wasStatus)) { confetti(wp); u.cheerUntil = performance.now() / 1000 + 3; } } }
       if (u.tx !== lx || u.tz !== lz) { const fx = u.tx, fz = u.tz; u.tx = lx; u.tz = lz; u.walk = null; tween(600, k => { u.g.position.set(fx + (lx - fx) * k, u.g.position.y, fz + (lz - fz) * k); if (u.bench) u.bench.position.set(u.g.position.x, .56, u.g.position.z); }); }
     }
     // Crew: a lead's team members stand behind it, smaller.
@@ -413,6 +423,7 @@ function syncLotUnits(lot, agents, s) {
   for (const [id, u] of lot.units) if (!seen.has(id)) destroyUnit(u);
 }
 function activity(a) {
+  if ((a.status === 'waiting' || a.status === 'idle') && a.idleMin >= IDLE_CALL_MIN) return `${a.status === 'waiting' ? 'Done' : 'Idle'} for ${a.idleMin >= 60 ? Math.floor(a.idleMin / 60) + 'h ' + (a.idleMin % 60) + 'm' : a.idleMin + 'm'} · waiting for orders`;
   switch (a.status) {
     case 'permission': return 'Waiting for approval' + (a.verb ? ': ' + a.verb : '');
     case 'question': return 'Waiting for your answer';
@@ -556,7 +567,7 @@ function makeMachineBody(m) {
 function destroyShip(sh, quiet) {
   ships.delete(sh.pr.key); dropLabel(sh.el); pickables.delete(sh.hit); const pi = flags.indexOf(sh.pennant); if (pi >= 0) flags.splice(pi, 1); if (selected.pr === sh.pr) { selected = {}; renderSel(); }
   const g = sh.g, x0 = g.position.x; if (quiet) { disposeObj(g); return; }
-  const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#9fd8e8', 14, 2, 1.5);
+  const wp = new THREE.Vector3(); g.getWorldPosition(wp); burst(wp, '#9fd8e8', 14, 2, 1.5); fireworks(wp.clone().setY(wp.y + 9), 4); // a PR closed or merged: send it off
   tween(1400, k => { g.position.x = x0 - 18 * k; g.position.y = .8 - k * k * 2.2; }, () => disposeObj(g), easeInCubic);
 }
 function destroyMachine(m, quiet) {
@@ -756,8 +767,12 @@ function animateUnit(u, t, dt) {
       const sp = s === 'active' ? 9 : 4, ph = Math.sin(T * sp + u.phase); m.armR.rotation.x = -1.2 + ph * .8; m.armL.rotation.x = .35; inner.position.y = Math.max(0, -ph) * .03;
       if (m.sparks && !reduceMotion()) { if (ph > .97 && !u.sparked) { u.sparked = true; for (const k of m.sparks) { k.life = .35 + Math.random() * .2; k.m.position.set((Math.random() - .5) * .3, .75, .95); k.v.set((Math.random() - .5) * 3, 2 + Math.random() * 2, (Math.random() - .5) * 3); } } if (ph < 0) u.sparked = false; for (const k of m.sparks) { if (k.life <= 0) { k.m.visible = false; continue; } k.life -= dt; k.m.visible = true; k.v.y -= 12 * dt; k.m.position.addScaledVector(k.v, dt); } } break; }
     case 'permission': case 'question': m.armR.rotation.x = -2.9 + Math.sin(T * 7 + u.phase) * .18; m.armR.rotation.z = -.35; inner.position.y = Math.abs(Math.sin(T * 5 + u.phase)) * .12; m.bubble.position.y = 2.55 * u.scale + Math.sin(T * 3 + u.phase) * .1; { const k = .5 + .5 * Math.sin(T * 4 + u.phase); m.disc.scale.setScalar(1 + k * .4); m.disc.material.opacity = .25 + k * .35; } break;
-    case 'waiting': inner.scale.y = u.scale * (1 + Math.sin(T * 2 + u.phase) * .015); m.armL.rotation.x = .2; m.armR.rotation.x = .2; m.head.rotation.y = Math.sin(T * .6 + u.phase) * .6; m.legL.rotation.x = 0; m.legR.rotation.x = 0; break;
-    case 'idle': inner.rotation.z = Math.sin(T * .9 + u.phase) * .06; m.head.rotation.x = .38 + Math.sin(T * 1.2) * .04; m.armL.rotation.x = .25; m.armR.rotation.x = .25; { const f = ((T * .35 + u.phase) % 1 + 1) % 1; m.bubble.position.set(.35 + f * .3, 2.1 + f * .9, 0); m.bubble.material.opacity = 1 - f; } break;
+    case 'waiting': case 'idle':
+      if (u.cheerUntil && t < u.cheerUntil) { m.armL.rotation.x = -3; m.armR.rotation.x = -3; inner.position.y = Math.abs(Math.sin(T * 6)) * .35; inner.rotation.y = u.face + Math.sin(T * 3) * .3; break; }
+      if (a.idleMin >= IDLE_CALL_MIN && !u.mini) { idleCall(u, t, T); break; }
+      if (s === 'waiting') { inner.scale.y = u.scale * (1 + Math.sin(T * 2 + u.phase) * .015); m.armL.rotation.x = .2; m.armR.rotation.x = .2; m.head.rotation.y = Math.sin(T * .6 + u.phase) * .6; m.legL.rotation.x = 0; m.legR.rotation.x = 0; }
+      else { inner.rotation.z = Math.sin(T * .9 + u.phase) * .06; m.head.rotation.x = .38 + Math.sin(T * 1.2) * .04; m.armL.rotation.x = .25; m.armR.rotation.x = .25; const f = ((T * .35 + u.phase) % 1 + 1) % 1; m.bubble.position.set(.35 + f * .3, 2.1 + f * .9, 0); m.bubble.material.opacity = 1 - f; }
+      break;
     case 'crashed': inner.rotation.z = -Math.PI / 2 + .1; inner.rotation.y = u.face + .6; inner.position.y = .38; m.armL.rotation.x = -.4; m.armR.rotation.x = .6; for (const sm of m.smoke) { const f = ((T * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(.4 + Math.sin(f * 6 + sm.ph * 9) * .15 - f * .3, .4 + f * 1.8, .2 + Math.cos(f * 5) * .15); sm.m.scale.setScalar(.6 + f * 1.3); sm.m.material.opacity = .65 * (1 - f); } m.bubble.position.set(0, 1.6, 0); break;
     case 'resuming': inner.rotation.y = T * 3.2; inner.position.y = .12 + Math.abs(Math.sin(T * 4)) * .14; m.arc.rotation.z = -T * 2.4; m.bubble.material.rotation = -T * 2; break;
   }
@@ -792,7 +807,7 @@ function tick(now) {
   runTweens(now); updateCamera(dt); updateTerrain(dt); runPuffs(dt);
   for (const u of units.values()) if (u.p) animateUnit(u, t, dt);
   if (!reduceMotion()) {
-    flags.forEach((f, i) => { f.rotation.y = Math.sin(t * 2.2 + i) * .18; }); for (const b of beacons) b.material.emissiveIntensity = 1 + Math.sin(t * 3) * .7;
+    flags.forEach((f, i) => { f.rotation.y = Math.sin(t * 2.2 + i) * .18; }); for (const b of beacons) b.material.emissiveIntensity = 1 + (b.userData.nightBoost || 0) + Math.sin(t * 3) * .7;
     for (const c of cranes) { c.jib.rotation.y = Math.sin(t * .35 + c.ph) * .9; c.block.position.y = -2.4 + Math.sin(t * .7 + c.ph) * .5; }
     for (const sh of ships.values()) { sh.g.position.y = sh.baseY + Math.sin(t * 1.1 + sh.ph) * .08; sh.g.rotation.z = Math.sin(t * .8 + sh.ph) * .035 + (sh.pr.behindBy ? .1 : 0); if (sh.smoke) for (const sm of sh.smoke) { const f = ((t * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(-1.5 + f * .4, 1.4 + f * 1.6, Math.sin(f * 7) * .2); sm.m.scale.setScalar(.6 + f * 1.2); sm.m.material.opacity = .6 * (1 - f); }
       if (sh.beam) { const k = .5 + .5 * Math.sin(t * 2.6 + sh.ph); sh.beam.material.opacity = .12 + k * .22; sh.beam.scale.set(1 + k * .25, 1, 1 + k * .25); sh.bubble.scale.setScalar(.9 + k * .35); sh.bubble.position.y = 5.9 + k * .3; for (const r of sh.ripples) { const f = ((t * .45 + r.ph) % 1 + 1) % 1; r.m.scale.setScalar(.6 + f * 1.6); r.m.material.opacity = .55 * (1 - f); } } }
@@ -800,8 +815,76 @@ function tick(now) {
     for (const s of sites.values()) if (s.extra.mark) s.extra.mark.position.y = s.extra.markY + Math.sin(t * 1.2) * .25;
     for (const m of machines.values()) if (m.flag && m.run.state === 'running') m.flag.material.rotation = -t * 2;
   }
+  updateLife(t, dt);
   renderer.render(scene, camera); updateLabels(); drawMinimap();
 }
+
+/* ────────────────────────── Life: daylight, creatures, idle calls, celebrations, treasury ────────────────────────── */
+const life = { clouds: [], birds: [], flies: [], fish: null, torches: [], chimneys: [], flyHomes: [], dayK: 1, lastDay: -1 };
+const IDLE_CALL_MIN = 5;
+const PHRASES = ['Standing by, commander.', 'Anything else?', 'Ready for orders!', 'All quiet here.', 'Shall I keep going?', 'Awaiting instructions…', 'Free for a new task.', 'Done. What next?', 'Idle hands, commander.'];
+function softSprite(w, h, draw, opacity = 1) { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d')); const tex = new THREE.CanvasTexture(c); return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity, depthWrite: false })); }
+function speechSprite(text) {
+  const s = softSprite(320, 80, g => { g.fillStyle = 'rgba(250,247,240,.97)'; g.beginPath(); g.roundRect(6, 6, 308, 56, 14); g.fill(); g.beginPath(); g.moveTo(40, 62); g.lineTo(52, 78); g.lineTo(64, 62); g.fill(); g.fillStyle = '#0b1118'; g.font = '600 24px "Segoe UI", system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 160, 34); });
+  s.scale.set(3.6, .9, 1); s.material.depthTest = false; s.renderOrder = 12; return s;
+}
+function initLife() {
+  const cloud = () => softSprite(256, 128, g => { for (const [x, y, r] of [[80, 70, 50], [130, 55, 60], [180, 72, 48], [110, 85, 40], [160, 88, 42]]) { const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,.9)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); } }, .55);
+  for (let i = 0; i < 7; i++) { const c = cloud(); c.scale.set(16 + Math.random() * 10, 8 + Math.random() * 4, 1); c.position.set((Math.random() - .5) * 220, 30 + Math.random() * 8, (Math.random() - .5) * 140); scene.add(c); life.clouds.push({ s: c, v: .5 + Math.random() * .5 }); }
+  const bird = () => softSprite(64, 32, g => { g.strokeStyle = '#1b2430'; g.lineWidth = 4; g.lineCap = 'round'; g.beginPath(); g.moveTo(6, 22); g.quadraticCurveTo(20, 6, 32, 20); g.quadraticCurveTo(44, 6, 58, 22); g.stroke(); });
+  for (let f = 0; f < 2; f++) { const flock = { birds: [], t: 8 + f * 25, dir: 1, z: 0, y: 15, wait: true }; for (let i = 0; i < 5; i++) { const b = bird(); b.scale.set(1.6, .8, 1); b.visible = false; scene.add(b); flock.birds.push({ s: b, ox: (i - 2) * 1.6, oz: Math.abs(i - 2) * 1.3, ph: Math.random() * 6 }); } life.birds.push(flock); }
+  for (let i = 0; i < 14; i++) { const col = ['#f9e2af', '#f5c2e7', '#94e2d5', '#fab387'][i % 4]; const s = softSprite(32, 32, g => { g.fillStyle = col; g.beginPath(); g.ellipse(10, 16, 8, 6, .4, 0, Math.PI * 2); g.fill(); g.beginPath(); g.ellipse(22, 16, 8, 6, -.4, 0, Math.PI * 2); g.fill(); }); s.scale.set(.5, .5, 1); s.visible = false; scene.add(s); life.flies.push({ s, ph: Math.random() * 6, home: null }); }
+  life.fish = { next: 6, s: null, t0: 0, from: null, ring: null };
+  const fs = softSprite(64, 32, g => { g.fillStyle = '#9fd8e8'; g.beginPath(); g.ellipse(26, 16, 18, 8, 0, 0, Math.PI * 2); g.fill(); g.beginPath(); g.moveTo(44, 16); g.lineTo(60, 6); g.lineTo(60, 26); g.closePath(); g.fill(); }); fs.scale.set(1.4, .7, 1); fs.visible = false; scene.add(fs); life.fish.s = fs;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(.4, .55, 32), new THREE.MeshBasicMaterial({ color: 0xbfe9f5, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })); ring.rotation.x = -Math.PI / 2; ring.visible = false; scene.add(ring); life.fish.ring = ring;
+}
+function pickFlyHomes() { const forest = terrain.tiles.filter(t => t.biome === 'forest' && t.th > 0); life.flyHomes = forest.length ? life.flies.map(() => forest[Math.floor(Math.random() * forest.length)]) : []; }
+// Sun, sky and lights follow the wall clock: full day around noon, lamps and torches after dusk.
+function updateDaylight() {
+  const d = new Date(), h = d.getHours() + d.getMinutes() / 60; if (Math.abs(h - life.lastDay) < 1 / 60) return; life.lastDay = h;
+  const ang = (h - 6) / 12 * Math.PI, dayK = Math.max(0, Math.min(1, (Math.sin(ang) + .12) / 1.12)); life.dayK = dayK;
+  sun.intensity = .22 + 1.4 * dayK; sun.color.setHex(0x8fa8ff).lerp(new THREE.Color(0xfff0d2), dayK);
+  sun.position.set(40 * Math.cos(ang) + 10, 18 + 56 * Math.max(0, Math.sin(ang)), 30);
+  const sky = new THREE.Color(0x05080e).lerp(new THREE.Color(0x121a24), dayK); scene.background.copy(sky); scene.fog.color.copy(sky);
+  scene.children.find(o => o.isHemisphereLight).intensity = .22 + .5 * dayK;
+  const night = 1 - dayK; mats.window.emissiveIntensity = night * 1.3; mats.torch.emissiveIntensity = night * 1.6; mats.torch.opacity = night;
+  for (const b of beacons) b.userData.nightBoost = night * .8;
+}
+function updateLife(t, dt) {
+  updateDaylight(); const rx = terrain.rx + 30, night = 1 - life.dayK;
+  for (const c of life.clouds) { c.s.position.x += c.v * dt; if (c.s.position.x > rx) c.s.position.x = -rx; }
+  for (const f of life.birds) {
+    if (f.wait) { f.t -= dt; if (f.t <= 0) { f.wait = false; f.dir = Math.random() < .5 ? 1 : -1; f.x = -f.dir * rx; f.z = (Math.random() - .5) * terrain.rz * 1.4; f.y = 13 + Math.random() * 5; f.birds.forEach(b => b.s.visible = true); } continue; }
+    f.x += f.dir * 7 * dt; if (Math.abs(f.x) > rx) { f.wait = true; f.t = 25 + Math.random() * 40; f.birds.forEach(b => b.s.visible = false); continue; }
+    for (const b of f.birds) { b.s.position.set(f.x + b.ox * f.dir, f.y + Math.sin(t * 1.3 + b.ph) * .6, f.z + b.oz); b.s.scale.set(1.6 * f.dir, .8 * (.55 + .45 * Math.abs(Math.sin(t * 9 + b.ph))), 1); }
+  }
+  if (life.flyHomes.length) for (let i = 0; i < life.flies.length; i++) { const fl = life.flies[i], home = life.flyHomes[i]; if (!home || night > .8) { fl.s.visible = false; continue; } fl.s.visible = true; fl.s.position.set(home.x + Math.sin(t * .9 + fl.ph) * 1.6 + Math.sin(t * 3.1 + fl.ph) * .3, home.h + 1.4 + Math.sin(t * 2.2 + fl.ph * 2) * .5, home.z + Math.cos(t * .7 + fl.ph) * 1.6); fl.s.scale.set(.5, .5 * (.5 + .5 * Math.abs(Math.sin(t * 14 + fl.ph))), 1); }
+  const gh = sites.get('github'); const F = life.fish;
+  if (F && gh) { F.next -= dt; if (F.next <= 0 && !F.from) { F.from = new THREE.Vector3(gh.x - gh.extra.cx + (Math.random() - .5) * gh.extra.hr, PLAT + .6, gh.z + 2 + (Math.random() - .5) * gh.extra.hr * .9); F.t0 = t; F.s.visible = true; F.ring.visible = true; F.ring.position.copy(F.from); F.ring.position.y += .02; }
+    if (F.from) { const k = (t - F.t0) / 1.1; if (k >= 1) { F.from = null; F.s.visible = false; F.ring.visible = false; F.next = 4 + Math.random() * 7; } else { F.s.position.set(F.from.x + k * 2.2, F.from.y + Math.sin(k * Math.PI) * 2.2, F.from.z); F.s.scale.set(1.4 * (k < .5 ? 1 : -1), .7, 1); F.s.material.rotation = (k < .5 ? 1 : -1) * (.6 - k * 1.2); F.ring.scale.setScalar(1 + k * 4); F.ring.material.opacity = .6 * (1 - k); } } }
+  for (let i = life.chimneys.length - 1; i >= 0; i--) { const c = life.chimneys[i]; if (!c.g.parent) { life.chimneys.splice(i, 1); continue; } for (const sm of c.smoke) { const f = ((t * .35 + sm.ph) % 1 + 1) % 1; sm.m.position.set(c.at[0] + Math.sin(f * 5 + sm.ph * 9) * .25, c.at[1] + f * 2.4, c.at[2]); sm.m.scale.setScalar(.5 + f * 1.6); sm.m.material.opacity = .5 * (1 - f); } }
+  if (night > 0) for (const tr of life.torches) tr.material.emissiveIntensity = night * (1.2 + Math.sin(t * 13 + tr.position.x) * .4 + Math.sin(t * 7.3) * .2);
+}
+// A unit that has waited long enough waves, hops and calls out for orders.
+function idleCall(u, t, T) {
+  const { p: m, inner } = u; const wave = Math.sin(T * .45 + u.phase) > .2;
+  if (wave) { m.armR.rotation.x = -2.7 + Math.sin(T * 9 + u.phase) * .45; m.armR.rotation.z = -.4; inner.position.y = Math.abs(Math.sin(T * 5 + u.phase)) * .18; }
+  else { m.armL.rotation.x = .2; m.armR.rotation.x = .2; m.head.rotation.y = Math.sin(T * .8 + u.phase) * .7; }
+  m.disc.material.opacity = .28 + (.5 + .5 * Math.sin(T * 3 + u.phase)) * .3;
+  if (u.say && t > u.sayUntil) { disposeObj(u.say); u.say = null; }
+  if (!u.say && t > (u.nextSay || u.phase * 3)) { u.say = speechSprite(PHRASES[Math.floor(Math.random() * PHRASES.length)]); u.say.position.set(1.2, 3.4 * u.scale, 0); u.g.add(u.say); u.sayUntil = t + 3.5; u.nextSay = t + 14 + Math.random() * 14; }
+  if (u.say) u.say.position.y = 3.4 * u.scale + Math.sin(t * 2) * .06;
+}
+function confetti(pos) { for (const c of ['#f9e2af', '#a6e3a1', '#89b4fa', '#f5c2e7', '#fab387']) burst(pos, c, 8, 1.4, 4); }
+function fireworks(pos, n) { for (let k = 0; k < n; k++) setTimeout(() => { if (!alive) return; const p = pos.clone().add(new THREE.Vector3((Math.random() - .5) * 8, Math.random() * 4, (Math.random() - .5) * 6)); burst(p, ['#f9e2af', '#a6e3a1', '#89b4fa', '#f5c2e7', '#fab387'][k % 5], 34, 2.5, 4); }, k * 380); }
+function syncTreasury(site, s) {
+  const n = Math.min(60, Math.round((s.cost || 0) * 6)); setLabel(site.el, `Treasury · ${esc(fmtMoney(s.cost || 0))} today`);
+  if (n === site.extra.coinsN) return; const grew = site.extra.coinsN >= 0 && n > site.extra.coinsN; site.extra.coinsN = n;
+  disposeObj(site.extra.coins); const g = new THREE.Group(); site.g.add(g); site.extra.coins = g;
+  for (let i = 0; i < n; i++) { const pile = i % 5, level = Math.floor(i / 5); const a = pile * 1.257; const coin = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, .12, 6), mats.gold); coin.position.set(Math.cos(a) * 1.5 * (pile ? 1 : 0), .56 + level * .13, Math.sin(a) * 1.5 * (pile ? 1 : 0)); coin.rotation.y = i * .3; coin.castShadow = true; g.add(coin); }
+  if (grew) { const wp = new THREE.Vector3(); site.g.getWorldPosition(wp); wp.y += 1.5; burst(wp, '#f9e2af', 10, 1.2, 3); }
+}
+function fmtMoney(c) { return c >= 1 ? '$' + c.toFixed(2) : '$' + c.toFixed(3); }
 
 // Re-render the selection bar from the current facts (after a failed action, for instance).
 W.refreshSel = function () { if (alive) renderSel(); };

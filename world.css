@@ -308,3 +308,5 @@ body.world-mode #term-header .term-title { display: none; }
 .w-site .w-alert.w-bad { color: var(--w-crashed); }
 @keyframes w-alert { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .w-site .w-alert { animation: none; } }
+.wr-row .wr-mini { width: 22px; height: 22px; clip-path: var(--w-hexw); background: rgba(255,255,255,.08); color: var(--dim); border: 0; cursor: pointer; font-size: 11px; }
+.wr-row .wr-mini:hover { background: rgba(243,139,168,.3); color: var(--text); }

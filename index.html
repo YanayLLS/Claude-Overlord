@@ -5626,17 +5626,20 @@ function worldSnapshot() {
   for (const cwd of knownProjects) addProject(cwd);
   for (const w of worktrees) addProject(w.path);
   for (const [, a] of agents) if (!a.archived) addProject(a.cwd || '(unknown)');
-  const agentRows = [];
+  const agentRows = [], now = Date.now();
   for (const [id, a] of agents) {
     if (a.archived) continue;
     const st = agentStatus(a), win = ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok);
+    // How long the agent has had nothing to do: the world uses it to make idle units call for orders.
+    if (st === 'waiting' || st === 'idle') { if (!_worldIdleSince.has(id)) _worldIdleSince.set(id, now); } else _worldIdleSince.delete(id);
+    const idleMin = _worldIdleSince.has(id) ? Math.floor((now - _worldIdleSince.get(id)) / 60000) : 0;
     const ctxPct = a.stats?.ctxTok ? Math.min(100, Math.round((a.stats.ctxTok / win) * 100)) : 0;
     const lead = [...teamMap.entries()].find(([, t]) => t.leadAgentId === id);
     let team = null;
     if (lead) { const [name, t] = lead; const members = t.members.filter(m => m.agentType !== 'team-lead').map(m => { const task = t.tasks.find(k => k.owner === m.name && k.status !== 'completed'); return { name: m.name, agentType: m.agentType || '', task: task ? (task.activeForm || task.subject || '') : '' }; }); team = { name, members, done: t.tasks.filter(k => k.status === 'completed').length, total: t.tasks.length }; }
     agentRows.push({ id, cwd: a.cwd || '(unknown)', title: a.customName ? a.title : (a.prompt || a.title || 'New agent'), status: needsAnswer(a) && st === 'permission' ? 'question' : st,
       verb: statusVerb(a, st), ctxPct, cost: calcCost(a.stats), costStr: fmtCost(calcCost(a.stats)), model: a.stats?.modelFamily || '', looping: !!a.looping,
-      tool: ([...a.tools.values()].find(t => !t.done) || {}).name || '',
+      tool: ([...a.tools.values()].find(t => !t.done) || {}).name || '', idleMin,
       crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', currentFileName: a.currentFileName || '', team });
   }
   // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
@@ -5655,8 +5658,10 @@ function worldSnapshot() {
   const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '', actor: r.actor || '', startedAt: r.startedAt || '',
     actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
-  return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length) };
+  let costToday = 0; for (const a of agentRows) costToday += a.cost;
+  return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, now };
 }
+const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
 function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
 // The roster extras the classic list doesn't have: header counters, a "Needs you" block on top,
 // and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
@@ -5675,6 +5680,7 @@ function renderWorldRoster(s) {
     if (a.status === 'permission' || a.status === 'question') attn += row(a.status === 'question' ? 'var(--purple)' : 'var(--yellow)', true, a.title, (a.status === 'question' ? 'Needs an answer' : 'Needs approval') + ' · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
     else if (a.status === 'crashed') attn += row('var(--red)', true, a.title, 'Crashed ' + esc(a.crash) + ' · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
     else if (a.ctxPct >= 80) attn += row('var(--red)', true, a.title, 'Context at ' + a.ctxPct + '% · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
+    else if (a.idleMin >= 5) attn += row('var(--dim)', false, a.title, 'Idle for ' + (a.idleMin >= 60 ? Math.floor(a.idleMin / 60) + 'h ' + (a.idleMin % 60) + 'm' : a.idleMin + 'm') + ' · give an order or close · ' + esc(projLabel(a.cwd)), `<button class="wr-mini" title="Close this agent" onclick="event.stopPropagation();closeAgent(${a.id})">✕</button>`, agentGo(a.id) + ";openTerm(" + a.id + ");switchTermTab('conversation')", a.id);
   }
   for (const r of s.runs) if (r.state === 'failure') attn += row('var(--red)', false, r.name + ' failed · ' + r.repo, esc(r.branch || r.title || ''), '', `openActionRun('${escAttr(r.url).replace(/'/g, '\\\'')}')`);
   for (const p of s.prs) if (p.state === 'changes' || p.state === 'conflict' || p.behindBy > 0 || p.needsApproval) attn += row(p.state === 'changes' || p.state === 'conflict' ? 'var(--red)' : 'var(--yellow)', false, '#' + p.number + ' ' + p.title, p.state === 'conflict' ? 'Conflicts with ' + esc(p.baseRef) : p.state === 'changes' ? 'Changes requested' : p.behindBy > 0 ? p.behindBy + ' commit' + (p.behindBy === 1 ? '' : 's') + ' behind ' + esc(p.baseRef) : 'Waiting for your review', '', `openPr('${escAttr(p.url).replace(/'/g, '\\\'')}')`);
