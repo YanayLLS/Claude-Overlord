@@ -5644,7 +5644,7 @@ function worldSnapshot() {
       crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', currentFileName: a.currentFileName || '', team });
   }
   // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
-  const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.checks === 'FAILURE') return 'blocked'; if (p.mergeState === 'BEHIND' || p.behindBy > 0) return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
+  const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.checks === 'fail') return 'blocked'; if (p.mergeState === 'BEHIND' || p.behindBy > 0) return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
   // The ship's action buttons are the PR dropdown's own buttons (same gating, same handlers), just shown in the selection bar.
   const prWorldActions = (p) => {
     const u = p.url.replace(/'/g, "\\'"), k = p.key.replace(/'/g, "\\'"), act = prBranchAction(p); // pr-behind.js

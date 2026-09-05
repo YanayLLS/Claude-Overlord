@@ -502,10 +502,10 @@ function makeShipBody(sh) {
   const crates = Math.min(6, Math.ceil((pr.commitCount || 1) / 4)); for (let c = 0; c < crates; c++) { const cr = box(.55, .55, .55, c % 2 ? mats.wood : mats.scaffold); cr.position.set(-1.6 + (c % 3) * .7, 1.36 + Math.floor(c / 3) * .56, c < 3 ? .45 : -.45); sg.add(cr); }
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(.07, .09, 4, 6), mats.dark); mast.position.set(.4, 3, 0); sg.add(mast);
   const sail = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), mat(st.color, { side: THREE.DoubleSide, emissive: st.color, emissiveIntensity: .1 })); sail.position.set(.4, 3.2, 0); sail.rotation.y = Math.PI / 2; sg.add(sail);
-  const pc = pr.checks === 'SUCCESS' ? 0xa6e3a1 : pr.checks === 'FAILURE' ? 0xf38ba8 : pr.checks === 'PENDING' ? 0xf9e2af : 0x7d8ca3;
+  const pc = pr.checks === 'pass' ? 0xa6e3a1 : pr.checks === 'fail' ? 0xf38ba8 : pr.checks === 'pending' ? 0xf9e2af : 0x7d8ca3; // pass | fail | pending | none, as the PR badge reports them
   const pennant = new THREE.Mesh(new THREE.PlaneGeometry(.9, .4), mat(pc, { side: THREE.DoubleSide })); pennant.position.set(.85, 4.9, 0); sg.add(pennant); flags.push(pennant); sh.pennant = pennant;
   if (pr.behindBy > 0) { const chain = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, 2.6, 4), mats.iron); chain.position.set(-2.6, .3, .6); chain.rotation.z = .6; sg.add(chain); }
-  sh.smoke = null; if (pr.checks === 'FAILURE' || pr.state === 'conflict') { sh.smoke = []; for (let k = 0; k < 4; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.16, 7, 6), new THREE.MeshStandardMaterial({ color: 0x4a3a3a, transparent: true, opacity: .7 })); sg.add(s); sh.smoke.push({ m: s, ph: k / 4 }); } }
+  sh.smoke = null; if (pr.checks === 'fail' || pr.state === 'conflict') { sh.smoke = []; for (let k = 0; k < 4; k++) { const s = new THREE.Mesh(new THREE.SphereGeometry(.16, 7, 6), new THREE.MeshStandardMaterial({ color: 0x4a3a3a, transparent: true, opacity: .7 })); sg.add(s); sh.smoke.push({ m: s, ph: k / 4 }); } }
   // Status flag at the masthead: readable from any distance.
   const [gl, gc] = PR_GLYPH(pr); const b = textSprite(gl, gc, 'rgba(8,12,18,.92)', .9); b.position.set(.4, 5.9, 0); sg.add(b); sh.bubble = b;
   // A ship that waits on the commander signals: a light column over the mast and ripples in the water.
