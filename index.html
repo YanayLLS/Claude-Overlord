@@ -5640,6 +5640,7 @@ function worldSnapshot() {
     agentRows.push({ id, cwd: a.cwd || '(unknown)', title: a.customName ? a.title : (a.prompt || a.title || 'New agent'), status: needsAnswer(a) && st === 'permission' ? 'question' : st,
       verb: statusVerb(a, st), ctxPct, cost: calcCost(a.stats), costStr: fmtCost(calcCost(a.stats)), model: a.stats?.modelFamily || '', looping: !!a.looping,
       tool: ([...a.tools.values()].find(t => !t.done) || {}).name || '', idleMin,
+      turns: a.stats?.turns || 0, toolsUsed: Object.values(a.stats?.tools || {}).reduce((x, y) => x + (y || 0), 0), tokIn: a.stats?.inTok || 0, tokOut: a.stats?.outTok || 0,
       crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', currentFileName: a.currentFileName || '', team });
   }
   // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
@@ -5658,8 +5659,8 @@ function worldSnapshot() {
   const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '', actor: r.actor || '', startedAt: r.startedAt || '',
     actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
-  let costToday = 0; for (const a of agentRows) costToday += a.cost;
-  return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, now };
+  let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
+  return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now };
 }
 const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
 function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
