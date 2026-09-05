@@ -12,7 +12,10 @@
 #world-stage { display: none; position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); cursor: default; }
 body.world-mode #world-stage { display: block; }
 body.world-mode #list-col { flex: none; width: 300px; border-right: 1px solid var(--border); }
-body.world-mode #term { width: 46%; }
+/* The stage always keeps room to be seen: the terminal pane yields first, then the roster. */
+body.world-mode #world-stage { min-width: 340px; }
+body.world-mode #term { width: 46%; max-width: calc(100vw - 300px - 340px - 6px); }
+@media (max-width: 1100px) { body.world-mode #list-col { width: 240px; } body.world-mode #term { max-width: calc(100vw - 240px - 340px - 6px); } }
 #hdr-world.on { background: var(--w-gold); color: #1a1408; }
 #world-stage.grabbing { cursor: grabbing; }
 #world-stage canvas.gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -143,3 +146,44 @@ body.world-mode #term-header .term-tab { font-family: var(--w-display); font-siz
 body.world-mode #term-header .term-tab.active { color: var(--w-gold); border-bottom-color: var(--w-gold); }
 body.world-mode #term-header .term-title { font-size: 11px; }
 body.world-mode #resize { border-left-color: var(--w-line-hi); }
+
+/* ── Roster extras (world mode only): header counters, Needs-you block, GitHub and peers sections ── */
+#world-counters, #world-attn, #world-extra { display: none; }
+body.world-mode #world-counters { display: flex; gap: 3px; align-items: center; }
+body.world-mode #world-attn, body.world-mode #world-extra { display: block; }
+body.world-mode #world-attn:empty, body.world-mode #world-extra:empty { display: none; }
+body.world-mode #header h1 { flex: 0 0 auto; margin-right: 6px; }
+body.world-mode #header h1::after { content: 'Command'; margin-left: 8px; font-size: 11px; letter-spacing: .22em; color: var(--w-gold); font-weight: 500; }
+body.world-mode #headerBadges { display: none; }
+body.world-mode #bookmarks { margin-left: auto; }
+.wc { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 13px; clip-path: var(--w-hexw); background: rgba(0,0,0,.35); font-size: 11px; color: var(--dim); white-space: nowrap; -webkit-app-region: no-drag; }
+.wc[onclick] { cursor: pointer; } .wc[onclick]:hover { background: rgba(255,255,255,.08); }
+.wc i { width: 9px; height: 10px; clip-path: var(--w-hex); background: var(--c); flex: none; }
+.wc i.coin { width: 11px; height: 12px; background: linear-gradient(135deg, #ffe3a0, var(--w-gold) 55%, #8f6d2b); }
+.wc b { font-family: var(--w-mono); font-size: 13px; font-weight: 500; color: var(--text); }
+.wc.wc-gold b { color: var(--w-gold); }
+.wr-sec { padding: 6px 0 4px; }
+.wr-sec h3 { margin: 0; padding: 5px 12px; display: flex; align-items: center; gap: 8px; font-family: var(--w-display); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--c, var(--dim)); font-weight: 600; }
+.wr-sec h3 .hexi { width: 9px; height: 10px; clip-path: var(--w-hex); background: currentColor; flex: none; }
+.wr-sec h3 .n { margin-left: auto; font-family: var(--w-mono); font-size: 10px; letter-spacing: 0; color: var(--dim); font-weight: 400; }
+.wr-attn { background: rgba(249,226,175,.05); border-bottom: 1px solid var(--w-line); padding-bottom: 6px; }
+.wr-attn h3 { color: var(--w-perm); }
+.wr-lot { padding: 6px 12px 2px 22px; font-size: 11px; color: var(--dim); }
+.wr-empty { padding: 3px 12px 6px 22px; font-size: 11px; color: var(--dim); opacity: .7; }
+.wr-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; padding: 5px 12px 5px 22px; cursor: pointer; border-left: 2px solid transparent; }
+.wr-row:hover { background: rgba(255,255,255,.04); }
+.wr-dot { width: 9px; height: 10px; clip-path: var(--w-hex); background: var(--c); justify-self: center; }
+.wr-dot.pulse { animation: wr-pulse 1.2s ease-in-out infinite; }
+@keyframes wr-pulse { 50% { opacity: .35; } }
+.wr-txt { min-width: 0; }
+.wr-txt b { display: block; font-weight: 500; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wr-txt small { display: block; font-size: 11px; color: var(--c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.wr-ctx { font-family: var(--w-mono); font-size: 10px; color: var(--dim); }
+body.world-mode #filter-bar { display: flex; }
+@media (prefers-reduced-motion: reduce) { .wr-dot.pulse { animation: none; } }
+
+/* Selection bar on a narrow stage: keep the name readable, let the buttons wrap under it. */
+#world-stage { container-type: inline-size; }
+.w-main { min-width: 160px; }
+@container (max-width: 900px) { #world-sel { flex-wrap: wrap; } .w-orders { margin-left: auto; flex-basis: 100%; justify-content: flex-end; } .w-close { position: absolute; right: 8px; top: 8px; } }
+@container (max-width: 640px) { .w-stats .w-stat:nth-child(n+3) { display: none; } }

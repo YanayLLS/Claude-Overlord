@@ -1126,6 +1126,7 @@ button:focus-visible { outline-offset:0; }
   <div id="header">
     <h1><span>Overlord</span> <span class="app-ver"></span></h1>
     <div id="headerBadges"></div>
+    <div id="world-counters"></div>
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
@@ -1147,7 +1148,9 @@ button:focus-visible { outline-offset:0; }
       <span id="filter-count"></span>
       <button id="filter-close" onclick="closeFilter()" aria-label="Close filter">&times;</button>
     </div>
+    <div id="world-attn"></div>
     <div id="list"></div>
+    <div id="world-extra"></div>
     <div id="pr-dropdown" style="display:none"></div>
     <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
     <div id="actions-dropdown" style="display:none"></div>
@@ -5619,7 +5622,52 @@ function worldSnapshot() {
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   return { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length) };
 }
-function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { window.World.sync(worldSnapshot()); } catch (e) { console.error('[world] sync failed', e); } }
+function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); } catch (e) { console.error('[world] sync failed', e); } }
+// The roster extras the classic list doesn't have: header counters, a "Needs you" block on top,
+// and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
+function renderWorldRoster(s) {
+  const st = { work: 0, need: 0, done: 0, down: 0 }; let cost = 0;
+  for (const a of s.agents) { if (a.status === 'active' || a.status === 'settling' || a.status === 'resuming') st.work++; else if (a.status === 'permission' || a.status === 'question') st.need++; else if (a.status === 'waiting') st.done++; else if (a.status === 'crashed') st.down++; cost += a.cost; }
+  const chip = (c, n, label, onclick, title) => `<span class="wc" style="--c:${c}" ${onclick ? `onclick="${onclick}"` : ''} title="${escAttr(title || label)}"><i></i><b>${n}</b>${label}</span>`;
+  document.getElementById('world-counters').innerHTML =
+    chip('var(--accent)', st.work, 'working') + chip('var(--yellow)', st.need, 'need you', 'focusNextPerm()', 'Units waiting for approval or an answer — click to jump') + chip('var(--green)', st.done, 'done') + chip('var(--red)', st.down, 'down')
+    + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`;
+  const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
+  const agentGo = (id) => `focusAgent(${id});window.World&&World.focus(${id})`;
+  const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
+  let attn = '';
+  for (const a of s.agents) {
+    if (a.status === 'permission' || a.status === 'question') attn += row(a.status === 'question' ? 'var(--purple)' : 'var(--yellow)', true, a.title, (a.status === 'question' ? 'Needs an answer' : 'Needs approval') + ' · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
+    else if (a.status === 'crashed') attn += row('var(--red)', true, a.title, 'Crashed ' + esc(a.crash) + ' · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
+    else if (a.ctxPct >= 80) attn += row('var(--red)', true, a.title, 'Context at ' + a.ctxPct + '% · ' + esc(projLabel(a.cwd)), '', agentGo(a.id), a.id);
+  }
+  for (const r of s.runs) if (r.state === 'failure') attn += row('var(--red)', false, r.name + ' failed · ' + r.repo, esc(r.branch || r.title || ''), '', `openActionRun('${escAttr(r.url).replace(/'/g, '\\\'')}')`);
+  for (const p of s.prs) if (p.state === 'changes' || p.state === 'conflict' || p.behindBy > 0 || p.needsApproval) attn += row(p.state === 'changes' || p.state === 'conflict' ? 'var(--red)' : 'var(--yellow)', false, '#' + p.number + ' ' + p.title, p.state === 'conflict' ? 'Conflicts with ' + esc(p.baseRef) : p.state === 'changes' ? 'Changes requested' : p.behindBy > 0 ? p.behindBy + ' commit' + (p.behindBy === 1 ? '' : 's') + ' behind ' + esc(p.baseRef) : 'Waiting for your review', '', `openPr('${escAttr(p.url).replace(/'/g, '\\\'')}')`);
+  const attnEl = document.getElementById('world-attn'); const attnN = (attn.match(/class="wr-row"/g) || []).length;
+  attnEl.innerHTML = attn ? `<div class="wr-sec wr-attn"><h3><i class="hexi"></i>Needs you<span class="n">${attnN}</span></h3>${attn}</div>` : '';
+  let extra = '';
+  if (s.github) {
+    const prSt = { ready: ['Ready to merge', 'var(--green)'], open: ['Open', 'var(--cyan)'], behind: ['Behind base', 'var(--yellow)'], changes: ['Changes requested', 'var(--red)'], conflict: ['Conflicts', 'var(--red)'], blocked: ['Blocked', 'var(--peach)'] };
+    const runSt = { running: ['Running', 'var(--yellow)'], success: ['Passed', 'var(--green)'], failure: ['Failed', 'var(--red)'], cancelled: ['Cancelled', 'var(--dim)'], none: ['No runs yet', 'var(--dim)'] };
+    extra += `<div class="wr-sec"><h3 style="--c:#c9d1d9"><i class="hexi"></i>GitHub quarter<span class="n">${s.prs.length} PR${s.prs.length === 1 ? '' : 's'} · ${s.runs.length} run${s.runs.length === 1 ? '' : 's'}</span></h3>`;
+    extra += `<div class="wr-lot" style="color:#3fbfd6">Docks · pull requests</div>`;
+    if (!s.prs.length) extra += `<div class="wr-empty">${prSettings.enabled ? 'No open PRs' : 'PR tracking is off — enable it in Settings'}</div>`;
+    for (const p of s.prs) { const [l, c] = prSt[p.state] || prSt.open; extra += row(c, p.state === 'open', '#' + p.number + ' ' + p.title, esc(l) + (p.checks ? ' · checks ' + esc(p.checks.toLowerCase()) : '') + (p.behindBy ? ' · ' + p.behindBy + ' behind' : ''), '+' + p.commitCount, `window.World&&World.focusKey('pr','${escAttr(p.key).replace(/'/g, '\\\'')}')`); }
+    extra += `<div class="wr-lot" style="color:#a78bfa">Proving grounds · Actions</div>`;
+    if (!s.runs.length) extra += `<div class="wr-empty">${actionsSettings.enabled ? 'No tracked runs yet' : 'Actions tracking is off — add workflows in Settings'}</div>`;
+    for (const r of s.runs) { const [l, c] = runSt[r.state] || runSt.none; extra += row(c, r.state === 'running', r.name + ' · ' + r.repo, esc(l) + (r.branch ? ' · ⑂ ' + esc(r.branch) : ''), r.runNumber ? '#' + r.runNumber : '', `window.World&&World.focusKey('run','${escAttr(r.key).replace(/'/g, '\\\'')}')`); }
+    extra += `</div>`;
+  }
+  if (s.peers.length) {
+    extra += `<div class="wr-sec"><h3 style="--c:var(--accent)"><i class="hexi"></i>Allied camp · peers<span class="n">${s.peers.filter(p => p.connected).length}/${s.peers.length} online</span></h3>`;
+    for (const p of s.peers) extra += row(p.connected ? 'var(--accent)' : 'var(--dim)', false, p.name, p.connected ? 'online' + (p.agents ? ' · ' + p.agents + ' unit' + (p.agents === 1 ? '' : 's') + ' afield' : '') : 'offline', '', `openChat({type:'peer',id:'${escAttr(p.name).toLowerCase().replace(/'/g, '\\\'')}'})`);
+    extra += `</div>`;
+  }
+  document.getElementById('world-extra').innerHTML = extra;
+}
+// Hovering an agent card in the list lights its unit on the map.
+document.getElementById('list').addEventListener('mouseover', (e) => { if (!worldView || !window.World) return; const card = e.target.closest('.agent[data-id]'); if (card) World.hover(+card.dataset.id); });
+document.getElementById('list').addEventListener('mouseleave', () => { if (worldView && window.World) World.hover(null); });
 
 // Initial render
 render();

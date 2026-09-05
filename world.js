@@ -540,6 +540,13 @@ W.sync = function (s) {
   for (const p of plan) { seen.add(p.key); let site = sites.get(p.key); if (!site) site = createSite(p); syncSite(site, p, s); }
   for (const [k, site] of sites) if (!seen.has(k)) destroySite(site);
   layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R })));
+  // Until the commander pans or zooms, keep the whole settlement framed.
+  if (!cam.userMoved && sites.size) {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const st of sites.values()) { minX = Math.min(minX, st.x - st.R); maxX = Math.max(maxX, st.x + st.R); minZ = Math.min(minZ, st.z - st.R); maxZ = Math.max(maxZ, st.z + st.R); }
+    const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2 + 2, span = Math.max(maxX - minX, (maxZ - minZ) * 1.6), zoom = Math.min(3, Math.max(1.1, span / 34));
+    const fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom; if (Math.abs(fx - cx) > .5 || Math.abs(fz - cz) > .5 || Math.abs(fzoom - zoom) > .05) tween(900, k => { if (cam.userMoved) return; cam.target.x = fx + (cx - fx) * k; cam.target.z = fz + (cz - fz) * k; cam.zoom = fzoom + (zoom - fzoom) * k; });
+  }
   // Selection follows the app's selected agent whenever that changes; a ship or machine picked here stays picked otherwise.
   if (s.selectedId !== lastSel) { lastSel = s.selectedId; const u = s.selectedId != null ? units.get(s.selectedId) : null; if (u) select({ unit: u }); else if (selected.unit) select({}); }
   else if (selected.unit) renderSel(); // stats may have changed
@@ -567,7 +574,7 @@ function bindInput() {
   canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, moved: false, btn: e.button }; canvas.setPointerCapture(e.pointerId); });
   canvas.addEventListener('pointermove', e => {
     if (drag) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-      if (drag.moved) { stage.classList.add('grabbing'); const k = .034 * cam.zoom, s = Math.sin(cam.yaw), c = Math.cos(cam.yaw); cam.target.x -= (dx * c + dy * s) * k; cam.target.z -= (dy * c - dx * s) * k; drag.x = e.clientX; drag.y = e.clientY; } return; }
+      if (drag.moved) { stage.classList.add('grabbing'); cam.userMoved = true; const k = .034 * cam.zoom, s = Math.sin(cam.yaw), c = Math.cos(cam.yaw); cam.target.x -= (dx * c + dy * s) * k; cam.target.z -= (dy * c - dx * s) * k; drag.x = e.clientX; drag.y = e.clientY; } return; }
     const r = pick(e); hovered = r.unit || null; canvas.style.cursor = Object.keys(r).length ? 'pointer' : 'default';
   });
   canvas.addEventListener('pointerup', e => {
@@ -579,10 +586,10 @@ function bindInput() {
     else if (r.pr) select({ pr: r.pr }); else if (r.run) select({ run: r.run }); else if (r.peer) select({ peer: r.peer }); else if (r.site) select({ site: r.site }); else select({});
   });
   canvas.addEventListener('dblclick', e => { const r = pick(e); if (r.unit && !r.unit.mini) { flyTo(r.unit.g); hooks.openAgent && hooks.openAgent(r.unit.a.id); } else if (r.pr) hooks.openPr && hooks.openPr(r.pr.url); else if (r.run) hooks.openRun && hooks.openRun(r.run.url); else if (r.peer) hooks.openChat && hooks.openChat(r.peer.name); });
-  canvas.addEventListener('wheel', e => { e.preventDefault(); if (e.ctrlKey) return; cam.zoom = Math.min(3.2, Math.max(.4, cam.zoom * (e.deltaY > 0 ? 1.1 : .91))); }, { passive: false });
-  const onKey = e => { if (!cam.hover || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.ctrlKey || e.metaKey || e.altKey) return; const k = e.key.toLowerCase(); if ('wasdqe'.includes(k) || k.startsWith('arrow')) { keys.add(k); } };
+  canvas.addEventListener('wheel', e => { e.preventDefault(); if (e.ctrlKey) return; cam.userMoved = true; cam.zoom = Math.min(3.2, Math.max(.4, cam.zoom * (e.deltaY > 0 ? 1.1 : .91))); }, { passive: false });
+  const onKey = e => { if (!cam.hover || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.ctrlKey || e.metaKey || e.altKey) return; const k = e.key.toLowerCase(); if ('wasdqe'.includes(k) || k.startsWith('arrow')) { keys.add(k); cam.userMoved = true; } };
   addEventListener('keydown', onKey); addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
-  miniEl.addEventListener('pointerdown', e => { const r = miniEl.getBoundingClientRect(); cam.target.x = ((e.clientX - r.left) / r.width - .5) * terrain.rx * 2.3; cam.target.z = ((e.clientY - r.top) / r.height - .5) * terrain.rz * 2.3; });
+  miniEl.addEventListener('pointerdown', e => { cam.userMoved = true; const r = miniEl.getBoundingClientRect(); cam.target.x = ((e.clientX - r.left) / r.width - .5) * terrain.rx * 2.3; cam.target.z = ((e.clientY - r.top) / r.height - .5) * terrain.rz * 2.3; });
   cam.keys = keys;
 }
 function updateCamera(dt) {
@@ -701,6 +708,11 @@ function tick(now) {
   }
   renderer.render(scene, camera); updateLabels(); drawMinimap();
 }
+
+// Roster hooks: the list on the left can highlight and fly to a unit.
+W.hover = function (id) { if (!alive) return; hovered = id == null ? null : (units.get(id) || null); };
+W.focus = function (id) { if (!alive) return; const u = units.get(id); if (u) { cam.userMoved = true; flyTo(u.g); } };
+W.focusKey = function (kind, key) { if (!alive) return; const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
 
 window.World = W;
 })();
