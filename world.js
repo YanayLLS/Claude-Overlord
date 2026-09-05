@@ -969,7 +969,7 @@ function setBanner(A, text) {
 }
 // Medics: one per lot with a unit down, running between the fallen until they resume or are closed.
 function updateMedics(t, dt) {
-  for (const lot of lots) {
+  for (const site of sites.values()) for (const lot of site.lots.values()) {
     const fallen = [...lot.units.values()].filter(u => u.a.status === 'crashed' || u.a.status === 'resuming');
     let md = life.medics.get(lot);
     if (fallen.length && !md) {
