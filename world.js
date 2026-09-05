@@ -678,6 +678,7 @@ W.sync = function (s) {
   else if (selected.run) { const nr = (s.runs || []).find(r => r.key === selected.run.key); if (!nr) select({}); else { const sig = nr.actionsHtml + nr.state + nr.runNumber; if (selected.run !== nr || sig !== selSig) { selected.run = nr; selSig = sig; renderSel(); } } }
   else if (selected.peer) { const npr = (s.peers || []).find(p => p.name === selected.peer.name); if (!npr) select({}); else { const sig = String(npr.connected) + npr.agents; if (selected.peer !== npr || sig !== selSig) { selected.peer = npr; selSig = sig; renderSel(); } } }
   else if (selected.site && !sites.has(selected.site.key)) select({});
+  else if (selected.site) renderSel(); // balance, build timers and upgrade buttons move with every sync
   detectAwards(s);
 };
 
@@ -1002,10 +1003,10 @@ function updateDaylight() {
   const d = new Date(), h = d.getHours() + d.getMinutes() / 60; if (Math.abs(h - life.lastDay) < 1 / 60) return; life.lastDay = h;
   const ang = (h - 6) / 12 * Math.PI, dayK = Math.max(0, Math.min(1, (Math.sin(ang) + .12) / 1.12)); life.dayK = dayK;
   // Night is a blue hour, never black: this is a work surface first. Lamps, windows and torches still carry the mood.
-  sun.intensity = 1.05 + .55 * dayK; sun.color.setHex(0xc9d6ff).lerp(new THREE.Color(0xfff0d2), dayK);
+  sun.intensity = 1.25 + .4 * dayK; sun.color.setHex(0xc9d6ff).lerp(new THREE.Color(0xfff0d2), dayK);
   sun.position.set(40 * Math.cos(ang) + 10, 34 + 40 * Math.max(0, Math.sin(ang)), 30);
-  const sky = new THREE.Color(0x0e1622).lerp(new THREE.Color(0x121a24), dayK); scene.background.copy(sky); scene.fog.color.copy(sky); life.sky = sky; life.sunBase = sun.intensity;
-  scene.children.find(o => o.isHemisphereLight).intensity = .6 + .15 * dayK;
+  const sky = new THREE.Color(0x111a27).lerp(new THREE.Color(0x121a24), dayK); scene.background.copy(sky); scene.fog.color.copy(sky); life.sky = sky; life.sunBase = sun.intensity;
+  scene.children.find(o => o.isHemisphereLight).intensity = .78 + .1 * dayK;
   const night = 1 - dayK; mats.window.emissiveIntensity = night * 1.3; mats.torch.emissiveIntensity = night * 1.6; mats.torch.opacity = night;
   for (const b of beacons) b.userData.nightBoost = night * .8;
 }
