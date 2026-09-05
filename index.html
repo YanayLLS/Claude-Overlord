@@ -5603,6 +5603,7 @@ function setWorldView(on, persist = true) {
       award: (kind, amount, label) => worldAward(kind, amount, label),
       spend: (cost, patch) => worldSpend(cost, patch),
       finishBuilds: () => worldFinishBuilds(),
+      resetEconomy: () => { if (!worldDev) return; worldEconomy = worldEconomyDefault(); worldEconomySave(); worldSync(); },
     }); window.World.ready = true; worldDailyStreak(); worldSync(); }
     catch (e) {
       // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.

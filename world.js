@@ -372,6 +372,7 @@ function syncSite(site, p, s) {
       syncLotUnits(lot, agents, s);
     });
     for (const [cwd, lot] of site.lots) if (!seen.has(cwd)) { for (const u of lot.units.values()) destroyUnit(u); dropLabel(lot.el); disposeObj(lot.g); site.lots.delete(cwd); }
+    if (site.anchor) { let tallest = 0; for (const lot of site.lots.values()) if (lot.building) tallest = Math.max(tallest, lot.building.userData.topY + lot.building.position.y); site.anchor.position.y = Math.max(9, tallest + 2.5); } // the banner clears the tallest tower
     if (site.el) { const all = repos.flatMap(r => s.agents.filter(a => a.cwd === r.cwd)); const built = repos.length ? repos.reduce((acc, r) => acc + (site.lots.get(r.cwd)?.built ?? 1), 0) / repos.length : 0;
       const tierName = (p.kind === 'feature' ? TOWER_TIERS : HALL_TIERS)[tierOf(site.key) - 1]; if (site.built != null && site.built < 1 && built >= 1) { const wp = new THREE.Vector3(); site.anchor.getWorldPosition(wp); fireworks(wp.setY(wp.y + 6), 6); } /* the feature's work is complete */ setLabel(site.el, `<div class="w-eyebrow">Feature</div><b>${esc(p.name)}</b><div class="w-prog"><i style="width:${Math.round(built * 100)}%"></i></div><span class="w-cnt">${all.length} unit${all.length === 1 ? '' : 's'} &middot; ${repos.length} repo${repos.length === 1 ? '' : 's'} &middot; ${Math.round(built * 100)}%</span>`); site.built = built; site.name = p.name; }
   } else if (p.kind === 'github') { if (site.R !== p.R || site.tier !== tierOf('github')) { const up = site.tier != null && site.tier !== tierOf('github'); destroySite(site); const ns = createSite(p); syncGithub(ns, s); if (up) { const wp = new THREE.Vector3(); ns.g.getWorldPosition(wp); wp.y += 8; fireworks(wp, 4); } return; } syncGithub(site, s); }
@@ -822,6 +823,7 @@ function command(cmd, ev) {
     case 'chat': hooks.openChat && hooks.openChat(selected.peer.name); break;
     case 'upgrade': { const st = selected.site; if (!st) break; const up = upgradeInfo(st); if (!up || !hooks.spend) break; if (hooks.spend(up.cost, { upgrade: st.key, tier: up.next, label: up.name, dur: up.dur })) toast(`${up.name}: construction started — ${up.cost} ⬡`); break; }
     case 'finish': hooks.finishBuilds && hooks.finishBuilds(); break;
+    case 'reset': hooks.resetEconomy && hooks.resetEconomy(); break;
     case 'dev': hooks.award && hooks.award('dev', 500, 'dev cheat'); break;
     default: if (cmd.startsWith('buy:')) { const id = cmd.slice(4), d = DECOS[id]; if (d && hooks.spend && hooks.spend(d.cost, { deco: id, label: d.name, dur: DECO_TIME })) toast(`${d.name}: construction started — ${d.cost} ⬡`); }
   }
@@ -833,7 +835,7 @@ function upgradeInfo(site) {
 function upgradeBtn(site) { const b = buildOf(site.key); if (b) { const p = buildProgress(b); return `<button class="w-btn buy" disabled title="${esc(b.name)}: ${Math.round(p.pct * 100)}% built, ${p.left} to go"><span class="g">⚒ ${p.left}</span>Building…</button>`; } const up = upgradeInfo(site); if (!up) return `<button class="w-btn buy" disabled title="Top tier reached"><span class="g">⬡</span>Max</button>`; return `<button class="w-btn buy" data-cmd="upgrade" ${coins() < up.cost ? 'disabled' : ''} title="Upgrade to ${up.name} for ${up.cost} coins (you have ${coins()})"><span class="g">⬡ ${up.cost}</span>${up.name}</button>`; }
 function shopButtons() {
   let h = ''; for (const [id, d] of Object.entries(DECOS)) { const owned = economy && economy.deco && economy.deco[id], bb = buildOf('deco:' + id); if (bb) { const p = buildProgress(bb); h += `<button class="w-btn buy" disabled title="${d.name}: ${p.left} to go"><span class="g">⚒ ${p.left}</span>Building…</button>`; continue; } h += owned ? `<button class="w-btn buy" disabled title="${d.name}: built"><span class="g">✓</span>${d.name}</button>` : `<button class="w-btn buy" data-cmd="buy:${id}" ${coins() < d.cost ? 'disabled' : ''} title="${d.name} for ${d.cost} coins"><span class="g">⬡ ${d.cost}</span>${d.name}</button>`; }
-  if (snap && snap.dev) h += `<button class="w-btn dev" data-cmd="dev" title="Test instance only: adds 500 coins"><span class="g">+500</span>dev cheat</button><button class="w-btn dev" data-cmd="finish" title="Test instance only: complete every build now"><span class="g">⏩</span>finish builds</button>`;
+  if (snap && snap.dev) h += `<button class="w-btn dev" data-cmd="dev" title="Test instance only: adds 500 coins"><span class="g">+500</span>dev cheat</button><button class="w-btn dev" data-cmd="finish" title="Test instance only: complete every build now"><span class="g">⏩</span>finish builds</button><button class="w-btn dev" data-cmd="reset" title="Test instance only: reset coins, upgrades and decorations"><span class="g">↺</span>reset</button>`;
   return h;
 }
 // Decorations bought at the treasury.
