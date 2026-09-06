@@ -5200,8 +5200,9 @@ function refreshPrs(btn) {
 }
 
 // Capture phase: rows/buttons elsewhere in the app stopPropagation, which would
-// otherwise leave the panel open when you click them.
-document.addEventListener('click', (e) => {
+// otherwise leave the panel open when you click them. mousedown, not click: the
+// terminal and titlebar drag region never deliver a click.
+document.addEventListener('mousedown', (e) => {
   const t = e.target.closest ? e.target : e.target.parentElement; // text/SVG nodes
   if (!t) return;
   if (!t.closest('#pr-snooze-pop') && !t.closest('.pr-snooze')) closeSnooze();

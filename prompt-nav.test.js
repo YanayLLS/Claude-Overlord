@@ -33,3 +33,15 @@ assert.strictEqual(nextNavIdx(29, -1, 2), 1);
 assert.strictEqual(nextNavIdx(-1, 1, 2), 2);
 
 console.log('prompt-nav: all assertions passed');
+
+// Renderer scripts share one global lexical scope: a `const` name declared by two
+// of them is a SyntaxError that silently kills the second file (this exact bug —
+// prompt-copy.js and prompt-nav.js both had `const MARKER`, so promptRows was
+// never defined and every jump click did nothing). Parse them the way the page does.
+const fs = require('fs');
+const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
+const srcs = [...html.matchAll(/<script src="\.\/([^"]+)"><\/script>/g)].map(m => m[1])
+  .filter(f => f !== 'xterm-bundle.js'); // bundled, not ours
+const combined = srcs.map(f => fs.readFileSync(__dirname + '/' + f, 'utf8')).join('\n');
+new Function(combined); // throws on any duplicate top-level declaration
+console.log('renderer scripts (' + srcs.join(', ') + ') share no clashing globals');
