@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <title>Overlord</title>
 <link rel="stylesheet" href="./xterm.css" />
+<link rel="stylesheet" href="./world.css" />
 <style>
 :root {
   --bg: #1e1e2e; --bg2: #181825; --bg3: #252536; --border: #313244; --border-hi: #45475a;
@@ -296,7 +297,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 /* ── Agent card ── */
 .agents { padding:2px 8px 2px 10px; margin-left:10px; border-left:1px solid rgba(49,50,68,.6); display:flex; flex-direction:column; gap:2px; }
 .agent {
-  position:relative; display:flex; align-items:center; gap:7px; height:30px; padding:0 10px;
+  position:relative; display:flex; align-items:center; gap:5px; height:30px; padding:0 7px;
   cursor:pointer; border:1px solid transparent; background:transparent;
   border-radius:5px; transition:background .1s, border-color .1s, opacity .15s; overflow:hidden;
 }
@@ -315,17 +316,17 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent[data-status="crashed"] .agent-dot { background:var(--red); opacity:1; }
 .agent[data-status="resuming"] .agent-dot { background:var(--yellow); opacity:1; animation:pulse 2s ease-in-out infinite; }
 /* Middle flexible zone (status + current file) keeps the right cluster right-anchored */
-.agent-mid { flex:0 1 auto; min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
+.agent-mid { flex:0 1 auto; min-width:0; display:flex; align-items:center; gap:5px; overflow:hidden; }
 /* Right cluster — fixed-width columns so model + ctx% line up across rows */
-.agent-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
-.agent-model-slot { width:54px; display:flex; justify-content:flex-end; flex-shrink:0; }
+.agent-right { display:flex; align-items:center; gap:5px; flex-shrink:0; }
+.agent-model-slot { width:62px; display:flex; justify-content:flex-end; flex-shrink:0; }
 /* Fixed tail slot: ctx% normally, hover actions swap in — model chip left of it never moves */
-.agent-tail { position:relative; display:flex; align-items:center; justify-content:flex-end; min-width:38px; flex-shrink:0; }
-.ctx-pct { font-size:10px; font-variant-numeric:tabular-nums; color:var(--dim); min-width:34px; text-align:right; flex-shrink:0; }
+.agent-tail { position:relative; display:flex; align-items:center; justify-content:flex-end; min-width:28px; flex-shrink:0; }
+.ctx-pct { font-size:10px; font-variant-numeric:tabular-nums; color:var(--dim); min-width:28px; text-align:right; flex-shrink:0; }
 .ctx-pct.warn { color:var(--yellow); } .ctx-pct.danger { color:var(--red); }
 /* Hover actions — overlaid at the right (over the ctx%), model chip stays put */
 .agent-actions { position:absolute; right:0; top:50%; transform:translateY(-50%); display:none; align-items:center; gap:1px; z-index:3;
-  padding-left:22px; }
+  padding-left:18px; }
 .agent:hover .agent-actions { display:flex; }
 .agent:hover .agent-tail .ctx-pct { visibility:hidden; }
 .agent-actions .agent-btn { opacity:1; }
@@ -605,13 +606,16 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #summary-bar .pace-ok { color:var(--green); }
 #summary-bar .pace-warn { color:var(--yellow); }
 #summary-bar .pace-over { color:var(--red); }
-.model-tag { font-size:9px; padding:1px 5px; letter-spacing:.4px; text-transform:uppercase;
-  border:1px solid var(--border); border-radius:3px; color:var(--dim); margin-left:3px; vertical-align:1px; }
+.model-tag { font-size:9px; letter-spacing:.2px; text-transform:uppercase;
+  border:1px solid var(--border); border-radius:3px; color:var(--dim); margin-left:3px; vertical-align:1px;
+  display:inline-flex; align-items:stretch; overflow:hidden; cursor:pointer; }
+.model-tag > span { padding:1px 4px; }
+.model-tag .mt-chev { padding:1px 2px; border-left:1px solid currentColor; display:flex; align-items:center; opacity:.65; }
 .model-tag.fable { color:var(--pink); border-color:rgba(245,194,231,.4); }
 .model-tag.opus { color:var(--purple); border-color:rgba(203,166,247,.4); }
 .model-tag.sonnet { color:var(--accent); border-color:rgba(137,180,250,.4); }
 .model-tag.haiku { color:var(--cyan); border-color:rgba(148,226,213,.4); }
-.model-tag:hover { opacity:.8; filter:brightness(1.2); }
+.model-tag > span:hover { background:rgba(205,214,244,.14); filter:brightness(1.2); }
 .group-servers { display:flex; gap:4px; flex-shrink:0; flex-wrap:wrap; }
 .group-servers:empty { display:none; }
 .server-badge {
@@ -685,17 +689,21 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 /* Inline ghost-text autocomplete overlay — floats over the terminal canvas, never written to the xterm buffer */
 #ghost-suggest { position:fixed; z-index:50; color:#585b70; opacity:.85; white-space:pre; pointer-events:none; display:none; }
 #ghost-suggest .ghost-hint { font-size:9px; opacity:.7; margin-left:6px; border:1px solid #585b70; border-radius:3px; padding:0 3px; }
-#scroll-bottom-btn, #scroll-top-btn {
-  display:none; position:absolute; bottom:12px; right:20px; z-index:10;
+/* Always-visible scroll/prompt nav stack: prev prompt, top, bottom, next prompt */
+#term-scroll-nav {
+  display:none; position:absolute; top:50%; transform:translateY(-50%); right:20px; z-index:10;
+  flex-direction:column; gap:6px;
+}
+#term-scroll-nav.visible { display:flex; }
+#term-scroll-nav button {
   width:32px; height:32px; border-radius:50%; border:1px solid var(--border);
   background:var(--surface0); color:var(--text); cursor:pointer;
-  font-size:14px; line-height:30px; text-align:center;
+  font-size:14px; line-height:30px; text-align:center; padding:0;
   opacity:.7; transition:opacity .15s, background .15s;
   box-shadow:0 2px 8px rgba(0,0,0,.4);
 }
-#scroll-bottom-btn:hover, #scroll-top-btn:hover { opacity:1; background:var(--surface1); }
-#scroll-bottom-btn.visible, #scroll-top-btn.visible { display:block; }
-#scroll-top-btn { bottom:52px; }
+#term-scroll-nav button:hover { opacity:1; background:var(--surface1); }
+#term-scroll-nav button.prompt-jump { width:22px; height:22px; font-size:10px; line-height:20px; align-self:center; }
 #term-name-chip {
   display:none; position:absolute; bottom:8px; left:10px; z-index:9; pointer-events:none;
   max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -1145,11 +1153,13 @@ button:focus-visible { outline-offset:0; }
   <div id="header">
     <h1><span>Overlord</span> <span class="app-ver"></span></h1>
     <div id="headerBadges"></div>
+    <div id="world-counters"></div>
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
 
+    <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map">&#x2B22;</button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Restart app">&#x1F504;</button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
@@ -1159,23 +1169,31 @@ button:focus-visible { outline-offset:0; }
   </div>
   <div id="content">
   <div id="list-col">
+    <div id="world-roster-grip" title="Drag to resize the roster"></div>
+    <button id="world-roster-hide" onclick="setWorldRosterHidden(true)" title="Hide the roster (it slides away; a tab brings it back)">&#x2039;</button>
     <div id="ctx-warning" onclick="focusNextCtxDanger()"><span class="ctx-warning-icon">&#x26A0;</span><span id="ctx-warning-text"></span></div>
     <div id="filter-bar">
       <input id="filter-input" type="text" placeholder="Filter agents... (Esc to close)" />
       <span id="filter-count"></span>
       <button id="filter-close" onclick="closeFilter()" aria-label="Close filter">&times;</button>
     </div>
+    <div id="world-attn"></div>
     <div id="list"></div>
+    <div id="world-extra"></div>
     <div id="pr-dropdown" style="display:none"></div>
     <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
     <div id="actions-dropdown" style="display:none"></div>
     <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
     <div id="summary-bar"></div>
   </div>
+  <button id="world-roster-tab" onclick="setWorldRosterHidden(false)" title="Show the roster"><span>&#x203A;</span><b id="world-roster-tab-n"></b>Agents</button>
+  <div id="world-stage"></div>
   <div id="resize"></div>
   <div id="term">
+    <div id="term-dossier"></div>
     <div id="term-header">
       <div class="term-tabs">
+        <button class="term-tab" id="tab-conversation" onclick="switchTermTab('conversation')">Conversation</button>
         <button class="term-tab active" id="tab-terminal" onclick="switchTermTab('terminal')">Terminal</button>
         <button class="term-tab" id="tab-timeline" onclick="switchTermTab('timeline')">Timeline</button>
       </div>
@@ -1194,10 +1212,14 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x25B2;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x25BC;</button></div>
+    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x2912;</button><button class="prompt-jump" onclick="jumpPrompt(-1)" title="Previous prompt (Ctrl+&#x2191;)">&#x25B2;</button><button class="prompt-jump" onclick="jumpPrompt(1)" title="Next prompt (Ctrl+&#x2193;)">&#x25BC;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x2913;</button></div></div>
     <div id="timeline-events"></div>
+    <div id="conversation"></div>
+    <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
   </div>
   </div><!-- end #content -->
+  <div id="quest-overlay" hidden onclick="if(event.target===this)closeQuest()"><div id="quest-scroll" role="dialog" aria-label="Quest"></div></div>
+  <div id="quest-view" hidden onclick="if(event.target===this||event.target.classList.contains('qv-close'))closeQuestView()"><button class="qv-nav qv-prev" onclick="questViewStep(-1)" title="Previous">&#x2039;</button><div id="quest-view-box"></div><button class="qv-nav qv-next" onclick="questViewStep(1)" title="Next">&#x203A;</button><button class="qv-close" title="Close">&times;</button><div id="quest-view-cap"></div></div>
   <div id="settings-overlay" style="display:none" onclick="toggleSettings()">
     <div class="settings-modal" onclick="event.stopPropagation()">
       <div class="settings-header">
@@ -1232,6 +1254,11 @@ button:focus-visible { outline-offset:0; }
         <span>Prompt autocomplete (ghost text)</span>
       </label>
       <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-world" onchange="setWorldView(this.checked)" />
+        <span>World view (3D map)</span>
+      </label>
+      <div class="settings-hint">Shows your agents as a hex-tile island beside the list: features are walled compounds, directories are workshops, PRs and Actions dock in the GitHub quarter. Everything you can do in the list still works; the map is another way to look at the same state. Toggle with the &#x2B22; button in the header.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -1284,6 +1311,56 @@ button:focus-visible { outline-offset:0; }
         <span>Idle poll interval (seconds):</span>
         <input type="number" id="inp-actions-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onActionsSettingsChange()" />
       </label>
+      </div>
+      </details>
+
+      <details class="settings-sec">
+      <summary>ClickUp raids<span class="sec-chip" id="chip-clickup"></span></summary>
+      <div class="sec-body">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-clickup" onchange="onClickupEnableChange(this.checked)" />
+        <span>Raids from ClickUp (World view)</span>
+      </label>
+      <div class="settings-hint">Your tickets in a matching status become enemies that attack the base of their platform. Each user signs in with their own ClickUp account: the token stays on this machine and is only sent to api.clickup.com.</div>
+      <label class="settings-label" style="display:block;">
+        <span>Sign in:</span>
+        <div class="settings-hint" style="padding:2px 0 4px;">1. <a href="#" onclick="api.send({type:'openUrl',url:'https://app.clickup.com/settings/apps'});return false;" style="color:var(--accent,#89b4fa)">Get a token</a> — the ClickUp page has a one-click “Generate” button. 2. Paste it here and press Connect.</div>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="password" id="inp-clickup-token" placeholder="pk_… personal API token" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();clickupConnect();}" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <button onclick="clickupConnect()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Connect</button>
+        </div>
+        <div class="settings-hint" id="clickup-auth" style="padding-left:0;">Not signed in.</div>
+      </label>
+      <label class="settings-label" style="display:block;">
+        <span>Boards:</span>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="text" id="inp-clickup-search" placeholder="Search boards..." oninput="renderBoardPicker()" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <button onclick="loadClickupBoards()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Load boards</button>
+        </div>
+        <div id="clickup-board-list" style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;padding:4px;"></div>
+      </label>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-clickup-mine" checked onchange="onClickupSettingsChange()" />
+        <span>Only tickets assigned to me</span>
+      </label>
+      <label class="settings-label">
+        <span>Raid statuses (comma-separated):</span>
+        <input type="text" id="inp-clickup-status" value="failed qa" style="width:220px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
+      </label>
+      <label class="settings-label">
+        <span>Fought when in:</span>
+        <input type="text" id="inp-clickup-fight" value="in development" style="width:220px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
+      </label>
+      <div class="settings-hint">A ticket in a raid status spawns an enemy at its platform's base. Once it moves to a fight status the base's agents shoot it; when it leaves both, the enemy dies.</div>
+      <label class="settings-label" style="display:block;">
+        <span>Bases (platform → project):</span>
+        <div id="clickup-bases" style="margin-top:4px;"></div>
+      </label>
+      <label class="settings-label">
+        <span>Poll interval (seconds):</span>
+        <input type="number" id="inp-clickup-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
+      </label>
+      <div class="settings-hint" id="clickup-live" style="padding-left:0;"></div>
       </div>
       </details>
 
@@ -1357,6 +1434,10 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+U</span><span class="help-desc">Refresh usage stats</span></div>
       <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close overlay / filter</span></div>
       <div class="help-row"><span class="help-key">?</span><span class="help-desc">Show this help</span></div>
+      <div class="help-row help-world"><span class="help-key">&#x2B22;</span><span class="help-desc">World view: the roster as a 3D map (header button or Settings)</span></div>
+      <div class="help-row help-world"><span class="help-key">Drag / WASD</span><span class="help-desc">Pan the map &middot; wheel zooms &middot; Q / E rotate</span></div>
+      <div class="help-row help-world"><span class="help-key">Click</span><span class="help-desc">Select a unit &middot; double-click opens its terminal &middot; right-click its menu</span></div>
+      <div class="help-row help-world"><span class="help-key">Roster</span><span class="help-desc">Needs-you block on top; hover a card to light its unit; GitHub and peers below</span></div>
     </div>
   </div>
   <div id="search-overlay" onclick="closeSearch()">
@@ -1403,11 +1484,14 @@ button:focus-visible { outline-offset:0; }
 <script src="./update-core.js"></script>
 <script src="./pr-behind.js"></script>
 <script src="./prompt-copy.js"></script>
+<script src="./prompt-nav.js"></script>
 <script src="./term-size-core.js"></script>
 <script src="./usage-core.js"></script>
 <script src="./preview-ui-dom.js"></script>
 <script src="./preview-ui-device.js"></script>
 <script src="./preview-ui.js"></script>
+<script src="./three-bundle.js"></script>
+<script src="./world.js"></script>
 <script>
 document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
 
@@ -1427,6 +1511,8 @@ const wtRunning = new Map(); // worktree path -> {port, url} for a running dev s
 function worktreeAt(p) { return worktrees.find(w => w.path === p) || null; }
 let selectedId = null;
 let filterText = '';
+let worldView = false; // World view (3D map) — off by default; see setWorldView() at the bottom
+let worldTl = null; // { id, events } — copy of the selected agent's timeline for the Conversation tab
 let filterReady = false;
 // ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
 const collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
@@ -2278,6 +2364,35 @@ function showModelMenu(e, id) {
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
+// The chevron half of the model tag. Levels come out of the same /v1/models
+// payload as the picker — capabilities.effort says which rungs a model has, so
+// a model that gains `max` tomorrow gets it here without an app release.
+const agentEffort = new Map(); // agent id -> effort last set from this menu
+function showEffortMenu(e, id) {
+  const a = agents.get(id);
+  const m = CLAUDE_MODELS.find(x => x.id === (a?.stats?.model || ''))
+         || CLAUDE_MODELS.find(x => x.family === (a?.stats?.modelFamily || ''));
+  const levels = m?.efforts || [];
+  const cur = agentEffort.get(id);
+  const items = [{ header: 'Effort level' }];
+  if (!levels.length) {
+    if (!CLAUDE_MODELS.length) requestModels();
+    items.push({ label: CLAUDE_MODELS.length ? 'No effort levels for this model'
+      : (modelsError || 'Loading models…'), action: () => {} });
+  } else {
+    for (const lv of ['auto', ...levels]) {
+      items.push({ label: lv + (cur === lv ? '  · current' : ''), action: () => setEffort(id, lv) });
+    }
+  }
+  showServerMenu(e, items);
+}
+function setEffort(id, level) {
+  const a = agents.get(id);
+  if (a && a.status === 'active') { showToast('Agent must be idle to change effort'); return; }
+  agentEffort.set(id, level);
+  api.send({ type: 'termInput', id, data: '/effort ' + level + '\r' });
+}
+
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
 function openFile(id, filePath) { if (filePath) api.send({ type: 'openFile', id, path: filePath }); }
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
@@ -2395,6 +2510,7 @@ function render() {
     list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
     document.getElementById('headerBadges').innerHTML = '';
     document.title = 'Overlord';
+    if (worldView) worldSync();
     return;
   }
 
@@ -2537,7 +2653,7 @@ function render() {
           ${a.currentFileName ? `<span class="agent-current-file" title="${escAttr(a.currentFile)}" data-file="${escAttr(a.currentFile)}" onclick="event.stopPropagation();openFile(${id},this.dataset.file)">${esc(a.currentFileName)}</span>` : ''}
         </div>
         <div class="agent-right" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${agentCtxWin / 1000}K (${ctxPct}%)">
-          <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}" onclick="event.stopPropagation();showModelMenu(event,${id})" style="cursor:pointer" title="Change model">${mf}</span>` : ''}</span>
+          <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}"><span onclick="event.stopPropagation();showModelMenu(event,${id})" title="Change model">${mf}</span><span class="mt-chev" onclick="event.stopPropagation();showEffortMenu(event,${id})" title="Change effort level">&#9662;</span></span>` : ''}</span>
           <span class="agent-tail">
             ${a.peerPending && a.peerPending.length ? `<span title="Peer messages awaiting your approval — click to review" onclick="event.stopPropagation();openPeerApprovalModal(${id})" style="background:var(--peach);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;cursor:pointer;">&#x2709; ${a.peerPending.length}</span>` : ''}
             <span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>
@@ -2690,6 +2806,7 @@ function render() {
   bar.innerHTML = barHtml;
   bar.onclick = () => refreshUsage();
   bar.classList.add('show');
+  if (worldView) worldSync();
 }
 
 // ── Terminal panel (real xterm.js) ──────────────────────
@@ -2794,14 +2911,12 @@ function destroyXterm(id) {
   x.terminal.dispose(); x.el.remove(); xterms.delete(id);
 }
 
+// The nav stack stays put whenever a terminal is on screen — no scroll-position gating,
+// so the buttons never move under the cursor.
 function updateScrollBtn() {
-  const btn = document.getElementById('scroll-bottom-btn');
-  const top = document.getElementById('scroll-top-btn');
+  const nav = document.getElementById('term-scroll-nav');
   const x = selectedId != null ? xterms.get(selectedId) : null;
-  if (!x || termTab !== 'terminal') { btn.classList.remove('visible'); top.classList.remove('visible'); return; }
-  const buf = x.terminal.buffer.active;
-  btn.classList.toggle('visible', buf.viewportY < buf.baseY);
-  top.classList.toggle('visible', buf.viewportY > 0);
+  nav.classList.toggle('visible', !!x && termTab === 'terminal');
 }
 
 // Park the chip just above Claude's input box. The box is ~4 rows tall (borders + hint
@@ -3063,19 +3178,19 @@ function schedulePromptNavUpdate() {
   _promptNavTimer = setTimeout(() => { _promptNavTimer = null; updatePromptNav(); }, 300);
 }
 
-// Scan terminal buffer for prompt marker lines (❯)
+// Scan terminal scrollback for submitted prompts. Rows on the current screen
+// (>= baseY) are skipped by promptRows — the live input line wears the same
+// marker, and jumping to it scrolls nowhere. Adapter for prompt-nav.js.
 function getPromptLines() {
   const x = selectedId != null ? xterms.get(selectedId) : null;
   if (!x) return [];
   const buf = x.terminal.buffer.normal;
-  const lines = [];
+  const rows = [];
   for (let i = 0; i < buf.length; i++) {
     const line = buf.getLine(i);
-    if (!line) continue;
-    const text = line.translateToString(true);
-    if (/^\s*❯/.test(text) || /^\s*[│┃]\s+>\s/.test(text)) lines.push(i);
+    rows.push(line ? line.translateToString(true) : '');
   }
-  return lines;
+  return promptRows(rows, buf.baseY); // prompt-nav.js
 }
 
 function updatePromptNav() {
@@ -3092,29 +3207,40 @@ function updatePromptNav() {
     return;
   }
   const promptLines = getPromptLines();
-  const total = promptLines.length || (a?.prompts?.length ?? 0);
+  const total = promptLines.length;
   if (!a || total === 0) { counter.textContent = '0/0'; return; }
-  const label = a.promptNavIdx >= total ? '◇' : String(a.promptNavIdx + 1);
+  const inRange = a.promptNavIdx >= 0 && a.promptNavIdx < total;
+  const label = inRange ? String(a.promptNavIdx + 1) : '◇';
   counter.textContent = label + '/' + total;
 }
 
+// DIAG (temporary): every click reports what the scan saw and where the
+// viewport ended up. Remove once prompt jumping is confirmed working.
 function jumpPrompt(dir) {
+ try {
   const a = selectedId != null ? agents.get(selectedId) : null;
-  if (!a) return;
+  if (!a) { showToast('jump: no agent selected'); return; }
   if (termTab === 'timeline') { jumpTimelinePrompt(dir); return; }
+  const x = xterms.get(selectedId);
   const promptLines = getPromptLines();
-  const total = promptLines.length || (a.prompts?.length ?? 0);
-  if (total === 0) return;
-  if (a.promptNavIdx < 0 || a.promptNavIdx > total) a.promptNavIdx = total;
-  const newIdx = a.promptNavIdx + dir;
-  if (newIdx < 0 || newIdx > total) return;
+  const total = promptLines.length;
+  const buf = x ? x.terminal.buffer.normal : null;
+  const before = buf ? buf.viewportY : -1;
+  if (total === 0) {
+    showToast('jump: 0 prompts found (buffer ' + (buf ? buf.length : '?') + ' lines, baseY ' + (buf ? buf.baseY : '?') + ')');
+    return;
+  }
+  const newIdx = nextNavIdx(a.promptNavIdx, dir, total); // prompt-nav.js
   a.promptNavIdx = newIdx;
   updatePromptNav();
-  if (!promptLines.length) return;
-  const x = xterms.get(selectedId);
-  if (!x) return;
-  if (newIdx >= promptLines.length) { x.terminal.scrollToBottom(); return; }
-  x.terminal.scrollToLine(Math.max(0, promptLines[newIdx] - 1));
+  if (!x) { showToast('jump: no terminal'); return; }
+  if (newIdx >= total) { x.terminal.scrollToBottom(); }
+  else x.terminal.scrollToLine(Math.max(0, promptLines[newIdx] - 1));
+  const target = newIdx >= total ? 'bottom' : String(promptLines[newIdx]);
+  showToast('jump: ' + total + ' prompts, idx ' + newIdx + ', line ' + target
+    + ', viewportY ' + before + '→' + x.terminal.buffer.normal.viewportY
+    + ', baseY ' + x.terminal.buffer.normal.baseY);
+ } catch (e) { showToast('jump error: ' + e.message); }
 }
 
 let _tlPromptIdx = -1;
@@ -3145,11 +3271,19 @@ function switchTermTab(tab) {
   termTab = tab;
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
   document.getElementById('tab-timeline').classList.toggle('active', tab === 'timeline');
+  document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
   const tc = document.getElementById('term-container');
   const tl = document.getElementById('timeline-events');
+  const cv = document.getElementById('conversation'), od = document.getElementById('term-order');
+  cv.classList.toggle('open', tab === 'conversation'); od.classList.toggle('open', tab === 'conversation');
   if (tab === 'terminal') {
     tc.style.display = ''; tl.classList.remove('open');
     if (selectedId) showXterm(selectedId);
+  } else if (tab === 'conversation') {
+    // World view's readable transcript: fed by the same timeline events, plus the live tool state.
+    tc.style.display = 'none'; tl.classList.remove('open');
+    if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
+    renderConversation();
   } else {
     _tlPromptIdx = -1;
     tc.style.display = 'none'; tl.classList.add('open');
@@ -3192,6 +3326,8 @@ function renderTlEvent(ev) {
 function handleTimelineData(msg) {
   if (msg.id !== timelineAgentId) return;
   const el = document.getElementById('timeline-events');
+  worldTl = { id: msg.id, events: (msg.events || []).slice() }; // the conversation view reads the same events
+  if (termTab === 'conversation') renderConversation();
   if (!msg.events || msg.events.length === 0) {
     el.innerHTML = '<div class="tl-empty">No events yet</div>';
     return;
@@ -3202,6 +3338,7 @@ function handleTimelineData(msg) {
 
 function handleTimelineEvent(msg) {
   if (msg.id !== timelineAgentId) return;
+  if (worldTl && worldTl.id === msg.id) { worldTl.events.push(msg.event); if (termTab === 'conversation') renderConversation(); }
   const el = document.getElementById('timeline-events');
   // Remove empty message if present
   const empty = el.querySelector('.tl-empty');
@@ -3413,11 +3550,8 @@ api.onMainLog((msg) => console.log('%c[main]', 'color:#888', msg));
 // ── Message handling ───────────────────────────────────
 api.on((msg) => {
   if (msg.type === 'imagePasted') {
-    const x = xterms.get(msg.id);
-    if (x && msg.base64) {
-      // Show inline image thumbnail via iTerm2 inline image protocol
-      x.terminal.write('\r\n\x1b]1337;File=inline=1;width=auto;height=8;preserveAspectRatio=1:' + msg.base64 + '\x07\r\n');
-    }
+    // ponytail: no inline thumbnail. Writing to xterm out-of-band desyncs the
+    // TUI's own redraw (it does not know those rows exist) and scrambles the prompt.
     showToast('Image pasted — path inserted');
     return;
   }
@@ -3582,7 +3716,7 @@ function handleAgentMsg(msg) {
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
-    case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = msg.prompts.length - 1; if (selectedId === msg.id) updatePromptNav(); } break; }
+    case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = -1; /* -1 = at bottom; the buffer scan owns the real range */ if (selectedId === msg.id) updatePromptNav(); } break; }
     case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
@@ -3615,6 +3749,7 @@ function handleAgentMsg(msg) {
       renderPrBadge();
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
+      if (worldView) scheduleRender();
       break;
     }
     case 'repoList':
@@ -3628,6 +3763,7 @@ function handleAgentMsg(msg) {
       actionsState.error = msg.error || null;
       actionsState.errorCode = msg.errorCode || null;
       renderActionsBadge();
+      if (worldView) scheduleRender();
       if (document.getElementById('actions-dropdown').style.display === 'block') {
         document.getElementById('actions-dropdown').innerHTML = actionsDropdownHtml();
         startActElapsed(); // fresh rows lost their ticker; re-attach (no-op if already running)
@@ -3635,6 +3771,23 @@ function handleAgentMsg(msg) {
       break;
     case 'workflowList':
       renderRepoWorkflows(msg.repo, msg.workflows, msg.error);
+      break;
+    case 'clickupTask': if (questOpen && questOpen.id === msg.id) { questOpen.body = msg.task; questOpen.error = msg.error || null; renderQuest(); } break;
+    case 'clickupAuth':
+      clickupTeams = msg.teams || [];
+      if (msg.error) renderClickupAuth(msg.error);
+      else { renderClickupAuth(null); if (msg.user) loadClickupBoards(); else { clickupTree = null; renderBoardPicker(); } }
+      break;
+    case 'clickupBoards': {
+      const box = document.getElementById('clickup-board-list');
+      if (msg.error) { if (box) box.innerHTML = '<div class="pr-empty">Failed: ' + escapeHtml(msg.error) + '</div>'; break; }
+      clickupTree = msg.tree || []; renderBoardPicker();
+      break;
+    }
+    case 'clickupList':
+      clickupState = { tasks: msg.tasks || [], error: msg.error || null, fetchedAt: msg.fetchedAt || 0 };
+      renderClickupLive(); renderBoardPicker(); renderPlatformMap(); renderSettingsChips();
+      if (worldView) worldSync();
       break;
     case 'ghReady': {
       // gh just became usable — refresh whatever the user was blocked on.
@@ -3683,6 +3836,7 @@ function handleAgentMsg(msg) {
       alert('PR action failed: ' + (msg.error || 'unknown error'));
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
+      if (worldView && window.World && window.World.ready) window.World.refreshSel(); // put the ship's buttons back
       break;
     }
     case 'timelineData': handleTimelineData(msg); break;
@@ -3692,7 +3846,7 @@ function handleAgentMsg(msg) {
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
-    case 'peersState': { peersState = msg; renderPeersSec(); break; }
+    case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);
       if (a) {
@@ -4123,6 +4277,11 @@ function applySettings(s) {
     const chk = document.getElementById('chk-sound');
     if (chk) chk.checked = notificationSoundEnabled;
   }
+  if (s.worldEconomy) { worldEconomy = Object.assign(worldEconomyDefault(), s.worldEconomy); worldEconomy.stats = Object.assign(worldEconomyDefault().stats, worldEconomy.stats || {}); }
+  if (s.worldView !== undefined) setWorldView(!!s.worldView, false);
+  if (s.worldRosterW) worldRosterW = Math.max(200, Math.min(600, +s.worldRosterW || 300));
+  if (s.worldRosterHidden !== undefined) worldRosterHidden = !!s.worldRosterHidden;
+  applyWorldRoster();
   if (s.planBudget !== undefined) {
     planBudget = s.planBudget;
     const inp = document.getElementById('inp-budget');
@@ -4152,6 +4311,17 @@ function applySettings(s) {
     renderTrackedWorkflows();
     renderActionsBadge();
   }
+  if (s.clickupHasToken !== undefined) clickupHasToken = !!s.clickupHasToken;
+  if (s.clickupSettings) {
+    clickupSettings = { ...clickupSettings, ...s.clickupSettings };
+    selectedBoards = new Map((clickupSettings.lists || []).map(l => [l.id, l]));
+    const c = document.getElementById('chk-clickup'); if (c) c.checked = !!clickupSettings.enabled;
+    const m = document.getElementById('chk-clickup-mine'); if (m) m.checked = clickupSettings.onlyMine !== false;
+    const st = document.getElementById('inp-clickup-status'); if (st && document.activeElement !== st) st.value = (clickupSettings.statuses || ['failed qa']).join(', ');
+    const ft = document.getElementById('inp-clickup-fight'); if (ft && document.activeElement !== ft) ft.value = (clickupSettings.fightStatuses || []).join(', ');
+    const i = document.getElementById('inp-clickup-interval'); if (i) i.value = clickupSettings.intervalSec || 60;
+  }
+  renderClickupAuth(null); renderBoardPicker(); renderClickupLive(); renderPlatformMap();
   // Restore terminal panel width
   if (s.termWidth) {
     settings_termWidth = s.termWidth;
@@ -4182,6 +4352,7 @@ function toggleSettings() {
     document.getElementById('chk-notif').checked = notificationsEnabled;
     document.getElementById('chk-sound').checked = notificationSoundEnabled;
     document.getElementById('chk-ghost').checked = ghostEnabled;
+    document.getElementById('chk-world').checked = worldView;
     document.getElementById('inp-budget').value = planBudget;
     renderTrackedWorkflows();
     renderSettingsChips();
@@ -4796,7 +4967,7 @@ let prSettings = { enabled: false, repos: [], intervalSec: 60 };
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function prNeedsApproval(p) { return !p.mine && p.reviewDecision !== 'CHANGES_REQUESTED'; }
-function prSilenced(p) { return p.muted || p.repoMuted || p.snoozed; }
+function prSilenced(p) { return p.muted || p.repoMuted || p.snoozed || p.archived; }
 
 function renderPrBadge() {
   const b = document.getElementById('pr-badge');
@@ -4810,18 +4981,24 @@ function renderPrBadge() {
     b.style.display = 'flex'; b.className = waiting > 0 ? 'alert' : '';
     b.textContent = '⬢ ' + active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '');
     b.title = waiting > 0 ? waiting + ' PR(s) waiting for approval' : active.length + ' open PR(s)';
-  } else if (prState.prs.length > 0) {
+  } else if (prState.prs.some(p => !p.archived)) {
     // Only muted PRs remain — keep a quiet entry so the dropdown stays reachable to un-mute.
+    const n = prState.prs.filter(p => !p.archived).length;
     b.style.display = 'flex'; b.className = '';
-    b.textContent = '🔕 ' + prState.prs.length + ' muted';
+    b.textContent = '🔕 ' + n + ' muted';
     b.title = 'All watched PRs are muted — click to manage';
+  } else if (prState.prs.length > 0) {
+    // Everything archived — a minimal badge, otherwise the dropdown is unreachable.
+    b.style.display = 'flex'; b.className = '';
+    b.textContent = '📦 ' + prState.prs.length + ' archived';
+    b.title = 'All watched PRs are archived — click to manage';
   } else {
     b.style.display = 'none';
     document.getElementById('pr-dropdown').style.display = 'none';
   }
 }
 
-let prCollapsed = new Set();
+let prCollapsed = new Set(['__archived__']); // archived stays out of sight until asked for
 
 function prCiIcon(c) {
   if (c === 'pass') return '<span title="checks passing" style="color:#a6e3a1">✓</span> ';
@@ -4884,6 +5061,7 @@ function prRowHtml(p, dim) {
   const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
+  const archBtn = `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦</button>`;
   // Red = waiting on my review. Green = mine and ready to merge. Orange = conflicts.
   // All three reuse prMergeInfo(), the same test that gates the Merge button.
   const mi = prMergeInfo(p);
@@ -4898,7 +5076,7 @@ function prRowHtml(p, dim) {
       ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>`
       : '';
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
-    + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}</div>`
+    + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)}${commits}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
@@ -4925,7 +5103,18 @@ function prMutedRowHtml(p) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
   return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
-    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-mute" onclick="event.stopPropagation();unmutePr('${k}')">🔔 Unmute</button></div>`
+    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-mute" onclick="event.stopPropagation();unmutePr('${k}')">🔔 Unmute</button>`
+    + `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely" onclick="event.stopPropagation();archivePr('${k}')">📦</button></div>`
+    + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
+    + prBranchHtml(p)
+    + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`;
+}
+
+function prArchivedRowHtml(p) {
+  const u = p.url.replace(/'/g, "\\'");
+  const k = p.key.replace(/'/g, "\\'");
+  return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
+    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Un-archive" onclick="event.stopPropagation();unarchivePr('${k}')">📤 Unarchive</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)}</div></div>`;
@@ -4955,7 +5144,8 @@ function prSnoozedRowHtml(p) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
   return `<div class="pr-row pr-muted" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
-    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Wake now" onclick="event.stopPropagation();unsnoozePr('${k}')">⏰ Wake</button></div>`
+    + `<div class="pr-actions"><button class="pr-approve pr-mute" title="Wake now" onclick="event.stopPropagation();unsnoozePr('${k}')">⏰ Wake</button>`
+    + `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely" onclick="event.stopPropagation();archivePr('${k}')">📦</button></div>`
     + `<div>${escapeHtml(p.repo)} #${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
     + `<div class="pr-meta">@${escapeHtml(p.author)} · ${escapeHtml(prSnoozeLeft(p.snoozeUntil))}</div></div>`;
@@ -5011,11 +5201,13 @@ function prDropdownHtml() {
   const head = prDropdownHead();
   if (prState.error) return head + '<div class="pr-empty">PR check failed. '
     + escapeHtml(prState.error) + ghFixHtml(prState.errorCode) + '</div>';
-  const active = prState.prs.filter(p => !p.muted && !p.repoMuted && !p.snoozed);
-  const repoMuted = prState.prs.filter(p => p.repoMuted && !p.muted);
-  const snoozed = prState.prs.filter(p => p.snoozed && !p.muted && !p.repoMuted);
-  const muted = prState.prs.filter(p => p.muted);
-  if (!active.length && !repoMuted.length && !snoozed.length && !muted.length) return head + '<div class="pr-empty">No open PRs.</div>';
+  const live = prState.prs.filter(p => !p.archived);
+  const archived = prState.prs.filter(p => p.archived);
+  const active = live.filter(p => !p.muted && !p.repoMuted && !p.snoozed);
+  const repoMuted = live.filter(p => p.repoMuted && !p.muted);
+  const snoozed = live.filter(p => p.snoozed && !p.muted && !p.repoMuted);
+  const muted = live.filter(p => p.muted);
+  if (!live.length && !archived.length) return head + '<div class="pr-empty">No open PRs.</div>';
   let html = head;
   // Active repos
   for (const [repo, prs] of prGroupByRepo(active)) {
@@ -5044,6 +5236,13 @@ function prDropdownHtml() {
     html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__muted__')">`
       + `<span>${collapsed ? '▸' : '▾'} 🔕 Muted</span><span class="pr-count">${muted.length}</span></div>`;
     if (!collapsed) html += muted.map(prMutedRowHtml).join('');
+  }
+  // Archived PRs — collapsed by default, the only way back from archive
+  if (archived.length) {
+    const collapsed = prCollapsed.has('__archived__');
+    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__archived__')">`
+      + `<span>${collapsed ? '▸' : '▾'} 📦 Archived</span><span class="pr-count">${archived.length}</span></div>`;
+    if (!collapsed) html += archived.map(prArchivedRowHtml).join('');
   }
   if (prState.failedRepos && prState.failedRepos.length) {
     html += `<div class="pr-empty" style="color:#f38ba8">⚠ Couldn't reach: ${escapeHtml(prState.failedRepos.join(', '))}</div>`;
@@ -5102,6 +5301,8 @@ function prCtx(e, url) {
 
 function mutePr(key) { api.send({ type: 'mutePr', key }); }
 function unmutePr(key) { api.send({ type: 'unmutePr', key }); }
+function archivePr(key) { api.send({ type: 'archivePr', key }); }
+function unarchivePr(key) { api.send({ type: 'unarchivePr', key }); }
 function muteRepo(repo) { api.send({ type: 'muteRepo', repo }); }
 function unmuteRepo(repo) { api.send({ type: 'unmuteRepo', repo }); }
 
@@ -5111,8 +5312,9 @@ function refreshPrs(btn) {
 }
 
 // Capture phase: rows/buttons elsewhere in the app stopPropagation, which would
-// otherwise leave the panel open when you click them.
-document.addEventListener('click', (e) => {
+// otherwise leave the panel open when you click them. mousedown, not click: the
+// terminal and titlebar drag region never deliver a click.
+document.addEventListener('mousedown', (e) => {
   const t = e.target.closest ? e.target : e.target.parentElement; // text/SVG nodes
   if (!t) return;
   if (!t.closest('#pr-snooze-pop') && !t.closest('.pr-snooze')) closeSnooze();
@@ -5123,6 +5325,193 @@ document.addEventListener('click', (e) => {
 // ── GitHub Actions tracking ───────────────────────────
 let actionsSettings = { enabled: false, workflows: [], intervalSec: 60 };
 let actionsState = { runs: [], error: null, errorCode: null };
+
+// ── ClickUp raids: settings panel ──────────────────────
+// The token itself never comes back from main; only whether one is stored (clickupHasToken).
+let clickupSettings = { enabled: false, teamId: '', lists: [], statuses: ['failed qa'], fightStatuses: ['in development'], platformMap: {}, intervalSec: 60, onlyMine: true, user: null };
+let clickupHasToken = false, clickupTeams = [], clickupTree = null;
+let clickupState = { tasks: [], error: null, fetchedAt: 0 };
+let selectedBoards = new Map(); // list id -> { id, name, path }
+
+function onClickupEnableChange(val) { clickupSettings.enabled = val; onClickupSettingsChange(); }
+function onClickupSettingsChange() {
+  const g = id => document.getElementById(id), teamSel = g('sel-clickup-team');
+  clickupSettings = { ...clickupSettings, enabled: g('chk-clickup').checked, teamId: teamSel && teamSel.value ? teamSel.value : clickupSettings.teamId, lists: [...selectedBoards.values()],
+    statuses: g('inp-clickup-status').value, fightStatuses: g('inp-clickup-fight').value, platformMap: clickupSettings.platformMap || {}, intervalSec: Math.max(30, Number(g('inp-clickup-interval').value) || 60), onlyMine: g('chk-clickup-mine').checked };
+  api.send({ type: 'saveClickupSettings', clickupSettings });
+  renderSettingsChips();
+}
+function clickupConnect() {
+  const inp = document.getElementById('inp-clickup-token'), token = inp.value.trim();
+  if (!token) { renderClickupAuth(null); return; }
+  document.getElementById('clickup-auth').textContent = 'Checking token…';
+  api.send({ type: 'clickupConnect', token }); inp.value = '';
+}
+function clickupSignOut() { document.getElementById('clickup-auth').textContent = 'Signing out…'; api.send({ type: 'clickupConnect', token: '' }); }
+function renderClickupAuth(error) {
+  const el = document.getElementById('clickup-auth'), inp = document.getElementById('inp-clickup-token'); if (!el) return;
+  if (inp) inp.placeholder = clickupHasToken ? 'Token saved — paste a new one to replace it' : 'pk_… personal API token';
+  if (error) { el.innerHTML = '<span style="color:#f38ba8">Sign-in failed: ' + escapeHtml(error) + '</span>'; return; }
+  const u = clickupSettings.user;
+  if (!clickupHasToken || !u) { el.textContent = 'Not signed in.'; return; }
+  const team = clickupTeams.find(t => t.id === clickupSettings.teamId);
+  let h = 'Signed in as <b>' + escapeHtml(u.username || u.email || u.id) + '</b>';
+  if (clickupTeams.length > 1) h += ' · workspace <select id="sel-clickup-team" onchange="onClickupSettingsChange();loadClickupBoards()" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;padding:2px 6px;">' + clickupTeams.map(t => '<option value="' + t.id + '"' + (t.id === clickupSettings.teamId ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('') + '</select>';
+  else if (team) h += ' · ' + escapeHtml(team.name);
+  h += ' · <a href="#" onclick="clickupSignOut();return false;" style="color:var(--dim)">sign out</a>';
+  el.innerHTML = h;
+}
+function loadClickupBoards() {
+  const box = document.getElementById('clickup-board-list'); if (box) box.innerHTML = '<div class="pr-empty">Loading boards from ClickUp…</div>';
+  api.send({ type: 'clickupBoards' });
+}
+function findBoard(id) { for (const sp of clickupTree || []) { for (const fo of sp.folders) for (const l of fo.lists) if (l.id === id) return l; for (const l of sp.lists) if (l.id === id) return l; } return selectedBoards.get(id) || null; }
+function renderBoardPicker() {
+  const box = document.getElementById('clickup-board-list'); if (!box) return;
+  const per = {}; for (const t of clickupState.tasks) if (t.list) per[t.list.id] = (per[t.list.id] || 0) + 1;
+  const row = (l, depth, label) => '<label style="display:flex;gap:6px;align-items:center;padding:2px 4px 2px ' + (4 + depth * 14) + 'px;font-size:12px;cursor:pointer;">'
+    + '<input type="checkbox" ' + (selectedBoards.has(l.id) ? 'checked' : '') + ' onchange="toggleBoard(\'' + l.id + '\',this.checked)"><span>' + escapeHtml(label || l.name) + '</span>'
+    + (per[l.id] ? '<span style="margin-left:auto;font-size:11px;color:#f38ba8">' + per[l.id] + ' raid' + (per[l.id] === 1 ? '' : 's') + '</span>' : '') + '</label>';
+  if (!clickupTree) {
+    if (!selectedBoards.size) { box.innerHTML = '<div class="pr-empty">' + (clickupHasToken ? 'Click “Load boards” to pick the boards whose tickets raid the island.' : 'Connect a token, then pick the boards whose tickets raid the island.') + '</div>'; return; }
+    box.innerHTML = [...selectedBoards.values()].map(l => row(l, 0, l.path || l.name)).join(''); return;
+  }
+  const q = (document.getElementById('inp-clickup-search').value || '').toLowerCase(), match = l => !q || l.name.toLowerCase().includes(q) || (l.path || '').toLowerCase().includes(q);
+  let h = '';
+  for (const sp of clickupTree) {
+    const folders = sp.folders.map(fo => ({ ...fo, lists: fo.lists.filter(match) })).filter(fo => fo.lists.length), lists = sp.lists.filter(match);
+    if (!folders.length && !lists.length) continue;
+    h += '<div style="padding:5px 4px 2px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;">' + escapeHtml(sp.name) + '</div>';
+    for (const fo of folders) {
+      const all = fo.lists.every(l => selectedBoards.has(l.id));
+      h += '<label style="display:flex;gap:6px;align-items:center;padding:2px 4px 2px 18px;font-size:12px;cursor:pointer;color:var(--dim);"><input type="checkbox" ' + (all ? 'checked' : '') + ' onchange="toggleFolder(\'' + fo.id + '\',this.checked)"><span>&#x1F4C1; ' + escapeHtml(fo.name) + '</span></label>' + fo.lists.map(l => row(l, 2)).join('');
+    }
+    h += lists.map(l => row(l, 1)).join('');
+  }
+  // Boards picked earlier that the tree no longer has (a sprint that ended) stay listed so they can be unticked.
+  const gone = [...selectedBoards.values()].filter(l => !findBoardInTree(l.id));
+  if (gone.length) h += '<div style="padding:5px 4px 2px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;">No longer in ClickUp</div>' + gone.map(l => row(l, 1, l.path || l.name)).join('');
+  box.innerHTML = h || '<div class="pr-empty">No match.</div>';
+}
+function findBoardInTree(id) { for (const sp of clickupTree || []) { for (const fo of sp.folders) for (const l of fo.lists) if (l.id === id) return l; for (const l of sp.lists) if (l.id === id) return l; } return null; }
+function toggleBoard(id, on) { const l = findBoard(id); if (on && l) selectedBoards.set(id, { id: l.id, name: l.name, path: l.path || '' }); else selectedBoards.delete(id); onClickupSettingsChange(); renderBoardPicker(); }
+function toggleFolder(fid, on) { for (const sp of clickupTree || []) for (const fo of sp.folders) if (fo.id === fid) for (const l of fo.lists) { if (on) selectedBoards.set(l.id, { id: l.id, name: l.name, path: l.path || '' }); else selectedBoards.delete(l.id); } onClickupSettingsChange(); renderBoardPicker(); }
+// ── Which base a platform's enemies attack ──
+// The table is keyed by the platform label's letters only ("Android 🤖" -> "android"). A platform with
+// no explicit choice gets a guess from project names; a platform nothing matches raids a random base,
+// stable per ticket, which the world resolves itself.
+const platformKey = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const PLATFORM_HINTS = [[/android/, /android/i], [/\bpc\b|windows/, /pc[_ -]?win|windows|\bpc\b/i], [/\bmac\b/, /\bmac/i], [/\bios\b/, /\bios\b/i], [/xr|hololens|quest|magicleap|\bvr\b|headset/, /\bxr\b|hololens|quest|\bvr\b/i], [/webgl/, /webgl/i], [/backoffice|back office/, /backoffice|back-office|frontend/i], [/webapp|\bweb\b/, /\bweb\b|frontline\.io-web|frontend/i], [/unity/, /unity|android|pc[_ -]?win|\bxr\b/i]];
+function worldBaseOptions() {
+  const seen = new Set(), out = [];
+  const add = cwd => { if (!cwd || seen.has(cwd)) return; seen.add(cwd); const w = worktreeAt(cwd); out.push({ cwd, label: w ? pathLabel(w.repo) + ' · ' + (w.branch || w.feature || pathLabel(cwd)) : pathLabel(cwd) }); };
+  for (const cwd of knownProjects) add(cwd); for (const w of worktrees) add(w.path); for (const [, a] of agents) if (!a.archived) add(a.cwd);
+  return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+function suggestBase(key, options) {
+  for (const [labelRe, projRe] of PLATFORM_HINTS) if (labelRe.test(key)) { const hit = options.find(o => projRe.test(o.cwd) || projRe.test(o.label)); if (hit) return hit.cwd; }
+  return null;
+}
+// The base for a ticket: the first of its platforms with a mapped or guessed project, else null (random).
+function worldRaidTarget(task, options) {
+  const map = clickupSettings.platformMap || {};
+  for (const p of task.platforms || []) { const k = platformKey(p); if (!k) continue; const cwd = map[k] || suggestBase(k, options); if (cwd && options.some(o => o.cwd === cwd)) return cwd; }
+  return null;
+}
+function worldRaids() {
+  if (!clickupSettings.enabled) return [];
+  const options = worldBaseOptions();
+  return clickupState.tasks.map(t => ({ ...t, target: worldRaidTarget(t, options) }));
+}
+function renderPlatformMap() {
+  const box = document.getElementById('clickup-bases'); if (!box) return;
+  const map = clickupSettings.platformMap || {}, options = worldBaseOptions(), labels = new Map();
+  for (const t of clickupState.tasks) for (const p of t.platforms || []) { const k = platformKey(p); if (k && !labels.has(k)) labels.set(k, p); }
+  for (const k of Object.keys(map)) if (!labels.has(k)) labels.set(k, k);
+  if (!labels.size) { box.innerHTML = '<div class="pr-empty" style="padding:6px 4px;">Platforms appear here as your tickets name them.</div>'; return; }
+  const opt = (v, text, sel) => '<option value="' + escAttr(v) + '"' + (sel ? ' selected' : '') + '>' + esc(text) + '</option>';
+  box.innerHTML = [...labels.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([k, lab]) => {
+    const chosen = map[k] || '', guess = chosen ? '' : suggestBase(k, options), cur = chosen || guess;
+    return '<div style="display:flex;gap:8px;align-items:center;padding:2px 0;font-size:12px;"><span style="flex:0 0 150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(lab) + '</span>'
+      + '<select onchange="setPlatformBase(\'' + escAttr(k) + '\',this.value)" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;padding:2px 6px;">' + opt('', guess ? 'Auto · ' + (options.find(o => o.cwd === guess) || {}).label : 'Random base', !chosen) + options.map(o => opt(o.cwd, o.label, chosen === o.cwd)).join('') + '</select>'
+      + (cur ? '' : '<span style="color:var(--dim);font-size:11px;">random</span>') + '</div>';
+  }).join('');
+}
+function setPlatformBase(key, cwd) { const m = { ...(clickupSettings.platformMap || {}) }; if (cwd) m[key] = cwd; else delete m[key]; clickupSettings.platformMap = m; onClickupSettingsChange(); renderPlatformMap(); if (worldView) worldSync(); }
+// ── The quest scroll: a ticket read as a quest, body and all ──
+let questOpen = null; // { id, task, base, body, error }
+function copyLink(url) { try { navigator.clipboard.writeText(url).then(() => showToast('Link copied'), () => showToast('Could not copy')); } catch { showToast('Could not copy'); } }
+function openQuest(task, base) { questOpen = { id: task.id, task, base: base || null, body: null, error: null }; renderQuest(); document.getElementById('quest-overlay').hidden = false; api.send({ type: 'clickupTask', id: task.id }); }
+function closeQuest() { questOpen = null; document.getElementById('quest-overlay').hidden = true; }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (questView) closeQuestView(); else if (questOpen) closeQuest(); } else if (questView && e.key === 'ArrowLeft') questViewStep(-1); else if (questView && e.key === 'ArrowRight') questViewStep(1); });
+// Attachments: pictures and clips as thumbnails on the scroll, opened in a viewer; anything else is a link.
+const questKind = a => /^image\//.test(a.mime) || /^(png|jpe?g|gif|webp|bmp|svg)$/.test(a.ext) ? 'image' : /^video\//.test(a.mime) || /^(mp4|webm|mov|m4v|ogv)$/.test(a.ext) ? 'video' : 'file';
+function questAttachHtml(list) {
+  const media = list.filter(a => questKind(a) !== 'file'), files = list.filter(a => questKind(a) === 'file');
+  let h = '';
+  if (media.length) h += '<div class="q-attach">' + media.map((a, i) => { const k = questKind(a); return '<div class="q-thumb' + (k === 'video' ? ' video' : '') + '" onclick="openQuestView(' + i + ')" title="' + escAttr(a.title || k) + '">' + (a.thumb || k === 'image' ? '<img src="' + escAttr(a.thumb || a.url) + '" alt="" loading="lazy">' : '<video src="' + escAttr(a.url) + '#t=0.5" preload="metadata" muted playsinline></video>') + (k === 'video' ? '<span class="q-play">&#x25B6;</span>' : '') + '</div>'; }).join('') + '</div>';
+  if (files.length) h += '<div class="q-files">' + files.map(a => '<a href="#" class="q-file" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(a.url) + '\'});return false;">&#x1F4CE; ' + esc(a.title || a.ext || 'file') + (a.size ? ' <small>' + (a.size > 1048576 ? (a.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(a.size / 1024)) + ' KB') + '</small>' : '') + '</a>').join('') + '</div>';
+  return h;
+}
+let questView = null; // { list, i }
+function openQuestViewUrl(url) { questView = { list: [{ url, title: '', mime: 'image/*', ext: '' }], i: 0 }; renderQuestView(); document.getElementById('quest-view').hidden = false; }
+function openQuestView(i) { const list = ((questOpen && questOpen.body && questOpen.body.attachments) || []).filter(a => questKind(a) !== 'file'); if (!list[i]) return; questView = { list, i }; renderQuestView(); document.getElementById('quest-view').hidden = false; }
+function closeQuestView() { questView = null; const box = document.getElementById('quest-view-box'); if (box) box.innerHTML = ''; document.getElementById('quest-view').hidden = true; }
+function questViewStep(d) { if (!questView) return; questView.i = (questView.i + d + questView.list.length) % questView.list.length; renderQuestView(); }
+function renderQuestView() {
+  const v = questView; if (!v) return; const a = v.list[v.i], box = document.getElementById('quest-view-box'), cap = document.getElementById('quest-view-cap');
+  box.innerHTML = questKind(a) === 'video' ? '<video src="' + escAttr(a.url) + '" controls autoplay playsinline></video>' : '<img src="' + escAttr(a.url) + '" alt="">';
+  cap.innerHTML = esc(a.title || '') + (v.list.length > 1 ? ' <span>' + (v.i + 1) + ' / ' + v.list.length + '</span>' : '') + ' <a href="#" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(a.url) + '\'});return false;">open in browser</a>';
+  document.querySelectorAll('#quest-view .qv-nav').forEach(b => b.hidden = v.list.length < 2);
+}
+// Markdown as ClickUp writes it, rendered safely: everything is escaped first, then a handful of constructs are recognised.
+function questMd(src) {
+  const inl = s => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/!\[([^\]]*)\]\((https?:[^\s)]+)\)/g, (m, alt, url) => '<img class="q-inline" src="' + url.replace(/"/g, '%22') + '" alt="' + alt + '" loading="lazy" onclick="openQuestViewUrl(this.src)">')
+    .replace(/\[([^\]]+)\]\((https?:[^\s)]+)\)/g, (m, txt, url) => '<a href="#" onclick="api.send({type:\'openUrl\',url:\'' + url.replace(/'/g, '%27') + '\'});return false;">' + txt + '</a>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<i>$2</i>').replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, '$1<i>$2</i>').replace(/~~([^~]+)~~/g, '<s>$1</s>');
+  const lines = String(src || '').replace(/\r/g, '').split('\n'); let h = '', para = [], list = null, code = null;
+  const flush = () => { if (para.length) { h += '<p>' + para.map(inl).join('<br>') + '</p>'; para = []; } if (list) { h += '</' + list + '>'; list = null; } };
+  for (const raw of lines) {
+    if (code !== null) { if (/^\s*```/.test(raw)) { h += '<pre>' + esc(code.join('\n')) + '</pre>'; code = null; } else code.push(raw); continue; }
+    const line = raw.replace(/\s+$/, '');
+    if (/^\s*```/.test(line)) { flush(); code = []; continue; }
+    if (!line.trim()) { flush(); continue; }
+    let m;
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); h += '<h' + Math.min(4, m[1].length + 1) + '>' + inl(m[2]) + '</h' + Math.min(4, m[1].length + 1) + '>'; continue; }
+    if ((m = line.match(/^\s*>\s?(.*)$/))) { flush(); h += '<blockquote>' + inl(m[1]) + '</blockquote>'; continue; }
+    if (/^\s*([-*_]\s*){3,}$/.test(line)) { flush(); h += '<hr>'; continue; } // a rule ("* * *") before the list test, which it would otherwise pass
+    if ((m = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/))) { const kind = /^\s*\d/.test(line) ? 'ol' : 'ul'; if (list !== kind) { flush(); list = kind; h += '<' + kind + '>'; } let item = m[1]; const chk = item.match(/^\[( |x|X)\]\s*(.*)$/); if (chk) item = '<span class="q-chk' + (chk[1] === ' ' ? '' : ' on') + '"></span>' + inl(chk[2]); else item = inl(item); h += '<li>' + item + '</li>'; continue; }
+    if (list) flush(); para.push(line.trim());
+  }
+  if (code !== null) h += '<pre>' + esc(code.join('\n')) + '</pre>'; flush();
+  return h || '<p class="q-empty">The scroll is blank: this ticket has no description.</p>';
+}
+function renderQuest() {
+  const el = document.getElementById('quest-scroll'), q = questOpen; if (!el || !q) return;
+  const t = q.body || q.task, pri = t.priority === 'none' ? 'no' : t.priority, tier = { low: 'Gremlin', normal: 'Raider', high: 'Ogre', urgent: 'Warlord', none: 'Raider' }[t.priority] || 'Raider';
+  const chip = (k, v) => v ? '<span class="q-chip"><small>' + esc(k) + '</small>' + esc(v) + '</span>' : '';
+  const when = ts => ts ? new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+  const since = q.task.since ? Math.round((Date.now() - q.task.since) / 60000) : 0, sinceStr = since < 60 ? since + 'm' : since < 1440 ? Math.floor(since / 60) + 'h' : Math.floor(since / 1440) + 'd';
+  const fields = (t.fields || []).filter(f => !/^platform$/i.test(f.name)).slice(0, 6);
+  el.innerHTML = '<div class="q-ribbon ' + esc(t.priority || 'none') + '"><span class="q-eyebrow">Quest &middot; ' + esc(tier) + '</span><span class="q-pri">' + esc(pri.toUpperCase()) + ' PRIORITY</span></div>'
+    + '<div class="q-body"><div class="q-seal">&#x2620;</div><h1>' + esc(t.name) + '</h1>'
+    + '<div class="q-chips">' + chip('Platform', (t.platforms || []).join(', ')) + chip('Board', t.list && t.list.name) + chip('Status', t.status) + chip('Assigned', (t.assignees || []).join(', ')) + chip('Besieging', q.base) + chip('Here for', sinceStr) + chip('Due', when(t.due)) + chip('Tags', (t.tags || []).join(', ')) + fields.map(f => chip(f.name, f.values.join(', '))).join('') + '</div>'
+    + '<div class="q-text">' + (q.error ? '<p class="q-empty">Could not read the scroll: ' + esc(q.error) + '</p>' : !q.body ? '<p class="q-empty q-wait">Unrolling the scroll…</p>' : questMd(t.markdown)) + '</div>'
+    + (q.body && t.attachments && t.attachments.length ? questAttachHtml(t.attachments.filter(a => !(t.markdown || '').includes(a.url))) : '')
+    + '<div class="q-actions"><button class="q-btn q-main" onclick="copyLink(\'' + escAttr(t.url) + '\')">&#x2398; Copy link</button><button class="q-btn" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(t.url) + '\'})">&#x2197; Open in ClickUp</button><button class="q-btn q-close" onclick="closeQuest()">Close</button></div></div>';
+}
+function renderClickupLive() {
+  const el = document.getElementById('clickup-live'); if (!el) return;
+  if (!clickupSettings.enabled) { el.textContent = ''; return; }
+  if (clickupState.error) { el.innerHTML = '<span style="color:#f38ba8">Last poll failed: ' + escapeHtml(clickupState.error) + '</span>'; return; }
+  if (!clickupState.fetchedAt) { el.textContent = clickupHasToken && selectedBoards.size ? 'Waiting for the first poll…' : 'Sign in and pick at least one board.'; return; }
+  const by = {}; for (const t of clickupState.tasks) by[t.priority] = (by[t.priority] || 0) + 1;
+  const parts = ['urgent', 'high', 'normal', 'low', 'none'].filter(p => by[p]).map(p => by[p] + ' ' + p);
+  const ago = Math.max(0, Math.round((Date.now() - clickupState.fetchedAt) / 1000));
+  el.textContent = clickupState.tasks.length + ' raid' + (clickupState.tasks.length === 1 ? '' : 's') + ' right now' + (parts.length ? ' · ' + parts.join(', ') : '') + ' · polled ' + (ago < 60 ? ago + 's' : Math.round(ago / 60) + 'm') + ' ago';
+}
 let actionsPendingRepo = null; // repo whose workflow list is being picked from
 
 function onActionsSettingsChange() {
@@ -5429,6 +5818,8 @@ function renderSettingsChips() {
   n('chip-pr', pr, pr ? `on · ${prN} repo${prN === 1 ? '' : 's'}` : 'off');
   const ac = actionsSettings.enabled, acN = (actionsSettings.workflows || []).length;
   n('chip-actions', ac, ac ? `on · ${acN} workflow${acN === 1 ? '' : 's'}` : 'off');
+  const cuOn = clickupSettings.enabled, cuN = (clickupSettings.lists || []).length, cuR = clickupState.tasks.length;
+  n('chip-clickup', cuOn, cuOn ? `on · ${cuN} board${cuN === 1 ? '' : 's'} · ${cuR} raid${cuR === 1 ? '' : 's'}` : 'off');
 }
 
 function loadRepos() {
@@ -5488,6 +5879,259 @@ setInterval(() => {
     if (txt) el.textContent = txt; else el.textContent = '';
   }
 }, 1000);
+
+// ── World view (3D map) ─────────────────────────────────
+// Off by default. When on, world.js draws the same state the list shows, beside it.
+// Every click in the world calls the same functions the list calls; nothing here changes behavior.
+// (worldView itself is declared with the other view state near the top.)
+// The roster column in World view: resizable by its grip, and it can slide away (a tab on the stage brings it back).
+let worldRosterW = 300, worldRosterHidden = false;
+function applyWorldRoster() {
+  document.body.style.setProperty('--w-roster', (worldRosterHidden ? 0 : worldRosterW) + 'px');
+  document.body.classList.toggle('roster-hidden', worldRosterHidden);
+  const n = document.getElementById('world-roster-tab-n'); if (n) { let live = 0; for (const [, a] of agents) if (!a.archived) live++; n.textContent = live; }
+}
+function setWorldRosterHidden(h, persist = true) {
+  worldRosterHidden = !!h; applyWorldRoster();
+  if (persist) api.send({ type: 'saveSettings', settings: { worldRosterHidden } });
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 340); // the stage and terminal refit once the slide ends
+}
+(function initWorldRosterGrip() {
+  const grip = document.getElementById('world-roster-grip'); if (!grip) return; let drag = null;
+  grip.addEventListener('pointerdown', e => { drag = { x: e.clientX, w: worldRosterW }; grip.setPointerCapture(e.pointerId); document.body.classList.add('roster-resizing'); e.preventDefault(); });
+  grip.addEventListener('pointermove', e => { if (!drag) return; worldRosterW = Math.max(200, Math.min(600, drag.w + e.clientX - drag.x)); applyWorldRoster(); });
+  const end = e => { if (!drag) return; drag = null; document.body.classList.remove('roster-resizing'); api.send({ type: 'saveSettings', settings: { worldRosterW } }); window.dispatchEvent(new Event('resize')); };
+  grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+  grip.addEventListener('dblclick', () => { worldRosterW = 300; applyWorldRoster(); api.send({ type: 'saveSettings', settings: { worldRosterW } }); });
+})();
+function setWorldView(on, persist = true) {
+  on = !!on;
+  if (persist && on !== worldView) api.send({ type: 'saveSettings', settings: { worldView: on } });
+  const changed = on !== worldView;
+  worldView = on;
+  document.body.classList.toggle('world-mode', on);
+  const hb = document.getElementById('hdr-world'); if (hb) hb.classList.toggle('on', on);
+  const chk = document.getElementById('chk-world'); if (chk) chk.checked = on;
+  if (on && window.World && (changed || !window.World.ready)) {
+    try { window.World.init(document.getElementById('world-stage'), {
+      selectAgent: (id) => { if (id > 0) focusAgent(id); },
+      openAgent: (id) => { if (id > 0) openTerm(id); },
+      agentMenu: (ev, id) => { if (id > 0) showAgentMenu(ev, id); },
+      closeAgent: (id) => { if (id > 0) closeAgent(id); },
+      stopLoop: (id) => { if (id > 0) stopLoop(id); },
+      showModelMenu: (ev, id) => { if (id > 0) showModelMenu(ev, id); },
+      showEffortMenu: (ev, id) => { if (id > 0) showEffortMenu(ev, id); },
+      focusTeamMember: (team, member, isLead) => focusTeamMember(team, member, isLead),
+      addAgent: (cwd) => addAgent(cwd),
+      openFolder: (p) => openFolder(p),
+      openPr: (url) => openPr(url),
+      openRun: (url) => openActionRun(url),
+      openChat: (name) => openChat({ type: 'peer', id: String(name).toLowerCase() }),
+      award: (kind, amount, label) => worldAward(kind, amount, label),
+      spend: (cost, patch) => worldSpend(cost, patch),
+      refreshUsage: () => refreshUsage(),
+      openRaid: (url) => api.send({ type: 'openUrl', url }),
+      openQuest: (task, base) => openQuest(task, base),
+      copyLink: (url) => copyLink(url),
+    }); window.World.ready = true; worldDailyStreak(); worldSync(); }
+    catch (e) {
+      // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.
+      console.error('[world] init failed', e);
+      try { window.World.dispose(); } catch {}
+      window.World.ready = false; worldView = false; document.body.classList.remove('world-mode');
+      if (hb) hb.classList.remove('on'); if (chk) chk.checked = false;
+      if (persist) api.send({ type: 'saveSettings', settings: { worldView: false } });
+      if (typeof showToast === 'function') showToast('World view could not start on this machine');
+    }
+  } else if (!on && window.World && window.World.ready) {
+    window.World.dispose(); window.World.ready = false;
+  }
+  if (!on && termTab === 'conversation') switchTermTab('terminal'); // that tab only exists in world mode
+  // The terminal's xterm needs a refit after the columns change width; schedFit is the same path the window resize uses.
+  if (typeof schedFit === 'function') schedFit();
+}
+function toggleWorldView() { setWorldView(!worldView); }
+// Snapshot of renderer state for the world. Plain data, read-only, built from the same maps the list uses.
+// The usage caps the summary bar shows, for the world's power plant: one bar per cap plus the weekly pace.
+function worldUsage() {
+  const u = currentUsage; if (!u || (u.hourly == null && u.weekly == null)) return null;
+  const bars = [];
+  if (u.hourly != null) bars.push({ key: 'session', label: 'Current session', pct: u.hourly, reset: u.hourlyReset || 0, date: false });
+  if (u.weekly != null) bars.push({ key: 'week', label: 'Current week', pct: u.weekly, reset: u.weeklyReset || 0, date: true });
+  for (const m of u.modelWeekly || []) bars.push({ key: 'm:' + m.model, label: modelLabel(m.model) + ' week', pct: m.pct, reset: m.reset || u.weeklyReset || 0, date: true });
+  let pace = null;
+  if (u.weekly != null && u.weeklyReset) { const daysLeft = (u.weeklyReset - Date.now()) / 86400000, daysElapsed = 7 - daysLeft; if (daysElapsed > .01 && daysLeft > 0) { const expected = daysElapsed / 7 * 100, actual = u.weekly; pace = { expected, actual, state: actual <= expected * .85 ? 'ok' : actual <= expected * 1.1 ? 'warn' : 'over', label: actual <= expected * 1.1 ? 'On track' : 'Too fast' }; } }
+  return { bars, pace, fetchedAt: u.fetchedAt || 0 };
+}
+function worldSnapshot() {
+  const projects = new Map();
+  const addProject = (cwd) => { if (!cwd || projects.has(cwd)) return; const w = worktreeAt(cwd); const running = wtRunning.get(cwd);
+    projects.set(cwd, w
+      ? { cwd, label: pathLabel(w.repo), branch: w.branch || '', feature: w.feature || null, port: w.port || 0, status: w.status || 'ready', serverUrl: running ? running.url : '' }
+      : { cwd, label: pathLabel(cwd), branch: '', feature: null, port: 0, status: 'ready', serverUrl: '' }); };
+  for (const cwd of knownProjects) addProject(cwd);
+  for (const w of worktrees) addProject(w.path);
+  for (const [, a] of agents) if (!a.archived) addProject(a.cwd || '(unknown)');
+  const agentRows = [], now = Date.now();
+  for (const [id, a] of agents) {
+    if (a.archived) continue;
+    const st = agentStatus(a), win = ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok);
+    // How long the agent has had nothing to do: the world uses it to make idle units call for orders.
+    if (st === 'waiting' || st === 'idle') { if (!_worldIdleSince.has(id)) _worldIdleSince.set(id, now); } else _worldIdleSince.delete(id);
+    const idleMin = _worldIdleSince.has(id) ? Math.floor((now - _worldIdleSince.get(id)) / 60000) : 0;
+    const ctxPct = a.stats?.ctxTok ? Math.min(100, Math.round((a.stats.ctxTok / win) * 100)) : 0;
+    const lead = [...teamMap.entries()].find(([, t]) => t.leadAgentId === id);
+    let team = null;
+    if (lead) { const [name, t] = lead; const members = t.members.filter(m => m.agentType !== 'team-lead').map(m => { const task = t.tasks.find(k => k.owner === m.name && k.status !== 'completed'); return { name: m.name, agentType: m.agentType || '', task: task ? (task.activeForm || task.subject || '') : '' }; }); team = { name, members, done: t.tasks.filter(k => k.status === 'completed').length, total: t.tasks.length }; }
+    agentRows.push({ id, cwd: a.cwd || '(unknown)', title: a.customName ? a.title : (a.prompt || a.title || 'New agent'), status: needsAnswer(a) && st === 'permission' ? 'question' : st,
+      verb: statusVerb(a, st), ctxPct, cost: calcCost(a.stats), costStr: fmtCost(calcCost(a.stats)), model: a.stats?.modelFamily || '', looping: !!a.looping,
+      tool: ([...a.tools.values()].find(t => !t.done) || {}).name || '', idleMin,
+      turns: a.stats?.turns || 0, toolsUsed: Object.values(a.stats?.tools || {}).reduce((x, y) => x + (y || 0), 0), tokIn: a.stats?.inTok || 0, tokOut: a.stats?.outTok || 0,
+      crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', currentFileName: a.currentFileName || '', team });
+  }
+  // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
+  const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.checks === 'fail') return 'blocked'; if (p.mergeState === 'BEHIND' || p.behindBy > 0) return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
+  // The ship's action buttons are the PR dropdown's own buttons (same gating, same handlers), just shown in the selection bar.
+  const prWorldActions = (p) => {
+    const u = p.url.replace(/'/g, "\\'"), k = p.key.replace(/'/g, "\\'"), act = prBranchAction(p); // pr-behind.js
+    const upd = act === 'conflict' ? `<button class="pr-approve pr-conflictbtn" title="Conflicts with ${escapeHtml(p.baseRef)} — resolve them on GitHub, then update" onclick="event.stopPropagation();openPr('${u}/conflicts')">⚠ Conflicts</button>`
+      : act === 'update' ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>` : '';
+    return upd + prActionBtn(p, u)
+      + `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰ Snooze</button>`
+      + `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕 Mute</button>`
+      + `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦 Archive</button>`;
+  };
+  const prs = prState.prs.filter(p => !prSilenced(p)).map(p => ({ key: p.key, repo: p.repo, number: p.number, title: p.title, url: p.url, author: p.author, state: prState_(p), checks: p.checks || '', behindBy: p.behindBy || 0, commitCount: p.commitCount || 0, headRef: p.headRef || '', baseRef: p.baseRef || '', mine: !!p.mine, needsApproval: prNeedsApproval(p), reviewDecision: p.reviewDecision || '', approvedBy: p.approvedBy || [], changesBy: p.changesBy || [], createdAt: p.createdAt || '', actionsHtml: prWorldActions(p) }));
+  const runs = actionsState.runs.map(r => ({ key: r.key, name: r.name, repo: r.repo, branch: r.branch || '', state: r.state || 'none', url: r.url || '', runNumber: r.runNumber || 0, title: r.title || '', actor: r.actor || '', startedAt: r.startedAt || '',
+    actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
+  const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
+  let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
+  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), usage: worldUsage(), raids: worldRaids(), raidsOn: !!(clickupSettings.enabled && clickupSettings.user) };
+  return snapshot;
+}
+const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
+
+// ── World economy: coins for outcomes and attentiveness, spent on cosmetic upgrades. Saved in settings; classic mode never reads it. ──
+function worldEconomyDefault() { return { coins: 0, earned: 0, upgrades: {}, deco: {}, builds: {}, streak: { last: '', days: 0 }, stats: { reviews: 0, merges: 0, updates: 0, jobs: 0, turns: 0, quick: 0, resumes: 0, closes: 0, raids: 0 } }; }
+let worldEconomy = worldEconomyDefault(), _ecoSaveTimer = null;
+function worldEconomySave() { clearTimeout(_ecoSaveTimer); _ecoSaveTimer = setTimeout(() => api.send({ type: 'saveSettings', settings: { worldEconomy } }), 400); }
+const WORLD_TITLES = [[0, 'Overseer'], [500, 'Marshal'], [2000, 'Overlord'], [10000, 'High Overlord']];
+function worldTitle() { let t = WORLD_TITLES[0][1]; for (const [n, name] of WORLD_TITLES) if (worldEconomy.earned >= n) t = name; return t; }
+// kind: reviews | merges | updates | jobs | turns | quick | resumes | closes | streak | dev
+function worldAward(kind, amount, label) {
+  amount = Math.round(amount); if (!(amount > 0)) return;
+  worldEconomy.coins += amount; worldEconomy.earned += amount; if (kind in worldEconomy.stats) worldEconomy.stats[kind] += 1;
+  worldEconomySave(); if (window.World && window.World.ready) window.World.coinsChanged(worldEconomy, `+${amount} ⬡ ${label}`);
+  if (worldView) renderWorldRoster(worldSnapshot()); // header coin chip
+}
+// Paying starts a timed construction; worldBuildsTick() applies the result when the timer runs out.
+function worldSpend(cost, patch) {
+  if (worldEconomy.coins < cost) return false;
+  const key = patch.upgrade || ('deco:' + patch.deco); if (worldEconomy.builds[key]) return false; // one build per site at a time
+  worldEconomy.coins -= cost;
+  worldEconomy.builds[key] = { kind: patch.upgrade ? 'upgrade' : 'deco', target: patch.upgrade || patch.deco, tier: patch.tier || 0, name: patch.label || '', start: Date.now(), dur: Math.max(5, patch.dur || 60) };
+  worldEconomySave(); if (window.World && window.World.ready) window.World.coinsChanged(worldEconomy, `−${cost} ⬡ ${patch.label || ''} under construction`);
+  return true;
+}
+function worldBuildsTick() {
+  const now = Date.now(); let changed = false;
+  for (const [key, b] of Object.entries(worldEconomy.builds)) {
+    if (now < b.start + b.dur * 1000) continue;
+    if (b.kind === 'upgrade') worldEconomy.upgrades[b.target] = b.tier; else worldEconomy.deco[b.target] = true;
+    delete worldEconomy.builds[key]; changed = true;
+    if (window.World && window.World.ready) window.World.buildComplete(key, b);
+  }
+  if (changed) worldEconomySave();
+}
+function worldDailyStreak() {
+  const today = new Date().toISOString().slice(0, 10); if (worldEconomy.streak.last === today) return;
+  const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10); worldEconomy.streak.days = worldEconomy.streak.last === y ? worldEconomy.streak.days + 1 : 1; worldEconomy.streak.last = today;
+  worldAward('streak', 20, `day ${worldEconomy.streak.days} on the island`);
+}
+function worldSync() { if (!worldView || !window.World || !window.World.ready) return; try { worldBuildsTick(); const s = worldSnapshot(); window.World.sync(s); renderWorldRoster(s); renderDossierHead(s); if (termTab === 'conversation') renderConversation(); } catch (e) { console.error('[world] sync failed', e); } }
+setInterval(() => { if (worldView && Object.keys(worldEconomy.builds).length) worldSync(); }, 1000); // construction timers tick even when nothing else changes
+// The roster extras the classic list doesn't have: header counters on top (the list itself is untouched),
+// and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
+// PRs and deployments in the header: the counts, and in front of them whatever needs the commander now.
+function worldGithubChips(s) {
+  if (!s.github) return '';
+  const prs = s.prs || [], runs = s.runs || [], toApprove = prs.filter(p => p.needsApproval).length, changes = prs.filter(p => p.mine && p.state === 'changes').length, ready = prs.filter(p => p.mine && p.state === 'ready').length;
+  const running = runs.filter(r => r.state === 'running').length, failed = runs.filter(r => r.state === 'failure').length;
+  let pr;
+  if (toApprove) pr = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpPr()" title="Pull requests waiting for your review — click to fly to the first"><i></i><b>${toApprove}</b>to approve<em>${prs.length} open</em></span>`;
+  else if (changes) pr = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpPr()" title="Changes requested on your pull requests — click to fly there"><i></i><b>${changes}</b>changes asked<em>${prs.length} open</em></span>`;
+  else if (ready) pr = `<span class="wc" style="--c:var(--green)" onclick="worldJumpPr()" title="Your pull requests ready to merge — click to fly there"><i></i><b>${ready}</b>ready to merge<em>${prs.length} open</em></span>`;
+  else pr = `<span class="wc" style="--c:#94e2d5" onclick="worldJumpPr()" title="Open pull requests on the watched repos — click to fly to the harbour"><i></i><b>${prs.length}</b>PRs</span>`;
+  let run;
+  if (running) run = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpRun()" title="Deployments in progress — click to fly to the first"><i class="spin"></i><b>${running}</b>deploying${failed ? '<em>' + failed + ' failed</em>' : ''}</span>`;
+  else if (failed) run = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpRun()" title="Failed deployments — click to fly to the first"><i></i><b>${failed}</b>deploy${failed === 1 ? '' : 's'} failed</span>`;
+  else if (runs.length) run = `<span class="wc" style="--c:var(--green)" onclick="worldJumpRun()" title="Tracked workflows, all passing — click to fly to the harbour"><i></i><b>${runs.length}</b>deploy${runs.length === 1 ? '' : 's'} ok</span>`;
+  else run = '';
+  return pr + run;
+}
+function worldJumpPr() { const prs = worldSnapshot().prs, p = prs.find(x => x.needsApproval) || prs.find(x => x.mine && x.state === 'changes') || prs.find(x => x.mine && x.state === 'ready') || prs[0]; if (!window.World) return; if (p) World.focusKey('pr', p.key); else World.focusKey('site', 'github'); }
+function worldJumpRun() { const runs = worldSnapshot().runs, r = runs.find(x => x.state === 'running') || runs.find(x => x.state === 'failure') || runs[0]; if (!window.World) return; if (r) World.focusKey('run', r.key); else World.focusKey('site', 'github'); }
+function renderWorldRoster(s) {
+  { const n = document.getElementById('world-roster-tab-n'); if (n) n.textContent = s.agents.length; }
+  const st = { work: 0, need: 0, done: 0, down: 0 }; let cost = 0;
+  for (const a of s.agents) { if (a.status === 'active' || a.status === 'settling' || a.status === 'resuming') st.work++; else if (a.status === 'permission' || a.status === 'question') st.need++; else if (a.status === 'waiting') st.done++; else if (a.status === 'crashed') st.down++; cost += a.cost; }
+  const chip = (c, n, label, onclick, title) => `<span class="wc" style="--c:${c}" ${onclick ? `onclick="${onclick}"` : ''} title="${escAttr(title || label)}"><i></i><b>${n}</b>${label}</span>`;
+  document.getElementById('world-counters').innerHTML =
+    chip('var(--accent)', st.work, 'working') + chip('var(--yellow)', st.need, 'need you', 'focusNextPerm()', 'Units waiting for approval or an answer — click to jump') + chip('var(--green)', st.done, 'done') + chip('var(--red)', st.down, 'down')
+    + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`
+    + `<span class="wc wc-coins" title="Coins: earned by reviewing and merging PRs, answering agents quickly, finished jobs and turns. Spend them at the treasury and on station upgrades." onclick="window.World&&World.focusKey('treasury')"><i class="hexcoin"></i><b>${worldEconomy.coins.toLocaleString()}</b>${esc(worldTitle())}</span>`
+    + worldGithubChips(s)
+    + (s.raidsOn && s.raids.length ? chip('#ff3b5c', s.raids.length, s.raids.length === 1 ? 'raid' : 'raids', "window.World&&World.focusKey('site','portal')", 'Tickets besieging the island — click to fly to the Dark Portal') : '');
+  const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
+  const agentGo = (id) => `focusAgent(${id});window.World&&World.focus(${id})`;
+  const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
+  document.getElementById('world-attn').innerHTML = ''; // no "Needs you" block: it buried the agent list; the header counter jumps to the next one
+  document.getElementById('world-extra').innerHTML = ''; // the roster is the agent list alone; PRs, runs and peers live in the world
+}
+// ── Dossier: the terminal pane's head, Conversation tab and order box (world mode) ──
+function renderDossierHead(s) {
+  const el = document.getElementById('term-dossier'); if (!el) return;
+  const a = selectedId != null ? s.agents.find(x => x.id === selectedId) : null;
+  if (!a) { el.innerHTML = ''; return; }
+  const p = s.projects.find(p => p.cwd === a.cwd), st = { active: ['Working', 'var(--accent)'], settling: ['Finishing', 'var(--accent)'], permission: ['Needs approval', 'var(--yellow)'], question: ['Needs an answer', 'var(--purple)'], waiting: ['Done', 'var(--green)'], idle: ['Idle', 'var(--dim)'], crashed: ['Crashed', 'var(--red)'], resuming: ['Resuming', 'var(--purple)'] }[a.status] || ['', 'var(--dim)'];
+  const crumb = p && p.feature ? `Feature <b>${esc(p.feature)}</b> · ${esc(p.label)}` : `Workshop <b>${esc(p ? p.label : pathLabel(a.cwd))}</b>${p && p.branch ? ' · ⑂ ' + esc(p.branch) : ''}`;
+  el.innerHTML = `<div class="wd-portrait">${esc((a.model || 's')[0].toUpperCase())}</div><div class="wd-main"><div class="wd-crumb">${crumb}</div><h2>${esc(a.title)}</h2></div><div class="wd-stats"><span title="Context used">ctx <b class="${a.ctxPct >= 80 ? 'danger' : a.ctxPct >= 60 ? 'warn' : ''}">${a.ctxPct}%</b></span><span title="Model">${esc(a.model || '?')}</span><span title="Cost" style="color:var(--w-gold)">${esc(a.costStr)}</span></div><span class="wd-chip" style="--c:${st[1]}">${st[0]}</span><button class="wd-close" title="Hide the terminal (Esc). Click the agent again to bring it back." onclick="closeTerm()">&times;</button>`;
+}
+function renderConversation() {
+  const el = document.getElementById('conversation'); if (!el || !el.classList.contains('open')) return;
+  const a = selectedId != null ? agents.get(selectedId) : null;
+  if (!a) { el.innerHTML = '<div class="tl-empty">Select an agent to read its conversation</div>'; return; }
+  const evs = worldTl && worldTl.id === selectedId ? worldTl.events : null;
+  const stuck = el.scrollTop + el.clientHeight < el.scrollHeight - 30 && el.dataset.for === String(selectedId);
+  const doneBy = new Map(); if (evs) for (const ev of evs) if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev);
+  const name = a.customName ? a.title : (a.agentName || 'Agent');
+  let h = '';
+  if (!evs) h += '<div class="tl-empty">Loading conversation…</div>';
+  else if (!evs.length) h += `<div class="msg ai"><div class="eyebrow">${esc(name)}</div><p>Nothing yet. Give an order below to put this agent to work.</p></div>`;
+  for (const ev of evs || []) {
+    if (ev.type === 'prompt') h += `<div class="msg user"><div class="eyebrow">You<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(ev.text)}</p></div>`;
+    else if (ev.type === 'text') h += `<div class="msg ai"><div class="eyebrow">${esc(name)}<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(ev.text)}</p></div>`;
+    else if (ev.type === 'tool' || ev.type === 'subtask') { const d = ev.toolId ? doneBy.get(ev.toolId) : null; h += `<div class="msg tool${ev.type === 'subtask' ? ' sub' : ''}${!d && ev.toolId ? ' running' : ''}"><span class="t">${esc(ev.name || '')}</span><span class="f" title="${escAttr(ev.text || '')}">${esc(ev.text || '')}</span>${d && d.text ? `<span class="d" title="${escAttr(d.text)}">${esc(d.text.slice(0, 40))}</span>` : ''}</div>`; }
+    else if (ev.type === 'turn') h += `<div class="msg turn">${esc(ev.text)}</div>`;
+  }
+  // Live state on top of the transcript: tools still running, a permission prompt, a question, a crash.
+  const live = [...a.tools.values()].filter(t => !t.done);
+  const perm = live.find(t => t.perm);
+  if (perm && perm.perm === 'ask') h += `<div class="msg ask" style="--c:var(--purple)"><div class="eyebrow">Question for you</div><p>${esc(perm.status || 'The agent is waiting for your answer in the terminal.')}</p><div class="row2"><button class="yes" onclick="switchTermTab('terminal');const x=xterms.get(selectedId);if(x)x.terminal.focus()">Answer in terminal</button></div></div>`;
+  else if (perm) h += `<div class="msg ask" style="--c:var(--yellow)"><div class="eyebrow">Wants to run</div><pre>${esc(perm.status || perm.name || '')}</pre><div class="row2"><button class="yes" onclick="worldReply('1\\r')">Approve</button><button onclick="worldReply('2\\r')">Always this session</button><button onclick="worldReply('\\x1b')">Deny</button></div></div>`;
+  else for (const t of live) h += `<div class="msg tool running"><span class="t">${esc(t.name || 'tool')}</span><span class="f">${esc(t.status || 'running…')}</span></div>`;
+  if (a.crashed === 'fatal') h += `<div class="msg err">Process exited (${a.crashCount}/${a.crashMax} attempts).<div class="row2"><button class="yes" onclick="resumeSelected()">Resume</button></div></div>`;
+  el.innerHTML = h; el.dataset.for = String(selectedId);
+  if (!stuck) el.scrollTop = el.scrollHeight;
+}
+// The order box and approval buttons type into the agent's pty exactly as the terminal would.
+function worldReply(data) { if (selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data }); }
+function sendOrder() { const inp = document.getElementById('term-order-input'); const text = inp.value.trim(); if (!text || selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data: text + '\r' }); inp.value = ''; }
+// Hovering an agent card in the list lights its unit on the map.
+document.getElementById('list').addEventListener('mouseover', (e) => { if (!worldView || !window.World) return; const card = e.target.closest('.agent[data-id]'); if (card) World.hover(+card.dataset.id); });
+document.getElementById('list').addEventListener('mouseleave', () => { if (worldView && window.World) World.hover(null); });
+// Clicking a card (its existing onclick still focuses the agent) also flies the camera to the unit and zooms in.
+document.getElementById('list').addEventListener('click', (e) => { if (!worldView || !window.World) return; if (e.target.closest('button, .model-tag, .agent-current-file, .agent-actions')) return; const card = e.target.closest('.agent[data-id]'); if (card) World.focus(+card.dataset.id, .9); });
 
 // Initial render
 render();

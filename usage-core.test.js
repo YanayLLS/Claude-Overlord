@@ -1,6 +1,6 @@
 // Run: node usage-core.test.js
 const assert = require('assert');
-const { parseModelWeekly, modelLabel } = require('./usage-core');
+const { parseModelWeekly, parseOauthUsage, modelLabel } = require('./usage-core');
 
 // ── parseModelWeekly ──────────────────────────────────
 assert.deepStrictEqual(parseModelWeekly({}), []);
@@ -50,5 +50,20 @@ assert.strictEqual(modelLabel('fable'), 'Fable');
 assert.strictEqual(modelLabel('opus'), 'Opus');
 assert.strictEqual(modelLabel(''), '');
 assert.strictEqual(modelLabel(undefined), '');
+
+// ── parseOauthUsage ──────────────────────────────────
+{
+  const j = { five_hour: { utilization: 32.0, resets_at: '2026-09-05T20:59:59.710172+00:00' }, seven_day: { utilization: 20.0, resets_at: '2026-09-10T12:59:59.710194+00:00' },
+    limits: [{ kind: 'session', percent: 32 }, { kind: 'weekly_all', percent: 20 }, { kind: 'weekly_scoped', percent: 39, resets_at: '2026-09-10T12:59:59.710419+00:00', scope: { model: { id: null, display_name: 'Fable' } } }] };
+  const u = parseOauthUsage(j);
+  assert.strictEqual(u.hourly, 32); assert.strictEqual(u.weekly, 20);
+  assert.strictEqual(u.hourlyReset, Date.parse('2026-09-05T20:59:59.710172+00:00'));
+  assert.strictEqual(u.weeklyReset, Date.parse('2026-09-10T12:59:59.710194+00:00'));
+  assert.deepStrictEqual(u.modelWeekly, [{ model: 'fable', pct: 39, reset: Date.parse('2026-09-10T12:59:59.710419+00:00') }]);
+}
+assert.strictEqual(parseOauthUsage({ limits: [] }), null); // nothing usable: the caller falls back to headers
+assert.strictEqual(parseOauthUsage(null), null);
+assert.deepStrictEqual(parseOauthUsage({ five_hour: { utilization: 5 }, seven_day: null }), { hourly: 5 }); // partial answers still count
+{ const u = parseOauthUsage({ seven_day: { utilization: 1 }, limits: [{ kind: 'weekly_scoped', percent: 7, scope: { model: { id: 'opus-x', display_name: null } } }] }); assert.deepStrictEqual(u.modelWeekly, [{ model: 'opus-x', pct: 7, reset: 0 }]); }
 
 console.log('ok — all usage-core checks passed');

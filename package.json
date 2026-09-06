@@ -1,15 +1,15 @@
 {
   "name": "overlord",
-  "version": "1.35.0",
+  "version": "1.40.0",
   "description": "Overlord — Claude Agent Manager",
   "main": "main.js",
   "scripts": {
     "preinstall": "node scripts/check-prerequisites.js",
     "test": "node --test",
-    "start": "node scripts/bundle-xterm.js && electron .",
-    "dev": "node scripts/bundle-xterm.js && electronmon .",
-    "package": "node scripts/bundle-xterm.js && electron-builder --dir",
-    "dist": "node scripts/bundle-xterm.js && electron-builder"
+    "start": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && electron .",
+    "dev": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && electronmon .",
+    "package": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && electron-builder --dir",
+    "dist": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && electron-builder"
   },
   "dependencies": {
     "@xterm/addon-web-links": "^0.12.0",
@@ -24,7 +24,8 @@
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
     "electronmon": "^2.0.4",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "three": "^0.160.1"
   },
   "build": {
     "appId": "com.overlord.claude",
@@ -56,37 +57,11 @@
       "shortcutName": "Overlord"
     },
     "files": [
-      "main.js",
-      "worktree.js",
-      "preload.js",
-      "index.html",
-      "ghost-core.js",
-      "actions-core.js",
-      "peer-core.js",
-      "update-core.js",
-      "pr-behind.js",
-      "prompt-copy.js",
-      "term-size-core.js",
-      "resume-core.js",
-      "state-core.js",
-      "usage-core.js",
-      "xterm-bundle.js",
-      "xterm.css",
-      "qr.js",
-      "mobile.html",
-      "browser/errors.js",
-      "browser/view-wiring.js",
-      "browser/snapshot-script.js",
-      "browser/input-rebind.js",
-      "browser/actions.js",
-      "browser/registry.js",
-      "mcp/tools.js",
-      "mcp/server.js",
-      "mcp/agent-config.js",
-      "preview-pane.js",
-      "preview-ui.js",
-      "preview-ui-dom.js",
-      "preview-ui-device.js"
+      "**/*",
+      "!**/*.test.js",
+      "!scripts/**",
+      "!docs/**",
+      "!*.md"
     ],
     "directories": {
       "output": "out"
