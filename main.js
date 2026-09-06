@@ -3345,7 +3345,8 @@ function handleIpc(msg) {
       clickupGet(`/task/${encodeURIComponent(id)}?include_markdown_description=true`, token).then(({ json }) => {
         const t = cu.normalizeTask(json, { platformField: clickupCfg().platformField }); if (!t) throw new Error('No task in reply');
         const fields = (Array.isArray(json.custom_fields) ? json.custom_fields : []).map(f => ({ name: f && f.name || '', values: cu.fieldLabels(f) })).filter(f => f.name && f.values.length);
-        send({ type: 'clickupTask', id, task: { ...t, markdown: String(json.markdown_description || json.description || json.text_content || ''), due: Number(json.due_date) || 0, updated: Number(json.date_updated) || 0, creator: json.creator && (json.creator.username || json.creator.email) || '', fields }, error: null });
+        send({ type: 'clickupTask', id, task: { ...t, markdown: String(json.markdown_description || json.description || json.text_content || ''), due: Number(json.due_date) || 0, updated: Number(json.date_updated) || 0,
+          attachments: (Array.isArray(json.attachments) ? json.attachments : []).filter(a => a && typeof a.url === 'string' && /^https:\/\//.test(a.url)).map(a => ({ id: String(a.id || ''), title: String(a.title || ''), url: a.url, thumb: [a.thumbnail_medium, a.thumbnail_small, a.thumbnail_large].find(u => typeof u === 'string' && /^https:\/\//.test(u)) || '', mime: String(a.mimetype || ''), ext: String(a.extension || '').toLowerCase(), size: Number(a.size) || 0 })), creator: json.creator && (json.creator.username || json.creator.email) || '', fields }, error: null });
       }).catch(e => send({ type: 'clickupTask', id, task: null, error: e.message || String(e) }));
       break;
     }

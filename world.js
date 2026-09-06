@@ -788,7 +788,7 @@ function bindInput() {
     if (r.unit) { if (r.unit.mini) { select({ unit: r.unit }); hooks.focusTeamMember && hooks.focusTeamMember(r.unit.a.teamName, r.unit.a.memberName, false); } else { select({ unit: r.unit }); hooks.selectAgent && hooks.selectAgent(r.unit.a.id); } }
     else if (r.pr) select({ pr: r.pr }); else if (r.run) select({ run: r.run }); else if (r.peer) select({ peer: r.peer }); else if (r.raid) select({ raid: r.raid }); else if (r.site) select({ site: r.site }); else select({});
   });
-  canvas.addEventListener('dblclick', e => { const r = pick(e); if (r.unit && !r.unit.mini) { flyTo(r.unit.g); hooks.openAgent && hooks.openAgent(r.unit.a.id); } else if (r.pr) hooks.openPr && hooks.openPr(r.pr.url); else if (r.run) hooks.openRun && hooks.openRun(r.run.url); else if (r.peer) hooks.openChat && hooks.openChat(r.peer.name); else if (r.raid) hooks.openRaid && hooks.openRaid(r.raid.task.url); });
+  canvas.addEventListener('dblclick', e => { const r = pick(e); if (r.unit && !r.unit.mini) { flyTo(r.unit.g); hooks.openAgent && hooks.openAgent(r.unit.a.id); } else if (r.pr) hooks.openPr && hooks.openPr(r.pr.url); else if (r.run) hooks.openRun && hooks.openRun(r.run.url); else if (r.peer) hooks.openChat && hooks.openChat(r.peer.name); else if (r.raid) hooks.openQuest && hooks.openQuest(r.raid.task, raidBase(r.raid)); });
   canvas.addEventListener('wheel', e => { e.preventDefault(); if (e.ctrlKey) return; cam.userMoved = true; cam.zoom = Math.min(6.5, Math.max(.4, cam.zoom * (e.deltaY > 0 ? 1.1 : .91))); }, { passive: false });
   const onKey = e => { if (!cam.hover || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.ctrlKey || e.metaKey || e.altKey) return; const k = e.key.toLowerCase(); touched(); if ('wasdqe'.includes(k) || k.startsWith('arrow')) { keys.add(k); cam.userMoved = true; } else if (k === 'f' || k === 'home') frameAll(true); };
   addEventListener('keydown', onKey); addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
@@ -877,7 +877,7 @@ function command(cmd, ev) {
     case 'openRun': hooks.openRun && hooks.openRun(selected.run.url); break;
     case 'chat': hooks.openChat && hooks.openChat(selected.peer.name); break;
     case 'openRaid': hooks.openRaid && hooks.openRaid(selected.raid.task.url); break;
-    case 'quest': { const rd = selected.raid; if (rd && hooks.openQuest) hooks.openQuest(rd.task, rd.lot ? rd.lot.spec.title : rd.site && rd.site.kind === 'treasury' ? 'the Treasury' : ''); break; }
+    case 'quest': { const rd = selected.raid; if (rd && hooks.openQuest) hooks.openQuest(rd.task, raidBase(rd)); break; }
     case 'copyRaid': hooks.copyLink && hooks.copyLink(selected.raid.task.url); break;
     case 'upgrade': { const st = selected.site; if (!st) break; const up = upgradeInfo(st); if (!up || !hooks.spend) break; if (hooks.spend(up.cost, { upgrade: st.key, tier: up.next, label: up.name, dur: up.dur })) toast(`${up.name}: construction started — ${up.cost} ⬡`); break; }
     case 'usage': hooks.refreshUsage && hooks.refreshUsage(); toast('Reading the meters…'); break;
@@ -1247,6 +1247,7 @@ const RAID_HEX = { low: '#5ee0f0', normal: '#fab387', high: '#f38ba8', urgent: '
 const PRI_ORDER = { urgent: 0, high: 1, normal: 2, none: 3, low: 4 }, RAID_CAP = 40, FLAME_CAP = 16;
 const raidTier = r => RAID_TIERS[r.priority] || RAID_TIERS.none;
 const hashStr = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
+const raidBase = rd => rd.lot ? rd.lot.spec.title : rd.site && rd.site.kind === 'treasury' ? 'the Treasury' : '';
 function sinceStr(ts) { if (!ts) return ''; const m = Math.max(0, Math.round((Date.now() - ts) / 60000)); if (m < 60) return 'here ' + m + 'm'; const h = Math.floor(m / 60); if (h < 24) return 'here ' + h + 'h ' + (m % 60) + 'm'; return 'here ' + Math.floor(h / 24) + 'd ' + (h % 24) + 'h'; }
 // Battle effects: projectiles, shock rings, tumbling rubble, fires that burn out, camera shake, sieges on bases.
 const fx = { shots: [], rings: [], debris: [], flames: [], sieges: new Set() };
@@ -1434,7 +1435,7 @@ function createRaider(r, target, portal) {
   raidHit(rd); makeRaiderBody(rd); rd.key = raidKey(r, target);
   rd.el = label('w-obj w-raid ' + r.priority + (r.phase === 'fight' ? ' fight' : ''), raidLabel(rd), g, RAID_HEX[r.priority] || RAID_HEX.none, 2.5 * sc + .4);
   g.scale.setScalar(.01); tween(900, k => g.scale.setScalar(Math.max(.01, k)), () => { rd.state = 'march'; }, easeOutBack, 120);
-  const wp = from.clone(); wp.y += 1; setTimeout(() => { if (!alive) return; burst(wp, '#b07cff', 26, 1.8, 3); shockRing(wp, 0x9b6dff, 5, .9); life.flashUntil = performance.now() / 1000 + .07; }, 120);
+  const wp = from.clone(); wp.y += 1; setTimeout(() => { if (!alive) return; burst(wp, '#b07cff', 26, 1.8, 3); shockRing(wp, 0x9b6dff, 5, .9); }, 120);
   raiders.set(r.id, rd); return rd;
 }
 const raidKey = (r, tg) => r.priority + '|' + r.phase + '|' + (tg ? tg.site.key + '|' + (tg.lot ? tg.lot.cwd : '') : '');
@@ -1484,8 +1485,8 @@ function fireAttack(rd, t) {
     case 'smash': { const p = rd.g.position.clone(); shockRing(p, 0xfab387, 3.5, .6); burst(p, '#c9b8a0', 16, 1.6 * sc, 2); debris(p, 0x8d8a84, 4, 3.5); shake(.08, .25); break; }
     case 'fireball': shoot(pos, aim, { color: 0xff7a2a, size: .38, glow: true, arc: 4, dur: 1, trail: '#ff9a3c', onHit: p => { burst(p, '#ff9a3c', 22, 1.6, 3); burst(p, '#ffd24a', 10, 1, 3.5); firePatch(land(p), 14 + Math.random() * 8, 1); shockRing(land(p), 0xff7a2a, 3, .5); shake(.12, .3); } }); break;
     case 'roar': { const p = rd.g.position.clone(); shockRing(p, 0xf38ba8, 7, 1); burst(p, '#f38ba8', 12, 2 * sc, 2); shake(.14, .5); break; }
-    case 'stomp': { const p = rd.g.position.clone(); shockRing(p, 0xff2d55, 9, 1.1); burst(p, '#8a98ab', 30, 3 * sc, 3); debris(p, 0x3a3542, 10, 6); shake(.5, .7); life.flashUntil = t + .06; break; }
-    case 'darkbolt': shoot(pos, aim, { color: 0xb07cff, size: .5, glow: true, arc: 5, dur: 1.1, trail: '#b07cff', onHit: p => { burst(p, '#b07cff', 34, 2.4, 3.5); burst(p, '#ff2d55', 12, 1.2, 4); firePatch(land(p), 20, 1.7); shockRing(land(p), 0x9b6dff, 6, .8); shake(.3, .5); life.flashUntil = performance.now() / 1000 + .08; } }); break;
+    case 'stomp': { const p = rd.g.position.clone(); shockRing(p, 0xff2d55, 9, 1.1); burst(p, '#8a98ab', 30, 3 * sc, 3); debris(p, 0x3a3542, 10, 6); shake(.5, .7); break; }
+    case 'darkbolt': shoot(pos, aim, { color: 0xb07cff, size: .5, glow: true, arc: 5, dur: 1.1, trail: '#b07cff', onHit: p => { burst(p, '#b07cff', 34, 2.4, 3.5); burst(p, '#ff2d55', 12, 1.2, 4); firePatch(land(p), 20, 1.7); shockRing(land(p), 0x9b6dff, 6, .8); shake(.3, .5); } }); break;
   }
 }
 // The base fights back once the ticket is in development: its units, or the keep itself when nobody is home, shoot bolts.
