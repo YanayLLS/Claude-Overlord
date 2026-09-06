@@ -84,7 +84,7 @@ function initPuffs() {
   g.beginPath(); for (let k = 0; k < 6; k++) { const a = -Math.PI / 2 + k * Math.PI / 3; k ? g.lineTo(16 + 14 * Math.cos(a), 16 + 14 * Math.sin(a)) : g.moveTo(16 + 14 * Math.cos(a), 16 + 14 * Math.sin(a)); } g.closePath(); g.fillStyle = '#fff'; g.fill();
   const tex = new THREE.CanvasTexture(c);
   puffs = { pool: [], tex };
-  for (let i = 0; i < 160; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false })); s.visible = false; scene.add(s); puffs.pool.push({ s, life: 0, ttl: 1, v: new THREE.Vector3() }); }
+  for (let i = 0; i < 360; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false })); s.visible = false; scene.add(s); puffs.pool.push({ s, life: 0, ttl: 1, v: new THREE.Vector3() }); }
 }
 function burst(pos, color, n = 18, spread = 1.2, up = 3) {
   if (!puffs || !alive || reduceMotion()) return;
@@ -1541,7 +1541,7 @@ W.refreshSel = function () { if (alive) renderSel(); };
 W.hover = function (id) { if (!alive) return; hovered = id == null ? null : (units.get(id) || null); };
 W.focus = function (id, zoom) { if (!alive) return; const u = units.get(id); if (!u) return; cam.userMoved = true; const p = new THREE.Vector3(); u.g.getWorldPosition(p); const fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom, tz = zoom || Math.min(cam.zoom, 1.1); tween(700, k => { cam.target.x = fx + (p.x - fx) * k; cam.target.z = fz + (p.z - fz) * k; cam.zoom = fzoom + (tz - fzoom) * k; }); };
 W.devCam = function (zoom, key, yaw) { if (!alive) return null; cam.userMoved = true; cam.cine = false; cam.lastInput = performance.now() / 1000; if (zoom) cam.zoom = zoom; if (yaw != null) cam.yaw = yaw; const st = key && sites.get(key); if (st) { cam.target.x = st.x; cam.target.z = st.z; } return { zoom: cam.zoom, yaw: cam.yaw, x: cam.target.x, z: cam.target.z, R: st && st.R }; }; // test hook: place the camera exactly
-W.focusKey = function (kind, key) { if (!alive) return; if (kind === 'raid') { const rd = raiders.get(key); if (rd) { cam.userMoved = true; flyTo(rd.g); select({ raid: rd }); } return; } if (kind === 'treasury') { const st = sites.get('treasury'); if (st) { cam.userMoved = true; flyTo(st.g); select({ site: st }); } return; } const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
+W.focusKey = function (kind, key) { if (!alive) return; if (kind === 'site') { const st = sites.get(key); if (st) { cam.userMoved = true; flyTo(st.g); select({ site: st }); } return; } if (kind === 'raid') { const rd = raiders.get(key); if (rd) { cam.userMoved = true; flyTo(rd.g); select({ raid: rd }); } return; } if (kind === 'treasury') { const st = sites.get('treasury'); if (st) { cam.userMoved = true; flyTo(st.g); select({ site: st }); } return; } const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
 
 window.World = W;
 })();
