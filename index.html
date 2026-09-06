@@ -1286,6 +1286,47 @@ button:focus-visible { outline-offset:0; }
       </details>
 
       <details class="settings-sec">
+      <summary>ClickUp raids<span class="sec-chip" id="chip-clickup"></span></summary>
+      <div class="sec-body">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-clickup" onchange="onClickupEnableChange(this.checked)" />
+        <span>Raids from ClickUp (World view)</span>
+      </label>
+      <div class="settings-hint">Your tickets in a matching status become enemies that attack the base of their platform. Each user signs in with their own ClickUp account: the token stays on this machine and is only sent to api.clickup.com.</div>
+      <label class="settings-label" style="display:block;">
+        <span>Sign in:</span>
+        <div class="settings-hint" style="padding:2px 0 4px;">1. <a href="#" onclick="api.send({type:'openUrl',url:'https://app.clickup.com/settings/apps'});return false;" style="color:var(--accent,#89b4fa)">Get a token</a> — the ClickUp page has a one-click “Generate” button. 2. Paste it here and press Connect.</div>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="password" id="inp-clickup-token" placeholder="pk_… personal API token" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();clickupConnect();}" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <button onclick="clickupConnect()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Connect</button>
+        </div>
+        <div class="settings-hint" id="clickup-auth" style="padding-left:0;">Not signed in.</div>
+      </label>
+      <label class="settings-label" style="display:block;">
+        <span>Boards:</span>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="text" id="inp-clickup-search" placeholder="Search boards..." oninput="renderBoardPicker()" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <button onclick="loadClickupBoards()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Load boards</button>
+        </div>
+        <div id="clickup-board-list" style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;padding:4px;"></div>
+      </label>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-clickup-mine" checked onchange="onClickupSettingsChange()" />
+        <span>Only tickets assigned to me</span>
+      </label>
+      <label class="settings-label">
+        <span>Statuses (comma-separated):</span>
+        <input type="text" id="inp-clickup-status" value="failed qa" style="width:220px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
+      </label>
+      <label class="settings-label">
+        <span>Poll interval (seconds):</span>
+        <input type="number" id="inp-clickup-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
+      </label>
+      <div class="settings-hint" id="clickup-live" style="padding-left:0;"></div>
+      </div>
+      </details>
+
+      <details class="settings-sec">
       <summary>Peers<span class="sec-chip" id="chip-peers"></span></summary>
       <div class="sec-body">
       <label class="settings-label">
@@ -3688,6 +3729,22 @@ function handleAgentMsg(msg) {
     case 'workflowList':
       renderRepoWorkflows(msg.repo, msg.workflows, msg.error);
       break;
+    case 'clickupAuth':
+      clickupTeams = msg.teams || [];
+      if (msg.error) renderClickupAuth(msg.error);
+      else { renderClickupAuth(null); if (msg.user) loadClickupBoards(); else { clickupTree = null; renderBoardPicker(); } }
+      break;
+    case 'clickupBoards': {
+      const box = document.getElementById('clickup-board-list');
+      if (msg.error) { if (box) box.innerHTML = '<div class="pr-empty">Failed: ' + escapeHtml(msg.error) + '</div>'; break; }
+      clickupTree = msg.tree || []; renderBoardPicker();
+      break;
+    }
+    case 'clickupList':
+      clickupState = { tasks: msg.tasks || [], error: msg.error || null, fetchedAt: msg.fetchedAt || 0 };
+      renderClickupLive(); renderBoardPicker(); renderSettingsChips();
+      if (worldView) worldSync();
+      break;
     case 'ghReady': {
       // gh just became usable — refresh whatever the user was blocked on.
       prState.error = null; prState.errorCode = null;
@@ -4210,6 +4267,16 @@ function applySettings(s) {
     renderTrackedWorkflows();
     renderActionsBadge();
   }
+  if (s.clickupHasToken !== undefined) clickupHasToken = !!s.clickupHasToken;
+  if (s.clickupSettings) {
+    clickupSettings = { ...clickupSettings, ...s.clickupSettings };
+    selectedBoards = new Map((clickupSettings.lists || []).map(l => [l.id, l]));
+    const c = document.getElementById('chk-clickup'); if (c) c.checked = !!clickupSettings.enabled;
+    const m = document.getElementById('chk-clickup-mine'); if (m) m.checked = clickupSettings.onlyMine !== false;
+    const st = document.getElementById('inp-clickup-status'); if (st && document.activeElement !== st) st.value = (clickupSettings.statuses || ['failed qa']).join(', ');
+    const i = document.getElementById('inp-clickup-interval'); if (i) i.value = clickupSettings.intervalSec || 60;
+  }
+  renderClickupAuth(null); renderBoardPicker(); renderClickupLive();
   // Restore terminal panel width
   if (s.termWidth) {
     settings_termWidth = s.termWidth;
@@ -5213,6 +5280,87 @@ document.addEventListener('mousedown', (e) => {
 // ── GitHub Actions tracking ───────────────────────────
 let actionsSettings = { enabled: false, workflows: [], intervalSec: 60 };
 let actionsState = { runs: [], error: null, errorCode: null };
+
+// ── ClickUp raids: settings panel ──────────────────────
+// The token itself never comes back from main; only whether one is stored (clickupHasToken).
+let clickupSettings = { enabled: false, teamId: '', lists: [], statuses: ['failed qa'], intervalSec: 60, onlyMine: true, user: null };
+let clickupHasToken = false, clickupTeams = [], clickupTree = null;
+let clickupState = { tasks: [], error: null, fetchedAt: 0 };
+let selectedBoards = new Map(); // list id -> { id, name, path }
+
+function onClickupEnableChange(val) { clickupSettings.enabled = val; onClickupSettingsChange(); }
+function onClickupSettingsChange() {
+  const g = id => document.getElementById(id), teamSel = g('sel-clickup-team');
+  clickupSettings = { ...clickupSettings, enabled: g('chk-clickup').checked, teamId: teamSel && teamSel.value ? teamSel.value : clickupSettings.teamId, lists: [...selectedBoards.values()],
+    statuses: g('inp-clickup-status').value, intervalSec: Math.max(30, Number(g('inp-clickup-interval').value) || 60), onlyMine: g('chk-clickup-mine').checked };
+  api.send({ type: 'saveClickupSettings', clickupSettings });
+  renderSettingsChips();
+}
+function clickupConnect() {
+  const inp = document.getElementById('inp-clickup-token'), token = inp.value.trim();
+  if (!token) { renderClickupAuth(null); return; }
+  document.getElementById('clickup-auth').textContent = 'Checking token…';
+  api.send({ type: 'clickupConnect', token }); inp.value = '';
+}
+function clickupSignOut() { document.getElementById('clickup-auth').textContent = 'Signing out…'; api.send({ type: 'clickupConnect', token: '' }); }
+function renderClickupAuth(error) {
+  const el = document.getElementById('clickup-auth'), inp = document.getElementById('inp-clickup-token'); if (!el) return;
+  if (inp) inp.placeholder = clickupHasToken ? 'Token saved — paste a new one to replace it' : 'pk_… personal API token';
+  if (error) { el.innerHTML = '<span style="color:#f38ba8">Sign-in failed: ' + escapeHtml(error) + '</span>'; return; }
+  const u = clickupSettings.user;
+  if (!clickupHasToken || !u) { el.textContent = 'Not signed in.'; return; }
+  const team = clickupTeams.find(t => t.id === clickupSettings.teamId);
+  let h = 'Signed in as <b>' + escapeHtml(u.username || u.email || u.id) + '</b>';
+  if (clickupTeams.length > 1) h += ' · workspace <select id="sel-clickup-team" onchange="onClickupSettingsChange();loadClickupBoards()" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;padding:2px 6px;">' + clickupTeams.map(t => '<option value="' + t.id + '"' + (t.id === clickupSettings.teamId ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('') + '</select>';
+  else if (team) h += ' · ' + escapeHtml(team.name);
+  h += ' · <a href="#" onclick="clickupSignOut();return false;" style="color:var(--dim)">sign out</a>';
+  el.innerHTML = h;
+}
+function loadClickupBoards() {
+  const box = document.getElementById('clickup-board-list'); if (box) box.innerHTML = '<div class="pr-empty">Loading boards from ClickUp…</div>';
+  api.send({ type: 'clickupBoards' });
+}
+function findBoard(id) { for (const sp of clickupTree || []) { for (const fo of sp.folders) for (const l of fo.lists) if (l.id === id) return l; for (const l of sp.lists) if (l.id === id) return l; } return selectedBoards.get(id) || null; }
+function renderBoardPicker() {
+  const box = document.getElementById('clickup-board-list'); if (!box) return;
+  const per = {}; for (const t of clickupState.tasks) if (t.list) per[t.list.id] = (per[t.list.id] || 0) + 1;
+  const row = (l, depth, label) => '<label style="display:flex;gap:6px;align-items:center;padding:2px 4px 2px ' + (4 + depth * 14) + 'px;font-size:12px;cursor:pointer;">'
+    + '<input type="checkbox" ' + (selectedBoards.has(l.id) ? 'checked' : '') + ' onchange="toggleBoard(\'' + l.id + '\',this.checked)"><span>' + escapeHtml(label || l.name) + '</span>'
+    + (per[l.id] ? '<span style="margin-left:auto;font-size:11px;color:#f38ba8">' + per[l.id] + ' raid' + (per[l.id] === 1 ? '' : 's') + '</span>' : '') + '</label>';
+  if (!clickupTree) {
+    if (!selectedBoards.size) { box.innerHTML = '<div class="pr-empty">' + (clickupHasToken ? 'Click “Load boards” to pick the boards whose tickets raid the island.' : 'Connect a token, then pick the boards whose tickets raid the island.') + '</div>'; return; }
+    box.innerHTML = [...selectedBoards.values()].map(l => row(l, 0, l.path || l.name)).join(''); return;
+  }
+  const q = (document.getElementById('inp-clickup-search').value || '').toLowerCase(), match = l => !q || l.name.toLowerCase().includes(q) || (l.path || '').toLowerCase().includes(q);
+  let h = '';
+  for (const sp of clickupTree) {
+    const folders = sp.folders.map(fo => ({ ...fo, lists: fo.lists.filter(match) })).filter(fo => fo.lists.length), lists = sp.lists.filter(match);
+    if (!folders.length && !lists.length) continue;
+    h += '<div style="padding:5px 4px 2px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;">' + escapeHtml(sp.name) + '</div>';
+    for (const fo of folders) {
+      const all = fo.lists.every(l => selectedBoards.has(l.id));
+      h += '<label style="display:flex;gap:6px;align-items:center;padding:2px 4px 2px 18px;font-size:12px;cursor:pointer;color:var(--dim);"><input type="checkbox" ' + (all ? 'checked' : '') + ' onchange="toggleFolder(\'' + fo.id + '\',this.checked)"><span>&#x1F4C1; ' + escapeHtml(fo.name) + '</span></label>' + fo.lists.map(l => row(l, 2)).join('');
+    }
+    h += lists.map(l => row(l, 1)).join('');
+  }
+  // Boards picked earlier that the tree no longer has (a sprint that ended) stay listed so they can be unticked.
+  const gone = [...selectedBoards.values()].filter(l => !findBoardInTree(l.id));
+  if (gone.length) h += '<div style="padding:5px 4px 2px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;">No longer in ClickUp</div>' + gone.map(l => row(l, 1, l.path || l.name)).join('');
+  box.innerHTML = h || '<div class="pr-empty">No match.</div>';
+}
+function findBoardInTree(id) { for (const sp of clickupTree || []) { for (const fo of sp.folders) for (const l of fo.lists) if (l.id === id) return l; for (const l of sp.lists) if (l.id === id) return l; } return null; }
+function toggleBoard(id, on) { const l = findBoard(id); if (on && l) selectedBoards.set(id, { id: l.id, name: l.name, path: l.path || '' }); else selectedBoards.delete(id); onClickupSettingsChange(); renderBoardPicker(); }
+function toggleFolder(fid, on) { for (const sp of clickupTree || []) for (const fo of sp.folders) if (fo.id === fid) for (const l of fo.lists) { if (on) selectedBoards.set(l.id, { id: l.id, name: l.name, path: l.path || '' }); else selectedBoards.delete(l.id); } onClickupSettingsChange(); renderBoardPicker(); }
+function renderClickupLive() {
+  const el = document.getElementById('clickup-live'); if (!el) return;
+  if (!clickupSettings.enabled) { el.textContent = ''; return; }
+  if (clickupState.error) { el.innerHTML = '<span style="color:#f38ba8">Last poll failed: ' + escapeHtml(clickupState.error) + '</span>'; return; }
+  if (!clickupState.fetchedAt) { el.textContent = clickupHasToken && selectedBoards.size ? 'Waiting for the first poll…' : 'Sign in and pick at least one board.'; return; }
+  const by = {}; for (const t of clickupState.tasks) by[t.priority] = (by[t.priority] || 0) + 1;
+  const parts = ['urgent', 'high', 'normal', 'low', 'none'].filter(p => by[p]).map(p => by[p] + ' ' + p);
+  const ago = Math.max(0, Math.round((Date.now() - clickupState.fetchedAt) / 1000));
+  el.textContent = clickupState.tasks.length + ' raid' + (clickupState.tasks.length === 1 ? '' : 's') + ' right now' + (parts.length ? ' · ' + parts.join(', ') : '') + ' · polled ' + (ago < 60 ? ago + 's' : Math.round(ago / 60) + 'm') + ' ago';
+}
 let actionsPendingRepo = null; // repo whose workflow list is being picked from
 
 function onActionsSettingsChange() {
@@ -5519,6 +5667,8 @@ function renderSettingsChips() {
   n('chip-pr', pr, pr ? `on · ${prN} repo${prN === 1 ? '' : 's'}` : 'off');
   const ac = actionsSettings.enabled, acN = (actionsSettings.workflows || []).length;
   n('chip-actions', ac, ac ? `on · ${acN} workflow${acN === 1 ? '' : 's'}` : 'off');
+  const cuOn = clickupSettings.enabled, cuN = (clickupSettings.lists || []).length, cuR = clickupState.tasks.length;
+  n('chip-clickup', cuOn, cuOn ? `on · ${cuN} board${cuN === 1 ? '' : 's'} · ${cuR} raid${cuR === 1 ? '' : 's'}` : 'off');
 }
 
 function loadRepos() {
@@ -5702,7 +5852,7 @@ function worldSnapshot() {
     actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
-  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), usage: worldUsage() };
+  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), usage: worldUsage(), raids: clickupState.tasks };
   return snapshot;
 }
 const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
