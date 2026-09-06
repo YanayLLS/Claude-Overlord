@@ -5449,8 +5449,8 @@ function questMd(src) {
     let m;
     if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); h += '<h' + Math.min(4, m[1].length + 1) + '>' + inl(m[2]) + '</h' + Math.min(4, m[1].length + 1) + '>'; continue; }
     if ((m = line.match(/^\s*>\s?(.*)$/))) { flush(); h += '<blockquote>' + inl(m[1]) + '</blockquote>'; continue; }
+    if (/^\s*([-*_]\s*){3,}$/.test(line)) { flush(); h += '<hr>'; continue; } // a rule ("* * *") before the list test, which it would otherwise pass
     if ((m = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/))) { const kind = /^\s*\d/.test(line) ? 'ol' : 'ul'; if (list !== kind) { flush(); list = kind; h += '<' + kind + '>'; } let item = m[1]; const chk = item.match(/^\[( |x|X)\]\s*(.*)$/); if (chk) item = '<span class="q-chk' + (chk[1] === ' ' ? '' : ' on') + '"></span>' + inl(chk[2]); else item = inl(item); h += '<li>' + item + '</li>'; continue; }
-    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flush(); h += '<hr>'; continue; }
     if (list) flush(); para.push(line.trim());
   }
   if (code !== null) h += '<pre>' + esc(code.join('\n')) + '</pre>'; flush();
@@ -5467,7 +5467,7 @@ function renderQuest() {
     + '<div class="q-body"><div class="q-seal">&#x2620;</div><h1>' + esc(t.name) + '</h1>'
     + '<div class="q-chips">' + chip('Platform', (t.platforms || []).join(', ')) + chip('Board', t.list && t.list.name) + chip('Status', t.status) + chip('Assigned', (t.assignees || []).join(', ')) + chip('Besieging', q.base) + chip('Here for', sinceStr) + chip('Due', when(t.due)) + chip('Tags', (t.tags || []).join(', ')) + fields.map(f => chip(f.name, f.values.join(', '))).join('') + '</div>'
     + '<div class="q-text">' + (q.error ? '<p class="q-empty">Could not read the scroll: ' + esc(q.error) + '</p>' : !q.body ? '<p class="q-empty q-wait">Unrolling the scroll…</p>' : questMd(t.markdown)) + '</div>'
-    + (q.body && t.attachments && t.attachments.length ? questAttachHtml(t.attachments) : '')
+    + (q.body && t.attachments && t.attachments.length ? questAttachHtml(t.attachments.filter(a => !(t.markdown || '').includes(a.url))) : '')
     + '<div class="q-actions"><button class="q-btn q-main" onclick="copyLink(\'' + escAttr(t.url) + '\')">&#x2398; Copy link</button><button class="q-btn" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(t.url) + '\'})">&#x2197; Open in ClickUp</button><button class="q-btn q-close" onclick="closeQuest()">Close</button></div></div>';
 }
 function renderClickupLive() {
