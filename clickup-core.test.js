@@ -1,6 +1,6 @@
 // Run: node clickup-core.test.js
 const assert = require('assert');
-const { statusMatches, parseStatusFilter, fieldLabels, normalizeTask, assignedTo, diffRaids, taskQuery, buildTree, flattenTree, sanitizeLists } = require('./clickup-core');
+const { statusMatches, phaseOf, platformKey, sanitizePlatformMap, parseStatusFilter, fieldLabels, normalizeTask, assignedTo, diffRaids, taskQuery, buildTree, flattenTree, sanitizeLists } = require('./clickup-core');
 
 // ── status matching: emoji, case and per-list copies do not matter ──
 assert.ok(statusMatches('failed qa 🐞', ['failed qa']));
@@ -13,6 +13,14 @@ assert.ok(!statusMatches('', ['failed qa']));
 assert.ok(!statusMatches('failed qa', []));
 assert.deepStrictEqual(parseStatusFilter(' failed qa, waiting for merge;failed qa\n'), ['failed qa', 'waiting for merge']);
 assert.deepStrictEqual(parseStatusFilter(''), []);
+
+assert.strictEqual(phaseOf('failed qa 🐞', ['failed qa'], ['in development']), 'raid');
+assert.strictEqual(phaseOf('in development 🛠', ['failed qa'], ['in development']), 'fight');
+assert.strictEqual(phaseOf('waiting for merge', ['failed qa'], ['in development']), null);
+assert.strictEqual(phaseOf('failed qa', ['failed qa'], ['failed qa']), 'raid'); // raid wins a tie
+assert.strictEqual(platformKey('Android 🤖'), 'android'); assert.strictEqual(platformKey(' XR Headset '), 'xr headset');
+assert.deepStrictEqual(sanitizePlatformMap({ 'Android 🤖': 'D:\Repos\Frontline One Android', '': 'x', bad: 5, ' ': 'y' }), { android: 'D:\Repos\Frontline One Android' });
+assert.deepStrictEqual(sanitizePlatformMap(null), {});
 
 // ── custom field values ──
 const PLAT = { id: 'f6b4', name: 'Platform', type: 'labels', type_config: { options: [{ id: 'a', label: 'Webapp 🌐' }, { id: 'b', label: 'Android 🤖' }] }, value: ['b', 'a'] };

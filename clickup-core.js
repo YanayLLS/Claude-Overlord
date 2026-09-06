@@ -15,6 +15,12 @@ function statusMatches(status, filters) {
   for (const f of Array.isArray(filters) ? filters : [filters]) { const fk = statusKey(f); if (fk && (k === fk || k.startsWith(fk + ' '))) return true; }
   return false;
 }
+// A ticket's phase: 'raid' while it sits in a raid status (failed qa), 'fight' while it is being
+// worked on (in development: the base's agents shoot back), null when it is in neither.
+function phaseOf(status, raidFilters, fightFilters) { if (statusMatches(status, raidFilters)) return 'raid'; if (statusMatches(status, fightFilters)) return 'fight'; return null; }
+// The platform-to-base table is keyed by the label's letters only, so "Android 🤖" and "android" agree.
+function platformKey(label) { return statusKey(label); }
+function sanitizePlatformMap(m) { const out = {}; if (!m || typeof m !== 'object') return out; for (const [k, v] of Object.entries(m)) { const kk = platformKey(k); if (!kk || kk.length > 60 || typeof v !== 'string' || !v || v.length > 400) continue; out[kk] = v; } return out; }
 // "failed qa, waiting for merge" -> ['failed qa', 'waiting for merge']
 function parseStatusFilter(text) { return [...new Set(String(text || '').split(/[,\n;]+/).map(s => s.trim()).filter(Boolean))]; }
 
@@ -112,4 +118,4 @@ function sanitizeLists(lists) {
   return out;
 }
 
-if (typeof module !== 'undefined') module.exports = { PRIORITIES, statusKey, statusMatches, parseStatusFilter, fieldLabels, normalizeTask, assignedTo, diffRaids, taskQuery, buildTree, flattenTree, sanitizeLists };
+if (typeof module !== 'undefined') module.exports = { PRIORITIES, statusKey, statusMatches, phaseOf, platformKey, sanitizePlatformMap, parseStatusFilter, fieldLabels, normalizeTask, assignedTo, diffRaids, taskQuery, buildTree, flattenTree, sanitizeLists };

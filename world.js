@@ -41,10 +41,10 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
 let THREE, stage, canvas, labelsEl, selEl, miniEl, toastEl, hooks = {};
 let renderer, scene, camera, sun, raf = 0, ro = null, lastT = 0, alive = false;
 const cam = { target: null, zoom: 2.0, yaw: 0, base: null, hover: false };
-const sites = new Map(), units = new Map(), ships = new Map(), machines = new Map(), tents = new Map();
+const sites = new Map(), units = new Map(), ships = new Map(), machines = new Map(), tents = new Map(), raiders = new Map();
 const order = { features: [], shops: [] };
 const anchors = new Set(), tweens = new Set(), flags = [], cranes = [], beacons = [];
-let selected = {}, hovered = null, snap = null, terrain = null, mats = null, card = null, cardFor = null, siteColorIdx = 0, lastSel, selSig = '';
+let selected = {}, hovered = null, hoveredRaid = null, snap = null, terrain = null, mats = null, card = null, cardFor = null, siteColorIdx = 0, lastSel, selSig = '';
 const pickables = new Set(); // every hit mesh in the scene, kept in step with create/destroy
 const colorFor = new Map(); // site key -> color (stable across syncs)
 
@@ -120,7 +120,7 @@ W.init = function (stageEl, h) {
 W.dispose = function () {
   alive = false; cancelAnimationFrame(raf); if (ro) ro.disconnect(); ro = null;
   for (const s of tweens) tweens.delete(s);
-  sites.clear(); units.clear(); ships.clear(); machines.clear(); tents.clear(); anchors.clear(); pickables.clear(); lastSel = undefined; flags.length = 0; life.clouds.length = 0; life.birds.length = 0; life.flies.length = 0; life.torches.length = 0; life.chimneys.length = 0; life.fires.length = 0; life.fish = null; life.rain = null; life.sky = null; life.stars = null; life.meteor = null; life.ship = null; life.gulls.length = 0; life.spot = null; life.medics.clear(); life.fountains.length = 0; life.lighthouse = null; life.orbits.length = 0; life.beams.length = 0; life.buoys.length = 0; prevAg.clear(); intents.clear(); awardsArmed = false; economy = null; cam.cine = false; cam.lastInput = null; cranes.length = 0; beacons.length = 0; order.features.length = 0; order.shops.length = 0;
+  sites.clear(); units.clear(); ships.clear(); machines.clear(); tents.clear(); raiders.clear(); anchors.clear(); fx.shots.length = 0; fx.rings.length = 0; fx.debris.length = 0; fx.flames.length = 0; fx.sieges.clear(); cam.shake = null; pickables.clear(); lastSel = undefined; flags.length = 0; life.clouds.length = 0; life.birds.length = 0; life.flies.length = 0; life.torches.length = 0; life.chimneys.length = 0; life.fires.length = 0; life.fish = null; life.rain = null; life.sky = null; life.stars = null; life.meteor = null; life.ship = null; life.gulls.length = 0; life.spot = null; life.medics.clear(); life.fountains.length = 0; life.lighthouse = null; life.orbits.length = 0; life.beams.length = 0; life.buoys.length = 0; prevAg.clear(); intents.clear(); awardsArmed = false; economy = null; cam.cine = false; cam.lastInput = null; cranes.length = 0; beacons.length = 0; order.features.length = 0; order.shops.length = 0;
   if (scene) scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } } });
   if (renderer) renderer.dispose(); renderer = scene = camera = null; terrain = null; puffs = null; selected = {}; hovered = null; snap = null;
   if (stage) stage.innerHTML = ''; if (hooks.miniSlot) hooks.miniSlot.innerHTML = '';
@@ -154,9 +154,9 @@ function buildTerrain() {
 // Give every tile a target height and colour from the island shape and the sites on it.
 function layoutTerrain(siteList) {
   const T = terrain; let rx = 44, rz = 34;
-  for (const s of siteList) { rx = Math.max(rx, Math.abs(s.x) + s.R + 16); rz = Math.max(rz, Math.abs(s.z) + s.R + 14); }
+  for (const s of siteList) { const edge = s.kind === 'portal'; rx = Math.max(rx, Math.abs(s.x) + s.R + (edge ? 2 : 16)); rz = Math.max(rz, Math.abs(s.z) + s.R + (edge ? 2 : 14)); }
   T.rx = rx; T.rz = rz;
-  const grass = [new THREE.Color(0x6fae5a), new THREE.Color(0x7dba62), new THREE.Color(0x63a052)], forest = new THREE.Color(0x4f8f48), sand = new THREE.Color(0xd9c58f), rock = new THREE.Color(0x8d8a84), snow = new THREE.Color(0xd8dde0), plot = new THREE.Color(0x3c4a52), earth = new THREE.Color(0x6b5a44), deep = new THREE.Color(0x1f6f8c), water = new THREE.Color(0x2c86a8);
+  const grass = [new THREE.Color(0x6fae5a), new THREE.Color(0x7dba62), new THREE.Color(0x63a052)], forest = new THREE.Color(0x4f8f48), sand = new THREE.Color(0xd9c58f), rock = new THREE.Color(0x8d8a84), snow = new THREE.Color(0xd8dde0), ash = new THREE.Color(0x2f2b36), ashCol = new THREE.Color(0x1d1a22), crag = new THREE.Color(0x4a454f), plot = new THREE.Color(0x3c4a52), earth = new THREE.Color(0x6b5a44), deep = new THREE.Color(0x1f6f8c), water = new THREE.Color(0x2c86a8);
   for (const t of T.tiles) {
     const e = (t.x / rx) ** 2 + (t.z / rz) ** 2;
     let biome = 'hidden', th = 0;
@@ -171,10 +171,14 @@ function layoutTerrain(siteList) {
         else if (lx > s.quay && az < .45 * R && biome !== 'hidden') { biome = 'bay'; th = WATER; break; }
         else if (d < R + TILE * 2.6 && biome !== 'hidden' && biome !== 'water') { th = Math.min(th, SAND + 1.3 * (d - R - TILE * .8) / (TILE * 1.8)); if (d < R + TILE * 1.6) biome = 'sand'; }
         continue; }
+      if (s.kind === 'portal') { // scorched ground on the plateau, a raised rim of black crag around it
+        if (d < s.R + TILE * .8) { site = s; biome = 'ash'; th = PLAT; break; }
+        else if (d < s.R + TILE * 3 && biome !== 'hidden') { th = Math.max(th, PLAT + 1.5 - 2.8 * (d - s.R - TILE * .8) / (TILE * 2.2)); biome = d < s.R + TILE * 2.1 ? 'crag' : biome === 'water' ? 'sand' : biome; }
+        continue; }
       if (d < s.R + TILE * .8) { site = s; biome = 'plot'; th = PLAT; break; } else if (d < s.R + TILE * 2.6 && biome !== 'hidden') { th = Math.max(th, PLAT - 1.2 * (d - s.R - TILE * .8) / (TILE * 1.8)); if (biome === 'water') { biome = 'sand'; } } }
     t.site = site; t.th = th; t.biome = biome;
-    t.cap.copy(biome === 'plot' ? plot : biome === 'water' || biome === 'bay' ? water : biome === 'sand' ? sand : biome === 'rock' ? (th > 4 ? snow : rock) : biome === 'forest' ? forest : grass[Math.floor(t.n2 * 3) % 3]);
-    t.col.copy(biome === 'water' || biome === 'bay' ? deep : biome === 'plot' ? plot : earth);
+    t.cap.copy(biome === 'plot' ? plot : biome === 'ash' ? ash : biome === 'crag' ? crag : biome === 'water' || biome === 'bay' ? water : biome === 'sand' ? sand : biome === 'rock' ? (th > 4 ? snow : rock) : biome === 'forest' ? forest : grass[Math.floor(t.n2 * 3) % 3]);
+    t.col.copy(biome === 'water' || biome === 'bay' ? deep : biome === 'plot' ? plot : biome === 'ash' || biome === 'crag' ? ashCol : earth);
     if (t.h === 0 && th > 0) t.h = .01; // new land rises from the sea floor
   }
   T.dirty = true; if (life.flies.length) pickFlyHomes();
@@ -311,6 +315,7 @@ function planSites(s) {
   if (plan.length) plan.push({ key: 'treasury', kind: 'treasury', x: 0, z: 2.5, R: 7 }); // today's spend as a coin pile at the crossroads
   if (plan.length) plan.push({ key: 'plant', kind: 'plant', x: -17, z: 2.5, R: 7 }); // the power plant: session / week / per-model supply
   if (s.peers && s.peers.length) plan.push({ key: 'allies', kind: 'allies', x: -(sTotal / 2 + GAP + 13), z: 22, R: 13 });
+  if (s.raidsOn) plan.push({ key: 'portal', kind: 'portal', x: -(Math.max(fTotal, sTotal) / 2 + GAP + 20), z: Math.min(-30, fRowZ - 12), R: 9 }); // the enemy's cave, on the far north-west crag
   return plan;
 }
 
@@ -353,6 +358,7 @@ function createSite(p) {
   } else if (p.kind === 'github') buildGithub(site, p);
   else if (p.kind === 'allies') buildAllies(site, p.R);
   else if (p.kind === 'plant') buildPlant(site, p.R);
+  else if (p.kind === 'portal') buildPortal(site, p.R);
   else if (p.kind === 'treasury') { site.color = 0xe1b453; const plat = hexPrism(p.R, .5, mats.plot); plat.position.y = .25; g.add(plat); g.add(hexEdge(p.R, .52, 0xe1b453, .6)); site.plat = plat; plat.userData.pick = { site }; const an = new THREE.Object3D(); an.position.set(0, 4.2, 0); g.add(an); site.el = label('w-lot', 'Treasury', an, '#e1b453'); site.extra.coins = new THREE.Group(); g.add(site.extra.coins); site.extra.coinsN = -1; }
   // Spawn: rise from below with a dust burst.
   g.position.y = PLAT - 9; tween(900, k => { g.position.y = PLAT - 9 + 9 * k; }, () => burst(new THREE.Vector3(p.x, PLAT + .5, p.z), '#e6d7b8', 40, p.R * 1.2, 2), easeOutCubic, 250);
@@ -390,6 +396,7 @@ function syncSite(site, p, s) {
   else if (p.kind === 'treasury') syncTreasury(site, s);
   else if (p.kind === 'plant') syncPlant(site, s);
   else if (p.kind === 'allies') syncAllies(site, s);
+  else if (p.kind === 'portal') syncPortal(site, s);
 }
 
 /* ────────────────────────── Units (agents) ────────────────────────── */
@@ -723,6 +730,7 @@ W.sync = function (s) {
   for (const p of plan) { seen.add(p.key); let site = sites.get(p.key); if (!site) site = createSite(p); syncSite(site, p, s); }
   for (const p of plan) { const site = sites.get(p.key); if (site && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); } }
   for (const [k, site] of sites) if (!seen.has(k)) destroySite(site);
+  syncRaids(s);
   layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R, kind: st.kind, quay: st.extra.lay ? st.extra.lay.quay : 0 })));
   // Until the commander pans or zooms, keep the whole settlement framed.
   if (!cam.userMoved && sites.size) frameAll();
@@ -735,6 +743,7 @@ W.sync = function (s) {
   if (selected.pr) { const np = (s.prs || []).find(p => p.key === selected.pr.key); if (!np) select({}); else { const sig = np.actionsHtml + np.state + np.checks + np.behindBy + np.commitCount + np.reviewDecision; if (selected.pr !== np || sig !== selSig) { selected.pr = np; selSig = sig; renderSel(); } } }
   else if (selected.run) { const nr = (s.runs || []).find(r => r.key === selected.run.key); if (!nr) select({}); else { const sig = nr.actionsHtml + nr.state + nr.runNumber; if (selected.run !== nr || sig !== selSig) { selected.run = nr; selSig = sig; renderSel(); } } }
   else if (selected.peer) { const npr = (s.peers || []).find(p => p.name === selected.peer.name); if (!npr) select({}); else { const sig = String(npr.connected) + npr.agents; if (selected.peer !== npr || sig !== selSig) { selected.peer = npr; selSig = sig; renderSel(); } } }
+  else if (selected.raid) { if (!raiders.has(selected.raid.task.id)) select({}); else { const sig = selected.raid.task.phase + selected.raid.task.priority + selected.raid.task.name + (selected.raid.lot ? selected.raid.lot.cwd : ''); if (sig !== selSig) { selSig = sig; renderSel(); } } }
   else if (selected.site && !sites.has(selected.site.key)) select({});
   else if (selected.site) renderSel(); // balance, build timers and upgrade buttons move with every sync
   detectAwards(s);
@@ -755,6 +764,7 @@ function select(what) {
   for (const sh of ships.values()) sh.el.el.classList.toggle('sel', sh.pr === selected.pr);
   for (const m of machines.values()) m.el.el.classList.toggle('sel', m.run === selected.run);
   for (const t of tents.values()) t.el.el.classList.toggle('sel', t.peer === selected.peer);
+  for (const rd of raiders.values()) rd.el.el.classList.toggle('sel', rd === selected.raid);
 }
 function bindInput() {
   const keys = new Set(); let drag = null;
@@ -768,6 +778,7 @@ function bindInput() {
     if (drag) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
       if (drag.moved) { stage.classList.add('grabbing'); cam.userMoved = true; const k = .034 * cam.zoom, s = Math.sin(cam.yaw), c = Math.cos(cam.yaw); cam.target.x -= (dx * c + dy * s) * k; cam.target.z -= (dy * c - dx * s) * k; drag.x = e.clientX; drag.y = e.clientY; } return; }
     const r = pick(e); hovered = r.unit || null; canvas.style.cursor = Object.keys(r).length ? 'pointer' : 'default';
+    const nr = r.raid || null; if (nr !== hoveredRaid) { if (hoveredRaid && hoveredRaid.el) hoveredRaid.el.el.classList.remove('hov'); hoveredRaid = nr; if (nr) nr.el.el.classList.add('hov'); }
   });
   canvas.addEventListener('pointerup', e => {
     const d = drag; drag = null; stage.classList.remove('grabbing'); if (!d || d.moved) return;
@@ -775,9 +786,9 @@ function bindInput() {
     if (d.btn === 2) { if (r.unit && !r.unit.mini) hooks.agentMenu && hooks.agentMenu(e, r.unit.a.id); return; }
     if (d.btn !== 0) return;
     if (r.unit) { if (r.unit.mini) { select({ unit: r.unit }); hooks.focusTeamMember && hooks.focusTeamMember(r.unit.a.teamName, r.unit.a.memberName, false); } else { select({ unit: r.unit }); hooks.selectAgent && hooks.selectAgent(r.unit.a.id); } }
-    else if (r.pr) select({ pr: r.pr }); else if (r.run) select({ run: r.run }); else if (r.peer) select({ peer: r.peer }); else if (r.site) select({ site: r.site }); else select({});
+    else if (r.pr) select({ pr: r.pr }); else if (r.run) select({ run: r.run }); else if (r.peer) select({ peer: r.peer }); else if (r.raid) select({ raid: r.raid }); else if (r.site) select({ site: r.site }); else select({});
   });
-  canvas.addEventListener('dblclick', e => { const r = pick(e); if (r.unit && !r.unit.mini) { flyTo(r.unit.g); hooks.openAgent && hooks.openAgent(r.unit.a.id); } else if (r.pr) hooks.openPr && hooks.openPr(r.pr.url); else if (r.run) hooks.openRun && hooks.openRun(r.run.url); else if (r.peer) hooks.openChat && hooks.openChat(r.peer.name); });
+  canvas.addEventListener('dblclick', e => { const r = pick(e); if (r.unit && !r.unit.mini) { flyTo(r.unit.g); hooks.openAgent && hooks.openAgent(r.unit.a.id); } else if (r.pr) hooks.openPr && hooks.openPr(r.pr.url); else if (r.run) hooks.openRun && hooks.openRun(r.run.url); else if (r.peer) hooks.openChat && hooks.openChat(r.peer.name); else if (r.raid) hooks.openRaid && hooks.openRaid(r.raid.task.url); });
   canvas.addEventListener('wheel', e => { e.preventDefault(); if (e.ctrlKey) return; cam.userMoved = true; cam.zoom = Math.min(6.5, Math.max(.4, cam.zoom * (e.deltaY > 0 ? 1.1 : .91))); }, { passive: false });
   const onKey = e => { if (!cam.hover || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.ctrlKey || e.metaKey || e.altKey) return; const k = e.key.toLowerCase(); touched(); if ('wasdqe'.includes(k) || k.startsWith('arrow')) { keys.add(k); cam.userMoved = true; } else if (k === 'f' || k === 'home') frameAll(true); };
   addEventListener('keydown', onKey); addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
@@ -792,9 +803,7 @@ function frameAll(force) {
   if (Math.abs(fx - cx) > .5 || Math.abs(fz - cz) > .5 || Math.abs(fzoom - zoom) > .05 || (force && Math.abs(fyaw) > .01)) tween(900, k => { if (cam.userMoved) return; cam.target.x = fx + (cx - fx) * k; cam.target.z = fz + (cz - fz) * k; cam.zoom = fzoom + (zoom - fzoom) * k; if (force) cam.yaw = fyaw * (1 - k); });
 }
 function updateCamera(dt) {
-  // War-room mode: left alone for 45 s, the camera drifts around the island; any input takes over again.
   const now = performance.now() / 1000; if (cam.lastInput == null) cam.lastInput = now;
-  if (!cam.cine && sites.size && now - cam.lastInput > 45 && !reduceMotion()) cam.cine = true;
   if (cam.cine) { const { cx, cz, zoom } = frameBox(); cam.yaw += dt * .05; cam.target.x += (cx - cam.target.x) * Math.min(1, .25 * dt); cam.target.z += (cz - cam.target.z) * Math.min(1, .25 * dt); cam.zoom += (zoom * .9 - cam.zoom) * Math.min(1, .25 * dt); }
   const keys = cam.keys, sp = 24 * dt * cam.zoom, s = Math.sin(cam.yaw), c = Math.cos(cam.yaw); let mx = 0, mz = 0;
   if (keys.has('w') || keys.has('arrowup')) mz -= 1; if (keys.has('s') || keys.has('arrowdown')) mz += 1; if (keys.has('a') || keys.has('arrowleft')) mx -= 1; if (keys.has('d') || keys.has('arrowright')) mx += 1;
@@ -804,6 +813,7 @@ function updateCamera(dt) {
   cam.target.x = Math.max(-lim.x, Math.min(lim.x, cam.target.x)); cam.target.z = Math.max(-lim.z, Math.min(lim.z, cam.target.z)); cam.target.y = PLAT;
   const off = cam.base.clone().multiplyScalar(cam.zoom).applyAxisAngle(new THREE.Vector3(0, 1, 0), cam.yaw);
   camera.position.copy(cam.target).add(off); camera.lookAt(cam.target);
+  if (cam.shake && now < cam.shake.until && !reduceMotion()) { const a = cam.shake.amp * Math.min(1, (cam.shake.until - now) * 2); camera.position.x += (Math.random() - .5) * a; camera.position.y += (Math.random() - .5) * a; camera.position.z += (Math.random() - .5) * a; }
   if (scene.fog) { const dist = off.length(); scene.fog.near = dist + 45; scene.fog.far = dist + 170; }
   const pos = hooks.miniSlot && hooks.miniSlot.querySelector('#world-mini-pos'); if (pos) { const txt = `${Math.round(cam.target.x)}, ${Math.round(cam.target.z)}`; if (pos.textContent !== txt) pos.textContent = txt; }
 }
@@ -838,6 +848,10 @@ function renderSel() {
     h = `<div class="w-portrait" style="--c:${st.hex}">&#x2699;</div><div class="w-main" style="--c:#a78bfa;--sc:${st.hex}"><div class="w-crumb">GitHub quarter &middot; <b>workflow run</b> &middot; ${esc(r.repo)}${r.runNumber ? ' &middot; #' + r.runNumber : ''}</div><h2>${esc(r.name)}</h2><div class="w-act">${st.label}${r.branch ? ' · ⑂ ' + esc(r.branch) : ''}${r.title ? ' · ' + esc(r.title) : ''}</div></div>
       <div class="w-stats"><div class="w-stat"><span class="k">By</span><span class="v">${r.actor ? '@' + esc(r.actor) : '<em>?</em>'}</span></div><div class="w-stat"><span class="k">Started</span><span class="v">${r.startedAt ? esc(new Date(r.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : '<em>?</em>'}</span></div></div>
       <div class="w-orders w-orders-html">${r.actionsHtml || ob('&#x2197;', 'Open run', 'openRun', { off: !r.url })}</div>`;
+  } else if (selected.raid) {
+    const rd = selected.raid, r = rd.task, tier = rd.tier, hex = RAID_HEX[r.priority] || RAID_HEX.none, base = rd.lot ? rd.lot.spec.title : rd.site ? (rd.site.kind === 'treasury' ? 'the Treasury' : rd.site.key) : '?';
+    h = `<div class="w-portrait" style="--c:${hex}">&#x2620;</div><div class="w-main" style="--c:${hex};--sc:${hex}"><div class="w-crumb">${r.phase === 'fight' ? 'Under fire' : 'Raid'} &middot; <b>${tier.name}</b> &middot; ${esc(r.list.name)}${r.assignees.length ? ' &middot; ' + esc(r.assignees.join(', ')) : ''}</div><h2>${esc(r.name)}</h2><div class="w-act">${(r.priority === 'none' ? 'no' : r.priority).toUpperCase()} priority ${r.platforms.length ? '&middot; ' + esc(r.platforms.join(', ')) : '&middot; no platform'} &middot; ${rd.state === 'march' || rd.state === 'emerge' ? 'marching on' : 'besieging'} <b>${esc(base)}</b>${r.target ? '' : ' (no base mapped: picked at random)'} &middot; ${sinceStr(r.since)}</div></div>
+      <div class="w-orders">${ob('&#x1F4DC;', 'Quest', 'quest') + ob('&#x2398;', 'Copy link', 'copyRaid') + ob('&#x2197;', 'ClickUp', 'openRaid')}</div>`;
   } else if (selected.peer) {
     const p = selected.peer;
     h = `<div class="w-portrait" style="--c:${p.connected ? 'var(--w-working)' : 'var(--w-idle)'}">&#x21C4;</div><div class="w-main" style="--c:var(--w-working);--sc:var(--dim)"><div class="w-crumb">Allied camp &middot; <b>peer Overlord</b> &middot; ${p.connected ? 'online' : 'offline'}</div><h2>${esc(p.name)}</h2><div class="w-act">${p.agents ? p.agents + ' unit' + (p.agents === 1 ? '' : 's') + ' afield' : 'no units reported'}${p.host ? ' · ' + esc(p.host) + ':' + p.port : ''}</div></div><div class="w-orders">${ob('&#x1F5E8;', 'Chat', 'chat')}</div>`;
@@ -862,6 +876,9 @@ function command(cmd, ev) {
     case 'openPr': hooks.openPr && hooks.openPr(selected.pr.url); break;
     case 'openRun': hooks.openRun && hooks.openRun(selected.run.url); break;
     case 'chat': hooks.openChat && hooks.openChat(selected.peer.name); break;
+    case 'openRaid': hooks.openRaid && hooks.openRaid(selected.raid.task.url); break;
+    case 'quest': { const rd = selected.raid; if (rd && hooks.openQuest) hooks.openQuest(rd.task, rd.lot ? rd.lot.spec.title : rd.site && rd.site.kind === 'treasury' ? 'the Treasury' : ''); break; }
+    case 'copyRaid': hooks.copyLink && hooks.copyLink(selected.raid.task.url); break;
     case 'upgrade': { const st = selected.site; if (!st) break; const up = upgradeInfo(st); if (!up || !hooks.spend) break; if (hooks.spend(up.cost, { upgrade: st.key, tier: up.next, label: up.name, dur: up.dur })) toast(`${up.name}: construction started — ${up.cost} ⬡`); break; }
     case 'usage': hooks.refreshUsage && hooks.refreshUsage(); toast('Reading the meters…'); break;
     default: if (cmd.startsWith('buy:')) { const id = cmd.slice(4), d = DECOS[id]; if (d && hooks.spend && hooks.spend(d.cost, { deco: id, label: d.name, dur: DECO_TIME })) toast(`${d.name}: construction started — ${d.cost} ⬡`); }
@@ -929,6 +946,7 @@ function animateUnit(u, t, dt) {
   const { p: m, inner, a } = u, s = a.status, T = reduceMotion() ? 0 : t;
   m.armL.rotation.set(0, 0, 0); m.armR.rotation.set(0, 0, 0); inner.rotation.set(0, u.face, 0); inner.position.y = 0; inner.scale.setScalar(u.scale); m.head.rotation.set(0, 0, 0);
   u.g.position.y = .56 + (u.ackAt && t < u.ackAt + .6 ? Math.sin((t - u.ackAt) / .6 * Math.PI) * .38 : 0); // a hop when the commander clicks
+  if (u.shootUntil && t < u.shootUntil) { m.armR.rotation.x = -1.6; m.armR.rotation.z = -.2; return; } // loosing a bolt at a raider
   if (u.carry) { u.carry.visible = !!(u.walk && !u.walk.back); if (!u.walk) { disposeObj(u.carry); u.carry = null; } }
   m.ring.material.opacity = u === selected.unit ? .95 : u === hovered ? .5 : 0; m.disc.scale.setScalar(1); m.disc.material.opacity = .32;
   if (m.think) { m.think.position.y = 2.6 * u.scale + Math.sin(T * 2.2 + u.phase) * .08; m.think.position.x = .35 * u.scale; }
@@ -997,11 +1015,12 @@ function drawMinimap() {
   mg.fillStyle = '#0d1a2a'; mg.fillRect(0, 0, Wm, Hm);
   mg.fillStyle = '#2b5b3e'; mg.beginPath(); mg.ellipse(Wm / 2, Hm / 2, Wm / 2 / 1.15, Hm / 2 / 1.15, 0, 0, Math.PI * 2); mg.fill();
   const hexPath = (cx, cy, r) => { mg.beginPath(); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; k ? mg.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)) : mg.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); } mg.closePath(); };
-  for (const s of sites.values()) { hexPath(X(s.x), Z(s.z), s.R * Wm / rx / 2); mg.fillStyle = s.kind === 'github' ? 'rgba(27,75,94,.95)' : s.kind === 'plant' ? 'rgba(46,88,98,.95)' : 'rgba(60,74,82,.95)'; mg.fill(); mg.strokeStyle = hexStr(s.color || 0xc9d1d9); mg.lineWidth = 1.5; mg.stroke(); }
+  for (const s of sites.values()) { hexPath(X(s.x), Z(s.z), s.R * Wm / rx / 2); mg.fillStyle = s.kind === 'github' ? 'rgba(27,75,94,.95)' : s.kind === 'plant' ? 'rgba(46,88,98,.95)' : s.kind === 'portal' ? 'rgba(58,28,74,.95)' : 'rgba(60,74,82,.95)'; mg.fill(); mg.strokeStyle = hexStr(s.color || 0xc9d1d9); mg.lineWidth = 1.5; mg.stroke(); }
   const dot = (o, hex, r, on) => { o.getWorldPosition(p); hexPath(X(p.x), Z(p.z), r); mg.fillStyle = hex; mg.fill(); if (on) { mg.strokeStyle = '#fff'; mg.lineWidth = 1.2; hexPath(X(p.x), Z(p.z), r + 2.5); mg.stroke(); } };
   for (const sh of ships.values()) dot(sh.g, (PR_STATE[sh.pr.state] || PR_STATE.open).hex, 3, sh.pr === selected.pr);
   for (const m of machines.values()) dot(m.g, (RUN_STATE[m.run.state] || RUN_STATE.none).hex, 3, m.run === selected.run);
   for (const u of units.values()) dot(u.g, hexStr(STATUS[u.a.status].hex), u.mini ? 1.6 : 3, u === selected.unit);
+  for (const rd of raiders.values()) dot(rd.g, RAID_HEX[rd.task.priority] || RAID_HEX.none, rd.tier.scale >= 1.5 ? 4.5 : 3, rd === selected.raid);
   // Pings: anything that needs the commander pulses on the map.
   const tp = performance.now() / 1000, pulse = 4 + 3 * (.5 + .5 * Math.sin(tp * 5));
   for (const u of units.values()) { const a = u.a; if (u.mini) continue; const need = a.status === 'permission' || a.status === 'question' || a.status === 'crashed' || a.idleMin >= IDLE_CALL_MIN; if (!need) continue; u.g.getWorldPosition(p); hexPath(X(p.x), Z(p.z), pulse); mg.strokeStyle = a.status === 'crashed' ? '#f38ba8' : '#f9e2af'; mg.lineWidth = 1.5; mg.stroke(); }
@@ -1012,8 +1031,9 @@ function drawMinimap() {
 function tick(now) {
   if (!alive) return; raf = requestAnimationFrame(tick);
   const dt = Math.min(.05, (now - lastT) / 1000); lastT = now; const t = now / 1000;
-  runTweens(now); updateCamera(dt); updateTerrain(dt); runPuffs(dt);
+  runTweens(now); updateCamera(dt); updateTerrain(dt); runPuffs(dt); updateFx(now / 1000, dt);
   for (const u of units.values()) if (u.p) animateUnit(u, t, dt);
+  for (const rd of raiders.values()) animateRaider(rd, t, dt);
   if (!reduceMotion()) {
     flags.forEach((f, i) => { f.rotation.y = Math.sin(t * 2.2 + i) * .18; }); for (const b of beacons) b.material.emissiveIntensity = 1 + (b.userData.nightBoost || 0) + Math.sin(t * 3) * .7;
     for (const c of cranes) { if (c.spin) { c.jib.rotation.z = t * 1.1; continue; } c.jib.rotation.y = Math.sin(t * .35 + c.ph) * .9; c.block.position.y = -2.4 + Math.sin(t * .7 + c.ph) * .5; }
@@ -1022,6 +1042,7 @@ function tick(now) {
     for (const m of machines.values()) { if (m.fire) { const k = .8 + .2 * Math.sin(t * 9 + m.ph) + .12 * Math.sin(t * 23 + m.ph * 3); m.fire.scale.set(k, .75 + k * .5, k); m.fire.rotation.y = t * 2.5; m.lamp.emissiveIntensity = 1 + Math.sin(t * 5 + m.ph) * .6; } if (m.smoke) for (const sm of m.smoke) { const f = ((t * (m.run.state === 'failure' ? .22 : .4) + sm.ph) % 1 + 1) % 1; sm.m.position.set(Math.sin(f * 6 + sm.ph * 9) * .25, 4.9 + f * 2.4, Math.cos(f * 5 + sm.ph * 7) * .2); sm.m.scale.setScalar(.5 + f * 1.4); sm.m.material.opacity = .65 * (1 - f); } }
     for (const s of sites.values()) if (s.extra.plant) { const P = s.extra.plant, load = .25 + P.load; P.core.material.emissiveIntensity = 1.2 + Math.sin(t * 3) * .5; P.core.scale.setScalar(1 + Math.sin(t * 3) * .06); P.turbine.rotation.z = t * (.6 + P.load * 2.4); for (const sm of P.steam) { const f = ((t * .28 * load + sm.ph) % 1 + 1) % 1; sm.m.position.set(-4.2 + Math.sin(f * 5 + sm.ph * 9) * .5, 5.2 + f * 3.2, -1.6 + Math.cos(f * 4 + sm.ph * 7) * .4); sm.m.scale.setScalar(.5 + f * 1.6); sm.m.material.opacity = .5 * (1 - f) * Math.min(1, .3 + P.load * 1.4); } }
     for (const s of sites.values()) if (s.extra.mark) s.extra.mark.position.y = s.extra.markY + Math.sin(t * 1.2) * .25;
+    for (const s of sites.values()) if (s.extra.portal) animatePortal(s.extra.portal, t, s);
     for (const m of machines.values()) if (m.flag && m.run.state === 'running') m.flag.material.rotation = -t * 2;
   }
   updateLife(t, dt);
@@ -1211,13 +1232,316 @@ function syncTreasury(site, s) {
 }
 function fmtMoney(c) { return c >= 1 ? '$' + c.toFixed(2) : '$' + c.toFixed(3); }
 
+/* ────────────────────────── ClickUp raids: the Dark Portal and the enemies it sends ────────────────────────── */
+// Every ticket of the commander's that sits in a raid status is an enemy that emerges from the portal on the
+// coastal crag and marches on the base of its platform. Priority sets the tier. A ticket moved into a fight
+// status keeps its enemy, now under fire from the base; a ticket that leaves both statuses kills it.
+const PORTAL_C = 0xb07cff, PORTAL_HEX = '#b07cff';
+const RAID_TIERS = {
+  low: { name: 'Gremlin', scale: .66, speed: 5.4, body: 0x5f9a3a, eyes: 0xffd23f, weight: 1, coins: 5, every: [3, 6], attacks: ['bite', 'pebble'] },
+  normal: { name: 'Raider', scale: 1, speed: 3.4, body: 0x7d3f33, eyes: 0xff3b5c, weight: 2, coins: 10, every: [4, 8], attacks: ['smash', 'rock'] },
+  high: { name: 'Ogre', scale: 1.6, speed: 2.6, body: 0x5b3a7a, eyes: 0xffa31a, weight: 4, coins: 25, every: [5, 9], attacks: ['fireball', 'roar'] },
+  urgent: { name: 'Warlord', scale: 2.4, speed: 2.1, body: 0x1f1826, eyes: 0xff2d55, weight: 8, coins: 100, every: [6, 10], attacks: ['stomp', 'darkbolt'] },
+  none: { name: 'Raider', scale: 1, speed: 3.4, body: 0x6b5a5a, eyes: 0xff3b5c, weight: 2, coins: 10, every: [4, 8], attacks: ['smash', 'rock'] } };
+const RAID_HEX = { low: '#a6e3a1', normal: '#fab387', high: '#f38ba8', urgent: '#ff3b5c', none: '#b4befe' };
+const PRI_ORDER = { urgent: 0, high: 1, normal: 2, none: 3, low: 4 }, RAID_CAP = 40, FLAME_CAP = 16;
+const raidTier = r => RAID_TIERS[r.priority] || RAID_TIERS.none;
+const hashStr = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
+function sinceStr(ts) { if (!ts) return ''; const m = Math.max(0, Math.round((Date.now() - ts) / 60000)); if (m < 60) return 'here ' + m + 'm'; const h = Math.floor(m / 60); if (h < 24) return 'here ' + h + 'h ' + (m % 60) + 'm'; return 'here ' + Math.floor(h / 24) + 'd ' + (h % 24) + 'h'; }
+// Battle effects: projectiles, shock rings, tumbling rubble, fires that burn out, camera shake, sieges on bases.
+const fx = { shots: [], rings: [], debris: [], flames: [], sieges: new Set() };
+function shockRing(pos, color, R = 4, dur = .7) { const m = new THREE.Mesh(new THREE.RingGeometry(.6, 1, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .7, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); m.rotation.x = -Math.PI / 2; m.position.copy(pos); m.position.y += .1; scene.add(m); fx.rings.push({ m, t: 0, dur, R }); }
+function shoot(from, to, o) {
+  const geo = o.kind === 'rock' ? new THREE.DodecahedronGeometry(o.size || .3, 0) : new THREE.SphereGeometry(o.size || .25, 8, 6);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: o.color, emissive: o.glow ? o.color : 0x000000, emissiveIntensity: o.glow ? 2 : 0 })); m.position.copy(from); m.castShadow = true; scene.add(m);
+  fx.shots.push({ m, from: from.clone(), to: to.clone(), t: 0, dur: o.dur || .8, arc: o.arc ?? 3, trail: o.trail || null, onHit: o.onHit, trailAt: 0 });
+}
+function debris(pos, color, n, up = 4) { for (let i = 0; i < n; i++) { const s = .12 + Math.random() * .16; const m = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), mat(color)); m.position.copy(pos); m.castShadow = true; scene.add(m); fx.debris.push({ m, v: new THREE.Vector3((Math.random() - .5) * 6, up * (.6 + Math.random()), (Math.random() - .5) * 6), r: new THREE.Vector3(Math.random() * 9, Math.random() * 9, Math.random() * 9), life: 1 + Math.random() * .8 }); } }
+function firePatch(pos, dur = 18, size = 1) {
+  if (fx.flames.length >= FLAME_CAP) return;
+  const g = new THREE.Group(); g.position.copy(pos); scene.add(g);
+  const fire = new THREE.Mesh(new THREE.ConeGeometry(.45 * size, 1.3 * size, 6), new THREE.MeshStandardMaterial({ color: 0xff9a3c, emissive: 0xff5a1a, emissiveIntensity: 1.6, transparent: true, opacity: .92 })); fire.position.y = .65 * size; g.add(fire); life.fires.push(fire);
+  const inner = new THREE.Mesh(new THREE.ConeGeometry(.22 * size, .85 * size, 6), new THREE.MeshStandardMaterial({ color: 0xffe08a, emissive: 0xffd24a, emissiveIntensity: 2, transparent: true, opacity: .95 })); inner.position.y = .45 * size; g.add(inner); life.fires.push(inner);
+  const scorch = new THREE.Mesh(new THREE.CircleGeometry(1.1 * size, 12), new THREE.MeshBasicMaterial({ color: 0x0b0a0c, transparent: true, opacity: .55, depthWrite: false })); scorch.rotation.x = -Math.PI / 2; scorch.position.y = .05; g.add(scorch);
+  const smoke = []; for (let k = 0; k < 4; k++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(.2 * size, 7, 6), new THREE.MeshStandardMaterial({ color: 0x2a262c, transparent: true, opacity: .6 })); g.add(sm); smoke.push({ m: sm, ph: k / 4 }); }
+  fx.flames.push({ g, smoke, life: dur, size });
+}
+function shake(amp, dur) { const now = performance.now() / 1000; cam.shake = { amp: Math.max(amp, cam.shake && cam.shake.until > now ? cam.shake.amp : 0), until: now + dur }; }
+function updateFx(t, dt) {
+  for (let i = fx.shots.length - 1; i >= 0; i--) { const s = fx.shots[i]; s.t += dt; const k = Math.min(1, s.t / s.dur); s.m.position.lerpVectors(s.from, s.to, k); s.m.position.y += Math.sin(k * Math.PI) * s.arc; s.m.rotation.x += dt * 9; s.m.rotation.y += dt * 7; if (s.trail && t > s.trailAt) { s.trailAt = t + .045; burst(s.m.position, s.trail, 1, .25, .5); } if (k >= 1) { fx.shots.splice(i, 1); const p = s.m.position.clone(); disposeObj(s.m); s.onHit && s.onHit(p); } }
+  for (let i = fx.rings.length - 1; i >= 0; i--) { const r = fx.rings[i]; r.t += dt; const k = r.t / r.dur; if (k >= 1) { fx.rings.splice(i, 1); disposeObj(r.m); continue; } r.m.scale.setScalar(1 + k * r.R); r.m.material.opacity = .7 * (1 - k); }
+  for (let i = fx.debris.length - 1; i >= 0; i--) { const d = fx.debris[i]; d.life -= dt; if (d.life <= 0) { fx.debris.splice(i, 1); disposeObj(d.m); continue; } d.v.y -= 14 * dt; d.m.position.addScaledVector(d.v, dt); d.m.rotation.x += d.r.x * dt; d.m.rotation.z += d.r.z * dt; const gy = groundY(d.m.position.x, d.m.position.z) - .45; if (d.m.position.y < gy) { d.m.position.y = gy; d.v.y *= -.3; d.v.x *= .6; d.v.z *= .6; } }
+  for (let i = fx.flames.length - 1; i >= 0; i--) { const f = fx.flames[i]; f.life -= dt; if (f.life <= 0) { fx.flames.splice(i, 1); disposeObj(f.g); continue; } f.g.scale.setScalar(Math.max(.01, Math.min(1, f.life / 3))); for (const sm of f.smoke) { const q = ((t * .35 + sm.ph) % 1 + 1) % 1; sm.m.position.set(Math.sin(q * 6 + sm.ph * 9) * .3, .8 + q * 2.8, Math.cos(q * 5) * .3); sm.m.scale.setScalar(.5 + q * 1.6); sm.m.material.opacity = .55 * (1 - q); } }
+  for (const host of fx.sieges) { const S = host.siege; if (!S || !S.g.parent) { fx.sieges.delete(host); continue; } for (const sm of S.smoke) { const q = ((t * sm.sp + sm.ph) % 1 + 1) % 1; sm.m.position.set(sm.at[0] + Math.sin(q * 5 + sm.ph * 9) * .35, sm.at[1] + q * 4, sm.at[2] + Math.cos(q * 4 + sm.ph * 7) * .3); sm.m.scale.setScalar(.5 + q * 2); sm.m.material.opacity = .6 * (1 - q); } if (S.embersAt < t) { S.embersAt = t + .5; const wp = new THREE.Vector3(S.at[0], S.at[1] + 1, S.at[2]); S.g.localToWorld(wp); burst(wp, '#ff9a3c', 2, 1.4, 2.2); } }
+}
+// A base under siege smokes, then burns, in proportion to the tiers attacking it.
+function setSiege(host, w) {
+  const level = w <= 0 ? 0 : Math.min(5, Math.ceil(w / 2)); if ((host.siege ? host.siege.level : 0) === level) return;
+  if (host.siege) { disposeObj(host.siege.g); host.siege = null; }
+  if (!level) return;
+  const g = new THREE.Group(); host.g.add(g); const b = host.building, top = b ? b.userData.topY : 3.5, bx = b ? b.position.x : 0, bz = b ? b.position.z : 0, R = b ? 2.6 : 2.4, smoke = [];
+  for (let k = 0; k < level + 1; k++) { const a = k * 2.4 + 1, h = top * (.3 + .55 * ((k % 3) / 2)); for (let q = 0; q < 4; q++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(.22 + level * .05, 7, 6), new THREE.MeshStandardMaterial({ color: 0x2a262c, transparent: true, opacity: .6 })); g.add(sm); smoke.push({ m: sm, ph: q / 4, sp: .28 + Math.random() * .2, at: [bx + Math.cos(a) * R * .85, h, bz + Math.sin(a) * R * .85] }); } }
+  if (level >= 2) for (let k = 0; k < level - 1; k++) { const a = k * 2.1 + .7, s = .8 + level * .12; const fire = new THREE.Mesh(new THREE.ConeGeometry(.42 * s, 1.3 * s, 6), new THREE.MeshStandardMaterial({ color: 0xff9a3c, emissive: 0xff5a1a, emissiveIntensity: 1.6, transparent: true, opacity: .9 })); fire.position.set(bx + Math.cos(a) * R * .95, top * (.28 + .38 * (k % 2)), bz + Math.sin(a) * R * .95); g.add(fire); life.fires.push(fire); }
+  for (let k = 0; k < level + 1; k++) { const sc = new THREE.Mesh(new THREE.CircleGeometry(.8 + (k % 3) * .3, 10), new THREE.MeshBasicMaterial({ color: 0x0b0a0c, transparent: true, opacity: .5, depthWrite: false })); sc.rotation.x = -Math.PI / 2; const a = k * 1.9 + .4; sc.position.set(bx + Math.cos(a) * (R + 2.2), .6, bz + Math.sin(a) * (R + 2.2)); g.add(sc); }
+  host.siege = { level, g, smoke, at: [bx, top * .5, bz], embersAt: 0 }; fx.sieges.add(host);
+}
+// The ClickUp sign over the cave: a stylised mark (an upward chevron and a smile in the brand's gradient) and the name.
+function clickupSign() {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256; const x = c.getContext('2d');
+  x.lineCap = 'round'; x.lineJoin = 'round';
+  const g1 = x.createLinearGradient(40, 0, 220, 0); g1.addColorStop(0, '#ff5fa0'); g1.addColorStop(.5, '#8d5cff'); g1.addColorStop(1, '#49ccf9');
+  x.strokeStyle = g1; x.lineWidth = 34; x.beginPath(); x.moveTo(52, 132); x.lineTo(130, 46); x.lineTo(208, 132); x.stroke();
+  const g2 = x.createLinearGradient(60, 0, 200, 0); g2.addColorStop(0, '#ff5fa0'); g2.addColorStop(1, '#49ccf9');
+  x.strokeStyle = g2; x.lineWidth = 30; x.beginPath(); x.moveTo(72, 176); x.quadraticCurveTo(130, 232, 188, 176); x.stroke();
+  x.fillStyle = '#ffffff'; x.font = '700 76px Bahnschrift, "Segoe UI", sans-serif'; x.textBaseline = 'middle'; x.fillText('ClickUp', 236, 128);
+  const tex = new THREE.CanvasTexture(c); if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; return tex;
+}
+function skullSprite(size) { const s = softSprite(64, 64, x => { x.fillStyle = '#efe7d6'; x.beginPath(); x.arc(32, 26, 20, 0, Math.PI * 2); x.fill(); x.fillRect(20, 40, 24, 14); x.fillStyle = '#120a14'; x.beginPath(); x.arc(24, 26, 6, 0, Math.PI * 2); x.arc(40, 26, 6, 0, Math.PI * 2); x.fill(); x.fillRect(29, 44, 2, 8); x.fillRect(34, 44, 2, 8); }); s.scale.setScalar(size); return s; }
+function buildPortal(site, R) {
+  const g = site.g; site.color = PORTAL_C;
+  const plat = hexPrism(R, .5, mat(0x2a2731)); plat.position.y = .25; g.add(plat); g.add(hexEdge(R, .52, PORTAL_C, .7)); site.plat = plat; plat.userData.pick = { site };
+  const pg = new THREE.Group(); pg.rotation.y = Math.atan2(-site.x, -site.z); g.add(pg); // the cave mouth faces the island's heart
+  const rockM = mat(0x3a3542), rockD = mat(0x2c2833), rng = seeded(11);
+  const block = box(8.6, 6.4, 4.2, rockD); block.position.set(0, 3.2, -3.2); pg.add(block);
+  const peak = new THREE.Mesh(new THREE.ConeGeometry(3.2, 5.2, 5), rockM); peak.position.set(-.6, 8.8, -3.4); peak.castShadow = true; pg.add(peak);
+  for (let k = 0; k < 11; k++) { const a = Math.PI + (k / 10 - .5) * Math.PI * 1.45, r = R * (.5 + rng() * .4), h = 3.5 + rng() * 6.5; const sp = new THREE.Mesh(new THREE.ConeGeometry(.9 + rng() * 1, h, 5), rng() > .5 ? rockM : rockD); sp.position.set(Math.cos(a) * r, h / 2 + .4, Math.sin(a) * r); sp.rotation.z = (rng() - .5) * .35; sp.castShadow = true; pg.add(sp); }
+  for (const sx of [-1, 1]) { const pil = box(1.7, 5.6, 1.8, rockM); pil.position.set(sx * 3.1, 3.3, .2); pg.add(pil); const tooth = new THREE.Mesh(new THREE.ConeGeometry(.35, 1.1, 4), mat(0xe9e2d3)); tooth.position.set(sx * 2.05, 5.2, .8); tooth.rotation.z = sx * .35; tooth.rotation.x = Math.PI; pg.add(tooth); }
+  const lintel = box(8.4, 1.5, 2, rockD); lintel.position.set(0, 6.1, .2); pg.add(lintel);
+  const dark = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 5), new THREE.MeshBasicMaterial({ color: 0x050308 })); dark.position.set(0, 2.9, -.6); pg.add(dark);
+  const ringM = new THREE.MeshStandardMaterial({ color: 0xb07cff, emissive: 0x8b5cf6, emissiveIntensity: 1.6 }), ring2M = new THREE.MeshStandardMaterial({ color: 0xff6fb5, emissive: 0xd946ef, emissiveIntensity: 1.4 });
+  const r1 = new THREE.Mesh(new THREE.TorusGeometry(1.9, .16, 6, 28), ringM); r1.position.set(0, 3, .1); pg.add(r1);
+  const r2 = new THREE.Mesh(new THREE.TorusGeometry(1.25, .12, 6, 24), ring2M); r2.position.set(0, 3, .3); pg.add(r2);
+  const core = softSprite(128, 128, x => { const gr = x.createRadialGradient(64, 64, 4, 64, 64, 60); gr.addColorStop(0, 'rgba(255,255,255,.95)'); gr.addColorStop(.35, 'rgba(176,124,255,.85)'); gr.addColorStop(1, 'rgba(76,29,149,0)'); x.fillStyle = gr; x.beginPath(); x.arc(64, 64, 60, 0, Math.PI * 2); x.fill(); }, .7); core.scale.setScalar(3.4); core.position.set(0, 3, .2); core.material.depthWrite = false; pg.add(core);
+  const glow = new THREE.Mesh(new THREE.RingGeometry(1.6, 4.6, 32), new THREE.MeshBasicMaterial({ color: 0x9b6dff, transparent: true, opacity: .16, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); glow.rotation.x = -Math.PI / 2; glow.position.set(0, .53, 2.2); pg.add(glow);
+  // A column of unlight above the peak, bats, and a ground fog that drifts out of the mouth.
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(.3, 1.4, 30, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x9b6dff, transparent: true, opacity: .12, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); beam.position.set(0, 18, -1); pg.add(beam); life.beams.push(beam);
+  const bats = []; for (let k = 0; k < 5; k++) { const b = softSprite(64, 32, x => { x.fillStyle = '#0d0912'; x.beginPath(); x.moveTo(4, 14); x.quadraticCurveTo(16, 2, 28, 14); x.lineTo(32, 10); x.lineTo(36, 14); x.quadraticCurveTo(48, 2, 60, 14); x.quadraticCurveTo(48, 20, 40, 18); x.lineTo(32, 26); x.lineTo(24, 18); x.quadraticCurveTo(16, 20, 4, 14); x.fill(); }); b.scale.set(1.3, .65, 1); pg.add(b); bats.push({ s: b, ph: k * 1.3, r: 4 + k, h: 7 + k * .8 }); }
+  const fog = []; for (let k = 0; k < 6; k++) { const f = softSprite(64, 64, x => { const gr = x.createRadialGradient(32, 32, 2, 32, 32, 30); gr.addColorStop(0, 'rgba(150,110,220,.55)'); gr.addColorStop(1, 'rgba(150,110,220,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); }, .8); f.scale.set(4, 1.6, 1); pg.add(f); fog.push({ s: f, ph: k / 6 }); }
+  const embers = []; for (let k = 0; k < 12; k++) { const e = new THREE.Mesh(new THREE.SphereGeometry(.14, 6, 5), new THREE.MeshStandardMaterial({ color: 0xd8b4fe, emissive: 0xb07cff, emissiveIntensity: 1.6, transparent: true, opacity: .8 })); pg.add(e); embers.push({ m: e, ph: k / 12 }); }
+  for (const sx of [-1, 1]) { const st = new THREE.Mesh(new THREE.CylinderGeometry(.5, .7, 1.1, 6), rockD); st.position.set(sx * 4.8, 1.05, 4.2); pg.add(st); const bowl = new THREE.Mesh(new THREE.CylinderGeometry(.7, .4, .5, 7), mats.dark); bowl.position.set(sx * 4.8, 1.85, 4.2); pg.add(bowl); const fire = new THREE.Mesh(new THREE.ConeGeometry(.5, 1.3, 6), new THREE.MeshStandardMaterial({ color: 0xc4a6ff, emissive: 0x7c3aed, emissiveIntensity: 1.5, transparent: true, opacity: .9 })); fire.position.set(sx * 4.8, 2.6, 4.2); pg.add(fire); life.fires.push(fire); }
+  for (let k = 0; k < 8; k++) { const b = box(.9 + rng() * .5, .1, .12, mat(0xe9e2d3)); b.position.set((rng() - .5) * 11, .56, 2 + rng() * 5.5); b.rotation.y = rng() * 3; pg.add(b); }
+  for (let k = 0; k < 3; k++) { const sk = skullSprite(.7); sk.position.set(-3.5 + k * 3.4, .9, 5.5 + (k % 2) * .8); pg.add(sk); }
+  for (const sx of [-1, 1]) { const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .09, 3.2, 5), mats.dark); pole.position.set(sx * 6.4, 2.1, 1.6); pole.rotation.z = sx * .12; pg.add(pole); const sk = skullSprite(.8); sk.position.set(sx * 6.5, 3.9, 1.6); pg.add(sk); }
+  const board = box(5.4, 2.7, .3, mat(0x14101c)); board.position.set(0, 8.1, .9); pg.add(board); const rim = box(5.7, 3, .2, mat(PORTAL_C)); rim.position.set(0, 8.1, .8); pg.add(rim);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(5.1, 2.55), new THREE.MeshBasicMaterial({ map: clickupSign(), transparent: true })); face.position.set(0, 8.1, 1.07); pg.add(face);
+  for (const sx of [-1, 1]) { const ch = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, 1.4, 4), mats.iron); ch.position.set(sx * 2.2, 7.1, .9); pg.add(ch); }
+  const mouth = new THREE.Object3D(); mouth.position.set(0, .56, 3); pg.add(mouth);
+  site.extra.portal = { rings: [r1, r2], core, glow, embers, bats, fog, load: 0, pulseAt: 0 }; site.extra.mouth = mouth;
+  const an = new THREE.Object3D(); an.position.set(0, 13.2, -1); g.add(an); site.el = label('w-site w-big', '', an, PORTAL_HEX);
+}
+function animatePortal(P, t, site) {
+  P.rings[0].rotation.z = t * 1.3; P.rings[1].rotation.z = -t * 2.2; P.rings[1].rotation.y = Math.sin(t * .8) * .35;
+  P.core.material.opacity = .5 + Math.sin(t * 3.1) * .2; P.core.scale.setScalar(3.1 + Math.sin(t * 2.3) * .35); P.glow.material.opacity = .12 + Math.sin(t * 2) * .05 + Math.min(.2, P.load * .03);
+  for (const e of P.embers) { const f = ((t * .22 + e.ph) % 1 + 1) % 1; e.m.position.set(Math.sin(f * 6 + e.ph * 9) * 1.5, .7 + f * 6, 1 + Math.cos(f * 5 + e.ph * 7) * .9); e.m.scale.setScalar(.4 + f * .7); e.m.material.opacity = .85 * (1 - f); }
+  for (const b of P.bats) { const a = t * .9 + b.ph; b.s.position.set(Math.cos(a) * b.r, b.h + Math.sin(t * 2.1 + b.ph) * .8, -2 + Math.sin(a) * b.r * .6); b.s.scale.set(1.3 * (Math.cos(a + Math.PI / 2) > 0 ? 1 : -1), .65 * (.5 + .5 * Math.abs(Math.sin(t * 12 + b.ph))), 1); }
+  for (const f of P.fog) { const q = ((t * .08 + f.ph) % 1 + 1) % 1; f.s.position.set(Math.sin(f.ph * 9) * 2.5 + Math.sin(t * .5 + f.ph * 6) * .5, .75 + q * .3, 2 + q * 9); f.s.material.opacity = .8 * Math.sin(q * Math.PI); }
+  if (P.load && t > P.pulseAt) { P.pulseAt = t + 4 + Math.random() * 4; const wp = new THREE.Vector3(); site.extra.mouth.getWorldPosition(wp); shockRing(wp, 0x9b6dff, 6, 1.2); burst(wp, '#b07cff', 10, 2, 2.5); }
+}
+function syncPortal(site, s) {
+  const list = s.raidsOn ? (s.raids || []) : [], n = list.length, fight = list.filter(r => r.phase === 'fight').length; site.extra.portal.load = n;
+  setLabel(site.el, `<div class="w-eyebrow">ClickUp</div><b>Dark portal</b><span class="w-cnt">${n ? n + ' raid' + (n === 1 ? '' : 's') + ' afield' + (fight ? ' · ' + fight + ' under fire' : '') : 'all quiet'}</span>`);
+}
+// Ground height under a world point, from the nearest hex tile (a site plateau counts as its floor).
+function groundY(x, z) { const T = terrain; if (!T) return PLAT; const NI = 64, NJ = 34; const i = Math.round(x / (1.5 * TILE)), zo = (i & 1) ? Math.sqrt(3) / 2 * TILE : 0, j = Math.round((z - zo) / (Math.sqrt(3) * TILE)); if (Math.abs(i) > NI || Math.abs(j) > NJ) return PLAT; const t = T.tiles[(i + NI) * (2 * NJ + 1) + (j + NJ)]; return t && t.th > 0 ? t.th + .56 : PLAT + .56; }
+function allLots() { const out = []; for (const st of sites.values()) for (const lot of st.lots.values()) out.push(lot); return out; }
+// Where a raid stands: at the foot of its base's plateau, on the side nearest the lot it is after (or a stable random side).
+function raidTarget(r) {
+  const lots = allLots(); let lot = null;
+  if (r.target) lot = lots.find(l => l.cwd === r.target) || null;
+  if (!lot && lots.length) lot = lots[hashStr(r.id) % lots.length];
+  const site = lot ? lot.site : sites.get('treasury'); if (!site) return null;
+  const h = hashStr(r.id + '|post'), jitter = ((h % 100) / 100 - .5) * 1.6;
+  let a; if (lot && site.lots.size > 1) { const wp = new THREE.Vector3(); lot.building.getWorldPosition(wp); a = Math.atan2(wp.z - site.z, wp.x - site.x) + jitter; } else a = (h % 360) * Math.PI / 180;
+  const rr = site.R + 2.2 + raidTier(r).scale * .9 + ((h >> 8) % 3) * .9, x = site.x + Math.cos(a) * rr, z = site.z + Math.sin(a) * rr;
+  const aim = new THREE.Vector3(); if (lot && lot.building) { lot.building.getWorldPosition(aim); aim.y += Math.min(6, lot.building.userData.topY * .45); } else { aim.set(site.x, PLAT + 1.5, site.z); }
+  return { lot, site, post: new THREE.Vector3(x, groundY(x, z), z), face: Math.atan2(site.x - x, site.z - z), aim };
+}
+// The card: priority - ticket - platform, then the small print.
+function raidLabel(rd) {
+  const r = rd.task, plat = r.platforms.length ? r.platforms.join(', ') : 'no platform', who = r.assignees.length ? r.assignees[0].split(' ')[0] : '';
+  return `<b>${esc((r.priority === 'none' ? 'no' : r.priority).toUpperCase())}</b><span class="w-who"> - ${esc(r.name.length > 46 ? r.name.slice(0, 45) + '…' : r.name)} - ${esc(plat)}</span><small>${r.phase === 'fight' ? '&#x2694; under fire &middot; ' : ''}${esc(rd.tier.name)}${who ? ' &middot; ' + esc(who) : ''} &middot; ${esc(sinceStr(r.since))}</small>`;
+}
+function makeRaiderBody(rd) {
+  const tier = rd.tier, sc = tier.scale, r = rd.task, pri = r.priority in RAID_TIERS ? r.priority : 'none', base = mat(tier.body), dark = mat(0x15111a), bone = mat(0xe9e2d3), accent = mat(rd.lot ? rd.lot.spec.color : 0xe1b453, { emissive: rd.lot ? rd.lot.spec.color : 0xe1b453, emissiveIntensity: .25 }), p = {};
+  const inner = new THREE.Group(); inner.scale.setScalar(sc); rd.g.add(inner);
+  p.eyeMat = new THREE.MeshStandardMaterial({ color: 0x1a0008, emissive: tier.eyes, emissiveIntensity: 2.2 }); p.eyes = [];
+  const eyes = (head, w, y, z, tilt) => { for (const ex of [-1, 1]) { const e = box(w, w * .6, .05, p.eyeMat); e.position.set(ex * w * 1.3, y, z); e.rotation.z = ex * tilt; head.add(e); p.eyes.push(e); } };
+  const teeth = (head, n, y, z, w) => { for (let k = 0; k < n; k++) { const tooth = new THREE.Mesh(new THREE.ConeGeometry(.045, .12, 4), bone); tooth.position.set((k - (n - 1) / 2) * w, y, z); tooth.rotation.x = Math.PI; head.add(tooth); } };
+  const shoulder = (sx, y, len, w, m) => { const piv = new THREE.Group(); piv.position.set(sx, y, 0); const arm = box(w, len, w, m); arm.position.y = -len / 2; const hand = box(w * 1.05, w * .7, w * 1.05, m); hand.position.y = -len - w * .3; piv.add(arm, hand); piv.userData.len = len; return piv; };
+  if (pri === 'low') {
+    // Gremlin: a hunched imp with a huge head, bat ears, a whip tail and long clawed arms.
+    p.legL = box(.2, .4, .22, dark); p.legL.position.set(-.16, .2, 0); p.legR = box(.2, .4, .22, dark); p.legR.position.set(.16, .2, 0);
+    p.torso = box(.6, .6, .44, base); p.torso.position.y = .7; p.torso.rotation.x = .3; const tab = box(.34, .4, .05, accent); tab.position.set(0, .68, .27); tab.rotation.x = .3;
+    p.head = box(.78, .62, .7, base); p.head.position.y = 1.32; eyes(p.head, .17, .08, .36, -.35); teeth(p.head, 5, -.2, .36, .11);
+    for (const sx of [-1, 1]) { const ear = new THREE.Mesh(new THREE.ConeGeometry(.16, .7, 4), base); ear.position.set(sx * .5, .3, -.05); ear.rotation.z = -sx * 1.1; p.head.add(ear); }
+    const tail = box(.08, .08, .9, base); tail.position.set(0, .45, -.55); tail.rotation.x = .5; inner.add(tail); p.tail = tail;
+    p.armL = shoulder(-.4, 1, .8, .16, base); p.armR = shoulder(.4, 1, .8, .16, base);
+    for (const arm of [p.armL, p.armR]) for (let k = 0; k < 3; k++) { const claw = new THREE.Mesh(new THREE.ConeGeometry(.035, .22, 4), bone); claw.position.set((k - 1) * .07, -.98, .08); claw.rotation.x = -Math.PI / 2; arm.add(claw); }
+    inner.add(p.legL, p.legR, p.torso, tab, p.head, p.armL, p.armR);
+  } else if (pri === 'high') {
+    // Ogre: a hulking brute with a belly, tusks, fur on the shoulders, a bone club and a burning torch.
+    p.legL = box(.34, .55, .36, dark); p.legL.position.set(-.26, .28, 0); p.legR = box(.34, .55, .36, dark); p.legR.position.set(.26, .28, 0);
+    p.torso = box(1.25, .95, .75, base); p.torso.position.y = 1.02; const belly = new THREE.Mesh(new THREE.SphereGeometry(.5, 8, 6), mat(0x7b5a95)); belly.position.set(0, .82, .28); belly.scale.set(1.1, .8, .7);
+    const tab = box(.5, .55, .06, accent); tab.position.set(0, 1.28, .4); const belt = box(1.3, .14, .8, mat(0x3a2a22)); belt.position.y = .58;
+    for (const sx of [-1, 1]) { const fur = box(.62, .34, .7, mat(0x3b2b26)); fur.position.set(sx * .72, 1.55, 0); inner.add(fur); }
+    for (let k = 0; k < 3; k++) { const sk = box(.14, .16, .12, bone); sk.position.set((k - 1) * .22, 1.45, .42); inner.add(sk); }
+    p.head = box(.72, .62, .68, base); p.head.position.y = 1.85; eyes(p.head, .13, .06, .35, .2); const brow = box(.76, .12, .14, dark); brow.position.set(0, .2, .32); p.head.add(brow);
+    for (const sx of [-1, 1]) { const tusk = new THREE.Mesh(new THREE.ConeGeometry(.07, .34, 4), bone); tusk.position.set(sx * .2, -.22, .36); tusk.rotation.z = -sx * .25; p.head.add(tusk); }
+    for (const sx of [-1, 1]) { const horn = new THREE.Mesh(new THREE.ConeGeometry(.1, .5, 5), bone); horn.position.set(sx * .3, .38, 0); horn.rotation.z = -sx * .7; p.head.add(horn); }
+    p.armL = shoulder(-.85, 1.42, .95, .3, base); p.armR = shoulder(.85, 1.42, .95, .3, base);
+    const club = new THREE.Group(); club.position.y = -1; const handle = box(.1, 1, .1, bone); handle.position.set(0, .2, .2); const head = new THREE.Mesh(new THREE.SphereGeometry(.26, 6, 5), bone); head.position.set(0, .75, .2); club.add(handle, head); p.armL.add(club);
+    const torch = new THREE.Group(); torch.position.y = -1; const th = box(.1, 1.1, .1, mats.wood); th.position.set(0, .35, .12); const fire = new THREE.Mesh(new THREE.ConeGeometry(.3, .9, 6), new THREE.MeshStandardMaterial({ color: 0xff9a3c, emissive: 0xff5a1a, emissiveIntensity: 1.6, transparent: true, opacity: .92 })); fire.position.set(0, 1.15, .12); torch.add(th, fire); p.armR.add(torch); life.fires.push(fire);
+    inner.add(p.legL, p.legR, p.torso, belly, tab, belt, p.head, p.armL, p.armR);
+  } else if (pri === 'urgent') {
+    // Warlord: plate armour, a rune burning on the chest, a spiked crown, a cape, a double axe, and skulls that circle it.
+    const plate = mat(0x4a4653, { metalness: .6, roughness: .35 });
+    p.legL = box(.34, .6, .36, plate); p.legL.position.set(-.24, .3, 0); p.legR = box(.34, .6, .36, plate); p.legR.position.set(.24, .3, 0);
+    p.torso = box(1.1, 1, .66, plate); p.torso.position.y = 1.1; const rune = box(.32, .42, .06, new THREE.MeshStandardMaterial({ color: 0xff2d55, emissive: 0xff2d55, emissiveIntensity: 2.2 })); rune.position.set(0, 1.18, .35); p.rune = rune;
+    const tab = box(.56, .5, .05, accent); tab.position.set(0, .68, .35); const belt = box(1.14, .14, .7, dark); belt.position.y = .62;
+    for (const sx of [-1, 1]) { const pad = box(.5, .28, .6, plate); pad.position.set(sx * .68, 1.62, 0); inner.add(pad); for (let k = 0; k < 3; k++) { const spk = new THREE.Mesh(new THREE.ConeGeometry(.07, .36, 4), bone); spk.position.set(sx * (.58 + k * .1), 1.9, -.2 + k * .2); spk.rotation.z = -sx * .3; inner.add(spk); } }
+    p.head = box(.62, .58, .6, mat(0x2a2230)); p.head.position.y = 1.95; eyes(p.head, .16, .04, .31, .3); const visor = box(.66, .08, .1, plate); visor.position.set(0, .16, .3); p.head.add(visor);
+    for (const sx of [-1, 1]) { const horn = new THREE.Mesh(new THREE.ConeGeometry(.12, .9, 5), bone); horn.position.set(sx * .3, .5, 0); horn.rotation.z = -sx * .5; p.head.add(horn); }
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(.34, .32, .16, 6), mats.iron); crown.position.y = .34; p.head.add(crown); for (let k = 0; k < 6; k++) { const spk = new THREE.Mesh(new THREE.ConeGeometry(.05, .3, 4), mats.iron); const an = k * 1.047; spk.position.set(Math.cos(an) * .3, .54, Math.sin(an) * .3); p.head.add(spk); }
+    const cape = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.6), mat(0x6b0f24, { side: THREE.DoubleSide })); cape.position.set(0, .95, -.4); cape.rotation.x = .14; inner.add(cape); p.cape = cape;
+    p.armL = shoulder(-.72, 1.5, .9, .28, plate); p.armR = shoulder(.72, 1.5, .9, .28, plate);
+    const axe = new THREE.Group(); axe.position.y = -.95; const handle = box(.1, 2, .1, dark); handle.position.set(0, .4, .2); for (const sx of [-1, 1]) { const blade = box(.06, .9, .7, mats.iron); blade.position.set(sx * .3, 1.15, .2); axe.add(blade); } axe.add(handle); p.armR.add(axe);
+    const orb = new THREE.Group(); for (let k = 0; k < 3; k++) { const sk = skullSprite(.5); const a = k * 2.094; sk.position.set(Math.cos(a) * 1.3, 0, Math.sin(a) * 1.3); orb.add(sk); } inner.add(orb); life.orbits.push({ g: orb, speed: 1.4, bob: .15, base: 2.3 });
+    const aura = new THREE.Mesh(new THREE.RingGeometry(.9, 1.7, 32), new THREE.MeshBasicMaterial({ color: 0x8b1e3f, transparent: true, opacity: .3, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })); aura.rotation.x = -Math.PI / 2; aura.position.y = .03; inner.add(aura); p.aura = aura;
+    p.smoke = []; for (let i = 0; i < 5; i++) { const sm = new THREE.Mesh(new THREE.SphereGeometry(.2, 7, 6), new THREE.MeshStandardMaterial({ color: 0x2b1a33, transparent: true, opacity: .6 })); inner.add(sm); p.smoke.push({ m: sm, ph: i / 5 }); }
+    inner.add(p.legL, p.legR, p.torso, rune, tab, belt, p.head, p.armL, p.armR);
+  } else {
+    // Raider: horned helm, a spiked club, a round shield in the base's colour.
+    p.legL = box(.26, .5, .28, dark); p.legL.position.set(-.18, .25, 0); p.legR = box(.26, .5, .28, dark); p.legR.position.set(.18, .25, 0);
+    p.torso = box(.86, .82, .54, base); p.torso.position.y = .9; const strap = box(.16, .84, .58, dark); strap.position.set(-.2, .9, 0); strap.rotation.z = .3; const belt = box(.9, .1, .56, mat(0x3a2a22)); belt.position.y = .52;
+    p.head = box(.56, .5, .54, mat(0x8f6b5c)); p.head.position.y = 1.58; eyes(p.head, .11, .02, .28, .25); teeth(p.head, 4, -.2, .28, .1);
+    const helm = box(.64, .3, .62, mats.iron); helm.position.y = .28; p.head.add(helm); const nose = box(.1, .34, .06, mats.iron); nose.position.set(0, .02, .3); p.head.add(nose);
+    for (const sx of [-1, 1]) { const horn = new THREE.Mesh(new THREE.ConeGeometry(.09, .5, 5), bone); horn.position.set(sx * .34, .34, 0); horn.rotation.z = -sx * .9; p.head.add(horn); }
+    p.armL = shoulder(-.55, 1.22, .64, .24, base); p.armR = shoulder(.55, 1.22, .64, .24, base);
+    const shield = hexPrism(.5, .08, accent); shield.rotation.x = Math.PI / 2; shield.position.set(-.18, -.4, .18); p.armL.add(shield); const rim = hexEdge(.5, 0, 0xb9c2cc, .9); rim.rotation.x = Math.PI / 2; rim.position.copy(shield.position); p.armL.add(rim);
+    const club = new THREE.Group(); club.position.y = -.7; const handle = box(.09, .8, .09, mats.wood); handle.position.set(0, .15, .2); const head = new THREE.Mesh(new THREE.CylinderGeometry(.14, .2, .4, 6), mats.stoneDark); head.position.set(0, .68, .2); club.add(handle, head); for (let k = 0; k < 4; k++) { const spk = new THREE.Mesh(new THREE.ConeGeometry(.04, .16, 4), mats.iron); const an = k * 1.57; spk.position.set(Math.cos(an) * .2, .7, .2 + Math.sin(an) * .2); spk.rotation.z = -Math.cos(an) * 1.4; spk.rotation.x = Math.sin(an) * 1.4; club.add(spk); } p.armR.add(club);
+    inner.add(p.legL, p.legR, p.torso, strap, belt, p.head, p.armL, p.armR);
+  }
+  p.disc = new THREE.Mesh(new THREE.CircleGeometry(.9 * sc, 6), new THREE.MeshBasicMaterial({ color: 0xff3b5c, transparent: true, opacity: .28, depthWrite: false })); p.disc.rotation.x = -Math.PI / 2; p.disc.rotation.z = Math.PI / 6; p.disc.position.y = .015; rd.g.add(p.disc);
+  p.ring = new THREE.Mesh(new THREE.RingGeometry(.98 * sc, 1.12 * sc, 6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })); p.ring.rotation.x = -Math.PI / 2; p.ring.rotation.z = Math.PI / 6; p.ring.position.y = .02; rd.g.add(p.ring);
+  rd.inner = inner; rd.p = p;
+}
+function raidHit(rd) { const sc = rd.tier.scale, hit = new THREE.Mesh(new THREE.BoxGeometry(1.7 * sc, 2.4 * sc, 1.7 * sc), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })); hit.position.y = 1.15 * sc; rd.g.add(hit); hit.userData.pick = { raid: rd }; rd.hit = hit; pickables.add(hit); }
+function createRaider(r, target, portal) {
+  const g = new THREE.Group(); scene.add(g);
+  const from = new THREE.Vector3(); if (portal && portal.extra.mouth) portal.extra.mouth.getWorldPosition(from); else from.copy(target.post);
+  g.position.copy(from); const tier = raidTier(r), sc = tier.scale;
+  const rd = { task: r, tier, g, lot: target.lot, site: target.site, post: target.post, face: target.face, aim: target.aim, state: 'emerge', key: null, ph: Math.random() * 6, nextAtk: 0, nextShot: 0, hitUntil: 0, dustAt: 0 };
+  raidHit(rd); makeRaiderBody(rd); rd.key = raidKey(r, target);
+  rd.el = label('w-obj w-raid ' + r.priority + (r.phase === 'fight' ? ' fight' : ''), raidLabel(rd), g, RAID_HEX[r.priority] || RAID_HEX.none, 2.5 * sc + .4);
+  g.scale.setScalar(.01); tween(900, k => g.scale.setScalar(Math.max(.01, k)), () => { rd.state = 'march'; }, easeOutBack, 120);
+  const wp = from.clone(); wp.y += 1; setTimeout(() => { if (!alive) return; burst(wp, '#b07cff', 26, 1.8, 3); shockRing(wp, 0x9b6dff, 5, .9); life.flashUntil = performance.now() / 1000 + .07; }, 120);
+  raiders.set(r.id, rd); return rd;
+}
+const raidKey = (r, tg) => r.priority + '|' + r.phase + '|' + (tg ? tg.site.key + '|' + (tg.lot ? tg.lot.cwd : '') : '');
+function destroyRaider(rd, quiet) {
+  raiders.delete(rd.task.id); dropLabel(rd.el); pickables.delete(rd.hit); if (selected.raid === rd) { selected = {}; renderSel(); } if (hoveredRaid === rd) hoveredRaid = null;
+  const g = rd.g; if (quiet) { disposeObj(g); return; }
+  const wp = new THREE.Vector3(); g.getWorldPosition(wp); wp.y += 1; burst(wp, RAID_HEX[rd.task.priority] || RAID_HEX.none, 16 + Math.round(rd.tier.scale * 10), 1.4 * rd.tier.scale, 3); burst(wp, '#ffffff', 8, 1, 3.5); shockRing(wp, 0xffffff, 3 + rd.tier.scale * 2, .8); debris(wp, 0x2b1a33, 3 + Math.round(rd.tier.scale * 3), 5); if (rd.tier.scale >= 1.5) shake(.25 * rd.tier.scale, .5);
+  give('raids', rd.tier.coins, 'slew a ' + rd.tier.name.toLowerCase() + ' · ' + rd.task.name.slice(0, 26));
+  const sk = skullSprite(1.1 * rd.tier.scale); sk.position.copy(wp); scene.add(sk); tween(1800, k => { sk.position.y = wp.y + k * 5; sk.material.opacity = 1 - k; }, () => disposeObj(sk));
+  const y0 = g.position.y; tween(700, k => { g.rotation.z = -Math.PI / 2 * Math.min(1, k * 1.6); g.position.y = y0 - k * 1.2; if (k > .5) g.scale.setScalar(Math.max(.01, 1 - (k - .5) * 2)); }, () => disposeObj(g), easeInCubic);
+}
+function syncRaids(s) {
+  const list = s.raidsOn ? (s.raids || []) : [], seen = new Set(), portal = sites.get('portal'), weights = new Map();
+  const sorted = [...list].sort((a, b) => (PRI_ORDER[a.priority] ?? 3) - (PRI_ORDER[b.priority] ?? 3)).slice(0, RAID_CAP);
+  for (const r of sorted) {
+    const target = raidTarget(r); if (!target) continue; seen.add(r.id);
+    const host = target.lot || target.site; weights.set(host, (weights.get(host) || 0) + raidTier(r).weight);
+    let rd = raiders.get(r.id);
+    if (!rd) { rd = createRaider(r, target, portal); continue; }
+    const nk = raidKey(r, target), was = rd.task; rd.task = r;
+    if (rd.key !== nk) {
+      rd.key = nk; rd.lot = target.lot; rd.site = target.site;
+      if (was.priority !== r.priority || (was.target || '') !== (r.target || '')) { disposeObj(rd.inner); disposeObj(rd.p.disc); disposeObj(rd.p.ring); rd.tier = raidTier(r); makeRaiderBody(rd); rd.el.dy = 2.5 * rd.tier.scale + .4; pickables.delete(rd.hit); disposeObj(rd.hit); raidHit(rd); }
+      if (was.phase !== r.phase) { const wp = new THREE.Vector3(); rd.g.getWorldPosition(wp); wp.y += 1.5 * rd.tier.scale; burst(wp, r.phase === 'fight' ? '#89b4fa' : '#ff3b5c', 14, 1.2, 2.5); }
+      rd.el.el.className = 'w-lab w-obj w-raid ' + r.priority + (r.phase === 'fight' ? ' fight' : '') + (rd === selected.raid ? ' sel' : '') + (rd === hoveredRaid ? ' hov' : ''); rd.el.el.style.setProperty('--c', RAID_HEX[r.priority] || RAID_HEX.none);
+    }
+    rd.aim = target.aim;
+    if (rd.post.distanceTo(target.post) > .6) { rd.post = target.post; rd.face = target.face; if (rd.state === 'siege') rd.state = 'march'; }
+    setLabel(rd.el, raidLabel(rd));
+  }
+  for (const [id, rd] of raiders) if (!seen.has(id)) destroyRaider(rd, !s.raidsOn);
+  // Bases smoke and burn in proportion to what is standing at their walls.
+  const hosts = new Set([...weights.keys(), ...fx.sieges]); for (const h of hosts) setSiege(h, weights.get(h) || 0);
+}
+// One attack, picked at random from the tier's repertoire.
+function startAttack(rd, t) {
+  const kind = rd.tier.attacks[Math.floor(Math.random() * rd.tier.attacks.length)], sc = rd.tier.scale;
+  rd.atk = { kind, t0: t, dur: kind === 'bite' ? 1.1 : kind === 'stomp' ? 1.3 : 1, fired: false };
+  if (kind === 'bite') { const dir = new THREE.Vector3(rd.aim.x - rd.g.position.x, 0, rd.aim.z - rd.g.position.z).normalize(); rd.atk.from = rd.g.position.clone(); rd.atk.to = rd.g.position.clone().addScaledVector(dir, 2.6); }
+}
+function fireAttack(rd, t) {
+  const A = rd.atk, sc = rd.tier.scale, pos = rd.g.position.clone(); pos.y += 1.4 * sc; const aim = rd.aim.clone().add(new THREE.Vector3((Math.random() - .5) * 3, 0, (Math.random() - .5) * 3));
+  const land = p => { const gy = groundY(p.x, p.z); return new THREE.Vector3(p.x, Math.max(gy - .5, p.y - 1.5), p.z); };
+  switch (A.kind) {
+    case 'pebble': shoot(pos, aim, { kind: 'rock', color: 0x8d8a84, size: .16, arc: 2.5, dur: .7, onHit: p => { burst(p, '#8a98ab', 6, .6, 1.6); debris(p, 0x8d8a84, 2, 2.5); } }); break;
+    case 'rock': shoot(pos, aim, { kind: 'rock', color: 0x6f6a66, size: .34, arc: 3.5, dur: .9, onHit: p => { burst(p, '#8a98ab', 16, 1.2, 2.2); debris(p, 0x8d8a84, 6, 4); shockRing(land(p), 0xc9d1d9, 2.5, .5); shake(.08, .25); } }); break;
+    case 'smash': { const p = rd.g.position.clone(); shockRing(p, 0xfab387, 3.5, .6); burst(p, '#c9b8a0', 16, 1.6 * sc, 2); debris(p, 0x8d8a84, 4, 3.5); shake(.08, .25); break; }
+    case 'fireball': shoot(pos, aim, { color: 0xff7a2a, size: .38, glow: true, arc: 4, dur: 1, trail: '#ff9a3c', onHit: p => { burst(p, '#ff9a3c', 22, 1.6, 3); burst(p, '#ffd24a', 10, 1, 3.5); firePatch(land(p), 14 + Math.random() * 8, 1); shockRing(land(p), 0xff7a2a, 3, .5); shake(.12, .3); } }); break;
+    case 'roar': { const p = rd.g.position.clone(); shockRing(p, 0xf38ba8, 7, 1); burst(p, '#f38ba8', 12, 2 * sc, 2); shake(.14, .5); break; }
+    case 'stomp': { const p = rd.g.position.clone(); shockRing(p, 0xff2d55, 9, 1.1); burst(p, '#8a98ab', 30, 3 * sc, 3); debris(p, 0x3a3542, 10, 6); shake(.5, .7); life.flashUntil = t + .06; break; }
+    case 'darkbolt': shoot(pos, aim, { color: 0xb07cff, size: .5, glow: true, arc: 5, dur: 1.1, trail: '#b07cff', onHit: p => { burst(p, '#b07cff', 34, 2.4, 3.5); burst(p, '#ff2d55', 12, 1.2, 4); firePatch(land(p), 20, 1.7); shockRing(land(p), 0x9b6dff, 6, .8); shake(.3, .5); life.flashUntil = performance.now() / 1000 + .08; } }); break;
+  }
+}
+// The base fights back once the ticket is in development: its units, or the keep itself when nobody is home, shoot bolts.
+function fightBack(rd, t) {
+  rd.nextShot = t + 1.1 + Math.random() * 1.5; const lot = rd.lot; let from = new THREE.Vector3();
+  const shooters = lot ? [...lot.units.values()].filter(u => !u.mini) : [];
+  if (shooters.length) { const u = shooters[Math.floor(Math.random() * shooters.length)]; u.g.getWorldPosition(from); from.y += 1.7 * u.scale; u.shootUntil = t + .35; }
+  else if (lot && lot.building) { from.set(0, lot.building.userData.topY - 1.2, -3.4); lot.g.localToWorld(from); }
+  else if (rd.site) { from.set(rd.site.x, PLAT + 3, rd.site.z); }
+  else return;
+  const to = rd.g.position.clone(); to.y += 1.2 * rd.tier.scale; const sc = rd.tier.scale;
+  shoot(from, to, { color: 0x89b4fa, size: .16, glow: true, arc: 1.5, dur: .45, trail: '#89b4fa', onHit: p => { burst(p, '#89b4fa', 10, .8, 2.2); burst(p, '#ffffff', 3, .3, 2.5); rd.hitUntil = performance.now() / 1000 + .35; if (Math.random() < .25) debris(p, 0x2b1a33, 2, 3); } });
+}
+function animateRaider(rd, t, dt) {
+  const { p: m, inner, tier } = rd, T = reduceMotion() ? 0 : t, sc = tier.scale, hit = t < rd.hitUntil;
+  m.ring.material.opacity = rd === selected.raid ? .95 : 0;
+  { const k = 1.6 + Math.sin(T * 6 + rd.ph) * .6; m.eyeMat.emissiveIntensity = hit ? 4 : rd.task.phase === 'fight' ? k + .8 : k; m.eyeMat.emissive.setHex(hit ? 0xffffff : tier.eyes); }
+  if (m.cape) m.cape.rotation.x = .14 + Math.sin(T * 2.2 + rd.ph) * .14;
+  if (m.rune) m.rune.material.emissiveIntensity = 1.6 + Math.sin(T * 4 + rd.ph) * .9;
+  if (m.aura) { m.aura.material.opacity = .22 + Math.sin(T * 3 + rd.ph) * .12; m.aura.rotation.z = T * .6; }
+  if (m.tail) m.tail.rotation.y = Math.sin(T * 5 + rd.ph) * .5;
+  if (m.smoke) for (const sm of m.smoke) { const f = ((T * .3 + sm.ph) % 1 + 1) % 1; sm.m.position.set(Math.sin(f * 6 + sm.ph * 9) * .7, .1 + f * 1.4, Math.cos(f * 5) * .6); sm.m.scale.setScalar(.6 + f * 1.4); sm.m.material.opacity = .5 * (1 - f); }
+  inner.rotation.x = hit ? -.3 : 0; inner.rotation.z = 0;
+  if (rd.state === 'emerge') { inner.rotation.y = rd.face; return; }
+  if (rd.state === 'march') {
+    const dx = rd.post.x - rd.g.position.x, dz = rd.post.z - rd.g.position.z, d = Math.hypot(dx, dz);
+    if (d < .25 || reduceMotion()) { rd.g.position.set(rd.post.x, rd.post.y, rd.post.z); rd.state = 'siege'; rd.nextAtk = t + 1 + Math.random() * 2; const wp = rd.g.position.clone(); wp.y += .3; burst(wp, '#8a98ab', 8, 1.2 * sc, 1.5); if (sc >= 1.5) shake(.1 * sc, .3); return; }
+    const step = Math.min(d, tier.speed * dt); rd.g.position.x += dx / d * step; rd.g.position.z += dz / d * step;
+    const gy = groundY(rd.g.position.x, rd.g.position.z); rd.g.position.y += (gy - rd.g.position.y) * Math.min(1, dt * 6);
+    inner.rotation.y = Math.atan2(dx, dz); const sw = Math.sin(T * (tier.speed * 3.2) + rd.ph); m.legL.rotation.x = sw * .6; m.legR.rotation.x = -sw * .6; m.armL.rotation.x = -sw * .5; m.armR.rotation.x = sw * .5 - .4; inner.position.y = Math.abs(sw) * .06 * sc;
+    if (t > rd.dustAt) { rd.dustAt = t + .3; const wp = rd.g.position.clone(); wp.y += .1; burst(wp, '#c9b8a0', 2 + Math.round(sc), .6 * sc, 1); }
+    return;
+  }
+  // Besieging: planted at the foot of the base, and every few seconds an attack from the tier's repertoire.
+  inner.rotation.y = rd.face + Math.sin(T * .7 + rd.ph) * .1; m.legL.rotation.x = 0; m.legR.rotation.x = 0; inner.position.y = 0;
+  if (rd.task.phase === 'fight' && t > rd.nextShot && !reduceMotion()) fightBack(rd, t);
+  if (!rd.atk && t > rd.nextAtk && !reduceMotion()) { rd.nextAtk = t + tier.every[0] + Math.random() * (tier.every[1] - tier.every[0]); startAttack(rd, t); }
+  const A = rd.atk;
+  if (A) {
+    const k = (t - A.t0) / A.dur; if (k >= 1) { rd.atk = null; rd.g.position.set(rd.post.x, rd.post.y, rd.post.z); }
+    else if (A.kind === 'bite') { const q = Math.sin(k * Math.PI); rd.g.position.lerpVectors(A.from, A.to, q); inner.position.y = Math.abs(Math.sin(k * Math.PI * 4)) * .3 * sc; m.armL.rotation.x = -1.5 * q; m.armR.rotation.x = -1.5 * q; m.head.rotation.x = .4 * q; if (k > .45 && !A.fired) { A.fired = true; const p = rd.g.position.clone(); p.y += .8 * sc; burst(p, '#ffd36b', 8, .6, 2); shockRing(rd.g.position, 0xa6e3a1, 1.6, .4); } }
+    else if (A.kind === 'stomp') { const q = k < .5 ? k * 2 : 1 - (k - .5) * 2; inner.position.y = q * 1.4 * sc; m.legL.rotation.x = -q; m.legR.rotation.x = -q; m.armL.rotation.x = -2.4 * q; m.armR.rotation.x = -2.4 * q; if (k > .5 && !A.fired) { A.fired = true; fireAttack(rd, t); } }
+    else { const wind = Math.min(1, k * 2.2), swing = k > .45 ? Math.min(1, (k - .45) / .25) : 0; m.armR.rotation.x = -2.8 * wind + 3.6 * swing; m.armL.rotation.x = -.6 * wind + .3 * swing; inner.rotation.z = .12 * wind - .18 * swing; m.head.rotation.x = -.3 * wind + .4 * swing; inner.position.y = swing * .12 * sc; if (k > .45 && !A.fired) { A.fired = true; fireAttack(rd, t); } }
+  } else {
+    const roar = ((T * .4 + rd.ph) % 1) > .85; m.armR.rotation.x = roar ? -2.4 : -.9 + Math.sin(T * 2.4 + rd.ph) * .2; m.armL.rotation.x = roar ? -1.4 : .3; m.head.rotation.x = roar ? -.3 : 0; inner.position.y = roar ? .18 * sc : Math.abs(Math.sin(T * 1.6 + rd.ph)) * .03; inner.scale.setScalar(sc * (1 + Math.sin(T * 1.6 + rd.ph) * .012));
+  }
+  m.disc.material.opacity = .22 + (.5 + .5 * Math.sin(T * 3 + rd.ph)) * .16;
+}
+
 // Re-render the selection bar from the current facts (after a failed action, for instance).
 W.refreshSel = function () { if (alive) renderSel(); };
 // Roster hooks: the list on the left can highlight and fly to a unit.
 W.hover = function (id) { if (!alive) return; hovered = id == null ? null : (units.get(id) || null); };
 W.focus = function (id, zoom) { if (!alive) return; const u = units.get(id); if (!u) return; cam.userMoved = true; const p = new THREE.Vector3(); u.g.getWorldPosition(p); const fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom, tz = zoom || Math.min(cam.zoom, 1.1); tween(700, k => { cam.target.x = fx + (p.x - fx) * k; cam.target.z = fz + (p.z - fz) * k; cam.zoom = fzoom + (tz - fzoom) * k; }); };
 W.devCam = function (zoom, key, yaw) { if (!alive) return null; cam.userMoved = true; cam.cine = false; cam.lastInput = performance.now() / 1000; if (zoom) cam.zoom = zoom; if (yaw != null) cam.yaw = yaw; const st = key && sites.get(key); if (st) { cam.target.x = st.x; cam.target.z = st.z; } return { zoom: cam.zoom, yaw: cam.yaw, x: cam.target.x, z: cam.target.z, R: st && st.R }; }; // test hook: place the camera exactly
-W.focusKey = function (kind, key) { if (!alive) return; if (kind === 'treasury') { const st = sites.get('treasury'); if (st) { cam.userMoved = true; flyTo(st.g); select({ site: st }); } return; } const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
+W.focusKey = function (kind, key) { if (!alive) return; if (kind === 'raid') { const rd = raiders.get(key); if (rd) { cam.userMoved = true; flyTo(rd.g); select({ raid: rd }); } return; } if (kind === 'treasury') { const st = sites.get('treasury'); if (st) { cam.userMoved = true; flyTo(st.g); select({ site: st }); } return; } const o = kind === 'pr' ? ships.get(key) : kind === 'run' ? machines.get(key) : kind === 'peer' ? tents.get(key) : null; if (o) { cam.userMoved = true; flyTo(o.g); select(kind === 'pr' ? { pr: o.pr } : kind === 'run' ? { run: o.run } : { peer: o.peer }); } };
 
 window.World = W;
 })();

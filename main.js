@@ -342,6 +342,7 @@ function logToRenderer(...args) {
 function publicSettings() { const { clickupToken, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken }; }
 function sendFullState() {
   send({ type: 'settings', settings: publicSettings() });
+  if (lastClickup.fetchedAt || lastClickup.error) send({ type: 'clickupList', ...lastClickup }); // a reloaded renderer gets the raids back at once
   for (const [id, a] of agents) {
     send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
@@ -2289,6 +2290,7 @@ let lastClickup = { tasks: [], error: null, fetchedAt: 0 };
 function clickupCfg() {
   const c = settings.clickupSettings || {};
   return { enabled: !!c.enabled, teamId: String(c.teamId || ''), lists: cu.sanitizeLists(c.lists), statuses: Array.isArray(c.statuses) && c.statuses.length ? c.statuses : ['failed qa'],
+    fightStatuses: Array.isArray(c.fightStatuses) ? c.fightStatuses : ['in development'], platformMap: cu.sanitizePlatformMap(c.platformMap),
     intervalSec: Math.max(30, Number(c.intervalSec) || 60), onlyMine: c.onlyMine !== false, user: c.user && c.user.id ? c.user : null, platformField: String(c.platformField || 'platform') };
 }
 // One JSON GET. Resolves { status, json } or rejects with a message fit for the settings panel.
@@ -2319,7 +2321,7 @@ async function clickupTasks(token, cfg) {
   for (let page = 0; page < 20; page++) {
     const { json } = await clickupGet(cu.taskQuery(cfg.teamId, listIds, page, me), token);
     const rows = (json && json.tasks) || [];
-    for (const raw of rows) { const t = cu.normalizeTask(raw, { platformField: cfg.platformField }); if (!t) continue; if (!cu.statusMatches(t.status, cfg.statuses)) continue; if (me && !cu.assignedTo(t, me)) continue; out.push(t); }
+    for (const raw of rows) { const t = cu.normalizeTask(raw, { platformField: cfg.platformField }); if (!t) continue; const phase = cu.phaseOf(t.status, cfg.statuses, cfg.fightStatuses); if (!phase) continue; if (me && !cu.assignedTo(t, me)) continue; t.phase = phase; out.push(t); }
     if (rows.length < 100 || (json && json.last_page)) break;
   }
   return out;
@@ -3293,6 +3295,8 @@ function handleIpc(msg) {
         teamId: String(c.teamId || prev.teamId || '').replace(/\D/g, ''),
         lists: cu.sanitizeLists(c.lists),
         statuses: cu.parseStatusFilter(Array.isArray(c.statuses) ? c.statuses.join(',') : c.statuses).slice(0, 20),
+        fightStatuses: cu.parseStatusFilter(Array.isArray(c.fightStatuses) ? c.fightStatuses.join(',') : c.fightStatuses).slice(0, 20),
+        platformMap: cu.sanitizePlatformMap(c.platformMap),
         intervalSec: Math.max(30, Number(c.intervalSec) || 60),
         onlyMine: c.onlyMine !== false,
         user: prev.user,
@@ -3301,7 +3305,7 @@ function handleIpc(msg) {
       if (!settings.clickupSettings.statuses.length) settings.clickupSettings.statuses = ['failed qa'];
       const next = clickupCfg();
       // A different board set or filter re-seeds silently: nothing there counts as a fresh raid.
-      if (next.teamId !== prev.teamId || next.onlyMine !== prev.onlyMine || JSON.stringify(next.lists.map(l => l.id)) !== JSON.stringify(prev.lists.map(l => l.id)) || JSON.stringify(next.statuses) !== JSON.stringify(prev.statuses)) { clickupSeeded = false; settings.clickupSeen = {}; }
+      if (next.teamId !== prev.teamId || next.onlyMine !== prev.onlyMine || JSON.stringify(next.lists.map(l => l.id)) !== JSON.stringify(prev.lists.map(l => l.id)) || JSON.stringify(next.statuses) !== JSON.stringify(prev.statuses) || JSON.stringify(next.fightStatuses) !== JSON.stringify(prev.fightStatuses)) { clickupSeeded = false; settings.clickupSeen = {}; }
       saveState();
       send({ type: 'settings', settings: publicSettings() });
       armClickupTimer();
@@ -3332,6 +3336,17 @@ function handleIpc(msg) {
       const token = settings.clickupToken, cfg = clickupCfg();
       if (!token || !cfg.teamId) { send({ type: 'clickupBoards', tree: null, error: 'Connect a ClickUp token first' }); break; }
       clickupTree(token, cfg.teamId).then(tree => send({ type: 'clickupBoards', tree, error: null })).catch(e => send({ type: 'clickupBoards', tree: null, error: e.message || String(e) }));
+      break;
+    }
+    case 'clickupTask': {
+      // The quest scroll: the ticket's body, fetched only when asked for.
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = settings.clickupToken;
+      if (!id || !token) { send({ type: 'clickupTask', id, task: null, error: 'Not signed in' }); break; }
+      clickupGet(`/task/${encodeURIComponent(id)}?include_markdown_description=true`, token).then(({ json }) => {
+        const t = cu.normalizeTask(json, { platformField: clickupCfg().platformField }); if (!t) throw new Error('No task in reply');
+        const fields = (Array.isArray(json.custom_fields) ? json.custom_fields : []).map(f => ({ name: f && f.name || '', values: cu.fieldLabels(f) })).filter(f => f.name && f.values.length);
+        send({ type: 'clickupTask', id, task: { ...t, markdown: String(json.markdown_description || json.description || json.text_content || ''), due: Number(json.due_date) || 0, updated: Number(json.date_updated) || 0, creator: json.creator && (json.creator.username || json.creator.email) || '', fields }, error: null });
+      }).catch(e => send({ type: 'clickupTask', id, task: null, error: e.message || String(e) }));
       break;
     }
     case 'pollClickupNow': armClickupTimer(); break;
