@@ -337,8 +337,12 @@ function logToRenderer(...args) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('main-log', msg);
 }
 
+// What the renderer (and the mobile client over the LAN socket) may see of the settings:
+// the ClickUp API token stays in the main process, only its presence is reported.
+function publicSettings() { const { clickupToken, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken }; }
 function sendFullState() {
-  send({ type: 'settings', settings });
+  send({ type: 'settings', settings: publicSettings() });
+  if (lastClickup.fetchedAt || lastClickup.error) send({ type: 'clickupList', ...lastClickup }); // a reloaded renderer gets the raids back at once
   for (const [id, a] of agents) {
     send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
@@ -2272,6 +2276,90 @@ async function exportTranscript(id) {
 
 // ── Usage polling (via API rate-limit headers) ────────
 let usageInFlight = false;
+// ── ClickUp raids ─────────────────────────────────────
+// Tickets assigned to the signed-in user, on the boards they picked, in a "failed qa" status
+// (or whatever the filter says) are raids on the island. The personal API token is the
+// login: it identifies the user (GET /user) and authorises the polls. Everything the world
+// needs is normalised by clickup-core; this section only does the I/O.
+const cu = require('./clickup-core');
+const CLICKUP_API = 'https://api.clickup.com/api/v2';
+const CLICKUP_TIMEOUT_MS = 20000;
+let clickupTimer = null, clickupInFlight = false, clickupSeeded = false, clickupErrorLogged = false;
+let lastClickup = { tasks: [], error: null, fetchedAt: 0 };
+
+function clickupCfg() {
+  const c = settings.clickupSettings || {};
+  return { enabled: !!c.enabled, teamId: String(c.teamId || ''), lists: cu.sanitizeLists(c.lists), statuses: Array.isArray(c.statuses) && c.statuses.length ? c.statuses : ['failed qa'],
+    fightStatuses: Array.isArray(c.fightStatuses) ? c.fightStatuses : ['in development'], platformMap: cu.sanitizePlatformMap(c.platformMap),
+    intervalSec: Math.max(30, Number(c.intervalSec) || 60), onlyMine: c.onlyMine !== false, user: c.user && c.user.id ? c.user : null, platformField: String(c.platformField || 'platform') };
+}
+// One JSON GET. Resolves { status, json } or rejects with a message fit for the settings panel.
+function clickupGet(path, token) {
+  return new Promise((resolve, reject) => {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), CLICKUP_TIMEOUT_MS);
+    fetch(CLICKUP_API + path, { headers: { authorization: token, accept: 'application/json' }, signal: ctl.signal })
+      .then(async (r) => { clearTimeout(to); let json = null; try { json = await r.json(); } catch {} if (r.status === 401) return reject(new Error('Token rejected (401)')); if (r.status === 429) return reject(new Error('Rate limited (429) — try again in a minute')); if (r.status >= 400) return reject(new Error((json && (json.err || json.error)) || ('HTTP ' + r.status))); resolve({ status: r.status, json }); })
+      .catch((e) => { clearTimeout(to); reject(new Error(e && e.name === 'AbortError' ? 'Timed out' : (e && e.message) || 'Network error')); });
+  });
+}
+async function clickupWhoAmI(token) { const { json } = await clickupGet('/user', token); const u = json && json.user; if (!u || u.id == null) throw new Error('No user in reply'); return { id: String(u.id), username: u.username || '', email: u.email || '' }; }
+async function clickupTeams(token) { const { json } = await clickupGet('/team', token); return ((json && json.teams) || []).filter(t => t && t.id).map(t => ({ id: String(t.id), name: t.name || '' })); }
+// Spaces, then per space its folders (which carry their lists inline) and folderless lists.
+async function clickupTree(token, teamId) {
+  const { json } = await clickupGet(`/team/${encodeURIComponent(teamId)}/space?archived=false`, token);
+  const spaces = (json && json.spaces) || [], foldersBySpace = {}, listsBySpace = {};
+  for (const sp of spaces) {
+    if (!sp || !sp.id) continue;
+    const fo = await clickupGet(`/space/${encodeURIComponent(sp.id)}/folder?archived=false`, token); foldersBySpace[sp.id] = (fo.json && fo.json.folders) || [];
+    const li = await clickupGet(`/space/${encodeURIComponent(sp.id)}/list?archived=false`, token); listsBySpace[sp.id] = (li.json && li.json.lists) || [];
+  }
+  return cu.buildTree(spaces, foldersBySpace, {}, listsBySpace);
+}
+// Every page of the watched lists for the signed-in user, then the status filter locally.
+async function clickupTasks(token, cfg) {
+  const out = [], listIds = cfg.lists.map(l => l.id), me = cfg.onlyMine && cfg.user ? cfg.user.id : null;
+  for (let page = 0; page < 20; page++) {
+    const { json } = await clickupGet(cu.taskQuery(cfg.teamId, listIds, page, me), token);
+    const rows = (json && json.tasks) || [];
+    for (const raw of rows) { const t = cu.normalizeTask(raw, { platformField: cfg.platformField }); if (!t) continue; const phase = cu.phaseOf(t.status, cfg.statuses, cfg.fightStatuses); if (!phase) continue; if (me && !cu.assignedTo(t, me)) continue; t.phase = phase; out.push(t); }
+    if (rows.length < 100 || (json && json.last_page)) break;
+  }
+  return out;
+}
+function notifyRaid(t) {
+  if (!settings.notifications || !Notification.isSupported()) return;
+  const n = new Notification({ title: `⚔ Raid · ${t.priority.toUpperCase()}${t.platforms.length ? ' · ' + t.platforms.join(', ') : ''}`, body: t.name, silent: true });
+  n.on('click', () => shell.openExternal(t.url).catch(() => {}));
+  n.show();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
+}
+async function pollClickup() {
+  const cfg = clickupCfg(), token = settings.clickupToken;
+  if (clickupInFlight || !cfg.enabled || !token || !cfg.teamId || !cfg.user || !cfg.lists.length) return;
+  clickupInFlight = true;
+  try {
+    const tasks = await clickupTasks(token, cfg);
+    const d = cu.diffRaids(tasks, settings.clickupSeen, Date.now(), clickupSeeded);
+    settings.clickupSeen = d.seen; clickupSeeded = true;
+    for (const t of d.spawned) if (t.priority === 'high' || t.priority === 'urgent') notifyRaid(t);
+    lastClickup = { tasks: tasks.map(t => ({ ...t, since: d.seen[t.id] })), error: null, fetchedAt: Date.now() };
+    clickupErrorLogged = false;
+    saveState();
+  } catch (e) {
+    lastClickup = { ...lastClickup, error: e.message || String(e) };
+    if (!clickupErrorLogged) { clickupErrorLogged = true; console.log('[Overlord] ClickUp poll failed:', lastClickup.error); }
+  }
+  clickupInFlight = false;
+  send({ type: 'clickupList', ...lastClickup });
+}
+function armClickupTimer() {
+  if (clickupTimer) { clearInterval(clickupTimer); clickupTimer = null; }
+  const cfg = clickupCfg();
+  if (!cfg.enabled) { if (lastClickup.tasks.length || lastClickup.error) { lastClickup = { tasks: [], error: null, fetchedAt: 0 }; send({ type: 'clickupList', ...lastClickup }); } return; }
+  pollClickup();
+  clickupTimer = setInterval(pollClickup, cfg.intervalSec * 1000);
+}
+
 let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
 // Set before any programmatic quit so the close confirmation doesn't block it.
 let forceQuit = false;
@@ -2821,7 +2909,7 @@ async function doCreateWorktree({ repo, branch, base, feature }) {
   settings.worktrees = settings.worktrees || [];
   settings.worktrees.push(entry);
   saveState();
-  send({ type: 'settings', settings });
+  send({ type: 'settings', settings: publicSettings() });
   send({ type: 'toast', text: `Created worktree ${branch}` });
   installWorktree(entry);
   return entry;
@@ -2831,7 +2919,7 @@ async function doCreateWorktree({ repo, branch, base, feature }) {
 // card shows a "setup" state until done. seamless > watching npm scroll.
 function installWorktree(entry) {
   const pm = wt.detectPackageManager(entry.path);
-  if (!pm) { entry.status = 'ready'; saveState(); send({ type: 'settings', settings }); return; }
+  if (!pm) { entry.status = 'ready'; saveState(); send({ type: 'settings', settings: publicSettings() }); return; }
   const logPath = path.join(STATE_DIR, 'logs', `setup-${wt.slug(entry.branch)}.log`);
   entry.setupLog = logPath;
   try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.writeFileSync(logPath, `# ${pm} install in ${entry.path}\n# started ${new Date().toISOString()}\n\n`); } catch {}
@@ -2849,7 +2937,7 @@ function installWorktree(entry) {
     proc.on('exit', (code) => {
       append(`\n# exit code ${code}\n`);
       if (code === 0) {
-        entry.status = 'ready'; saveState(); send({ type: 'settings', settings });
+        entry.status = 'ready'; saveState(); send({ type: 'settings', settings: publicSettings() });
         // Auto-start the dev server once deps are in, so a new feature/worktree comes up
         // ready to open in the browser without a second click.
         if (entry.autostart && projectConfig(entry.repo) && projectConfig(entry.repo).devCommand) {
@@ -2863,7 +2951,7 @@ function installWorktree(entry) {
         flog(`Setup for ${entry.branch}: ${pm} install exited ${code}, retrying with --legacy-peer-deps`);
         attempt(pm === 'npm' ? ['--legacy-peer-deps'] : [], true);
       } else {
-        entry.status = 'failed'; saveState(); send({ type: 'settings', settings });
+        entry.status = 'failed'; saveState(); send({ type: 'settings', settings: publicSettings() });
         flog(`Setup failed for ${entry.branch}: install exited ${code}. Log: ${logPath}`);
         send({ type: 'toast', text: `${entry.branch} setup failed (exit ${code}) — see log in ⋮ menu` });
       }
@@ -2871,7 +2959,7 @@ function installWorktree(entry) {
     proc.on('error', (e) => {
       append(`\n# spawn error: ${e.stack || e.message}\n`);
       if (!isRetry) { attempt(pm === 'npm' ? ['--legacy-peer-deps'] : [], true); return; }
-      entry.status = 'failed'; saveState(); send({ type: 'settings', settings });
+      entry.status = 'failed'; saveState(); send({ type: 'settings', settings: publicSettings() });
       flog(`Setup spawn error for ${entry.branch}: ${e.message}. Log: ${logPath}`);
       send({ type: 'toast', text: `${entry.branch} setup failed: ${e.message}` });
     });
@@ -2883,14 +2971,14 @@ function startDevServer(p) {
   const entry = findWorktree(p);
   if (!entry) return;
   let cfg = projectConfig(entry.repo);
-  if (!cfg || !cfg.devCommand) { cfg = ensureProjectConfig(entry.repo, entry.base); saveState(); send({ type: 'settings', settings }); }
+  if (!cfg || !cfg.devCommand) { cfg = ensureProjectConfig(entry.repo, entry.base); saveState(); send({ type: 'settings', settings: publicSettings() }); }
   if (!cfg.devCommand) { send({ type: 'toast', text: 'No dev command detected — set one in Configure dev server' }); return; }
   // Upgrade a stale generic URL template to the detected one (e.g. back-office's openable app
   // is the vite client at base+1, not the API on base). Only touches the plain default, so a
   // custom template the user set is preserved.
   if (!cfg.urlTemplate || cfg.urlTemplate === 'http://localhost:{port}') {
     const g = wt.detectDevCommand(entry.repo);
-    if (g.urlTemplate && g.urlTemplate !== cfg.urlTemplate) { cfg.urlTemplate = g.urlTemplate; saveState(); send({ type: 'settings', settings }); }
+    if (g.urlTemplate && g.urlTemplate !== cfg.urlTemplate) { cfg.urlTemplate = g.urlTemplate; saveState(); send({ type: 'settings', settings: publicSettings() }); }
   }
   if (devServers.has(p)) return;
   const url = fillPort(cfg.urlTemplate, entry.port);
@@ -3008,7 +3096,7 @@ function handleIpc(msg) {
         seedFiles: Array.isArray(c.seedFiles) ? c.seedFiles.map(String) : ['.env', '.env.local', '.certs'],
       };
       saveState();
-      send({ type: 'settings', settings });
+      send({ type: 'settings', settings: publicSettings() });
       break;
     }
     case 'createWorktree': {
@@ -3027,7 +3115,7 @@ function handleIpc(msg) {
       }
       settings.lastFeatureRepos = repos.map(r => r.repo);
       saveState();
-      send({ type: 'settings', settings });
+      send({ type: 'settings', settings: publicSettings() });
       for (const r of repos) {
         doCreateWorktree({ repo: r.repo, branch: name, base: r.base || 'dev', feature: name })
           .catch(e => { flog(`createFeature ${name} / ${r.repo} failed:`, e); send({ type: 'toast', text: `Feature ${name} — ${path.basename(r.repo)} failed: ${e.message || 'error'}` }); });
@@ -3043,7 +3131,7 @@ function handleIpc(msg) {
       // (thousands of files) is slow, so run the actual git worktree removal in the background.
       settings.worktrees = (settings.worktrees || []).filter(w => w.path !== msg.path);
       saveState();
-      send({ type: 'settings', settings });
+      send({ type: 'settings', settings: publicSettings() });
       wt.removeWorktree({ repo: entry.repo, dest: entry.path, branch: entry.branch, deleteBranch: !!msg.deleteBranch })
         .catch(e => { flog('removeWorktree cleanup failed:', e); send({ type: 'toast', text: `Cleanup of ${entry.branch} folder failed — remove it manually` }); });
       break;
@@ -3057,7 +3145,7 @@ function handleIpc(msg) {
     }
     case 'retrySetup': {
       const entry = findWorktree(msg.path);
-      if (entry) { entry.status = 'setup'; saveState(); send({ type: 'settings', settings }); installWorktree(entry); }
+      if (entry) { entry.status = 'setup'; saveState(); send({ type: 'settings', settings: publicSettings() }); installWorktree(entry); }
       break;
     }
     case 'openServerLog': {
@@ -3160,7 +3248,7 @@ function handleIpc(msg) {
       prSeenSeeded = false; // re-seed silently against the new repo set
       settings.prSeen = [];
       saveState();
-      send({ type: 'settings', settings });
+      send({ type: 'settings', settings: publicSettings() });
       armPrTimer();
       break;
     }
@@ -3182,7 +3270,7 @@ function handleIpc(msg) {
         intervalSec: Math.max(30, Number(a.intervalSec) || 60),
       };
       saveState();
-      send({ type: 'settings', settings });
+      send({ type: 'settings', settings: publicSettings() });
       armActionsTimer();
       break;
     }
@@ -3200,6 +3288,69 @@ function handleIpc(msg) {
       break;
     }
     case 'pollActionsNow': armActionsTimer(); break;
+    case 'saveClickupSettings': {
+      const c = msg.clickupSettings || {}, prev = clickupCfg();
+      settings.clickupSettings = {
+        enabled: !!c.enabled,
+        teamId: String(c.teamId || prev.teamId || '').replace(/\D/g, ''),
+        lists: cu.sanitizeLists(c.lists),
+        statuses: cu.parseStatusFilter(Array.isArray(c.statuses) ? c.statuses.join(',') : c.statuses).slice(0, 20),
+        fightStatuses: cu.parseStatusFilter(Array.isArray(c.fightStatuses) ? c.fightStatuses.join(',') : c.fightStatuses).slice(0, 20),
+        platformMap: cu.sanitizePlatformMap(c.platformMap),
+        intervalSec: Math.max(30, Number(c.intervalSec) || 60),
+        onlyMine: c.onlyMine !== false,
+        user: prev.user,
+        platformField: prev.platformField,
+      };
+      if (!settings.clickupSettings.statuses.length) settings.clickupSettings.statuses = ['failed qa'];
+      const next = clickupCfg();
+      // A different board set or filter re-seeds silently: nothing there counts as a fresh raid.
+      if (next.teamId !== prev.teamId || next.onlyMine !== prev.onlyMine || JSON.stringify(next.lists.map(l => l.id)) !== JSON.stringify(prev.lists.map(l => l.id)) || JSON.stringify(next.statuses) !== JSON.stringify(prev.statuses) || JSON.stringify(next.fightStatuses) !== JSON.stringify(prev.fightStatuses)) { clickupSeeded = false; settings.clickupSeen = {}; }
+      saveState();
+      send({ type: 'settings', settings: publicSettings() });
+      armClickupTimer();
+      break;
+    }
+    case 'clickupConnect': {
+      // The pasted token is the login: verify it, remember who it belongs to and which
+      // workspaces it can see. An empty token signs out.
+      const token = String(msg.token || '').trim();
+      if (!token) { settings.clickupToken = null; settings.clickupSettings = { ...(settings.clickupSettings || {}), user: null, enabled: false }; settings.clickupSeen = {}; clickupSeeded = false; saveState(); armClickupTimer(); send({ type: 'settings', settings: publicSettings() }); send({ type: 'clickupAuth', user: null, teams: [], error: null }); break; }
+      (async () => {
+        try {
+          const user = await clickupWhoAmI(token), teams = await clickupTeams(token);
+          const c = settings.clickupSettings || {};
+          const teamId = teams.some(t => t.id === String(c.teamId || '')) ? String(c.teamId) : (teams[0] ? teams[0].id : '');
+          if (!c.user || c.user.id !== user.id) { settings.clickupSeen = {}; clickupSeeded = false; }
+          settings.clickupToken = token;
+          settings.clickupSettings = { ...c, user, teamId };
+          saveState();
+          send({ type: 'settings', settings: publicSettings() });
+          send({ type: 'clickupAuth', user, teams, error: null });
+          armClickupTimer();
+        } catch (e) { send({ type: 'clickupAuth', user: null, teams: [], error: e.message || String(e) }); }
+      })();
+      break;
+    }
+    case 'clickupBoards': {
+      const token = settings.clickupToken, cfg = clickupCfg();
+      if (!token || !cfg.teamId) { send({ type: 'clickupBoards', tree: null, error: 'Connect a ClickUp token first' }); break; }
+      clickupTree(token, cfg.teamId).then(tree => send({ type: 'clickupBoards', tree, error: null })).catch(e => send({ type: 'clickupBoards', tree: null, error: e.message || String(e) }));
+      break;
+    }
+    case 'clickupTask': {
+      // The quest scroll: the ticket's body, fetched only when asked for.
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = settings.clickupToken;
+      if (!id || !token) { send({ type: 'clickupTask', id, task: null, error: 'Not signed in' }); break; }
+      clickupGet(`/task/${encodeURIComponent(id)}?include_markdown_description=true`, token).then(({ json }) => {
+        const t = cu.normalizeTask(json, { platformField: clickupCfg().platformField }); if (!t) throw new Error('No task in reply');
+        const fields = (Array.isArray(json.custom_fields) ? json.custom_fields : []).map(f => ({ name: f && f.name || '', values: cu.fieldLabels(f) })).filter(f => f.name && f.values.length);
+        send({ type: 'clickupTask', id, task: { ...t, markdown: String(json.markdown_description || json.description || json.text_content || ''), due: Number(json.due_date) || 0, updated: Number(json.date_updated) || 0,
+          attachments: (Array.isArray(json.attachments) ? json.attachments : []).filter(a => a && typeof a.url === 'string' && /^https:\/\//.test(a.url)).map(a => ({ id: String(a.id || ''), title: String(a.title || ''), url: a.url, thumb: [a.thumbnail_medium, a.thumbnail_small, a.thumbnail_large].find(u => typeof u === 'string' && /^https:\/\//.test(u)) || '', mime: String(a.mimetype || ''), ext: String(a.extension || '').toLowerCase(), size: Number(a.size) || 0 })), creator: json.creator && (json.creator.username || json.creator.email) || '', fields }, error: null });
+      }).catch(e => send({ type: 'clickupTask', id, task: null, error: e.message || String(e) }));
+      break;
+    }
+    case 'pollClickupNow': armClickupTimer(); break;
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
@@ -3246,13 +3397,13 @@ function handleIpc(msg) {
           if (settings.bookmarks.some(b => b.path === p)) return;
           settings.bookmarks.push({ path: p, name: path.basename(p) || p });
           saveState();
-          send({ type: 'settings', settings });
+          send({ type: 'settings', settings: publicSettings() });
         });
       break;
     case 'removeBookmark':
       settings.bookmarks = (settings.bookmarks || []).filter(b => b.path !== msg.path);
       saveState();
-      send({ type: 'settings', settings });
+      send({ type: 'settings', settings: publicSettings() });
       break;
     case 'renameBookmark': {
       const b = (settings.bookmarks || []).find(x => x.path === msg.path);
@@ -3260,7 +3411,7 @@ function handleIpc(msg) {
       if (!b || !name) break;
       b.name = name;
       saveState();
-      send({ type: 'settings', settings });
+      send({ type: 'settings', settings: publicSettings() });
       break;
     }
     case 'openFile': {
@@ -4659,6 +4810,7 @@ app.whenReady().then(() => {
       startRemoteServer();
       armPrTimer();
       armActionsTimer();
+      armClickupTimer();
     }
     // Runs on every load incl. renderer reload — repaints from in-memory state
     // so a reload (to pick up index.html changes) keeps all live sessions.

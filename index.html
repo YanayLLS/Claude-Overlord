@@ -1191,6 +1191,8 @@ button:focus-visible { outline-offset:0; }
     <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
   </div>
   </div><!-- end #content -->
+  <div id="quest-overlay" hidden onclick="if(event.target===this)closeQuest()"><div id="quest-scroll" role="dialog" aria-label="Quest"></div></div>
+  <div id="quest-view" hidden onclick="if(event.target===this||event.target.classList.contains('qv-close'))closeQuestView()"><button class="qv-nav qv-prev" onclick="questViewStep(-1)" title="Previous">&#x2039;</button><div id="quest-view-box"></div><button class="qv-nav qv-next" onclick="questViewStep(1)" title="Next">&#x203A;</button><button class="qv-close" title="Close">&times;</button><div id="quest-view-cap"></div></div>
   <div id="settings-overlay" style="display:none" onclick="toggleSettings()">
     <div class="settings-modal" onclick="event.stopPropagation()">
       <div class="settings-header">
@@ -1282,6 +1284,56 @@ button:focus-visible { outline-offset:0; }
         <span>Idle poll interval (seconds):</span>
         <input type="number" id="inp-actions-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onActionsSettingsChange()" />
       </label>
+      </div>
+      </details>
+
+      <details class="settings-sec">
+      <summary>ClickUp raids<span class="sec-chip" id="chip-clickup"></span></summary>
+      <div class="sec-body">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-clickup" onchange="onClickupEnableChange(this.checked)" />
+        <span>Raids from ClickUp (World view)</span>
+      </label>
+      <div class="settings-hint">Your tickets in a matching status become enemies that attack the base of their platform. Each user signs in with their own ClickUp account: the token stays on this machine and is only sent to api.clickup.com.</div>
+      <label class="settings-label" style="display:block;">
+        <span>Sign in:</span>
+        <div class="settings-hint" style="padding:2px 0 4px;">1. <a href="#" onclick="api.send({type:'openUrl',url:'https://app.clickup.com/settings/apps'});return false;" style="color:var(--accent,#89b4fa)">Get a token</a> — the ClickUp page has a one-click “Generate” button. 2. Paste it here and press Connect.</div>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="password" id="inp-clickup-token" placeholder="pk_… personal API token" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();clickupConnect();}" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <button onclick="clickupConnect()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Connect</button>
+        </div>
+        <div class="settings-hint" id="clickup-auth" style="padding-left:0;">Not signed in.</div>
+      </label>
+      <label class="settings-label" style="display:block;">
+        <span>Boards:</span>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+          <input type="text" id="inp-clickup-search" placeholder="Search boards..." oninput="renderBoardPicker()" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
+          <button onclick="loadClickupBoards()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Load boards</button>
+        </div>
+        <div id="clickup-board-list" style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;padding:4px;"></div>
+      </label>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-clickup-mine" checked onchange="onClickupSettingsChange()" />
+        <span>Only tickets assigned to me</span>
+      </label>
+      <label class="settings-label">
+        <span>Raid statuses (comma-separated):</span>
+        <input type="text" id="inp-clickup-status" value="failed qa" style="width:220px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
+      </label>
+      <label class="settings-label">
+        <span>Fought when in:</span>
+        <input type="text" id="inp-clickup-fight" value="in development" style="width:220px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
+      </label>
+      <div class="settings-hint">A ticket in a raid status spawns an enemy at its platform's base. Once it moves to a fight status the base's agents shoot it; when it leaves both, the enemy dies.</div>
+      <label class="settings-label" style="display:block;">
+        <span>Bases (platform → project):</span>
+        <div id="clickup-bases" style="margin-top:4px;"></div>
+      </label>
+      <label class="settings-label">
+        <span>Poll interval (seconds):</span>
+        <input type="number" id="inp-clickup-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
+      </label>
+      <div class="settings-hint" id="clickup-live" style="padding-left:0;"></div>
       </div>
       </details>
 
@@ -3688,6 +3740,23 @@ function handleAgentMsg(msg) {
     case 'workflowList':
       renderRepoWorkflows(msg.repo, msg.workflows, msg.error);
       break;
+    case 'clickupTask': if (questOpen && questOpen.id === msg.id) { questOpen.body = msg.task; questOpen.error = msg.error || null; renderQuest(); } break;
+    case 'clickupAuth':
+      clickupTeams = msg.teams || [];
+      if (msg.error) renderClickupAuth(msg.error);
+      else { renderClickupAuth(null); if (msg.user) loadClickupBoards(); else { clickupTree = null; renderBoardPicker(); } }
+      break;
+    case 'clickupBoards': {
+      const box = document.getElementById('clickup-board-list');
+      if (msg.error) { if (box) box.innerHTML = '<div class="pr-empty">Failed: ' + escapeHtml(msg.error) + '</div>'; break; }
+      clickupTree = msg.tree || []; renderBoardPicker();
+      break;
+    }
+    case 'clickupList':
+      clickupState = { tasks: msg.tasks || [], error: msg.error || null, fetchedAt: msg.fetchedAt || 0 };
+      renderClickupLive(); renderBoardPicker(); renderPlatformMap(); renderSettingsChips();
+      if (worldView) worldSync();
+      break;
     case 'ghReady': {
       // gh just became usable — refresh whatever the user was blocked on.
       prState.error = null; prState.errorCode = null;
@@ -4210,6 +4279,17 @@ function applySettings(s) {
     renderTrackedWorkflows();
     renderActionsBadge();
   }
+  if (s.clickupHasToken !== undefined) clickupHasToken = !!s.clickupHasToken;
+  if (s.clickupSettings) {
+    clickupSettings = { ...clickupSettings, ...s.clickupSettings };
+    selectedBoards = new Map((clickupSettings.lists || []).map(l => [l.id, l]));
+    const c = document.getElementById('chk-clickup'); if (c) c.checked = !!clickupSettings.enabled;
+    const m = document.getElementById('chk-clickup-mine'); if (m) m.checked = clickupSettings.onlyMine !== false;
+    const st = document.getElementById('inp-clickup-status'); if (st && document.activeElement !== st) st.value = (clickupSettings.statuses || ['failed qa']).join(', ');
+    const ft = document.getElementById('inp-clickup-fight'); if (ft && document.activeElement !== ft) ft.value = (clickupSettings.fightStatuses || []).join(', ');
+    const i = document.getElementById('inp-clickup-interval'); if (i) i.value = clickupSettings.intervalSec || 60;
+  }
+  renderClickupAuth(null); renderBoardPicker(); renderClickupLive(); renderPlatformMap();
   // Restore terminal panel width
   if (s.termWidth) {
     settings_termWidth = s.termWidth;
@@ -5213,6 +5293,193 @@ document.addEventListener('mousedown', (e) => {
 // ── GitHub Actions tracking ───────────────────────────
 let actionsSettings = { enabled: false, workflows: [], intervalSec: 60 };
 let actionsState = { runs: [], error: null, errorCode: null };
+
+// ── ClickUp raids: settings panel ──────────────────────
+// The token itself never comes back from main; only whether one is stored (clickupHasToken).
+let clickupSettings = { enabled: false, teamId: '', lists: [], statuses: ['failed qa'], fightStatuses: ['in development'], platformMap: {}, intervalSec: 60, onlyMine: true, user: null };
+let clickupHasToken = false, clickupTeams = [], clickupTree = null;
+let clickupState = { tasks: [], error: null, fetchedAt: 0 };
+let selectedBoards = new Map(); // list id -> { id, name, path }
+
+function onClickupEnableChange(val) { clickupSettings.enabled = val; onClickupSettingsChange(); }
+function onClickupSettingsChange() {
+  const g = id => document.getElementById(id), teamSel = g('sel-clickup-team');
+  clickupSettings = { ...clickupSettings, enabled: g('chk-clickup').checked, teamId: teamSel && teamSel.value ? teamSel.value : clickupSettings.teamId, lists: [...selectedBoards.values()],
+    statuses: g('inp-clickup-status').value, fightStatuses: g('inp-clickup-fight').value, platformMap: clickupSettings.platformMap || {}, intervalSec: Math.max(30, Number(g('inp-clickup-interval').value) || 60), onlyMine: g('chk-clickup-mine').checked };
+  api.send({ type: 'saveClickupSettings', clickupSettings });
+  renderSettingsChips();
+}
+function clickupConnect() {
+  const inp = document.getElementById('inp-clickup-token'), token = inp.value.trim();
+  if (!token) { renderClickupAuth(null); return; }
+  document.getElementById('clickup-auth').textContent = 'Checking token…';
+  api.send({ type: 'clickupConnect', token }); inp.value = '';
+}
+function clickupSignOut() { document.getElementById('clickup-auth').textContent = 'Signing out…'; api.send({ type: 'clickupConnect', token: '' }); }
+function renderClickupAuth(error) {
+  const el = document.getElementById('clickup-auth'), inp = document.getElementById('inp-clickup-token'); if (!el) return;
+  if (inp) inp.placeholder = clickupHasToken ? 'Token saved — paste a new one to replace it' : 'pk_… personal API token';
+  if (error) { el.innerHTML = '<span style="color:#f38ba8">Sign-in failed: ' + escapeHtml(error) + '</span>'; return; }
+  const u = clickupSettings.user;
+  if (!clickupHasToken || !u) { el.textContent = 'Not signed in.'; return; }
+  const team = clickupTeams.find(t => t.id === clickupSettings.teamId);
+  let h = 'Signed in as <b>' + escapeHtml(u.username || u.email || u.id) + '</b>';
+  if (clickupTeams.length > 1) h += ' · workspace <select id="sel-clickup-team" onchange="onClickupSettingsChange();loadClickupBoards()" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;padding:2px 6px;">' + clickupTeams.map(t => '<option value="' + t.id + '"' + (t.id === clickupSettings.teamId ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('') + '</select>';
+  else if (team) h += ' · ' + escapeHtml(team.name);
+  h += ' · <a href="#" onclick="clickupSignOut();return false;" style="color:var(--dim)">sign out</a>';
+  el.innerHTML = h;
+}
+function loadClickupBoards() {
+  const box = document.getElementById('clickup-board-list'); if (box) box.innerHTML = '<div class="pr-empty">Loading boards from ClickUp…</div>';
+  api.send({ type: 'clickupBoards' });
+}
+function findBoard(id) { for (const sp of clickupTree || []) { for (const fo of sp.folders) for (const l of fo.lists) if (l.id === id) return l; for (const l of sp.lists) if (l.id === id) return l; } return selectedBoards.get(id) || null; }
+function renderBoardPicker() {
+  const box = document.getElementById('clickup-board-list'); if (!box) return;
+  const per = {}; for (const t of clickupState.tasks) if (t.list) per[t.list.id] = (per[t.list.id] || 0) + 1;
+  const row = (l, depth, label) => '<label style="display:flex;gap:6px;align-items:center;padding:2px 4px 2px ' + (4 + depth * 14) + 'px;font-size:12px;cursor:pointer;">'
+    + '<input type="checkbox" ' + (selectedBoards.has(l.id) ? 'checked' : '') + ' onchange="toggleBoard(\'' + l.id + '\',this.checked)"><span>' + escapeHtml(label || l.name) + '</span>'
+    + (per[l.id] ? '<span style="margin-left:auto;font-size:11px;color:#f38ba8">' + per[l.id] + ' raid' + (per[l.id] === 1 ? '' : 's') + '</span>' : '') + '</label>';
+  if (!clickupTree) {
+    if (!selectedBoards.size) { box.innerHTML = '<div class="pr-empty">' + (clickupHasToken ? 'Click “Load boards” to pick the boards whose tickets raid the island.' : 'Connect a token, then pick the boards whose tickets raid the island.') + '</div>'; return; }
+    box.innerHTML = [...selectedBoards.values()].map(l => row(l, 0, l.path || l.name)).join(''); return;
+  }
+  const q = (document.getElementById('inp-clickup-search').value || '').toLowerCase(), match = l => !q || l.name.toLowerCase().includes(q) || (l.path || '').toLowerCase().includes(q);
+  let h = '';
+  for (const sp of clickupTree) {
+    const folders = sp.folders.map(fo => ({ ...fo, lists: fo.lists.filter(match) })).filter(fo => fo.lists.length), lists = sp.lists.filter(match);
+    if (!folders.length && !lists.length) continue;
+    h += '<div style="padding:5px 4px 2px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;">' + escapeHtml(sp.name) + '</div>';
+    for (const fo of folders) {
+      const all = fo.lists.every(l => selectedBoards.has(l.id));
+      h += '<label style="display:flex;gap:6px;align-items:center;padding:2px 4px 2px 18px;font-size:12px;cursor:pointer;color:var(--dim);"><input type="checkbox" ' + (all ? 'checked' : '') + ' onchange="toggleFolder(\'' + fo.id + '\',this.checked)"><span>&#x1F4C1; ' + escapeHtml(fo.name) + '</span></label>' + fo.lists.map(l => row(l, 2)).join('');
+    }
+    h += lists.map(l => row(l, 1)).join('');
+  }
+  // Boards picked earlier that the tree no longer has (a sprint that ended) stay listed so they can be unticked.
+  const gone = [...selectedBoards.values()].filter(l => !findBoardInTree(l.id));
+  if (gone.length) h += '<div style="padding:5px 4px 2px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;">No longer in ClickUp</div>' + gone.map(l => row(l, 1, l.path || l.name)).join('');
+  box.innerHTML = h || '<div class="pr-empty">No match.</div>';
+}
+function findBoardInTree(id) { for (const sp of clickupTree || []) { for (const fo of sp.folders) for (const l of fo.lists) if (l.id === id) return l; for (const l of sp.lists) if (l.id === id) return l; } return null; }
+function toggleBoard(id, on) { const l = findBoard(id); if (on && l) selectedBoards.set(id, { id: l.id, name: l.name, path: l.path || '' }); else selectedBoards.delete(id); onClickupSettingsChange(); renderBoardPicker(); }
+function toggleFolder(fid, on) { for (const sp of clickupTree || []) for (const fo of sp.folders) if (fo.id === fid) for (const l of fo.lists) { if (on) selectedBoards.set(l.id, { id: l.id, name: l.name, path: l.path || '' }); else selectedBoards.delete(l.id); } onClickupSettingsChange(); renderBoardPicker(); }
+// ── Which base a platform's enemies attack ──
+// The table is keyed by the platform label's letters only ("Android 🤖" -> "android"). A platform with
+// no explicit choice gets a guess from project names; a platform nothing matches raids a random base,
+// stable per ticket, which the world resolves itself.
+const platformKey = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const PLATFORM_HINTS = [[/android/, /android/i], [/\bpc\b|windows/, /pc[_ -]?win|windows|\bpc\b/i], [/\bmac\b/, /\bmac/i], [/\bios\b/, /\bios\b/i], [/xr|hololens|quest|magicleap|\bvr\b|headset/, /\bxr\b|hololens|quest|\bvr\b/i], [/webgl/, /webgl/i], [/backoffice|back office/, /backoffice|back-office|frontend/i], [/webapp|\bweb\b/, /\bweb\b|frontline\.io-web|frontend/i], [/unity/, /unity|android|pc[_ -]?win|\bxr\b/i]];
+function worldBaseOptions() {
+  const seen = new Set(), out = [];
+  const add = cwd => { if (!cwd || seen.has(cwd)) return; seen.add(cwd); const w = worktreeAt(cwd); out.push({ cwd, label: w ? pathLabel(w.repo) + ' · ' + (w.branch || w.feature || pathLabel(cwd)) : pathLabel(cwd) }); };
+  for (const cwd of knownProjects) add(cwd); for (const w of worktrees) add(w.path); for (const [, a] of agents) if (!a.archived) add(a.cwd);
+  return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+function suggestBase(key, options) {
+  for (const [labelRe, projRe] of PLATFORM_HINTS) if (labelRe.test(key)) { const hit = options.find(o => projRe.test(o.cwd) || projRe.test(o.label)); if (hit) return hit.cwd; }
+  return null;
+}
+// The base for a ticket: the first of its platforms with a mapped or guessed project, else null (random).
+function worldRaidTarget(task, options) {
+  const map = clickupSettings.platformMap || {};
+  for (const p of task.platforms || []) { const k = platformKey(p); if (!k) continue; const cwd = map[k] || suggestBase(k, options); if (cwd && options.some(o => o.cwd === cwd)) return cwd; }
+  return null;
+}
+function worldRaids() {
+  if (!clickupSettings.enabled) return [];
+  const options = worldBaseOptions();
+  return clickupState.tasks.map(t => ({ ...t, target: worldRaidTarget(t, options) }));
+}
+function renderPlatformMap() {
+  const box = document.getElementById('clickup-bases'); if (!box) return;
+  const map = clickupSettings.platformMap || {}, options = worldBaseOptions(), labels = new Map();
+  for (const t of clickupState.tasks) for (const p of t.platforms || []) { const k = platformKey(p); if (k && !labels.has(k)) labels.set(k, p); }
+  for (const k of Object.keys(map)) if (!labels.has(k)) labels.set(k, k);
+  if (!labels.size) { box.innerHTML = '<div class="pr-empty" style="padding:6px 4px;">Platforms appear here as your tickets name them.</div>'; return; }
+  const opt = (v, text, sel) => '<option value="' + escAttr(v) + '"' + (sel ? ' selected' : '') + '>' + esc(text) + '</option>';
+  box.innerHTML = [...labels.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([k, lab]) => {
+    const chosen = map[k] || '', guess = chosen ? '' : suggestBase(k, options), cur = chosen || guess;
+    return '<div style="display:flex;gap:8px;align-items:center;padding:2px 0;font-size:12px;"><span style="flex:0 0 150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(lab) + '</span>'
+      + '<select onchange="setPlatformBase(\'' + escAttr(k) + '\',this.value)" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;padding:2px 6px;">' + opt('', guess ? 'Auto · ' + (options.find(o => o.cwd === guess) || {}).label : 'Random base', !chosen) + options.map(o => opt(o.cwd, o.label, chosen === o.cwd)).join('') + '</select>'
+      + (cur ? '' : '<span style="color:var(--dim);font-size:11px;">random</span>') + '</div>';
+  }).join('');
+}
+function setPlatformBase(key, cwd) { const m = { ...(clickupSettings.platformMap || {}) }; if (cwd) m[key] = cwd; else delete m[key]; clickupSettings.platformMap = m; onClickupSettingsChange(); renderPlatformMap(); if (worldView) worldSync(); }
+// ── The quest scroll: a ticket read as a quest, body and all ──
+let questOpen = null; // { id, task, base, body, error }
+function copyLink(url) { try { navigator.clipboard.writeText(url).then(() => showToast('Link copied'), () => showToast('Could not copy')); } catch { showToast('Could not copy'); } }
+function openQuest(task, base) { questOpen = { id: task.id, task, base: base || null, body: null, error: null }; renderQuest(); document.getElementById('quest-overlay').hidden = false; api.send({ type: 'clickupTask', id: task.id }); }
+function closeQuest() { questOpen = null; document.getElementById('quest-overlay').hidden = true; }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (questView) closeQuestView(); else if (questOpen) closeQuest(); } else if (questView && e.key === 'ArrowLeft') questViewStep(-1); else if (questView && e.key === 'ArrowRight') questViewStep(1); });
+// Attachments: pictures and clips as thumbnails on the scroll, opened in a viewer; anything else is a link.
+const questKind = a => /^image\//.test(a.mime) || /^(png|jpe?g|gif|webp|bmp|svg)$/.test(a.ext) ? 'image' : /^video\//.test(a.mime) || /^(mp4|webm|mov|m4v|ogv)$/.test(a.ext) ? 'video' : 'file';
+function questAttachHtml(list) {
+  const media = list.filter(a => questKind(a) !== 'file'), files = list.filter(a => questKind(a) === 'file');
+  let h = '';
+  if (media.length) h += '<div class="q-attach">' + media.map((a, i) => { const k = questKind(a); return '<div class="q-thumb' + (k === 'video' ? ' video' : '') + '" onclick="openQuestView(' + i + ')" title="' + escAttr(a.title || k) + '">' + (a.thumb || k === 'image' ? '<img src="' + escAttr(a.thumb || a.url) + '" alt="" loading="lazy">' : '<video src="' + escAttr(a.url) + '#t=0.5" preload="metadata" muted playsinline></video>') + (k === 'video' ? '<span class="q-play">&#x25B6;</span>' : '') + '</div>'; }).join('') + '</div>';
+  if (files.length) h += '<div class="q-files">' + files.map(a => '<a href="#" class="q-file" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(a.url) + '\'});return false;">&#x1F4CE; ' + esc(a.title || a.ext || 'file') + (a.size ? ' <small>' + (a.size > 1048576 ? (a.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(a.size / 1024)) + ' KB') + '</small>' : '') + '</a>').join('') + '</div>';
+  return h;
+}
+let questView = null; // { list, i }
+function openQuestViewUrl(url) { questView = { list: [{ url, title: '', mime: 'image/*', ext: '' }], i: 0 }; renderQuestView(); document.getElementById('quest-view').hidden = false; }
+function openQuestView(i) { const list = ((questOpen && questOpen.body && questOpen.body.attachments) || []).filter(a => questKind(a) !== 'file'); if (!list[i]) return; questView = { list, i }; renderQuestView(); document.getElementById('quest-view').hidden = false; }
+function closeQuestView() { questView = null; const box = document.getElementById('quest-view-box'); if (box) box.innerHTML = ''; document.getElementById('quest-view').hidden = true; }
+function questViewStep(d) { if (!questView) return; questView.i = (questView.i + d + questView.list.length) % questView.list.length; renderQuestView(); }
+function renderQuestView() {
+  const v = questView; if (!v) return; const a = v.list[v.i], box = document.getElementById('quest-view-box'), cap = document.getElementById('quest-view-cap');
+  box.innerHTML = questKind(a) === 'video' ? '<video src="' + escAttr(a.url) + '" controls autoplay playsinline></video>' : '<img src="' + escAttr(a.url) + '" alt="">';
+  cap.innerHTML = esc(a.title || '') + (v.list.length > 1 ? ' <span>' + (v.i + 1) + ' / ' + v.list.length + '</span>' : '') + ' <a href="#" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(a.url) + '\'});return false;">open in browser</a>';
+  document.querySelectorAll('#quest-view .qv-nav').forEach(b => b.hidden = v.list.length < 2);
+}
+// Markdown as ClickUp writes it, rendered safely: everything is escaped first, then a handful of constructs are recognised.
+function questMd(src) {
+  const inl = s => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/!\[([^\]]*)\]\((https?:[^\s)]+)\)/g, (m, alt, url) => '<img class="q-inline" src="' + url.replace(/"/g, '%22') + '" alt="' + alt + '" loading="lazy" onclick="openQuestViewUrl(this.src)">')
+    .replace(/\[([^\]]+)\]\((https?:[^\s)]+)\)/g, (m, txt, url) => '<a href="#" onclick="api.send({type:\'openUrl\',url:\'' + url.replace(/'/g, '%27') + '\'});return false;">' + txt + '</a>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<i>$2</i>').replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, '$1<i>$2</i>').replace(/~~([^~]+)~~/g, '<s>$1</s>');
+  const lines = String(src || '').replace(/\r/g, '').split('\n'); let h = '', para = [], list = null, code = null;
+  const flush = () => { if (para.length) { h += '<p>' + para.map(inl).join('<br>') + '</p>'; para = []; } if (list) { h += '</' + list + '>'; list = null; } };
+  for (const raw of lines) {
+    if (code !== null) { if (/^\s*```/.test(raw)) { h += '<pre>' + esc(code.join('\n')) + '</pre>'; code = null; } else code.push(raw); continue; }
+    const line = raw.replace(/\s+$/, '');
+    if (/^\s*```/.test(line)) { flush(); code = []; continue; }
+    if (!line.trim()) { flush(); continue; }
+    let m;
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); h += '<h' + Math.min(4, m[1].length + 1) + '>' + inl(m[2]) + '</h' + Math.min(4, m[1].length + 1) + '>'; continue; }
+    if ((m = line.match(/^\s*>\s?(.*)$/))) { flush(); h += '<blockquote>' + inl(m[1]) + '</blockquote>'; continue; }
+    if (/^\s*([-*_]\s*){3,}$/.test(line)) { flush(); h += '<hr>'; continue; } // a rule ("* * *") before the list test, which it would otherwise pass
+    if ((m = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/))) { const kind = /^\s*\d/.test(line) ? 'ol' : 'ul'; if (list !== kind) { flush(); list = kind; h += '<' + kind + '>'; } let item = m[1]; const chk = item.match(/^\[( |x|X)\]\s*(.*)$/); if (chk) item = '<span class="q-chk' + (chk[1] === ' ' ? '' : ' on') + '"></span>' + inl(chk[2]); else item = inl(item); h += '<li>' + item + '</li>'; continue; }
+    if (list) flush(); para.push(line.trim());
+  }
+  if (code !== null) h += '<pre>' + esc(code.join('\n')) + '</pre>'; flush();
+  return h || '<p class="q-empty">The scroll is blank: this ticket has no description.</p>';
+}
+function renderQuest() {
+  const el = document.getElementById('quest-scroll'), q = questOpen; if (!el || !q) return;
+  const t = q.body || q.task, pri = t.priority === 'none' ? 'no' : t.priority, tier = { low: 'Gremlin', normal: 'Raider', high: 'Ogre', urgent: 'Warlord', none: 'Raider' }[t.priority] || 'Raider';
+  const chip = (k, v) => v ? '<span class="q-chip"><small>' + esc(k) + '</small>' + esc(v) + '</span>' : '';
+  const when = ts => ts ? new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+  const since = q.task.since ? Math.round((Date.now() - q.task.since) / 60000) : 0, sinceStr = since < 60 ? since + 'm' : since < 1440 ? Math.floor(since / 60) + 'h' : Math.floor(since / 1440) + 'd';
+  const fields = (t.fields || []).filter(f => !/^platform$/i.test(f.name)).slice(0, 6);
+  el.innerHTML = '<div class="q-ribbon ' + esc(t.priority || 'none') + '"><span class="q-eyebrow">Quest &middot; ' + esc(tier) + '</span><span class="q-pri">' + esc(pri.toUpperCase()) + ' PRIORITY</span></div>'
+    + '<div class="q-body"><div class="q-seal">&#x2620;</div><h1>' + esc(t.name) + '</h1>'
+    + '<div class="q-chips">' + chip('Platform', (t.platforms || []).join(', ')) + chip('Board', t.list && t.list.name) + chip('Status', t.status) + chip('Assigned', (t.assignees || []).join(', ')) + chip('Besieging', q.base) + chip('Here for', sinceStr) + chip('Due', when(t.due)) + chip('Tags', (t.tags || []).join(', ')) + fields.map(f => chip(f.name, f.values.join(', '))).join('') + '</div>'
+    + '<div class="q-text">' + (q.error ? '<p class="q-empty">Could not read the scroll: ' + esc(q.error) + '</p>' : !q.body ? '<p class="q-empty q-wait">Unrolling the scroll…</p>' : questMd(t.markdown)) + '</div>'
+    + (q.body && t.attachments && t.attachments.length ? questAttachHtml(t.attachments.filter(a => !(t.markdown || '').includes(a.url))) : '')
+    + '<div class="q-actions"><button class="q-btn q-main" onclick="copyLink(\'' + escAttr(t.url) + '\')">&#x2398; Copy link</button><button class="q-btn" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(t.url) + '\'})">&#x2197; Open in ClickUp</button><button class="q-btn q-close" onclick="closeQuest()">Close</button></div></div>';
+}
+function renderClickupLive() {
+  const el = document.getElementById('clickup-live'); if (!el) return;
+  if (!clickupSettings.enabled) { el.textContent = ''; return; }
+  if (clickupState.error) { el.innerHTML = '<span style="color:#f38ba8">Last poll failed: ' + escapeHtml(clickupState.error) + '</span>'; return; }
+  if (!clickupState.fetchedAt) { el.textContent = clickupHasToken && selectedBoards.size ? 'Waiting for the first poll…' : 'Sign in and pick at least one board.'; return; }
+  const by = {}; for (const t of clickupState.tasks) by[t.priority] = (by[t.priority] || 0) + 1;
+  const parts = ['urgent', 'high', 'normal', 'low', 'none'].filter(p => by[p]).map(p => by[p] + ' ' + p);
+  const ago = Math.max(0, Math.round((Date.now() - clickupState.fetchedAt) / 1000));
+  el.textContent = clickupState.tasks.length + ' raid' + (clickupState.tasks.length === 1 ? '' : 's') + ' right now' + (parts.length ? ' · ' + parts.join(', ') : '') + ' · polled ' + (ago < 60 ? ago + 's' : Math.round(ago / 60) + 'm') + ' ago';
+}
 let actionsPendingRepo = null; // repo whose workflow list is being picked from
 
 function onActionsSettingsChange() {
@@ -5519,6 +5786,8 @@ function renderSettingsChips() {
   n('chip-pr', pr, pr ? `on · ${prN} repo${prN === 1 ? '' : 's'}` : 'off');
   const ac = actionsSettings.enabled, acN = (actionsSettings.workflows || []).length;
   n('chip-actions', ac, ac ? `on · ${acN} workflow${acN === 1 ? '' : 's'}` : 'off');
+  const cuOn = clickupSettings.enabled, cuN = (clickupSettings.lists || []).length, cuR = clickupState.tasks.length;
+  n('chip-clickup', cuOn, cuOn ? `on · ${cuN} board${cuN === 1 ? '' : 's'} · ${cuR} raid${cuR === 1 ? '' : 's'}` : 'off');
 }
 
 function loadRepos() {
@@ -5629,6 +5898,9 @@ function setWorldView(on, persist = true) {
       award: (kind, amount, label) => worldAward(kind, amount, label),
       spend: (cost, patch) => worldSpend(cost, patch),
       refreshUsage: () => refreshUsage(),
+      openRaid: (url) => api.send({ type: 'openUrl', url }),
+      openQuest: (task, base) => openQuest(task, base),
+      copyLink: (url) => copyLink(url),
     }); window.World.ready = true; worldDailyStreak(); worldSync(); }
     catch (e) {
       // No WebGL, or the module failed: fall back to the list view rather than leave a blank stage.
@@ -5702,13 +5974,13 @@ function worldSnapshot() {
     actionsHtml: r.url ? `<button class="pr-approve" title="Open this run on GitHub" onclick="event.stopPropagation();openActionRun('${r.url.replace(/'/g, "\\'")}')">↗ Open run</button><button class="pr-approve pr-mute" title="Copy the run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>` : '' }));
   const peers = (peersState.enabled ? peersState.peers : []).map(p => ({ name: p.name, connected: !!p.connected, host: p.host || '', port: p.port || 0, agents: (p.agents || []).length }));
   let costToday = 0, tokIn = 0, tokOut = 0, turns = 0; for (const a of agentRows) { costToday += a.cost; tokIn += a.tokIn; tokOut += a.tokOut; turns += a.turns; }
-  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), usage: worldUsage() };
+  const snapshot = { selectedId, projects: [...projects.values()], agents: agentRows, prs, runs, peers, github: !!(prSettings.enabled || actionsSettings.enabled || prs.length || runs.length), cost: costToday, tokIn, tokOut, turns, now, economy: worldEconomy, title: worldTitle(), usage: worldUsage(), raids: worldRaids(), raidsOn: !!(clickupSettings.enabled && clickupSettings.user) };
   return snapshot;
 }
 const _worldIdleSince = new Map(); // agent id -> when it last became done/idle
 
 // ── World economy: coins for outcomes and attentiveness, spent on cosmetic upgrades. Saved in settings; classic mode never reads it. ──
-function worldEconomyDefault() { return { coins: 0, earned: 0, upgrades: {}, deco: {}, builds: {}, streak: { last: '', days: 0 }, stats: { reviews: 0, merges: 0, updates: 0, jobs: 0, turns: 0, quick: 0, resumes: 0, closes: 0 } }; }
+function worldEconomyDefault() { return { coins: 0, earned: 0, upgrades: {}, deco: {}, builds: {}, streak: { last: '', days: 0 }, stats: { reviews: 0, merges: 0, updates: 0, jobs: 0, turns: 0, quick: 0, resumes: 0, closes: 0, raids: 0 } }; }
 let worldEconomy = worldEconomyDefault(), _ecoSaveTimer = null;
 function worldEconomySave() { clearTimeout(_ecoSaveTimer); _ecoSaveTimer = setTimeout(() => api.send({ type: 'saveSettings', settings: { worldEconomy } }), 400); }
 const WORLD_TITLES = [[0, 'Overseer'], [500, 'Marshal'], [2000, 'Overlord'], [10000, 'High Overlord']];
@@ -5748,6 +6020,25 @@ function worldSync() { if (!worldView || !window.World || !window.World.ready) r
 setInterval(() => { if (worldView && Object.keys(worldEconomy.builds).length) worldSync(); }, 1000); // construction timers tick even when nothing else changes
 // The roster extras the classic list doesn't have: header counters on top (the list itself is untouched),
 // and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
+// PRs and deployments in the header: the counts, and in front of them whatever needs the commander now.
+function worldGithubChips(s) {
+  if (!s.github) return '';
+  const prs = s.prs || [], runs = s.runs || [], toApprove = prs.filter(p => p.needsApproval).length, changes = prs.filter(p => p.mine && p.state === 'changes').length, ready = prs.filter(p => p.mine && p.state === 'ready').length;
+  const running = runs.filter(r => r.state === 'running').length, failed = runs.filter(r => r.state === 'failure').length;
+  let pr;
+  if (toApprove) pr = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpPr()" title="Pull requests waiting for your review — click to fly to the first"><i></i><b>${toApprove}</b>to approve<em>${prs.length} open</em></span>`;
+  else if (changes) pr = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpPr()" title="Changes requested on your pull requests — click to fly there"><i></i><b>${changes}</b>changes asked<em>${prs.length} open</em></span>`;
+  else if (ready) pr = `<span class="wc" style="--c:var(--green)" onclick="worldJumpPr()" title="Your pull requests ready to merge — click to fly there"><i></i><b>${ready}</b>ready to merge<em>${prs.length} open</em></span>`;
+  else pr = `<span class="wc" style="--c:#94e2d5" onclick="worldJumpPr()" title="Open pull requests on the watched repos — click to fly to the harbour"><i></i><b>${prs.length}</b>PRs</span>`;
+  let run;
+  if (running) run = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpRun()" title="Deployments in progress — click to fly to the first"><i class="spin"></i><b>${running}</b>deploying${failed ? '<em>' + failed + ' failed</em>' : ''}</span>`;
+  else if (failed) run = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpRun()" title="Failed deployments — click to fly to the first"><i></i><b>${failed}</b>deploy${failed === 1 ? '' : 's'} failed</span>`;
+  else if (runs.length) run = `<span class="wc" style="--c:var(--green)" onclick="worldJumpRun()" title="Tracked workflows, all passing — click to fly to the harbour"><i></i><b>${runs.length}</b>deploy${runs.length === 1 ? '' : 's'} ok</span>`;
+  else run = '';
+  return pr + run;
+}
+function worldJumpPr() { const prs = worldSnapshot().prs, p = prs.find(x => x.needsApproval) || prs.find(x => x.mine && x.state === 'changes') || prs.find(x => x.mine && x.state === 'ready') || prs[0]; if (!window.World) return; if (p) World.focusKey('pr', p.key); else World.focusKey('site', 'github'); }
+function worldJumpRun() { const runs = worldSnapshot().runs, r = runs.find(x => x.state === 'running') || runs.find(x => x.state === 'failure') || runs[0]; if (!window.World) return; if (r) World.focusKey('run', r.key); else World.focusKey('site', 'github'); }
 function renderWorldRoster(s) {
   { const n = document.getElementById('world-roster-tab-n'); if (n) n.textContent = s.agents.length; }
   const st = { work: 0, need: 0, done: 0, down: 0 }; let cost = 0;
@@ -5756,7 +6047,9 @@ function renderWorldRoster(s) {
   document.getElementById('world-counters').innerHTML =
     chip('var(--accent)', st.work, 'working') + chip('var(--yellow)', st.need, 'need you', 'focusNextPerm()', 'Units waiting for approval or an answer — click to jump') + chip('var(--green)', st.done, 'done') + chip('var(--red)', st.down, 'down')
     + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`
-    + `<span class="wc wc-coins" title="Coins: earned by reviewing and merging PRs, answering agents quickly, finished jobs and turns. Spend them at the treasury and on station upgrades." onclick="window.World&&World.focusKey('treasury')"><i class="hexcoin"></i><b>${worldEconomy.coins.toLocaleString()}</b>${esc(worldTitle())}</span>`;
+    + `<span class="wc wc-coins" title="Coins: earned by reviewing and merging PRs, answering agents quickly, finished jobs and turns. Spend them at the treasury and on station upgrades." onclick="window.World&&World.focusKey('treasury')"><i class="hexcoin"></i><b>${worldEconomy.coins.toLocaleString()}</b>${esc(worldTitle())}</span>`
+    + worldGithubChips(s)
+    + (s.raidsOn && s.raids.length ? chip('#ff3b5c', s.raids.length, s.raids.length === 1 ? 'raid' : 'raids', "window.World&&World.focusKey('site','portal')", 'Tickets besieging the island — click to fly to the Dark Portal') : '');
   const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
   const agentGo = (id) => `focusAgent(${id});window.World&&World.focus(${id})`;
   const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
