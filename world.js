@@ -1238,12 +1238,12 @@ function fmtMoney(c) { return c >= 1 ? '$' + c.toFixed(2) : '$' + c.toFixed(3); 
 // status keeps its enemy, now under fire from the base; a ticket that leaves both statuses kills it.
 const PORTAL_C = 0xb07cff, PORTAL_HEX = '#b07cff';
 const RAID_TIERS = {
-  low: { name: 'Gremlin', scale: .66, speed: 5.4, body: 0x5f9a3a, eyes: 0xffd23f, weight: 1, coins: 5, every: [3, 6], attacks: ['bite', 'pebble'] },
+  low: { name: 'Gremlin', scale: .95, speed: 5.4, body: 0x2fb7c6, eyes: 0xfff23f, weight: 1, coins: 5, every: [3, 6], attacks: ['bite', 'pebble'] },
   normal: { name: 'Raider', scale: 1, speed: 3.4, body: 0x7d3f33, eyes: 0xff3b5c, weight: 2, coins: 10, every: [4, 8], attacks: ['smash', 'rock'] },
   high: { name: 'Ogre', scale: 1.6, speed: 2.6, body: 0x5b3a7a, eyes: 0xffa31a, weight: 4, coins: 25, every: [5, 9], attacks: ['fireball', 'roar'] },
   urgent: { name: 'Warlord', scale: 2.4, speed: 2.1, body: 0x1f1826, eyes: 0xff2d55, weight: 8, coins: 100, every: [6, 10], attacks: ['stomp', 'darkbolt'] },
   none: { name: 'Raider', scale: 1, speed: 3.4, body: 0x6b5a5a, eyes: 0xff3b5c, weight: 2, coins: 10, every: [4, 8], attacks: ['smash', 'rock'] } };
-const RAID_HEX = { low: '#a6e3a1', normal: '#fab387', high: '#f38ba8', urgent: '#ff3b5c', none: '#b4befe' };
+const RAID_HEX = { low: '#5ee0f0', normal: '#fab387', high: '#f38ba8', urgent: '#ff3b5c', none: '#b4befe' };
 const PRI_ORDER = { urgent: 0, high: 1, normal: 2, none: 3, low: 4 }, RAID_CAP = 40, FLAME_CAP = 16;
 const raidTier = r => RAID_TIERS[r.priority] || RAID_TIERS.none;
 const hashStr = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
