@@ -358,8 +358,9 @@ body.world-mode #term-header .term-title { display: none; }
 .w-obj.w-gh.sel { background: rgba(214,165,69,.45); }
 /* The quest board: a drawer of wanted posters, one per raid, pinned to a dark wooden board. */
 #quest-log { display: none; }
-body.world-mode #quest-log { display: flex; flex-direction: column; position: fixed; top: 44px; right: 0; bottom: 0; width: min(470px, 92vw); z-index: 40; color: #efe3c8; font-family: 'Segoe UI', system-ui, sans-serif; background: repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 2px, transparent 2px 46px), linear-gradient(180deg, #3a2819, #21160e); border-left: 2px solid #5a3f2a; box-shadow: -24px 0 60px rgba(0,0,0,.55), inset 3px 0 0 #7a5738; transform: translateX(105%); transition: transform .34s cubic-bezier(.2,.8,.2,1); }
-body.world-mode #quest-log.open { transform: none; }
+body.world-mode #quest-log-dim { position: fixed; inset: 0; z-index: 39; background: rgba(6,8,12,.45); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; transition: opacity .25s; } body.world-mode.quest-log-open #quest-log-dim { opacity: 1; pointer-events: auto; }
+body.world-mode #quest-log { display: flex; flex-direction: column; position: fixed; left: 50%; top: 50%; width: min(760px, 92vw); height: min(78vh, 860px); z-index: 40; pointer-events: none; opacity: 0; color: #efe3c8; font-family: 'Segoe UI', system-ui, sans-serif; background: repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 2px, transparent 2px 46px), linear-gradient(180deg, #3a2819, #21160e); border-left: 2px solid #5a3f2a; box-shadow: 0 30px 90px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.06); transform: translate(-50%, -50%) translateY(26px) scale(.96); transition: transform .3s cubic-bezier(.2,.9,.3,1.15), opacity .22s; clip-path: polygon(0 10px, 10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px)); border: 2px solid #5a3f2a; border-left-width: 2px; }
+body.world-mode #quest-log.open { transform: translate(-50%, -50%); opacity: 1; pointer-events: auto; }
 @media (prefers-reduced-motion: reduce) { body.world-mode #quest-log { transition: none; } }
 #quest-log .ql-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
 #quest-log .ql-eyebrow { font-family: var(--w-display); font-size: 9px; letter-spacing: .3em; text-transform: uppercase; color: #ff6f8f; }
@@ -372,7 +373,9 @@ body.world-mode #quest-log.open { transform: none; }
 #quest-log .ql-chip.urgent { --c: #ff3b5c; } #quest-log .ql-chip.high { --c: #f38ba8; } #quest-log .ql-chip.normal { --c: #fab387; } #quest-log .ql-chip.low { --c: #5ee0f0; } #quest-log .ql-chip.none { --c: #b4befe; } #quest-log .ql-chip.fire { --c: #89b4fa; }
 #quest-log .ql-chip.on { background: var(--c); color: #1a1408; border-color: var(--c); } #quest-log .ql-chip.on b { color: #1a1408; }
 #quest-log .ql-search { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; padding: 6px 10px; color: #efe3c8; background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.14); outline: none; } #quest-log .ql-search:focus { border-color: var(--w-gold); }
-#quest-log .ql-list { flex: 1; overflow: auto; padding: 10px 18px 16px; }
+#quest-log .ql-list { flex: 1; overflow: auto; padding: 10px 18px 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; align-content: start; }
+#quest-log .ql-group, #quest-log .ql-empty { grid-column: 1 / -1; }
+@media (max-width: 720px) { #quest-log .ql-list { grid-template-columns: 1fr; } }
 #quest-log .ql-group { display: flex; align-items: center; gap: 8px; margin: 12px 0 6px; font-family: var(--w-display); font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: #cdb98f; }
 #quest-log .ql-group:first-child { margin-top: 2px; }
 #quest-log .ql-base { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -398,7 +401,7 @@ body.world-mode #quest-log.open { transform: none; }
 #quest-log .ql-bounty-total { font-family: var(--w-mono); color: var(--w-gold); }
 #quest-log .ql-portal { margin-left: auto; font-family: inherit; font-size: 11px; padding: 4px 10px; border: 1px solid rgba(176,124,255,.5); background: rgba(176,124,255,.14); color: #d8b4fe; cursor: pointer; clip-path: var(--w-hexw); } #quest-log .ql-portal:hover { background: #b07cff; color: #1a1408; }
 .wc.wc-raids.on { background: #ff3b5c; color: #fff; } .wc.wc-raids.on b { color: #fff; } .wc.wc-raids.on i { background: #fff; }
-body.world-mode #world-sel { transition: right .34s cubic-bezier(.2,.8,.2,1); } body.world-mode.quest-log-open #world-sel { right: calc(min(470px, 92vw) + 12px); }
+
 /* The quest scroll: a ticket read as a parchment quest, over the stage. */
 #quest-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(6,8,12,.62); backdrop-filter: blur(3px); }
 #quest-overlay[hidden] { display: none; }

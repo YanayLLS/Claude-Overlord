@@ -1187,6 +1187,7 @@ button:focus-visible { outline-offset:0; }
     <div id="summary-bar"></div>
   </div>
   <button id="world-roster-tab" onclick="setWorldRosterHidden(false)" title="Show the roster"><span>&#x203A;</span><b id="world-roster-tab-n"></b>Agents</button>
+  <div id="quest-log-dim" onclick="toggleQuestLog(false)"></div>
   <aside id="quest-log" aria-label="Quest board"><div class="ql-head"><div><div class="ql-eyebrow">ClickUp &middot; raids</div><h2>Quest Board</h2></div><button class="ql-x" onclick="toggleQuestLog(false)" title="Close (Esc)">&times;</button></div><div class="ql-tools"></div><div class="ql-list"></div><div class="ql-foot"></div></aside>
   <div id="world-stage"></div>
   <div id="resize"></div>
@@ -6065,7 +6066,7 @@ function toggleQuestLog(open) {
   if (worldView) renderWorldRoster(worldSnapshot()); // the chip lights up while the board is open
 }
 function questLogSetFilter(k, v) { if (k === 'pri') questLogFilter.pri = questLogFilter.pri === v ? '' : v; else if (k === 'fire') questLogFilter.fire = !questLogFilter.fire; else if (k === 'q') questLogFilter.q = v; renderQuestLog(); }
-function questLogGo(id) { if (window.World && World.focusKey) World.focusKey('raid', id); document.querySelectorAll('#quest-log .ql-row.cur').forEach(e => e.classList.remove('cur')); const row = document.querySelector('#quest-log .ql-row[data-id="' + id + '"]'); if (row) row.classList.add('cur'); }
+function questLogGo(id) { if (window.World && World.focusKey) World.focusKey('raid', id); toggleQuestLog(false); // the board steps aside so the flight to the monster is seen document.querySelectorAll('#quest-log .ql-row.cur').forEach(e => e.classList.remove('cur')); const row = document.querySelector('#quest-log .ql-row[data-id="' + id + '"]'); if (row) row.classList.add('cur'); }
 function questLogHover(id) { if (window.World && World.hoverRaid) World.hoverRaid(id); }
 function questLogQuest(id) { const t = clickupState.tasks.find(x => x.id === id); if (!t) return; const info = window.World && World.raidInfo ? World.raidInfo(id) : null; openQuest({ ...t, target: worldRaidTarget(t, worldBaseOptions()) }, info ? info.base : ''); }
 function renderQuestLog(s) {
