@@ -1188,7 +1188,7 @@ button:focus-visible { outline-offset:0; }
   </div>
   <button id="world-roster-tab" onclick="setWorldRosterHidden(false)" title="Show the roster"><span>&#x203A;</span><b id="world-roster-tab-n"></b>Agents</button>
   <div id="quest-log-dim" onclick="toggleQuestLog(false)"></div>
-  <aside id="quest-log" aria-label="Quest board"><div class="ql-head"><div><div class="ql-eyebrow">ClickUp &middot; raids</div><h2>Quest Board</h2></div><button class="ql-x" onclick="toggleQuestLog(false)" title="Close (Esc)">&times;</button></div><div class="ql-tools"></div><div class="ql-list"></div><div class="ql-foot"></div></aside>
+  <aside id="quest-log" aria-label="Quest log"><div class="ql-head"><div><div class="ql-eyebrow">ClickUp &middot; raids</div><h2>Quest Log</h2></div><div class="ql-tools"></div><button class="ql-x" onclick="toggleQuestLog(false)" title="Close (Esc)">&times;</button></div><div class="ql-body"><div class="ql-side"><div class="ql-list"></div><div class="ql-foot"></div></div><div id="quest-scroll" role="region" aria-label="Quest"></div></div></aside>
   <div id="world-stage"></div>
   <div id="resize"></div>
   <div id="term">
@@ -1220,7 +1220,6 @@ button:focus-visible { outline-offset:0; }
     <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
   </div>
   </div><!-- end #content -->
-  <div id="quest-overlay" hidden onclick="if(event.target===this)closeQuest()"><div id="quest-scroll" role="dialog" aria-label="Quest"></div></div>
   <div id="quest-view" hidden onclick="if(event.target===this||event.target.classList.contains('qv-close'))closeQuestView()"><button class="qv-nav qv-prev" onclick="questViewStep(-1)" title="Previous">&#x2039;</button><div id="quest-view-box"></div><button class="qv-nav qv-next" onclick="questViewStep(1)" title="Next">&#x203A;</button><button class="qv-close" title="Close">&times;</button><div id="quest-view-cap"></div></div>
   <div id="settings-overlay" style="display:none" onclick="toggleSettings()">
     <div class="settings-modal" onclick="event.stopPropagation()">
@@ -5443,9 +5442,9 @@ function setPlatformBase(key, cwd) { const m = { ...(clickupSettings.platformMap
 // ── The quest scroll: a ticket read as a quest, body and all ──
 let questOpen = null; // { id, task, base, body, error }
 function copyLink(url) { try { navigator.clipboard.writeText(url).then(() => showToast('Link copied'), () => showToast('Could not copy')); } catch { showToast('Could not copy'); } }
-function openQuest(task, base) { questOpen = { id: task.id, task, base: base || null, body: null, error: null }; renderQuest(); document.getElementById('quest-overlay').hidden = false; api.send({ type: 'clickupTask', id: task.id }); }
-function closeQuest() { questOpen = null; document.getElementById('quest-overlay').hidden = true; }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (questView) closeQuestView(); else if (questOpen) closeQuest(); else if (questLogOpen) toggleQuestLog(false); } else if (questView && e.key === 'ArrowLeft') questViewStep(-1); else if (questView && e.key === 'ArrowRight') questViewStep(1); });
+function openQuest(task, base) { questOpen = { id: task.id, task, base: base || null, body: null, error: null }; if (!questLogOpen) toggleQuestLog(true); else renderQuestLog(); renderQuest(); api.send({ type: 'clickupTask', id: task.id }); }
+function closeQuest() { toggleQuestLog(false); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (questView) closeQuestView(); else if (questLogOpen) toggleQuestLog(false); } else if (questView && e.key === 'ArrowLeft') questViewStep(-1); else if (questView && e.key === 'ArrowRight') questViewStep(1); });
 // Attachments: pictures and clips as thumbnails on the scroll, opened in a viewer; anything else is a link.
 const questKind = a => /^image\//.test(a.mime) || /^(png|jpe?g|gif|webp|bmp|svg)$/.test(a.ext) ? 'image' : /^video\//.test(a.mime) || /^(mp4|webm|mov|m4v|ogv)$/.test(a.ext) ? 'video' : 'file';
 function questAttachHtml(list) {
@@ -5491,7 +5490,7 @@ function questMd(src) {
   return h || '<p class="q-empty">The scroll is blank: this ticket has no description.</p>';
 }
 function renderQuest() {
-  const el = document.getElementById('quest-scroll'), q = questOpen; if (!el || !q) return;
+  const el = document.getElementById('quest-scroll'), q = questOpen; if (!el) return; if (!q) { renderQuestIdle(); return; }
   const t = q.body || q.task, pri = t.priority === 'none' ? 'no' : t.priority, tier = { low: 'Gremlin', normal: 'Raider', high: 'Ogre', urgent: 'Warlord', none: 'Raider' }[t.priority] || 'Raider';
   const chip = (k, v) => v ? '<span class="q-chip"><small>' + esc(k) + '</small>' + esc(v) + '</span>' : '';
   const when = ts => ts ? new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
@@ -5502,7 +5501,7 @@ function renderQuest() {
     + '<div class="q-chips">' + chip('Platform', (t.platforms || []).join(', ')) + chip('Board', t.list && t.list.name) + chip('Status', t.status) + chip('Assigned', (t.assignees || []).join(', ')) + chip('Besieging', q.base) + chip('Here for', sinceStr) + chip('Due', when(t.due)) + chip('Tags', (t.tags || []).join(', ')) + fields.map(f => chip(f.name, f.values.join(', '))).join('') + '</div>'
     + '<div class="q-text">' + (q.error ? '<p class="q-empty">Could not read the scroll: ' + esc(q.error) + '</p>' : !q.body ? '<p class="q-empty q-wait">Unrolling the scroll…</p>' : questMd(t.markdown)) + '</div>'
     + (q.body && t.attachments && t.attachments.length ? questAttachHtml(t.attachments.filter(a => !(t.markdown || '').includes(a.url))) : '')
-    + '<div class="q-actions"><button class="q-btn q-main" onclick="copyLink(\'' + escAttr(t.url) + '\')">&#x2398; Copy link</button><button class="q-btn" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(t.url) + '\'})">&#x2197; Open in ClickUp</button><button class="q-btn q-close" onclick="closeQuest()">Close</button></div></div>';
+    + '<div class="q-actions"><button class="q-btn q-main" onclick="questFly(\'' + escAttr(q.id) + '\')" title="Close the log and fly the camera to this monster">&#x2694; Fly to the monster</button><button class="q-btn" onclick="copyLink(\'' + escAttr(t.url) + '\')">&#x2398; Copy link</button><button class="q-btn" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(t.url) + '\'})">&#x2197; Open in ClickUp</button></div></div>';
 }
 function renderClickupLive() {
   const el = document.getElementById('clickup-live'); if (!el) return;
@@ -6055,53 +6054,49 @@ setInterval(() => { if (worldView && Object.keys(worldEconomy.builds).length) wo
 // The roster extras the classic list doesn't have: header counters on top (the list itself is untouched),
 // and GitHub / peers sections below the list. Rows call the same functions the badges and menus call.
 // PRs and deployments in the header: the counts, and in front of them whatever needs the commander now.
-// ── The Quest Board: every raid as a wanted poster, grouped by the base it besieges ──
-let questLogOpen = false, questLogFilter = { pri: '', fire: false, q: '' };
+// ── The Quest Log: a game's quest menu. Quests by priority on the left, the chosen one read on the right. ──
+let questLogOpen = false, questLogFilter = { q: '' };
 const QL_TIER = { urgent: ['Warlord', 100], high: ['Ogre', 25], normal: ['Raider', 10], low: ['Gremlin', 5], none: ['Raider', 10] };
-const QL_PRI_ORDER = { urgent: 0, high: 1, normal: 2, none: 3, low: 4 };
+const QL_SECTIONS = [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low'], ['none', 'No priority']];
 function toggleQuestLog(open) {
   questLogOpen = open === undefined ? !questLogOpen : !!open;
   const el = document.getElementById('quest-log'); if (!el) return; document.body.classList.toggle('quest-log-open', questLogOpen);
-  if (questLogOpen) { el.classList.add('open'); renderQuestLog(); } else { el.classList.remove('open'); if (window.World && World.hoverRaid) World.hoverRaid(null); }
-  if (worldView) renderWorldRoster(worldSnapshot()); // the chip lights up while the board is open
+  if (questLogOpen) { el.classList.add('open'); renderQuestLog(); renderQuest(); } else { el.classList.remove('open'); questOpen = null; if (window.World && World.hoverRaid) World.hoverRaid(null); }
+  if (worldView) renderWorldRoster(worldSnapshot()); // the chip lights up while the log is open
 }
-function questLogSetFilter(k, v) { if (k === 'pri') questLogFilter.pri = questLogFilter.pri === v ? '' : v; else if (k === 'fire') questLogFilter.fire = !questLogFilter.fire; else if (k === 'q') questLogFilter.q = v; renderQuestLog(); }
-function questLogGo(id) { if (window.World && World.focusKey) World.focusKey('raid', id); toggleQuestLog(false); /* the board steps aside so the flight to the monster is seen */ document.querySelectorAll('#quest-log .ql-row.cur').forEach(e => e.classList.remove('cur')); const row = document.querySelector('#quest-log .ql-row[data-id="' + id + '"]'); if (row) row.classList.add('cur'); }
+function questLogSetFilter(v) { questLogFilter.q = v; renderQuestLog(); }
+function questLogSelect(id) { const t = clickupState.tasks.find(x => x.id === id); if (!t) return; if (questOpen && questOpen.id === id) return; const info = window.World && World.raidInfo ? World.raidInfo(id) : null; openQuest({ ...t, target: worldRaidTarget(t, worldBaseOptions()) }, info ? info.base : ''); }
 function questLogHover(id) { if (window.World && World.hoverRaid) World.hoverRaid(id); }
-function questLogQuest(id) { const t = clickupState.tasks.find(x => x.id === id); if (!t) return; const info = window.World && World.raidInfo ? World.raidInfo(id) : null; openQuest({ ...t, target: worldRaidTarget(t, worldBaseOptions()) }, info ? info.base : ''); }
+function questFly(id) { toggleQuestLog(false); if (window.World && World.focusKey) World.focusKey('raid', id); }
 function renderQuestLog(s) {
   const el = document.getElementById('quest-log'); if (!el || !questLogOpen) return;
-  const raids = (s || worldSnapshot()).raids || [], F = questLogFilter, q = F.q.trim().toLowerCase();
+  const raids = (s || worldSnapshot()).raids || [], q = questLogFilter.q.trim().toLowerCase(), sel = questOpen ? questOpen.id : null;
   const info = id => (window.World && World.raidInfo && World.raidInfo(id)) || null;
-  const rows = raids.map(r => ({ r, i: info(r.id) })).filter(({ r }) => (!F.pri || r.priority === F.pri) && (!F.fire || r.phase === 'fight') && (!q || (r.name + ' ' + r.platforms.join(' ') + ' ' + (r.list.name || '') + ' ' + r.assignees.join(' ')).toLowerCase().includes(q)));
-  const byPri = {}; for (const r of raids) byPri[r.priority] = (byPri[r.priority] || 0) + 1;
+  const rows = raids.filter(r => !q || (r.name + ' ' + r.platforms.join(' ') + ' ' + (r.list.name || '') + ' ' + r.assignees.join(' ')).toLowerCase().includes(q));
   const fire = raids.filter(r => r.phase === 'fight').length, bounty = raids.reduce((a, r) => a + (QL_TIER[r.priority] || QL_TIER.none)[1], 0);
-  const pchip = p => byPri[p] ? '<button class="ql-chip ' + p + (F.pri === p ? ' on' : '') + '" onclick="questLogSetFilter(\'pri\',\'' + p + '\')"><b>' + byPri[p] + '</b>' + (p === 'none' ? 'no priority' : p) + '</button>' : '';
-  el.querySelector('.ql-tools').innerHTML = '<div class="ql-chips">' + ['urgent', 'high', 'normal', 'low', 'none'].map(pchip).join('') + (fire ? '<button class="ql-chip fire' + (F.fire ? ' on' : '') + '" onclick="questLogSetFilter(\'fire\')"><b>' + fire + '</b>under fire</button>' : '') + '</div>'
-    + '<input class="ql-search" type="text" placeholder="Search quests…" value="' + escAttr(F.q) + '" oninput="questLogSetFilter(\'q\',this.value)">';
+  el.querySelector('.ql-tools').innerHTML = '<input class="ql-search" type="text" placeholder="Search quests…" value="' + escAttr(questLogFilter.q) + '" oninput="questLogSetFilter(this.value)">';
   const since = ts => { if (!ts) return ''; const m = Math.max(0, Math.round((Date.now() - ts) / 60000)); return m < 60 ? m + 'm' : m < 1440 ? Math.floor(m / 60) + 'h' : Math.floor(m / 1440) + 'd'; };
-  // Group by the base under attack, worst-hit first.
-  const groups = new Map();
-  for (const x of rows) { const base = x.i ? x.i.base || 'the wilds' : 'marching'; if (!groups.has(base)) groups.set(base, { base, rows: [], weight: 0 }); const g = groups.get(base); g.rows.push(x); g.weight += { urgent: 8, high: 4, normal: 2, low: 1 }[x.r.priority] || 2; }
-  const sorted = [...groups.values()].sort((a, b) => b.weight - a.weight);
-  let h = '';
-  if (!raids.length) h = '<div class="ql-empty"><div class="ql-empty-mark">&#x2694;</div><b>All quiet.</b><span>No ticket of yours sits in a raid status on the boards you watch.</span></div>';
-  else if (!rows.length) h = '<div class="ql-empty"><b>No quest matches.</b><span>Loosen the filters above.</span></div>';
-  for (const g of sorted) {
-    const level = Math.min(5, Math.ceil(g.weight / 2));
-    h += '<div class="ql-group"><span class="ql-base">' + esc(g.base) + '</span><span class="ql-siege" title="Siege level ' + level + ' of 5">' + '<i></i>'.repeat(level) + '<em></em>'.repeat(5 - level) + '</span><span class="ql-n">' + g.rows.length + '</span></div>';
-    g.rows.sort((a, b) => (QL_PRI_ORDER[a.r.priority] ?? 3) - (QL_PRI_ORDER[b.r.priority] ?? 3) || (a.r.since || 0) - (b.r.since || 0));
-    g.rows.forEach(({ r, i }, k) => {
-      const tier = (QL_TIER[r.priority] || QL_TIER.none), pri = r.priority === 'none' ? 'no priority' : r.priority, plat = r.platforms.length ? r.platforms.join(', ') : 'no platform', who = r.assignees.length ? r.assignees[0].split(' ')[0] : '';
-      const state = r.phase === 'fight' ? '<span class="ql-state fire">&#x2694; under fire</span>' : i && (i.state === 'march' || i.state === 'emerge') ? '<span class="ql-state march">marching</span>' : '<span class="ql-state">besieging</span>';
-      h += '<div class="ql-row ' + esc(r.priority) + (k % 2 ? ' tilt' : '') + '" data-id="' + escAttr(r.id) + '" onclick="questLogGo(\'' + escAttr(r.id) + '\')" onmouseenter="questLogHover(\'' + escAttr(r.id) + '\')" onmouseleave="questLogHover(null)" ondblclick="questLogQuest(\'' + escAttr(r.id) + '\')">'
-        + '<i class="ql-pin"></i><div class="ql-badge"><b>' + esc(pri.toUpperCase()) + '</b><span>' + tier[0] + '</span></div>'
-        + '<div class="ql-main"><div class="ql-title">' + esc(r.name) + '</div><div class="ql-meta"><span>' + esc(plat) + '</span><span>' + esc(r.list.name || '') + '</span>' + (who ? '<span>' + esc(who) + '</span>' : '') + '<span>here ' + since(r.since) + '</span></div></div>'
-        + '<div class="ql-side">' + state + '<span class="ql-bounty" title="Coins when slain">&#x2B21; ' + tier[1] + '</span><div class="ql-acts"><button onclick="event.stopPropagation();questLogQuest(\'' + escAttr(r.id) + '\')" title="Read the quest scroll">&#x1F4DC;</button><button onclick="event.stopPropagation();copyLink(\'' + escAttr(r.url) + '\')" title="Copy link">&#x2398;</button><button onclick="event.stopPropagation();api.send({type:\'openUrl\',url:\'' + escAttr(r.url) + '\'})" title="Open in ClickUp">&#x2197;</button></div></div></div>';
-    });
+  let hh = '';
+  if (!raids.length) hh = '<div class="ql-empty"><div class="ql-empty-mark">&#x2694;</div><b>All quiet.</b><span>No ticket of yours sits in a raid status on the boards you watch.</span></div>';
+  else if (!rows.length) hh = '<div class="ql-empty"><b>No quest matches.</b><span>Try another word.</span></div>';
+  for (const [pri, name] of QL_SECTIONS) {
+    const list = rows.filter(r => r.priority === pri).sort((a, b) => (a.since || 0) - (b.since || 0)); if (!list.length) continue;
+    hh += '<div class="ql-sec ' + pri + '"><i></i><span>' + name + '</span><em>' + list.length + '</em></div>';
+    for (const r of list) {
+      const i = info(r.id), tier = (QL_TIER[pri] || QL_TIER.none)[0], plat = r.platforms.length ? r.platforms[0] : 'no platform';
+      const st = r.phase === 'fight' ? '<span class="ql-st fire" title="Under fire: in development">&#x2694;</span>' : i && (i.state === 'march' || i.state === 'emerge') ? '<span class="ql-st march" title="Marching">&#x2192;</span>' : '<span class="ql-st" title="Besieging">&#x2620;</span>';
+      hh += '<div class="ql-item ' + pri + (r.id === sel ? ' cur' : '') + '" data-id="' + escAttr(r.id) + '" onclick="questLogSelect(\'' + escAttr(r.id) + '\')" onmouseenter="questLogHover(\'' + escAttr(r.id) + '\')" onmouseleave="questLogHover(null)"><div class="ql-item-top"><b>' + esc(r.name) + '</b>' + st + '</div><small>' + esc(tier) + ' &middot; ' + esc(plat) + (i && i.base ? ' &middot; at ' + esc(i.base) : '') + ' &middot; ' + since(r.since) + '</small></div>';
+    }
   }
-  el.querySelector('.ql-list').innerHTML = h;
-  el.querySelector('.ql-foot').innerHTML = raids.length ? '<span>' + raids.length + ' quest' + (raids.length === 1 ? '' : 's') + (fire ? ' · ' + fire + ' under fire' : '') + '</span><span class="ql-bounty-total" title="Coins if every raid were slain">bounty &#x2B21; ' + bounty.toLocaleString() + '</span><button class="ql-portal" onclick="window.World&&World.focusKey(\'site\',\'portal\')" title="Fly to the Dark Portal">&#x25C9; portal</button>' : '';
+  el.querySelector('.ql-list').innerHTML = hh;
+  el.querySelector('.ql-foot').innerHTML = raids.length ? '<span>' + raids.length + ' quest' + (raids.length === 1 ? '' : 's') + (fire ? ' · ' + fire + ' under fire' : '') + '</span><span class="ql-bounty-total" title="Coins if every raid were slain">&#x2B21; ' + bounty.toLocaleString() + '</span><button class="ql-portal" onclick="toggleQuestLog(false);window.World&&World.focusKey(\'site\',\'portal\')" title="Fly to the Dark Portal">&#x25C9; portal</button>' : '';
+  const cur = el.querySelector('.ql-item.cur'); if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
+}
+// The right-hand pane with nothing chosen: a summary that invites a pick.
+function renderQuestIdle() {
+  const el = document.getElementById('quest-scroll'); if (!el) return; const raids = worldSnapshot().raids || [];
+  const by = {}; for (const r of raids) by[r.priority] = (by[r.priority] || 0) + 1;
+  el.innerHTML = '<div class="q-idle"><div class="q-idle-mark">&#x1F4DC;</div><b>' + (raids.length ? 'Choose a quest' : 'No quests') + '</b><span>' + (raids.length ? QL_SECTIONS.filter(([p]) => by[p]).map(([p, n]) => by[p] + ' ' + n.toLowerCase()).join(' · ') + '. Click one on the left to read it; double-click a monster on the island to open its quest here.' : 'Your tickets in a raid status appear here as quests.') + '</span></div>';
 }
 function worldGithubChips(s) {
   if (!s.github) return '';
@@ -6131,7 +6126,7 @@ function renderWorldRoster(s) {
     + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`
     + `<span class="wc wc-coins" title="Coins: earned by reviewing and merging PRs, answering agents quickly, finished jobs and turns. Spend them at the treasury and on station upgrades." onclick="window.World&&World.focusKey('treasury')"><i class="hexcoin"></i><b>${worldEconomy.coins.toLocaleString()}</b>${esc(worldTitle())}</span>`
     + worldGithubChips(s)
-    + (s.raidsOn && s.raids.length ? `<span class="wc wc-raids${questLogOpen ? ' on' : ''}" style="--c:#ff3b5c" onclick="toggleQuestLog()" title="Tickets besieging the island — open the quest board"><i></i><b>${s.raids.length}</b>${s.raids.length === 1 ? 'raid' : 'raids'}</span>` : '');
+    + (s.raidsOn && s.raids.length ? `<span class="wc wc-raids${questLogOpen ? ' on' : ''}" style="--c:#ff3b5c" onclick="toggleQuestLog()" title="Tickets besieging the island — open the quest log"><i></i><b>${s.raids.length}</b>${s.raids.length === 1 ? 'raid' : 'raids'}</span>` : '');
   const row = (c, key, title, sub, extra, onclick, hover) => `<div class="wr-row" style="--c:${c}" onclick="${onclick}" ${hover ? `onmouseenter="window.World&&World.hover(${hover})" onmouseleave="window.World&&World.hover(null)"` : ''}><i class="wr-dot${key ? ' pulse' : ''}"></i><div class="wr-txt"><b>${esc(title)}</b><small>${sub}</small></div>${extra ? `<span class="wr-ctx">${extra}</span>` : ''}</div>`;
   const agentGo = (id) => `focusAgent(${id});window.World&&World.focus(${id})`;
   const projLabel = (cwd) => { const p = s.projects.find(p => p.cwd === cwd); return p ? p.label : pathLabel(cwd); };
