@@ -5061,7 +5061,7 @@ function prRowHtml(p, dim) {
   const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
   const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
   const eta = p.checksEta ? ' · ' + escapeHtml(etaWords(p.checksEta, Date.now())) : ''; // pr-eta.js
-  const testing = p.checks === 'pending' ? ' · <span class="pr-testing" title="Checks are still running on GitHub' + (p.checksEta ? ' — estimate from recent runs of this workflow' : '') + '">⏳ testing' + eta + '</span>' : p.checks === 'fail' ? ' · <span class="pr-chg" title="Checks failed on GitHub">checks failed</span>' : '';
+  const testing = p.checks === 'pending' ? ' · <span class="pr-testing" title="Checks are still running on GitHub' + (p.checksEta ? ' — ' + escapeHtml(p.checksEta.name) + ', from its recent runs' : '') + '">⏳ testing' + eta + '</span>' : p.checks === 'fail' ? ' · <span class="pr-chg" title="Checks failed on GitHub">checks failed</span>' : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   const archBtn = `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦</button>`;

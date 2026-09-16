@@ -83,7 +83,7 @@ autoUpdater.on('error', err => {
 // repo directly via start.bat get nothing from that, so offer them a pull.
 const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
-const { medianDurations, runningWorkflows, checksEta } = require('./pr-eta');
+const { durationStats, runningWorkflows, checksEta } = require('./pr-eta');
 const { pickResumedFile } = require('./resume-core');
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered } = require('./recover-core');
@@ -2019,9 +2019,10 @@ const wfDurations = {};
 async function fetchWorkflowDurations(repo) {
   const c = wfDurations[repo];
   if (c && Date.now() - c.at < 10 * 60000) return c.by;
-  const res = await ghJson(['api', `/repos/${repo}/actions/runs?status=success&per_page=50`]);
+  // Params as flags: an '&' in the URL would be split by cmd.exe (gh runs with shell: true on Windows).
+  const res = await ghJson(['api', '-X', 'GET', `/repos/${repo}/actions/runs`, '-f', 'status=success', '-F', 'per_page=50']);
   if (res.error) return (c && c.by) || {};
-  const by = medianDurations(res.data && res.data.workflow_runs);
+  const by = durationStats(res.data && res.data.workflow_runs);
   wfDurations[repo] = { at: Date.now(), by };
   return by;
 }

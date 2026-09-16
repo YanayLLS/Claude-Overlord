@@ -1,17 +1,22 @@
-// When will a PR's running checks finish? GitHub has no ETA, so we make one:
-// each running workflow's start time plus the median duration of that workflow's
-// recent successful runs. The PR's ETA is the latest of those.
+// When will a PR's running checks finish? GitHub has no ETA, so we make one from
+// each running workflow's start time and that workflow's recent successful runs.
+// Consistent workflows get "~N min left"; erratic ones (a BDD suite that takes
+// 7 minutes or 2 hours depending on profile) get elapsed time and the usual range.
 
-// REST /actions/runs rows → { workflowName: medianMs }.
-function medianDurations(runs) {
+// REST /actions/runs rows → { workflowName: { median, lo, hi } } in ms (quartiles).
+// Runs under a minute are no-op runs (nothing to test) and are left out.
+function durationStats(runs) {
   const by = {};
   for (const r of runs || []) {
     const a = Date.parse(r.run_started_at || r.created_at), b = Date.parse(r.updated_at);
-    if (!r.name || !(a > 0) || !(b > a)) continue;
+    if (!r.name || !(a > 0) || !(b - a >= 60000)) continue;
     (by[r.name] = by[r.name] || []).push(b - a);
   }
   const out = {};
-  for (const n of Object.keys(by)) { const v = by[n].sort((x, y) => x - y); out[n] = v[Math.floor(v.length / 2)]; }
+  for (const n of Object.keys(by)) {
+    const v = by[n].sort((x, y) => x - y), q = f => v[Math.min(v.length - 1, Math.floor(v.length * f))];
+    out[n] = { median: q(0.5), lo: q(0.25), hi: q(0.75) };
+  }
   return out;
 }
 
@@ -28,26 +33,31 @@ function runningWorkflows(nodes) {
   return Object.keys(seen).map(name => ({ name, startedAt: seen[name] }));
 }
 
-// → epoch ms when the last running workflow should finish, or null when no
-// running workflow has history (a first-ever run can't be estimated).
-function checksEta(running, durations) {
-  let eta = null;
+// → the running workflow expected to finish last: { name, startedAt (ms), eta (ms),
+// lo, hi, stable }. stable = its history is tight enough (p75 within 2x p25) to
+// promise a time. null when no running workflow has history.
+function checksEta(running, stats) {
+  let best = null;
   for (const w of running || []) {
-    const d = durations && durations[w.name], s = Date.parse(w.startedAt);
-    if (!(d > 0) || !(s > 0)) continue;
-    if (eta === null || s + d > eta) eta = s + d;
+    const st = stats && stats[w.name], s = Date.parse(w.startedAt);
+    if (!st || !(st.median > 0) || !(s > 0)) continue;
+    const eta = s + st.median;
+    if (!best || eta > best.eta) best = { name: w.name, startedAt: s, eta, lo: st.lo, hi: st.hi, stable: st.hi <= 2 * st.lo };
   }
-  return eta;
+  return best;
 }
 
-// Words for the row: '~4 min left' | 'any moment' | 'running long'.
-function etaWords(etaMs, nowMs) {
-  const left = etaMs - nowMs;
-  if (left > 90000) return '~' + Math.round(left / 60000) + ' min left';
+// Words for the row. Stable: '~4 min left' | 'any moment' | 'running long'.
+// Erratic: '38 min in · usually 7–23 min'.
+function etaWords(info, nowMs) {
+  const min = ms => Math.max(1, Math.round(ms / 60000));
+  if (!info.stable) return min(nowMs - info.startedAt) + ' min in · usually ' + min(info.lo) + '–' + min(info.hi) + ' min';
+  const left = info.eta - nowMs;
+  if (left > 90000) return '~' + min(left) + ' min left';
   if (left > -60000) return 'any moment';
   return 'running long';
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { medianDurations, runningWorkflows, checksEta, etaWords };
+  module.exports = { durationStats, runningWorkflows, checksEta, etaWords };
 }
