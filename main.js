@@ -83,6 +83,7 @@ autoUpdater.on('error', err => {
 // repo directly via start.bat get nothing from that, so offer them a pull.
 const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
+const { medianDurations, runningWorkflows, checksEta } = require('./pr-eta');
 const { pickResumedFile } = require('./resume-core');
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered } = require('./recover-core');
@@ -1932,7 +1933,8 @@ function fetchAllPRs(repos) {
         + `author { login } reviewDecision mergeable mergeStateStatus headRefName baseRefName `
         + `reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 20) { nodes { author { login } state } } `
-        + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state } } } } } } }`;
+        + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state `
+        + `contexts(first: 50) { nodes { __typename ... on CheckRun { status checkSuite { workflowRun { createdAt workflow { name } } } } } } } } } } } }`;
     });
     const query = `query {\n${parts.join('\n')}\n}`;
     let out = '', errbuf = '', proc, done = false;
@@ -1971,6 +1973,7 @@ function fetchAllPRs(repos) {
             author: (pr.author && pr.author.login) || '',
             reviewDecision: pr.reviewDecision || '', mine,
             checks: rollupState(rollup && rollup.state),
+            running: runningWorkflows(rollup && rollup.contexts && rollup.contexts.nodes),
             mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
             requested, createdAt: pr.createdAt || '', approvedBy, changesBy,
             headRef: pr.headRefName || '', baseRef: pr.baseRefName || '',
@@ -2007,6 +2010,19 @@ function fetchBehind(prs) {
   });
 }
 
+// Median duration of each workflow's recent successful runs, per repo, cached
+// for 10 minutes — it only feeds the "~N min left" estimate on running checks.
+const wfDurations = {};
+async function fetchWorkflowDurations(repo) {
+  const c = wfDurations[repo];
+  if (c && Date.now() - c.at < 10 * 60000) return c.by;
+  const res = await ghJson(['api', `/repos/${repo}/actions/runs?status=success&per_page=50`]);
+  if (res.error) return (c && c.by) || {};
+  const by = medianDurations(res.data && res.data.workflow_runs);
+  wfDurations[repo] = { at: Date.now(), by };
+  return by;
+}
+
 async function pollPRs() {
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
@@ -2029,6 +2045,10 @@ async function pollPRs() {
   const prs = res.prs;
   const behind = await fetchBehind(prs);
   prs.forEach(p => { p.behindBy = behind[p.key] ?? null; });
+  for (const p of prs) {
+    p.checksEta = null;
+    if (p.checks === 'pending' && p.running.length) p.checksEta = checksEta(p.running, await fetchWorkflowDurations(p.repo));
+  }
   const currentKeys = prs.map(p => p.key);
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);

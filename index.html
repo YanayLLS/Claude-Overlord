@@ -1485,6 +1485,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./actions-core.js"></script>
 <script src="./update-core.js"></script>
 <script src="./pr-behind.js"></script>
+<script src="./pr-eta.js"></script>
 <script src="./prompt-copy.js"></script>
 <script src="./prompt-nav.js"></script>
 <script src="./term-size-core.js"></script>
@@ -5061,7 +5062,8 @@ function prRowHtml(p, dim) {
   const appr = (p.approvedBy && p.approvedBy.length) ? ` · <span class="pr-appr" title="Approved by ${escapeHtml(p.approvedBy.join(', '))}">✓${p.approvedBy.length}</span>` : '';
   const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
   const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
-  const testing = p.checks === 'pending' ? ' · <span class="pr-testing" title="Checks are still running on GitHub">⏳ testing</span>' : p.checks === 'fail' ? ' · <span class="pr-chg" title="Checks failed on GitHub">checks failed</span>' : '';
+  const eta = p.checksEta ? ' · ' + escapeHtml(etaWords(p.checksEta, Date.now())) : ''; // pr-eta.js
+  const testing = p.checks === 'pending' ? ' · <span class="pr-testing" title="Checks are still running on GitHub' + (p.checksEta ? ' — estimate from this workflow's recent runs' : '') + '">⏳ testing' + eta + '</span>' : p.checks === 'fail' ? ' · <span class="pr-chg" title="Checks failed on GitHub">checks failed</span>' : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   const archBtn = `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦</button>`;
