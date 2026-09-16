@@ -1934,7 +1934,7 @@ function fetchAllPRs(repos) {
         + `reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 20) { nodes { author { login } state } } `
         + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state `
-        + `contexts(first: 50) { nodes { __typename ... on CheckRun { status checkSuite { workflowRun { createdAt workflow { name } } } } } } } } } } } }`;
+        + `contexts(first: 50) { nodes { __typename ... on CheckRun { status checkSuite { workflowRun { createdAt workflow { name } } } } } } } } } } } } }`;
     });
     const query = `query {\n${parts.join('\n')}\n}`;
     let out = '', errbuf = '', proc, done = false;
@@ -1981,7 +1981,9 @@ function fetchAllPRs(repos) {
           });
         }
       });
-      finish({ prs, failed });
+      // Every alias null + GraphQL errors = the query itself was rejected; say why instead of "couldn't reach".
+      const gqlErr = !prs.length && failed.length === valid.length && json.errors && json.errors[0] && json.errors[0].message;
+      finish(gqlErr ? { prs, failed, error: 'GitHub: ' + String(gqlErr).slice(0, 200) } : { prs, failed });
     });
     try { proc.stdin.write(query); proc.stdin.end(); } catch {}
   });

@@ -43,3 +43,11 @@ test('etaWords', () => {
   assert.strictEqual(etaWords(now - 30000, now), 'any moment');
   assert.strictEqual(etaWords(now - 5 * 60000, now), 'running long');
 });
+
+test('main.js PR query has balanced braces (GitHub rejects the whole query otherwise)', () => {
+  const src = require('fs').readFileSync(__dirname + '/main.js', 'utf8');
+  const m = src.match(/return `r\$\{i\}: repository[\s\S]*?`;/);
+  assert.ok(m, 'query template not found');
+  const q = m[0].replace(/`\s*\n\s*\+\s*`/g, '');
+  assert.strictEqual((q.match(/\{/g) || []).length, (q.match(/\}/g) || []).length);
+});
