@@ -1257,10 +1257,10 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
       <label class="settings-label">
-        <input type="checkbox" id="chk-world" onchange="setWorldView(this.checked)" />
-        <span>World view (3D map)</span>
+        <input type="checkbox" id="chk-world" onchange="setWorldEnabled(this.checked)" />
+        <span>World game (feature flag)</span>
       </label>
-      <div class="settings-hint">Shows your agents as a hex-tile island beside the list: features are walled compounds, directories are workshops, PRs and Actions dock in the GitHub quarter. Everything you can do in the list still works; the map is another way to look at the same state. Toggle with the &#x2B22; button in the header.</div>
+      <div class="settings-hint">Off: nothing of the world is loaded or run &mdash; no 3D renderer, no header button, no economy. On: the game starts, showing your agents as a hex-tile island beside the list. Everything you can do in the list still works; the map is another way to look at the same state. Show or hide it with the &#x2B22; button in the header.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -1493,8 +1493,6 @@ button:focus-visible { outline-offset:0; }
 <script src="./preview-ui-dom.js"></script>
 <script src="./preview-ui-device.js"></script>
 <script src="./preview-ui.js"></script>
-<script src="./three-bundle.js"></script>
-<script src="./world.js"></script>
 <script>
 document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
 
@@ -4281,7 +4279,7 @@ function applySettings(s) {
     if (chk) chk.checked = notificationSoundEnabled;
   }
   if (s.worldEconomy) { worldEconomy = Object.assign(worldEconomyDefault(), s.worldEconomy); worldEconomy.stats = Object.assign(worldEconomyDefault().stats, worldEconomy.stats || {}); }
-  if (s.worldView !== undefined) setWorldView(!!s.worldView, false);
+  setWorldEnabled(s.worldEnabled !== undefined ? !!s.worldEnabled : !!s.worldView, false, s.worldView !== false); // older settings had only worldView: on meant the game ran
   if (s.worldRosterW) worldRosterW = Math.max(200, Math.min(600, +s.worldRosterW || 300));
   if (s.worldRosterHidden !== undefined) worldRosterHidden = !!s.worldRosterHidden;
   applyWorldRoster();
@@ -4355,7 +4353,7 @@ function toggleSettings() {
     document.getElementById('chk-notif').checked = notificationsEnabled;
     document.getElementById('chk-sound').checked = notificationSoundEnabled;
     document.getElementById('chk-ghost').checked = ghostEnabled;
-    document.getElementById('chk-world').checked = worldView;
+    document.getElementById('chk-world').checked = worldEnabled;
     document.getElementById('inp-budget').value = planBudget;
     renderTrackedWorkflows();
     renderSettingsChips();
@@ -5063,7 +5061,7 @@ function prRowHtml(p, dim) {
   const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
   const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
   const eta = p.checksEta ? ' · ' + escapeHtml(etaWords(p.checksEta, Date.now())) : ''; // pr-eta.js
-  const testing = p.checks === 'pending' ? ' · <span class="pr-testing" title="Checks are still running on GitHub' + (p.checksEta ? ' — estimate from this workflow's recent runs' : '') + '">⏳ testing' + eta + '</span>' : p.checks === 'fail' ? ' · <span class="pr-chg" title="Checks failed on GitHub">checks failed</span>' : '';
+  const testing = p.checks === 'pending' ? ' · <span class="pr-testing" title="Checks are still running on GitHub' + (p.checksEta ? ' — estimate from recent runs of this workflow' : '') + '">⏳ testing' + eta + '</span>' : p.checks === 'fail' ? ' · <span class="pr-chg" title="Checks failed on GitHub">checks failed</span>' : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   const archBtn = `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦</button>`;
@@ -5909,8 +5907,28 @@ function setWorldRosterHidden(h, persist = true) {
   grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
   grip.addEventListener('dblclick', () => { worldRosterW = 300; applyWorldRoster(); api.send({ type: 'saveSettings', settings: { worldRosterW } }); });
 })();
+// Feature flag. Off (the default): three-bundle.js and world.js are never fetched, the header button and help rows
+// are hidden, and no world code runs. On: the scripts load once, on demand, and the game starts.
+let worldEnabled = false, _worldLoad = null;
+function loadWorld() {
+  if (window.World) return Promise.resolve();
+  const add = src => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error(src + ' failed to load')); document.head.appendChild(el); });
+  return _worldLoad || (_worldLoad = add('./three-bundle.js').then(() => add('./world.js')).catch(e => { _worldLoad = null; throw e; }));
+}
+function setWorldEnabled(on, persist = true, view = true) {
+  worldEnabled = !!on;
+  document.body.classList.toggle('world-on', worldEnabled);
+  const chk = document.getElementById('chk-world'); if (chk) chk.checked = worldEnabled;
+  if (persist) api.send({ type: 'saveSettings', settings: { worldEnabled } });
+  if (!worldEnabled) { setWorldView(false, persist); return; }
+  loadWorld().then(() => { if (worldEnabled) setWorldView(view, persist); }, e => {
+    console.error('[world] load failed', e);
+    setWorldEnabled(false, persist);
+    if (typeof showToast === 'function') showToast('World game could not load');
+  });
+}
 function setWorldView(on, persist = true) {
-  on = !!on;
+  on = !!on && worldEnabled && !!window.World; // gated by the flag: nothing runs until the scripts are in
   if (persist && on !== worldView) api.send({ type: 'saveSettings', settings: { worldView: on } });
   const changed = on !== worldView;
   worldView = on;
@@ -5955,7 +5973,7 @@ function setWorldView(on, persist = true) {
   // The terminal's xterm needs a refit after the columns change width; schedFit is the same path the window resize uses.
   if (typeof schedFit === 'function') schedFit();
 }
-function toggleWorldView() { setWorldView(!worldView); }
+function toggleWorldView() { if (worldEnabled) setWorldView(!worldView); }
 // Snapshot of renderer state for the world. Plain data, read-only, built from the same maps the list uses.
 // The usage caps the summary bar shows, for the world's power plant: one bar per cap plus the weekly pace.
 function worldUsage() {
