@@ -1929,12 +1929,13 @@ function fetchAllPRs(repos) {
     const parts = valid.map((r, i) => {
       const [owner, name] = r.split('/');
       return `r${i}: repository(owner:${JSON.stringify(owner)}, name:${JSON.stringify(name)}) { `
-        + `pullRequests(states: OPEN, first: 100) { nodes { number title url isDraft createdAt `
+        // ponytail: `first:` limits set the GraphQL point cost (12/poll at these; 40 at 100/20/20/50). Raise if a repo tops 30 open PRs.
+        + `pullRequests(states: OPEN, first: 30) { nodes { number title url isDraft createdAt `
         + `author { login } reviewDecision mergeable mergeStateStatus headRefName baseRefName `
-        + `reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } `
-        + `latestReviews(first: 20) { nodes { author { login } state } } `
+        + `reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } } } } `
+        + `latestReviews(first: 10) { nodes { author { login } state } } `
         + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state `
-        + `contexts(first: 50) { nodes { __typename ... on CheckRun { status checkSuite { workflowRun { createdAt workflow { name } } } } } } } } } } } } }`;
+        + `contexts(first: 30) { nodes { __typename ... on CheckRun { status checkSuite { workflowRun { createdAt workflow { name } } } } } } } } } } } } }`;
     });
     const query = `query {\n${parts.join('\n')}\n}`;
     let out = '', errbuf = '', proc, done = false;
