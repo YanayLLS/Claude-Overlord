@@ -130,6 +130,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-reqtag { color:var(--red); font-weight:600; }
 .pr-appr { color:#a6e3a1; font-weight:600; }
 .pr-chg { color:#f38ba8; font-weight:600; }
+.pr-testing { color:#f9e2af; font-weight:600; }
 .pr-age { color:var(--dim); }
 .pr-dhead { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; font-size:11px; color:var(--dim); border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg2,#1e1e2e); z-index:1; }
 .pr-refresh { background:none; border:none; color:var(--text); font-size:14px; cursor:pointer; padding:0 4px; line-height:1; }
@@ -5060,6 +5061,7 @@ function prRowHtml(p, dim) {
   const appr = (p.approvedBy && p.approvedBy.length) ? ` · <span class="pr-appr" title="Approved by ${escapeHtml(p.approvedBy.join(', '))}">✓${p.approvedBy.length}</span>` : '';
   const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
   const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
+  const testing = p.checks === 'pending' ? ' · <span class="pr-testing" title="Checks are still running on GitHub">⏳ testing</span>' : p.checks === 'fail' ? ' · <span class="pr-chg" title="Checks failed on GitHub">checks failed</span>' : '';
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   const archBtn = `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦</button>`;
@@ -5080,7 +5082,7 @@ function prRowHtml(p, dim) {
     + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
     + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
     + prBranchHtml(p)
-    + `<div class="pr-meta">@${escapeHtml(p.author)}${commits}${appr}${chg}${meta}${reqTag}${age}</div></div>`;
+    + `<div class="pr-meta">@${escapeHtml(p.author)}${commits}${appr}${chg}${meta}${testing}${reqTag}${age}</div></div>`;
 }
 
 function prGroupHeader(repo, count, muted) {
