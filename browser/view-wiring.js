@@ -29,11 +29,13 @@ function wireErrors(webContents, errors) {
 // Any navigation — full load, history nav, or in-page (hash/pushState) nav —
 // must notify the presenter: it repaints the URL bar and, on Windows,
 // restores keyboard focus to the parent window so its buttons stay clickable.
-function wireNavigation(id, webContents, onNavigated, isSuppressed = () => false) {
+function wireNavigation(id, webContents, onNavigated, isSuppressed = () => false, onLoad = () => {}) {
   const notify = () => {
+    onLoad(); // every load counts for focus purposes, suppressed or not
     if (isSuppressed()) return; // internal input re-bind load, not an agent navigation
     try { onNavigated(id, webContents.getURL()); } catch {}
   };
+  webContents.on('did-start-loading', onLoad);
   webContents.on('did-finish-load', notify);
   webContents.on('did-navigate', notify);
   webContents.on('did-navigate-in-page', notify);

@@ -40,14 +40,17 @@ function createRegistry({ makeView, attach, detach, onErrorCount, onNavigated = 
     const rebinder = createInputRebinder();
     const errors = createErrorBuffer((count, last) => onErrorCount(id, count, last), rebinder.isSuppressed);
     wireErrors(view.webContents, errors);
-    wireNavigation(id, view.webContents, onNavigated, rebinder.isSuppressed);
+    // Any load, even a suppressed re-bind one, can yank keyboard focus into the view.
+    const entry = { view, errors: null, actions: null, partition, lastNavAt: 0 };
+    wireNavigation(id, view.webContents, onNavigated, rebinder.isSuppressed, () => { entry.lastNavAt = Date.now(); });
     wireNetworkErrors(partition, errors);
     const actions = createActions({
       getWebContents: () => { const e = entries.get(id); return e ? e.view.webContents : null; },
       errors,
       rebindInput: rebinder.rebind,
     });
-    entries.set(id, { view, errors, actions, partition });
+    entry.errors = errors; entry.actions = actions;
+    entries.set(id, entry);
     establishViewport(view);
     return view;
   }
@@ -77,8 +80,10 @@ function createRegistry({ makeView, attach, detach, onErrorCount, onNavigated = 
   const errorsFor = (id) => { ensure(id); return entries.get(id).errors; };
   const actionsFor = (id) => { try { ensure(id); return entries.get(id).actions; } catch { return null; } };
   const destroyAll = () => { for (const id of [...entries.keys()]) destroy(id); };
+  // True when some agent view loaded within the last `ms` — the moment a view steals focus from the terminal.
+  const navigatedWithin = (ms, now = Date.now()) => [...entries.values()].some(e => now - e.lastNavAt < ms);
 
-  return { ensure, show, hideAll, has, errorsFor, actionsFor, destroy, destroyAll };
+  return { ensure, show, hideAll, has, errorsFor, actionsFor, destroy, destroyAll, navigatedWithin };
 }
 
 module.exports = { createRegistry, DEFAULT_VIEW_WIDTH, DEFAULT_VIEW_HEIGHT };

@@ -3529,6 +3529,13 @@ focusAgent = function(id) {
   window.addEventListener('blur', stopDrag);
 })();
 
+// An agent's embedded browser grabs keyboard focus when it loads a page. When that
+// happens while typing in the terminal, main hands focus straight back (see preview-pane.js).
+window.addEventListener('blur', () => {
+  const a = document.activeElement;
+  if (a && a.classList && a.classList.contains('xterm-helper-textarea')) api.send({ type: 'reclaimFocus' });
+});
+
 // Fit on any resize of the terminal panel, container, or window
 let fitRaf = 0;
 function schedFit() {

@@ -261,3 +261,12 @@ test('console errors from the re-bind load are not double-counted', async () => 
   await actions.navigate('http://localhost:3000/two');
   assert.strictEqual(before, 1);
 });
+
+test('navigatedWithin: true only shortly after some view loaded', async () => {
+  const h = harness();
+  h.registry.ensure(1); h.registry.ensure(2);
+  assert.strictEqual(h.registry.navigatedWithin(2000), false);
+  await h.made[1].webContents.loadURL('http://x/');
+  assert.strictEqual(h.registry.navigatedWithin(2000), true);
+  assert.strictEqual(h.registry.navigatedWithin(2000, Date.now() + 5000), false);
+});

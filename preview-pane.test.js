@@ -203,3 +203,15 @@ test('onAgentClosed forgets a non-focused agent without disturbing the pane', ()
   preview.setBounds(BOUNDS);
   assert.ok(registry.shown.length > shownBefore, 'agent 1 must still be presented');
 });
+
+test('reclaimFocus: hands focus back after an agent load or when the pane is hidden, never after a user click', () => {
+  let focused = 0, recent = false, winFocused = true;
+  const registry = fakeRegistry(); registry.navigatedWithin = () => recent;
+  const window = { isDestroyed: () => false, isFocused: () => winFocused, webContents: { focus: () => focused++ } };
+  const c = createPreviewController({ window, registry, send: () => {}, writeToAgent: () => {} });
+  c.setAgent(1); c.setBounds({ x: 0, y: 0, width: 10, height: 10 }); c.show(); focused = 0;
+  c.reclaimFocus(); assert.strictEqual(focused, 0, 'visible pane, no recent load: the user clicked in');
+  recent = true; c.reclaimFocus(); assert.strictEqual(focused, 1, 'a view just loaded: reclaim');
+  recent = false; c.hide(); c.reclaimFocus(); assert.strictEqual(focused, 2, 'pane hidden: any steal is reclaimed');
+  winFocused = false; c.reclaimFocus(); assert.strictEqual(focused, 2, 'user switched apps: leave it');
+});
