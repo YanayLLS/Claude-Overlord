@@ -58,6 +58,27 @@ function etaWords(info, nowMs) {
   return 'running long';
 }
 
+// The PR's check state from its individual checks, not GitHub's rollup: the rollup
+// says FAILURE the moment any run fails, even a cancelled run superseded by a rerun
+// still in progress. Per check name the newest run wins; anything still running
+// makes the PR 'pending', and `failed` counts the checks that have actually failed.
+// → { checks: 'pass' | 'fail' | 'pending' | 'none', failed }
+const BAD = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
+function checkSummary(nodes) {
+  const latest = {};
+  for (const n of nodes || []) {
+    if (!n) continue;
+    const name = n.name || n.context;
+    if (!name) continue;
+    const at = n.startedAt || '';
+    if (!latest[name] || at >= latest[name].at) latest[name] = { at, running: n.__typename === 'CheckRun' ? n.status !== 'COMPLETED' : n.state === 'PENDING' || n.state === 'EXPECTED', bad: BAD.has(n.conclusion || n.state) };
+  }
+  const all = Object.values(latest);
+  if (!all.length) return { checks: 'none', failed: 0 };
+  const failed = all.filter(c => c.bad && !c.running).length;
+  return { checks: all.some(c => c.running) ? 'pending' : failed ? 'fail' : 'pass', failed };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { durationStats, runningWorkflows, checksEta, etaWords };
+  module.exports = { durationStats, runningWorkflows, checksEta, etaWords, checkSummary };
 }

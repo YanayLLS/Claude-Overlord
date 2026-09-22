@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { durationStats, runningWorkflows, checksEta, etaWords } = require('./pr-eta');
+const { durationStats, runningWorkflows, checksEta, etaWords, checkSummary } = require('./pr-eta');
 
 const T0 = '2026-09-16T10:00:00Z', ms = (iso) => Date.parse(iso), M = 60000;
 const run = (name, mins) => ({ name, run_started_at: T0, updated_at: new Date(ms(T0) + mins * M).toISOString() });
@@ -48,4 +48,20 @@ test('main.js PR query has balanced braces (GitHub rejects the whole query other
   assert.ok(m, 'query template not found');
   const q = m[0].replace(/`\s*\n\s*\+\s*`/g, '');
   assert.strictEqual((q.match(/\{/g) || []).length, (q.match(/\}/g) || []).length);
+});
+
+test('checkSummary: running checks make the PR pending even when the rollup says FAILURE', () => {
+  const cr = (name, status, conclusion, startedAt) => ({ __typename: 'CheckRun', name, status, conclusion, startedAt });
+  // PR 910: a cancelled bdd superseded by a rerun, a stale failed gate, shards still running.
+  const nodes = [cr('Vitest (1/4)', 'IN_PROGRESS', null, '2026-09-22T10:05:00Z'), cr('plan', 'COMPLETED', 'SUCCESS', '2026-09-22T10:00:00Z'),
+    cr('bdd', 'COMPLETED', 'CANCELLED', '2026-09-22T10:00:00Z'), cr('bdd', 'IN_PROGRESS', null, '2026-09-22T10:05:00Z'),
+    cr('bdd-gate', 'COMPLETED', 'FAILURE', '2026-09-22T10:01:00Z'), cr('Perf', 'COMPLETED', 'SKIPPED', '2026-09-22T10:01:00Z')];
+  assert.deepStrictEqual(checkSummary(nodes), { checks: 'pending', failed: 1 });
+  assert.deepStrictEqual(checkSummary([cr('a', 'COMPLETED', 'SUCCESS', ''), cr('b', 'COMPLETED', 'SKIPPED', '')]), { checks: 'pass', failed: 0 });
+  assert.deepStrictEqual(checkSummary([cr('a', 'COMPLETED', 'SUCCESS', ''), cr('b', 'COMPLETED', 'TIMED_OUT', '')]), { checks: 'fail', failed: 1 });
+  // a rerun that passed replaces the earlier failure of the same check
+  assert.deepStrictEqual(checkSummary([cr('a', 'COMPLETED', 'FAILURE', '2026-09-22T10:00:00Z'), cr('a', 'COMPLETED', 'SUCCESS', '2026-09-22T10:10:00Z')]), { checks: 'pass', failed: 0 });
+  // legacy commit statuses
+  assert.deepStrictEqual(checkSummary([{ __typename: 'StatusContext', context: 'ci/x', state: 'PENDING' }, { __typename: 'StatusContext', context: 'ci/y', state: 'FAILURE' }]), { checks: 'pending', failed: 1 });
+  assert.deepStrictEqual(checkSummary([]), { checks: 'none', failed: 0 });
 });

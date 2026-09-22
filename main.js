@@ -83,7 +83,7 @@ autoUpdater.on('error', err => {
 // repo directly via start.bat get nothing from that, so offer them a pull.
 const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
-const { durationStats, runningWorkflows, checksEta } = require('./pr-eta');
+const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./pr-eta');
 const { pickResumedFile } = require('./resume-core');
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered } = require('./recover-core');
@@ -1935,7 +1935,7 @@ function fetchAllPRs(repos) {
         + `reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 10) { nodes { author { login } state } } `
         + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state `
-        + `contexts(first: 30) { nodes { __typename ... on CheckRun { status checkSuite { workflowRun { createdAt workflow { name } } } } } } } } } } } } }`;
+        + `contexts(first: 30) { nodes { __typename ... on StatusContext { context state } ... on CheckRun { name status conclusion startedAt checkSuite { workflowRun { createdAt workflow { name } } } } } } } } } } } } }`;
     });
     const query = `query {\n${parts.join('\n')}\n}`;
     let out = '', errbuf = '', proc, done = false;
@@ -1973,7 +1973,8 @@ function fetchAllPRs(repos) {
             key: prKey(r, pr.number), repo: r, number: pr.number, title: pr.title, url: pr.url,
             author: (pr.author && pr.author.login) || '',
             reviewDecision: pr.reviewDecision || '', mine,
-            checks: rollupState(rollup && rollup.state),
+            // Per-check summary when GitHub gave us the checks; the rollup only as a fallback (it says FAILURE while a rerun is still going).
+            ...(rollup && rollup.contexts && rollup.contexts.nodes && rollup.contexts.nodes.length ? checkSummary(rollup.contexts.nodes) : { checks: rollupState(rollup && rollup.state), failed: 0 }),
             running: runningWorkflows(rollup && rollup.contexts && rollup.contexts.nodes),
             mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
             requested, createdAt: pr.createdAt || '', approvedBy, changesBy,
