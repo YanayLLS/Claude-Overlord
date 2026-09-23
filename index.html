@@ -1482,6 +1482,7 @@ button:focus-visible { outline-offset:0; }
 </div>
 <script src="./xterm-bundle.js"></script>
 <script src="./ghost-core.js"></script>
+<script src="./key229.js"></script>
 <script src="./actions-core.js"></script>
 <script src="./update-core.js"></script>
 <script src="./pr-behind.js"></script>
@@ -2850,6 +2851,8 @@ function createXterm(id) {
   terminal.loadAddon(imageAddon);
   terminal.loadAddon(webLinksAddon);
   terminal.open(el);
+  const k229 = makeKey229Fix(terminal, terminal.textarea); // key229.js — keeps remote-typed keys in order
+  el.addEventListener('input', k229.input, true);
   // Fit NOW, while the buffer is empty — reflowing later (after the scrollback replay)
   // is what corrupts the viewport. Skipped when #term is closed (container has no size);
   // showXterm's first-show fit covers that case, and the buffer is still small then.
@@ -2884,6 +2887,7 @@ function createXterm(id) {
   });
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
+    k229.keydown(e);
     if (e.key === 'Tab' && ghost.text && id === selectedId) { ghostAccept(); return false; } // accept ghost suggestion
     if (e.key === 'Escape' && ghost.text) { ghostClear(); } // dismiss, but let Esc pass through too
     if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
