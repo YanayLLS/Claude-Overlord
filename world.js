@@ -39,7 +39,7 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
 
 /* ────────────────────────── Module state ────────────────────────── */
 let THREE, stage, canvas, labelsEl, selEl, miniEl, toastEl, hooks = {};
-let renderer, scene, camera, sun, raf = 0, ro = null, lastT = 0, alive = false;
+let renderer, scene, camera, sun, raf = 0, ro = null, lastT = 0, alive = false, hiddenTicker = 0;
 const cam = { target: null, zoom: 2.0, yaw: 0, base: null, hover: false };
 const sites = new Map(), units = new Map(), ships = new Map(), machines = new Map(), tents = new Map(), raiders = new Map();
 const order = { features: [], shops: [] };
@@ -66,7 +66,22 @@ function mat(color, extra) { return new THREE.MeshStandardMaterial(Object.assign
 function box(w, h, d, m) { const me = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); me.castShadow = true; me.receiveShadow = true; return me; }
 function hexPrism(R, h, m) { const me = new THREE.Mesh(new THREE.CylinderGeometry(R, R, h, 6), m); me.rotation.y = Math.PI / 6; me.castShadow = true; me.receiveShadow = true; return me; }
 function hexEdge(R, y, color, opacity = .8) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.CylinderGeometry(R, R, .02, 6)), new THREE.LineBasicMaterial({ color, transparent: true, opacity })); e.rotation.y = Math.PI / 6; e.position.y = y; return e; }
-function disposeObj(o) { o.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) { const ms = Array.isArray(c.material) ? c.material : [c.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } } }); if (o.parent) o.parent.remove(o); }
+// Disposing frees the GPU side and, just as important, forgets the object everywhere the animation loop
+// still looks for it: the flag, beacon, fire, crane and orbit registries, the pickables, the label anchors.
+// A registry entry left behind kept the whole disposed subtree alive and cost a little work every frame,
+// and over a day of units, raids and rebuilds that added up. Shared materials (mats.*) are never disposed:
+// disposing one forces every object that uses it to recompile its shader on the next frame.
+let sharedMats = new Set();
+function disposeObj(o) {
+  const gone = new Set(); o.traverse(c => gone.add(c));
+  for (const c of gone) { if (c.geometry) c.geometry.dispose(); if (c.material) { const ms = Array.isArray(c.material) ? c.material : [c.material]; for (const m of ms) { if (sharedMats.has(m)) continue; if (m.map) m.map.dispose(); m.dispose(); } } }
+  if (o.parent) o.parent.remove(o);
+  const prune = (arr, of) => { let w = 0; for (let i = 0; i < arr.length; i++) { const x = arr[i]; if (!gone.has(of ? of(x) : x)) arr[w++] = x; } arr.length = w; };
+  prune(flags); prune(beacons); prune(cranes, c => c.g); if (cranes.length) prune(cranes, c => c.jib);
+  if (typeof life !== 'undefined') { prune(life.torches); prune(life.fires); prune(life.beams); prune(life.buoys); prune(life.fountains); prune(life.chimneys, c => c.g); prune(life.orbits, x => x.g); if (life.lighthouse && gone.has(life.lighthouse)) life.lighthouse = null; }
+  for (const p of pickables) if (gone.has(p)) pickables.delete(p);
+  for (const a of [...anchors]) if (a.obj && gone.has(a.obj)) dropLabel(a);
+}
 function label(cls, html, obj, color, dy = 0) { const el = document.createElement('div'); el.className = 'w-lab ' + cls; if (color) el.style.setProperty('--c', color); el.innerHTML = html; labelsEl.appendChild(el); const a = { el, obj, dy, html }; anchors.add(a); return a; }
 function setLabel(a, html) { if (a.html !== html) { a.html = html; a.el.innerHTML = html; } }
 function dropLabel(a) { if (!a) return; anchors.delete(a); a.el.remove(); }
@@ -111,18 +126,24 @@ W.init = function (stageEl, h) {
   sun = new THREE.DirectionalLight(0xfff0d2, 1.6); sun.position.set(40, 70, 30); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 1, far: 220 }); sun.shadow.bias = -0.0006; scene.add(sun);
   mats = { stone: mat(0x9a9285), stoneDark: mat(0x7a746a), wood: mat(0x8a6a48), scaffold: mat(0xc39a55), dark: mat(0x2b2f36), skin: mat(0xf0d2b0), iron: mat(0xb9c2cc, { metalness: .5, roughness: .4 }), gold: mat(0xe1b453, { metalness: .6, roughness: .35 }), plot: mat(0x3c4a52), yard: mat(0x46565f), wall: mat(0x8c8579), canvas: mat(0xe0d6bf), water: new THREE.MeshStandardMaterial({ color: 0x2c86a8, roughness: .3, metalness: .05 }), window: new THREE.MeshStandardMaterial({ color: 0x2b2f36, emissive: 0xffb060, emissiveIntensity: 0, roughness: .6 }), torch: new THREE.MeshStandardMaterial({ color: 0xffb060, emissive: 0xff9a3c, emissiveIntensity: 0, transparent: true, opacity: 0 }) };
+  sharedMats = new Set(Object.values(mats));
   initPuffs(); buildTerrain(); initLife();
   card = document.createElement('div'); card.className = 'w-lab w-card'; card.hidden = true; labelsEl.appendChild(card);
   bindInput();
   ro = new ResizeObserver(resize); ro.observe(stage); resize();
   lastT = performance.now(); raf = requestAnimationFrame(tick);
+  // A covered or minimised window gets no animation frames, but syncs still arrive (polls, ClickUp raids) and
+  // every exit animation, effect and label they retire is only released by the frame loop. This slow ticker
+  // keeps that bookkeeping moving while the window is hidden, so an Overlord left behind other windows all
+  // day does not carry a growing pile of finished tweens and dead labels until it is next looked at.
+  hiddenTicker = setInterval(() => { if (!alive || !document.hidden) return; const now = performance.now(); try { runTweens(now); updateFx(now / 1000, .5); } catch (e) { console.error('[world] hidden tick', e); } }, 1000);
 };
 W.dispose = function () {
-  alive = false; cancelAnimationFrame(raf); if (ro) ro.disconnect(); ro = null;
+  alive = false; cancelAnimationFrame(raf); if (ro) ro.disconnect(); ro = null; clearInterval(hiddenTicker); hiddenTicker = 0;
   for (const s of tweens) tweens.delete(s);
   sites.clear(); units.clear(); ships.clear(); machines.clear(); tents.clear(); raiders.clear(); anchors.clear(); fx.shots.length = 0; fx.rings.length = 0; fx.debris.length = 0; fx.flames.length = 0; fx.sieges.clear(); cam.shake = null; pickables.clear(); lastSel = undefined; flags.length = 0; life.clouds.length = 0; life.birds.length = 0; life.flies.length = 0; life.torches.length = 0; life.chimneys.length = 0; life.fires.length = 0; life.fish = null; life.rain = null; life.sky = null; life.stars = null; life.meteor = null; life.ship = null; life.gulls.length = 0; life.spot = null; life.medics.clear(); life.fountains.length = 0; life.lighthouse = null; life.orbits.length = 0; life.beams.length = 0; life.buoys.length = 0; prevAg.clear(); intents.clear(); awardsArmed = false; economy = null; cam.cine = false; cam.lastInput = null; cranes.length = 0; beacons.length = 0; order.features.length = 0; order.shops.length = 0;
   if (scene) scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); } } });
-  if (renderer) renderer.dispose(); renderer = scene = camera = null; terrain = null; puffs = null; selected = {}; hovered = null; snap = null;
+  if (renderer) renderer.dispose(); renderer = scene = camera = null; sharedMats = new Set(); terrain = null; puffs = null; selected = {}; hovered = null; snap = null;
   if (stage) stage.innerHTML = ''; if (hooks.miniSlot) hooks.miniSlot.innerHTML = '';
 };
 function resize() { if (!renderer) return; const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
@@ -1541,6 +1562,8 @@ W.refreshSel = function () { if (alive) renderSel(); };
 // Roster hooks: the list on the left can highlight and fly to a unit.
 W.hover = function (id) { if (!alive) return; hovered = id == null ? null : (units.get(id) || null); };
 W.focus = function (id, zoom) { if (!alive) return; const u = units.get(id); if (!u) return; cam.userMoved = true; const p = new THREE.Vector3(); u.g.getWorldPosition(p); const fx = cam.target.x, fz = cam.target.z, fzoom = cam.zoom, tz = zoom || Math.min(cam.zoom, 1.1); tween(700, k => { cam.target.x = fx + (p.x - fx) * k; cam.target.z = fz + (p.z - fz) * k; cam.zoom = fzoom + (tz - fzoom) * k; }); };
+// Registry sizes and GPU-side counts, for leak checks: every number here should settle, never climb, over a day.
+W.stats = function () { if (!alive) return null; return { flags: flags.length, cranes: cranes.length, beacons: beacons.length, fires: life.fires.length, torches: life.torches.length, orbits: life.orbits.length, beams: life.beams.length, chimneys: life.chimneys.length, buoys: life.buoys.length, fountains: life.fountains.length, anchors: anchors.size, pickables: pickables.size, tweens: tweens.size, units: units.size, raiders: raiders.size, ships: ships.size, machines: machines.size, shots: fx.shots.length, rings: fx.rings.length, debris: fx.debris.length, flames: fx.flames.length, sieges: fx.sieges.size, labels: labelsEl ? labelsEl.childElementCount : 0, gpu: renderer ? { geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, programs: renderer.info.programs.length } : null }; };
 W.devCam = function (zoom, key, yaw) { if (!alive) return null; cam.userMoved = true; cam.cine = false; cam.lastInput = performance.now() / 1000; if (zoom) cam.zoom = zoom; if (yaw != null) cam.yaw = yaw; const st = key && sites.get(key); if (st) { cam.target.x = st.x; cam.target.z = st.z; } return { zoom: cam.zoom, yaw: cam.yaw, x: cam.target.x, z: cam.target.z, R: st && st.R }; }; // test hook: place the camera exactly
 // The quest board asks about a raid: which base it is at, what it is doing, and what it pays when slain.
 W.raidInfo = function (id) { const rd = alive && raiders.get(String(id)); if (!rd) return null; return { base: raidBase(rd), state: rd.state, tier: rd.tier.name, coins: rd.tier.coins, random: !rd.task.target }; };
