@@ -1513,6 +1513,7 @@ function worktreeAt(p) { return worktrees.find(w => w.path === p) || null; }
 let selectedId = null;
 let filterText = '';
 let worldView = false; // World view (3D map) — off by default; see setWorldView() at the bottom
+const TL_MAX_EVENTS = 1000; // the timeline keeps this many events on screen, matching what main sends when it opens
 let worldTl = null; // { id, events } — copy of the selected agent's timeline for the Conversation tab
 let filterReady = false;
 // ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
@@ -2842,7 +2843,7 @@ function createXterm(id) {
     fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: true, scrollback: 10000, cursorStyle: 'bar', cursorWidth: 2,
   });
   const searchAddon = new XSearchAddon();
-  const imageAddon = new XImageAddon({ sixelSupport: false, iipSupport: true, enableSizeReports: true });
+  const imageAddon = new XImageAddon({ sixelSupport: false, iipSupport: true, enableSizeReports: true, storageLimit: 8 }); // MB of decoded images kept per terminal (the addon's default is 128)
   const webLinksAddon = new XWebLinksAddon((_e, uri) => api.send({ type: 'openUrl', url: uri }));
   terminal.loadAddon(fitAddon);
   terminal.loadAddon(searchAddon);
@@ -3339,12 +3340,13 @@ function handleTimelineData(msg) {
 
 function handleTimelineEvent(msg) {
   if (msg.id !== timelineAgentId) return;
-  if (worldTl && worldTl.id === msg.id) { worldTl.events.push(msg.event); if (termTab === 'conversation') renderConversation(); }
+  if (worldTl && worldTl.id === msg.id) { worldTl.events.push(msg.event); if (worldTl.events.length > TL_MAX_EVENTS) worldTl.events.splice(0, worldTl.events.length - TL_MAX_EVENTS); if (termTab === 'conversation') renderConversation(); }
   const el = document.getElementById('timeline-events');
   // Remove empty message if present
   const empty = el.querySelector('.tl-empty');
   if (empty) empty.remove();
   el.insertAdjacentHTML('beforeend', renderTlEvent(msg.event));
+  while (el.childElementCount > TL_MAX_EVENTS) el.firstElementChild.remove(); // an agent left open all day would otherwise grow this list without end
   if (!tlUserScrolled) el.scrollTop = el.scrollHeight;
 }
 
@@ -3655,6 +3657,7 @@ function handleAgentMsg(msg) {
     }
     case 'agentClosed': {
       agents.delete(msg.id); destroyXterm(msg.id);
+      lastTermDataAt.delete(msg.id); agentEffort.delete(msg.id); _worldIdleSince.delete(msg.id); { const dt = _doneTimers.get(msg.id); if (dt) { clearTimeout(dt); _doneTimers.delete(msg.id); } } // per-agent bookkeeping goes with the agent
       // Clean up teams led by this agent
       for (const [teamName, team] of teamMap) {
         if (team.leadAgentId === msg.id) teamMap.delete(teamName);

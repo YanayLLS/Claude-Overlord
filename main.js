@@ -267,6 +267,10 @@ const LOG_FILE = path.join(STATE_DIR, 'overlord.log');
 // Append-only diagnostic log so failures (worktree setup, git, PR, crashes) leave a
 // readable trail on disk instead of vanishing into a truncated toast. Path is printed
 // on startup; open it from any worktree's "Setup failed" menu too.
+// Memory of every process the app runs, in MB, for the log: what was growing before a death is the whole clue.
+function memorySummary() {
+  try { const out = {}; for (const p of app.getAppMetrics()) { const k = p.type === 'Tab' ? 'renderer' : p.type.toLowerCase(); out[k + (out[k] ? p.pid : '')] = Math.round(p.memory.privateBytes / 1024); } out.mainHeap = Math.round(process.memoryUsage().heapUsed / 1048576); return out; } catch (e) { return { err: String(e) }; }
+}
 function flog(...args) {
   const msg = args.map(a => (typeof a === 'string' ? a : (a && a.stack) || JSON.stringify(a))).join(' ');
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -3978,6 +3982,7 @@ setInterval(() => {
 
 // Periodically scan for teams
 setInterval(() => scanTeams(), TEAM_POLL_MS);
+setInterval(() => flog('memory ' + JSON.stringify(memorySummary())), 10 * 60 * 1000);
 
 // Periodically fetch usage — when user is active OR any agent is running OR data is stale
 function hasActiveAgents() { for (const a of agents.values()) { if (!a.isWaiting) return true; } return false; }
@@ -4891,6 +4896,19 @@ app.whenReady().then(() => {
   if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   mainWindow.setMenuBarVisibility(false);
+  // When the page's process dies (out of memory, a crash, killed), the window would otherwise sit blank while
+  // main keeps polling into the void. Write down why, then load the page again: agents live in main, so a
+  // reload brings everything back. A second death within a minute is left alone, so a page that dies on load
+  // cannot loop.
+  let lastRendererDeath = 0;
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    flog(`renderer gone: reason=${details.reason} exitCode=${details.exitCode} — ${JSON.stringify(memorySummary())}`);
+    console.log(`[Overlord] Renderer gone (${details.reason}, exit ${details.exitCode})`);
+    const now = Date.now(); if (now - lastRendererDeath < 60000) { flog('renderer died twice within a minute: not reloading again'); return; } lastRendererDeath = now;
+    setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadFile(path.join(__dirname, 'index.html')); }, 500);
+  });
+  mainWindow.webContents.on('unresponsive', () => flog('renderer unresponsive — ' + JSON.stringify(memorySummary())));
+  mainWindow.webContents.on('responsive', () => flog('renderer responsive again'));
   // Show window as soon as the page is painted — don't wait for agent restoration
   mainWindow.once('ready-to-show', () => mainWindow.show());
   // Restore agents after window is visible (heavy JSONL parsing + process cleanup)
