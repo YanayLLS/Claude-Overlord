@@ -536,17 +536,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   background:var(--title-bg); font-size:11px; color:var(--dim); gap:3px; letter-spacing:.3px; cursor:pointer;
 }
 #summary-bar.show { display:flex; }
-.usage-row { display:flex; align-items:center; gap:8px; min-height:18px; }
-.usage-row-label { font-size:10px; color:var(--dim); white-space:nowrap; font-weight:600; min-width:110px; }
-.usage-row-track { position:relative; flex:1; height:10px; background:rgba(255,255,255,.08); border-radius:5px; overflow:hidden; min-width:40px; }
-.usage-row-fill { position:absolute; left:0; top:0; height:100%; border-radius:5px; transition:width .4s ease, background .3s; }
-.usage-row-fill.ok { background:var(--accent); opacity:.5; }
-.usage-row-fill.warn { background:var(--yellow); opacity:.65; }
-.usage-row-fill.danger { background:var(--red); opacity:.7; }
-.usage-row-pct { font-size:10px; color:var(--fg); white-space:nowrap; min-width:58px; text-align:right; }
-.usage-row-reset { font-size:9px; color:var(--dim); white-space:nowrap; opacity:.7; }
-.usage-info-row { display:flex; align-items:center; gap:6px; min-height:16px; font-size:10px; color:var(--dim); flex-wrap:wrap; }
-.usage-info-row .sep { opacity:.3; }
 #summary-bar .pace-ok { color:var(--green); }
 #summary-bar .pace-warn { color:var(--yellow); }
 #summary-bar .pace-over { color:var(--red); }
@@ -1104,10 +1093,14 @@ button:focus-visible { outline-offset:0; }
     <div id="list"></div>
     <div id="world-extra"></div>
     <div id="pr-dropdown" style="display:none"></div>
-    <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
     <div id="actions-dropdown" style="display:none"></div>
-    <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
-    <div id="summary-bar"></div>
+    <div id="list-foot">
+      <div class="foot-chips">
+        <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
+        <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
+      </div>
+      <div id="summary-bar"></div>
+    </div>
   </div>
   <button id="world-roster-tab" onclick="setWorldRosterHidden(false)" title="Show the roster"><span>&#x203A;</span><b id="world-roster-tab-n"></b>Agents</button>
   <div id="quest-log-dim" onclick="toggleQuestLog(false)"></div>
@@ -2681,53 +2674,45 @@ function render() {
     return `Resets ${timeStr}${_tz ? ` (${_tz})` : ''}`;
   }
 
-  function usageRowHTML(label, pct, resetTs, includeDate) {
+  // One compact meter per cap: label + % on top, a hairline bar below; reset time lives in the tooltip.
+  function usageMeterHTML(label, pct, resetTs, includeDate, extra = '') {
     const cls = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
-    const resetStr = fmtResetTime(resetTs, includeDate);
-    return `<div class="usage-row">
-      <span class="usage-row-label">${label}</span>
-      <div class="usage-row-track" title="${pct.toFixed(1)}% used">
-        <div class="usage-row-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div>
-      </div>
-      <span class="usage-row-pct">${pct.toFixed(1)}% used</span>
-      ${resetStr ? `<span class="usage-row-reset">${resetStr}</span>` : ''}
+    return `<div class="usage-meter" title="${escAttr(label + ': ' + pct.toFixed(1) + '% used' + (resetTs ? ' · ' + fmtResetTime(resetTs, includeDate) : ''))}">
+      <div class="um-top"><span class="um-label">${label}${extra}</span><span class="um-pct ${cls}">${Math.round(pct)}%</span></div>
+      <div class="um-track"><div class="um-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
     </div>`;
   }
 
   let barHtml = '';
+  const tip = [];
   if (currentUsage && (currentUsage.hourly != null || currentUsage.weekly != null)) {
-    if (currentUsage.hourly != null) barHtml += usageRowHTML('Current session', currentUsage.hourly, currentUsage.hourlyReset, false);
-    if (currentUsage.weekly != null) barHtml += usageRowHTML('Current week', currentUsage.weekly, currentUsage.weeklyReset, true);
-    // Per-model weekly caps (Fable, Opus, …) sit under the overall week row.
-    for (const m of currentUsage.modelWeekly || []) {
-      barHtml += usageRowHTML(modelLabel(m.model) + ' week', m.pct, m.reset || currentUsage.weeklyReset, true);
-    }
-
-    // Info row: agents + pace + age
-    let infoHtml = `<span>${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? ` · ${activeCount} active` : ''}</span>`;
+    let pace = '';
     if (currentUsage.weekly != null && currentUsage.weeklyReset) {
-      const msLeft = currentUsage.weeklyReset - Date.now();
-      const daysLeft = msLeft / 86400000;
+      const daysLeft = (currentUsage.weeklyReset - Date.now()) / 86400000;
       const daysElapsed = 7 - daysLeft;
       if (daysElapsed > 0.01 && daysLeft > 0) {
         const expectedPct = (daysElapsed / 7) * 100;
         const actual = currentUsage.weekly;
         const paceClass = actual <= expectedPct * 0.85 ? 'pace-ok' : actual <= expectedPct * 1.1 ? 'pace-warn' : 'pace-over';
-        const paceLabel = actual <= expectedPct * 1.1 ? 'On track' : 'Too fast';
-        infoHtml += `<span class="sep">│</span><span>Used: ${actual.toFixed(1)}%</span>`;
-        infoHtml += `<span class="sep">·</span><span>Expected: ${expectedPct.toFixed(1)}%</span>`;
-        infoHtml += `<span class="sep">·</span><span class="${paceClass}">${paceLabel}</span>`;
+        pace = `<span class="um-pace ${paceClass}">${actual <= expectedPct * 1.1 ? 'on track' : 'too fast'}</span>`;
+        tip.push(`Week: ${actual.toFixed(1)}% used, ${expectedPct.toFixed(1)}% expected by now`);
       }
+    }
+    if (currentUsage.hourly != null) barHtml += usageMeterHTML('Session', currentUsage.hourly, currentUsage.hourlyReset, false);
+    if (currentUsage.weekly != null) barHtml += usageMeterHTML('Week', currentUsage.weekly, currentUsage.weeklyReset, true, pace);
+    // Per-model weekly caps (Fable, Opus, …) get their own meter.
+    for (const m of currentUsage.modelWeekly || []) {
+      barHtml += usageMeterHTML(modelLabel(m.model), m.pct, m.reset || currentUsage.weeklyReset, true);
     }
     if (currentUsage.fetchedAt) {
       const ago = Math.round((Date.now() - currentUsage.fetchedAt) / 1000);
-      const ageStr = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
-      infoHtml += `<span class="sep">│</span><span style="opacity:.5">${ageStr}</span>`;
+      tip.push('Updated ' + (ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`));
     }
-    barHtml += `<div class="usage-info-row">${infoHtml}</div>`;
   } else {
-    barHtml = `<div class="usage-info-row"><span>${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? ` · ${activeCount} active` : ''}</span><span class="sep">│</span><span>Usage: click to fetch</span></div>`;
+    barHtml = `<div class="usage-empty">Usage: click to fetch</div>`;
   }
+  tip.push(`${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? `, ${activeCount} active` : ''}`, 'Click to refresh');
+  bar.title = tip.join('\n');
   bar.innerHTML = barHtml;
   bar.onclick = () => refreshUsage();
   bar.classList.add('show');

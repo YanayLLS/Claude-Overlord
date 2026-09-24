@@ -146,13 +146,6 @@ body.world-mode #pr-badge, body.world-mode #actions-badge { border-radius: 0; cl
 /* Supply: the summary bar's usage rows, with the number written on the bar */
 body.world-mode #summary-bar { background: var(--w-panel-2); border-top-color: var(--w-line); padding: 8px 12px 9px; gap: 4px; letter-spacing: 0; }
 body.world-mode #summary-bar::before { content: 'Supply · usage'; font-family: var(--w-display); font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--w-gold); margin-bottom: 2px; }
-body.world-mode .usage-row { flex-wrap: wrap; gap: 2px 10px; min-height: 0; padding: 2px 0 1px; position: relative; }
-body.world-mode .usage-row-label { flex: 0 0 96px; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text); }
-body.world-mode .usage-row-track { height: 16px; border-radius: 0; clip-path: var(--w-hexw); background: rgba(255,255,255,.08); overflow: visible; }
-body.world-mode .usage-row-fill { border-radius: 0; opacity: .6 !important; }
-body.world-mode .usage-row-pct { position: absolute; right: 0; top: 2px; height: 16px; line-height: 16px; min-width: 0; padding-right: 12px; font-family: var(--w-mono); font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px #000; }
-body.world-mode .usage-row-reset { flex: 0 0 100%; order: 5; padding-left: 106px; font-size: 10px; opacity: .8; }
-body.world-mode .usage-info-row { font-size: 10.5px; margin-top: 2px; }
 body.world-mode #ctx-warning { clip-path: none; border-bottom-color: rgba(243,139,168,.3); }
 
 /* Terminal pane header */
