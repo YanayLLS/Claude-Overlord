@@ -90,6 +90,8 @@ if (typeof document !== 'undefined') {
     hideTip();
     if (!el) return;
     tipTarget = el;
+    // A cut-off name is the whole point of hovering it: show at once. Everything else waits a beat.
+    if (el.hasAttribute('data-tip-overflow')) { showTip(el); return; }
     tipTimer = setTimeout(() => { if (tipTarget === el) showTip(el); }, 350);
   });
   for (const ev of ['mousedown', 'wheel', 'keydown']) window.addEventListener(ev, hideTip, { capture: true, passive: true });
