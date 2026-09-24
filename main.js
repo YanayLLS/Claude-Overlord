@@ -1173,6 +1173,7 @@ function handleTermExit(id, exitCode) {
   if (crashed) a.crashed = true; // watchdog must not flip a crashed card to 'waiting'
   if (crashed && a.crashCount < MAX_CRASH_RETRIES) {
     a.crashCount++;
+    a._crashNudge = !a.isWaiting; // died mid-turn → tell the resumed Claude to carry on
     console.log(`[Overlord] Agent ${id} crashed (exit ${exitCode}), auto-resuming (${a.crashCount}/${MAX_CRASH_RETRIES})`);
     send({ type: 'termData', id, data: `\r\n\x1b[33m[Crashed — auto-resuming ${a.crashCount}/${MAX_CRASH_RETRIES}...]\x1b[0m\r\n` });
     send({ type: 'crashed', id, crashCount: a.crashCount, maxRetries: MAX_CRASH_RETRIES });
@@ -1189,6 +1190,14 @@ function handleTermExit(id, exitCode) {
   }
 }
 
+
+function sendCrashNudge(id) {
+  const a = agents.get(id), t = terminals.get(id);
+  if (!a || !t || !a._crashNudge) return;
+  a._crashNudge = false;
+  t.write('Your session crashed mid-task and was auto-resumed. Continue from where you left off.');
+  setTimeout(() => { try { t.write('\r'); } catch {} }, 300); // separate Enter so Ink submits, not pastes
+}
 
 function safeCwd(cwd) {
   return (cwd && fs.existsSync(cwd)) ? cwd : os.homedir();
@@ -1236,7 +1245,9 @@ function doSpawnTerminal(id) {
   const feat = featureAgentArgs(a.cwd);
   const claudeCmd = (useResume ? `claude --resume ${a.sessionId}${skip}` : `claude --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id);
   const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
-  const args = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
+  // /c, not /k: /k left cmd.exe alive after Claude died, so the pty never exited and
+  // crashes went unnoticed (no auto-resume). /c exits with Claude's own exit code.
+  const args = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   try {
     const proc = pty.spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
     terminals.set(id, proc);
@@ -1263,7 +1274,7 @@ function doSpawnTerminal(id) {
         const probe = (a._readyBuf || '') + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|[\x00-\x08\x0b-\x1f\x7f]/g, '');
         if (/Welcome back|\? for shortcuts|Try ["']/.test(probe)) {
           a._readyBuf = '';
-          a._readyTimer = setTimeout(() => { a._readyTimer = null; a.claudeReady = true; flushPeerMsgs(id); }, 4000);
+          a._readyTimer = setTimeout(() => { a._readyTimer = null; a.claudeReady = true; sendCrashNudge(id); flushPeerMsgs(id); }, 4000);
         } else {
           a._readyBuf = probe.slice(-256);
         }
@@ -1343,7 +1354,7 @@ function createAgent(folderPath, initialPrompt) {
   const feat = featureAgentArgs(cwd);
   const claudeCmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}`;
   const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
-  const shellArgs = process.platform === 'win32' ? `/k ${claudeCmd}` : ['-c', claudeCmd];
+  const shellArgs = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
   send({ type: 'stats', id, stats: agent.stats });
   send({ type: 'focused', id });
