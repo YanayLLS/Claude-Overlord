@@ -1,7 +1,7 @@
 // One tooltip for the whole app. Any element with a title (or data-tip) gets a
 // dark bubble with an arrow pointing at it, opening toward whichever side of
-// the screen has the most room. The title is moved to data-tip on first hover
-// so the native tooltip never shows alongside it.
+// the screen has the most room. Titles are moved to data-tip as soon as they
+// appear, so the native tooltip never shows alongside it.
 
 const TIP_GAP = 8;      // room for the arrow between target and bubble
 const TIP_MARGIN = 6;   // bubble never touches the window edge
@@ -35,12 +35,26 @@ if (typeof document !== 'undefined') {
   tipEl.setAttribute('role', 'tooltip');
   let tipTarget = null, tipTimer = null;
 
-  // The text lives in data-tip; a title (set in HTML or later by code) is moved there.
+  // The text lives in data-tip. Every title, whether in the HTML, from a re-render, or set by
+  // code later, is moved there the moment it appears, so the native tooltip has nothing to show.
   const tipText = (el) => {
     const t = el.getAttribute('title');
     if (t != null) { el.dataset.tip = t; el.removeAttribute('title'); }
     return el.dataset.tip || '';
   };
+  const stripTitles = (root) => {
+    if (root.nodeType !== 1) return;
+    if (root.hasAttribute('title')) tipText(root);
+    for (const el of root.querySelectorAll('[title]')) tipText(el);
+  };
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      if (m.type === 'attributes') { if (m.target.hasAttribute('title')) tipText(m.target); }
+      else for (const n of m.addedNodes) stripTitles(n);
+    }
+  }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['title'] });
+  stripTitles(document.documentElement);
+  document.addEventListener('DOMContentLoaded', () => stripTitles(document.documentElement));
   const hideTip = () => { clearTimeout(tipTimer); tipTarget = null; tipEl.classList.remove('show'); };
   const showTip = (el) => {
     const text = tipText(el);
@@ -56,16 +70,17 @@ if (typeof document !== 'undefined') {
   };
 
   document.addEventListener('mouseover', (e) => {
-    const el = e.target.closest && e.target.closest('[title], [data-tip]');
+    const el = e.target.closest && e.target.closest('[data-tip]');
     if (el === tipTarget) return;
     hideTip();
     if (!el) return;
-    tipText(el); // strip the title now so the native tooltip can't race ours
     tipTarget = el;
     tipTimer = setTimeout(() => { if (tipTarget === el) showTip(el); }, 350);
   });
-  // Titles some rows set on mouseenter land after mouseover; catch them before the native tip does.
-  document.addEventListener('mousemove', () => { if (tipTarget && tipTarget.hasAttribute('title')) tipText(tipTarget); }, { passive: true });
+  // A re-render can swap the element under a still mouse; follow it so the tip isn't lost.
+  document.addEventListener('mousemove', (e) => {
+    if (tipTarget && !tipTarget.isConnected) { hideTip(); e.target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); }
+  }, { passive: true });
   for (const ev of ['mousedown', 'wheel', 'keydown', 'blur']) window.addEventListener(ev, hideTip, { capture: true, passive: true });
   document.addEventListener('mouseleave', hideTip);
 }
