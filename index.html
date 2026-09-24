@@ -2407,9 +2407,19 @@ function statusLineHTML(a, st) {
 let _renderPending = false;
 let _renaming = false; // true while inline rename input is active
 function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; if (_renaming || _dragId != null) return; render(); }); } }
+// Mouse held down on the list: a rebuild between press and release swaps the pressed button
+// for a fresh copy and the browser drops the click. Hold renders until release, then catch up.
+let _listPressed = false, _renderHeld = false;
+document.getElementById('list').addEventListener('pointerdown', () => { _listPressed = true; });
+for (const ev of ['pointerup', 'pointercancel', 'dragend', 'blur']) window.addEventListener(ev, () => {
+  if (!_listPressed) return;
+  _listPressed = false;
+  if (_renderHeld) { _renderHeld = false; setTimeout(scheduleRender); } // after the click handler runs
+});
 function render() {
   if (_dragId != null) return; // never rebuild the list mid-drag — it cancels native drag-and-drop
   if (_renaming) return; // rebuilding would destroy the inline rename input
+  if (_listPressed) { _renderHeld = true; return; }
   const list = document.getElementById('list');
   if (agents.size === 0 && knownProjects.size === 0) {
     list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
