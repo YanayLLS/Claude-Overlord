@@ -385,7 +385,7 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 .pr-row { margin: 0 6px; padding: 8px 10px; border-bottom: none; border-left: none !important; border-radius: var(--r); font-size: 12.5px; }
 .pr-row:hover { background: var(--hover-strong); }
 .pr-row > .pr-actions + div { font-weight: 500; line-height: 1.35; }
-.pr-row .pr-branch { font-size: 10.5px; margin-top: 3px; opacity: .85; }
+.pr-row .pr-branch { font-size: 10.5px; margin-top: 3px; }
 .pr-row .pr-meta { font-size: 11px; margin-top: 3px; }
 .pr-row.pr-req, .pr-row.pr-req:hover { background: rgba(248,113,113,.08); box-shadow: inset 2px 0 0 var(--red); }
 .pr-row.pr-req:hover { background: rgba(248,113,113,.13); }
@@ -393,6 +393,6 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 .pr-row.pr-mergeable:hover { background: rgba(74,222,128,.12); }
 .pr-row.pr-conflict, .pr-row.pr-conflict:hover { background: rgba(251,146,60,.08); box-shadow: inset 2px 0 0 var(--peach); }
 .pr-row.pr-conflict:hover { background: rgba(251,146,60,.13); }
-.pr-actions { right: 10px; gap: 4px; }
+.pr-actions { right: 10px; gap: 4px; z-index: 2; } /* above the row text, which can form its own layer */
 .pr-approve { border-radius: var(--r-sm); padding: 4px 10px; }
 .pr-testing { color: var(--yellow); }
