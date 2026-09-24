@@ -350,3 +350,12 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 #prompt-rail .pr-dashes i { width: 10px; height: 2px; background: var(--dim); opacity: .45; transition: width .15s, opacity .15s, background .15s; }
 #prompt-rail:hover .pr-dashes i { opacity: .8; }
 #prompt-rail .pr-dashes i.on { width: 18px; background: var(--accent); opacity: 1; }
+
+/* Tracked Actions: wide, one line per workflow (name + status left, details right) */
+#actions-dropdown { width: 600px; max-width: calc(100vw - 24px); min-width: 0; }
+#actions-dropdown .act-row { display: flex; align-items: center; gap: 14px; padding: 6px 10px; }
+#actions-dropdown .act-row > div:first-of-type { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+#actions-dropdown .act-row .act-meta { margin: 0 0 0 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+#actions-dropdown .act-row:hover .act-meta { visibility: hidden; } /* the Copy URL button sits there on failed rows */
+#actions-dropdown .act-row:not(.act-failure):hover .act-meta { visibility: visible; }
+#actions-dropdown .act-repo { padding: 10px 14px 3px; }
