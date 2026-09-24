@@ -23,7 +23,7 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
 
 /* ── Header = title bar (Windows draws min/max/close in the right 140px) ── */
-#header { height: 44px; padding: 0 150px 0 16px; gap: 6px; background: var(--title-bg); border-bottom: 1px solid var(--border); }
+#header { height: 44px; padding: 0 16px; gap: 6px; background: var(--title-bg); border-bottom: 1px solid var(--border); }
 #header h1 { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
 #header h1 span { color: var(--text); }
 .hdr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; min-width: 30px; padding: 0 8px;
@@ -369,3 +369,7 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 .group.collapsed .group-name { color: var(--subtext); }
 .agents { margin-left: 14px; padding: 0 6px 6px 4px; border-left-color: rgba(255,255,255,.05); }
 .feature { border-radius: var(--r-lg); }
+
+/* Right padding = exactly the area Windows' min/max/close overlay covers (env vars from
+   titleBarOverlay), so there's no dead gap at any display scaling; 150px when unavailable. */
+#header { padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 150px)) + 8px); }
