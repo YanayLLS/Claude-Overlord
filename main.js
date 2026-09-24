@@ -2062,12 +2062,6 @@ async function pollPRs() {
   }
   if (!failedRepos.length) prGhErrorLogged = false;
   const prs = res.prs;
-  const behind = await fetchBehind(prs);
-  prs.forEach(p => { p.behindBy = behind[p.key] ?? null; });
-  for (const p of prs) {
-    p.checksEta = null;
-    if (p.checks === 'pending' && p.running.length) p.checksEta = checksEta(p.running, await fetchWorkflowDurations(p.repo));
-  }
   const currentKeys = prs.map(p => p.key);
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);
@@ -2111,6 +2105,14 @@ async function pollPRs() {
   settings.prArchived = (settings.prArchived || []).filter(k => currentKeys.includes(k));
   prSeenSeeded = true;
   saveState();
+  // Show the list now; "commits behind" and the checks ETA take a call per PR, so they follow.
+  send({ type: 'prList', prs, error: null, failedRepos });
+  const behind = await fetchBehind(prs);
+  prs.forEach(p => { p.behindBy = behind[p.key] ?? null; });
+  for (const p of prs) {
+    p.checksEta = null;
+    if (p.checks === 'pending' && p.running.length) p.checksEta = checksEta(p.running, await fetchWorkflowDurations(p.repo));
+  }
   send({ type: 'prList', prs, error: null, failedRepos });
 }
 
@@ -4929,14 +4931,16 @@ app.whenReady().then(() => {
   mainWindow.webContents.on('did-finish-load', () => {
     if (!_didRestore) {
       _didRestore = true;
+      // PR and Actions checks go first: their gh calls are async, so they run while the
+      // (synchronous, heavy) agent restore below parses every agent's history.
+      armPrTimer();
+      armActionsTimer();
       restoreAgents(state);
       // Seed the settings copy at boot. Nothing else saves until the user changes
       // something, so on the launch right after an update — exactly when the old
       // state file is the only copy — there would otherwise be no second copy yet.
       saveSettingsCopy();
       startRemoteServer();
-      armPrTimer();
-      armActionsTimer();
       armClickupTimer();
     }
     // Runs on every load incl. renderer reload — repaints from in-memory state
