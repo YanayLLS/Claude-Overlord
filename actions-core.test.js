@@ -33,31 +33,31 @@ assert.strictEqual(runState({ status: 'completed', conclusion: 'skipped' }), 'ca
 // ── actionsRollup ─────────────────────────────────────
 assert.strictEqual(actionsRollup([]).cls, 'hidden');
 assert.deepStrictEqual(actionsRollup([{ state: 'success' }, { state: 'success' }]),
-  { cls: '', text: '⚙ All 2 up to date' });
+  { cls: '', text: 'All 2 up to date' });
 assert.deepStrictEqual(actionsRollup([{ state: 'success' }]),
-  { cls: '', text: '⚙ All 1 up to date' });
+  { cls: '', text: 'All 1 up to date' });
 assert.deepStrictEqual(actionsRollup([{ state: 'running' }, { state: 'failure' }]),
-  { cls: 'running', text: '⚙ 1 running · 1 failed' });
+  { cls: 'running', text: '1 running · 1 failed' });
 assert.deepStrictEqual(actionsRollup([{ state: 'failure' }, { state: 'success' }]),
-  { cls: 'alert', text: '⚙ 1 failed · 1 ok' });
+  { cls: 'alert', text: '1 failed · 1 ok' });
 // red only for MY failure; someone else's breakage is amber, same text
 assert.deepStrictEqual(actionsRollup([{ state: 'failure', mine: true }]),
-  { cls: 'alert', text: '⚙ 1 failed' });
+  { cls: 'alert', text: '1 failed' });
 assert.deepStrictEqual(actionsRollup([{ state: 'failure', mine: false }]),
-  { cls: 'warn', text: '⚙ 1 failed' });
+  { cls: 'warn', text: '1 failed' });
 // mixed: one of them is mine → still red
 assert.deepStrictEqual(actionsRollup([{ state: 'failure', mine: false }, { state: 'failure', mine: true }]),
-  { cls: 'alert', text: '⚙ 2 failed' });
+  { cls: 'alert', text: '2 failed' });
 // unknown ownership must fail loud, not silently downgrade
 assert.strictEqual(actionsRollup([{ state: 'failure' }]).cls, 'alert');
 // running still outranks a failure of either kind
 assert.strictEqual(actionsRollup([{ state: 'running' }, { state: 'failure', mine: true }]).cls, 'running');
 // a per-row fetch error alone must not read as "up to date"
 assert.deepStrictEqual(actionsRollup([{ state: 'success', error: 'boom' }]),
-  { cls: 'err', text: '⚙ Actions — 1 check failed' });
+  { cls: 'err', text: 'Actions — 1 check failed' });
 // never-run workflows count as neither ok nor failed
 assert.deepStrictEqual(actionsRollup([{ state: 'none' }]),
-  { cls: '', text: '⚙ 1 never run' });
+  { cls: '', text: '1 never run' });
 
 // ── nextPollDelay ─────────────────────────────────────
 assert.strictEqual(nextPollDelay([{ state: 'running' }], 60), 10000);

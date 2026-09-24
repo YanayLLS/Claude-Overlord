@@ -2523,7 +2523,7 @@ function render() {
       : (wtEntry ? `<a class="wt-port" onclick="event.stopPropagation();openUrl('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
     html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}"><div class="group-header" onclick="toggleGroup('${safeCwd}')">
       <span class="group-chevron">&#x25BC;</span>
-      <div class="group-info">${nameHtml}</div>
+      <div class="group-info" title="${escAttr(cwd)}">${nameHtml}</div>
       ${wtStatus}
       ${wtServerBadge}
       ${serverBadges}
@@ -4872,18 +4872,18 @@ function renderPrBadge() {
     // Green = one of mine is mergeable with green checks; red = someone's waiting on my review; both = half and half.
     const ready = active.filter(p => p.mine && prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none')).length;
     b.style.display = 'flex'; b.className = waiting > 0 && ready > 0 ? 'split' : waiting > 0 ? 'alert' : ready > 0 ? 'ready' : '';
-    b.textContent = '⬢ ' + active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '') + (ready > 0 ? ' · ' + ready + ' to merge' : '');
+    b.textContent = active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '') + (ready > 0 ? ' · ' + ready + ' to merge' : '');
     b.title = [waiting > 0 && waiting + ' PR(s) waiting for approval', ready > 0 && ready + ' of yours ready to merge'].filter(Boolean).join(' · ') || active.length + ' open PR(s)';
   } else if (prState.prs.some(p => !p.archived)) {
     // Only muted PRs remain — keep a quiet entry so the dropdown stays reachable to un-mute.
     const n = prState.prs.filter(p => !p.archived).length;
     b.style.display = 'flex'; b.className = '';
-    b.textContent = '🔕 ' + n + ' muted';
+    b.textContent = n + ' muted';
     b.title = 'All watched PRs are muted — click to manage';
   } else if (prState.prs.length > 0) {
     // Everything archived — a minimal badge, otherwise the dropdown is unreachable.
     b.style.display = 'flex'; b.className = '';
-    b.textContent = '📦 ' + prState.prs.length + ' archived';
+    b.textContent = prState.prs.length + ' archived PRs';
     b.title = 'All watched PRs are archived — click to manage';
   } else {
     b.style.display = 'none';
@@ -5135,8 +5135,8 @@ function prDropdownHtml() {
   }
   // Archived PRs — collapsed by default, the only way back from archive
   if (archived.length) {
-    const collapsed = prCollapsed.has('__archived__');
-    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__archived__')">`
+    const collapsed = !prCollapsed.has('__archived_open__'); // set membership = opened, so default is collapsed
+    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__archived_open__')">`
       + `<span>${collapsed ? '▸' : '▾'} 📦 Archived</span><span class="pr-count">${archived.length}</span></div>`;
     if (!collapsed) html += archived.map(prArchivedRowHtml).join('');
   }
@@ -5578,7 +5578,7 @@ function renderActionsBadge() {
     return;
   }
   if (actionsState.error && !actionsState.runs.length) {
-    el.className = 'err'; el.textContent = '⚙ Actions — check failed'; el.style.display = 'flex'; return;
+    el.className = 'err'; el.textContent = 'Actions — check failed'; el.style.display = 'flex'; return;
   }
   const { cls, text } = actionsRollup(actionsState.runs); // actions-core.js
   if (cls === 'hidden') { el.style.display = 'none'; if (dd) dd.style.display = 'none'; return; }

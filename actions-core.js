@@ -38,7 +38,7 @@ function actionsRollup(rows) {
   const list = rows || [];
   if (!list.length) return { cls: 'hidden', text: '' };
   const errs = list.filter(r => r.error).length;
-  if (errs) return { cls: 'err', text: `⚙ Actions — ${errs} check failed` };
+  if (errs) return { cls: 'err', text: `Actions — ${errs} check failed` };
   const n = (s) => list.filter(r => r.state === s).length;
   const running = n('running'), failed = n('failure'), ok = n('success'), never = n('none');
   // The loud red badge is reserved for a failure that is MINE to fix. Someone
@@ -51,10 +51,10 @@ function actionsRollup(rows) {
   if (failed) parts.push(`${failed} failed`);
   if (ok) parts.push(`${ok} ok`);
   if (never) parts.push(`${never} never run`);
-  if (running) return { cls: 'running', text: '⚙ ' + parts.join(' · ') };
-  if (failed) return { cls: myFailure ? 'alert' : 'warn', text: '⚙ ' + parts.join(' · ') };
-  if (ok && !never) return { cls: '', text: `⚙ All ${ok} up to date` };
-  return { cls: '', text: '⚙ ' + parts.join(' · ') };
+  if (running) return { cls: 'running', text: '' + parts.join(' · ') };
+  if (failed) return { cls: myFailure ? 'alert' : 'warn', text: '' + parts.join(' · ') };
+  if (ok && !never) return { cls: '', text: `All ${ok} up to date` };
+  return { cls: '', text: '' + parts.join(' · ') };
 }
 
 // Rows that just turned failed — failing NOW and not already failing last poll.
