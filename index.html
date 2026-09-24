@@ -3641,8 +3641,7 @@ function handleAgentMsg(msg) {
       if (msg.error) { prState.error = msg.error; prState.errorCode = msg.errorCode || null; }
       else { prState.prs = msg.prs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; }
       renderPrBadge();
-      const d = document.getElementById('pr-dropdown');
-      if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
+      refreshOpenDropdown('pr-dropdown', prDropdownHtml);
       if (worldView) scheduleRender();
       break;
     }
@@ -3658,10 +3657,7 @@ function handleAgentMsg(msg) {
       actionsState.errorCode = msg.errorCode || null;
       renderActionsBadge();
       if (worldView) scheduleRender();
-      if (document.getElementById('actions-dropdown').style.display === 'block') {
-        document.getElementById('actions-dropdown').innerHTML = actionsDropdownHtml();
-        startActElapsed(); // fresh rows lost their ticker; re-attach (no-op if already running)
-      }
+      refreshOpenDropdown('actions-dropdown', actionsDropdownHtml, startActElapsed); // fresh rows need their ticker
       break;
     case 'workflowList':
       renderRepoWorkflows(msg.repo, msg.workflows, msg.error);
@@ -5144,6 +5140,26 @@ function prDropdownHtml() {
   return html;
 }
 
+// A poll landing mid-click rebuilt the open dropdown under the pressed button, and the click
+// fell through to the row (opening the PR instead of merging it). Rebuilds wait while the
+// mouse is down inside, then land right after the click.
+function refreshOpenDropdown(id, build, after) {
+  const d = document.getElementById(id);
+  if (!d || d.style.display !== 'block') return;
+  if (d._pressed) { d._pending = () => refreshOpenDropdown(id, build, after); return; }
+  d.innerHTML = build();
+  if (after) after();
+}
+for (const id of ['pr-dropdown', 'actions-dropdown']) document.getElementById(id).addEventListener('pointerdown', (e) => { e.currentTarget._pressed = true; });
+for (const ev of ['pointerup', 'pointercancel', 'blur']) window.addEventListener(ev, () => {
+  for (const id of ['pr-dropdown', 'actions-dropdown']) {
+    const d = document.getElementById(id);
+    if (!d._pressed) continue;
+    d._pressed = false;
+    const f = d._pending; d._pending = null;
+    if (f) setTimeout(f); // after the click handler runs
+  }
+});
 function togglePrDropdown(e) {
   if (e) e.stopPropagation();
   const d = document.getElementById('pr-dropdown');
