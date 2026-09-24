@@ -359,3 +359,13 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 #actions-dropdown .act-row:hover .act-meta { visibility: hidden; } /* the Copy URL button sits there on failed rows */
 #actions-dropdown .act-row:not(.act-failure):hover .act-meta { visibility: visible; }
 #actions-dropdown .act-repo { padding: 10px 14px 3px; }
+
+/* Each project is a soft card: header + its agents in one panel, gaps between projects */
+#list { padding: 4px 8px 12px; }
+.group { margin: 0 0 8px; border-radius: var(--r-lg); background: rgba(255,255,255,.022); border: 1px solid rgba(255,255,255,.045); }
+.group.collapsed { background: transparent; border-color: transparent; }
+.group-header { margin: 0; padding: 8px 8px 6px 8px; }
+.group-name { color: var(--text); font-size: 12.5px; }
+.group.collapsed .group-name { color: var(--subtext); }
+.agents { margin-left: 14px; padding: 0 6px 6px 4px; border-left-color: rgba(255,255,255,.05); }
+.feature { border-radius: var(--r-lg); }
