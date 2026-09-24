@@ -6,8 +6,9 @@
     toggleBtn.className = 'hdr-btn'; toggleBtn.id = 'preview-toggle';
     toggleBtn.title = 'Toggle web preview'; toggleBtn.textContent = '⧉';
     toggleBtn.onclick = actions.onToggle;
-    const header = document.getElementById('header');
-    header.insertBefore(toggleBtn, document.getElementById('addBtn'));
+    const more = document.getElementById('hdr-more'); // the header ⋯ menu, when the page has one
+    if (more) { toggleBtn.className = 'hdr-menu-item'; toggleBtn.removeAttribute('title'); toggleBtn.innerHTML = '<span class="mi-glyph">⧉</span><span>Web preview</span>'; more.appendChild(toggleBtn); }
+    else document.getElementById('header').insertBefore(toggleBtn, document.getElementById('addBtn'));
 
     const content = document.getElementById('content');
     const handle = document.createElement('div');

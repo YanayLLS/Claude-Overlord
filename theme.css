@@ -280,3 +280,23 @@ body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 #app-tip.bottom::after { top: -4px;    left: calc(var(--arrow) - 4px); box-shadow: -1px -1px 0 rgba(255,255,255,.06); }
 #app-tip.left::after   { right: -4px;  top: calc(var(--arrow) - 4px);  box-shadow: 1px -1px 0 rgba(255,255,255,.06); }
 #app-tip.right::after  { left: -4px;   top: calc(var(--arrow) - 4px);  box-shadow: -1px 1px 0 rgba(255,255,255,.06); }
+
+/* Finished agents (your turn) get a quiet hollow dot; color is kept for working, blocked, crashed */
+.agent[data-status="waiting"] .agent-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--subtext); }
+
+/* Header ⋯ menu */
+#hdr-more-wrap { position: relative; }
+#hdr-more { display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 200; min-width: 180px; padding: 5px;
+  background: #151518; border-radius: var(--r-lg); box-shadow: var(--pop-shadow); }
+#hdr-more.open { display: block; }
+.hdr-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px; border: none; border-radius: var(--r-sm);
+  background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.hdr-menu-item:hover { background: var(--hover-strong); }
+.hdr-menu-item .ic, .hdr-menu-item .mi-glyph { width: 16px; color: var(--dim); text-align: center; font-size: 14px; }
+.hdr-menu-item.active { color: var(--cyan); }
+
+/* Dev servers in a group header: green dot + count; the list is in its menu */
+.server-badge { padding: 0 8px; gap: 5px; }
+.srv-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.server-badge .server-count, .server-badge:hover .server-count { background: none; padding: 0; font-size: 11px; color: var(--subtext); }
+.server-badge .server-menu-btn { display: none; }
