@@ -40,6 +40,8 @@ if (typeof document !== 'undefined') {
   const tipText = (el) => {
     const t = el.getAttribute('title');
     if (t != null) { el.dataset.tip = t; el.removeAttribute('title'); }
+    // data-tip-overflow: the element's own text, only while it's cut off with an ellipsis
+    if (el.hasAttribute('data-tip-overflow')) return el.scrollWidth > el.clientWidth ? el.textContent : '';
     return el.dataset.tip || '';
   };
   const stripTitles = (root) => {
@@ -62,19 +64,22 @@ if (typeof document !== 'undefined') {
   const hideTip = () => { clearTimeout(tipTimer); tipTarget = null; tipEl.classList.remove('show'); };
   const showTip = (el) => {
     const text = tipText(el);
-    if (!text || !el.isConnected) return;
+    if (!text || !el.isConnected) { tipEl.classList.remove('show'); return; }
     if (!tipEl.isConnected) document.body.appendChild(tipEl);
+    const r = el.getBoundingClientRect(), key = text + '|' + r.left + ',' + r.top + ',' + r.width + ',' + r.height;
+    if (tipEl.classList.contains('show') && tipEl.dataset.key === key) return; // same text, same spot: stay put
+    tipEl.dataset.key = key;
     tipEl.textContent = text;
-    tipEl.className = ''; tipEl.style.left = '0px'; tipEl.style.top = '0px'; // measure at rest
+    tipEl.style.left = '0px'; tipEl.style.top = '0px'; // measure at rest; classes stay so the fade doesn't restart
     const b = tipEl.getBoundingClientRect();
-    const p = tipPlacement(el.getBoundingClientRect(), b.width, b.height, innerWidth, innerHeight);
+    const p = tipPlacement(r, b.width, b.height, innerWidth, innerHeight);
     tipEl.style.left = p.x + 'px'; tipEl.style.top = p.y + 'px';
     tipEl.style.setProperty('--arrow', p.arrow + 'px');
     tipEl.className = 'show ' + p.side;
   };
 
   document.addEventListener('mouseover', (e) => {
-    const el = e.target.closest && e.target.closest('[data-tip], [title]'); // title: a fresh node the observer hasn't reached yet
+    const el = e.target.closest && e.target.closest('[data-tip], [title], [data-tip-overflow]'); // title: a fresh node the observer hasn't reached yet
     if (el === tipTarget) return;
     // A re-render swapped the hovered element for a fresh copy: keep the tip up and follow the new one.
     if (el && tipTarget && !tipTarget.isConnected) {
