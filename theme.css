@@ -266,3 +266,17 @@ body:not(.world-mode) #term-header { display: none; }
 .usage-empty { font-size: 11px; color: var(--dim); padding: 2px 4px; }
 /* World mode lays these out itself (flex order on the list column) */
 body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
+
+/* ── App tooltip (tooltip.js): dark bubble, arrow pointing at the element ── */
+#app-tip { position: fixed; z-index: 100000; max-width: 320px; padding: 6px 10px; border-radius: 8px;
+  background: #26262b; color: #f4f4f5; font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.06); pointer-events: none;
+  opacity: 0; transition: opacity .12s, transform .12s; }
+#app-tip.show { opacity: 1; transform: none; }
+#app-tip.top { transform-origin: bottom; } #app-tip.bottom { transform-origin: top; }
+#app-tip:not(.show).top { transform: translateY(3px); } #app-tip:not(.show).bottom { transform: translateY(-3px); }
+#app-tip::after { content: ''; position: absolute; width: 8px; height: 8px; background: #26262b; transform: rotate(45deg); }
+#app-tip.top::after    { bottom: -4px; left: calc(var(--arrow) - 4px); box-shadow: 1px 1px 0 rgba(255,255,255,.06); }
+#app-tip.bottom::after { top: -4px;    left: calc(var(--arrow) - 4px); box-shadow: -1px -1px 0 rgba(255,255,255,.06); }
+#app-tip.left::after   { right: -4px;  top: calc(var(--arrow) - 4px);  box-shadow: 1px -1px 0 rgba(255,255,255,.06); }
+#app-tip.right::after  { left: -4px;   top: calc(var(--arrow) - 4px);  box-shadow: -1px 1px 0 rgba(255,255,255,.06); }
