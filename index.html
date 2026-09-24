@@ -47,6 +47,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #pr-badge, #actions-badge { align-items:center; gap:8px; padding:5px 12px; border-top:1px solid var(--border); background:var(--title-bg); font-size:11px; color:var(--text); cursor:pointer; letter-spacing:.3px; flex-shrink:0; user-select:none; }
 #pr-badge.err, #actions-badge.err { color:#f38ba8; }
 #pr-badge.alert, #actions-badge.alert { background:#f38ba8; color:#11111b; font-weight:700; }
+#pr-badge.ready { background:#a6e3a1; color:#11111b; font-weight:700; }
+#pr-badge.split { background:linear-gradient(90deg, #f38ba8 50%, #a6e3a1 50%); color:#11111b; font-weight:700; }
+#pr-badge.ready:hover { background:#b5eab0; }
+#pr-badge.split:hover { background:linear-gradient(90deg, #f5a3b8 50%, #b5eab0 50%); }
 #pr-badge, #actions-badge { transition:background .12s, color .12s; }
 #pr-badge:hover, #actions-badge:hover { background:var(--bg3); }
 #pr-badge.alert:hover, #actions-badge.alert:hover { background:#f5a3b8; }
@@ -4993,9 +4997,11 @@ function renderPrBadge() {
   } else if (prState.prs.some(p => !prSilenced(p))) {
     const active = prState.prs.filter(p => !prSilenced(p));
     const waiting = active.filter(prNeedsApproval).length;
-    b.style.display = 'flex'; b.className = waiting > 0 ? 'alert' : '';
-    b.textContent = '⬢ ' + active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '');
-    b.title = waiting > 0 ? waiting + ' PR(s) waiting for approval' : active.length + ' open PR(s)';
+    // Green = one of mine is mergeable with green checks; red = someone's waiting on my review; both = half and half.
+    const ready = active.filter(p => p.mine && prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none')).length;
+    b.style.display = 'flex'; b.className = waiting > 0 && ready > 0 ? 'split' : waiting > 0 ? 'alert' : ready > 0 ? 'ready' : '';
+    b.textContent = '⬢ ' + active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '') + (ready > 0 ? ' · ' + ready + ' to merge' : '');
+    b.title = [waiting > 0 && waiting + ' PR(s) waiting for approval', ready > 0 && ready + ' of yours ready to merge'].filter(Boolean).join(' · ') || active.length + ' open PR(s)';
   } else if (prState.prs.some(p => !p.archived)) {
     // Only muted PRs remain — keep a quiet entry so the dropdown stays reachable to un-mute.
     const n = prState.prs.filter(p => !p.archived).length;
