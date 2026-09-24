@@ -2,11 +2,11 @@
 // can be tested without xterm.
 //
 // Claude Code echoes every submitted prompt into the scrollback with the same
-// marker it draws the live input line with ("❯ ", or "│ > " in the older boxed
-// skin). The live line must be excluded: it sits on the current screen, so
-// "jump to it" scrolls nowhere and reads as a broken button.
+// marker it draws the live input line with ("❯ ", "> " at column 0 in some
+// builds, or "│ > " in the older boxed skin). The live line must be excluded: it
+// sits on the current screen, so "jump to it" scrolls nowhere and reads as a broken button.
 
-const PROMPT_ROW_MARKER = /^\s*(?:❯|[│┃]\s+>\s)/;
+const PROMPT_ROW_MARKER = /^\s*(?:❯|[│┃]\s+>\s)|^> /; // indented "> " is quoted output, not a prompt
 
 // rows: rendered buffer lines, baseY: index of the first row of the current
 // screen. Returns the buffer indices of submitted prompts, oldest first.

@@ -3225,33 +3225,19 @@ function updatePromptNav() {
   counter.textContent = label + '/' + total;
 }
 
-// DIAG (temporary): every click reports what the scan saw and where the
-// viewport ended up. Remove once prompt jumping is confirmed working.
 function jumpPrompt(dir) {
- try {
   const a = selectedId != null ? agents.get(selectedId) : null;
-  if (!a) { showToast('jump: no agent selected'); return; }
+  if (!a) return;
   if (termTab === 'timeline') { jumpTimelinePrompt(dir); return; }
   const x = xterms.get(selectedId);
   const promptLines = getPromptLines();
   const total = promptLines.length;
-  const buf = x ? x.terminal.buffer.normal : null;
-  const before = buf ? buf.viewportY : -1;
-  if (total === 0) {
-    showToast('jump: 0 prompts found (buffer ' + (buf ? buf.length : '?') + ' lines, baseY ' + (buf ? buf.baseY : '?') + ')');
-    return;
-  }
+  if (!x || total === 0) return;
   const newIdx = nextNavIdx(a.promptNavIdx, dir, total); // prompt-nav.js
   a.promptNavIdx = newIdx;
   updatePromptNav();
-  if (!x) { showToast('jump: no terminal'); return; }
-  if (newIdx >= total) { x.terminal.scrollToBottom(); }
+  if (newIdx >= total) x.terminal.scrollToBottom();
   else x.terminal.scrollToLine(Math.max(0, promptLines[newIdx] - 1));
-  const target = newIdx >= total ? 'bottom' : String(promptLines[newIdx]);
-  showToast('jump: ' + total + ' prompts, idx ' + newIdx + ', line ' + target
-    + ', viewportY ' + before + '→' + x.terminal.buffer.normal.viewportY
-    + ', baseY ' + x.terminal.buffer.normal.baseY);
- } catch (e) { showToast('jump error: ' + e.message); }
 }
 
 let _tlPromptIdx = -1;

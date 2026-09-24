@@ -21,6 +21,9 @@ assert.deepStrictEqual(promptRows(rows, baseY), [1, 3]);
 // Old bordered-box style still recognised
 assert.deepStrictEqual(promptRows(['│ > boxed prompt │', 'out'], 1), [0]);
 
+// Some Claude builds echo prompts with a plain "> " at column 0
+assert.deepStrictEqual(promptRows(['> plain prompt', '  > quoted output', 'out'], 3), [0]);
+
 // Navigation: total=2 prompts, index 2 is the virtual "bottom" entry.
 assert.strictEqual(nextNavIdx(2, -1, 2), 1);   // from bottom → last prompt
 assert.strictEqual(nextNavIdx(1, -1, 2), 0);
