@@ -1119,7 +1119,7 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x2912;</button><div id="prompt-rail"><div class="pr-dashes"></div><div class="pr-pop"></div></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x2913;</button></div></div>
+    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 7v14"/></svg></button><div id="prompt-rail"><div class="pr-dashes"></div><div class="pr-pop"></div></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg></button></div></div>
     <div id="conversation"></div>
     <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
   </div>
@@ -3121,8 +3121,8 @@ function renderPromptRail(lines) {
     rail.classList.toggle('has', lines.length > 0);
     const dashes = rail.querySelector('.pr-dashes'), pop = rail.querySelector('.pr-pop');
     dashes.replaceChildren(); pop.replaceChildren();
-    // ponytail: last 20 dashes only, so the rail never outgrows the nav stack; the hover list has them all
-    lines.slice(-20).forEach(() => dashes.appendChild(document.createElement('i')));
+    // ponytail: last 14 dashes only, so the rail stays short; the hover list has them all
+    lines.slice(-14).forEach(() => dashes.appendChild(document.createElement('i')));
     texts.forEach((t, i) => {
       const item = document.createElement('div');
       item.textContent = t || '(empty prompt)';
