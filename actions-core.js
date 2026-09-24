@@ -72,6 +72,13 @@ function nextPollDelay(rows, intervalSec) {
   return Math.max(30, Number(intervalSec) || 60) * 1000;
 }
 
+// Runs grouped by repo for the dropdown, first-seen order kept on both levels.
+function groupRunsByRepo(runs) {
+  const by = new Map();
+  for (const r of runs) { if (!by.has(r.repo)) by.set(r.repo, []); by.get(r.repo).push(r); }
+  return [...by].map(([repo, list]) => ({ repo, runs: list }));
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, REPO_RE };
+  module.exports = { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, REPO_RE };
 }

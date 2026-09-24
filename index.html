@@ -5517,7 +5517,7 @@ function actionsRowHtml(r) {
     ? `<span class="act-ahead" title="${escapeHtml(r.ahead.title)}">+${r.ahead.count}</span>` : '';
   return `<div class="act-row act-${state}" onclick="openActionRun('${u}')">${copyBtn}`
     + `<div>${escapeHtml(r.name || r.file)}<span class="act-pill act-${state}">${label}</span>${ahead}</div>`
-    + `<div class="act-meta">${escapeHtml(r.repo)}${meta ? ' · ' + meta : ''}</div></div>`;
+    + (meta ? `<div class="act-meta">${meta}</div>` : '') + `</div>`; // the repo is the group header above
 }
 
 function actionsDropdownHtml() {
@@ -5533,7 +5533,13 @@ function actionsDropdownHtml() {
   const rank = { running: 0, failure: 1, cancelled: 2, none: 3, success: 4 };
   const sorted = [...actionsState.runs].sort((a, b) => (rank[a.state] ?? 5) - (rank[b.state] ?? 5));
   const stale = actionsState.error ? `<div class="pr-empty" style="color:#fab387">⚠ Last refresh failed: ${escapeHtml(actionsState.error)}</div>` : '';
-  return head + sorted.map(actionsRowHtml).join('') + stale;
+  // Grouped by repo; the repo with a running or failed run comes first (actions-core.js)
+  const groups = groupRunsByRepo(sorted).map(g => {
+    const [owner, name] = g.repo.split('/');
+    return `<div class="act-repo" title="${escapeHtml(g.repo)}"><span>${escapeHtml(name || g.repo)}</span><span class="act-owner">${escapeHtml(owner)}</span></div>`
+      + g.runs.map(actionsRowHtml).join('');
+  }).join('');
+  return head + groups + stale;
 }
 
 function renderActionsBadge() {

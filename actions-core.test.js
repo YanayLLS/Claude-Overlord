@@ -1,6 +1,6 @@
 // Run: node actions-core.test.js
 const assert = require('assert');
-const { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures } = require('./actions-core');
+const { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo } = require('./actions-core');
 
 // ── parseWorkflowInput ────────────────────────────────
 assert.deepStrictEqual(
@@ -79,5 +79,14 @@ assert.deepStrictEqual(diffNewFailures([F], null), []);
 // non-failures never fire
 assert.deepStrictEqual(diffNewFailures([{ key: 'k', state: 'success' }], { k: 'failure' }), []);
 assert.deepStrictEqual(diffNewFailures([], { k: 'running' }), []);
+
+// ── groupRunsByRepo ───────────────────────────────────
+// Keeps the incoming order: the caller sorts running/failed first, so the repo
+// that needs you most leads, and its runs stay in that order inside the group.
+const R = (repo, name, state) => ({ repo, name, state });
+const runs = [R('o/b', 'deploy', 'running'), R('o/a', 'prod', 'failure'), R('o/b', 'prod', 'success'), R('o/a', 'dev', 'success')];
+assert.deepStrictEqual(groupRunsByRepo(runs).map(g => [g.repo, g.runs.map(r => r.name)]),
+  [['o/b', ['deploy', 'prod']], ['o/a', ['prod', 'dev']]]);
+assert.deepStrictEqual(groupRunsByRepo([]), []);
 
 console.log('ok — all actions-core checks passed');
