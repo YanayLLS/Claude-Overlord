@@ -2063,6 +2063,8 @@ async function restartAgent(id) {
 function exportAgent(id) { api.send({ type: 'exportTranscript', id }); }
 function urlForAgent(id) { const a = agents.get(id); if (!a || !a.servers || a.servers.size === 0) return ''; const sorted = [...a.servers.entries()].sort((x, y) => x[0] - y[0]); return sorted[0][1]; }
 function syncPreview() { if (!window.preview) return; window.preview.setActiveAgent(selectedId); window.preview.setUrl(selectedId != null ? urlForAgent(selectedId) : ''); }
+// Stable avatar color per agent name — same name, same hue, every launch.
+function avatarHue(name) { let h = 0; for (const c of String(name)) h = (h * 31 + c.codePointAt(0)) % 360; return h; }
 function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
@@ -2166,6 +2168,7 @@ function showServerMenu(e, items) {
     btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(205,214,244,.06)'; });
     btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
     if (it.cls === 'ctx-danger') { btn.style.color = 'var(--red)'; }
+    if (it.active) { btn.style.color = 'var(--cyan)'; btn.style.fontWeight = '600'; }
     btn.onclick = () => { menu.remove(); it.action(); };
     menu.appendChild(btn);
   }
@@ -2295,7 +2298,7 @@ function showEffortMenu(e, id) {
   const m = CLAUDE_MODELS.find(x => x.id === (a?.stats?.model || ''))
          || CLAUDE_MODELS.find(x => x.family === (a?.stats?.modelFamily || ''));
   const levels = m?.efforts || [];
-  const cur = agentEffort.get(id);
+  const cur = agentEffort.get(id) || a?.stats?.effort; // menu pick shows at once; transcript reports it from the next turn
   const items = [{ header: 'Effort level' }];
   if (!levels.length) {
     if (!CLAUDE_MODELS.length) requestModels();
@@ -2303,7 +2306,7 @@ function showEffortMenu(e, id) {
       : (modelsError || 'Loading models…'), action: () => {} });
   } else {
     for (const lv of ['auto', ...levels]) {
-      items.push({ label: lv + (cur === lv ? '  · current' : ''), action: () => setEffort(id, lv) });
+      items.push({ label: (cur === lv ? '✓ ' : '   ') + lv, active: cur === lv, action: () => setEffort(id, lv) });
     }
   }
   showServerMenu(e, items);
@@ -2569,7 +2572,7 @@ function render() {
       const mf = a.stats?.modelFamily || '';
       html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}${needsAnswer(a) ? ' needs-answer' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
-        <span class="agent-dot"></span>
+        <span class="agent-dot" style="--h:${avatarHue(a.agentName || title)}">${esc(((a.agentName || title || '?').trim()[0] || '?').toUpperCase())}</span>
         <span class="agent-name" onmouseenter="this.title=this.scrollWidth>this.clientWidth?this.textContent:''" onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
         <div class="agent-mid">
           ${a.currentFileName ? `<span class="agent-current-file" title="${escAttr(a.currentFile)}" data-file="${escAttr(a.currentFile)}" onclick="event.stopPropagation();openFile(${id},this.dataset.file)">${esc(a.currentFileName)}</span>` : ''}
@@ -3616,7 +3619,7 @@ function handleAgentMsg(msg) {
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = -1; /* -1 = at bottom; the buffer scan owns the real range */ if (selectedId === msg.id) updatePromptNav(); } break; }
     case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; scheduleRender(); } break; }
-    case 'stats': { const a = agents.get(msg.id); if (a) { a.stats = msg.stats; scheduleRender(); } break; }
+    case 'stats': { const a = agents.get(msg.id); if (a) { if (msg.stats.effort !== a.stats?.effort) agentEffort.delete(msg.id); a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
     case 'focused': selectedId = msg.id; scheduleRender(); break;
     case 'focusFromNotification': focusAgent(msg.id); break;
