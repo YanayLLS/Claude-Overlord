@@ -52,9 +52,10 @@ function createMcpServer({ resolveActions }) {
   const byAgent = new Map(); // agentId -> token
   let server = null;
 
-  function mintToken(agentId) {
+  // reuse: the token an agent that survived an app restart still has in its MCP config.
+  function mintToken(agentId, reuse) {
     if (byAgent.has(agentId)) return byAgent.get(agentId);
-    const token = crypto.randomUUID();
+    const token = reuse || crypto.randomUUID();
     tokens.set(token, agentId);
     byAgent.set(agentId, token);
     return token;
@@ -77,12 +78,14 @@ function createMcpServer({ resolveActions }) {
     catch (e) { reply(res, 200, err(msg.id, -32603, e.message || 'Internal error')); }
   }
 
-  function start() {
-    return new Promise((resolve, reject) => {
+  // preferredPort: last launch's port, so agents that survived a restart can still reach us.
+  function start(preferredPort) {
+    const listen = (p) => new Promise((resolve, reject) => {
       server = http.createServer((req, res) => { onRequest(req, res).catch(() => reply(res, 500, null)); });
-      server.on('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
+      server.once('error', reject);
+      server.listen(p, '127.0.0.1', resolve);
     });
+    return preferredPort ? listen(preferredPort).catch(() => listen(0)) : listen(0);
   }
 
   const stop = () => new Promise((resolve) => (server ? server.close(() => resolve()) : resolve()));

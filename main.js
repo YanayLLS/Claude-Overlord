@@ -13,7 +13,9 @@ const pc = require('./peer-core');
 const { createRegistry } = require('./browser/registry');
 const { createMcpServer } = require('./mcp/server');
 const { writeAgentConfig, settingsFlags, removeAgentConfig } = require('./mcp/agent-config');
+const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
+const { createPtyClient, pipePathFor, hostLauncher } = require('./pty-client');
 
 
 // ── Constants ──────────────────────────────────────────
@@ -85,6 +87,9 @@ const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./pr-eta');
 const { pickResumedFile } = require('./resume-core');
+const { applyBgRecord } = require('./bg-core');
+// 'waiting' only when at the prompt AND no background shell/agent is still going
+const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered } = require('./recover-core');
 const { migrateLegacy } = require('./state-dir');
@@ -163,6 +168,7 @@ async function doGitPull() {
     // before-quit already hands running agents to detached processes that the
     // next launch reattaches, so a relaunch is a supported path, not a kill.
     forceQuit = true; // this restart was explicitly asked for — skip the close prompt
+    _restarting = true;
     setTimeout(() => { app.relaunch(); app.quit(); }, 400);
   } catch (e) {
     fail(e.message);
@@ -284,6 +290,14 @@ let mainWindow = null;
 let browserRegistry = null;
 let mcpServer = null;
 let preview = null;
+// Agent terminals live in pty-host.js, a process of their own, so an app restart
+// doesn't kill the Claude sessions inside them. Until it's connected (or if it
+// can't start) agents fall back to in-process ptys, which die with the app.
+const _ptyPipe = pipePathFor(STATE_DIR);
+const ptyHost = createPtyClient({ pipePath: _ptyPipe, launchHost: hostLauncher(path.join(__dirname, 'pty-host.js'), _ptyPipe) });
+let _ptyHostReady = Promise.resolve(false);
+const agentPty = () => (ptyHost.connected ? ptyHost : pty);
+let _restarting = false; // an app restart, not a close: every agent stays alive in the host
 
 // CLI flags binding one agent to its own embedded browser, and denying the
 // Chrome-extension MCP server that relays to whatever machine has the extension
@@ -381,8 +395,7 @@ function sendFullState() {
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
     if (a.title) send({ type: 'title', id, text: a.title, customName: a.customName || false });
-    if (a.isWaiting) send({ type: 'status', id, status: 'waiting' });
-    else send({ type: 'status', id, status: 'active' });
+    send({ type: 'status', id, status: shownStatus(a) });
     for (const [tid, st] of a.toolStatuses) {
       send({ type: 'toolStart', id, toolId: tid, status: st, name: a.toolNames.get(tid) });
       const subs = a.subToolIds.get(tid);
@@ -581,6 +594,8 @@ async function ghostComplete(id, reqId, prefix, context) {
 // Check if text is a system/internal message rather than a real user prompt
 const SYSTEM_MSG_RE = /^<(?:command-name|local-command|system-reminder|task-notification|user-prompt-submit-hook|antml:)/;
 function isSystemMessage(text) { return SYSTEM_MSG_RE.test(text.trim()); }
+// Claude Code appends reminder-only user records while idle (e.g. after /rename) — not a turn start
+function isReminderOnly(text) { return text.trim().startsWith('<system-reminder>'); }
 
 function getLanIp() {
   const nets = os.networkInterfaces();
@@ -705,7 +720,7 @@ function extractSpinnerText(id, data) {
           if (a) {
             if (a.spinnerText) { a.spinnerText = ''; send({ type: 'spinnerText', id, text: '' }); }
             // ponytail: pty completion line = ground-truth turn-done; backstop when turn_duration is missing (else stuck 'active' forever)
-            if (!a.isWaiting) { a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers); send({ type: 'status', id, status: 'waiting' }); flushPeerMsgs(id); }
+            if (!a.isWaiting) { a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers); send({ type: 'status', id, status: shownStatus(a) }); flushPeerMsgs(id); }
           }
           return;
         }
@@ -895,7 +910,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null });
+    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -1020,6 +1035,7 @@ function restoreAgents(state) {
       stats: savedStats,
     };
     agents.set(id, agent);
+    if (entry.mcpToken && mcpServer) mcpServer.mintToken(id, entry.mcpToken);
     if (!agent.agentName) agent.agentName = pickAgentName();
     restoredNames.add(agent.agentName);
     agentEntries.push({ id, entry });
@@ -1047,11 +1063,26 @@ function restoreAgents(state) {
     // Kill saved orphan PIDs + anything still holding a session lock — one process
     // scan for all agents instead of one wmic call per agent. All terminal spawns
     // wait on _restoreSweep so the sweep can never kill a freshly spawned claude.
+    // Agents whose Claude is still running in the pty host (app restart) get
+    // reattached, not swept: killing them is exactly what the host exists to avoid.
+    const live = new Set((await _ptyHostReady) ? (await ptyHost.list()).map(p => p.key) : []);
+    const survivors = agentEntries.filter(({ entry }) => entry.ptyKey && live.has(entry.ptyKey));
+    const fresh = agentEntries.filter(x => !survivors.includes(x));
+    for (const key of live) if (!survivors.some(({ entry }) => entry.ptyKey === key)) ptyHost.kill(key); // a spare or closed agent nobody will reattach
+    for (const { id, entry } of survivors) {
+      const proc = await ptyHost.attach(entry.ptyKey);
+      const ag = agents.get(id);
+      if (!proc || !ag) continue;
+      ag.isWaiting = !entry.wasActive;
+      try { ag.fileOffset = fs.statSync(ag.jsonlFile).size; } catch {} // doSpawnTerminal starts the watcher: don't re-read the whole transcript
+      doSpawnTerminal(id, proc);
+      send({ type: 'status', id, status: shownStatus(ag) });
+    }
     const sweep = (async () => {
-      await Promise.all(agentEntries.map(({ entry }) => killProcessTreeAsync(entry.pid)));
-      await killProcessesByCmdline(agentEntries.map(({ entry }) => entry.sessionId));
+      await Promise.all(fresh.map(({ entry }) => killProcessTreeAsync(entry.pid)));
+      await killProcessesByCmdline(fresh.map(({ entry }) => entry.sessionId));
       // Sessions swept — spawnTerminal can skip its own kill pass for these agents.
-      for (const { id } of agentEntries) { const ag = agents.get(id); if (ag) ag._sessionCleaned = true; }
+      for (const { id } of fresh) { const ag = agents.get(id); if (ag) ag._sessionCleaned = true; }
     })();
     _restoreSweep = sweep;
     await sweep;
@@ -1069,6 +1100,7 @@ function restoreAgents(state) {
               const r = JSON.parse(line);
               if (r.type === 'assistant' && r.message?.usage) {
                 if (r.message.model) { agent.stats.modelFamily = modelFamily(r.message.model); agent.stats.model = r.message.model; }
+                if (r.effort) agent.stats.effort = r.effort;
                 const u = r.message.usage;
                 agent.stats.inTok += u.input_tokens || 0;
                 agent.stats.outTok += u.output_tokens || 0;
@@ -1105,6 +1137,7 @@ function restoreAgents(state) {
               if (r.type === 'system' && r.subtype === 'compact_boundary') {
                 agent.stats.ctxTok = 0;
               }
+              applyBgRecord(agent.bgTasks ||= new Set(), r);
               if (r.type === 'system' && r.subtype === 'turn_duration') {
                 agent.stats.turns++;
                 agent.stats.durMs += r.durationMs || 0;
@@ -1128,6 +1161,9 @@ function restoreAgents(state) {
       // killed pre-warming came from sync wmic kills, not from spawning itself.
       if (!agent.archived) queuePrewarm(id);
     }
+    // After the resumes: warm a spare where the newest agent lives — likely where the next one goes.
+    const newest = [...agents.values()].filter(a => !a.archived).sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (newest) _prewarmChain.then(() => scheduleSpare(newest.cwd));
   })();
 }
 
@@ -1159,6 +1195,7 @@ function handleTermExit(id, exitCode) {
   const a = agents.get(id);
   if (!a) return;
   terminals.delete(id);
+  a.bgTasks?.clear(); // background shells/agents die with the Claude process
   a.claudeReady = false; // peer messages queue until a new pty shows Claude's prompt
   if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
   // If we're retrying due to --resume failure, don't treat as crash or send termExit
@@ -1236,7 +1273,8 @@ function spawnTerminal(id) {
   })();
 }
 
-function doSpawnTerminal(id) {
+// attached: a pty still running in the host from before an app restart.
+function doSpawnTerminal(id, attached) {
   const a = agents.get(id);
   if (!a) return;
   const hasJsonl = fs.existsSync(a.jsonlFile);
@@ -1249,11 +1287,24 @@ function doSpawnTerminal(id) {
   // crashes went unnoticed (no auto-resume). /c exits with Claude's own exit code.
   const args = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   try {
-    const proc = pty.spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
+    const proc = attached || agentPty().spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
     terminals.set(id, proc);
-    applyLastTermSize(id, proc);
-    a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
     if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
+    if (attached) {
+      // Same Claude process as before the restart: it's already at its prompt or mid-turn.
+      a.claudeReady = true;
+      a._resumeHandled = true; // its boot output is long gone — nothing to scan for resume errors
+      termBuffers.set(id, (proc.replay || '').slice(-TERM_BUFFER_MAX));
+      if (proc.replay) send({ type: 'termData', id, data: proc.replay });
+      // The replay starts mid-stream; a size change makes Claude repaint the whole screen.
+      const sz = spawnSize(id);
+      try { proc.resize(sz.cols, Math.max(1, sz.rows - 1)); } catch {}
+      setTimeout(() => { try { proc.resize(sz.cols, sz.rows); } catch {} }, 150);
+    } else {
+      a.bgTasks?.clear(); // a new Claude process — the old one's background tasks died with it
+      applyLastTermSize(id, proc);
+      a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
+    }
     // Flush any input that arrived before PTY was ready
     const queued = pendingTermInput.get(id);
     if (queued && queued.length > 0) {
@@ -1274,7 +1325,12 @@ function doSpawnTerminal(id) {
         const probe = (a._readyBuf || '') + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|[\x00-\x08\x0b-\x1f\x7f]/g, '');
         if (/Welcome back|\? for shortcuts|Try ["']/.test(probe)) {
           a._readyBuf = '';
-          a._readyTimer = setTimeout(() => { a._readyTimer = null; a.claudeReady = true; sendCrashNudge(id); flushPeerMsgs(id); }, 4000);
+          a._readyTimer = setTimeout(() => {
+            a._readyTimer = null; a.claudeReady = true;
+            // Resumed after a crash at the prompt: nothing else will clear 'resuming' until the next turn
+            if (a.crashed && !a._crashNudge) { a.crashed = false; send({ type: 'status', id, status: shownStatus(a) }); }
+            sendCrashNudge(id); flushPeerMsgs(id);
+          }, 4000);
         } else {
           a._readyBuf = probe.slice(-256);
         }
@@ -1331,10 +1387,55 @@ function doSpawnTerminal(id) {
 }
 
 // ── Agent lifecycle ────────────────────────────────────
+// ── Warm spare ─────────────────────────────────────────
+// `claude` needs ~1s to boot. Keep one already booted in the last folder an agent
+// was created in; the next new agent there adopts it and is typeable at once.
+// ponytail: one spare for the most recent folder; per-project spares if people hop folders a lot.
+const SPARE_DELAY_MS = 5000; // after a launch — concurrent claude startups race-write ~/.claude.json
+let spare = null; // { id, sessionId, cwd, key, proc, buf, bornAt, exited, adopted }
+let _spareTimer = null;
+function spareKey(cwd) {
+  return `${!!settings.bypassPermissions}|${featureAgentArgs(cwd).flags}|${(mcpServer && mcpServer.port()) || 0}`;
+}
+function dropSpare() {
+  if (!spare) return;
+  const s = spare; spare = null;
+  if (!s.exited) killPty(s.proc);
+  if (mcpServer) mcpServer.revokeToken(s.id);
+  removeAgentConfig(s.id);
+}
+function scheduleSpare(cwd) {
+  clearTimeout(_spareTimer);
+  _spareTimer = setTimeout(() => {
+    if (spareFits(spare, cwd, spareKey(cwd))) return;
+    dropSpare();
+    const id = nextId++;
+    const sessionId = crypto.randomUUID();
+    const feat = featureAgentArgs(cwd);
+    const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
+    const cmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}`;
+    const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+    const args = process.platform === 'win32' ? `/c ${cmd}` : ['-c', cmd];
+    try {
+      const s = { id, sessionId, cwd, key: spareKey(cwd), buf: '', bornAt: Date.now(), exited: false, adopted: false };
+      s.proc = agentPty().spawn(shell, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env }) });
+      s.proc.onData((d) => { if (!s.adopted) s.buf += d; });
+      s.proc.onExit(() => { s.exited = true; if (spare === s) dropSpare(); });
+      spare = s;
+    } catch (e) { flog('spare spawn failed:', e); }
+  }, SPARE_DELAY_MS);
+}
+function takeSpare(cwd) {
+  if (!spareFits(spare, cwd, spareKey(cwd))) return null;
+  const s = spare; spare = null; s.adopted = true;
+  return s;
+}
+
 function createAgent(folderPath, initialPrompt) {
   const cwd = folderPath || os.homedir();
-  const sessionId = crypto.randomUUID();
-  const id = nextId++;
+  const warm = takeSpare(cwd);
+  const sessionId = warm ? warm.sessionId : crypto.randomUUID();
+  const id = warm ? warm.id : nextId++;
   const agent = {
     id, sessionId, cwd,
     jsonlFile: path.join(claudeDir(cwd), `${sessionId}.jsonl`),
@@ -1361,11 +1462,17 @@ function createAgent(folderPath, initialPrompt) {
 
   const agentEnv = cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env });
   try {
-    const proc = pty.spawn(shell, shellArgs, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: agentEnv });
+    const proc = warm ? warm.proc : agentPty().spawn(shell, shellArgs, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
     applyLastTermSize(id, proc);
     let promptSent = !initialPrompt;
-    proc.onData((d) => {
+    // A spare that finished booting is already sitting at its prompt — the `>`
+    // probe below never sees a fresh prompt paint, so send the prompt now.
+    if (initialPrompt && warm && Date.now() - warm.bornAt > 3000) {
+      promptSent = true;
+      setTimeout(() => { try { proc.write(initialPrompt + '\r'); } catch {} }, 100);
+    }
+    const onData = (d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
       // Buffer terminal output for mobile remote
       let buf = termBuffers.get(id) || '';
@@ -1396,7 +1503,9 @@ function createAgent(folderPath, initialPrompt) {
           setTimeout(() => { try { proc.write(initialPrompt + '\r'); } catch {} }, 100);
         }
       }
-    });
+    };
+    proc.onData(onData);
+    if (warm && warm.buf) onData(warm.buf); // replay what the spare painted while idle
     proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
     // Fallback: send prompt after timeout if ready-detection didn't fire
     if (initialPrompt) {
@@ -1413,6 +1522,7 @@ function createAgent(folderPath, initialPrompt) {
     if (fs.existsSync(agent.jsonlFile)) { clearInterval(poll); startWatch(id); }
   }, JSONL_POLL_MS);
   polls.set(id, poll);
+  scheduleSpare(cwd); // the next new agent here starts instantly
   return id;
 }
 
@@ -1526,6 +1636,8 @@ function parseLine(id, line) {
   const a = agents.get(id); if (!a) return;
   try {
     const r = JSON.parse(line);
+    // Ledger moved while at the prompt (e.g. a background task finished) → re-show status
+    if (applyBgRecord(a.bgTasks ||= new Set(), r) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
     // Session rename. Claude Code persists /rename as a custom-title line, and
     // agents that rename themselves append the same line — so this is the one
     // source that covers both, and it's what /resume displays.
@@ -1541,6 +1653,7 @@ function parseLine(id, line) {
     if (r.type === 'assistant') {
       // Extract usage/model regardless of content format (matches restore logic)
       if (r.message?.model) { a.stats.modelFamily = modelFamily(r.message.model); a.stats.model = r.message.model; }
+      if (r.effort) a.stats.effort = r.effort; // Claude Code stamps the live /effort level on each assistant entry
       const u = r.message?.usage;
       if (u) { a.stats.inTok += u.input_tokens || 0; a.stats.outTok += u.output_tokens || 0; a.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); a.stats.cacheTok += u.cache_creation_input_tokens || 0; a.stats.cacheRead += u.cache_read_input_tokens || 0; send({ type: 'stats', id, stats: a.stats }); }
     }
@@ -1587,10 +1700,12 @@ function parseLine(id, line) {
           if (a.toolIds.size === 0) { a.hadTools = false; }
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-          if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); }
-          clrActivity(id); a.hadTools = false; a.turnTools = 0;
+          if (!isReminderOnly(txt)) {
+            if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); }
+            clrActivity(id); a.hadTools = false; a.turnTools = 0;
+          }
         }
-      } else if (typeof c === 'string' && c.trim()) {
+      } else if (typeof c === 'string' && c.trim() && !isReminderOnly(c)) {
         setPrompt(id, a, c);
         confirmPeerInjection(a, c.trim());
         clrActivity(id); a.hadTools = false; a.turnTools = 0;
@@ -1614,7 +1729,7 @@ function parseLine(id, line) {
         console.log(`[Overlord] Orphaned Claude for agent ${id} finished — ready for terminal`);
         send({ type: 'termData', id, data: '\x1b[32m[Previous session turn completed. Click to reconnect.]\x1b[0m\r\n' });
       }
-      send({ type: 'status', id, status: 'waiting' });
+      send({ type: 'status', id, status: shownStatus(a) });
       flushPeerMsgs(id);
       if (a.stats.turns === 1 || a.stats.turns % TITLE_REGEN_TURNS === 0) generateSummaryTitle(id);
     } else if (r.type === 'progress') {
@@ -1807,7 +1922,7 @@ function reassignAgentToFile(id, newFilePath) {
   send({ type: 'promptHistory', id, prompts: [] });
   // After /clear, agent is idle at prompt — mark as waiting (done)
   a.isWaiting = true;
-  send({ type: 'status', id, status: 'waiting' });
+  send({ type: 'status', id, status: shownStatus(a) });
   // Switch to new file
   const newSessionId = path.basename(newFilePath, '.jsonl');
   a.sessionId = newSessionId;
@@ -3672,8 +3787,10 @@ function handleIpc(msg) {
       break;
     }
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
-    case 'fullRestart': app.relaunch(); app.exit(0); break;
-    case 'installUpdate': forceQuit = true; autoUpdater.quitAndInstall(); break;
+    // quit, not exit: exit skips before-quit, so nothing would get saved for the reattach.
+    case 'fullRestart': forceQuit = true; _restarting = true; app.relaunch(); app.quit(); break;
+    // The host runs from the app's own files, so it has to go before the installer replaces them.
+    case 'installUpdate': forceQuit = true; ptyHost.shutdown(); setTimeout(() => autoUpdater.quitAndInstall(), 700); break;
     case 'checkGitUpdate': checkGitUpdate(); break;
     case 'gitPull': doGitPull(); break;
     case 'approvePr': {
@@ -3828,7 +3945,7 @@ function handleIpc(msg) {
       const email = getAccountEmail();
       const label = msg.label || email || `Account ${data.accounts.length + 1}`;
       const entry = { label, email, meta, credentials: creds };
-      const idx = data.accounts.findIndex(a => a.label === label);
+      const idx = data.accounts.findIndex(a => (email && a.email === email) || a.label === label);
       if (idx >= 0) data.accounts[idx] = entry;
       else data.accounts.push(entry);
       data.activeLabel = label;
@@ -3852,11 +3969,12 @@ function handleIpc(msg) {
       data.activeLabel = target.label;
       saveAccountsFile(data);
       _cachedAuthStatus = null;
-      refreshAuthStatus(true);
       lastUsage = null;
       send({ type: 'accountInfo', ...getCurrentAccountInfo() });
       send({ type: 'usage', usage: null });
-      // Run token verification via claude auth login (opens browser if needed)
+      // Saved creds carry a refresh token — only open the browser if the CLI says they're dead.
+      refreshAuthStatus(true).then(() => {
+      if (_cachedAuthStatus?.loggedIn) { fetchUsage(); return; }
       const switchLoginProc = spawn('claude', ['auth', 'login'], { shell: true, stdio: 'ignore', detached: true });
       switchLoginProc.unref();
       let switchPrevToken = getApiKey();
@@ -3880,6 +3998,7 @@ function handleIpc(msg) {
         }
       }, 1000);
       setTimeout(() => clearInterval(switchCheckInterval), 120000);
+      });
       break;
     }
     case 'addAccount': {
@@ -3988,7 +4107,7 @@ setInterval(() => {
     try { mtimeMs = fs.statSync(a.jsonlFile).mtimeMs; } catch { continue; }
     if (now - mtimeMs < STATUS_STUCK_MS) continue;
     a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers);
-    send({ type: 'status', id, status: 'waiting' });
+    send({ type: 'status', id, status: shownStatus(a) });
   }
 }, STATUS_STUCK_MS);
 
@@ -4013,7 +4132,7 @@ function handleRemoteCmd(msg) {
     case 'getState': {
       const agentList = [];
       for (const [id, a] of agents) {
-        const st = a.isWaiting ? 'waiting' : (a.toolIds.size > 0 || a.hadTools ? 'active' : 'idle');
+        const st = shownStatus(a) === 'waiting' ? 'waiting' : (a.bgTasks?.size || a.toolIds.size > 0 || a.hadTools ? 'active' : 'idle');
         agentList.push({
           id, cwd: a.cwd, title: a.title, customName: a.customName,
           agentName: a.agentName, status: st, lastPrompt: a.lastPrompt,
@@ -4906,7 +5025,8 @@ app.whenReady().then(() => {
     onNavigated: (id, url) => { send({ type: 'previewLoaded', id, url }); if (preview) preview.onAgentNavigated(id, url); },
   });
   mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
-  mcpServer.start().catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
+  mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
+  _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
   preview = createPreviewController({ window: mainWindow, registry: browserRegistry, send, writeToAgent: (id, text) => handleTermInput(id, text) });
   if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -4994,45 +5114,16 @@ app.whenReady().then(() => {
   }
 });
 app.on('before-quit', () => {
+  clearTimeout(_spareTimer); dropSpare();
   if (remoteServer) { try { remoteServer.close(); } catch {} }
   if (remoteWs) { try { remoteWs.destroy(); } catch {} }
   if (mcpServer) { try { mcpServer.stop(); } catch {} }
   if (preview) { try { preview.destroy(); } catch {} }
   if (browserRegistry) { try { browserRegistry.destroyAll(); } catch {} }
-  // Spawn detached Claude processes for active agents so they survive the app restart.
-  // The detached process continues the current turn headlessly; on restore the app
-  // kills it via saved PID before reconnecting.
-  const detachedPids = new Map(); // sessionId -> pid
-  for (const [id, a] of agents) {
-    if (!terminals.has(id)) continue; // no live terminal, nothing to preserve
-    const wasActive = !a.isWaiting;
-    if (!wasActive) continue;
-    const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
-    const cmd = `claude --resume ${a.sessionId}${skip}${agentClaudeFlags(id, { browser: false })}`;
-    try {
-      const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
-      const args = process.platform === 'win32' ? ['/c', cmd] : ['-c', cmd];
-      const child = spawn(sh, args, { cwd: safeCwd(a.cwd), detached: true, stdio: 'ignore', env: { ...process.env } });
-      child.unref();
-      detachedPids.set(a.sessionId, child.pid);
-      console.log(`[Overlord] Spawned detached Claude for agent ${id} (session ${a.sessionId}, pid ${child.pid})`);
-    } catch (e) {
-      console.log(`[Overlord] Failed to spawn detached Claude for agent ${id}:`, e.message);
-    }
-  }
-  // Update state file with detached PIDs so next startup can kill them
-  if (detachedPids.size > 0) {
-    try {
-      const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
-      for (const entry of (data.agents || [])) {
-        const dpid = detachedPids.get(entry.sessionId);
-        if (dpid) entry.pid = dpid;
-      }
-      writeDurable(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
-      fs.renameSync(STATE_FILE + '.tmp', STATE_FILE);
-    } catch (e) {
-      console.log('[Overlord] Failed to save detached PIDs:', e.message);
-    }
+  // Agents live on in the pty host. A restart keeps all of them; a real close
+  // keeps only the ones mid-turn, so their work finishes and they reattach next launch.
+  if (!_restarting) {
+    for (const [id, a] of agents) { const t = terminals.get(id); if (t && t.key && a.isWaiting) killPty(t); }
   }
 });
 app.on('window-all-closed', () => app.quit());

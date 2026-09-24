@@ -34,6 +34,36 @@ if (typeof document !== 'undefined') {
   tipEl.id = 'app-tip';
   tipEl.setAttribute('role', 'tooltip');
   let tipTarget = null, tipTimer = null;
+  // A cut-off name doesn't get a bubble: the row itself grows past the panel's edge, over the terminal.
+  const peekEl = document.createElement('div');
+  peekEl.id = 'name-peek';
+
+  // The row's background as one opaque color (hover tints are translucent), so the peek reads as the same row.
+  const solidBg = (el) => {
+    const layers = [];
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const m = getComputedStyle(n).backgroundColor.match(/[\d.]+/g);
+      const a = m && m[3] != null ? +m[3] : 1;
+      if (!m || a === 0) continue;
+      layers.push([+m[0], +m[1], +m[2], a]);
+      if (a === 1) break;
+    }
+    let c = [0, 0, 0];
+    for (const [r, g, b, a] of layers.reverse()) c = [c[0] * (1 - a) + r * a, c[1] * (1 - a) + g * a, c[2] * (1 - a) + b * a];
+    return `rgb(${c.map(Math.round).join(',')})`;
+  };
+  const showPeek = (el) => {
+    const row = el.closest('.agent') || el.parentElement;
+    const r = el.getBoundingClientRect(), rr = row.getBoundingClientRect(), cs = getComputedStyle(el);
+    if (!peekEl.isConnected) document.body.appendChild(peekEl);
+    peekEl.textContent = el.textContent;
+    Object.assign(peekEl.style, {
+      left: r.left + 'px', top: rr.top + 'px', height: rr.height + 'px', lineHeight: rr.height + 'px', maxWidth: (innerWidth - r.left - 6) + 'px',
+      fontFamily: cs.fontFamily, fontSize: cs.fontSize, fontWeight: cs.fontWeight, letterSpacing: cs.letterSpacing, color: cs.color,
+      background: solidBg(row),
+    });
+    peekEl.classList.add('show');
+  };
 
   // The text lives in data-tip. Every title, whether in the HTML, from a re-render, or set by
   // code later, is moved there the moment it appears, so the native tooltip has nothing to show.
@@ -61,8 +91,12 @@ if (typeof document !== 'undefined') {
   }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['title'] });
   stripTitles(document.documentElement);
   document.addEventListener('DOMContentLoaded', () => stripTitles(document.documentElement));
-  const hideTip = () => { clearTimeout(tipTimer); tipTarget = null; tipEl.classList.remove('show'); };
+  const hideTip = () => { clearTimeout(tipTimer); tipTarget = null; tipEl.classList.remove('show'); peekEl.classList.remove('show'); };
   const showTip = (el) => {
+    if (el.hasAttribute('data-tip-overflow')) {
+      if (el.isConnected && el.scrollWidth > el.clientWidth) showPeek(el); else peekEl.classList.remove('show');
+      return;
+    }
     const text = tipText(el);
     if (!text || !el.isConnected) { tipEl.classList.remove('show'); return; }
     if (!tipEl.isConnected) document.body.appendChild(tipEl);
@@ -84,13 +118,13 @@ if (typeof document !== 'undefined') {
     // A re-render swapped the hovered element for a fresh copy: keep the tip up and follow the new one.
     if (el && tipTarget && !tipTarget.isConnected) {
       tipTarget = el;
-      if (tipEl.classList.contains('show')) showTip(el);
+      if (tipEl.classList.contains('show') || peekEl.classList.contains('show')) showTip(el);
       return;
     }
     hideTip();
     if (!el) return;
     tipTarget = el;
-    // A cut-off name is the whole point of hovering it: show at once. Everything else waits a beat.
+    // A cut-off name is the whole point of hovering it: show it whole at once. Everything else waits a beat.
     if (el.hasAttribute('data-tip-overflow')) { showTip(el); return; }
     tipTimer = setTimeout(() => { if (tipTarget === el) showTip(el); }, 350);
   });

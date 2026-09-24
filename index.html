@@ -1393,6 +1393,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./prompt-nav.js"></script>
 <script src="./tooltip.js"></script>
 <script src="./term-size-core.js"></script>
+<script src="./shift-select-core.js"></script>
 <script src="./usage-core.js"></script>
 <script src="./preview-ui-dom.js"></script>
 <script src="./preview-ui-device.js"></script>
@@ -2040,9 +2041,10 @@ function syncPreview() { if (!window.preview) return; window.preview.setActiveAg
 function toggleHdrMore(e) {
   e.stopPropagation();
   const m = document.getElementById('hdr-more');
-  if (m.classList.toggle('open')) document.addEventListener('mousedown', function close(ev) {
+  // 'click', not 'mousedown': hiding the menu on mousedown swallowed the item's own click
+  if (m.classList.toggle('open')) document.addEventListener('click', function close(ev) {
     if (ev.target.closest('#hdr-more-wrap') && !ev.target.closest('.hdr-menu-item')) return;
-    setTimeout(() => m.classList.remove('open')); document.removeEventListener('mousedown', close);
+    m.classList.remove('open'); document.removeEventListener('click', close);
   });
 }
 function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
@@ -2804,8 +2806,33 @@ function createXterm(id) {
     updateScrollBtn();
     if (id === selectedId) highlightPromptRail();
   });
+  // Shift(+Ctrl)+Left/Right/Home/End marks prompt text like a Windows edit box (shift-select-core.js).
+  let shiftSel = null; // { anchorX, row } while a keyboard selection is live
+  terminal.onCursorMove(() => {
+    const b = terminal.buffer.active;
+    if (!shiftSel || b.baseY + b.cursorY !== shiftSel.row) return; // mid-redraw hop off the row
+    const r = selRange(shiftSel.anchorX, b.cursorX);
+    if (r.len) terminal.select(r.col, shiftSel.row, r.len); else terminal.clearSelection();
+  });
+  terminal.onSelectionChange(() => { if (!terminal.hasSelection() && shiftSel && shiftSel.anchorX !== terminal.buffer.active.cursorX) shiftSel = null; });
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
+    const nav = e.shiftKey && !e.altKey && !e.metaKey && shiftNavSeq(e.key, terminal.modes.applicationCursorKeysMode, e.ctrlKey);
+    if (nav) {
+      const b = terminal.buffer.active, row = b.baseY + b.cursorY;
+      if (!shiftSel || shiftSel.row !== row) shiftSel = { anchorX: b.cursorX, row };
+      api.send({ type: 'termInput', id, data: nav });
+      return false;
+    }
+    // Any other key ends the selection; typing, paste, Backspace or Delete replace it.
+    if (shiftSel && !/^(Shift|Control|Alt|Meta)$/.test(e.key) && !(e.ctrlKey && e.key === 'c')) {
+      const { anchorX } = shiftSel; shiftSel = null; terminal.clearSelection();
+      const erase = e.key === 'Backspace' || e.key === 'Delete';
+      if (erase || (e.key.length === 1 && !e.altKey && !e.metaKey && (!e.ctrlKey || e.key === 'v'))) {
+        api.send({ type: 'termInput', id, data: deleteSelSeq(anchorX, terminal.buffer.active.cursorX) });
+        if (erase) return false;
+      }
+    }
     k229.keydown(e);
     if (e.key === 'Tab' && ghost.text && id === selectedId) { ghostAccept(); return false; } // accept ghost suggestion
     if (e.key === 'Escape' && ghost.text) { ghostClear(); } // dismiss, but let Esc pass through too
@@ -3369,7 +3396,7 @@ focusAgent = function(id) {
   let dragging = false, startPos = 0, startSize = 0;
   let overlay = null;
   handle.addEventListener('mousedown', (e) => {
-    dragging = true;
+    dragging = termDragging = true;
     startPos = e.clientX;
     startSize = term.offsetWidth;
     document.body.style.cursor = 'ew-resize';
@@ -3396,7 +3423,8 @@ focusAgent = function(id) {
   });
   function stopDrag() {
     if (dragging) {
-      dragging = false;
+      dragging = termDragging = false;
+      schedFit(); // background xterms were skipped during the drag
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       if (overlay) { overlay.remove(); overlay = null; }
@@ -3423,13 +3451,14 @@ window.addEventListener('blur', () => {
 
 // Fit on any resize of the terminal panel, container, or window
 let fitRaf = 0;
+let termDragging = false; // sidebar drag: only the visible xterm refits per frame
 function schedFit() {
   cancelAnimationFrame(fitRaf);
   fitRaf = requestAnimationFrame(() => {
     if (container.clientWidth <= 0 || container.clientHeight <= 0) return; // term panel closed
     // Fit every xterm, not just the visible one — a background terminal left at the old
     // width would reflow (and desync its viewport) the moment you switch to it.
-    for (const [, x] of xterms) { try { fitPreservingScroll(x); } catch {} }
+    for (const [id, x] of xterms) { if (termDragging && id !== selectedId) continue; try { fitPreservingScroll(x); } catch {} }
     positionNameChip();
   });
 }
@@ -3734,7 +3763,7 @@ function handleAgentMsg(msg) {
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); break;
     case 'accountInfo': handleAccountInfo(msg); break;
-    case 'accountLoginComplete': showSaveAccountPrompt(msg.email); break;
+    case 'accountLoginComplete': api.send({ type: 'saveAccount' }); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
@@ -3824,10 +3853,10 @@ function handleAccountInfo(msg) {
   _accountInfo = msg;
   const btn = document.getElementById('account-btn');
   if (msg.hasCredentials) {
-    const display = msg.activeLabel || msg.email || 'Unsaved account';
+    const display = msg.email || msg.activeLabel || 'Unsaved account';
     btn.textContent = display;
     btn.classList.remove('no-account');
-    btn.title = msg.email ? `${display} (${msg.email})` : display;
+    btn.title = display;
   } else {
     btn.textContent = 'No account';
     btn.classList.add('no-account');
@@ -3866,45 +3895,38 @@ function showAccountMenu(e) {
   const accounts = info.accounts || [];
   const activeLabel = info.activeLabel;
 
-  // Current account header
-  if (info.hasCredentials) {
-    const hdr = document.createElement('div');
-    hdr.style.cssText = 'padding:5px 12px 2px;font-size:10px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;font-weight:600;';
-    hdr.textContent = 'Current';
-    menu.appendChild(hdr);
-    const cur = document.createElement('div');
-    cur.style.cssText = 'padding:2px 12px 5px;font-size:12px;color:var(--accent);font-weight:500;';
-    cur.textContent = activeLabel || info.email || 'Unsaved account';
-    if (info.email && activeLabel && activeLabel !== info.email) {
-      const em = document.createElement('span');
-      em.style.cssText = 'color:var(--dim);font-size:10px;margin-left:6px;font-weight:400;';
-      em.textContent = info.email;
-      cur.appendChild(em);
+  // All saved accounts in one list, by email — the active one is colored, not repeated under a header
+  for (const acct of accounts) {
+    const isActive = acct.label === activeLabel;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 8px 5px 12px;font-size:12px;cursor:pointer;color:var(--text);';
+    if (isActive) row.style.cssText += 'color:var(--accent);font-weight:600;cursor:default;';
+    const dot = document.createElement('span');
+    dot.style.cssText = `width:6px;height:6px;border-radius:50%;flex:none;background:${isActive ? 'var(--accent)' : 'transparent'};`;
+    const name = document.createElement('span');
+    name.style.cssText = 'flex:1;white-space:nowrap;';
+    name.textContent = acct.email || acct.label;
+    const tools = [];
+    if (!isActive) {
+      const x = document.createElement('button');
+      x.textContent = '×'; x.title = 'Remove';
+      x.style.cssText = 'background:none;border:none;color:var(--red);cursor:pointer;font-size:13px;padding:0 4px;opacity:0;font-family:inherit;';
+      x.onclick = (ev) => { ev.stopPropagation(); menu.remove(); api.send({ type: 'removeAccount', label: acct.label }); };
+      tools.push(x);
     }
-    menu.appendChild(cur);
-    addSep();
+    row.append(dot, name, ...tools);
+    row.addEventListener('mouseenter', () => { row.style.background = 'rgba(205,214,244,.06)'; tools.forEach(t => { t.style.opacity = '1'; }); });
+    row.addEventListener('mouseleave', () => { row.style.background = 'none'; tools.forEach(t => { t.style.opacity = '0'; }); });
+    if (!isActive) row.onclick = () => { menu.remove(); api.send({ type: 'switchAccount', label: acct.label }); };
+    menu.appendChild(row);
   }
-
-  // Other saved accounts
-  const others = accounts.filter(a => a.label !== activeLabel);
-  if (others.length > 0) {
-    for (const acct of others) {
-      const label = acct.email && acct.email !== acct.label ? `${acct.label}  ·  ${acct.email}` : acct.label;
-      addItem(label, () => api.send({ type: 'switchAccount', label: acct.label }));
-    }
-    addSep();
-  }
+  if (accounts.length) addSep();
 
   // Save / Add accounts
   if (info.hasCredentials && !activeLabel) {
-    addItem('Save this account…', () => showSaveAccountPrompt());
+    addItem('Save this account', () => api.send({ type: 'saveAccount' }));
   }
   addItem('Add account…', () => api.send({ type: 'addAccount' }));
-
-  // Remove non-active accounts
-  if (others.length > 0) {
-    addItem('Remove account…', () => showRemoveAccountMenu(e));
-  }
 
   addSep();
   if (info.hasCredentials) {
@@ -3930,79 +3952,6 @@ function showAccountMenu(e) {
   if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
   if (rect.bottom > window.innerHeight) menu.style.top = (btnRect.top - rect.height - 4) + 'px';
   const close = (ev) => { if (!menu.contains(ev.target) && ev.target.id !== 'account-btn') { menu.remove(); document.removeEventListener('mousedown', close); } };
-  setTimeout(() => document.addEventListener('mousedown', close), 0);
-}
-
-function showSaveAccountPrompt(emailOverride) {
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;';
-  const box = document.createElement('div');
-  box.style.cssText = 'background:var(--bg3);border:1px solid var(--border-hi);border-radius:8px;padding:16px;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,.4);';
-  box.innerHTML = '<div style="font-size:13px;color:var(--text);margin-bottom:8px;font-weight:500;">Save account as</div>';
-  const input = document.createElement('input');
-  input.type = 'text';
-  const defaultName = emailOverride || _accountInfo?.email || '';
-  input.placeholder = defaultName || 'Account name';
-  input.value = defaultName;
-  input.style.cssText = 'width:100%;padding:6px 8px;background:var(--bg);border:1px solid var(--border-hi);border-radius:4px;color:var(--text);font-family:inherit;font-size:12px;outline:none;box-sizing:border-box;';
-  input.onfocus = () => { input.style.borderColor = 'var(--accent)'; };
-  input.onblur = () => { input.style.borderColor = 'var(--border-hi)'; };
-  box.appendChild(input);
-  const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:12px;';
-  const cancel = document.createElement('button');
-  cancel.textContent = 'Cancel';
-  cancel.style.cssText = 'font-family:inherit;font-size:12px;padding:4px 12px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--dim);cursor:pointer;';
-  cancel.onclick = () => overlay.remove();
-  const save = document.createElement('button');
-  save.textContent = 'Save';
-  save.style.cssText = 'font-family:inherit;font-size:12px;padding:4px 12px;background:var(--accent);border:none;border-radius:4px;color:var(--title-bg);cursor:pointer;font-weight:600;';
-  save.onclick = () => {
-    const label = input.value.trim();
-    if (label) { api.send({ type: 'saveAccount', label }); overlay.remove(); }
-  };
-  input.onkeydown = (e) => { if (e.key === 'Enter') save.onclick(); if (e.key === 'Escape') overlay.remove(); };
-  btnRow.appendChild(cancel);
-  btnRow.appendChild(save);
-  box.appendChild(btnRow);
-  overlay.appendChild(box);
-  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-  document.body.appendChild(overlay);
-  input.focus();
-  input.select();
-}
-
-function showRemoveAccountMenu(e) {
-  const old = document.getElementById('account-ctx-menu');
-  if (old) old.remove();
-  const menu = document.createElement('div');
-  menu.id = 'account-ctx-menu';
-  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:180px;';
-
-  const hdr = document.createElement('div');
-  hdr.style.cssText = 'padding:5px 12px;font-size:10px;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;font-weight:600;';
-  hdr.textContent = 'Remove saved account';
-  menu.appendChild(hdr);
-
-  const others = (_accountInfo?.accounts || []).filter(a => a.label !== _accountInfo?.activeLabel);
-  for (const acct of others) {
-    const btn = document.createElement('button');
-    btn.textContent = acct.label;
-    btn.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:5px 12px;background:none;border:none;color:var(--red);cursor:pointer;border-radius:0;transition:background .1s;';
-    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(243,139,168,.08)'; });
-    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
-    btn.onclick = () => { menu.remove(); api.send({ type: 'removeAccount', label: acct.label }); };
-    menu.appendChild(btn);
-  }
-
-  const btnRect = document.getElementById('account-btn').getBoundingClientRect();
-  menu.style.left = btnRect.left + 'px';
-  menu.style.top = (btnRect.bottom + 4) + 'px';
-  document.body.appendChild(menu);
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
-  if (rect.bottom > window.innerHeight) menu.style.top = (btnRect.top - rect.height - 4) + 'px';
-  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
@@ -5012,6 +4961,7 @@ function prArchivedRowHtml(p) {
 
 function prDropdownHead() {
   return `<div class="pr-dhead"><span>Pull requests</span><span class="pr-dhead-btns">`
+    + (prState.prs.some(p => p.archived) ? `<button class="pr-refresh" title="${prCollapsed.has('__archived_open__') ? 'Hide' : 'Show'} archived" style="opacity:${prCollapsed.has('__archived_open__') ? 1 : .45}" onclick="event.stopPropagation();togglePrRepo('__archived_open__')">📦</button>` : '')
     + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button>`
     + `<button class="pr-refresh pr-close" title="Close" onclick="event.stopPropagation();closePrDropdown()">✕</button>`
     + `</span></div>`;
@@ -5097,7 +5047,8 @@ function prDropdownHtml() {
   const repoMuted = live.filter(p => p.repoMuted && !p.muted);
   const snoozed = live.filter(p => p.snoozed && !p.muted && !p.repoMuted);
   const muted = live.filter(p => p.muted);
-  if (!live.length && !archived.length) return head + '<div class="pr-empty">No open PRs.</div>';
+  const showArchived = prCollapsed.has('__archived_open__'); // toggled by the 📦 header button
+  if (!live.length && !(showArchived && archived.length)) return head + '<div class="pr-empty">No open PRs.</div>';
   let html = head;
   // Active repos
   for (const [repo, prs] of prGroupByRepo(active)) {
@@ -5127,12 +5078,10 @@ function prDropdownHtml() {
       + `<span>${collapsed ? '▸' : '▾'} 🔕 Muted</span><span class="pr-count">${muted.length}</span></div>`;
     if (!collapsed) html += muted.map(prMutedRowHtml).join('');
   }
-  // Archived PRs — collapsed by default, the only way back from archive
-  if (archived.length) {
-    const collapsed = !prCollapsed.has('__archived_open__'); // set membership = opened, so default is collapsed
-    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__archived_open__')">`
-      + `<span>${collapsed ? '▸' : '▾'} 📦 Archived</span><span class="pr-count">${archived.length}</span></div>`;
-    if (!collapsed) html += archived.map(prArchivedRowHtml).join('');
+  // Archived PRs — hidden unless the 📦 header toggle is on; the only way back from archive
+  if (showArchived && archived.length) {
+    html += `<div class="pr-group-header"><span>📦 Archived</span><span class="pr-count">${archived.length}</span></div>`;
+    html += archived.map(prArchivedRowHtml).join('');
   }
   if (prState.failedRepos && prState.failedRepos.length) {
     html += `<div class="pr-empty" style="color:#f38ba8">⚠ Couldn't reach: ${escapeHtml(prState.failedRepos.join(', '))}</div>`;
