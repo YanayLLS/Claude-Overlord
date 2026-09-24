@@ -40,6 +40,20 @@ function readPromptText(lines, cursorIdx) {
   return out.join('\n').trim();
 }
 
+// Bytes that delete a mouse selection on the prompt row: move the cursor to the
+// selection's right end, then backspace across it. The selection is clamped to the
+// typed text so the "> " marker and blank cells past the end never count.
+// row: the rendered prompt row; start/end: 0-based columns, end exclusive; app: xterm's
+// application-cursor-keys mode. Null when none of the typed text is selected.
+function eraseSelSeq(row, start, end, cursorX, app) {
+  const m = row.match(MARKER);
+  const textStart = m ? m[0].length : 0, textEnd = row.replace(/\s+$/, '').length;
+  const s = Math.max(start, textStart), e = Math.min(end, textEnd);
+  if (s >= e) return null;
+  const arrow = (app ? 'O' : '[') + (e > cursorX ? 'C' : 'D');
+  return arrow.repeat(Math.abs(e - cursorX)) + ''.repeat(e - s);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { boxInner, readPromptText };
+  module.exports = { boxInner, readPromptText, eraseSelSeq };
 }

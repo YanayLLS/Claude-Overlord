@@ -1,6 +1,6 @@
 // Run: node prompt-copy.test.js
 const assert = require('assert');
-const { boxInner, readPromptText } = require('./prompt-copy');
+const { boxInner, readPromptText, eraseSelSeq } = require('./prompt-copy');
 
 // Claude's prompt box, cursor on the input line
 const box = [
@@ -36,5 +36,23 @@ assert.strictEqual(readPromptText(['❯ git status'], 0), 'git status');
 assert.strictEqual(readPromptText(['│ >                 │'], 0), '');
 assert.strictEqual(readPromptText([], 0), '');
 assert.strictEqual(readPromptText(['out'], 9), '');
+
+// Mouse selection on the prompt row → bytes that delete it: arrows to its right end, then backspaces.
+// Columns are 0-based, end exclusive (what xterm's getSelectionPosition gives).
+const row = '> hello world';            // typed text runs from col 2 to col 13
+const L = '[D', R = '[C', BS = '';
+// cursor at the end (13), "world" selected (8..13): no move, 5 backspaces
+assert.strictEqual(eraseSelSeq(row, 8, 13, 13, false), BS.repeat(5));
+// cursor at the end, "hello" selected (2..7): left 6 to col 7, then 5 backspaces
+assert.strictEqual(eraseSelSeq(row, 2, 7, 13, false), L.repeat(6) + BS.repeat(5));
+// cursor at the start of the text (2), "world" selected: right 11, then 5 backspaces
+assert.strictEqual(eraseSelSeq(row, 8, 13, 2, false), R.repeat(11) + BS.repeat(5));
+// selection over the "> " marker and past the text's end is clamped to the typed text
+assert.strictEqual(eraseSelSeq(row, 0, 40, 13, false), BS.repeat(11));
+// application cursor-key mode sends ESC O x arrows
+assert.strictEqual(eraseSelSeq(row, 2, 7, 13, true), 'OD'.repeat(6) + BS.repeat(5));
+// nothing of the typed text selected → null (let the key through)
+assert.strictEqual(eraseSelSeq(row, 0, 2, 13, false), null);
+assert.strictEqual(eraseSelSeq(row, 20, 30, 13, false), null);
 
 console.log('prompt-copy: ok');

@@ -2754,6 +2754,21 @@ function createXterm(id) {
   terminal.open(el);
   // onScroll skips mouse-wheel scrolls in xterm 5.5; the viewport's own event catches them
   el.querySelector('.xterm-viewport').addEventListener('scroll', () => { if (id === selectedId) highlightPromptRail(); }, { passive: true });
+  // Mouse-selected prompt text: Backspace/Delete erases it, typing replaces it, like an edit box.
+  // Capture phase on the textarea, so it runs before xterm turns the key into bytes (prompt-copy.js).
+  terminal.textarea.addEventListener('keydown', (e) => {
+    if (!terminal.hasSelection()) return;
+    const erase = e.key === 'Backspace' || e.key === 'Delete';
+    if (!erase && !(e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey)) return;
+    const p = terminal.getSelectionPosition(), b = terminal.buffer.active, cy = b.baseY + b.cursorY;
+    if (!p || p.start.y !== cy || p.end.y !== cy) return; // only a selection on the prompt row
+    const line = b.getLine(cy);
+    const seq = line && eraseSelSeq(line.translateToString(true), p.start.x, p.end.x, b.cursorX, terminal.modes.applicationCursorKeysMode);
+    if (!seq) return;
+    terminal.clearSelection();
+    api.send({ type: 'termInput', id, data: seq });
+    if (erase) { e.preventDefault(); e.stopImmediatePropagation(); } // the typed char still goes through
+  }, true);
   const k229 = makeKey229Fix(terminal, terminal.textarea); // key229.js — keeps remote-typed keys in order
   el.addEventListener('input', k229.input, true);
   // Fit NOW, while the buffer is empty — reflowing later (after the scrollback replay)
