@@ -4867,7 +4867,7 @@ function renderPrBadge() {
     const active = prState.prs.filter(p => !prSilenced(p));
     const waiting = active.filter(prNeedsApproval).length;
     // Green = one of mine is mergeable with green checks; red = someone's waiting on my review; both = half and half.
-    const ready = active.filter(p => p.mine && prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none')).length;
+    const ready = active.filter(p => p.mine && prApproved(p) && prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none')).length;
     b.style.display = 'flex'; b.className = waiting > 0 && ready > 0 ? 'split' : waiting > 0 ? 'alert' : ready > 0 ? 'ready' : '';
     b.textContent = active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '') + (ready > 0 ? ' · ' + ready + ' to merge' : '');
     b.title = [waiting > 0 && waiting + ' PR(s) waiting for approval', ready > 0 && ready + ' of yours ready to merge'].filter(Boolean).join(' · ') || active.length + ' open PR(s)';
@@ -4893,6 +4893,11 @@ function prCiIcon(c) {
   return '';
 }
 
+// Someone approved it (and nobody since asked for changes). Green means this, not just "GitHub
+// would let me merge": repos without a required review are mergeable before anyone looks.
+function prApproved(p) {
+  return p.reviewDecision === 'APPROVED' || (!!(p.approvedBy && p.approvedBy.length) && p.reviewDecision !== 'CHANGES_REQUESTED');
+}
 function prMergeInfo(p) {
   if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return { enabled: false, label: 'conflicts' };
   if (p.mergeState === 'BEHIND') return { enabled: false, label: 'behind base' };
@@ -4951,10 +4956,10 @@ function prRowHtml(p, dim) {
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   const archBtn = `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦</button>`;
-  // Red = waiting on my review. Green = mine and ready to merge. Orange = conflicts.
+  // Red = waiting on my review. Green = mine, approved and ready to merge. Orange = conflicts.
   // All three reuse prMergeInfo(), the same test that gates the Merge button.
   const mi = prMergeInfo(p);
-  const canMerge = p.mine && !dim && mi.enabled;
+  const canMerge = p.mine && !dim && mi.enabled && prApproved(p);
   const conflict = !dim && mi.label === 'conflicts';
   const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '')
     + (conflict ? ' pr-conflict' : '') + (dim ? ' pr-muted' : '');
