@@ -863,32 +863,7 @@ button:focus-visible { outline-offset:0; }
 .term-tab:hover { color:var(--text); }
 .term-tab.active { color:var(--text); border-bottom-color:var(--accent); }
 
-/* ── Timeline ── */
-#timeline-events {
-  display:none; flex:1; overflow-y:auto; padding:10px 14px; font-size:12px;
-  background:var(--panel-bg); min-height:0;
-}
-#timeline-events.open { display:block; }
 .tl-empty { color:var(--dim); text-align:center; padding:40px 0; font-size:12px; }
-
-.tl-event { padding:6px 0 6px 22px; position:relative; border-left:2px solid var(--border); margin-left:5px; }
-.tl-event:last-child { border-left-color:transparent; }
-.tl-dot {
-  position:absolute; left:-5px; top:9px; width:8px; height:8px; border-radius:50%;
-}
-.tl-event-prompt .tl-dot { background:var(--green); color:var(--green); }
-.tl-event-text .tl-dot { background:var(--accent); color:var(--accent); }
-.tl-event-tool .tl-dot { background:var(--purple); color:var(--purple); }
-.tl-event-tool_done .tl-dot { background:rgba(255,255,255,.2); color:transparent; box-shadow:none; }
-.tl-event-turn .tl-dot { background:var(--yellow); color:var(--yellow); }
-.tl-event-subtask .tl-dot { background:var(--cyan); color:var(--cyan); }
-
-.tl-time { font-size:10px; color:var(--dim); letter-spacing:.3px; }
-.tl-label { color:var(--text); margin-top:1px; word-break:break-word; }
-.tl-label-tool { color:var(--purple); }
-.tl-label-prompt { color:var(--green); }
-.tl-event-prompt.tl-highlight { background:rgba(166,227,161,.1); border-radius:4px; }
-.tl-event-prompt.tl-highlight .tl-dot { box-shadow:0 0 6px var(--green); }
 
 /* ── QR overlay ── */
 #qr-overlay {
@@ -907,14 +882,6 @@ button:focus-visible { outline-offset:0; }
   user-select:all; cursor:text;
 }
 #qr-overlay .qr-hint { font-size:11px; color:var(--dim); }
-.tl-label-turn { color:var(--yellow); font-size:11px; }
-.tl-detail {
-  color:rgba(255,255,255,.35); font-size:11px; margin-top:2px;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; cursor:pointer;
-}
-.tl-detail:hover { color:rgba(255,255,255,.55); }
-.tl-detail.expanded { white-space:normal; word-break:break-word; }
-.tl-turn-sep { border-top:1px solid var(--border); margin:6px 0 0 -22px; }
 
 /* ── Archive overlay ── */
 #archive-overlay {
@@ -1153,7 +1120,6 @@ button:focus-visible { outline-offset:0; }
       <div class="term-tabs">
         <button class="term-tab" id="tab-conversation" onclick="switchTermTab('conversation')">Conversation</button>
         <button class="term-tab active" id="tab-terminal" onclick="switchTermTab('terminal')">Terminal</button>
-        <button class="term-tab" id="tab-timeline" onclick="switchTermTab('timeline')">Timeline</button>
       </div>
       <span class="term-title" id="term-title"></span>
       <div id="prompt-nav">
@@ -1171,7 +1137,6 @@ button:focus-visible { outline-offset:0; }
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
     <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x2912;</button><div id="prompt-rail"><div class="pr-dashes"></div><div class="pr-pop"></div></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x2913;</button></div></div>
-    <div id="timeline-events"></div>
     <div id="conversation"></div>
     <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
   </div>
@@ -1387,7 +1352,6 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">/</span><span class="help-desc">Filter agents (when not typing)</span></div>
       <div class="help-row"><span class="help-key">Ctrl+0</span><span class="help-desc">Reset zoom to 100%</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Scroll</span><span class="help-desc">Zoom in/out</span></div>
-      <div class="help-row"><span class="help-key">Ctrl+T</span><span class="help-desc">Toggle timeline / terminal</span></div>
       <div class="help-row"><span class="help-key">Ctrl+U</span><span class="help-desc">Refresh usage stats</span></div>
       <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close overlay / filter</span></div>
       <div class="help-row"><span class="help-key">?</span><span class="help-desc">Show this help</span></div>
@@ -1497,7 +1461,8 @@ function addKnownProject(cwd) { if (cwd && !knownProjects.has(cwd)) { knownProje
 function removeProject(cwd) {
   const live = [...agents].filter(([, a]) => a.cwd === cwd && !a.archived);
   if (live.length && !confirm(`Remove project and close ${live.length} agent${live.length === 1 ? '' : 's'}?\n\n${cwd}`)) return;
-  for (const [id] of live) closeAgent(id);
+  // archived agents too — any agent left with this cwd re-creates the group in render()
+  for (const [id, a] of agents) if (a.cwd === cwd) closeAgent(id);
   knownProjects.delete(cwd);
   persistProjects();
   render();
@@ -1900,9 +1865,8 @@ function showIconPicker(e, sessionId) {
 }
 
 // ── Timeline state ──
-let termTab = 'terminal'; // 'terminal' or 'timeline'
+let termTab = 'terminal'; // 'terminal', or 'conversation' in world mode
 let timelineAgentId = null;
-let tlUserScrolled = false;
 
 function openFilter() {
   document.getElementById('filter-bar').classList.add('open');
@@ -3073,7 +3037,7 @@ function openTerm(id) {
   // Update prompt nav after xterm exists and buffer has time to populate
   setTimeout(() => updatePromptNav(), 150);
   // Load timeline if tab is active or agent changed
-  if (timelineAgentId !== id) { _tlPromptIdx = -1; loadTimeline(id); }
+  if (timelineAgentId !== id) loadTimeline(id);
   render();
   // Re-focus terminal after render so keyboard input works immediately
   if (termTab === 'terminal') {
@@ -3162,14 +3126,6 @@ function updatePromptNav() {
   const counter = document.getElementById('prompt-counter');
   const a = selectedId != null ? agents.get(selectedId) : null;
   nav.style.display = 'flex';
-  if (termTab === 'timeline') {
-    const prompts = document.getElementById('timeline-events').querySelectorAll('.tl-event-prompt');
-    if (!a || prompts.length === 0) { counter.textContent = '0/0'; return; }
-    const total = prompts.length;
-    const label = _tlPromptIdx < 0 || _tlPromptIdx >= prompts.length ? '\u25C7' : String(_tlPromptIdx + 1);
-    counter.textContent = label + '/' + total;
-    return;
-  }
   const promptLines = getPromptLines();
   renderPromptRail(promptLines);
   const total = promptLines.length;
@@ -3229,7 +3185,6 @@ function jumpToPromptIdx(i) {
 function jumpPrompt(dir) {
   const a = selectedId != null ? agents.get(selectedId) : null;
   if (!a) return;
-  if (termTab === 'timeline') { jumpTimelinePrompt(dir); return; }
   const x = xterms.get(selectedId);
   const promptLines = getPromptLines();
   const total = promptLines.length;
@@ -3241,51 +3196,22 @@ function jumpPrompt(dir) {
   else x.terminal.scrollToLine(Math.max(0, promptLines[newIdx] - 1));
 }
 
-let _tlPromptIdx = -1;
-function jumpTimelinePrompt(dir) {
-  const el = document.getElementById('timeline-events');
-  const prompts = el.querySelectorAll('.tl-event-prompt');
-  if (prompts.length === 0) return;
-  const total = prompts.length + 1; // +1 for bottom virtual entry
-  if (_tlPromptIdx < 0 || _tlPromptIdx > prompts.length) _tlPromptIdx = prompts.length;
-  const newIdx = _tlPromptIdx + dir;
-  if (newIdx < 0 || newIdx > prompts.length) return;
-  _tlPromptIdx = newIdx;
-  // Clear previous highlight
-  el.querySelectorAll('.tl-highlight').forEach(e => e.classList.remove('tl-highlight'));
-  const nav = document.getElementById('prompt-nav');
-  nav.style.display = 'flex';
-  const label = newIdx >= prompts.length ? '\u25C7' : String(newIdx + 1);
-  document.getElementById('prompt-counter').textContent = label + '/' + total;
-  if (newIdx >= prompts.length) { el.scrollTop = el.scrollHeight; return; }
-  prompts[newIdx].classList.add('tl-highlight');
-  const promptEl = prompts[newIdx];
-  const relTop = promptEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
-  el.scrollTo({ top: relTop - (el.clientHeight - promptEl.offsetHeight) / 2, behavior: 'smooth' });
-}
-
-// ── Timeline ───────────────────────────────────────────
+// ── Terminal / conversation tabs ───────────────────────
 function switchTermTab(tab) {
   termTab = tab;
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
-  document.getElementById('tab-timeline').classList.toggle('active', tab === 'timeline');
   document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
   const tc = document.getElementById('term-container');
-  const tl = document.getElementById('timeline-events');
   const cv = document.getElementById('conversation'), od = document.getElementById('term-order');
   cv.classList.toggle('open', tab === 'conversation'); od.classList.toggle('open', tab === 'conversation');
   if (tab === 'terminal') {
-    tc.style.display = ''; tl.classList.remove('open');
+    tc.style.display = '';
     if (selectedId) showXterm(selectedId);
   } else if (tab === 'conversation') {
     // World view's readable transcript: fed by the same timeline events, plus the live tool state.
-    tc.style.display = 'none'; tl.classList.remove('open');
+    tc.style.display = 'none';
     if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
     renderConversation();
-  } else {
-    _tlPromptIdx = -1;
-    tc.style.display = 'none'; tl.classList.add('open');
-    if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
   }
   updatePromptNav();
   updateScrollBtn();
@@ -3293,12 +3219,11 @@ function switchTermTab(tab) {
   updateDeadOverlay();
 }
 
+// The agent's event feed (prompts, replies, tools) — the world view's Conversation tab reads it.
 function loadTimeline(id) {
   timelineAgentId = id;
-  tlUserScrolled = false;
   api.send({ type: 'setTimelineAgent', id });
   api.send({ type: 'getTimeline', id });
-  document.getElementById('timeline-events').innerHTML = '<div class="tl-empty">Loading timeline...</div>';
 }
 
 function fmtTs(ts) {
@@ -3306,51 +3231,16 @@ function fmtTs(ts) {
   try { const d = new Date(ts); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; }
 }
 
-function renderTlEvent(ev) {
-  const time = fmtTs(ev.ts);
-  const cls = 'tl-event tl-event-' + ev.type;
-  let label = '', detail = '';
-  switch (ev.type) {
-    case 'prompt': label = `<div class="tl-label tl-label-prompt">${esc(ev.text)}</div>`; break;
-    case 'text': label = `<div class="tl-label">${esc(ev.text)}</div>`; break;
-    case 'tool': label = `<div class="tl-label tl-label-tool">${esc(ev.name)}</div>`; detail = `<div class="tl-detail" onclick="this.classList.toggle('expanded')">${esc(ev.text)}</div>`; break;
-    case 'tool_done': detail = ev.text ? `<div class="tl-detail" onclick="this.classList.toggle('expanded')">${esc(ev.text)}</div>` : ''; break;
-    case 'turn': label = `<div class="tl-label tl-label-turn">${esc(ev.text)}</div><div class="tl-turn-sep"></div>`; break;
-    case 'subtask': label = `<div class="tl-label tl-label-tool">${esc(ev.name)}</div>`; detail = `<div class="tl-detail">${esc(ev.text)}</div>`; break;
-  }
-  return `<div class="${cls}"><div class="tl-dot"></div>${time ? `<div class="tl-time">${time}</div>` : ''}${label}${detail}</div>`;
-}
-
 function handleTimelineData(msg) {
   if (msg.id !== timelineAgentId) return;
-  const el = document.getElementById('timeline-events');
-  worldTl = { id: msg.id, events: (msg.events || []).slice() }; // the conversation view reads the same events
+  worldTl = { id: msg.id, events: (msg.events || []).slice() };
   if (termTab === 'conversation') renderConversation();
-  if (!msg.events || msg.events.length === 0) {
-    el.innerHTML = '<div class="tl-empty">No events yet</div>';
-    return;
-  }
-  el.innerHTML = msg.events.map(renderTlEvent).join('');
-  el.scrollTop = el.scrollHeight;
 }
 
 function handleTimelineEvent(msg) {
   if (msg.id !== timelineAgentId) return;
   if (worldTl && worldTl.id === msg.id) { worldTl.events.push(msg.event); if (worldTl.events.length > TL_MAX_EVENTS) worldTl.events.splice(0, worldTl.events.length - TL_MAX_EVENTS); if (termTab === 'conversation') renderConversation(); }
-  const el = document.getElementById('timeline-events');
-  // Remove empty message if present
-  const empty = el.querySelector('.tl-empty');
-  if (empty) empty.remove();
-  el.insertAdjacentHTML('beforeend', renderTlEvent(msg.event));
-  while (el.childElementCount > TL_MAX_EVENTS) el.firstElementChild.remove(); // an agent left open all day would otherwise grow this list without end
-  if (!tlUserScrolled) el.scrollTop = el.scrollHeight;
 }
-
-// Auto-scroll detection for timeline
-document.getElementById('timeline-events').addEventListener('scroll', function() {
-  const el = this;
-  tlUserScrolled = el.scrollTop + el.clientHeight < el.scrollHeight - 30;
-});
 
 // ── Global Search ──
 let _searchTimer = null;
@@ -4235,7 +4125,7 @@ function renderBookmarks(bookmarks) {
   }
   const add = document.createElement('button');
   add.className = 'hdr-btn bookmark-add';
-  add.textContent = '\u{1F516}';
+  add.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><path d="M12 7v6M9 10h6"/></svg>';
   add.title = 'Add bookmark — pin a file, folder, .bat, .exe or image here for one-click opening';
   add.onclick = (e) => showBookmarkMenu(e, [
     { label: 'Add file…', action: () => api.send({ type: 'addBookmark' }) },
@@ -4487,12 +4377,6 @@ document.addEventListener('keydown', (e) => {
       focusAgent(next);
       return;
     }
-  }
-  // Ctrl+T to toggle terminal/timeline tab
-  if (e.key === 't' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
-    e.preventDefault();
-    switchTermTab(termTab === 'terminal' ? 'timeline' : 'terminal');
-    return;
   }
   // ? to show help (when not in an input)
   if (e.key === '?' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {

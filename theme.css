@@ -82,7 +82,9 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 .agent.selected:hover { background: var(--surface1); }
 .agent-name { font-size: 13px; color: var(--subtext); }
 .agent:hover .agent-name, .agent.selected .agent-name { color: var(--text); }
-.agent[data-status="waiting"] .agent-name, .agent[data-status="permission"] .agent-name { color: var(--text); font-weight: 500; }
+/* Bright = finished, your turn. Bold is kept for "blocked on you" so it still stands out. */
+.agent[data-status="waiting"] .agent-name { color: var(--text); }
+.agent[data-status="permission"] .agent-name { color: var(--text); font-weight: 600; }
 /* Status: a dot, with a soft halo when something is going on */
 .agent-dot { width: 7px; height: 7px; background: var(--surface2); opacity: 1; }
 .agent[data-status="active"] .agent-dot { box-shadow: 0 0 0 3px rgba(124,140,255,.18); }
@@ -92,15 +94,18 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 /* Context used is the % at the right; the fill behind the text read as a half-applied selection */
 .agent-fill { display: none; }
 .ctx-pct { font-size: 11px; color: var(--dim); }
-/* Model chip only when you're on the row */
-.agent .model-tag { opacity: 0; transition: opacity .12s; }
-.agent:hover .model-tag, .agent.selected .model-tag { opacity: 1; }
+/* Model chip takes no room until you hover the row: the name runs right up to the % */
+.agent-right { gap: 0; }
+.agent-model-slot { display: none; width: auto; }
+.agent:hover .agent-model-slot { display: flex; position: absolute; right: 34px; top: 50%; transform: translateY(-50%); z-index: 2;
+  padding-left: 28px; background: linear-gradient(90deg, transparent, #19191b 24px); }
+.agent.selected:hover .agent-model-slot { background: linear-gradient(90deg, transparent, var(--surface1) 24px); }
 .model-tag { font-size: 10px; font-weight: 600; text-transform: lowercase; letter-spacing: 0; border-radius: var(--r-sm);
   border: 1px solid var(--border-hi); color: var(--subtext); background: var(--surface0); }
-.model-tag.opus, .model-tag.sonnet, .model-tag.haiku, .model-tag.fable { border-color: var(--border-hi); }
+.model-tag.opus, .model-tag.sonnet, .model-tag.haiku, .model-tag.fable { border-color: var(--border-hi); color: var(--subtext); }
 .model-tag .mt-chev { border-left-color: var(--border-hi); }
-.agent-actions { padding-left: 24px; background: linear-gradient(90deg, transparent, var(--surface1) 24px); }
-.agent:not(.selected) .agent-actions { background: linear-gradient(90deg, transparent, #151518 24px); }
+.agent-actions { padding-left: 8px; background: #19191b; }
+.agent.selected .agent-actions { background: var(--surface1); }
 .btn-close { border-radius: var(--r-sm); }
 .agent.needs-answer { border-radius: var(--r); }
 .agent-pname, .agent-current-file { border-radius: var(--r-sm); }
@@ -137,7 +142,7 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 #term-header .term-title { font-size: 12px; color: var(--dim); letter-spacing: 0; }
 #term-header button { border-radius: var(--r-sm); }
 #term-header button:hover { background: var(--hover-strong); }
-#term-container { background: var(--bg); padding-left: 10px; }
+#term-container { background: var(--bg); padding: 8px 0 0 10px; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 999px; }
 #term-scroll-nav { gap: 8px; right: 22px; }
 #term-scroll-nav button { width: 30px; height: 30px; line-height: 28px; font-size: 13px; opacity: .85; color: var(--subtext);
@@ -180,3 +185,16 @@ input[type="text"], input[type="search"], input[type="number"], select, textarea
 ::-webkit-scrollbar-thumb:hover { background: var(--surface2); background-clip: padding-box; }
 ::-webkit-scrollbar-button { display: none; }
 .settings-modal { width: 520px; }
+
+/* Dev-server chips in group headers: neutral pill, green dot when running */
+.server-badge { height: 24px; padding: 0 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0;
+  color: var(--subtext); background: var(--surface0); border: 1px solid var(--border); }
+.server-badge:hover { color: var(--text); background: var(--surface1); border-color: var(--border-hi); }
+.server-badge.running { color: var(--text); background: var(--surface0); border-color: var(--border); }
+.server-badge.running::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.server-badge.running:hover { color: var(--text); background: var(--surface1); border-color: var(--border-hi); }
+.server-badge .server-count, .server-badge:hover .server-count { background: var(--surface2); color: var(--text); border-radius: 999px; }
+.bookmark-add { opacity: 1; color: var(--dim); }
+/* No header row over the terminal: the selected row already names the agent, and the
+   prompt rail does the prompt jumping. World mode keeps it for its Conversation tab. */
+body:not(.world-mode) #term-header { display: none; }
