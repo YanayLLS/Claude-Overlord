@@ -73,14 +73,14 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 .group.is-worktree > .group-header { border-left: none; box-shadow: inset 2px 0 0 var(--accent); }
 
 .agents { margin-left: 16px; padding: 0 8px 0 6px; border-left: 1px solid var(--border); gap: 1px; }
-.agent { height: 32px; padding: 0 8px 0 10px; gap: 8px; border: none; border-radius: var(--r); background: transparent; }
+.agent { height: 28px; padding: 0 8px 0 10px; gap: 7px; border: none; border-radius: var(--r); background: transparent; }
 .agent:hover, .agent[data-status]:hover { background: var(--hover); border-color: transparent; }
 .agent[data-status="permission"], .agent[data-status="crashed"], .agent[data-status="waiting"] { background: transparent; border-color: transparent; }
 .agent::before { left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: transparent !important; }
 .agent.selected { background: var(--surface1); }
 .agent.selected::before { background: var(--accent) !important; }
 .agent.selected:hover { background: var(--surface1); }
-.agent-name { font-size: 13px; color: var(--subtext); }
+.agent-name { font-size: 12px; color: var(--subtext); }
 .agent:hover .agent-name, .agent.selected .agent-name { color: var(--text); }
 /* Bright = finished, your turn. Bold is kept for "blocked on you" so it still stands out. */
 .agent[data-status="waiting"] .agent-name { color: var(--text); }
