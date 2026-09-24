@@ -224,21 +224,6 @@ body:not(.world-mode) #term-header { display: none; }
 #actions-badge { --ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m10 8 6 4-6 4z'/%3E%3C/svg%3E"); }
 #summary-bar { background: transparent; }
 
-/* ── Agent avatars: the status dot becomes a colored initial; status is the ring around it ── */
-.agent { --st: transparent; }
-.agent[data-status="active"] { --st: var(--accent); }
-.agent[data-status="waiting"] { --st: var(--green); }
-.agent[data-status="permission"], .agent[data-status="resuming"] { --st: var(--yellow); }
-.agent[data-status="crashed"] { --st: var(--red); }
-.agent.needs-answer { --st: var(--peach); }
-#list .agent .agent-dot { width: 20px; height: 20px; border-radius: 50%; opacity: 1 !important; animation: none;
-  display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff;
-  background: hsl(var(--h) 45% 42%) !important; box-shadow: 0 0 0 2px #131316, 0 0 0 3.5px var(--st) !important; }
-#list .agent[data-status="idle"] .agent-dot { filter: saturate(.35) brightness(.8); }
-#list .agent[data-status="active"] .agent-dot { animation: av-ring 1.6s ease-in-out infinite; }
-@keyframes av-ring { 50% { box-shadow: 0 0 0 2px #131316, 0 0 0 3.5px transparent; } }
-@media (prefers-reduced-motion: reduce) { #list .agent[data-status="active"] .agent-dot { animation: none; } }
-.agent { height: 34px; }
 
 /* ── Compact header, ClickUp-sized: 28px controls, project links as quiet text ── */
 .hdr-btn { height: 28px; min-width: 28px; padding: 0 6px; }
