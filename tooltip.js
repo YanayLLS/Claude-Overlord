@@ -49,7 +49,11 @@ if (typeof document !== 'undefined') {
   };
   new MutationObserver((muts) => {
     for (const m of muts) {
-      if (m.type === 'attributes') { if (m.target.hasAttribute('title')) tipText(m.target); }
+      if (m.type === 'attributes') {
+        if (!m.target.hasAttribute('title')) continue;
+        tipText(m.target);
+        if (m.target === tipTarget && tipEl.classList.contains('show')) showTip(m.target); // live text, e.g. "updated 5s ago"
+      }
       else for (const n of m.addedNodes) stripTitles(n);
     }
   }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['title'] });
@@ -70,18 +74,21 @@ if (typeof document !== 'undefined') {
   };
 
   document.addEventListener('mouseover', (e) => {
-    const el = e.target.closest && e.target.closest('[data-tip]');
+    const el = e.target.closest && e.target.closest('[data-tip], [title]'); // title: a fresh node the observer hasn't reached yet
     if (el === tipTarget) return;
+    // A re-render swapped the hovered element for a fresh copy: keep the tip up and follow the new one.
+    if (el && tipTarget && !tipTarget.isConnected) {
+      tipTarget = el;
+      if (tipEl.classList.contains('show')) showTip(el);
+      return;
+    }
     hideTip();
     if (!el) return;
     tipTarget = el;
     tipTimer = setTimeout(() => { if (tipTarget === el) showTip(el); }, 350);
   });
-  // A re-render can swap the element under a still mouse; follow it so the tip isn't lost.
-  document.addEventListener('mousemove', (e) => {
-    if (tipTarget && !tipTarget.isConnected) { hideTip(); e.target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); }
-  }, { passive: true });
-  for (const ev of ['mousedown', 'wheel', 'keydown', 'blur']) window.addEventListener(ev, hideTip, { capture: true, passive: true });
+  for (const ev of ['mousedown', 'wheel', 'keydown']) window.addEventListener(ev, hideTip, { capture: true, passive: true });
+  window.addEventListener('blur', hideTip); // the window losing focus, not every element blur a re-render causes
   document.addEventListener('mouseleave', hideTip);
 }
 
