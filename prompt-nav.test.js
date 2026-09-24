@@ -1,6 +1,6 @@
 // Run: node prompt-nav.test.js
 const assert = require('assert');
-const { promptRows, nextNavIdx } = require('./prompt-nav');
+const { promptRows, nextNavIdx, promptText, activePrompt } = require('./prompt-nav');
 
 // Claude Code v2 echoes each submitted prompt into scrollback as "❯ text".
 // The live input line uses the same marker, so it must NOT count as a prompt —
@@ -23,6 +23,17 @@ assert.deepStrictEqual(promptRows(['│ > boxed prompt │', 'out'], 1), [0]);
 
 // Some Claude builds echo prompts with a plain "> " at column 0
 assert.deepStrictEqual(promptRows(['> plain prompt', '  > quoted output', 'out'], 3), [0]);
+
+// Rail labels: the prompt text without its marker
+assert.strictEqual(promptText('❯ fix the bug   '), 'fix the bug');
+assert.strictEqual(promptText('> plain prompt'), 'plain prompt');
+assert.strictEqual(promptText('│ > boxed prompt │'), 'boxed prompt');
+
+// Rail highlight: the last prompt at or above the top of the viewport (-1 = none yet)
+assert.strictEqual(activePrompt([10, 50, 90], 0), -1);
+assert.strictEqual(activePrompt([10, 50, 90], 49), 1);  // scrollToLine(50 - 1) lands here
+assert.strictEqual(activePrompt([10, 50, 90], 70), 1);
+assert.strictEqual(activePrompt([10, 50, 90], 500), 2);
 
 // Navigation: total=2 prompts, index 2 is the virtual "bottom" entry.
 assert.strictEqual(nextNavIdx(2, -1, 2), 1);   // from bottom → last prompt

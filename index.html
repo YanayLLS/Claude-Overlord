@@ -709,7 +709,24 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   box-shadow:0 2px 8px rgba(0,0,0,.4);
 }
 #term-scroll-nav button:hover { opacity:1; background:var(--surface1); }
-#term-scroll-nav button.prompt-jump { width:22px; height:22px; font-size:10px; line-height:20px; align-self:center; }
+/* Prompt rail: one dash per prompt in the scrollback; hover lists them, click jumps */
+#prompt-rail { display:none; position:relative; align-self:center; padding:6px 4px 6px 12px; cursor:pointer; }
+#prompt-rail.has { display:block; }
+#prompt-rail .pr-dashes { display:flex; flex-direction:column; align-items:flex-end; gap:5px; }
+#prompt-rail .pr-dashes i { display:block; width:14px; height:2px; border-radius:1px; background:var(--dim); opacity:.7; }
+#prompt-rail .pr-dashes i.on { width:18px; background:var(--text); opacity:1; }
+#prompt-rail .pr-pop {
+  display:none; position:absolute; right:100%; top:50%; transform:translateY(-50%);
+  width:300px; max-height:60vh; overflow-y:auto; padding:6px; border-radius:12px;
+  background:var(--surface0); border:1px solid var(--border); box-shadow:0 6px 20px rgba(0,0,0,.5);
+}
+#prompt-rail:hover .pr-pop { display:block; }
+#prompt-rail .pr-pop::-webkit-scrollbar { width:10px; }
+#prompt-rail .pr-pop::-webkit-scrollbar-track { background:transparent; }
+#prompt-rail .pr-pop::-webkit-scrollbar-thumb { background:var(--surface2); border-radius:5px; border:3px solid transparent; background-clip:padding-box; }
+#prompt-rail .pr-pop::-webkit-scrollbar-button { display:none; }
+#prompt-rail .pr-pop div { padding:7px 10px; border-radius:8px; font-size:12px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#prompt-rail .pr-pop div:hover, #prompt-rail .pr-pop div.on { background:var(--surface1); }
 #term-name-chip {
   display:none; position:absolute; bottom:8px; left:10px; z-index:9; pointer-events:none;
   max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -1220,7 +1237,7 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x2912;</button><button class="prompt-jump" onclick="jumpPrompt(-1)" title="Previous prompt (Ctrl+&#x2191;)">&#x25B2;</button><button class="prompt-jump" onclick="jumpPrompt(1)" title="Next prompt (Ctrl+&#x2193;)">&#x25BC;</button><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x2913;</button></div></div>
+    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top">&#x2912;</button><div id="prompt-rail"><div class="pr-dashes"></div><div class="pr-pop"></div></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)">&#x2913;</button></div></div>
     <div id="timeline-events"></div>
     <div id="conversation"></div>
     <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
@@ -2856,6 +2873,8 @@ function createXterm(id) {
   terminal.loadAddon(imageAddon);
   terminal.loadAddon(webLinksAddon);
   terminal.open(el);
+  // onScroll skips mouse-wheel scrolls in xterm 5.5; the viewport's own event catches them
+  el.querySelector('.xterm-viewport').addEventListener('scroll', () => { if (id === selectedId) highlightPromptRail(); }, { passive: true });
   const k229 = makeKey229Fix(terminal, terminal.textarea); // key229.js — keeps remote-typed keys in order
   el.addEventListener('input', k229.input, true);
   // Fit NOW, while the buffer is empty — reflowing later (after the scrollback replay)
@@ -2889,6 +2908,7 @@ function createXterm(id) {
   terminal.onScroll(() => {
     ghostClear();
     updateScrollBtn();
+    if (id === selectedId) highlightPromptRail();
   });
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
@@ -3218,11 +3238,59 @@ function updatePromptNav() {
     return;
   }
   const promptLines = getPromptLines();
+  renderPromptRail(promptLines);
   const total = promptLines.length;
   if (!a || total === 0) { counter.textContent = '0/0'; return; }
   const inRange = a.promptNavIdx >= 0 && a.promptNavIdx < total;
   const label = inRange ? String(a.promptNavIdx + 1) : '◇';
   counter.textContent = label + '/' + total;
+}
+
+// Rail beside the terminal: a dash per prompt, a hover list of their text.
+// Rebuilt only when the prompt rows change; scrolling just moves the highlight.
+let _railLines = [], _railKey = '';
+function renderPromptRail(lines) {
+  const rail = document.getElementById('prompt-rail');
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  const buf = x ? x.terminal.buffer.normal : null;
+  const texts = buf ? lines.map(n => { const l = buf.getLine(n); return l ? promptText(l.translateToString(true)) : ''; }) : [];
+  const key = selectedId + '|' + lines.join(',') + '|' + texts.join('\n');
+  if (key !== _railKey) {
+    _railKey = key; _railLines = lines;
+    rail.classList.toggle('has', lines.length > 0);
+    const dashes = rail.querySelector('.pr-dashes'), pop = rail.querySelector('.pr-pop');
+    dashes.replaceChildren(); pop.replaceChildren();
+    // ponytail: last 20 dashes only, so the rail never outgrows the nav stack; the hover list has them all
+    lines.slice(-20).forEach(() => dashes.appendChild(document.createElement('i')));
+    texts.forEach((t, i) => {
+      const item = document.createElement('div');
+      item.textContent = t || '(empty prompt)';
+      item.title = t;
+      item.onclick = () => jumpToPromptIdx(i);
+      pop.appendChild(item);
+    });
+  }
+  highlightPromptRail();
+}
+
+function highlightPromptRail() {
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  if (!x || !_railLines.length) return;
+  const buf = x.terminal.buffer.normal;
+  const on = activePrompt(_railLines, buf.viewportY); // prompt-nav.js
+  const rail = document.getElementById('prompt-rail');
+  const dashes = rail.querySelectorAll('.pr-dashes i'), off = _railLines.length - dashes.length;
+  dashes.forEach((d, i) => d.classList.toggle('on', i + off === on));
+  rail.querySelectorAll('.pr-pop div').forEach((d, i) => d.classList.toggle('on', i === on));
+}
+
+function jumpToPromptIdx(i) {
+  const a = selectedId != null ? agents.get(selectedId) : null;
+  const x = selectedId != null ? xterms.get(selectedId) : null;
+  if (!a || !x || i >= _railLines.length) return;
+  a.promptNavIdx = i;
+  x.terminal.scrollToLine(Math.max(0, _railLines[i] - 1));
+  updatePromptNav();
 }
 
 function jumpPrompt(dir) {
