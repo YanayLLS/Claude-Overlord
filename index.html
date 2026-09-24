@@ -368,24 +368,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   background:transparent; transition:background .15s;
 }
 .agent:hover { background:rgba(205,214,244,.04); border-color:var(--accent); }
-.agent.selected { background:var(--accent); border-color:var(--accent); }
-.agent.selected::before { background:rgba(0,0,0,.4); }
-.agent.selected .agent-name { color:#1e1e2e; }
-.agent.selected .agent-icon { color:#1e1e2e; }
-.agent.selected .agent-pname { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.1); }
-.agent.selected .model-tag { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.1); }
-.agent.selected .agent-status-line { color:rgba(30,30,46,.7); }
-.agent.selected .agent-prompt { color:rgba(30,30,46,.6); }
-.agent.selected .agent-prompt::before { color:rgba(30,30,46,.5); opacity:1; }
-.agent.selected .agent-preview { color:rgba(30,30,46,.4); }
-.agent.selected .agent-bottom button { color:rgba(30,30,46,.6); }
-.agent.selected .agent-bottom button:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
 .agent.selected:hover .agent-btn { opacity:.7; }
-.agent.selected .dot-active, .agent.selected .dot-waiting, .agent.selected .dot-perm,
-.agent.selected .dot-idle, .agent.selected .dot-crashed, .agent.selected .dot-resuming { color:#1e1e2e; }
 .agent.has-team { border-color:rgba(203,166,247,.15); }
 .agent.has-team::before { background:var(--purple); }
-.agent.has-team.selected { border-color:var(--purple); background:var(--purple); }
 
 /* Two-line card layout — top row = identity, bottom row = status + actions */
 .agent-top { display:flex; align-items:center; gap:6px; }
@@ -463,56 +448,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent[data-status="crashed"] .agent-status-line { color:var(--red); }
 .agent[data-status="resuming"] .agent-status-line { color:var(--yellow); }
 /* Dark text overrides when selected (needs higher specificity than data-status rules) */
-.agent.selected[data-status] .agent-status-line { color:rgba(30,30,46,.7); }
-.agent.selected .agent-current-file { color:#1e1e2e; border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
-.agent.selected .agent-current-file:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); background:rgba(0,0,0,.15); }
-.agent.selected[data-status="active"] .agent-current-file { color:#1e1e2e; opacity:.7; }
-.agent.selected .agent-btn:hover { color:#1e1e2e; background:rgba(0,0,0,.1); }
-.agent.selected .btn-loop { color:rgba(30,30,46,.7); border-color:rgba(0,0,0,.2); background:rgba(0,0,0,.08); }
-.agent.selected .btn-loop:hover { color:#1e1e2e; border-color:rgba(0,0,0,.35); }
-.agent.selected .status-meta { color:rgba(30,30,46,.5); opacity:1; }
-.agent.selected .ctx-bar-label { color:rgba(30,30,46,.5); }
-.agent.selected .ctx-bar-track { background:rgba(0,0,0,.15); }
-.agent.selected .ctx-bar-fill { background:rgba(0,0,0,.3); }
-.agent.selected .ctx-bar-fill.warn { background:rgba(0,0,0,.4); }
-.agent.selected .ctx-bar-fill.danger { background:rgba(0,0,0,.5); }
-.agent.selected .ctx-bar-pct { color:rgba(30,30,46,.6); }
-.agent.selected .ctx-bar-pct.warn { color:rgba(30,30,46,.7); }
-.agent.selected .ctx-bar-pct.danger { color:rgba(30,30,46,.8); }
-.agent.selected .ctx-bar-compact { color:rgba(30,30,46,.5); }
-.agent.selected .ctx-bar-compact:hover { color:#1e1e2e; }
-.agent.selected .ctx-bar-compacting { color:rgba(30,30,46,.7); }
-.agent.selected .agent-status-badge { border-color:rgba(0,0,0,.2); }
-.agent.selected .subagent { border-left-color:rgba(0,0,0,.2); }
-.agent.selected .subagent-dot { background:rgba(30,30,46,.5); box-shadow:none; }
-.agent.selected .subagent-name { color:#1e1e2e; opacity:.7; }
-.agent.selected .subagent-activity { color:rgba(30,30,46,.7); }
-.agent.selected .agent-team { border-top-color:rgba(0,0,0,.15); }
-.agent.selected .team-icon { color:rgba(30,30,46,.7); }
-.agent.selected .team-name { color:rgba(30,30,46,.8); }
-.agent.selected .team-count { color:rgba(30,30,46,.5); }
-.agent.selected .team-members { border-left-color:rgba(0,0,0,.15); }
-.agent.selected .team-member:hover { background:rgba(0,0,0,.06); }
-.agent.selected .team-member-dot { background:rgba(30,30,46,.6); box-shadow:none; }
-.agent.selected .team-member-name { color:#1e1e2e; }
-.agent.selected .team-member-role { color:rgba(30,30,46,.5); }
-.agent.selected .team-tasks-bar { border-left-color:rgba(0,0,0,.15); }
-.agent.selected .team-tasks-dot { background:rgba(30,30,46,.6); box-shadow:none; }
-.agent.selected .team-tasks-label { color:rgba(30,30,46,.7); }
-.agent.selected .team-tasks-pct { color:rgba(30,30,46,.5); }
 
 /* ── Selected (bright accent bg): DARK text on the row, LIGHT text on the hover-action scrim ── */
-.agent.selected .agent-name { color:#1e1e2e; }
-.agent.selected .agent-dot { background:#1e1e2e; box-shadow:none; opacity:.85; }
-.agent.selected .ctx-pct { color:rgba(30,30,46,.7); }
-.agent.selected .ctx-pct.warn { color:rgba(30,30,46,.85); }
-.agent.selected .ctx-pct.danger { color:#1e1e2e; }
-.agent.selected .agent-fill { background:rgba(0,0,0,.14); }
-.agent.selected .agent-fill.warn { background:rgba(0,0,0,.18); }
-.agent.selected .agent-fill.danger { background:rgba(0,0,0,.24); }
 /* Hover actions sit on a dark scrim → light-colored UI */
-.agent.selected .agent-actions .agent-btn { color:var(--text); }
-.agent.selected .agent-actions .agent-btn:hover { color:#fff; background:rgba(205,214,244,.12); }
 .agent-actions .btn-close:hover, .agent.selected .agent-actions .btn-close:hover { color:#fff !important; background:#eb6f8e; }
 
 /* Prompt / preview */
@@ -836,13 +774,6 @@ button:focus-visible { outline-offset:0; }
 .agent[data-status="waiting"] { border-color:rgba(166,227,161,.15); background:rgba(166,227,161,.04); }
 /* Hover stroke — must beat data-status border-color above */
 .agent[data-status]:hover { border-color:var(--accent); }
-/* Selected overrides — must beat data-status specificity */
-.agent.selected[data-status="permission"],
-.agent.selected[data-status="crashed"],
-.agent.selected[data-status="waiting"],
-.agent.selected[data-status="active"],
-.agent.selected[data-status="idle"],
-.agent.selected[data-status="resuming"] { background:var(--accent); border-color:var(--accent); }
 
 /* Answer needed — orange pulse while the agent is blocked on a chat answer */
 @keyframes needs-answer-flash {
@@ -1170,6 +1101,8 @@ button:focus-visible { outline-offset:0; }
 #preview-errors button:hover:not(:disabled) { background:var(--bg3); border-color:var(--cyan); }
 #preview-errors button:disabled { opacity:.4; cursor:not-allowed; }
 </style>
+<!-- The modern skin: loads after the base styles so it wins ties -->
+<link rel="stylesheet" href="./theme.css" />
 </head>
 <body>
 <div id="app">
@@ -1178,17 +1111,17 @@ button:focus-visible { outline-offset:0; }
     <div id="headerBadges"></div>
     <div id="world-counters"></div>
     <div id="bookmarks"></div>
-    <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none">&#x25A3;</button>
+    <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM21 21h.01M17 21h.01M21 17h.01"/></svg></button>
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
-    <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)">?</button>
+    <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button>
 
-    <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map">&#x2B22;</button>
-    <button class="hdr-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
-    <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Restart app">&#x1F504;</button>
+    <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></button>
+    <button class="hdr-btn" onclick="toggleSettings()" title="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    <button class="hdr-btn" onclick="window.api.send({type:'fullRestart'})" title="Restart app"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
-    <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)">+ Agent</button>
-    <button id="featBtn" onclick="openNewFeature()" title="Create a feature: one branch across multiple repos">+ Feature</button>
-    <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account">&#x1F464; No account</button>
+    <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Agent</button>
+    <button id="featBtn" onclick="openNewFeature()" title="Create a feature: one branch across multiple repos"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Feature</button>
+    <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account">No account</button>
   </div>
   <div id="content">
   <div id="list-col">
@@ -2860,7 +2793,7 @@ function createXterm(id) {
   container.appendChild(el);
   const fitAddon = new XFitAddon();
   const terminal = new XTerminal({
-    theme: { background:'#000000', foreground:'#cdd6f4', cursor:'#f5e0dc', cursorAccent:'#000000', selectionBackground:'#585b7066',
+    theme: { background:'#0e0e10', foreground:'#e4e4e7', cursor:'#e4e4e7', cursorAccent:'#0e0e10', selectionBackground:'#585b7066',
       black:'#45475a', red:'#f38ba8', green:'#a6e3a1', yellow:'#f9e2af', blue:'#89b4fa', magenta:'#cba6f7', cyan:'#94e2d5', white:'#bac2de',
       brightBlack:'#585b70', brightRed:'#f38ba8', brightGreen:'#a6e3a1', brightYellow:'#f9e2af', brightBlue:'#89b4fa', brightMagenta:'#cba6f7', brightCyan:'#94e2d5', brightWhite:'#a6adc8' },
     fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: true, scrollback: 10000, cursorStyle: 'bar', cursorWidth: 2,
@@ -4009,11 +3942,11 @@ function handleAccountInfo(msg) {
   const btn = document.getElementById('account-btn');
   if (msg.hasCredentials) {
     const display = msg.activeLabel || msg.email || 'Unsaved account';
-    btn.textContent = '\u{1F464} ' + display;
+    btn.textContent = display;
     btn.classList.remove('no-account');
     btn.title = msg.email ? `${display} (${msg.email})` : display;
   } else {
-    btn.textContent = '\u{1F464} No account';
+    btn.textContent = 'No account';
     btn.classList.add('no-account');
     btn.title = 'No credentials — run claude in a terminal to login';
   }

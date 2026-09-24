@@ -4878,7 +4878,10 @@ app.whenReady().then(() => {
     width: bounds.width || 750, height: bounds.height || 800,
     minWidth: 500, minHeight: 400,
     title: 'Overlord',
-    backgroundColor: '#1e1e2e',
+    backgroundColor: '#0e0e10',
+    // The app header is the title bar; Windows draws only its min/max/close buttons over it
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#0e0e10', symbolColor: '#9a9aa3', height: 44 },
     show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   };

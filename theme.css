@@ -1,0 +1,182 @@
+/* Overlord skin: neutral near-black surfaces, one accent, soft radii.
+   Loaded after index.html's base styles, so equal-specificity rules here win.
+   Colors live in the variables below; almost everything else reads them. */
+
+:root {
+  --bg: #0e0e10; --bg2: #0b0b0d; --bg3: #18181b; --border: #222226; --border-hi: #2e2e33;
+  --accent: #7c8cff; --green: #4ade80; --yellow: #facc15; --red: #f87171; --purple: #a78bfa;
+  --cyan: #22d3ee; --pink: #f472b6; --peach: #fb923c;
+  --text: #e4e4e7; --dim: #8b8b94; --fg: #e4e4e7; --subtext: #a1a1aa;
+  --shadow: #000; --card: #141417;
+  --surface0: #1c1c20; --surface1: #26262b; --surface2: #3a3a41;
+  --title-bg: #0e0e10; --panel-bg: #0e0e10; --editor-bg: #0e0e10;
+  --tab-active-bg: #0e0e10; --tab-inactive-bg: #0b0b0d;
+  --hover: rgba(255,255,255,.045); --hover-strong: rgba(255,255,255,.08);
+  --accent-soft: rgba(124,140,255,.14);
+  --r-sm: 6px; --r: 8px; --r-lg: 12px;
+  --pop-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06);
+}
+
+html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; font-size: 13px; letter-spacing: 0; }
+::selection { background: rgba(124,140,255,.35); }
+.ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; display: block; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+
+/* ── Header = title bar (Windows draws min/max/close in the right 140px) ── */
+#header { height: 44px; padding: 0 150px 0 16px; gap: 6px; background: var(--title-bg); border-bottom: 1px solid var(--border); }
+#header h1 { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
+#header h1 span { color: var(--text); }
+#header h1 .app-ver { color: var(--dim); font-weight: 400; font-size: 11px; margin-left: 2px; }
+.hdr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; min-width: 30px; padding: 0 8px;
+  border-radius: var(--r); color: var(--dim); font-size: 13px; }
+.hdr-btn:hover { background: var(--hover-strong); color: var(--text); }
+.hdr-btn.on, .hdr-btn.active { background: var(--accent-soft); color: var(--accent); }
+#bookmarks { gap: 2px; margin-right: 6px; }
+.bookmark { height: 28px; padding: 0 10px; font-size: 12px; font-weight: 500; color: var(--subtext); border-radius: 999px;
+  background: var(--surface0); border: 1px solid var(--border); }
+.bookmark:hover { color: var(--text); background: var(--surface1); }
+#addBtn, #featBtn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 10px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0; border-radius: var(--r); transition: background .12s, filter .12s; }
+#addBtn { background: var(--accent); color: #0b0b0d; border: none; }
+#addBtn:hover { opacity: 1; filter: brightness(1.1); }
+#featBtn { background: var(--surface0); color: var(--text); border: 1px solid var(--border-hi); }
+#featBtn:hover { background: var(--surface1); color: var(--text); }
+#addBtn .ic, #featBtn .ic { width: 14px; height: 14px; stroke-width: 2.2; }
+#account-btn { height: 30px; padding: 0 12px 0 8px; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px;
+  background: var(--surface0); color: var(--text); border: 1px solid var(--border); font-size: 12px; letter-spacing: 0; }
+#account-btn::before { content: ''; width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--accent), var(--purple)); }
+#account-btn:hover { background: var(--surface1); border-color: var(--border-hi); }
+#account-btn.no-account { color: var(--yellow); background: rgba(250,204,21,.08); border-color: rgba(250,204,21,.2); }
+#account-btn.no-account::before { background: var(--surface2); }
+#header .badge { border-radius: 999px; padding: 3px 9px; font-size: 11px; letter-spacing: 0; }
+
+/* ── Agent list ── */
+#list { padding: 6px 0 12px; }
+#list::-webkit-scrollbar-thumb, #list::-webkit-scrollbar-thumb:hover { background: var(--surface1); border-radius: 999px; }
+.group { margin-bottom: 4px; }
+.group-header { padding: 10px 12px 6px 10px; background: transparent; border-bottom: none; border-radius: var(--r); margin: 0 6px; }
+.group-header:hover { background: transparent; }
+.group-chevron { color: var(--dim); }
+.group-name { font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--subtext); }
+.group-header:hover .group-name { color: var(--text); }
+/* Path only when you go looking for it */
+.group-path { max-height: 0; opacity: 0; transition: max-height .15s, opacity .15s; }
+.group-header:hover .group-path { max-height: 16px; opacity: .8; }
+.group-actions { opacity: 0; transition: opacity .12s; }
+.group-header:hover .group-actions, .group-header:focus-within .group-actions { opacity: 1; }
+.group-actions button { height: 24px; padding: 0 9px; font-size: 11px; border-radius: var(--r-sm); border: none;
+  background: var(--surface0); color: var(--subtext); letter-spacing: 0; }
+.group-actions button:hover { background: var(--surface1); color: var(--text); border-color: transparent; }
+.group-menu-btn { width: 24px; height: 24px; border-radius: var(--r-sm); }
+.group-menu-btn:hover { background: var(--hover-strong); }
+.group.is-worktree > .group-header { border-left: none; box-shadow: inset 2px 0 0 var(--accent); }
+
+.agents { margin-left: 16px; padding: 0 8px 0 6px; border-left: 1px solid var(--border); gap: 1px; }
+.agent { height: 32px; padding: 0 8px 0 10px; gap: 8px; border: none; border-radius: var(--r); background: transparent; }
+.agent:hover, .agent[data-status]:hover { background: var(--hover); border-color: transparent; }
+.agent[data-status="permission"], .agent[data-status="crashed"], .agent[data-status="waiting"] { background: transparent; border-color: transparent; }
+.agent::before { left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: transparent !important; }
+.agent.selected { background: var(--surface1); }
+.agent.selected::before { background: var(--accent) !important; }
+.agent.selected:hover { background: var(--surface1); }
+.agent-name { font-size: 13px; color: var(--subtext); }
+.agent:hover .agent-name, .agent.selected .agent-name { color: var(--text); }
+.agent[data-status="waiting"] .agent-name, .agent[data-status="permission"] .agent-name { color: var(--text); font-weight: 500; }
+/* Status: a dot, with a soft halo when something is going on */
+.agent-dot { width: 7px; height: 7px; background: var(--surface2); opacity: 1; }
+.agent[data-status="active"] .agent-dot { box-shadow: 0 0 0 3px rgba(124,140,255,.18); }
+.agent[data-status="waiting"] .agent-dot { box-shadow: 0 0 0 3px rgba(74,222,128,.16); }
+.agent[data-status="permission"] .agent-dot { box-shadow: 0 0 0 3px rgba(250,204,21,.18); }
+.agent[data-status="crashed"] .agent-dot { box-shadow: 0 0 0 3px rgba(248,113,113,.18); }
+/* Context used is the % at the right; the fill behind the text read as a half-applied selection */
+.agent-fill { display: none; }
+.ctx-pct { font-size: 11px; color: var(--dim); }
+/* Model chip only when you're on the row */
+.agent .model-tag { opacity: 0; transition: opacity .12s; }
+.agent:hover .model-tag, .agent.selected .model-tag { opacity: 1; }
+.model-tag { font-size: 10px; font-weight: 600; text-transform: lowercase; letter-spacing: 0; border-radius: var(--r-sm);
+  border: 1px solid var(--border-hi); color: var(--subtext); background: var(--surface0); }
+.model-tag.opus, .model-tag.sonnet, .model-tag.haiku, .model-tag.fable { border-color: var(--border-hi); }
+.model-tag .mt-chev { border-left-color: var(--border-hi); }
+.agent-actions { padding-left: 24px; background: linear-gradient(90deg, transparent, var(--surface1) 24px); }
+.agent:not(.selected) .agent-actions { background: linear-gradient(90deg, transparent, #151518 24px); }
+.btn-close { border-radius: var(--r-sm); }
+.agent.needs-answer { border-radius: var(--r); }
+.agent-pname, .agent-current-file { border-radius: var(--r-sm); }
+.subagent-dot, .team-member-dot, .team-tasks-dot { border-radius: 50%; box-shadow: none; }
+
+/* ── Popovers and menus ── */
+.group-dropdown, #pr-dropdown, #actions-dropdown, #pr-snooze-pop, .branch-menu, #agent-tip {
+  background: #151518; border: none; border-radius: var(--r-lg); box-shadow: var(--pop-shadow); }
+.group-dropdown { padding: 5px; }
+.group-dropdown button { border-radius: var(--r-sm); padding: 7px 10px; font-size: 12px; letter-spacing: 0; }
+.group-dropdown button:hover { background: var(--hover-strong); }
+
+/* ── Footer usage bar ── */
+#summary-bar { padding: 10px 16px; gap: 6px; background: var(--bg); letter-spacing: 0; border-top: 1px solid var(--border); }
+.usage-row-label { font-weight: 500; font-size: 11px; color: var(--subtext); min-width: 96px; }
+.usage-row-track { height: 4px; border-radius: 999px; background: var(--surface1); }
+.usage-row-fill { border-radius: 999px; }
+.usage-row-fill.ok { background: var(--accent); opacity: .9; }
+.usage-row-fill.warn, .usage-row-fill.danger { opacity: .9; }
+.usage-row-pct { font-size: 11px; font-variant-numeric: tabular-nums; }
+.usage-row-reset { font-size: 10px; }
+.usage-info-row { font-size: 11px; }
+#pr-badge, #actions-badge { padding: 8px 16px; font-size: 12px; letter-spacing: 0; background: var(--bg); }
+
+/* ── Terminal panel ── */
+#term { border-left: 1px solid var(--border); }
+#resize { border-left: none; }
+#term-header { height: 44px; padding: 0 10px; gap: 8px; background: var(--bg); }
+.term-tabs { gap: 2px; padding: 3px; background: var(--surface0); border-radius: var(--r); }
+#term-header .term-tab { height: 26px; padding: 0 12px; font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: 0;
+  border: none; border-radius: var(--r-sm); color: var(--dim); }
+#term-header .term-tab:hover { color: var(--text); }
+#term-header .term-tab.active { background: var(--surface2); color: var(--text); border: none; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+#term-header .term-title { font-size: 12px; color: var(--dim); letter-spacing: 0; }
+#term-header button { border-radius: var(--r-sm); }
+#term-header button:hover { background: var(--hover-strong); }
+#term-container { background: var(--bg); padding-left: 10px; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 999px; }
+#term-scroll-nav { gap: 8px; right: 22px; }
+#term-scroll-nav button { width: 30px; height: 30px; line-height: 28px; font-size: 13px; opacity: .85; color: var(--subtext);
+  background: rgba(28,28,32,.75); border: 1px solid var(--border-hi); backdrop-filter: blur(8px); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+#term-scroll-nav button:hover { background: var(--surface1); color: var(--text); opacity: 1; }
+#prompt-rail .pr-pop { background: #151518; border: none; box-shadow: var(--pop-shadow); }
+#prompt-rail .pr-dashes i.on { background: var(--accent); }
+#term-search, #filter-bar { background: var(--bg); }
+#term-search-input, #filter-input { border-radius: var(--r); background: var(--surface0); border-color: var(--border); padding: 6px 10px; }
+#term-search-input:focus, #filter-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#term-order { background: var(--bg); }
+
+/* ── Timeline / conversation surfaces ── */
+#timeline-events, #conversation { background: var(--bg); }
+
+/* ── Modals ── */
+#settings-overlay, #confirm-overlay { background: rgba(0,0,0,.6); backdrop-filter: blur(6px); }
+.settings-modal, .confirm-modal { background: #131316; border: none; border-radius: 16px; box-shadow: var(--pop-shadow); padding: 22px 26px; }
+.settings-header { background: #131316; }
+.settings-sec > summary:hover { color: var(--text); }
+.settings-label input[type="checkbox"] { width: 32px; height: 18px; border: none; border-radius: 999px; background: var(--surface2); transition: background .15s; }
+.settings-label input[type="checkbox"]::after { content: ''; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.settings-label input[type="checkbox"]:checked { background: var(--accent); }
+.settings-label input[type="checkbox"]:checked::after { left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transform: translateX(14px); }
+.settings-hint { padding-left: 42px; }
+.confirm-actions button { border-radius: var(--r); padding: 7px 16px; font-weight: 500; background: var(--surface0); border-color: var(--border-hi); }
+.confirm-actions button:hover { background: var(--surface1); }
+
+/* ── Toast ── */
+.toast { background: #1c1c20; color: var(--text); border: none; border-radius: 999px; padding: 9px 18px;
+  box-shadow: var(--pop-shadow); }
+
+/* ── Generic form controls inside panels and modals ── */
+input[type="text"], input[type="search"], input[type="number"], select, textarea { border-radius: var(--r); }
+
+/* ── Scrollbars: thin rounded thumbs everywhere, no arrow buttons ── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--surface2); background-clip: padding-box; }
+::-webkit-scrollbar-button { display: none; }
+.settings-modal { width: 520px; }
