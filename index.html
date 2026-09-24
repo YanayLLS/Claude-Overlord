@@ -322,7 +322,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent[data-status="crashed"] .agent-dot { background:var(--red); opacity:1; }
 .agent[data-status="resuming"] .agent-dot { background:var(--yellow); opacity:1; animation:pulse 2s ease-in-out infinite; }
 /* Middle flexible zone (status + current file) keeps the right cluster right-anchored */
-.agent-mid { flex:0 1 auto; min-width:0; display:flex; align-items:center; gap:5px; overflow:hidden; }
 /* Right cluster — fixed-width columns so model + ctx% line up across rows */
 .agent-right { display:flex; align-items:center; gap:5px; flex-shrink:0; }
 .agent-model-slot { width:62px; display:flex; justify-content:flex-end; flex-shrink:0; }
@@ -408,17 +407,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .status-verb { flex-shrink:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .status-meta { flex-shrink:0; margin-left:5px; opacity:.45; font-size:10px; font-variant-numeric:tabular-nums; }
 .agent-bottom-spacer { flex:1; }
-/* Current file badge */
-.agent-current-file {
-  flex-shrink:1; min-width:0; max-width:140px;
-  font-size:10px; padding:1px 6px; border-radius:3px;
-  color:var(--dim); border:1px solid var(--border); background:rgba(205,214,244,.03);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  cursor:pointer; letter-spacing:.2px; transition:color .12s, border-color .12s, background .12s;
-}
-.agent-current-file:hover { color:var(--accent); border-color:rgba(148,226,213,.4); background:rgba(148,226,213,.08); }
-.agent[data-status="active"] .agent-current-file { color:var(--text); opacity:.7; }
-.agent[data-status="active"] .agent-current-file:hover { opacity:1; color:var(--accent); }
 /* Close button — hidden behind context menu by default */
 .agent-btn {
   font-family:inherit; background:none; border:none; cursor:pointer;
@@ -1734,18 +1722,6 @@ function submitFeature() {
 }
 document.addEventListener('click', closeGroupMenus);
 
-// Delegated handler for current-file badge — survives innerHTML re-renders
-document.getElementById('list').addEventListener('mousedown', (e) => {
-  if (e.button !== 0) return;
-  const badge = e.target.closest('.agent-current-file');
-  if (!badge) return;
-  e.stopPropagation();
-  const file = badge.dataset.file;
-  const agentEl = badge.closest('[data-id]');
-  const id = agentEl ? Number(agentEl.dataset.id) : undefined;
-  openFile(id, file);
-});
-
 // ── Agent icons (flat text glyphs — \uFE0E forces text presentation) ──
 const AGENT_ICONS = [
   '\u2726','\u2737','\u2742','\u2756','\u25C6','\u25CE','\u25B2','\u2B23',
@@ -2578,9 +2554,6 @@ function render() {
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
         <span class="agent-name" data-tip-overflow onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
-        <div class="agent-mid">
-          ${a.currentFileName ? `<span class="agent-current-file" title="${escAttr(a.currentFile)}" data-file="${escAttr(a.currentFile)}" onclick="event.stopPropagation();openFile(${id},this.dataset.file)">${esc(a.currentFileName)}</span>` : ''}
-        </div>
         <div class="agent-right" title="Context: ${a.stats?.ctxTok ? Math.round(a.stats.ctxTok / 1000) + 'K' : '0'}/${agentCtxWin / 1000}K (${ctxPct}%)">
           <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}"><span onclick="event.stopPropagation();showModelMenu(event,${id})" title="Change model">${mf}</span><span class="mt-chev" onclick="event.stopPropagation();showEffortMenu(event,${id})" title="Change effort level">&#9662;</span></span>` : ''}</span>
           <span class="agent-tail">
@@ -3502,7 +3475,7 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', currentFile: '', currentFileName: '', archived: msg.archived || false });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', archived: msg.archived || false });
       if (msg.cwd) addKnownProject(msg.cwd);
       // Fresh agent goes last: ids restart at 1 each launch, so a saved order may still
       // hold this id at a stale position. Re-append it.
@@ -3570,7 +3543,7 @@ function handleAgentMsg(msg) {
         a.crashed = null;
         if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now();
         if (msg.status === 'waiting') {
-          a.activeAt = null; a.tools.clear(); a.subTools.clear(); a.spinnerText = ''; a.currentFile = ''; a.currentFileName = '';
+          a.activeAt = null; a.tools.clear(); a.subTools.clear(); a.spinnerText = '';
         }
         // Debounced done: only confirm + chime after 3s of continuous waiting
         if (msg.status === 'waiting' && was === 'active') {
@@ -3600,7 +3573,7 @@ function handleAgentMsg(msg) {
       }
       break;
     }
-    case 'toolStart': { const a = agents.get(msg.id); if (a) { a.crashed = null; if (!a.activeAt) a.activeAt = Date.now(); a.tools.set(msg.toolId, { status: msg.status, name: msg.name, done: false, perm: false, isSubagent: msg.name === 'Task' || msg.name === 'Agent' }); if (msg.filePath) { a.currentFile = msg.filePath; a.currentFileName = msg.filePath.replace(/^.*[\\\/]/, ''); } scheduleRender(); } break; }
+    case 'toolStart': { const a = agents.get(msg.id); if (a) { a.crashed = null; if (!a.activeAt) a.activeAt = Date.now(); a.tools.set(msg.toolId, { status: msg.status, name: msg.name, done: false, perm: false, isSubagent: msg.name === 'Task' || msg.name === 'Agent' }); scheduleRender(); } break; }
     case 'toolDone': { const a = agents.get(msg.id); if (a) { const t = a.tools.get(msg.toolId); if (t) { t.done = true; a.subTools.delete(msg.toolId); } scheduleRender(); } break; }
     case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
     case 'subToolStart': { const a = agents.get(msg.id); if (a) { let subs = a.subTools.get(msg.parentToolId); if (!subs) { subs = new Map(); a.subTools.set(msg.parentToolId, subs); } subs.set(msg.toolId, { status: msg.status, name: msg.name, done: false }); scheduleRender(); } break; }
@@ -5898,7 +5871,7 @@ function worldSnapshot() {
       verb: statusVerb(a, st), ctxPct, cost: calcCost(a.stats), costStr: fmtCost(calcCost(a.stats)), model: a.stats?.modelFamily || '', looping: !!a.looping,
       tool: ([...a.tools.values()].find(t => !t.done) || {}).name || '', idleMin,
       turns: a.stats?.turns || 0, toolsUsed: Object.values(a.stats?.tools || {}).reduce((x, y) => x + (y || 0), 0), tokIn: a.stats?.inTok || 0, tokOut: a.stats?.outTok || 0,
-      crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', currentFileName: a.currentFileName || '', team });
+      crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', team });
   }
   // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
   const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.checks === 'fail') return 'blocked'; if (p.mergeState === 'BEHIND' || p.behindBy > 0) return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
@@ -6086,7 +6059,7 @@ function sendOrder() { const inp = document.getElementById('term-order-input'); 
 document.getElementById('list').addEventListener('mouseover', (e) => { if (!worldView || !window.World) return; const card = e.target.closest('.agent[data-id]'); if (card) World.hover(+card.dataset.id); });
 document.getElementById('list').addEventListener('mouseleave', () => { if (worldView && window.World) World.hover(null); });
 // Clicking a card (its existing onclick still focuses the agent) also flies the camera to the unit and zooms in.
-document.getElementById('list').addEventListener('click', (e) => { if (!worldView || !window.World) return; if (e.target.closest('button, .model-tag, .agent-current-file, .agent-actions')) return; const card = e.target.closest('.agent[data-id]'); if (card) World.focus(+card.dataset.id, .9); });
+document.getElementById('list').addEventListener('click', (e) => { if (!worldView || !window.World) return; if (e.target.closest('button, .model-tag, .agent-actions')) return; const card = e.target.closest('.agent[data-id]'); if (card) World.focus(+card.dataset.id, .9); });
 
 // Initial render
 render();

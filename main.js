@@ -1560,8 +1560,7 @@ function parseLine(id, line) {
             if (!EXEMPT.has(tn)) nonExempt = true;
             if (tn === 'CronCreate') { a.cronCount++; send({ type: 'looping', id, active: true, count: a.cronCount }); }
             if (tn === 'CronDelete') { a.cronCount = Math.max(0, a.cronCount - 1); send({ type: 'looping', id, active: a.cronCount > 0, count: a.cronCount }); }
-            const fp = inp.file_path && ['Read', 'Write', 'Edit'].includes(tn) ? inp.file_path : undefined;
-            send({ type: 'toolStart', id, toolId: b.id, status: st, name: tn, filePath: fp });
+            send({ type: 'toolStart', id, toolId: b.id, status: st, name: tn });
           }
         }
         // These tools always block on a human choice — flag now, don't wait out the timer.

@@ -135,7 +135,7 @@ body.world-mode .agent-dot { width: 9px; height: 10px; border-radius: 0; clip-pa
 body.world-mode .agent-name { font-size: 12px; font-weight: 500; }
 body.world-mode .model-tag { border: 0; border-radius: 0; clip-path: var(--w-hexw); background: rgba(255,255,255,.08); }
 body.world-mode .model-tag > span { padding: 2px 8px; }
-body.world-mode .agent-pname, body.world-mode .agent-current-file { border-radius: 0; clip-path: var(--w-hexw); border-color: transparent; background: rgba(255,255,255,.06); padding-left: 9px; padding-right: 9px; }
+body.world-mode .agent-pname { border-radius: 0; clip-path: var(--w-hexw); border-color: transparent; background: rgba(255,255,255,.06); padding-left: 9px; padding-right: 9px; }
 body.world-mode .agent-btn { border-radius: 0; }
 body.world-mode #filter-bar { background: var(--w-panel-2); border-bottom-color: var(--w-line); }
 body.world-mode #filter-input { border-radius: 0; clip-path: var(--w-hexw); border-color: transparent; background: #0a0f15; padding-left: 14px; }
@@ -213,7 +213,6 @@ body.world-mode .agent { display: grid; grid-template-columns: 14px 1fr auto; gr
 body.world-mode .agent-dot { grid-row: 1 / span 2; grid-column: 1; justify-self: center; }
 body.world-mode .agent-name { grid-row: 1; grid-column: 2; }
 body.world-mode .agent-right { grid-row: 1; grid-column: 3; }
-body.world-mode .agent-mid { grid-row: 2; grid-column: 3; justify-self: end; }
 body.world-mode .agent::after { content: attr(data-stext); grid-row: 2; grid-column: 2; min-width: 0; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; z-index: 1; }
 body.world-mode .agent[data-status="active"]::after { color: var(--accent); }
 body.world-mode .agent[data-status="permission"]::after { color: var(--yellow); }

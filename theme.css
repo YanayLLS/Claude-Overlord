@@ -108,7 +108,7 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 .agent.selected .agent-actions { background: var(--surface1); }
 .btn-close { border-radius: var(--r-sm); }
 .agent.needs-answer { border-radius: var(--r); }
-.agent-pname, .agent-current-file { border-radius: var(--r-sm); }
+.agent-pname { border-radius: var(--r-sm); }
 .subagent-dot, .team-member-dot, .team-tasks-dot { border-radius: 50%; box-shadow: none; }
 
 /* ── Popovers and menus ── */
