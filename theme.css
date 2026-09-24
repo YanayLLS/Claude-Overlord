@@ -26,7 +26,6 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 #header { height: 44px; padding: 0 150px 0 16px; gap: 6px; background: var(--title-bg); border-bottom: 1px solid var(--border); }
 #header h1 { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
 #header h1 span { color: var(--text); }
-#header h1 .app-ver { color: var(--dim); font-weight: 400; font-size: 11px; margin-left: 2px; }
 .hdr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; min-width: 30px; padding: 0 8px;
   border-radius: var(--r); color: var(--dim); font-size: 13px; }
 .hdr-btn:hover { background: var(--hover-strong); color: var(--text); }
@@ -316,3 +315,22 @@ body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 .act-pill { font-size: 9.5px; padding: 1px 7px; letter-spacing: .02em; }
 #actions-dropdown { padding-bottom: 6px; }
 #actions-dropdown .pr-dhead { padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--text); background: #151518; border-bottom: 1px solid var(--border); }
+
+/* Sidebar search: always on screen; Ctrl+F still jumps into it, × clears */
+#filter-bar { display: flex; padding: 10px 10px 4px; border-bottom: none; background: transparent; }
+#filter-input { height: 30px; padding: 0 10px 0 30px; font-size: 12px;
+  background: var(--surface0) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b8b94' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 10px center / 14px; }
+#filter-input:placeholder-shown ~ #filter-close { display: none; }
+body.world-mode #filter-bar:not(.open) { display: none; }
+
+/* Group size next to its name */
+.group-count { margin-left: 6px; font-size: 11px; color: var(--dim); opacity: .7; font-variant-numeric: tabular-nums; }
+
+/* Finished (your turn) = white ring; idle = faint small dot, so the two read apart */
+.agent[data-status="waiting"] .agent-dot { box-shadow: inset 0 0 0 1.5px var(--text); }
+.agent[data-status="idle"] .agent-dot { width: 5px; height: 5px; margin: 0 1px; background: var(--surface2); opacity: 1; }
+
+/* Header project links read as bookmarks: a folder glyph before each */
+.bookmark { display: inline-flex; align-items: center; gap: 6px; }
+.bookmark::before { content: ''; width: 13px; height: 13px; flex-shrink: 0; background: currentColor; opacity: .7;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/%3E%3C/svg%3E") center / contain no-repeat; }

@@ -98,7 +98,6 @@ body.world-mode { --w-line: #223140; --w-line-hi: #34465a; --w-panel: #121b26; -
 body.world-mode #header { height: 44px; gap: 8px; background: linear-gradient(180deg, #172230, var(--w-panel)); border-bottom-color: var(--w-line-hi); }
 body.world-mode #header h1 { font-family: var(--w-display); font-size: 15px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
 body.world-mode #header h1 span:first-child { color: #fff; }
-body.world-mode #header h1 .app-ver { color: var(--w-gold); font-size: 11px; letter-spacing: .2em; }
 body.world-mode #header .badge { border: 0; border-radius: 0; clip-path: var(--w-hexw); padding: 5px 15px; background: rgba(0,0,0,.35); font-family: var(--w-mono); font-size: 11.5px; letter-spacing: 0; color: var(--text); }
 body.world-mode #header .badge-perm { color: var(--w-perm); background: rgba(249,226,175,.16); }
 body.world-mode .hdr-btn { border-radius: 0; clip-path: var(--w-hexw); background: rgba(255,255,255,.06); padding: 5px 13px; font-size: 13px; }

@@ -35,7 +35,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   -webkit-app-region:drag;
 }
 #header h1 span { color:var(--accent); font-weight:600; }
-#header h1 .app-ver { color:var(--dim); font-weight:400; font-size:11px; }
 #headerBadges { display:flex; gap:4px; align-items:center; }
 #headerBadges:empty { display:none; }
 /* names are no longer truncated, so scroll rather than clip when the row runs long */
@@ -1051,7 +1050,7 @@ button:focus-visible { outline-offset:0; }
 <body>
 <div id="app">
   <div id="header">
-    <h1><span>Overlord</span> <span class="app-ver"></span></h1>
+    <h1><span>Overlord</span> </h1>
     <div id="headerBadges"></div>
     <div id="world-counters"></div>
     <div id="bookmarks"></div>
@@ -1076,9 +1075,9 @@ button:focus-visible { outline-offset:0; }
     <button id="world-roster-hide" onclick="setWorldRosterHidden(true)" title="Hide the roster (it slides away; a tab brings it back)">&#x2039;</button>
     <div id="ctx-warning" onclick="focusNextCtxDanger()"><span class="ctx-warning-icon">&#x26A0;</span><span id="ctx-warning-text"></span></div>
     <div id="filter-bar">
-      <input id="filter-input" type="text" placeholder="Filter agents... (Esc to close)" />
+      <input id="filter-input" type="text" placeholder="Search agents  (Ctrl+F)" />
       <span id="filter-count"></span>
-      <button id="filter-close" onclick="closeFilter()" aria-label="Close filter">&times;</button>
+      <button id="filter-close" onclick="closeFilter()" aria-label="Clear search">&times;</button>
     </div>
     <div id="world-attn"></div>
     <div id="list"></div>
@@ -1394,12 +1393,13 @@ button:focus-visible { outline-offset:0; }
 <script src="./prompt-nav.js"></script>
 <script src="./tooltip.js"></script>
 <script src="./term-size-core.js"></script>
+<script src="./shift-select-core.js"></script>
 <script src="./usage-core.js"></script>
 <script src="./preview-ui-dom.js"></script>
 <script src="./preview-ui-device.js"></script>
 <script src="./preview-ui.js"></script>
 <script>
-document.querySelector('#header h1 .app-ver').textContent = api.version ? 'v' + api.version : '';
+document.querySelector('#header h1').title = api.version ? 'Overlord v' + api.version : ''; // version in the tooltip, not the title bar
 
 function ctxWindow(modelFamily, ctxTok) {
   const base = (modelFamily === 'opus' || modelFamily === 'fable') ? 1000000 : 200000; // sonnet/haiku default 200k
@@ -1850,6 +1850,7 @@ function openFilter() {
 }
 function closeFilter() {
   document.getElementById('filter-bar').classList.remove('open');
+  document.getElementById('filter-input').value = ''; // the bar stays on screen now, so clear what it shows
   if (filterText) { filterText = ''; render(); }
 }
 document.getElementById('filter-input').addEventListener('input', (e) => { filterText = e.target.value.toLowerCase(); render(); });
@@ -2506,7 +2507,7 @@ function render() {
       : (wtEntry ? `<a class="wt-port" onclick="event.stopPropagation();openUrl('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
     html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}"><div class="group-header" onclick="toggleGroup('${safeCwd}')">
       <span class="group-chevron">&#x25BC;</span>
-      <div class="group-info" title="${escAttr(cwd)}">${nameHtml}</div>
+      <div class="group-info" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>
       ${wtStatus}
       ${wtServerBadge}
       ${serverBadges}
