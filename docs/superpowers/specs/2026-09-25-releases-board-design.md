@@ -80,14 +80,15 @@ branches`). An invalid config shows that list instead of the grid.
 
 ## Data
 
-On each refresh, all requests run in parallel through the existing `ghJson` helper:
+One GraphQL query per refresh, sent through the existing `ghGraphql` helper, covers every repo.
 
-- **Per cell:** `GET repos/{repo}/commits/{branch}`, giving sha, first line of the message, author login,
-  committer date and html_url.
-- **Per promote pair `(from → to)`:** `GET repos/{repo}/compare/{toBranch}...{fromBranch}`, giving
-  `ahead_by`, the `html_url` compare link, and the last 10 `commits` for the detail view.
-
-Frontline's config comes to about 35 requests per refresh, well under the 5,000/hour limit.
+- **Per cell:** `ref(qualifiedName: "refs/heads/<branch>") { target { ... on Commit } }`, giving sha,
+  headline + body, author, committedDate and url.
+  - A merge commit's "Merge pull request #N from …" headline is replaced with `#N <PR title>`, taken
+    from the first line of the body.
+- **Per promote pair `(from → to)`:** `ref(<to branch>) { compare(headRef: <from branch>) { aheadBy
+  commits(last: 10) } }`.
+- A missing branch comes back as a null ref rather than an error, so it only marks its own cell.
 
 **Failures:**
 
@@ -129,8 +130,9 @@ Same split as the Actions feature (`actions-core.js`):
 |---|---|
 | `releases-core.js` | Pure: `parseSource`, `validateConfig`, `buildGrid(config, results)` → rows/cells/arrows view model, `age()`. No DOM, no gh. |
 | `releases-core.test.js` | `node --test`. Covers validation errors, source parsing, and grid building incl. missing branches, notes, non-adjacent promote steps, per-cell errors. |
-| `main.js` | Loads the config (file or gh), fans out requests, sends a `releasesData` IPC message. Handles `releasesRefresh`, `releasesOpen`/`Close` (start/stop 5-min timer). |
-| `index.html` | Badge, modal, cell detail, setup screen, source field in Settings. |
+| `releases-main.js` | Loads the config (file or gh), fans out requests, sends `{ type: 'releases', state }`; source + cache in `<stateDir>/releases.json`, not `settings`. Handles `releasesRefresh`, `releasesOpen`/`Close` (start/stop 5-min timer). |
+| `releases-ui.js` + `releases.css` | Badge, modal, cell detail, setup screen (which also holds the source field — not in Settings, for isolation). |
+| `main.js` / `index.html` | Hooks only: 2 and 3 lines. Removing the feature = delete `releases-*` + those lines. |
 
 ## Frontline default config
 

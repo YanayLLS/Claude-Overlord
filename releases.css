@@ -1,0 +1,49 @@
+/* Releases board — self-contained, see releases-ui.js */
+/* same pill as #pr-badge / #actions-badge in theme.css's footer chips, with a tag icon */
+#releases-badge { display:flex; align-items:center; gap:6px; height:26px; padding:0 10px; border:1px solid var(--border); border-radius:999px; background:var(--surface0); font-size:11.5px; font-weight:500; color:var(--subtext); cursor:pointer; flex-shrink:0; user-select:none; transition:background .12s, color .12s; }
+#releases-badge:hover { background:var(--surface1); color:var(--text); }
+#releases-badge::before { content:''; width:13px; height:13px; flex-shrink:0; background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z'/%3E%3Ccircle cx='7.5' cy='7.5' r='.5' fill='black'/%3E%3C/svg%3E") center / contain no-repeat; }
+
+#rl-overlay { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:48px 16px; overflow:auto; }
+#rl-overlay.open { display:flex; }
+#rl-modal { background:var(--bg2); border:1px solid var(--border); border-radius:var(--r-lg,10px); box-shadow:var(--pop-shadow,0 8px 24px rgba(0,0,0,.4)); width:min(1100px,100%); color:var(--text); font-size:12px; }
+.rl-head { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); }
+.rl-head h2 { margin:0; font-size:14px; font-weight:600; }
+.rl-head .rl-src { color:var(--dim); font-size:11px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+.rl-head .rl-src:hover { color:var(--text); text-decoration:underline; }
+.rl-head .rl-upd { color:var(--dim); font-size:11px; white-space:nowrap; }
+.rl-setup button { background:var(--accent); color:var(--on-accent,#11111b); border:none; border-radius:var(--r-sm,4px); padding:4px 12px; cursor:pointer; font:inherit; font-weight:600; }
+.rl-setup button + button { background:none; color:var(--text); border:1px solid var(--border); font-weight:400; }
+.rl-head button {background:none; border:1px solid var(--border); color:var(--text); border-radius:var(--r-sm,4px); padding:2px 8px; cursor:pointer; font-size:12px; }
+.rl-head button:hover { background:var(--hover); }
+.rl-head button.spin { opacity:.5; }
+
+.rl-body { padding:12px 14px; overflow-x:auto; }
+.rl-grid { display:grid; gap:6px; align-items:stretch; min-width:max-content; }
+.rl-colhead { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.8px; padding:0 6px; }
+.rl-label { font-weight:600; padding:8px 6px; align-self:center; white-space:nowrap; }
+.rl-cell { border:1px solid var(--border); border-radius:var(--r,6px); padding:6px 8px; background:var(--card,var(--bg)); cursor:pointer; min-width:150px; max-width:220px; }
+.rl-cell:hover, .rl-cell.sel { border-color:var(--border-hi); background:var(--hover); }
+.rl-empty { min-width:150px; }
+.rl-sha { font-family:ui-monospace,Consolas,monospace; }
+.rl-sha .rl-age { color:var(--dim); font-family:inherit; }
+.rl-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:2px 0; }
+.rl-branch { color:var(--dim); font-size:11px; }
+.rl-next { margin-top:4px; font-size:11px; color:var(--peach,#fab387); }
+.rl-next.zero { color:var(--dim); }
+.rl-next a, .rl-link { color:inherit; cursor:pointer; text-decoration:none; }
+.rl-next a:hover, .rl-link:hover { text-decoration:underline; }
+.rl-bad { color:var(--red); }
+.rl-note { grid-column:2 / -1; color:var(--dim); font-style:italic; padding:8px 6px; }
+
+.rl-detail { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; }
+.rl-detail h3 { margin:0 0 6px; font-size:13px; }
+.rl-detail ul { margin:6px 0 0; padding-left:18px; }
+.rl-detail li { margin:2px 0; }
+.rl-detail .rl-mono { font-family:ui-monospace,Consolas,monospace; color:var(--dim); }
+
+.rl-setup { line-height:1.6; }
+.rl-setup input { width:100%; box-sizing:border-box; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:var(--r-sm,4px); padding:5px 8px; font:inherit; margin:6px 0; }
+.rl-setup ul { color:var(--red); }
+.rl-setup pre { background:var(--bg); border:1px solid var(--border); border-radius:var(--r-sm,4px); padding:8px; overflow:auto; font-size:11px; }

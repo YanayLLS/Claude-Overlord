@@ -1,0 +1,132 @@
+// Run: node releases-core.test.js
+const assert = require('assert');
+const { parseSource, validateConfig, requestsFor, buildGrid, age, commitTitle, DEFAULT_SOURCE } = require('./releases-core');
+
+// ── parseSource ───────────────────────────────────────
+assert.deepStrictEqual(parseSource('LLSLtd/frontlineio-frontend:.overlord/releases.json@dev'),
+  { kind: 'gh', repo: 'LLSLtd/frontlineio-frontend', path: '.overlord/releases.json', ref: 'dev' });
+assert.deepStrictEqual(parseSource('o/r:cfg/releases.json'), { kind: 'gh', repo: 'o/r', path: 'cfg/releases.json', ref: '' });
+assert.deepStrictEqual(parseSource('C:\\team\\releases.json'), { kind: 'file', path: 'C:\\team\\releases.json' });
+assert.deepStrictEqual(parseSource('/home/me/releases.json'), { kind: 'file', path: '/home/me/releases.json' });
+assert.strictEqual(parseSource(''), null);
+assert.strictEqual(parseSource('o/r:../../etc@dev'), null);       // path traversal
+assert.strictEqual(parseSource('o/r:a.json@dev&calc'), null);     // shell metachar in ref
+assert.strictEqual(parseSource('relative/releases.json'), null);  // neither absolute nor owner/repo:path
+assert.ok(parseSource(DEFAULT_SOURCE));
+
+// ── validateConfig ────────────────────────────────────
+const good = {
+  envs: ['dev', 'alpha', 'prod'],
+  repos: [
+    { repo: 'o/web', branches: { dev: 'dev', alpha: 'alpha', prod: 'master' }, promote: ['dev', 'alpha', 'prod'] },
+    { repo: 'o/id', label: 'Identity', branches: { dev: 'dev', prod: 'main' }, promote: ['dev', 'prod'] },
+    { repo: 'o/infra', note: 'applied by hand' },
+  ],
+};
+assert.deepStrictEqual(validateConfig(good), []);
+assert.deepStrictEqual(validateConfig(null), ['config must be a JSON object']);
+assert.deepStrictEqual(validateConfig({ envs: [], repos: [] }), ['envs: must be a non-empty array of names']);
+assert.deepStrictEqual(validateConfig({ envs: ['dev', 'dev'], repos: [] }), ['envs[1]: "dev" is listed twice']);
+{
+  const bad = validateConfig({
+    envs: ['dev', 'prod'],
+    repos: [
+      { repo: 'not a repo', branches: { dev: 'dev' } },
+      { repo: 'o/a', branches: { qa: 'qa', dev: 'dev&calc' } },
+      { repo: 'o/b', branches: { dev: 'dev' }, promote: ['dev', 'prod'] },
+      { repo: 'o/c' },
+      { repo: 'o/d', note: 'x', branches: { dev: 'dev' } },
+      { repo: 'o/e', branches: { dev: 'dev', prod: 'main' }, promote: ['dev'] },
+    ],
+  });
+  // every problem reported at once, each with its path
+  assert.deepStrictEqual(bad, [
+    'repos[0].repo: "not a repo" is not owner/name',
+    'repos[1].branches.qa: "qa" is not in envs',
+    'repos[1].branches.dev: "dev&calc" is not a valid branch name',
+    'repos[2].promote[1]: "prod" is not in branches',
+    'repos[3]: needs branches or note',
+    'repos[4]: has both branches and note — pick one',
+    'repos[5].promote: needs at least 2 envs',
+  ]);
+}
+
+// The Frontline default from the spec must validate as-is.
+const frontline = {
+  envs: ['dev', 'alpha', 'staging', 'prod'],
+  repos: [
+    { repo: 'LLSLtd/frontlineio-frontend', branches: { dev: 'dev', alpha: 'alpha', staging: 'staging', prod: 'master' }, promote: ['dev', 'alpha', 'prod'] },
+    { repo: 'LLSLtd/frontline.io-web', branches: { dev: 'dev', alpha: 'alpha', staging: 'staging', prod: 'prod-one' }, promote: ['dev', 'alpha', 'prod'] },
+    { repo: 'LLSLtd/identity-server', branches: { dev: 'dev', prod: 'main' }, promote: ['dev', 'prod'] },
+    { repo: 'LLSLtd/back-office', branches: { dev: 'dev', prod: 'master' }, promote: ['dev', 'prod'] },
+    { repo: 'LLSLtd/AI-chat-front', branches: { staging: 'staging', prod: 'prod-one' }, promote: ['staging', 'prod'] },
+    { repo: 'LLSLtd/remote-support-web', branches: { staging: 'staging', prod: 'prod-one' }, promote: ['staging', 'prod'] },
+    { repo: 'LLSLtd/Websocket', branches: { prod: 'master' } },
+    { repo: 'LLSLtd/dbschemas', note: 'Publishes to npm on every push to dev — not an environment' },
+    { repo: 'LLSLtd/servers-infrastructure', note: 'Applied by hand — dev branch = prod tfvars' },
+  ],
+};
+assert.deepStrictEqual(validateConfig(frontline), []);
+
+// ── requestsFor ───────────────────────────────────────
+{
+  const r = requestsFor(good);
+  assert.deepStrictEqual(r.commits.map(c => `${c.repo}|${c.env}|${c.branch}`),
+    ['o/web|dev|dev', 'o/web|alpha|alpha', 'o/web|prod|master', 'o/id|dev|dev', 'o/id|prod|main']);
+  // compare base = where it goes, head = where it is now
+  assert.deepStrictEqual(r.compares, [
+    { repo: 'o/web', from: 'dev', to: 'alpha', base: 'alpha', head: 'dev' },
+    { repo: 'o/web', from: 'alpha', to: 'prod', base: 'master', head: 'alpha' },
+    { repo: 'o/id', from: 'dev', to: 'prod', base: 'main', head: 'dev' },
+  ]);
+}
+
+// ── buildGrid ─────────────────────────────────────────
+{
+  const c = (sha) => ({ sha, title: 't ' + sha, author: 'ann', date: '2026-09-25T10:00:00Z', url: 'u/' + sha });
+  const g = buildGrid(good, {
+    commits: {
+      'o/web|dev': c('aaaaaaa1'), 'o/web|alpha': { missing: true }, 'o/web|prod': { error: 'boom' },
+      'o/id|dev': c('ccccccc1'), 'o/id|prod': c('ddddddd1'),
+    },
+    compares: {
+      'o/web|dev': { to: 'alpha', ahead: 12, url: 'cmp1', commits: [] },
+      'o/web|alpha': { error: 'nope' },
+      'o/id|dev': { to: 'prod', ahead: 4, url: 'cmp3', commits: [] },
+    },
+  });
+  assert.deepStrictEqual(g.envs, ['dev', 'alpha', 'prod']);
+  const [web, id, infra] = g.rows;
+  assert.strictEqual(web.label, 'web');                     // default label = repo name part
+  assert.strictEqual(web.cells[0].commit.sha, 'aaaaaaa1');
+  assert.deepStrictEqual(web.cells[0].next, { to: 'alpha', ahead: 12, url: 'cmp1', commits: [] });
+  assert.strictEqual(web.cells[1].missing, true);           // 404 marks only its own cell
+  assert.strictEqual(web.cells[1].next.error, 'nope');
+  assert.strictEqual(web.cells[2].error, 'boom');
+  assert.strictEqual(web.cells[2].next, null);              // last step has no outgoing arrow
+  assert.strictEqual(id.label, 'Identity');
+  assert.strictEqual(id.cells[1], null);                    // no alpha branch → empty cell
+  assert.strictEqual(id.cells[0].next.to, 'prod');          // non-adjacent step still lands on dev's cell
+  assert.strictEqual(infra.note, 'applied by hand');
+  assert.strictEqual(infra.cells, undefined);
+  // a cell whose request hasn't come back yet is loading, not an error
+  const empty = buildGrid(good, { commits: {}, compares: {} });
+  assert.strictEqual(empty.rows[0].cells[0].loading, true);
+}
+
+// ── commitTitle ───────────────────────────────────────
+// A merge commit's headline is noise; the PR title is its body's first line.
+assert.strictEqual(commitTitle('Merge pull request #933 from LLSLtd/fix/x', 'fix: iOS pull to refresh\n\nmore'),'#933 fix: iOS pull to refresh');
+assert.strictEqual(commitTitle('Merge pull request #933 from LLSLtd/fix/x', ''), 'Merge pull request #933 from LLSLtd/fix/x');
+assert.strictEqual(commitTitle('feat: squash-merged (#12)', 'body'), 'feat: squash-merged (#12)');
+
+// ── age ───────────────────────────────────────────────
+const now = Date.parse('2026-09-25T12:00:00Z');
+assert.strictEqual(age('2026-09-25T11:59:40Z', now), 'now');
+assert.strictEqual(age('2026-09-25T11:20:00Z', now), '40m');
+assert.strictEqual(age('2026-09-25T10:00:00Z', now), '2h');
+assert.strictEqual(age('2026-09-22T12:00:00Z', now), '3d');
+assert.strictEqual(age('2026-08-21T12:00:00Z', now), '5w');
+assert.strictEqual(age('garbage', now), '');
+
+console.log('releases-core: all passed');
