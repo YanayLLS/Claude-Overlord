@@ -72,22 +72,23 @@
   // Deploy status → the cell's colour (st-*) + a short label. The tooltip shows the same colour as a
   // small badge beside the label; the legend uses the same swatches.
   const DOT = { success: ['ok', 'Deployed'], failure: ['bad', 'Deploy failed'], partial: ['part', 'Deployed · a follow-up job failed'],
-    dead: ['manual', 'CI has never succeeded here · deployed some other way (likely by hand)'],
     running: ['run', 'Deploying now'], cancelled: ['off', 'Deploy cancelled'], never: ['off', 'Never deployed'] };
   function deployInfo(c) {
     // a pinned live commit beats everything else we could guess
+    // manual = nothing deploys it on push (config says so, or its CI has never once worked)
+    const manual = c.deploy === 'manual' || (c.run && c.run.state === 'dead');
     if (c.live && !c.live.error) {
-      return c.live.behind
-        ? { cls: 'manual', url: c.live.compareUrl, text: `Live: ${c.live.sha.slice(0, 7)} · ${c.live.behind} newer commit${c.live.behind === 1 ? '' : 's'} not deployed yet` }
-        : { cls: 'ok', url: c.live.url, text: 'Live: this commit is deployed' };
+      const how = manual ? 'Deployed by hand · ' : '';
+      return { cls: 'ok', manual, url: c.live.behind ? c.live.compareUrl : c.live.url,
+        text: how + (c.live.behind ? `live: ${c.live.sha.slice(0, 7)} · ${c.live.behind} newer commit${c.live.behind === 1 ? '' : 's'} not deployed yet` : 'live: this commit') };
     }
-    if (c.deploy === 'manual') return { cls: 'manual', text: 'Manual deploy · no CI/CD · this tip may not be live yet' };
+    if (manual) return { cls: 'off', manual, text: 'Deployed by hand · no CI/CD, and nothing records which commit is live' };
     if (!c.deploy) return { cls: 'none', text: 'No deploy workflow' };
     if (!c.run) return { cls: 'off', text: 'Deploy status loading…' };
     const [cls, label] = DOT[c.run.state] || ['off', `Deploy ${c.run.state}`];
     // name what broke, e.g. "technical-pr-to-dev › Open (or reuse) the staging → dev technical PR"
     const why = (c.run.failed || []).map(f => f.job + (f.step ? ` › ${f.step}` : '')).join('; ');
-    return { cls, url: c.run.url, text: label + (c.run.date && c.run.state !== 'running' ? ` · ${age(c.run.date)} ago` : '') + (why ? ` · ${why}` : '') };
+    return { cls, manual: false, url: c.run.url, text: label + (c.run.date && c.run.state !== 'running' ? ` · ${age(c.run.date)} ago` : '') + (why ? ` · ${why}` : '') };
   }
 
   // PR number when the commit is a merge ("#933 fix: …"), else the short sha
@@ -112,10 +113,11 @@
       else if (!n.ahead) next = `<span class="rl-next zero" title="Nothing waiting for ${esc(n.to)}">✓ ${esc(n.to)}</span>`;
       else next = `<span class="rl-next" title="${n.ahead} commits not yet in ${esc(n.to)}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>`;
     }
+    const hand = d.manual ? '<svg class="rl-hand" viewBox="0 0 24 24" aria-label="manual deploy"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>' : '';
     const tip = [d.text, shown && shown.title,
       [c.branch, shown && shown.sha.slice(0, 7), c.commit && c.commit.author].filter(Boolean).join(' · ')].filter(Boolean).join('\n');
     const isSel = sel && sel[0] === r && sel[1] === i;
-    return `<div class="rl-cell st-${d.cls}${isSel ? ' sel' : ''}" data-r="${r}" data-c="${i}" title="${esc(tip)}" data-tip-dot="rl-dot ${d.cls}"><div class="rl-top">${top}${next}</div></div>`;
+    return `<div class="rl-cell st-${d.cls}${isSel ? ' sel' : ''}" data-r="${r}" data-c="${i}" title="${esc(tip)}" data-tip-dot="rl-dot ${d.cls}"><div class="rl-top">${hand}${top}${next}</div></div>`;
   }
 
   const ENV_HUE = { dev: 'var(--accent)', alpha: 'var(--purple)', staging: 'var(--yellow)', prod: 'var(--green)', production: 'var(--green)' };
@@ -140,7 +142,7 @@
     + '<span><i class="rl-sw st-bad"></i>deploy failed</span>'
     + '<span><i class="rl-sw st-part"></i>deployed, side job failed</span>'
     + '<span><i class="rl-sw st-run"></i>deploying</span>'
-    + '<span><i class="rl-sw st-manual"></i>manual / not live yet</span>'
+    + '<span><svg class="rl-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>manual deploy</span>'
     + '<span><span class="rl-next"><b>12</b> → prod</span>waiting to promote</span></div>';
 
   function detailHtml(grid) {

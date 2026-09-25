@@ -41,7 +41,6 @@
 .rl-cell.st-bad { --tint:248,113,113; }
 .rl-cell.st-part { --tint:74,222,128; border-color:rgba(248,113,113,.55) !important; }
 .rl-cell.st-run { --tint:250,204,21; animation:rl-pulse 1.4s ease-in-out infinite; }
-.rl-cell.st-manual { --tint:250,204,21; border-style:dashed; }
 .rl-cell[class*="st-"]:not(.st-off):not(.st-none) { background:rgba(var(--tint),.09); border-color:rgba(var(--tint),.3); }
 .rl-cell[class*="st-"]:not(.st-off):not(.st-none):hover { background:rgba(var(--tint),.16); border-color:rgba(var(--tint),.5); }
 .rl-cell:hover { background:var(--surface1); border-color:var(--border-hi); }
@@ -101,4 +100,6 @@
 .rl-sw.st-bad { background:rgba(248,113,113,.2); border-color:rgba(248,113,113,.55); }
 .rl-sw.st-part { background:rgba(74,222,128,.2); border-color:rgba(248,113,113,.7); }
 .rl-sw.st-run { background:rgba(250,204,21,.2); border-color:rgba(250,204,21,.55); }
-.rl-sw.st-manual { background:rgba(250,204,21,.12); border-color:rgba(250,204,21,.55); border-style:dashed; }
+
+/* manual deploy: a hand on the cell, colour still says whether what's live is known-good */
+.rl-hand { width:12px; height:12px; flex-shrink:0; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; color:var(--subtext); }
