@@ -5025,6 +5025,7 @@ app.whenReady().then(() => {
     width: bounds.width || 750, height: bounds.height || 800,
     minWidth: 500, minHeight: 400,
     title: 'Overlord',
+    icon: path.join(__dirname, 'assets', 'icon.ico'), // taskbar/alt-tab icon when run from source too
     backgroundColor: themeOf(settings.theme).bg,
     // The app header is the title bar; Windows draws only its min/max/close buttons over it
     titleBarStyle: 'hidden',
