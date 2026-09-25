@@ -57,8 +57,8 @@
 .rl-dot.run { background:var(--yellow); animation:rl-pulse 1s ease-in-out infinite; }
 .rl-dot.manual { background:none; border:1.5px solid var(--yellow); }
 .rl-dot.off, .rl-dot.none { background:none; border:1.5px solid rgba(var(--ink),.2); }
-.rl-legend { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:10.5px; color:var(--dim); }
-.rl-legend span { display:inline-flex; align-items:center; gap:6px; }
+.rl-legend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:10.5px; color:var(--dim); }
+.rl-legend > span { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
 .rl-legend .rl-next { margin:0; padding:0; }
 
 .rl-detail h3 { margin:0 0 6px; font-size:13px; }

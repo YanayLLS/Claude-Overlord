@@ -127,9 +127,14 @@
     return h + '</div>';
   }
 
-  const LEGEND = '<div class="rl-legend"><span><i class="rl-dot ok"></i>deployed</span><span><i class="rl-dot bad"></i>deploy failing</span><span><i class="rl-dot part"></i>deployed, follow-up job failed</span>'
-      + '<span><i class="rl-dot run"></i>deploying</span><span><i class="rl-dot manual"></i>manual, no CI/CD</span>'
-      + '<span class="rl-next"><b>12</b> → prod</span><span>commits waiting to promote</span></div>';
+  // Each item is one unbreakable unit; the row wraps between items, never inside one.
+  const LEGEND = '<div class="rl-legend">'
+    + '<span><i class="rl-dot ok"></i>deployed</span>'
+    + '<span><i class="rl-dot bad"></i>deploy failed</span>'
+    + '<span><i class="rl-dot part"></i>deployed, side job failed</span>'
+    + '<span><i class="rl-dot run"></i>deploying</span>'
+    + '<span><i class="rl-dot manual"></i>manual deploy</span>'
+    + '<span><span class="rl-next"><b>12</b> → prod</span>waiting to promote</span></div>';
 
   function detailHtml(grid) {
     const row = sel && grid.rows[sel[0]];
