@@ -4831,13 +4831,6 @@ function renderPrBadge() {
 
 let prCollapsed = new Set(['__archived__']); // archived stays out of sight until asked for
 
-function prCiIcon(c) {
-  if (c === 'pass') return '<span title="checks passing" style="color:#a6e3a1">✓</span> ';
-  if (c === 'fail') return '<span title="checks failing" style="color:#f38ba8">✗</span> ';
-  if (c === 'pending') return '<span title="checks running" style="color:#f9e2af">⏳</span> ';
-  return '';
-}
-
 // Someone approved it (and nobody since asked for changes). Green means this, not just "GitHub
 // would let me merge": repos without a required review are mergeable before anyone looks.
 function prApproved(p) {
@@ -4887,17 +4880,30 @@ function prBranchHtml(p) {
 function prRowHtml(p, dim) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
-  const tag = p.reviewDecision === 'CHANGES_REQUESTED' ? ' · changes requested' : ' · needs approval';
-  const meta = p.mine && p.reviewDecision === 'APPROVED' ? ' · approved' : tag;
   const showReq = p.requested && !dim;
-  const reqTag = showReq ? ' · <span class="pr-reqtag">review requested</span>' : '';
-  const age = p.createdAt ? ' · <span class="pr-age" data-created="' + p.createdAt + '">' + escapeHtml(prRelTime(p.createdAt)) + '</span>' : '';
-  const appr = (p.approvedBy && p.approvedBy.length) ? ` · <span class="pr-appr" title="Approved by ${escapeHtml(p.approvedBy.join(', '))}">✓${p.approvedBy.length}</span>` : '';
-  const chg = (p.changesBy && p.changesBy.length) ? ` · <span class="pr-chg" title="Changes requested by ${escapeHtml(p.changesBy.join(', '))}">✗${p.changesBy.length}</span>` : '';
-  const commits = p.commitCount ? ` · <span class="pr-commits" title="${p.commitCount} commit(s) in this PR">⎇${p.commitCount}</span>` : '';
+  // Line 2 leads with what you scan for — review state, then checks — as chips; the rest is quiet text.
+  const names = (l) => escapeHtml((l || []).join(', '));
+  const reviewChip = p.reviewDecision === 'CHANGES_REQUESTED'
+    ? `<span class="pr-chip bad" title="Changes requested by ${names(p.changesBy)}">Changes requested</span>`
+    : prApproved(p)
+      ? `<span class="pr-chip good" title="Approved by ${names(p.approvedBy)}">Approved${p.approvedBy && p.approvedBy.length > 1 ? ' ×' + p.approvedBy.length : ''}</span>`
+      : `<span class="pr-chip">Needs review</span>`;
   const eta = p.checksEta ? ' · ' + escapeHtml(etaWords(p.checksEta, Date.now())) : ''; // pr-eta.js
-  const failedSoFar = p.failed ? ' · <span class="pr-chg" title="' + p.failed + ' check(s) already failed while others still run">' + p.failed + ' failed</span>' : '';
-  const testing = p.checks === 'pending' ? ' · <span class="pr-testing" title="Checks are still running on GitHub' + (p.checksEta ? ' — ' + escapeHtml(p.checksEta.name) + ', from its recent runs' : '') + '">⏳ testing' + eta + '</span>' + failedSoFar : p.checks === 'fail' ? ' · <span class="pr-chg" title="Checks failed on GitHub">' + (p.failed > 1 ? p.failed + ' checks failed' : 'checks failed') + '</span>' : '';
+  const checksChip = p.checks === 'pending'
+    ? `<span class="pr-chip warn" title="Checks are still running on GitHub${p.checksEta ? ' — ' + escapeHtml(p.checksEta.name) + ', from its recent runs' : ''}">Testing${eta}</span>`
+      + (p.failed ? `<span class="pr-chip bad" title="${p.failed} check(s) already failed while others still run">${p.failed} failed</span>` : '')
+    : p.checks === 'fail' ? `<span class="pr-chip bad" title="Checks failed on GitHub">${p.failed > 1 ? p.failed + ' checks failed' : 'Checks failed'}</span>` : '';
+  const reqChip = showReq ? '<span class="pr-chip bad">Your review</span>' : '';
+  const behindChip = p.behindBy > 0 ? `<span class="pr-chip warn" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">${p.behindBy} behind</span>` : '';
+  const sub = [
+    p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}</span>` : '',
+    p.commitCount ? `${p.commitCount} commit${p.commitCount === 1 ? '' : 's'}` : '',
+    p.mine ? '' : '@' + escapeHtml(p.author),
+    p.createdAt ? `<span class="pr-age" data-created="${p.createdAt}">${escapeHtml(prRelTime(p.createdAt))}</span>` : '',
+  ].filter(Boolean).join(' · ');
+  // "feat(dt-ai):" is metadata, not the headline: dim it
+  const t = escapeHtml(p.title), pre = t.match(/^[a-z]+(\([^)]*\))?!?:\s*/i);
+  const titleHtml = pre ? `<span class="pr-type">${pre[0]}</span>${t.slice(pre[0].length)}` : t;
   const muteBtn = `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕</button>`;
   const snoozeBtn = `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰</button>`;
   const archBtn = `<button class="pr-approve pr-mute" title="Archive — hide from Overlord entirely (the PR on GitHub is untouched)" onclick="event.stopPropagation();archivePr('${k}')">📦</button>`;
@@ -4916,9 +4922,8 @@ function prRowHtml(p, dim) {
       : '';
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
-    + `<div>${prCiIcon(p.checks)}#${p.number} · ${escapeHtml(p.title)}</div>`
-    + prBranchHtml(p)
-    + `<div class="pr-meta">@${escapeHtml(p.author)}${commits}${appr}${chg}${meta}${testing}${reqTag}${age}</div></div>`;
+    + `<div class="pr-l1"><span class="pr-ci ${p.checks || 'none'}" title="Checks: ${escapeHtml(p.checks || 'none')}"></span><span class="pr-title" title="${t}">${titleHtml}</span><span class="pr-num">#${p.number}</span></div>`
+    + `<div class="pr-l2">${reqChip}${reviewChip}${checksChip}${behindChip}<span class="pr-sub">${sub}</span></div></div>`;
 }
 
 function prGroupHeader(repo, count, muted) {
