@@ -1120,7 +1120,10 @@ button:focus-visible { outline-offset:0; }
         <span class="settings-title">Settings</span>
         <button class="settings-close" onclick="toggleSettings()" aria-label="Close settings">&times;</button>
       </div>
-      <details class="settings-sec" open>
+      <div class="settings-layout">
+      <nav class="settings-nav" id="settings-nav" aria-label="Settings sections"></nav>
+      <div class="settings-panes">
+      <details class="settings-sec" data-sec="general" open>
       <summary>General</summary>
       <div class="sec-body">
       <label class="settings-label">
@@ -1134,16 +1137,6 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">Hides agents that are actively working, resuming, or settling.</div>
       <label class="settings-label">
-        <input type="checkbox" id="chk-notif" onchange="onNotifChange(this.checked)" />
-        <span>Desktop notifications for permission requests</span>
-      </label>
-      <div class="settings-hint">Shows a native notification and flashes the taskbar when an agent needs approval.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-sound" onchange="onSoundChange(this.checked)" />
-        <span>Notification sound</span>
-      </label>
-      <div class="settings-hint">Plays an audio chime when an agent completes or needs approval.</div>
-      <label class="settings-label">
         <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
         <span>Prompt autocomplete (ghost text)</span>
       </label>
@@ -1154,10 +1147,6 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">Off: nothing of the world is loaded or run &mdash; no 3D renderer, no header button, no economy. On: the game starts, showing your agents as a hex-tile island beside the list. Everything you can do in the list still works; the map is another way to look at the same state. Show or hide it with the &#x2B22; button in the header.</div>
       <label class="settings-label">
-        <span>Theme</span>
-        <select id="sel-theme" onchange="setTheme(this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
-      </label>
-      <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
       </label>
@@ -1165,7 +1154,33 @@ button:focus-visible { outline-offset:0; }
       </div>
       </details>
 
-      <details class="settings-sec">
+      <details class="settings-sec" data-sec="notifications">
+      <summary>Notifications</summary>
+      <div class="sec-body">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-notif" onchange="onNotifChange(this.checked)" />
+        <span>Desktop notifications for permission requests</span>
+      </label>
+      <div class="settings-hint">Shows a native notification and flashes the taskbar when an agent needs approval.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-sound" onchange="onSoundChange(this.checked)" />
+        <span>Notification sound</span>
+      </label>
+      <div class="settings-hint">Plays an audio chime when an agent completes or needs approval.</div>
+      </div>
+      </details>
+
+      <details class="settings-sec" data-sec="appearance">
+      <summary>Appearance</summary>
+      <div class="sec-body">
+      <label class="settings-label">
+        <span>Theme</span>
+        <select id="sel-theme" onchange="setTheme(this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
+      </label>
+      </div>
+      </details>
+
+      <details class="settings-sec" data-sec="prs">
       <summary>Pull requests<span class="sec-chip" id="chip-pr"></span></summary>
       <div class="sec-body">
       <label class="settings-label">
@@ -1188,7 +1203,7 @@ button:focus-visible { outline-offset:0; }
       </div>
       </details>
 
-      <details class="settings-sec">
+      <details class="settings-sec" data-sec="actions">
       <summary>GitHub Actions<span class="sec-chip" id="chip-actions"></span></summary>
       <div class="sec-body">
       <label class="settings-label">
@@ -1212,7 +1227,7 @@ button:focus-visible { outline-offset:0; }
       </div>
       </details>
 
-      <details class="settings-sec">
+      <details class="settings-sec" data-sec="clickup">
       <summary>ClickUp raids<span class="sec-chip" id="chip-clickup"></span></summary>
       <div class="sec-body">
       <label class="settings-label">
@@ -1262,7 +1277,7 @@ button:focus-visible { outline-offset:0; }
       </div>
       </details>
 
-      <details class="settings-sec">
+      <details class="settings-sec" data-sec="peers">
       <summary>Peers<span class="sec-chip" id="chip-peers"></span></summary>
       <div class="sec-body">
       <label class="settings-label">
@@ -1286,6 +1301,8 @@ button:focus-visible { outline-offset:0; }
       <div id="peer-list" style="margin-top:6px;"></div>
       </div>
       </details>
+      </div>
+      </div>
     </div>
   </div>
   <div id="prompt-overlay" onclick="closePromptOverlay()">
@@ -4248,6 +4265,26 @@ function applySettings(s) {
 }
 
 let _settingsCloseTimer = null;
+// Settings is a side menu of sections; the <details> are panes, one shown at a time.
+// The menu is built from each pane's <summary>, so a new section only needs its markup.
+let settingsSec = 'general';
+function showSettingsSec(key) {
+  settingsSec = key;
+  const nav = document.getElementById('settings-nav');
+  nav.innerHTML = '';
+  for (const d of document.querySelectorAll('#settings-overlay .settings-sec')) {
+    const on = d.dataset.sec === key;
+    d.open = on; d.classList.toggle('active', on);
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = on ? 'on' : '';
+    b.textContent = d.querySelector('summary').firstChild.textContent.trim();
+    const chip = d.querySelector('.sec-chip');
+    if (chip && chip.classList.contains('on')) b.insertAdjacentHTML('beforeend', '<i class="nav-on" aria-label="on"></i>');
+    b.onclick = () => showSettingsSec(d.dataset.sec);
+    nav.appendChild(b);
+  }
+}
+document.addEventListener('click', (e) => { if (e.target.closest('.settings-sec > summary')) e.preventDefault(); }); // panes don't collapse
 function toggleSettings() {
   const el = document.getElementById('settings-overlay');
   const open = el.style.display === 'flex';
@@ -4258,6 +4295,7 @@ function toggleSettings() {
   } else {
     if (_settingsCloseTimer) { clearTimeout(_settingsCloseTimer); _settingsCloseTimer = null; }
     el.style.display = 'flex';
+    showSettingsSec(settingsSec);
     el.style.opacity = '0';
     requestAnimationFrame(() => { el.style.opacity = '1'; });
     document.getElementById('chk-bypass').checked = bypassPermissions;
@@ -4594,7 +4632,7 @@ function renderPeersSec() {
 function openPeersSettings() {
   const el = document.getElementById('settings-overlay');
   if (el.style.display !== 'flex') toggleSettings();
-  document.querySelectorAll('.settings-sec').forEach(d => { if (d.querySelector('#chk-peers')) d.open = true; });
+  showSettingsSec('peers');
 }
 function openPeerMsgModal(id) {
   const opts = [];

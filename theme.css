@@ -185,7 +185,7 @@ input[type="text"], input[type="search"], input[type="number"], select, textarea
 ::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--surface2); background-clip: padding-box; }
 ::-webkit-scrollbar-button { display: none; }
-.settings-modal { width: 520px; }
+.settings-modal { width: 760px; }
 
 /* Dev-server chips in group headers: neutral pill, green dot when running */
 .server-badge { height: 24px; padding: 0 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0;
@@ -491,3 +491,24 @@ html[data-theme="light"] ::selection { background: rgba(79,91,213,.22); }
 .uc-area { fill: var(--accent); opacity: .14; }
 .uc-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .uc-dot { fill: var(--accent); stroke: var(--pop); stroke-width: 2; }
+
+/* ── Settings: side menu + one section pane ── */
+.settings-modal { height: min(600px, 82vh); display: flex; flex-direction: column; overflow: hidden; }
+.settings-header { position: static; padding-bottom: 14px; }
+.settings-layout { flex: 1; min-height: 0; display: flex; gap: 22px; }
+.settings-nav { flex: 0 0 170px; display: flex; flex-direction: column; gap: 2px; padding-right: 14px; border-right: 1px solid var(--border); overflow-y: auto; }
+.settings-nav button { display: flex; align-items: center; gap: 8px; text-align: left; font: inherit; font-size: 12.5px; padding: 7px 10px;
+  border: none; border-radius: var(--r); background: none; color: var(--subtext); cursor: pointer; }
+.settings-nav button:hover { background: var(--hover); color: var(--text); }
+.settings-nav button.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.settings-nav .nav-on { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.settings-panes { flex: 1; min-width: 0; overflow-y: auto; padding-right: 6px; }
+.settings-panes .settings-sec { display: none; border-top: none; }
+.settings-panes .settings-sec.active { display: block; }
+.settings-panes .settings-sec > summary { cursor: default; padding: 2px 0 14px; font-size: 15px; pointer-events: none; }
+.settings-panes .settings-sec > summary::before { display: none; }
+.settings-panes .settings-sec > div.sec-body { padding: 0 0 12px; }
+@media (max-width: 640px) {
+  .settings-layout { flex-direction: column; gap: 12px; }
+  .settings-nav { flex: none; flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--border); padding: 0 0 10px; }
+}
