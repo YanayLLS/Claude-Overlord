@@ -1149,6 +1149,7 @@ function restoreAgents(state) {
               if (r.type === 'system' && r.subtype === 'turn_duration') {
                 agent.stats.turns++;
                 agent.stats.durMs += r.durationMs || 0;
+                agent.stats.lastTurnAt = Date.parse(r.timestamp) || agent.stats.lastTurnAt || 0; // "Stale" filter
               }
             } catch {}
           }
@@ -1728,6 +1729,7 @@ function parseLine(id, line) {
     } else if (r.type === 'system' && r.subtype === 'turn_duration') {
       clrTimer(id, permTimers);
       a.stats.turns++; a.stats.durMs += r.durationMs || 0;
+      a.stats.lastTurnAt = Date.parse(r.timestamp) || Date.now(); // "Stale" filter
       send({ type: 'stats', id, stats: a.stats });
       if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
       a.isWaiting = true; a.permSent = false; a.hadTools = false; a.turnTools = 0; a.crashCount = 0; a.spinnerText = ''; a.peerAutoSends = 0;

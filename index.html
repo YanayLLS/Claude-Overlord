@@ -1067,7 +1067,7 @@ button:focus-visible { outline-offset:0; }
       <input id="filter-input" type="text" placeholder="Search agents  (Ctrl+F)" />
       <span id="filter-count"></span>
       <button id="filter-close" onclick="closeFilter()" aria-label="Clear search">&times;</button>
-      <button id="filter-ready" onclick="toggleReadyFilter()" aria-pressed="false" title="Show only ready agents (hides ones working, resuming or settling)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Ready</button>
+      <button id="filter-mode" onclick="toggleFilterMenu(event)" aria-haspopup="menu" aria-expanded="false" title="Filter agents"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span id="filter-mode-label">All</span></button>
     </div>
     <div id="world-attn"></div>
     <div id="list"></div>
@@ -1449,7 +1449,50 @@ let filterText = '';
 let worldView = false; // World view (3D map) — off by default; see setWorldView() at the bottom
 const TL_MAX_EVENTS = 1000; // the timeline keeps this many events on screen, matching what main sends when it opens
 let worldTl = null; // { id, events } — copy of the selected agent's timeline for the Conversation tab
-let filterReady = false;
+// Agent list filter (one at a time), kept in settings so it survives restarts.
+let filterMode = 'all';
+const STALE_MS = 24 * 3600000;
+const WORKING = new Set(['active', 'resuming', 'settling']);
+const agentCtxPct = a => a.stats?.ctxTok ? Math.round(a.stats.ctxTok / ctxWindow(a.stats.modelFamily, a.stats.ctxTok) * 100) : 0;
+const AGENT_FILTERS = [
+  { key: 'all', label: 'All', test: () => true },
+  { key: 'needs', label: 'Needs me', hint: 'Waiting on an approval or your reply', test: a => { const st = agentStatus(a); return st === 'permission' || st === 'waiting' || st === 'crashed'; } },
+  { key: 'working', label: 'Working', hint: 'Running, resuming or finishing', test: a => WORKING.has(agentStatus(a)) },
+  { key: 'ready', label: 'Ready', hint: 'Not working right now', test: a => !WORKING.has(agentStatus(a)) },
+  { key: 'ctx', label: 'Context high', hint: '80%+ of the context window used', test: a => agentCtxPct(a) >= 80 },
+  { key: 'stale', label: 'Stale', hint: 'No turn in the last 24 hours', test: a => !WORKING.has(agentStatus(a)) && Date.now() - (a.stats?.lastTurnAt || a.createdAt || 0) > STALE_MS },
+];
+const agentFilter = () => AGENT_FILTERS.find(f => f.key === filterMode) || AGENT_FILTERS[0];
+function setFilterMode(key, persist = true) {
+  filterMode = AGENT_FILTERS.some(f => f.key === key) ? key : 'all';
+  const b = document.getElementById('filter-mode');
+  b.classList.toggle('on', filterMode !== 'all');
+  document.getElementById('filter-mode-label').textContent = agentFilter().label;
+  if (persist) api.send({ type: 'saveSettings', settings: { agentFilter: filterMode } });
+  closeFilterMenu();
+  render();
+}
+function toggleFilterMenu(e) {
+  e.stopPropagation();
+  if (document.getElementById('filter-menu')) { closeFilterMenu(); return; }
+  const live = [...agents.values()].filter(a => !a.archived);
+  const m = document.createElement('div');
+  m.id = 'filter-menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = AGENT_FILTERS.map(f => `<button role="menuitemradio" aria-checked="${f.key === filterMode}" class="${f.key === filterMode ? 'on' : ''}" data-key="${f.key}"${f.hint ? ` title="${escAttr(f.hint)}"` : ''}>`
+    + `<span>${escapeHtml(f.label)}</span><span class="fm-n">${live.filter(f.test).length}</span></button>`).join('');
+  m.onclick = (ev) => { const b = ev.target.closest('button[data-key]'); if (b) setFilterMode(b.dataset.key); };
+  const r = e.currentTarget.getBoundingClientRect();
+  m.style.top = (r.bottom + 4) + 'px'; m.style.right = (innerWidth - r.right) + 'px';
+  document.body.appendChild(m);
+  e.currentTarget.setAttribute('aria-expanded', 'true');
+  setTimeout(() => document.addEventListener('mousedown', closeFilterMenuOutside));
+}
+function closeFilterMenuOutside(ev) { if (!ev.target.closest('#filter-menu, #filter-mode')) closeFilterMenu(); }
+function closeFilterMenu() {
+  document.getElementById('filter-menu')?.remove();
+  document.getElementById('filter-mode')?.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('mousedown', closeFilterMenuOutside);
+}
 // ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
 const collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
 function toggleGroup(cwd) {
@@ -1884,12 +1927,7 @@ function closeFilter() {
 }
 document.getElementById('filter-input').addEventListener('input', (e) => { filterText = e.target.value.toLowerCase(); render(); });
 document.getElementById('filter-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFilter(); });
-function toggleReadyFilter(on) {
-  filterReady = on !== undefined ? on : !filterReady;
-  const b = document.getElementById('filter-ready');
-  b.classList.toggle('on', filterReady); b.setAttribute('aria-pressed', String(filterReady));
-  render();
-}
+
 
 let pendingCwd = null;
 let _promptCloseTimer = null;
@@ -2429,7 +2467,7 @@ function needsAnswer(a) {
 }
 
 function matchesFilter(a) {
-  if (filterReady) { const st = agentStatus(a); if (st === 'active' || st === 'resuming' || st === 'settling') return false; }
+  if (!agentFilter().test(a)) return false;
   if (!filterText) return true;
   return [a.agentName, a.title, a.prompt, a.preview, a.cwd, agentStatus(a)].join('\n').toLowerCase().includes(filterText);
 }
@@ -4225,6 +4263,7 @@ function applySettings(s) {
   }
   if (s.worldEconomy) { worldEconomy = Object.assign(worldEconomyDefault(), s.worldEconomy); worldEconomy.stats = Object.assign(worldEconomyDefault().stats, worldEconomy.stats || {}); }
   setMobileRemote(s.mobileRemote !== false, false);
+  if (s.agentFilter && s.agentFilter !== filterMode) setFilterMode(s.agentFilter, false);
   setWorldEnabled(s.worldEnabled !== undefined ? !!s.worldEnabled : !!s.worldView, false, s.worldView !== false); // older settings had only worldView: on meant the game ran
   if (s.worldRosterW) worldRosterW = Math.max(200, Math.min(600, +s.worldRosterW || 300));
   if (s.worldRosterHidden !== undefined) worldRosterHidden = !!s.worldRosterHidden;
