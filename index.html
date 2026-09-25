@@ -2469,7 +2469,9 @@ function needsAnswer(a) {
 }
 
 function matchesFilter(a) {
-  if (!agentFilter().test(a)) return false;
+  // The agent you're on stays listed even after it stops matching (e.g. you answer a "Needs me"
+  // agent and it starts working); it drops out once you switch away and the list re-renders.
+  if (!agentFilter().test(a) && a !== agents.get(selectedId)) return false;
   if (!filterText) return true;
   return [a.agentName, a.title, a.prompt, a.preview, a.cwd, agentStatus(a)].join('\n').toLowerCase().includes(filterText);
 }
