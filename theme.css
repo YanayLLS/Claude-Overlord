@@ -43,7 +43,7 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 #featBtn { background: var(--surface0); color: var(--text); border: 1px solid var(--border-hi); }
 #featBtn:hover { background: var(--surface1); color: var(--text); }
 #addBtn .ic, #featBtn .ic { width: 14px; height: 14px; stroke-width: 2.2; }
-#account-btn { height: 30px; padding: 0 12px 0 8px; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px;
+#account-btn { height: 30px; width: 30px; padding: 0; justify-content: center; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px;
   background: var(--surface0); color: var(--text); border: 1px solid var(--border); font-size: 12px; letter-spacing: 0; }
 #account-btn::before { content: ''; width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
   background: linear-gradient(135deg, var(--accent), var(--purple)); }

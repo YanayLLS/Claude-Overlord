@@ -1057,7 +1057,7 @@ button:focus-visible { outline-offset:0; }
     </div>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Agent</button>
     <button id="featBtn" onclick="openNewFeature()" title="Create a feature: one branch across multiple repos"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Feature</button>
-    <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account">No account</button>
+    <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account" aria-label="Account"></button>
   </div>
   <div id="content">
   <div id="list-col">
@@ -3869,11 +3869,9 @@ function handleAccountInfo(msg) {
   const btn = document.getElementById('account-btn');
   if (msg.hasCredentials) {
     const display = msg.email || msg.activeLabel || 'Unsaved account';
-    btn.textContent = display;
     btn.classList.remove('no-account');
     btn.title = display;
   } else {
-    btn.textContent = 'No account';
     btn.classList.add('no-account');
     btn.title = 'No credentials — run claude in a terminal to login';
   }
