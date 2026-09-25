@@ -390,6 +390,8 @@ function logToRenderer(...args) {
 
 // What the renderer (and the mobile client over the LAN socket) may see of the settings:
 // the ClickUp API token stays in the main process, only its presence is reported.
+// The header is 44 CSS px; the window buttons Windows draws over it are device px, so scale them with the UI zoom.
+function titleBarOverlay(theme) { return { ...titleBarColors(theme), height: Math.round(44 * (settings.zoom || 100) / 100) }; }
 function publicSettings() { const { clickupToken, prCache, actionsCache, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken }; }
 function sendFullState() {
   send({ type: 'settings', settings: publicSettings() });
@@ -3805,8 +3807,12 @@ function handleIpc(msg) {
       if ('worldEnabled' in msg.settings) armClickupTimer();
       if (msg.settings.mobileRemote === false && remoteWs) { try { remoteWs.destroy(); } catch {} remoteWs = null; remoteViewingAgent = null; }
       break;
+    case 'uiZoom': // the header scales with the UI, so the native window buttons must too
+      settings.zoom = Math.max(60, Math.min(200, Number(msg.zoom) || 100));
+      if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.setTitleBarOverlay(titleBarOverlay(settings.theme)); } catch {} }
+      break;
     case 'setTheme': // the window buttons Windows draws over the header follow the theme
-      if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.setTitleBarOverlay(titleBarColors(msg.theme)); mainWindow.setBackgroundColor(themeOf(msg.theme).bg); } catch {} }
+      if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.setTitleBarOverlay(titleBarOverlay(msg.theme)); mainWindow.setBackgroundColor(themeOf(msg.theme).bg); } catch {} }
       break;
     case 'peersEnable': {
       settings.peersEnabled = !!msg.enabled;
@@ -5097,7 +5103,7 @@ app.whenReady().then(() => {
     backgroundColor: themeOf(settings.theme).bg,
     // The app header is the title bar; Windows draws only its min/max/close buttons over it
     titleBarStyle: 'hidden',
-    titleBarOverlay: { ...titleBarColors(settings.theme), height: 44 },
+    titleBarOverlay: titleBarOverlay(settings.theme),
     show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   };

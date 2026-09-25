@@ -1047,6 +1047,7 @@ button:focus-visible { outline-offset:0; }
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM21 21h.01M17 21h.01M21 17h.01"/></svg></button>
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
+    <button class="hdr-btn" id="zoom-btn" onclick="toggleZoomMenu(event)" title="UI size (Ctrl+wheel, Ctrl+0 resets)" aria-haspopup="dialog" aria-expanded="false">100%</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button>
 
     <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></button>
@@ -4275,7 +4276,7 @@ let planBudget = 100;
 
 function applySettings(s) {
   if (s.theme) setTheme(s.theme, false);
-  if (s.zoom) { uiZoom = s.zoom; api.setZoom(uiZoom / 100); }
+  if (s.zoom) setUiZoom(s.zoom, false);
   if (s.termWidth) { settings_termWidth = s.termWidth; applyLayout(); }
   if (s.bypassPermissions !== undefined) {
     bypassPermissions = s.bypassPermissions;
@@ -4490,11 +4491,7 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+0 reset zoom
   if (e.key === '0' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
-    uiZoom = 100;
-    api.setZoom(1);
-    persistSettings();
-    const x = xterms.get(selectedId);
-    if (x) setTimeout(() => fitPreservingScroll(x), 50);
+    setUiZoom(100);
     return;
   }
   // Ctrl+U to refresh usage
@@ -5972,12 +5969,55 @@ function applyLayout() {
 document.addEventListener('wheel', (e) => {
   if (!e.ctrlKey) return;
   e.preventDefault();
-  uiZoom = Math.max(60, Math.min(200, uiZoom + (e.deltaY < 0 ? 10 : -10)));
+  setUiZoom(uiZoom + (e.deltaY < 0 ? 10 : -10));
+}, { passive: false });
+
+// One place sets the UI size: Ctrl+wheel, Ctrl+0, the saved setting and the header % button.
+const ZOOM_MIN = 60, ZOOM_MAX = 200, ZOOM_PRESETS = [75, 90, 100, 110, 125, 150, 175, 200];
+function setUiZoom(z, persist = true) {
+  uiZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(z)));
   api.setZoom(uiZoom / 100);
-  persistSettings();
+  document.getElementById('zoom-btn').textContent = uiZoom + '%';
+  const menu = document.getElementById('zoom-menu');
+  if (menu) {
+    menu.querySelector('input').value = uiZoom;
+    menu.querySelector('.zm-val').textContent = uiZoom + '%';
+    menu.querySelectorAll('[data-z]').forEach(b => b.classList.toggle('on', +b.dataset.z === uiZoom));
+  }
+  if (persist) persistSettings();
+  api.send({ type: 'uiZoom', zoom: uiZoom });
   const x = xterms.get(selectedId);
   if (x) setTimeout(() => { fitPreservingScroll(x); positionNameChip(); }, 50);
-}, { passive: false });
+}
+function toggleZoomMenu(e) {
+  e.stopPropagation();
+  if (document.getElementById('zoom-menu')) { closeZoomMenu(); return; }
+  const m = document.createElement('div');
+  m.id = 'zoom-menu'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-label', 'UI size');
+  m.innerHTML = `<div class="zm-head"><span>UI size</span><span class="zm-val">${uiZoom}%</span></div>`
+    + `<div class="zm-slider"><button data-step="-10" aria-label="Smaller">A</button>`
+    + `<input type="range" min="${ZOOM_MIN}" max="${ZOOM_MAX}" step="5" value="${uiZoom}" aria-label="UI size percent">`
+    + `<button data-step="10" aria-label="Bigger" class="zm-big">A</button></div>`
+    + `<div class="zm-presets">${ZOOM_PRESETS.map(z => `<button data-z="${z}" class="${z === uiZoom ? 'on' : ''}">${z}%</button>`).join('')}</div>`
+    + `<div class="zm-hint">Ctrl + wheel also works · Ctrl+0 resets</div>`;
+  // Live while dragging; the setting is saved by persistSettings' own debounce.
+  m.querySelector('input').oninput = (ev) => setUiZoom(+ev.target.value);
+  m.onclick = (ev) => {
+    const b = ev.target.closest('button'); if (!b) return;
+    setUiZoom(b.dataset.z ? +b.dataset.z : uiZoom + +b.dataset.step);
+  };
+  const r = e.currentTarget.getBoundingClientRect();
+  m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(8, innerWidth - r.right) + 'px';
+  document.body.appendChild(m);
+  e.currentTarget.setAttribute('aria-expanded', 'true');
+  setTimeout(() => document.addEventListener('mousedown', closeZoomMenuOutside));
+}
+function closeZoomMenuOutside(ev) { if (!ev.target.closest('#zoom-menu, #zoom-btn')) closeZoomMenu(); }
+function closeZoomMenu() {
+  document.getElementById('zoom-menu')?.remove();
+  document.getElementById('zoom-btn')?.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('mousedown', closeZoomMenuOutside);
+}
 
 
 // Live status line timer — update every second without full re-render
