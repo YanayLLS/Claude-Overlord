@@ -386,10 +386,13 @@ function logToRenderer(...args) {
 
 // What the renderer (and the mobile client over the LAN socket) may see of the settings:
 // the ClickUp API token stays in the main process, only its presence is reported.
-function publicSettings() { const { clickupToken, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken }; }
+function publicSettings() { const { clickupToken, prCache, actionsCache, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken }; }
 function sendFullState() {
   send({ type: 'settings', settings: publicSettings() });
   if (lastClickup.fetchedAt || lastClickup.error) send({ type: 'clickupList', ...lastClickup }); // a reloaded renderer gets the raids back at once
+  // Last good PR / Actions lists (persisted), so the badges paint at once on launch or reload instead of after the next poll.
+  if (settings.prCache) send({ type: 'prList', ...settings.prCache, error: null });
+  if (settings.actionsCache) send({ type: 'actionsList', runs: settings.actionsCache, error: null });
   for (const [id, a] of agents) {
     send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
@@ -2220,6 +2223,7 @@ async function pollPRs() {
   settings.prMuted = (settings.prMuted || []).filter(k => currentKeys.includes(k));
   settings.prArchived = (settings.prArchived || []).filter(k => currentKeys.includes(k));
   prSeenSeeded = true;
+  settings.prCache = { prs, failedRepos };
   saveState();
   // Show the list now; "commits behind" and the checks ETA take a call per PR, so they follow.
   send({ type: 'prList', prs, error: null, failedRepos });
@@ -2384,6 +2388,7 @@ async function pollActions() {
   for (const r of diffNewFailures(rows, prevStates)) notifyActionFailed(r);
   settings.actionsStates = {};
   for (const r of rows) if (!r.error) settings.actionsStates[r.key] = r.state;
+  settings.actionsCache = rows;
   saveState();
   send({ type: 'actionsList', runs: rows, error: null });
   return rows;
