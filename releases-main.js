@@ -35,15 +35,22 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (src.kind === 'file') {
       try { text = fs.readFileSync(src.path, 'utf-8'); } catch (e) { return { error: `Can't read ${src.path}: ${e.code || e.message}` }; }
     } else {
-      const res = await ghJson(['api', `repos/${src.repo}/contents/${src.path}${src.ref ? `?ref=${src.ref}` : ''}`]);
-      if (res.error) return { error: res.error, errorCode: res.errorCode || null };
+      // GitHub and any local checkout of that repo, side by side. A local copy with YOUR edits
+      // (uncommitted, or committed but not on the source branch yet) wins, so a refresh shows
+      // what you just changed; a checkout that's merely behind never overrides GitHub.
+      const [res, local] = await Promise.all([
+        ghJson(['api', `repos/${src.repo}/contents/${src.path}${src.ref ? `?ref=${src.ref}` : ''}`]),
+        findLocal ? findLocal(src.repo, src.path, src.ref) : null,
+      ]);
+      const readLocal = () => {
+        try { return { config: JSON.parse(fs.readFileSync(local.path, 'utf-8')), localOnly: local.path }; }
+        catch (e) { return { error: `Config at ${local.path} is not valid JSON: ${e.message}` }; }
+      };
+      if (local && local.edited) return readLocal();
+      if (res.error) return local ? readLocal() : { error: res.error, errorCode: res.errorCode || null };
       if (!res.data || typeof res.data.content !== 'string') {
         // Not on GitHub yet: read it from a local clone so the board works before it's pushed.
-        const local = findLocal && await findLocal(src.repo, src.path);
-        if (local) {
-          try { return { config: JSON.parse(fs.readFileSync(local, 'utf-8')), localOnly: local }; }
-          catch (e) { return { error: `Config at ${local} is not valid JSON: ${e.message}` }; }
-        }
+        if (local) return readLocal();
         return { error: `No config at ${source}${res.data && res.data.message ? ` (${res.data.message})` : ''} — no access, or the file isn't there yet.` };
       }
       text = Buffer.from(res.data.content, 'base64').toString('utf-8');

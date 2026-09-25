@@ -2352,17 +2352,28 @@ function ghJson(args, timeout = 20000) {
   });
 }
 
-// Releases config not on GitHub yet? Look for it in a local clone of that repo.
-async function releasesFindLocal(repo, rel) {
+// The Releases config in a local clone of its repo (any worktree): { path, edited }. edited =
+// the file has changes that aren't on origin/<ref> yet (uncommitted, or in unpushed/unmerged
+// commits) — then the board shows it over GitHub's copy. null when no checkout has the file.
+async function releasesFindLocal(repo, rel, ref) {
   const infos = (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean);
+  let found = null;
   for (const i of infos) {
     if (i.repo.toLowerCase() !== repo.toLowerCase()) continue;
-    // every worktree of that clone, not just the checked-out one: a config drafted on its own branch counts
     const list = await gitIn(i.dir, ['worktree', 'list', '--porcelain']);
     const trees = list ? list.split(/\r?\n/).filter(l => l.startsWith('worktree ')).map(l => l.slice(9)) : [i.dir];
-    for (const t of trees) { const p = path.join(t, rel); if (fs.existsSync(p)) return p; }
+    for (const t of trees) {
+      const p = path.join(t, rel);
+      if (!fs.existsSync(p)) continue;
+      const [dirty, ahead] = await Promise.all([
+        gitIn(t, ['status', '--porcelain', '--', rel]),
+        gitIn(t, ['log', '--format=%h', `origin/${ref || 'HEAD'}..HEAD`, '--', rel]),
+      ]);
+      if (dirty || ahead) return { path: p, edited: true };
+      found = found || { path: p, edited: false };
+    }
   }
-  return null;
+  return found;
 }
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal }); // Releases board — self-contained, see releases-*.js
 
