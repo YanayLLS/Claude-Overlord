@@ -541,3 +541,5 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
 .pick-empty.err { color: var(--red); }
 #header h1 .app-logo { width: 20px; height: 20px; margin-right: 7px; vertical-align: -5px; border-radius: 5px; }
 body:not(.mobile-on) #qr-btn { display: none !important; } /* mobile remote feature flag */
+.pr-author { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: 11px; color: var(--text); font-weight: 500; margin-right: 2px; }
+.pr-author img { width: 16px; height: 16px; border-radius: 50%; background: var(--surface1); }

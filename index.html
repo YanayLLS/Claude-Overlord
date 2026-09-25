@@ -5039,7 +5039,6 @@ function prRowHtml(p, dim) {
   const sub = [
     p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}</span>` : '',
     p.commitCount ? `${p.commitCount} commit${p.commitCount === 1 ? '' : 's'}` : '',
-    p.mine ? '' : '@' + escapeHtml(p.author),
     p.createdAt ? `<span class="pr-age" data-created="${p.createdAt}">${escapeHtml(prRelTime(p.createdAt))}</span>` : '',
   ].filter(Boolean).join(' · ');
   // "feat(dt-ai):" is metadata, not the headline: dim it
@@ -5064,7 +5063,14 @@ function prRowHtml(p, dim) {
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
     + `<div class="pr-l1"><span class="pr-ci ${p.checks || 'none'}" title="Checks: ${escapeHtml(p.checks || 'none')}"></span><span class="pr-title" title="${t}">${titleHtml}</span><span class="pr-num">#${p.number}</span></div>`
-    + `<div class="pr-l2">${reqChip}${reviewChip}${checksChip}${behindChip}<span class="pr-sub">${sub}</span></div></div>`;
+    + `<div class="pr-l2">${prAuthorHtml(p)}${reqChip}${reviewChip}${checksChip}${behindChip}<span class="pr-sub">${sub}</span></div></div>`;
+}
+
+// Who opened the PR, first on the row: GitHub avatar (a plain image URL, no API call) + login.
+function prAuthorHtml(p) {
+  if (!p.author) return '';
+  const a = escapeHtml(p.author);
+  return `<span class="pr-author" title="Opened by @${a}"><img src="https://github.com/${encodeURIComponent(p.author)}.png?size=32" alt="" loading="lazy" onerror="this.remove()">${p.mine ? 'you' : a}</span>`;
 }
 
 function prGroupHeader(repo, count, muted) {
