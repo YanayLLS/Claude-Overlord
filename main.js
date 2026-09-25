@@ -242,6 +242,10 @@ function defaultModel() {
 
 // OVERLORD_STATE_DIR sandboxes a test instance: own state/accounts, so it never
 // restores (and never kills) the sessions of a concurrently running install.
+// One icon for every surface. Source runs (start.bat) read assets/icon.ico; a release build embeds that
+// same file in the exe (package.json build.icon), and the shell can't read inside app.asar, so it uses the exe.
+const APP_ICON = app.isPackaged ? process.execPath : path.join(__dirname, 'assets', 'icon.ico');
+const APP_ID = 'com.overlord.claude';
 const STATE_DIR = process.env.OVERLORD_STATE_DIR || path.join(os.homedir(), '.overlord');
 // The state used to live in ~/.pixel-agents, from before the app was called
 // Overlord. First launch after the rename carries the config across; the old
@@ -5016,7 +5020,7 @@ function saveWindowBounds() {
 
 app.whenReady().then(() => {
   // Windows needs an explicit AppUserModelID or toast notifications silently no-op.
-  if (process.platform === 'win32') app.setAppUserModelId('com.overlord.claude');
+  if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
   // Load settings early (fast) so window bounds are correct, but defer heavy agent restoration
   const state = loadState();
   settings = { ...settings, ...state.settings };
@@ -5025,7 +5029,7 @@ app.whenReady().then(() => {
     width: bounds.width || 750, height: bounds.height || 800,
     minWidth: 500, minHeight: 400,
     title: 'Overlord',
-    icon: path.join(__dirname, 'assets', 'icon.ico'), // taskbar/alt-tab icon when run from source too
+    icon: APP_ICON,
     backgroundColor: themeOf(settings.theme).bg,
     // The app header is the title bar; Windows draws only its min/max/close buttons over it
     titleBarStyle: 'hidden',
@@ -5035,6 +5039,9 @@ app.whenReady().then(() => {
   };
   if (bounds.x !== undefined && bounds.y !== undefined) { opts.x = bounds.x; opts.y = bounds.y; }
   mainWindow = new BrowserWindow(opts);
+  // Windows takes the taskbar icon from the Start Menu shortcut sharing the app id (an older install's
+  // icon, even when run from start.bat). Setting it on the window itself wins over that shortcut.
+  if (process.platform === 'win32') mainWindow.setAppDetails({ appId: APP_ID, appIconPath: APP_ICON, appIconIndex: 0 });
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, cb) => cb(true));
   browserRegistry = createRegistry({
     makeView: (partition) => new WebContentsView({
