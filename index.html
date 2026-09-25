@@ -206,16 +206,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #content { display:flex; flex-direction:row; flex:1; overflow:hidden; }
 #list-col { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; background:var(--editor-bg); }
 
-/* ── Context warning banner ── */
-#ctx-warning {
-  display:none; padding:5px 16px; flex-shrink:0; font-size:11px; letter-spacing:.3px;
-  background:rgba(243,139,168,.08); border-bottom:1px solid rgba(243,139,168,.15); color:var(--red);
-  align-items:center; gap:6px; cursor:pointer;
-}
-#ctx-warning.show { display:flex; }
-#ctx-warning:hover { background:rgba(243,139,168,.14); }
-.ctx-warning-icon { flex-shrink:0; }
-
 /* ── Filter bar ── */
 #filter-bar {
   display:none; padding:4px 12px; border-bottom:1px solid var(--border); flex-shrink:0;
@@ -1073,7 +1063,6 @@ button:focus-visible { outline-offset:0; }
   <div id="list-col">
     <div id="world-roster-grip" title="Drag to resize the roster"></div>
     <button id="world-roster-hide" onclick="setWorldRosterHidden(true)" title="Hide the roster (it slides away; a tab brings it back)">&#x2039;</button>
-    <div id="ctx-warning" onclick="focusNextCtxDanger()"><span class="ctx-warning-icon">&#x26A0;</span><span id="ctx-warning-text"></span></div>
     <div id="filter-bar">
       <input id="filter-input" type="text" placeholder="Search agents  (Ctrl+F)" />
       <span id="filter-count"></span>
@@ -1330,6 +1319,7 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+D</span><span class="help-desc">Duplicate agent (same project, pre-filled prompt)</span></div>
       <div class="help-row"><span class="help-key">Ctrl+L</span><span class="help-desc">Clear terminal display</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+W</span><span class="help-desc">Close all done agents</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Shift+↑/↓</span><span class="help-desc">Previous / next agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Tab</span><span class="help-desc">Next agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+Tab</span><span class="help-desc">Previous agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+&#x2191;/&#x2193;</span><span class="help-desc">Cycle between your messages</span></div>
@@ -2020,12 +2010,16 @@ function focusNextPerm() {
   const next = idx >= 0 && idx < permIds.length - 1 ? permIds[idx + 1] : permIds[0];
   focusAgent(next);
 }
-function focusNextCtxDanger() {
-  const dangerIds = [...agents.entries()].filter(([, a]) => !a.archived && a.stats?.ctxTok && Math.round((a.stats.ctxTok / ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok)) * 100) >= 80).map(([id]) => id);
-  if (dangerIds.length === 0) return;
-  const idx = selectedId !== null ? dangerIds.indexOf(selectedId) : -1;
-  const next = idx >= 0 && idx < dangerIds.length - 1 ? dangerIds[idx + 1] : dangerIds[0];
+// Select the previous (-1) / next (1) agent in the visible list order, wrapping. False if the list is empty.
+function cycleAgent(dir) {
+  const ids = [...document.querySelectorAll('#list .agent[data-id]')].map(el => Number(el.dataset.id));
+  if (!ids.length) return false;
+  const idx = selectedId !== null ? ids.indexOf(selectedId) : -1;
+  const next = dir < 0
+    ? (idx <= 0 ? ids[ids.length - 1] : ids[idx - 1])
+    : (idx < 0 || idx >= ids.length - 1 ? ids[0] : ids[idx + 1]);
   focusAgent(next);
+  return true;
 }
 function closeDoneInGroup(cwd) {
   for (const [id, a] of agents) {
@@ -2653,22 +2647,6 @@ function render() {
   list.scrollTop = scrollTop;
   restoreOpenMenu(); // a re-render mid-interaction shouldn't close an open kebab menu
   window.restoreAgentTip?.(); // ditto for the hover tooltip on the status dot
-
-  // Context warning banner
-  const ctxWarn = document.getElementById('ctx-warning');
-  const dangerAgents = [...agents.entries()].filter(([, a]) => !a.archived && a.stats?.ctxTok && Math.round((a.stats.ctxTok / ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok)) * 100) >= 80);
-  if (dangerAgents.length > 0) {
-    const msgs = dangerAgents.map(([, a]) => {
-      const pct = Math.round((a.stats.ctxTok / ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok)) * 100);
-      return `${a.title || 'Agent'} (${pct}%)`;
-    });
-    document.getElementById('ctx-warning-text').textContent = dangerAgents.length === 1
-      ? `${msgs[0]} — context window almost full`
-      : `${dangerAgents.length} agents near context limit: ${msgs.join(', ')}`;
-    ctxWarn.classList.add('show');
-  } else {
-    ctxWarn.classList.remove('show');
-  }
 
   // Summary bar — 3-line layout: session bar, weekly bar, info/pace row
   const bar = document.getElementById('summary-bar');
@@ -4231,6 +4209,12 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
+  // Ctrl+Shift+Up/Down: previous / next agent in list order, across projects
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+    e.preventDefault();
+    cycleAgent(e.key === 'ArrowUp' ? -1 : 1);
+    return;
+  }
   // Ctrl+Up/Down to navigate prompts
   if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
@@ -4328,16 +4312,7 @@ document.addEventListener('keydown', (e) => {
   }
   // PageDown / PageUp: next / previous agent (cycles), using the visible list order
   if ((e.key === 'PageDown' || e.key === 'PageUp') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-    const ids = [...document.querySelectorAll('#list .agent[data-id]')].map(el => Number(el.dataset.id));
-    if (ids.length) {
-      e.preventDefault();
-      const idx = selectedId !== null ? ids.indexOf(selectedId) : -1;
-      const next = e.key === 'PageUp'
-        ? (idx <= 0 ? ids[ids.length - 1] : ids[idx - 1])
-        : (idx < 0 || idx >= ids.length - 1 ? ids[0] : ids[idx + 1]);
-      focusAgent(next);
-      return;
-    }
+    if (cycleAgent(e.key === 'PageUp' ? -1 : 1)) { e.preventDefault(); return; }
   }
   // ? to show help (when not in an input)
   if (e.key === '?' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
