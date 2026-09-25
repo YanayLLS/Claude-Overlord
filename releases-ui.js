@@ -3,7 +3,7 @@
 // and forwards { type: 'releases' } messages to releasesUi.onMsg.
 (function () {
   let state = null, open = false, sel = null; // sel = [rowIdx, cellIdx]
-  let tab = 'board', tlEnv = ''; // tab: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
+  let tab = 'board', tlEnv = '', toToday = false; // tab: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
 
   const core = document.createElement('script');
   core.src = './releases-core.js';
@@ -58,7 +58,7 @@
       api.send({ type: 'releasesSetSource', source: v });
     },
     deselect: () => { sel = null; render(); },
-    tab: (el) => { tab = el.dataset.tab; sel = null; render(); },
+    tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; render(); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
     cancelSource: () => { state = { ...(state || {}), editing: false }; render(); },
   };
@@ -128,31 +128,57 @@
 
   const hueOf = (env, envs) => ENV_HUE[env.toLowerCase()] || HUES[envs.indexOf(env) % HUES.length];
 
-  // Timeline tab: what landed on each env branch, newest first, grouped by day. Same data the
-  // board's second pass already fetched — no extra calls.
+  // Timeline tab, ClickUp-style: days run left→right, one lane per repo·env, each landing on that
+  // env's branch is a pill at its moment. Same data the board's second pass already fetched —
+  // no extra calls. Pills too close to their neighbour shrink to dots (hover for the rest).
+  const DAY_MS = 864e5, DAY_W = 64, MAX_DAYS = 30, MIN_DAYS = 7, LABEL_GAP = 46;
   function timelineHtml(s) {
-    const envs = s.config.envs;
-    const items = ReleasesCore.buildTimeline(s.config, s.results && s.results.history, tlEnv);
-    let h = '<div class="rl-tl"><div class="rl-tl-filter">'
+    const cfg = s.config, envs = cfg.envs, history = s.results && s.results.history;
+    let h = '<div class="rl-tl-filter">'
       + [''].concat(envs).map(e => `<button data-act="tlEnv" data-env="${esc(e)}" class="${e === tlEnv ? 'on' : ''}">`
         + (e ? `<span class="rl-env" style="--hue:${hueOf(e, envs)}">${esc(e)}</span>` : 'All') + '</button>').join('') + '</div>';
-    if (!s.results || !s.results.history) return h + '<div class="rl-tl-empty">Loading history…</div></div>';
-    if (!items.length) return h + '<div class="rl-tl-empty">Nothing landed here recently.</div></div>';
-    const dayOf = (iso) => {
-      const d = new Date(iso), t = new Date(), y = new Date(Date.now() - 864e5);
-      return d.toDateString() === t.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday'
-        : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
-    };
-    let day = null;
-    for (const e of items) {
-      const dd = dayOf(e.date);
-      if (dd !== day) { day = dd; h += `<div class="rl-tl-day">${esc(dd)}</div>`; }
-      h += `<div class="rl-tl-row" data-url="${esc(e.url)}" title="${esc(e.title)}\n${esc(e.branch)} · ${esc(e.sha.slice(0, 7))}">`
-        + `<span class="rl-tl-time">${esc(new Date(e.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }))}</span>`
-        + `<span class="rl-env" style="--hue:${hueOf(e.env, envs)}">${esc(e.env)}</span>`
-        + `<span class="rl-tl-repo">${esc(e.label)}</span>`
-        + `<span class="rl-sha">${esc(refOf(e))}</span>`
-        + `<span class="rl-tl-title">${esc(e.title.replace(/^#\d+ /, ''))}</span></div>`;
+    if (!history) return h + '<div class="rl-tl-empty">Loading history…</div>';
+    const items = ReleasesCore.buildTimeline(cfg, history, tlEnv);
+    if (!items.length) return h + '<div class="rl-tl-empty">Nothing landed here recently.</div>';
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const end = today.getTime() + DAY_MS;
+    const oldest = Math.min(...items.map(e => Date.parse(e.date)));
+    const days = Math.max(MIN_DAYS, Math.min(MAX_DAYS, Math.ceil((end - oldest) / DAY_MS)));
+    const start = end - days * DAY_MS;
+    const xOf = (t) => (t - start) / DAY_MS * DAY_W;
+
+    h += `<div class="rl-tlx" style="--dayw:${DAY_W}px; --days:${days}">`;
+    // axis: one cell per day, weekends shaded, today marked
+    h += '<div class="rl-tlx-head"><div class="rl-tlx-corner"></div><div class="rl-tlx-axis">';
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start + i * DAY_MS), wk = d.getDay() === 0 || d.getDay() === 6, isToday = d.getTime() === today.getTime();
+      h += `<div class="rl-tlx-day${wk ? ' wk' : ''}${isToday ? ' today' : ''}"><b>${d.getDate()}</b>${esc(d.toLocaleDateString([], { weekday: 'short' }))}</div>`;
+    }
+    h += '</div></div>';
+
+    const nowX = xOf(Date.now());
+    let group = null;
+    for (const r of cfg.repos) {
+      if (!r.branches) continue;
+      const label = r.label || r.repo.split('/')[1];
+      for (const env of envs) {
+        if (!r.branches[env] || (tlEnv && env !== tlEnv) || (r.live && r.live[env])) continue;
+        const lane = items.filter(e => e.repo === r.repo && e.env === env && Date.parse(e.date) >= start)
+          .sort((x, y) => Date.parse(x.date) - Date.parse(y.date));
+        if (!lane.length) continue;
+        if ((r.group || '') !== group) { group = r.group || ''; if (group) h += `<div class="rl-tlx-group">${esc(group)}</div>`; }
+        h += `<div class="rl-tlx-row"><div class="rl-tlx-label" title="${esc(r.repo)} · ${esc(r.branches[env])}"><span class="rl-tlx-repo">${esc(label)}</span>`
+          + `<span class="rl-env" style="--hue:${hueOf(env, envs)}">${esc(env)}</span></div><div class="rl-tlx-track">`
+          + `<i class="rl-tlx-now" style="left:${nowX}px"></i>`;
+        lane.forEach((e, k) => {
+          const x = xOf(Date.parse(e.date)), nx = k + 1 < lane.length ? xOf(Date.parse(lane[k + 1].date)) : Infinity;
+          const when = new Date(e.date).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+          h += `<a class="rl-tlx-mark${nx - x < LABEL_GAP ? ' dot' : ''}" data-url="${esc(e.url)}" style="left:${x}px; --hue:${hueOf(env, envs)}"`
+            + ` title="${esc(e.title)}\n${esc(label)} · ${esc(env)} · ${esc(when)}">${esc(refOf(e))}</a>`;
+        });
+        h += '</div></div>';
+      }
     }
     return h + '</div>';
   }
@@ -272,6 +298,7 @@
     modal.innerHTML = h + '</div>';
     const body = modal.querySelector('.rl-body');
     if (body) { body.scrollTop = top; body.scrollLeft = left; }
+    if (body && toToday && modal.querySelector('.rl-tlx')) { body.scrollLeft = body.scrollWidth; toToday = false; }
     // keep the clicked cell visible above the drawer
     const drawer = modal.querySelector('.rl-detail'), selCell = modal.querySelector('.rl-cell.sel');
     // freeze the modal at its pre-drawer height; the drawer's room comes out of the board's scroll
