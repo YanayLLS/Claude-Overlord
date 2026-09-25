@@ -56,6 +56,14 @@ function validateConfig(cfg) {
         else if (how !== 'manual' && !/^[\w.-]+\.ya?ml$/.test(String(how))) out.push(`${at}.deploy.${env}: "${how}" is not a workflow file or "manual"`);
       }
     }
+    if (r.uses != null) {
+      if (typeof r.uses !== 'object' || Array.isArray(r.uses)) out.push(`${at}.uses: must be an object`);
+      else for (const [env, other] of Object.entries(r.uses)) {
+        if (!envs.includes(env)) out.push(`${at}.uses.${env}: "${env}" is not in envs`);
+        else if (Object.prototype.hasOwnProperty.call(r.branches, env)) out.push(`${at}.uses.${env}: ${env} has its own branch`);
+        else if (!Object.prototype.hasOwnProperty.call(r.branches, other)) out.push(`${at}.uses.${env}: "${other}" has no branch in this repo`);
+      }
+    }
     if (r.live != null) {
       if (typeof r.live !== 'object' || Array.isArray(r.live)) out.push(`${at}.live: must be an object`);
       else for (const [env, l] of Object.entries(r.live)) {
@@ -111,7 +119,8 @@ function buildGrid(cfg, results) {
     for (const { from, to } of promotePairs(r)) nextOf[from] = to;
     const cells = cfg.envs.map((env) => {
       const branch = r.branches[env];
-      if (!branch) return null;
+      // no deployment of its own: this env runs another env's (config `uses`), or nothing
+      if (!branch) return r.uses && r.uses[env] ? { env, uses: r.uses[env] } : null;
       const res = commits[`${r.repo}|${env}`];
       const cell = { env, branch, deploy: (r.deploy && r.deploy[env]) || null, run: deploys[`${r.repo}|${env}`] || null, live: lives[`${r.repo}|${env}`] || null, commit: null, error: null, missing: false, loading: !res, next: null };
       if (res && res.error) cell.error = res.error;

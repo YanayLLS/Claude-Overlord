@@ -142,3 +142,6 @@
 .rl-tlx-mark.dot { width:10px; height:10px; padding:0; font-size:0; border:none; background:var(--hue); transform:translate(-5px, -50%); }
 .rl-tlx-mark.dot::before { display:none; }
 .rl-tlx-mark.dot:hover { transform:translate(-5px, -50%) scale(1.4); }
+/* an env that runs another env's deployment: a faint dashed placeholder naming whose */
+.rl-uses { display:flex; align-items:center; gap:6px; padding:0 10px; border:1px dashed rgba(var(--ink),.12); border-radius:var(--r-sm); font-size:10.5px; color:var(--dim); white-space:nowrap; }
+.rl-uses .rl-env { font-size:9.5px; color:var(--subtext); }

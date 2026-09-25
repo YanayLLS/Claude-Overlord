@@ -99,6 +99,11 @@
 
   function cellHtml(c, r, i) {
     if (!c) return '<div class="rl-empty"></div>';
+    // no deployment of its own: say whose it runs instead of leaving a hole
+    if (c.uses) {
+      return `<div class="rl-uses" title="${esc(c.env)} has no deployment of its own for this repo — it uses ${esc(c.uses)}'s">`
+        + `uses <span class="rl-env" style="--hue:${ENV_HUE[c.uses.toLowerCase()] || 'var(--dim)'}">${esc(c.uses)}</span></div>`;
+    }
     const d = deployInfo(c);
     // a manually deployed env with a pinned commit shows THAT commit, not the branch tip
     const shown = c.live && !c.live.error ? c.live : c.commit;

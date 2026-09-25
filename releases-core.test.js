@@ -248,4 +248,17 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(firstParentChain(nodes, 2).map(x => x.oid), ['m2', 'm1']);
   assert.deepStrictEqual(firstParentChain([], 5), []);
 }
+
+// ── uses: an env with no deployment of its own that runs another env's ──
+{
+  const cfg = { envs: ['dev', 'alpha', 'prod'], repos: [{ repo: 'o/id', branches: { dev: 'dev', prod: 'main' }, uses: { alpha: 'dev' } }] };
+  assert.deepStrictEqual(validateConfig(cfg), []);
+  const cells = buildGrid(cfg, {}).rows[0].cells;
+  assert.deepStrictEqual(cells[1], { env: 'alpha', uses: 'dev' });
+  assert.strictEqual(requestsFor(cfg).commits.length, 2); // nothing fetched for a borrowed env
+  const bad = (uses) => validateConfig({ envs: ['dev', 'alpha'], repos: [{ repo: 'o/a', branches: { dev: 'dev' }, uses }] });
+  assert.deepStrictEqual(bad({ alpha: 'prod' }), ['repos[0].uses.alpha: "prod" has no branch in this repo']);
+  assert.deepStrictEqual(bad({ dev: 'dev' }), ['repos[0].uses.dev: dev has its own branch']);
+  assert.deepStrictEqual(bad({ qa: 'dev' }), ['repos[0].uses.qa: "qa" is not in envs']);
+}
 console.log('releases-core: all passed');
