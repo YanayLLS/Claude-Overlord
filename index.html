@@ -571,7 +571,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .server-badge:hover .server-count { background:rgba(255,255,255,.2); color:#fff; }
 
 /* ── Terminal panel — right side ── */
-#term { display:none; flex-direction:column; border-left:1px solid var(--border); flex-shrink:0; height:auto; width:50%; min-width:200px; min-height:0; flex:none; }
+#term { display:none; flex-direction:column; border-left:1px solid var(--border); flex-shrink:0; height:auto; width:50%; min-width:200px; max-width:calc(100% - 240px); min-height:0; flex:none; } /* its saved width is CSS px, so zooming in grows it — never let it crowd the sidebar out */
 #term.open { display:flex; }
 #term-header {
   display:flex; align-items:center; padding:0 8px; height:35px;
@@ -590,6 +590,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #prompt-nav button:hover { color:var(--accent); }
 #prompt-nav .prompt-counter { font-size:10px; color:var(--dim); min-width:28px; text-align:center; user-select:none; }
 #term-container { flex:1; position:relative; background:#000; overflow:hidden; min-width:0; min-height:0; }
+/* Text fades out to nothing as it scrolls under the top edge; clicks and selection pass through. */
+#term-container::after { content:''; position:absolute; left:0; right:0; top:0; height:36px; z-index:4; pointer-events:none;
+  background:linear-gradient(to bottom, var(--term-bg, #000), transparent); }
 #term-container .xterm { height:100%; width:100%; }
 /* 18px hit area, 5px transparent border keeps the visible thumb slim — easier to grab, same look */
 #term-container .xterm .xterm-viewport::-webkit-scrollbar { width:18px; }
@@ -3551,6 +3554,7 @@ let termDragging = false; // sidebar drag: only the visible xterm refits per fra
 function schedFit() {
   cancelAnimationFrame(fitRaf);
   fitRaf = requestAnimationFrame(() => {
+    if (zoomSettling) return; // setUiZoom refits once the slider stops
     if (container.clientWidth <= 0 || container.clientHeight <= 0) return; // term panel closed
     // Fit every xterm, not just the visible one — a background terminal left at the old
     // width would reflow (and desync its viewport) the moment you switch to it.
@@ -4265,6 +4269,8 @@ function showToast(text, onClick) {
 
 // ── Settings ───────────────────────────────────────────
 let uiZoom = 100;
+const ZOOM_SETTLE_MS = 150; // setUiZoom holds xterm refits until the size stops moving
+let zoomSettling = false, zoomSettleTimer = null;
 let settings_termWidth = 0;
 
 let bypassPermissions = true;
@@ -5985,9 +5991,15 @@ function setUiZoom(z, persist = true) {
     menu.querySelectorAll('[data-z]').forEach(b => b.classList.toggle('on', +b.dataset.z === uiZoom));
   }
   if (persist) persistSettings();
-  api.send({ type: 'uiZoom', zoom: uiZoom });
-  const x = xterms.get(selectedId);
-  if (x) setTimeout(() => { fitPreservingScroll(x); positionNameChip(); }, 50);
+  // A slider drag fires this per step; refitting every xterm reflows its whole scrollback
+  // (~170ms per step with 8 busy agents). Hold refits until the size stops moving.
+  zoomSettling = true;
+  clearTimeout(zoomSettleTimer);
+  zoomSettleTimer = setTimeout(() => {
+    zoomSettling = false;
+    api.send({ type: 'uiZoom', zoom: uiZoom }); // native window buttons follow once, not per step
+    schedFit();
+  }, ZOOM_SETTLE_MS);
 }
 function toggleZoomMenu(e) {
   e.stopPropagation();
@@ -6000,8 +6012,15 @@ function toggleZoomMenu(e) {
     + `<button data-step="10" aria-label="Bigger" class="zm-big">A</button></div>`
     + `<div class="zm-presets">${ZOOM_PRESETS.map(z => `<button data-z="${z}" class="${z === uiZoom ? 'on' : ''}">${z}%</button>`).join('')}</div>`
     + `<div class="zm-hint">Ctrl + wheel also works · Ctrl+0 resets</div>`;
-  // Live while dragging; the setting is saved by persistSettings' own debounce.
-  m.querySelector('input').oninput = (ev) => setUiZoom(+ev.target.value);
+  // Every zoom step makes each xterm re-measure its font and redraw (~100ms with 8 agents),
+  // so a drag applies the size when the thumb pauses or lets go; the % label stays live.
+  const range = m.querySelector('input');
+  let dragT = null;
+  range.oninput = () => {
+    m.querySelector('.zm-val').textContent = range.value + '%';
+    clearTimeout(dragT); dragT = setTimeout(() => setUiZoom(+range.value), 80);
+  };
+  range.onchange = () => { clearTimeout(dragT); setUiZoom(+range.value); };
   m.onclick = (ev) => {
     const b = ev.target.closest('button'); if (!b) return;
     setUiZoom(b.dataset.z ? +b.dataset.z : uiZoom + +b.dataset.step);

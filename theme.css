@@ -324,7 +324,7 @@ body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 
 /* Sidebar search: always on screen; Ctrl+F still jumps into it, × clears */
 #filter-bar { display: flex; padding: 10px 10px 4px; border-bottom: none; background: transparent; }
-#filter-input { height: 30px; padding: 0 10px 0 30px; font-size: 12px;
+#filter-input { min-width: 0; height: 30px; padding: 0 10px 0 30px; font-size: 12px; /* min-width: an input won't shrink below ~20ch otherwise, pushing the filter button out */
   background: var(--surface0) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b8b94' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 10px center / 14px; }
 #filter-input:placeholder-shown ~ #filter-close { display: none; }
 body.world-mode #filter-bar:not(.open) { display: none; }
