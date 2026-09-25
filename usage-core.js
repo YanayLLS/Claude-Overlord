@@ -57,6 +57,15 @@ function modelLabel(model) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 }
 
+// The header fallback only sees the probed model's buckets, so a fetch that took it drops the
+// per-model caps it can't see. Keep the last known ones until their reset passes.
+function carryModelWeekly(next, prev, now) {
+  if (!next || (next.modelWeekly && next.modelWeekly.length)) return next;
+  const kept = ((prev && prev.modelWeekly) || []).filter(m => !m.reset || m.reset > now);
+  if (kept.length) next.modelWeekly = kept;
+  return next;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, MODEL_7D_RE };
+  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, MODEL_7D_RE };
 }

@@ -1,6 +1,15 @@
 // Run: node usage-core.test.js
 const assert = require('assert');
-const { parseModelWeekly, parseOauthUsage, modelLabel } = require('./usage-core');
+const { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly } = require('./usage-core');
+
+// ── carryModelWeekly: a header-probe fetch keeps the last known per-model caps until they reset
+{
+  const prev = { modelWeekly: [{ model: 'fable', pct: 6, reset: 2000 }, { model: 'opus', pct: 1, reset: 500 }] };
+  assert.deepStrictEqual(carryModelWeekly({ weekly: 33 }, prev, 1000).modelWeekly, [{ model: 'fable', pct: 6, reset: 2000 }]);
+  const fresh = { weekly: 33, modelWeekly: [{ model: 'fable', pct: 7, reset: 2000 }] };
+  assert.strictEqual(carryModelWeekly(fresh, prev, 1000).modelWeekly[0].pct, 7); // fresh data wins
+  assert.strictEqual(carryModelWeekly({ weekly: 1 }, null, 1000).modelWeekly, undefined);
+}
 
 // ── parseModelWeekly ──────────────────────────────────
 assert.deepStrictEqual(parseModelWeekly({}), []);

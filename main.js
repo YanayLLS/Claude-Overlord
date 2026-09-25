@@ -2565,7 +2565,7 @@ function armClickupTimer() {
 let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
 // Set before any programmatic quit so the close confirmation doesn't block it.
 let forceQuit = false;
-const { parseModelWeekly, parseOauthUsage } = require('./usage-core');
+const { parseModelWeekly, parseOauthUsage, carryModelWeekly } = require('./usage-core');
 let lastUsage = null;
 
 function getApiKey() {
@@ -2725,7 +2725,7 @@ function fetchUsageFromHeaders(apiKey) {
       }
       if (Object.keys(usage).length > 0) {
         usage.fetchedAt = Date.now();
-        lastUsage = usage;
+        lastUsage = carryModelWeekly(usage, lastUsage, usage.fetchedAt);
         send({ type: 'usage', usage });
         console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
       } else {
