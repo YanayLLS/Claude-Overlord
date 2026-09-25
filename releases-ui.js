@@ -131,7 +131,7 @@
   // Timeline tab, ClickUp-style: days run left→right, one lane per repo·env, each landing on that
   // env's branch is a pill at its moment. Same data the board's second pass already fetched —
   // no extra calls. Pills too close to their neighbour shrink to dots (hover for the rest).
-  const DAY_MS = 864e5, DAY_W = 64, MAX_DAYS = 30, MIN_DAYS = 7, LABEL_GAP = 46;
+  const DAY_MS = 864e5, DAY_W = 64, MAX_DAYS = 30, MIN_DAYS = 7;
   function timelineHtml(s) {
     const cfg = s.config, envs = cfg.envs, history = s.results && s.results.history;
     let h = '<div class="rl-tl-filter">'
@@ -159,26 +159,25 @@
 
     const nowX = xOf(Date.now());
     let group = null;
+    // one lane per repo; each pill names its env (DEV / STAGING / PROD…) in that env's colour,
+    // and a pill that would run into the next one shrinks to a dot. PR, title, time: on hover.
     for (const r of cfg.repos) {
       if (!r.branches) continue;
       const label = r.label || r.repo.split('/')[1];
-      for (const env of envs) {
-        if (!r.branches[env] || (tlEnv && env !== tlEnv) || (r.live && r.live[env])) continue;
-        const lane = items.filter(e => e.repo === r.repo && e.env === env && Date.parse(e.date) >= start)
-          .sort((x, y) => Date.parse(x.date) - Date.parse(y.date));
-        if (!lane.length) continue;
-        if ((r.group || '') !== group) { group = r.group || ''; if (group) h += `<div class="rl-tlx-group">${esc(group)}</div>`; }
-        h += `<div class="rl-tlx-row"><div class="rl-tlx-label" title="${esc(r.repo)} · ${esc(r.branches[env])}"><span class="rl-tlx-repo">${esc(label)}</span>`
-          + `<span class="rl-env" style="--hue:${hueOf(env, envs)}">${esc(env)}</span></div><div class="rl-tlx-track">`
-          + `<i class="rl-tlx-now" style="left:${nowX}px"></i>`;
-        lane.forEach((e, k) => {
-          const x = xOf(Date.parse(e.date)), nx = k + 1 < lane.length ? xOf(Date.parse(lane[k + 1].date)) : Infinity;
-          const when = new Date(e.date).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-          h += `<a class="rl-tlx-mark${nx - x < LABEL_GAP ? ' dot' : ''}" data-url="${esc(e.url)}" style="left:${x}px; --hue:${hueOf(env, envs)}"`
-            + ` title="${esc(e.title)}\n${esc(label)} · ${esc(env)} · ${esc(when)}">${esc(refOf(e))}</a>`;
-        });
-        h += '</div></div>';
-      }
+      const lane = items.filter(e => e.repo === r.repo && Date.parse(e.date) >= start)
+        .sort((x, y) => Date.parse(x.date) - Date.parse(y.date));
+      if (!lane.length) continue;
+      if ((r.group || '') !== group) { group = r.group || ''; if (group) h += `<div class="rl-tlx-group">${esc(group)}</div>`; }
+      h += `<div class="rl-tlx-row"><div class="rl-tlx-label" title="${esc(r.repo)}"><span class="rl-tlx-repo">${esc(label)}</span></div>`
+        + `<div class="rl-tlx-track"><i class="rl-tlx-now" style="left:${nowX}px"></i>`;
+      lane.forEach((e, k) => {
+        const x = xOf(Date.parse(e.date)), nx = k + 1 < lane.length ? xOf(Date.parse(lane[k + 1].date)) : Infinity;
+        const room = e.env.length * 7 + 26; // the pill's width: env name + dot + padding
+        const when = new Date(e.date).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+        h += `<a class="rl-tlx-mark${nx - x < room ? ' dot' : ''}" data-url="${esc(e.url)}" style="left:${x}px; --hue:${hueOf(e.env, envs)}"`
+          + ` title="${esc(e.env.toUpperCase())} · ${esc(refOf(e))} · ${esc(when)}\n${esc(e.title.replace(/^#\d+ /, ''))}\n${esc(e.branch)} · ${esc(e.sha.slice(0, 7))}">${esc(e.env.toUpperCase())}</a>`;
+      });
+      h += '</div></div>';
     }
     return h + '</div>';
   }
