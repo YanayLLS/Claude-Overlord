@@ -1192,7 +1192,11 @@ button:focus-visible { outline-offset:0; }
         <div class="field-title">Watched repos <span class="field-count" id="pr-repo-count"></span></div>
         <div class="field-row">
           <input type="search" class="settings-input" id="inp-pr-search" placeholder="Search repos…" oninput="renderRepoPicker()" style="flex:1;" />
-          <button class="settings-btn" onclick="loadRepos()" title="Reload the repos you can see on GitHub">&#x21BB; Refresh list</button>
+          <select class="settings-input" id="sel-repo-sort" onchange="renderRepoPicker()" title="Sort repos" aria-label="Sort repos">
+            <option value="recent">Latest PR</option>
+            <option value="az">A–Z</option>
+          </select>
+          <button class="settings-btn" onclick="loadRepos(true)" title="Reload the repos you can see on GitHub">&#x21BB;</button>
         </div>
         <div id="pr-repo-list" class="pick-list"></div>
       </div>
@@ -3726,6 +3730,7 @@ function handleAgentMsg(msg) {
     case 'repoList':
       if (msg.error) { document.getElementById('pr-repo-list').innerHTML = '<div class="pr-empty">Failed: ' + escapeHtml(msg.error) + ghFixHtml(msg.errorCode) + '</div>'; break; }
       allRepos = msg.repos || [];
+      repoLastPr = msg.lastPr || {};
       renderRepoPicker();
       break;
     case 'actionsList':
@@ -5830,9 +5835,18 @@ function renderSettingsChips() {
   n('chip-clickup', worldEnabled, !worldEnabled ? 'off' : cuOn ? `on · ${cuN} board${cuN === 1 ? '' : 's'} · ${cuR} raid${cuR === 1 ? '' : 's'}` : 'on · no raids');
 }
 
-function loadRepos() {
+function loadRepos(force = false) {
   document.getElementById('pr-repo-list').innerHTML = '<div class="pick-empty">Loading your repos from GitHub…</div>';
-  api.send({ type: 'listRepos' });
+  api.send({ type: 'listRepos', force });
+}
+let repoLastPr = {}; // repo -> ms of its newest PR (0 = never had one)
+// "3d ago" style age of a timestamp, for the repo picker.
+function agoShort(ms) {
+  const d = (Date.now() - ms) / 86400000;
+  if (d < 1) return 'today';
+  if (d < 30) return Math.floor(d) + 'd ago';
+  if (d < 365) return Math.floor(d / 30) + 'mo ago';
+  return Math.floor(d / 365) + 'y ago';
 }
 
 function renderRepoPicker() {
@@ -5844,13 +5858,18 @@ function renderRepoPicker() {
   if (count) count.textContent = selectedRepos.size ? selectedRepos.size + ' watched' : '';
   if (pool.length === 0) { box.innerHTML = '<div class="pick-empty">No repos found. Check <code>gh auth status</code>, then Refresh list.</div>'; return; }
   const q = (document.getElementById('inp-pr-search').value || '').toLowerCase();
-  // Watched repos first, then the rest, each alphabetical.
-  const list = pool.filter(r => r.toLowerCase().includes(q)).sort((a, b) => (selectedRepos.has(b) - selectedRepos.has(a)) || a.localeCompare(b));
+  // Latest PR: most recently active repos first, so the busy ones are easy to spot.
+  // A–Z: watched repos first, then the rest, each alphabetical.
+  const byRecent = (document.getElementById('sel-repo-sort') || {}).value !== 'az';
+  const list = pool.filter(r => r.toLowerCase().includes(q)).sort(byRecent
+    ? (a, b) => ((repoLastPr[b] || 0) - (repoLastPr[a] || 0)) || a.localeCompare(b)
+    : (a, b) => (selectedRepos.has(b) - selectedRepos.has(a)) || a.localeCompare(b));
   box.innerHTML = list.slice(0, 500).map(r => {
     const [owner, name] = r.split('/');
     return `<label class="pick-row${selectedRepos.has(r) ? ' on' : ''}">`
     + `<input type="checkbox" ${selectedRepos.has(r) ? 'checked' : ''} onchange="toggleRepo('${r.replace(/'/g, "\\'")}',this.checked)">`
-    + `<span class="pick-name">${escapeHtml(name || r)}</span><span class="pick-sub">${escapeHtml(owner)}</span></label>`;
+    + `<span class="pick-name">${escapeHtml(name || r)}</span><span class="pick-sub">${escapeHtml(owner)}`
+    + (repoLastPr[r] ? ` · <span title="Newest PR opened ${escAttr(new Date(repoLastPr[r]).toLocaleDateString())}">${agoShort(repoLastPr[r])}</span>` : r in repoLastPr ? ' · no PRs' : '') + `</span></label>`;
   }).join('') || '<div class="pick-empty">No repo matches “' + escapeHtml(q) + '”.</div>';
 }
 

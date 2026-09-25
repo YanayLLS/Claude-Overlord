@@ -2291,6 +2291,52 @@ function sanitizeWorkflows(list) {
   }, []);
 }
 
+// One GraphQL call via stdin (no shell quoting of the query). Resolves { data } or { error, errorCode }.
+function ghGraphql(query, timeout = 30000) {
+  return new Promise((resolve) => {
+    let out = '', errbuf = '', proc, done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
+    try { proc = spawn('gh', ['api', 'graphql', '-F', 'query=@-'], { windowsHide: true, shell: process.platform === 'win32' }); }
+    catch (e) { return resolve({ error: ghErr(e), errorCode: ghErrCode(e) }); }
+    const to = setTimeout(() => { try { proc.kill(); } catch {} finish({ error: 'timeout' }); }, timeout);
+    proc.on('error', (e) => finish({ error: ghErr(e), errorCode: ghErrCode(e) }));
+    proc.stdout.on('data', d => out += d);
+    proc.stderr.on('data', d => errbuf += d);
+    proc.on('close', () => {
+      try { const j = JSON.parse(out); if (j.data) return finish({ data: j.data }); } catch {}
+      const e = { message: (errbuf || out || 'gh graphql failed').trim().slice(0, 200) };
+      finish({ error: ghErr(e), errorCode: ghErrCode(e) });
+    });
+    proc.stdin.end(query);
+  });
+}
+
+// Every repo the user can see, with when its newest PR was opened, in one query per 100 repos
+// (the same call count the plain REST listing took). Archived repos are left out: no new PRs there.
+let repoListCache = null; // { at, msg }
+async function listReposWithLastPr() {
+  const aff = '[OWNER, COLLABORATOR, ORGANIZATION_MEMBER]';
+  const repos = [], lastPr = {};
+  let after = null;
+  for (let page = 0; page < 20; page++) { // ponytail: 2000-repo ceiling, raise if someone sees more
+    const res = await ghGraphql(`query { viewer { repositories(first: 100${after ? `, after: ${JSON.stringify(after)}` : ''}, `
+      + `affiliations: ${aff}, ownerAffiliations: ${aff}, isArchived: false, orderBy: {field: PUSHED_AT, direction: DESC}) { `
+      + `pageInfo { hasNextPage endCursor } nodes { nameWithOwner `
+      + `pullRequests(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { createdAt } } } } } }`);
+    if (res.error) return repos.length ? { repos, lastPr } : res;
+    const conn = res.data.viewer.repositories;
+    for (const n of conn.nodes || []) {
+      if (!n || lastPr[n.nameWithOwner] !== undefined) continue;
+      repos.push(n.nameWithOwner);
+      const pr = n.pullRequests && n.pullRequests.nodes && n.pullRequests.nodes[0];
+      lastPr[n.nameWithOwner] = pr ? Date.parse(pr.createdAt) || 0 : 0;
+    }
+    if (!conn.pageInfo.hasNextPage) break;
+    after = conn.pageInfo.endCursor;
+  }
+  return { repos, lastPr };
+}
+
 function ghJson(args, timeout = 20000) {
   return new Promise((resolve) => {
     execFile('gh', args, { timeout, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 8 * 1024 * 1024 },
@@ -3488,13 +3534,13 @@ function handleIpc(msg) {
       break;
     }
     case 'listRepos': {
-      execFile('gh', ['api', '--paginate', 'user/repos?per_page=100', '--jq', '.[].full_name'],
-        { timeout: 30000, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 16 * 1024 * 1024 },
-        (err, stdout) => {
-          if (err) { send({ type: 'repoList', repos: null, error: ghErr(err), errorCode: ghErrCode(err) }); return; }
-          const repos = [...new Set(stdout.split('\n').map(s => s.trim()).filter(Boolean))].sort();
-          send({ type: 'repoList', repos, error: null });
-        });
+      // Cached 10 min: opening the PR settings pane again costs nothing; "Refresh list" forces.
+      if (!msg.force && repoListCache && Date.now() - repoListCache.at < 10 * 60000) { send({ type: 'repoList', ...repoListCache.msg }); break; }
+      listReposWithLastPr().then(res => {
+        const out = res.error ? { repos: null, lastPr: {}, error: res.error, errorCode: res.errorCode || null } : { repos: res.repos, lastPr: res.lastPr, error: null };
+        if (!res.error) repoListCache = { at: Date.now(), msg: out };
+        send({ type: 'repoList', ...out });
+      });
       break;
     }
     case 'saveActionsSettings': {
