@@ -54,6 +54,31 @@ function eraseSelSeq(row, start, end, cursorX, app) {
   return arrow.repeat(Math.abs(e - cursorX)) + ''.repeat(e - s);
 }
 
+// Ctrl+A: where the typed prompt text sits, so it can be marked like an edit box.
+// Scans from the cursor row up to the marker row and down to the next ─── rule
+// (Claude's box edge or input divider). Columns are raw-row columns, endCol exclusive.
+// Null when nothing is typed.
+const RULE = /[─━]{3}/;
+const LEAD = new RegExp(`^\\s*${BORDER}?\\s?(?:>|❯|❱|\\$)\\s?`);
+const TRAIL = new RegExp(`\\s*${BORDER}?\\s*$`);
+function promptSpan(lines, cursorIdx) {
+  const at = (i) => (typeof lines[i] === 'string' ? lines[i] : '');
+  const end = (i) => at(i).replace(TRAIL, '').length;
+  let top = cursorIdx, startCol = 0, bot = cursorIdx;
+  for (let i = cursorIdx; i >= 0 && i > cursorIdx - 40 && !RULE.test(at(i)); i--) {
+    const m = at(i).match(LEAD);
+    if (m) { top = i; startCol = m[0].length; break; }
+  }
+  for (let i = cursorIdx + 1; i < lines.length && i < cursorIdx + 40; i++) {
+    if (!RULE.test(at(i))) continue;
+    for (let j = i - 1; j > cursorIdx; j--) if (end(j) > 0) { bot = j; break; }
+    break;
+  }
+  const endCol = end(bot);
+  if (bot === top && endCol <= startCol) return null;
+  return { top, startCol, bot, endCol };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { boxInner, readPromptText, eraseSelSeq };
+  module.exports = { boxInner, readPromptText, eraseSelSeq, promptSpan };
 }

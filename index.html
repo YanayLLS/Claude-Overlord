@@ -1350,6 +1350,7 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+W</span><span class="help-desc">Close selected agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+R</span><span class="help-desc">Restart selected agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+D</span><span class="help-desc">Duplicate agent (same project, pre-filled prompt)</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+A</span><span class="help-desc">Mark all text in the prompt</span></div>
       <div class="help-row"><span class="help-key">Ctrl+L</span><span class="help-desc">Clear terminal display</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+W</span><span class="help-desc">Close all done agents</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Z</span><span class="help-desc">Bring back the last Ctrl+W agent</span></div>
@@ -2935,6 +2936,7 @@ function createXterm(id) {
     // Ctrl+C with no selection: Claude clears the input box. Copy what was typed first so it isn't lost.
     if (e.ctrlKey && e.key === 'c' && !terminal.hasSelection()) { const t = readPromptBox(terminal); if (t) navigator.clipboard.writeText(t); return true; }
     if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
+    if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey && !e.altKey) { selectPromptBox(terminal); return false; }
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
     if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
     if ((e.ctrlKey || e.metaKey) && e.key === 'n') return false; // new agent, not ^N to the shell
@@ -3065,6 +3067,20 @@ function readPromptBox(terminal) {
     lines.push(ln ? ln.translateToString(true) : '');
   }
   return readPromptText(lines, cursorAbs - from);
+}
+
+// Ctrl+A: mark the typed prompt text. Ctrl+C then copies it; on a one-row prompt
+// Backspace/typing replace it via the mouse-selection handler.
+function selectPromptBox(terminal) {
+  const buf = terminal.buffer.active;
+  const cursorAbs = buf.baseY + buf.cursorY;
+  const from = Math.max(0, cursorAbs - 40);
+  const to = Math.min(buf.length - 1, cursorAbs + 40);
+  const lines = [];
+  for (let y = from; y <= to; y++) { const ln = buf.getLine(y); lines.push(ln ? ln.translateToString(true) : ''); }
+  const s = promptSpan(lines, cursorAbs - from);
+  if (!s) return terminal.clearSelection();
+  terminal.select(s.startCol, from + s.top, (s.bot - s.top) * terminal.cols + s.endCol - s.startCol);
 }
 
 // ── Inline ghost-text autocomplete ─────────────────────

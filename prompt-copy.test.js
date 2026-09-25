@@ -56,3 +56,16 @@ assert.strictEqual(eraseSelSeq(row, 0, 2, 13, false), null);
 assert.strictEqual(eraseSelSeq(row, 20, 30, 13, false), null);
 
 console.log('prompt-copy: ok');
+
+// Ctrl+A span: typed text from after the marker to the end, across rows
+const { promptSpan } = require('./prompt-copy');
+assert.deepStrictEqual(promptSpan(box, 2), { top: 2, startCol: 4, bot: 2, endCol: 21 });
+assert.deepStrictEqual(promptSpan(multi, 2), { top: 1, startCol: 4, bot: 2, endCol: 12 });
+// current Claude UI: rules above and below, no side borders
+const ruled = ['────────', '❯ hello', '  world', '', '────────', '  ? for shortcuts'];
+assert.deepStrictEqual(promptSpan(ruled, 1), { top: 1, startCol: 2, bot: 2, endCol: 7 });
+// plain shell, no rules: just the cursor row
+assert.deepStrictEqual(promptSpan(['$ ls -la'], 0), { top: 0, startCol: 2, bot: 0, endCol: 8 });
+// empty prompt: nothing to mark
+assert.strictEqual(promptSpan(['────', '❯ ', '────'], 1), null);
+console.log('promptSpan ok');
