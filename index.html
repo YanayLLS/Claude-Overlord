@@ -1067,6 +1067,7 @@ button:focus-visible { outline-offset:0; }
       <input id="filter-input" type="text" placeholder="Search agents  (Ctrl+F)" />
       <span id="filter-count"></span>
       <button id="filter-close" onclick="closeFilter()" aria-label="Clear search">&times;</button>
+      <button id="filter-ready" onclick="toggleReadyFilter()" aria-pressed="false" title="Show only ready agents (hides ones working, resuming or settling)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Ready</button>
     </div>
     <div id="world-attn"></div>
     <div id="list"></div>
@@ -1131,11 +1132,6 @@ button:focus-visible { outline-offset:0; }
         <span>Bypass permissions (--dangerously-skip-permissions)</span>
       </label>
       <div class="settings-hint">Applies to newly spawned agents. Persisted across sessions.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-ready" onchange="toggleReadyFilter(this.checked)" />
-        <span>Show only ready agents</span>
-      </label>
-      <div class="settings-hint">Hides agents that are actively working, resuming, or settling.</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-mobile" onchange="setMobileRemote(this.checked)" />
         <span>Mobile remote (feature flag)</span>
@@ -1888,7 +1884,12 @@ function closeFilter() {
 }
 document.getElementById('filter-input').addEventListener('input', (e) => { filterText = e.target.value.toLowerCase(); render(); });
 document.getElementById('filter-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFilter(); });
-function toggleReadyFilter(on) { filterReady = on !== undefined ? on : !filterReady; render(); }
+function toggleReadyFilter(on) {
+  filterReady = on !== undefined ? on : !filterReady;
+  const b = document.getElementById('filter-ready');
+  b.classList.toggle('on', filterReady); b.setAttribute('aria-pressed', String(filterReady));
+  render();
+}
 
 let pendingCwd = null;
 let _promptCloseTimer = null;
