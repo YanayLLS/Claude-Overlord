@@ -2838,6 +2838,7 @@ function createXterm(id) {
     if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
     if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
+    if ((e.ctrlKey || e.metaKey) && e.key === 'n') return false; // new agent, not ^N to the shell
     // Bare PageUp/PageDown cycle agents. xterm binds them to scrollPages and its cancel()
     // calls stopPropagation(), which would kill the event before the document handler sees
     // it. Shift+PageUp/Down still scrolls the terminal.
