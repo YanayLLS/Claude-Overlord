@@ -107,14 +107,19 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const base = { url: run.html_url, date: run.updated_at || run.created_at };
       if (run.status !== 'completed') { out[key] = { ...base, state: 'running' }; return; }
       // Red run: one more call to learn WHICH job failed — the deploy, or a follow-up after it
-      let failed = [];
+      // plus whether it has EVER gone green here: one that never has isn't what deploys this env
+      let failed = [], everSucceeded;
       if (run.conclusion === 'failure') {
-        const jobs = await ghJson(['api', `repos/${d.repo}/actions/runs/${run.id}/jobs`]);
+        const [jobs, wins] = await Promise.all([
+          ghJson(['api', `repos/${d.repo}/actions/runs/${run.id}/jobs`]),
+          ghJson(['api', '-X', 'GET', `repos/${d.repo}/actions/workflows/${d.file}/runs`, '-f', `branch=${d.branch}`, '-f', 'status=success', '-f', 'per_page=1']),
+        ]);
         failed = ((jobs.data && jobs.data.jobs) || []).filter(j => j.conclusion === 'failure').map(j => ({
           job: j.name, step: ((j.steps || []).find(st => st.conclusion === 'failure') || {}).name || '',
         }));
+        if (wins.data && typeof wins.data.total_count === 'number') everSucceeded = wins.data.total_count > 0;
       }
-      out[key] = { ...base, state: runState(run.conclusion || 'unknown', failed), failed };
+      out[key] = { ...base, state: runState(run.conclusion || 'unknown', failed, everSucceeded), failed };
     }));
     return out;
   }

@@ -71,6 +71,7 @@
   // next env. Line 2: the commit title. Branch, author and deploy details live in tooltips.
   // Dot colour + a short label; the tooltip shows the same dot as a badge beside the label.
   const DOT = { success: ['ok', 'Deployed'], failure: ['bad', 'Deploy failed'], partial: ['part', 'Deployed · a follow-up job failed'],
+    dead: ['manual', 'CI has never succeeded here · deployed some other way (likely by hand)'],
     running: ['run', 'Deploying now'], cancelled: ['off', 'Deploy cancelled'], never: ['off', 'Never deployed'] };
   function deployInfo(c) {
     if (c.deploy === 'manual') return { cls: 'manual', text: 'Manual deploy · no CI/CD · this tip may not be live yet' };

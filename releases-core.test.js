@@ -183,4 +183,16 @@ assert.strictEqual(age('garbage', now), '');
   assert.strictEqual(runState('failure', []), 'failure'); // no job detail: assume the worst
   assert.strictEqual(runState('cancelled', []), 'cancelled');
 }
+
+// ── a deploy workflow that has never once succeeded isn't how that env gets deployed ──
+{
+  const { runState } = require('./releases-core');
+  assert.strictEqual(runState('failure', [{ job: 'deploy', step: 'Deploy to Azure Web App' }], false), 'dead');
+  assert.strictEqual(runState('failure', [{ job: 'deploy', step: 'Deploy' }], true), 'failure');
+  assert.strictEqual(runState('failure', [{ job: 'x', step: 'open PR' }], false), 'partial'); // side job red on every run, deploy fine
+  assert.strictEqual(runState('success', [], false), 'success'); // the run itself succeeded
+  const { failedDeploys } = require('./releases-core');
+  const g = buildGrid({ envs: ['dev'], repos: [{ repo: 'o/a', branches: { dev: 'dev' }, deploy: { dev: 'd.yml' } }] }, { deploys: { 'o/a|dev': { state: 'dead' } } });
+  assert.deepStrictEqual(failedDeploys(g), []); // not "failing": it never worked, so nothing broke
+}
 console.log('releases-core: all passed');

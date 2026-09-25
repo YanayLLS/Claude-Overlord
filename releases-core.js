@@ -136,10 +136,15 @@ function age(iso, now = Date.now()) {
 // A deploy workflow's run is red when ANY job fails, but a follow-up job (opening a PR,
 // posting a ticket) failing after the deploy went out doesn't mean the env is broken.
 // "partial" = the run failed but no failed job or step is a deploy one.
-function runState(conclusion, failedJobs) {
+// "dead" = the deploy failed and the workflow has never succeeded on this branch: whatever keeps this env
+// running, it isn't this workflow, so its red run says nothing about the env.
+// everSucceeded: undefined = not checked (treated as true).
+function runState(conclusion, failedJobs, everSucceeded) {
   if (conclusion !== 'failure') return conclusion;
-  if (!failedJobs || !failedJobs.length) return 'failure';
-  return failedJobs.some(j => /deploy/i.test(j.job + ' ' + j.step)) ? 'failure' : 'partial';
+  // the deploy itself went through: a side job's red says nothing about the env
+  if (failedJobs && failedJobs.length && !failedJobs.some(j => /deploy/i.test(j.job + ' ' + j.step))) return 'partial';
+  // the deploy step failed — and if it has never once worked, it isn't how this env gets deployed
+  return everSucceeded === false ? 'dead' : 'failure';
 }
 
 // "label · env" for every cell whose last deploy run failed — what the footer badge warns about.
