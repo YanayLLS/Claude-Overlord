@@ -17,18 +17,33 @@ const { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly } = requ
   const M = 60000;
   let h = appendUsageSample([], { weekly: 10, hourly: 5, modelWeekly: [{ model: 'fable', pct: 6 }] }, 0);
   assert.deepStrictEqual(h[0], { t: 0, h: 5, w: 10, 'm:fable': 6 });
+  // resets ride along, so past windows can be cut where the API reset them
+  assert.strictEqual(appendUsageSample([], { hourly: 1, hourlyReset: 5000 }, 0)[0]['h@'], 5000);
   h = appendUsageSample(h, { weekly: 11 }, 1 * M);        // second point always appended
   h = appendUsageSample(h, { weekly: 12 }, 2 * M);        // < 10 min after the 1st -> replaces the newest
   assert.deepStrictEqual(h.map(p => p.w), [10, 12]);
   h = appendUsageSample(h, { weekly: 13 }, 11 * M);       // >= 10 min after the 1st -> kept
   assert.deepStrictEqual(h.map(p => p.w), [10, 12, 13]);
   assert.strictEqual(appendUsageSample(h, {}, 12 * M), h); // nothing to record -> unchanged
-  assert.deepStrictEqual(appendUsageSample(h, { weekly: 1 }, 9 * 86400000).map(p => p.w), [1]); // old ones pruned
+  assert.deepStrictEqual(appendUsageSample(h, { weekly: 1 }, 61 * 86400000).map(p => p.w), [1]); // old ones pruned
   assert.deepStrictEqual(usageMeters({ hourly: 1, weekly: 2, modelWeekly: [{ model: 'fable', pct: 3 }] }).map(m => m.key), ['h', 'w', 'm:fable']);
   const svg = usageChartSvg([{ t: 1000, w: 20 }, { t: 2000, w: 40 }], 'w', 0, 7 * 86400000);
   assert.ok(svg.startsWith('<svg') && svg.includes('uc-line') && svg.includes('Mon') || svg.includes('Thu'));
   assert.ok(usageChartSvg([{ t: 1000, h: 5 }], 'h', 0, 5 * 3600000).includes(':00'));
   assert.ok(!usageChartSvg([{ t: 1000, h: 5 }], 'w', 0, 1).includes('uc-line')); // no data for that meter
+}
+
+// ── usageWindows: one window per reset seen, final reading each, current one last
+{
+  const { usageWindows } = require('./usage-core');
+  const H = 3600000, S = 5 * H;
+  const pts = [
+    { t: 1 * H, h: 10, 'h@': 5 * H }, { t: 4 * H, h: 40, 'h@': 5 * H },   // session ending at 5h
+    { t: 9 * H, h: 20, 'h@': 12 * H },                                    // session ending at 12h
+  ];
+  const ws = usageWindows(pts, 'h', S, 20 * H, 13 * H);                   // current one ends at 20h, no data yet
+  assert.deepStrictEqual(ws.map(w => [w.end / H, w.last]), [[5, 40], [12, 20], [20, null]]);
+  assert.strictEqual(usageWindows([], 'w', 7 * 86400000, 0, 1000).length, 1); // no history: just "now"
 }
 
 // ── parseModelWeekly ──────────────────────────────────

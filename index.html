@@ -1036,6 +1036,7 @@ button:focus-visible { outline-offset:0; }
 </style>
 <!-- The modern skin: loads after the base styles so it wins ties -->
 <link rel="stylesheet" href="./theme.css" />
+<link rel="stylesheet" href="./releases.css" />
 </head>
 <body>
 <div id="app">
@@ -1427,6 +1428,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./preview-ui-dom.js"></script>
 <script src="./preview-ui-device.js"></script>
 <script src="./preview-ui.js"></script>
+<script src="./releases-ui.js"></script>
 <script>
 document.querySelector('#header h1').title = api.version ? 'Overlord v' + api.version : ''; // version in the tooltip, not the title bar
 
@@ -3562,6 +3564,7 @@ api.onMainLog((msg) => console.log('%c[main]', 'color:#888', msg));
 
 // ── Message handling ───────────────────────────────────
 api.on((msg) => {
+  if (msg.type === 'releases') { if (window.releasesUi) releasesUi.onMsg(msg); return; } // Releases board, releases-ui.js
   if (msg.type === 'imagePasted') {
     // ponytail: no inline thumbnail. Writing to xterm out-of-band desyncs the
     // TUI's own redraw (it does not know those rows exist) and scrambles the prompt.
@@ -3855,7 +3858,7 @@ function handleAgentMsg(msg) {
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;
-    case 'usageHistory': handleUsageHistory(msg.points); break;
+    case 'usageHistory': handleUsageHistory(msg.points, msg.since); break;
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
@@ -4061,17 +4064,23 @@ function refreshUsage() { api.send({ type: 'fetchUsage' }); }
 // ── Usage charts: hover a meter for its chart, click for a bigger one. History is per account, kept by main.
 let usageHist = [];
 let usageModalKey = null;
-function usagePanelHTML(key, W, H) {
+const usageWhen = (ms, long) => new Date(ms).toLocaleString([], long ? { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+// One meter over one window. win omitted = the current window; a past window shows where it ended.
+function usagePanelHTML(key, W, H, win) {
   const m = usageMeters(currentUsage).find(x => x.key === key); // usage-core.js
   if (!m) return '';
-  const now = Date.now();
-  const end = m.reset > now ? m.reset : now, start = end - m.span;
+  const now = Date.now(), long = m.span > 86400000;
+  const past = win && win.end <= now;
+  const end = win ? win.end : (m.reset > now ? m.reset : now), start = end - m.span;
+  const pct = past ? win.last : m.pct;
+  const cls = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : '';
   const expected = Math.min(100, Math.max(0, (now - start) / m.span * 100));
-  const cls = m.pct >= 90 ? 'danger' : m.pct >= 70 ? 'warn' : '';
-  const when = m.reset ? new Date(m.reset).toLocaleString([], m.span > 86400000 ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' }) : '';
-  return `<div class="ut-head"><span>${escapeHtml(m.label)}</span><span class="ut-pct um-pct ${cls}">${m.pct.toFixed(1)}%</span></div>`
+  const foot = past
+    ? `<span>${usageWhen(start, long)} – ${usageWhen(end, long)}</span><span>Ended at ${pct.toFixed(1)}%</span>`
+    : `<span><i class="ut-key-pace"></i>On pace: ${Math.round(expected)}% by now</span>${m.reset ? `<span>Resets ${escapeHtml(usageWhen(m.reset, long))}</span>` : ''}`;
+  return `<div class="ut-head"><span>${escapeHtml(m.label)}${past ? ' <span class="ut-past">past</span>' : ''}</span><span class="ut-pct um-pct ${cls}">${pct == null ? '–' : pct.toFixed(1) + '%'}</span></div>`
     + usageChartSvg(usageHist, key, start, end, W, H)
-    + `<div class="ut-foot"><span><i class="ut-key-pace"></i>On pace: ${Math.round(expected)}% by now</span>${when ? `<span>Resets ${escapeHtml(when)}</span>` : ''}</div>`;
+    + `<div class="ut-foot">${foot}</div>`;
 }
 const usageTip = document.createElement('div');
 usageTip.id = 'usage-tip'; usageTip.setAttribute('role', 'tooltip');
@@ -4087,25 +4096,45 @@ function showUsageTip(el) {
 document.addEventListener('mouseover', (e) => {
   const el = e.target.closest?.('#summary-bar [data-meter]');
   if (el === usageTipEl) return;
-  if (el) { showUsageTip(el); api.send({ type: 'getUsageHistory' }); }
+  if (el) { showUsageTip(el); if (!usageHistAll) api.send({ type: 'getUsageHistory', since: Date.now() - 8 * 86400000 }); }
   else { usageTipEl = null; usageTip.classList.remove('show'); }
 });
 function openUsageModal(key) {
-  usageModalKey = key;
+  usageModalKey = key; usageModalBack = 0;
   usageTipEl = null; usageTip.classList.remove('show');
   renderUsageModal();
   document.getElementById('usage-overlay').classList.add('open');
-  api.send({ type: 'getUsageHistory' });
+  api.send({ type: 'getUsageHistory', since: 0 });
   refreshUsage();
 }
+// usageModalBack: 0 = the current window, 1 = the one before, … Past windows come from the reset
+// times stored with each reading, so they match the API's real sessions/weeks.
+let usageModalBack = 0, usageHistAll = false;
 function renderUsageModal() {
   if (!usageModalKey) return;
-  const tabs = usageMeters(currentUsage).map(m => `<button class="${m.key === usageModalKey ? 'on' : ''}" data-key="${escAttr(m.key)}" onclick="usageModalKey=this.dataset.key;renderUsageModal()">${escapeHtml(m.label)}</button>`).join('');
-  document.getElementById('usage-modal-body').innerHTML = `<div class="ut-tabs">${tabs}</div>` + usagePanelHTML(usageModalKey, 560, 240);
+  const meters = usageMeters(currentUsage), m = meters.find(x => x.key === usageModalKey);
+  const tabs = meters.map(x => `<button class="${x.key === usageModalKey ? 'on' : ''}" data-key="${escAttr(x.key)}" onclick="usageModalKey=this.dataset.key;usageModalBack=0;renderUsageModal()">${escapeHtml(x.label)}</button>`).join('');
+  if (!m) { document.getElementById('usage-modal-body').innerHTML = `<div class="ut-tabs">${tabs}</div>`; return; }
+  const wins = usageWindows(usageHist, m.key, m.span, m.reset, Date.now()); // usage-core.js
+  usageModalBack = Math.max(0, Math.min(usageModalBack, wins.length - 1));
+  const win = wins[wins.length - 1 - usageModalBack];
+  const unit = m.span > 86400000 ? 'week' : 'session';
+  const nav = `<div class="ut-nav">`
+    + `<button onclick="usageModalBack++;renderUsageModal()" ${usageModalBack >= wins.length - 1 ? 'disabled' : ''} aria-label="Previous ${unit}">‹</button>`
+    + `<span>${usageModalBack ? usageModalBack + ' ' + unit + (usageModalBack > 1 ? 's' : '') + ' ago' : 'This ' + unit}</span>`
+    + `<button onclick="usageModalBack--;renderUsageModal()" ${usageModalBack === 0 ? 'disabled' : ''} aria-label="Next ${unit}">›</button></div>`;
+  // Every window's final reading as a bar, oldest left; click one to open it.
+  const strip = wins.length > 1 ? `<div class="ut-strip" aria-label="Past ${unit}s">` + wins.map((w, i) => {
+    const back = wins.length - 1 - i, v = back === 0 ? m.pct : (w.last || 0);
+    return `<button class="${back === usageModalBack ? 'on' : ''}" onclick="usageModalBack=${back};renderUsageModal()" title="${escAttr(usageWhen(w.end, true))}: ${v.toFixed(1)}%"><i style="height:${Math.max(2, Math.min(100, v))}%"></i></button>`;
+  }).join('') + `</div>` : '';
+  document.getElementById('usage-modal-body').innerHTML = `<div class="ut-tabs">${tabs}${nav}</div>`
+    + usagePanelHTML(m.key, 560, 240, usageModalBack ? win : undefined) + strip;
 }
 function closeUsageModal() { usageModalKey = null; document.getElementById('usage-overlay').classList.remove('open'); }
-function handleUsageHistory(points) {
+function handleUsageHistory(points, since) {
   usageHist = points || [];
+  usageHistAll = !since;
   if (usageTipEl && usageTipEl.isConnected) showUsageTip(usageTipEl);
   renderUsageModal();
 }

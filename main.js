@@ -2350,6 +2350,8 @@ function ghJson(args, timeout = 20000) {
   });
 }
 
+const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR }); // Releases board — self-contained, see releases-*.js
+
 // Latest run on any branch for one workflow. per_page=1 keeps it to a single
 // row; a workflow that has never run comes back with an empty list, not an error.
 async function fetchWorkflowRun(w) {
@@ -2629,7 +2631,11 @@ function loadUsageHistory() {
 }
 function recordUsage(usage) {
   const all = loadUsageHistory(), key = usageAccountKey();
+  const before = (all[key] || []).length;
   all[key] = appendUsageSample(all[key], usage, usage.fetchedAt);
+  // A poll inside the 10-min spacing only refreshes the newest sample in memory; the file is
+  // rewritten when a sample is added (<= 6 writes an hour), so at most 10 min of readings can be lost.
+  if (all[key].length === before) return;
   // ponytail: plain write, a torn file only loses chart history, never state
   try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(USAGE_HISTORY_FILE, JSON.stringify(all)); } catch (e) { console.log('[Overlord] Failed to save usage history:', e.message); }
 }
@@ -3338,6 +3344,7 @@ function featureAgentArgs(cwd) {
 }
 
 function handleIpc(msg) {
+  if (releases.handle(msg)) return;
   switch (msg.type) {
     case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
     case 'listBranches': {
@@ -4018,7 +4025,11 @@ function handleIpc(msg) {
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
     case 'fetchUsage': fetchUsage(); break;
-    case 'getUsageHistory': send({ type: 'usageHistory', points: loadUsageHistory()[usageAccountKey()] || [] }); break;
+    case 'getUsageHistory': { // since: only what the caller will draw (the hover tip needs 8 days, the modal all 60)
+      const since = Number(msg.since) || 0;
+      send({ type: 'usageHistory', since, points: (loadUsageHistory()[usageAccountKey()] || []).filter(p => p.t >= since) });
+      break;
+    }
     case 'getAccountInfo': send({ type: 'accountInfo', ...getCurrentAccountInfo() }); break;
     case 'saveAccount': {
       const data = loadAccounts();

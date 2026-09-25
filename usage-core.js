@@ -66,15 +66,14 @@ function carryModelWeekly(next, prev, now) {
   return next;
 }
 
-// ── Usage history: every meter's % per sample, one sample per 10 min, 8 days kept ──
+// ── Usage history: every meter's % per sample, one sample per 10 min, 60 days kept ──
 const USAGE_SAMPLE_MS = 10 * 60000;
-const USAGE_KEEP_MS = 8 * 86400000;
-// Meter keys: 'h' session, 'w' week, 'm:<model>' a per-model weekly cap.
+const USAGE_KEEP_MS = 60 * 86400000;
+// Meter keys: 'h' session, 'w' week, 'm:<model>' a per-model weekly cap. '<key>@' holds that
+// meter's reset time, so past sessions/weeks can be cut exactly where the API reset them.
 function usageSample(usage, now) {
   const p = { t: now };
-  if (usage.hourly != null) p.h = usage.hourly;
-  if (usage.weekly != null) p.w = usage.weekly;
-  for (const m of usage.modelWeekly || []) p['m:' + m.model] = m.pct;
+  for (const m of usageMeters(usage)) { p[m.key] = m.pct; if (m.reset) p[m.key + '@'] = m.reset; }
   return p;
 }
 // The newest sample always carries the latest reading; older ones stay >= 10 min apart.
@@ -96,6 +95,21 @@ function usageMeters(usage) {
   if (usage.weekly != null) out.push({ key: 'w', label: 'Week', pct: usage.weekly, reset: usage.weeklyReset || 0, span: D7 });
   for (const m of usage.modelWeekly || []) out.push({ key: 'm:' + m.model, label: modelLabel(m.model), pct: m.pct, reset: m.reset || usage.weeklyReset || 0, span: D7 });
   return out;
+}
+
+// A meter's windows, oldest first: one per reset time seen in the history, plus the current
+// one. Each is { start, end, last } where last is the final reading inside it (null if none).
+function usageWindows(points, key, span, currentReset, now) {
+  const ends = new Set();
+  for (const p of points || []) if (p[key + '@']) ends.add(Math.round(p[key + '@'] / 60000) * 60000);
+  const cur = currentReset > now ? Math.round(currentReset / 60000) * 60000 : now;
+  ends.add(cur);
+  return [...ends].sort((a, b) => a - b).filter(e => e <= cur).map(end => {
+    const start = end - span;
+    let last = null;
+    for (const p of points || []) if (p.t > start && p.t <= end && p[key] != null) last = p[key];
+    return { start, end, last };
+  }).filter((w, i, all) => w.last != null || i === all.length - 1);
 }
 
 // SVG of one meter's % across its window [start, end]: line + area, a dashed "on pace"
@@ -133,5 +147,5 @@ function usageChartSvg(points, key, start, end, W = 280, H = 110) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageChartSvg, MODEL_7D_RE };
+  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageChartSvg, MODEL_7D_RE };
 }
