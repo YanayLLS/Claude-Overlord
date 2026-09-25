@@ -514,3 +514,28 @@ html[data-theme="light"] ::selection { background: rgba(79,91,213,.22); }
 }
 .settings-subhead { margin: 18px 0 6px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--text); }
 body:not(.world-on) #world-raids { display: none; } /* raids are part of the World game */
+
+/* ── Settings fields: inputs, buttons, pick lists (PRs, Actions) ── */
+.settings-field { padding: 8px 0 10px; }
+.field-title { display: flex; align-items: baseline; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.field-count { font-weight: 400; color: var(--dim); font-size: 11px; }
+.field-row { display: flex; gap: 6px; }
+.field-unit { color: var(--dim); font-size: 12px; margin-left: -4px; }
+.settings-input { font: inherit; font-size: 12px; padding: 6px 10px; color: var(--text); background: var(--surface0);
+  border: 1px solid var(--border); border-radius: var(--r); outline: none; }
+.settings-input:focus { border-color: var(--accent); }
+.settings-btn { font: inherit; font-size: 12px; padding: 6px 12px; color: var(--text); background: var(--surface0);
+  border: 1px solid var(--border); border-radius: var(--r); cursor: pointer; white-space: nowrap; }
+.settings-btn:hover { background: var(--surface1); border-color: var(--border-hi); }
+.pick-list { margin-top: 6px; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r); padding: 4px; background: rgba(var(--ink),.015); }
+.pick-head { padding: 4px 8px 6px; font-size: 11px; color: var(--dim); }
+.pick-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); font-size: 12px; cursor: pointer; min-width: 0; }
+.pick-row:hover { background: var(--hover); }
+.pick-row.on .pick-name { color: var(--text); font-weight: 600; }
+.pick-row input[type="checkbox"] { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.pick-name { color: var(--subtext); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-sub { margin-left: auto; padding-left: 10px; color: var(--dim); font-size: 11px; flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-x { flex: none; margin-left: 4px; width: 22px; height: 22px; border: none; border-radius: var(--r-sm); background: none; color: var(--dim); cursor: pointer; font-size: 15px; line-height: 1; }
+.pick-x:hover { background: rgba(248,113,113,.14); color: var(--red); }
+.pick-empty { padding: 10px 8px; font-size: 12px; color: var(--dim); }
+.pick-empty.err { color: var(--red); }
