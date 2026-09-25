@@ -1142,11 +1142,6 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
       <label class="settings-label">
-        <input type="checkbox" id="chk-world" onchange="setWorldEnabled(this.checked)" />
-        <span>World game (feature flag)</span>
-      </label>
-      <div class="settings-hint">Off: nothing of the world is loaded or run &mdash; no 3D renderer, no header button, no economy. On: the game starts, showing your agents as a hex-tile island beside the list. Everything you can do in the list still works; the map is another way to look at the same state. Show or hide it with the &#x2B22; button in the header.</div>
-      <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
       </label>
@@ -1227,9 +1222,15 @@ button:focus-visible { outline-offset:0; }
       </div>
       </details>
 
-      <details class="settings-sec" data-sec="clickup">
-      <summary>ClickUp raids<span class="sec-chip" id="chip-clickup"></span></summary>
+      <details class="settings-sec" data-sec="world">
+      <summary>World<span class="sec-chip" id="chip-clickup"></span></summary>
       <div class="sec-body">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-world" onchange="setWorldEnabled(this.checked)" />
+        <span>World game (feature flag)</span>
+      </label>
+      <div class="settings-hint">Off: nothing of the world is loaded or run &mdash; no 3D renderer, no header button, no economy. On: the game starts, showing your agents as a hex-tile island beside the list. Everything you can do in the list still works; the map is another way to look at the same state. Show or hide it with the &#x2B22; button in the header.</div>
+      <div class="settings-subhead">ClickUp raids</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-clickup" onchange="onClickupEnableChange(this.checked)" />
         <span>Raids from ClickUp (World view)</span>
