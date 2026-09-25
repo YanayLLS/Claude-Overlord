@@ -39,6 +39,7 @@ function validateConfig(cfg) {
     const at = `repos[${i}]`;
     if (!r || typeof r !== 'object') { out.push(`${at}: must be an object`); return; }
     if (!REPO_RE.test(String(r.repo || ''))) out.push(`${at}.repo: "${r.repo}" is not owner/name`);
+    if (r.group != null && typeof r.group !== 'string') out.push(`${at}.group: must be a string`);
     const hasBranches = r.branches != null, hasNote = r.note != null;
     if (hasBranches && hasNote) { out.push(`${at}: has both branches and note — pick one`); return; }
     if (!hasBranches && !hasNote) { out.push(`${at}: needs branches or note`); return; }
@@ -47,6 +48,13 @@ function validateConfig(cfg) {
     for (const [env, branch] of Object.entries(r.branches)) {
       if (!envs.includes(env)) out.push(`${at}.branches.${env}: "${env}" is not in envs`);
       if (!SAFE_REF_RE.test(String(branch))) out.push(`${at}.branches.${env}: "${branch}" is not a valid branch name`);
+    }
+    if (r.deploy != null) {
+      if (typeof r.deploy !== 'object' || Array.isArray(r.deploy)) out.push(`${at}.deploy: must be an object`);
+      else for (const [env, how] of Object.entries(r.deploy)) {
+        if (!Object.prototype.hasOwnProperty.call(r.branches, env)) out.push(`${at}.deploy.${env}: "${env}" is not in branches`);
+        else if (how !== 'manual' && !/^[\w.-]+\.ya?ml$/.test(String(how))) out.push(`${at}.deploy.${env}: "${how}" is not a workflow file or "manual"`);
+      }
     }
     if (r.promote == null) return;
     if (!Array.isArray(r.promote) || r.promote.length < 2) { out.push(`${at}.promote: needs at least 2 envs`); return; }
@@ -64,38 +72,44 @@ function promotePairs(r) {
 
 // The gh calls a refresh needs. Assumes a validated config.
 function requestsFor(cfg) {
-  const commits = [], compares = [];
+  const commits = [], compares = [], deploys = [];
   for (const r of cfg.repos) {
     if (!r.branches) continue;
-    for (const env of cfg.envs) if (r.branches[env]) commits.push({ repo: r.repo, env, branch: r.branches[env] });
+    for (const env of cfg.envs) {
+      if (!r.branches[env]) continue;
+      commits.push({ repo: r.repo, env, branch: r.branches[env] });
+      const file = r.deploy && r.deploy[env];
+      if (file && file !== 'manual') deploys.push({ repo: r.repo, env, branch: r.branches[env], file });
+    }
     for (const { from, to } of promotePairs(r)) {
       compares.push({ repo: r.repo, from, to, base: r.branches[to], head: r.branches[from] });
     }
   }
-  return { commits, compares };
+  return { commits, compares, deploys };
 }
 
 // View model: one row per repo, one cell per env (null = repo has no branch there).
 // results.commits['repo|env'] and results.compares['repo|from'] — missing = still loading.
 function buildGrid(cfg, results) {
-  const commits = (results && results.commits) || {}, compares = (results && results.compares) || {};
+  const commits = (results && results.commits) || {}, compares = (results && results.compares) || {}, deploys = (results && results.deploys) || {};
   const rows = cfg.repos.map((r) => {
     const label = r.label || r.repo.split('/')[1];
-    if (!r.branches) return { repo: r.repo, label, note: String(r.note) };
+    const group = r.group || '';
+    if (!r.branches) return { repo: r.repo, label, group, note: String(r.note) };
     const nextOf = {};
     for (const { from, to } of promotePairs(r)) nextOf[from] = to;
     const cells = cfg.envs.map((env) => {
       const branch = r.branches[env];
       if (!branch) return null;
       const res = commits[`${r.repo}|${env}`];
-      const cell = { env, branch, commit: null, error: null, missing: false, loading: !res, next: null };
+      const cell = { env, branch, deploy: (r.deploy && r.deploy[env]) || null, run: deploys[`${r.repo}|${env}`] || null, commit: null, error: null, missing: false, loading: !res, next: null };
       if (res && res.error) cell.error = res.error;
       else if (res && res.missing) cell.missing = true;
       else if (res) cell.commit = res;
       if (nextOf[env]) cell.next = compares[`${r.repo}|${env}`] || { to: nextOf[env], loading: true };
       return cell;
     });
-    return { repo: r.repo, label, cells };
+    return { repo: r.repo, label, group, cells };
   });
   return { envs: cfg.envs.slice(), rows };
 }
@@ -119,7 +133,25 @@ function age(iso, now = Date.now()) {
   return `${Math.floor(m / 10080)}w`;
 }
 
-const api = { parseSource, validateConfig, requestsFor, buildGrid, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
+// A deploy workflow's run is red when ANY job fails, but a follow-up job (opening a PR,
+// posting a ticket) failing after the deploy went out doesn't mean the env is broken.
+// "partial" = the run failed but no failed job or step is a deploy one.
+function runState(conclusion, failedJobs) {
+  if (conclusion !== 'failure') return conclusion;
+  if (!failedJobs || !failedJobs.length) return 'failure';
+  return failedJobs.some(j => /deploy/i.test(j.job + ' ' + j.step)) ? 'failure' : 'partial';
+}
+
+// "label · env" for every cell whose last deploy run failed — what the footer badge warns about.
+function failedDeploys(grid) {
+  const out = [];
+  for (const row of (grid && grid.rows) || []) {
+    for (const c of row.cells || []) if (c && c.run && c.run.state === 'failure') out.push(row.label + ' · ' + c.env);
+  }
+  return out;
+}
+
+const api = { parseSource, validateConfig, requestsFor, buildGrid, failedDeploys, runState, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

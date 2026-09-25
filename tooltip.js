@@ -100,10 +100,12 @@ if (typeof document !== 'undefined') {
     const text = tipText(el);
     if (!text || !el.isConnected) { tipEl.classList.remove('show'); return; }
     if (!tipEl.isConnected) document.body.appendChild(tipEl);
-    const r = el.getBoundingClientRect(), key = text + '|' + r.left + ',' + r.top + ',' + r.width + ',' + r.height;
+    const dot = el.dataset.tipDot || ''; // data-tip-dot="some classes": a coloured badge ahead of the text
+    const r = el.getBoundingClientRect(), key = dot + text + '|' + r.left + ',' + r.top + ',' + r.width + ',' + r.height;
     if (tipEl.classList.contains('show') && tipEl.dataset.key === key) return; // same text, same spot: stay put
     tipEl.dataset.key = key;
     tipEl.textContent = text;
+    if (dot) { const i = document.createElement('i'); i.className = 'tip-dot ' + dot; tipEl.prepend(i); }
     tipEl.style.left = '0px'; tipEl.style.top = '0px'; // measure at rest; classes stay so the fade doesn't restart
     const b = tipEl.getBoundingClientRect();
     const p = tipPlacement(r, b.width, b.height, innerWidth, innerHeight);

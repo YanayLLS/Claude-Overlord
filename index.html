@@ -154,7 +154,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-row.pr-conflict, .pr-row.pr-conflict:hover { background:rgba(250,179,135,.15); border-left:2px solid var(--peach); }
 .pr-row.pr-conflict:hover { background:rgba(250,179,135,.22); }
 .pr-row .pr-meta { color:var(--dim); font-size:11px; margin-top:2px; }
-.pr-row .pr-branch { color:var(--dim); font-size:11px; margin-top:2px; font-family:ui-monospace,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pr-row .pr-branch { color:var(--dim); font-size:11px; margin-top:2px; font-family:'Geist Mono',ui-monospace,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pr-row .pr-branch .pr-arrow { opacity:.7; }
 .pr-empty { padding:12px; color:var(--dim); font-size:12px; }
 .gh-fix { display:flex; gap:6px; margin-top:8px; }
@@ -541,7 +541,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .wt-state { font-size:10px; padding:2px 6px; border-radius:3px; flex-shrink:0; letter-spacing:.3px; }
 .wt-state.setup { color:#f9e2af; background:rgba(249,226,175,.08); border:1px solid rgba(249,226,175,.35); }
 .wt-state.failed { color:#f38ba8; background:rgba(243,139,168,.08); border:1px solid rgba(243,139,168,.4); }
-.wt-port { font-size:10px; padding:2px 6px; border-radius:3px; flex-shrink:0; color:var(--subtext,#a6adc8); background:rgba(148,226,213,.05); border:1px solid rgba(148,226,213,.2); font-family:monospace; cursor:pointer; text-decoration:none; transition:color .12s, border-color .12s; }
+.wt-port { font-size:10px; padding:2px 6px; border-radius:3px; flex-shrink:0; color:var(--subtext,#a6adc8); background:rgba(148,226,213,.05); border:1px solid rgba(148,226,213,.2); font-family:'Geist Mono',monospace; cursor:pointer; text-decoration:none; transition:color .12s, border-color .12s; }
 .wt-port:hover { color:var(--cyan,#94e2d5); border-color:var(--cyan,#94e2d5); }
 .group.is-worktree > .group-header { border-left:2px solid var(--blue,#89b4fa); }
 .feature { margin:6px 0 10px; border:1px solid rgba(137,180,250,.35); border-radius:6px; background:rgba(137,180,250,.04); }
@@ -1589,9 +1589,9 @@ function openProjectConfig(repo) {
     <div style="font-weight:600;font-size:15px;margin-bottom:4px">Dev server config</div>
     <div style="color:#a6adc8;margin-bottom:14px">${esc(pathLabel(repo))} &#x2014; how Overlord starts this repo's server. Use <code>{port}</code> where the port goes.</div>
     <label style="display:block;margin-bottom:4px">Dev command</label>
-    <input id="cfg-cmd" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:12px;font-family:monospace">
+    <input id="cfg-cmd" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:12px;font-family:'Geist Mono',monospace">
     <label style="display:block;margin-bottom:4px">URL template</label>
-    <input id="cfg-url" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:12px;font-family:monospace">
+    <input id="cfg-url" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:12px;font-family:'Geist Mono',monospace">
     <div style="display:flex;gap:12px;margin-bottom:12px">
       <div style="flex:1"><label style="display:block;margin-bottom:4px">Base port</label>
         <input id="cfg-base" type="number" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px"></div>
@@ -1599,7 +1599,7 @@ function openProjectConfig(repo) {
         <input id="cfg-step" type="number" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px"></div>
     </div>
     <label style="display:block;margin-bottom:4px">Seed files (gitignored files to copy into each worktree, comma-separated)</label>
-    <input id="cfg-seed" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:16px;font-family:monospace">
+    <input id="cfg-seed" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:16px;font-family:'Geist Mono',monospace">
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button onclick="closeWt()" style="padding:7px 14px;background:#313244;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer">Cancel</button>
       <button onclick="submitProjectConfig()" style="padding:7px 14px;background:#89b4fa;color:#11111b;border:none;border-radius:6px;font-weight:600;cursor:pointer">Save</button>

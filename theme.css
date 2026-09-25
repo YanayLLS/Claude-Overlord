@@ -19,7 +19,10 @@
   --pop-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(var(--ink),.06);
 }
 
-html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; font-size: 13px; letter-spacing: 0; }
+/* Geist (Vercel, OFL) bundled so every machine gets the same type; Segoe stays as fallback */
+@font-face { font-family: 'Geist'; src: url('./assets/fonts/Geist-Variable.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('./assets/fonts/GeistMono-Variable.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+html, body { font-family: 'Geist', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; font-size: 13px; letter-spacing: -.005em; font-optical-sizing: auto; }
 ::selection { background: rgba(124,140,255,.35); }
 .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; display: block; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }

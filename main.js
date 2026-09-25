@@ -2272,7 +2272,7 @@ function armPrTimer() {
 
 // ── GitHub Actions tracking ───────────────────────────
 const { runState, nextPollDelay, diffNewFailures, REPO_RE: WF_REPO_RE } = require('./actions-core');
-const { checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
+const { git: gitIn, checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
 const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
 let actionsTimer = null;
 let actionsGhErrorLogged = false;
@@ -2352,7 +2352,19 @@ function ghJson(args, timeout = 20000) {
   });
 }
 
-const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR }); // Releases board — self-contained, see releases-*.js
+// Releases config not on GitHub yet? Look for it in a local clone of that repo.
+async function releasesFindLocal(repo, rel) {
+  const infos = (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean);
+  for (const i of infos) {
+    if (i.repo.toLowerCase() !== repo.toLowerCase()) continue;
+    // every worktree of that clone, not just the checked-out one: a config drafted on its own branch counts
+    const list = await gitIn(i.dir, ['worktree', 'list', '--porcelain']);
+    const trees = list ? list.split(/\r?\n/).filter(l => l.startsWith('worktree ')).map(l => l.slice(9)) : [i.dir];
+    for (const t of trees) { const p = path.join(t, rel); if (fs.existsSync(p)) return p; }
+  }
+  return null;
+}
+const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal }); // Releases board — self-contained, see releases-*.js
 
 // Latest run on any branch for one workflow. per_page=1 keeps it to a single
 // row; a workflow that has never run comes back with an empty list, not an error.

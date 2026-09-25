@@ -63,4 +63,4 @@ function aheadSummary(entries, base) {
   return { count: list[0].count, title };
 }
 
-module.exports = { remoteRepo, checkoutInfo, aheadOf, aheadSummary };
+module.exports = { git, remoteRepo, checkoutInfo, aheadOf, aheadSummary };

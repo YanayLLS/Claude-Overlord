@@ -129,4 +129,58 @@ assert.strictEqual(age('2026-09-22T12:00:00Z', now), '3d');
 assert.strictEqual(age('2026-08-21T12:00:00Z', now), '5w');
 assert.strictEqual(age('garbage', now), '');
 
+
+// ── deploy: per-env workflow file or "manual" ─────────
+{
+  const cfg = { envs: ['dev', 'prod'], repos: [{ repo: 'o/r', branches: { dev: 'dev', prod: 'main' }, deploy: { dev: 'deploy.yml', prod: 'manual' } }] };
+  assert.deepStrictEqual(validateConfig(cfg), []);
+  const g = buildGrid(cfg, {});
+  assert.strictEqual(g.rows[0].cells[0].deploy, 'deploy.yml');
+  assert.strictEqual(g.rows[0].cells[1].deploy, 'manual');
+  const bare = buildGrid({ envs: ['dev'], repos: [{ repo: 'o/r', branches: { dev: 'dev' } }] }, {});
+  assert.strictEqual(bare.rows[0].cells[0].deploy, null);
+  assert.deepStrictEqual(validateConfig({ envs: ['dev'], repos: [{ repo: 'o/r', branches: { dev: 'dev' }, deploy: { prod: 'x.yml' } }] }),
+    ['repos[0].deploy.prod: "prod" is not in branches']);
+  assert.deepStrictEqual(validateConfig({ envs: ['dev'], repos: [{ repo: 'o/r', branches: { dev: 'dev' }, deploy: { dev: 'a b&c' } }] }),
+    ['repos[0].deploy.dev: "a b&c" is not a workflow file or "manual"']);
+}
+
+// ── deploy run: last run of that env's workflow rides on the cell ──
+{
+  const cfg = { envs: ['dev'], repos: [{ repo: 'o/r', branches: { dev: 'dev' }, deploy: { dev: 'd.yml' } }] };
+  const run = { state: 'failure', url: 'u', date: '2026-01-01T00:00:00Z' };
+  assert.deepStrictEqual(buildGrid(cfg, { deploys: { 'o/r|dev': run } }).rows[0].cells[0].run, run);
+  assert.strictEqual(buildGrid(cfg, {}).rows[0].cells[0].run, null);
+  assert.deepStrictEqual(requestsFor(cfg).deploys, [{ repo: 'o/r', env: 'dev', branch: 'dev', file: 'd.yml' }]);
+}
+
+// ── group: optional section name carried onto the row ──
+{
+  const g = buildGrid({ envs: ['dev'], repos: [{ repo: 'o/a', group: 'App', branches: { dev: 'dev' } }, { repo: 'o/b', note: 'x' }] }, {});
+  assert.strictEqual(g.rows[0].group, 'App');
+  assert.strictEqual(g.rows[1].group, '');
+  assert.deepStrictEqual(validateConfig({ envs: ['dev'], repos: [{ repo: 'o/a', group: 5, branches: { dev: 'dev' } }] }), ['repos[0].group: must be a string']);
+}
+
+// ── failedDeploys: which cells the footer badge warns about ──
+{
+  const { failedDeploys } = require('./releases-core');
+  const cfg = { envs: ['dev', 'prod'], repos: [
+    { repo: 'o/a', label: 'front', branches: { dev: 'dev', prod: 'main' }, deploy: { dev: 'd.yml', prod: 'p.yml' } },
+    { repo: 'o/b', branches: { dev: 'dev' }, deploy: { dev: 'manual' } },
+  ] };
+  const g = buildGrid(cfg, { deploys: { 'o/a|dev': { state: 'failure' }, 'o/a|prod': { state: 'success' } } });
+  assert.deepStrictEqual(failedDeploys(g), ['front · dev']);
+  assert.deepStrictEqual(failedDeploys(null), []);
+}
+
+// ── runState: a red run is only a failed DEPLOY if a deploy job/step is what failed ──
+{
+  const { runState } = require('./releases-core');
+  assert.strictEqual(runState('success', []), 'success');
+  assert.strictEqual(runState('failure', [{ job: 'deploy', step: 'Deploy to Azure Web App' }]), 'failure');
+  assert.strictEqual(runState('failure', [{ job: 'technical-pr-to-dev', step: 'Open (or reuse) the staging → dev technical PR' }]), 'partial');
+  assert.strictEqual(runState('failure', []), 'failure'); // no job detail: assume the worst
+  assert.strictEqual(runState('cancelled', []), 'cancelled');
+}
 console.log('releases-core: all passed');
