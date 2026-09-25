@@ -1359,6 +1359,11 @@ button:focus-visible { outline-offset:0; }
       <div id="archive-list"></div>
     </div>
   </div>
+  <div id="usage-overlay" onclick="closeUsageModal()">
+    <div class="confirm-modal usage-modal" onclick="event.stopPropagation()" role="dialog" aria-label="Usage history">
+      <div id="usage-modal-body"></div>
+    </div>
+  </div>
   <div id="confirm-overlay" onclick="confirmResolve(false)">
     <div class="confirm-modal" onclick="event.stopPropagation()">
       <div class="confirm-title" id="confirm-msg"></div>
@@ -2683,9 +2688,9 @@ function render() {
   }
 
   // One compact meter per cap: label + % on top, a hairline bar below; reset time lives in the tooltip.
-  function usageMeterHTML(label, pct, resetTs, includeDate, extra = '') {
+  function usageMeterHTML(label, pct, resetTs, includeDate, extra = '', key = '') {
     const cls = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
-    return `<div class="usage-meter" title="${escAttr(label + ': ' + pct.toFixed(1) + '% used' + (resetTs ? ' · ' + fmtResetTime(resetTs, includeDate) : ''))}">
+    return `<div class="usage-meter" data-meter="${escAttr(key)}">
       <div class="um-top"><span class="um-label">${label}${extra}</span><span class="um-pct ${cls}">${Math.round(pct)}%</span></div>
       <div class="um-track"><div class="um-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
     </div>`;
@@ -2706,11 +2711,11 @@ function render() {
         tip.push(`Week: ${actual.toFixed(1)}% used, ${expectedPct.toFixed(1)}% expected by now`);
       }
     }
-    if (currentUsage.hourly != null) barHtml += usageMeterHTML('Session', currentUsage.hourly, currentUsage.hourlyReset, false);
-    if (currentUsage.weekly != null) barHtml += usageMeterHTML('Week', currentUsage.weekly, currentUsage.weeklyReset, true, pace);
+    if (currentUsage.hourly != null) barHtml += usageMeterHTML('Session', currentUsage.hourly, currentUsage.hourlyReset, false, '', 'h');
+    if (currentUsage.weekly != null) barHtml += usageMeterHTML('Week', currentUsage.weekly, currentUsage.weeklyReset, true, pace, 'w');
     // Per-model weekly caps (Fable, Opus, …) get their own meter.
     for (const m of currentUsage.modelWeekly || []) {
-      barHtml += usageMeterHTML(modelLabel(m.model), m.pct, m.reset || currentUsage.weeklyReset, true);
+      barHtml += usageMeterHTML(modelLabel(m.model), m.pct, m.reset || currentUsage.weeklyReset, true, '', 'm:' + m.model);
     }
     if (currentUsage.fetchedAt) {
       const ago = Math.round((Date.now() - currentUsage.fetchedAt) / 1000);
@@ -2720,9 +2725,10 @@ function render() {
     barHtml = `<div class="usage-empty">Usage: click to fetch</div>`;
   }
   tip.push(`${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? `, ${activeCount} active` : ''}`, 'Click to refresh');
-  bar.title = tip.join('\n');
+  // With meters, each has its own chart tooltip; the bar-wide one would stack on top of it.
+  if (currentUsage) bar.removeAttribute('title'); else bar.title = tip.join('\n');
   bar.innerHTML = barHtml;
-  bar.onclick = () => refreshUsage();
+  bar.onclick = (e) => { const m = e.target.closest('[data-meter]'); if (m) openUsageModal(m.dataset.meter); else refreshUsage(); };
   bar.classList.add('show');
   if (worldView) worldSync();
 }
@@ -3776,7 +3782,8 @@ function handleAgentMsg(msg) {
     case 'timelineData': handleTimelineData(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
-    case 'usage': handleUsage(msg.usage); break;
+    case 'usage': handleUsage(msg.usage); renderUsageModal(); break;
+    case 'usageHistory': handleUsageHistory(msg.points); break;
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); break;
     case 'remoteReady': { _remoteUrl = msg.url; _qrSvg = msg.qrSvg; document.getElementById('qr-btn').style.display = ''; break; }
@@ -3978,6 +3985,58 @@ function handleUsage(usage) {
   scheduleRender();
 }
 function refreshUsage() { api.send({ type: 'fetchUsage' }); }
+
+// ── Usage charts: hover a meter for its chart, click for a bigger one. History is per account, kept by main.
+let usageHist = [];
+let usageModalKey = null;
+function usagePanelHTML(key, W, H) {
+  const m = usageMeters(currentUsage).find(x => x.key === key); // usage-core.js
+  if (!m) return '';
+  const now = Date.now();
+  const end = m.reset > now ? m.reset : now, start = end - m.span;
+  const expected = Math.min(100, Math.max(0, (now - start) / m.span * 100));
+  const cls = m.pct >= 90 ? 'danger' : m.pct >= 70 ? 'warn' : '';
+  const when = m.reset ? new Date(m.reset).toLocaleString([], m.span > 86400000 ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' }) : '';
+  return `<div class="ut-head"><span>${escapeHtml(m.label)}</span><span class="ut-pct um-pct ${cls}">${m.pct.toFixed(1)}%</span></div>`
+    + usageChartSvg(usageHist, key, start, end, W, H)
+    + `<div class="ut-foot"><span><i class="ut-key-pace"></i>On pace: ${Math.round(expected)}% by now</span>${when ? `<span>Resets ${escapeHtml(when)}</span>` : ''}</div>`;
+}
+const usageTip = document.createElement('div');
+usageTip.id = 'usage-tip'; usageTip.setAttribute('role', 'tooltip');
+document.body.appendChild(usageTip);
+let usageTipEl = null;
+function showUsageTip(el) {
+  usageTipEl = el;
+  usageTip.innerHTML = usagePanelHTML(el.dataset.meter, 280, 110);
+  const r = el.getBoundingClientRect(), p = tipPlacement(r, usageTip.offsetWidth, usageTip.offsetHeight, innerWidth, innerHeight); // tooltip.js
+  usageTip.style.left = p.x + 'px'; usageTip.style.top = p.y + 'px';
+  usageTip.classList.add('show');
+}
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest?.('#summary-bar [data-meter]');
+  if (el === usageTipEl) return;
+  if (el) { showUsageTip(el); api.send({ type: 'getUsageHistory' }); }
+  else { usageTipEl = null; usageTip.classList.remove('show'); }
+});
+function openUsageModal(key) {
+  usageModalKey = key;
+  usageTipEl = null; usageTip.classList.remove('show');
+  renderUsageModal();
+  document.getElementById('usage-overlay').classList.add('open');
+  api.send({ type: 'getUsageHistory' });
+  refreshUsage();
+}
+function renderUsageModal() {
+  if (!usageModalKey) return;
+  const tabs = usageMeters(currentUsage).map(m => `<button class="${m.key === usageModalKey ? 'on' : ''}" data-key="${escAttr(m.key)}" onclick="usageModalKey=this.dataset.key;renderUsageModal()">${escapeHtml(m.label)}</button>`).join('');
+  document.getElementById('usage-modal-body').innerHTML = `<div class="ut-tabs">${tabs}</div>` + usagePanelHTML(usageModalKey, 560, 240);
+}
+function closeUsageModal() { usageModalKey = null; document.getElementById('usage-overlay').classList.remove('open'); }
+function handleUsageHistory(points) {
+  usageHist = points || [];
+  if (usageTipEl && usageTipEl.isConnected) showUsageTip(usageTipEl);
+  renderUsageModal();
+}
 // Re-render every 30s so age + reset countdowns stay fresh
 setInterval(() => { if (currentUsage) scheduleRender(); }, 30000);
 function usageCls(pct) { return pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : ''; }
@@ -4349,6 +4408,7 @@ document.addEventListener('keydown', (e) => {
     if (qr.style.display === 'flex') { closeQr(); return; }
     const cfm = document.getElementById('confirm-overlay');
     if (cfm.classList.contains('open')) { confirmResolve(false); return; }
+    if (usageModalKey) { closeUsageModal(); return; }
     const searchOv = document.getElementById('search-overlay');
     if (searchOv.style.display === 'flex') { closeSearch(); return; }
     const archive = document.getElementById('archive-overlay');

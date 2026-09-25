@@ -468,3 +468,26 @@ html[data-theme="light"] ::selection { background: rgba(79,91,213,.22); }
 /* ── Terminal sits in a rounded card on the sidebar surface ── */
 #term { background: var(--sidebar); border-left: none; }
 #term-container { margin: 4px; padding: 4px 0 0 6px; border: 1px solid var(--border); border-radius: var(--r); }
+
+/* ── Usage charts: meter hover tooltip + click modal (usage-core.js draws the SVG) ── */
+.usage-meter[data-meter] { cursor: pointer; }
+#usage-tip { position: fixed; z-index: 100000; padding: 10px 12px 8px; border-radius: var(--r-lg); background: var(--pop);
+  border: 1px solid var(--border-hi); box-shadow: var(--pop-shadow); pointer-events: none; opacity: 0; transition: opacity .12s; }
+#usage-tip.show { opacity: 1; }
+#usage-overlay { display: none; position: fixed; inset: 0; z-index: 1000; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.6); backdrop-filter: blur(6px); }
+#usage-overlay.open { display: flex; }
+.usage-modal { --pop: var(--editor-bg); }
+.ut-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.ut-pct { font-size: 13px; }
+.ut-foot { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; color: var(--dim); margin-top: 2px; }
+.ut-key-pace { display: inline-block; width: 12px; margin-right: 6px; vertical-align: middle; border-top: 1.5px dashed var(--dim); }
+.ut-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.ut-tabs button { font: inherit; font-size: 12px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface0); color: var(--subtext); cursor: pointer; }
+.ut-tabs button.on { background: var(--accent-soft); color: var(--text); border-color: var(--accent); }
+.uc-grid { stroke: rgba(var(--ink),.08); stroke-width: 1; }
+.uc-axis { fill: var(--dim); font-size: 9px; font-family: inherit; }
+.uc-pace { stroke: var(--dim); stroke-width: 1.5; stroke-dasharray: 3 3; opacity: .7; }
+.uc-area { fill: var(--accent); opacity: .14; }
+.uc-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.uc-dot { fill: var(--accent); stroke: var(--pop); stroke-width: 2; }

@@ -66,6 +66,72 @@ function carryModelWeekly(next, prev, now) {
   return next;
 }
 
+// ── Usage history: every meter's % per sample, one sample per 10 min, 8 days kept ──
+const USAGE_SAMPLE_MS = 10 * 60000;
+const USAGE_KEEP_MS = 8 * 86400000;
+// Meter keys: 'h' session, 'w' week, 'm:<model>' a per-model weekly cap.
+function usageSample(usage, now) {
+  const p = { t: now };
+  if (usage.hourly != null) p.h = usage.hourly;
+  if (usage.weekly != null) p.w = usage.weekly;
+  for (const m of usage.modelWeekly || []) p['m:' + m.model] = m.pct;
+  return p;
+}
+// The newest sample always carries the latest reading; older ones stay >= 10 min apart.
+function appendUsageSample(hist, usage, now) {
+  if (!usage || (usage.hourly == null && usage.weekly == null)) return hist;
+  const pts = (hist || []).filter(p => p.t > now - USAGE_KEEP_MS);
+  const point = usageSample(usage, now);
+  if (pts.length >= 2 && now - pts[pts.length - 2].t < USAGE_SAMPLE_MS) pts[pts.length - 1] = point;
+  else pts.push(point);
+  return pts;
+}
+
+// The meters a usage reading has, each with its reset window, so any of them can be charted.
+const H5 = 5 * 3600000, D7 = 7 * 86400000;
+function usageMeters(usage) {
+  if (!usage) return [];
+  const out = [];
+  if (usage.hourly != null) out.push({ key: 'h', label: 'Session', pct: usage.hourly, reset: usage.hourlyReset || 0, span: H5 });
+  if (usage.weekly != null) out.push({ key: 'w', label: 'Week', pct: usage.weekly, reset: usage.weeklyReset || 0, span: D7 });
+  for (const m of usage.modelWeekly || []) out.push({ key: 'm:' + m.model, label: modelLabel(m.model), pct: m.pct, reset: m.reset || usage.weeklyReset || 0, span: D7 });
+  return out;
+}
+
+// SVG of one meter's % across its window [start, end]: line + area, a dashed "on pace"
+// diagonal, time ticks (hours for a session, weekdays for a week), a dot on the latest reading.
+function usageChartSvg(points, key, start, end, W = 280, H = 110) {
+  const L = 30, R = 8, T = 8, B = 18, pw = W - L - R, ph = H - T - B;
+  const x = t => L + ((t - start) / (end - start)) * pw;
+  const y = v => T + ph - (Math.min(v, 100) / 100) * ph;
+  const f = n => n.toFixed(1);
+  let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Usage over this window">`;
+  for (const v of [0, 50, 100]) {
+    s += `<line x1="${L}" x2="${L + pw}" y1="${f(y(v))}" y2="${f(y(v))}" class="uc-grid"/>`
+      + `<text x="${L - 5}" y="${f(y(v) + 3)}" text-anchor="end" class="uc-axis">${v}%</text>`;
+  }
+  if (end - start > 86400000) {
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    for (let t = start; t < end; t += 86400000) {
+      s += `<text x="${f(x(t + 43200000))}" y="${H - 5}" text-anchor="middle" class="uc-axis">${DAYS[new Date(t + 43200000).getDay()]}</text>`;
+    }
+  } else {
+    for (let t = Math.ceil(start / 3600000) * 3600000; t < end; t += 3600000) {
+      s += `<text x="${f(x(t))}" y="${H - 5}" text-anchor="middle" class="uc-axis">${String(new Date(t).getHours()).padStart(2, '0')}:00</text>`;
+    }
+  }
+  s += `<line x1="${f(x(start))}" y1="${f(y(0))}" x2="${f(x(end))}" y2="${f(y(100))}" class="uc-pace"/>`;
+  const pts = (points || []).filter(p => p.t >= start && p.t <= end && p[key] != null);
+  if (pts.length) {
+    const line = pts.map(p => `${f(x(p.t))},${f(y(p[key]))}`).join(' L');
+    s += `<path d="M${f(x(pts[0].t))},${f(y(0))} L${line} L${f(x(pts[pts.length - 1].t))},${f(y(0))} Z" class="uc-area"/>`;
+    s += `<path d="M${line}" class="uc-line"/>`;
+    const last = pts[pts.length - 1];
+    s += `<circle cx="${f(x(last.t))}" cy="${f(y(last[key]))}" r="4" class="uc-dot"/>`;
+  }
+  return s + '</svg>';
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, MODEL_7D_RE };
+  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageChartSvg, MODEL_7D_RE };
 }

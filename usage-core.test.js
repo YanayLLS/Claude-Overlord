@@ -11,6 +11,26 @@ const { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly } = requ
   assert.strictEqual(carryModelWeekly({ weekly: 1 }, null, 1000).modelWeekly, undefined);
 }
 
+// ── appendUsageSample: every meter, >= 10 min spacing, newest always latest, 8-day window
+{
+  const { appendUsageSample, usageMeters, usageChartSvg } = require('./usage-core');
+  const M = 60000;
+  let h = appendUsageSample([], { weekly: 10, hourly: 5, modelWeekly: [{ model: 'fable', pct: 6 }] }, 0);
+  assert.deepStrictEqual(h[0], { t: 0, h: 5, w: 10, 'm:fable': 6 });
+  h = appendUsageSample(h, { weekly: 11 }, 1 * M);        // second point always appended
+  h = appendUsageSample(h, { weekly: 12 }, 2 * M);        // < 10 min after the 1st -> replaces the newest
+  assert.deepStrictEqual(h.map(p => p.w), [10, 12]);
+  h = appendUsageSample(h, { weekly: 13 }, 11 * M);       // >= 10 min after the 1st -> kept
+  assert.deepStrictEqual(h.map(p => p.w), [10, 12, 13]);
+  assert.strictEqual(appendUsageSample(h, {}, 12 * M), h); // nothing to record -> unchanged
+  assert.deepStrictEqual(appendUsageSample(h, { weekly: 1 }, 9 * 86400000).map(p => p.w), [1]); // old ones pruned
+  assert.deepStrictEqual(usageMeters({ hourly: 1, weekly: 2, modelWeekly: [{ model: 'fable', pct: 3 }] }).map(m => m.key), ['h', 'w', 'm:fable']);
+  const svg = usageChartSvg([{ t: 1000, w: 20 }, { t: 2000, w: 40 }], 'w', 0, 7 * 86400000);
+  assert.ok(svg.startsWith('<svg') && svg.includes('uc-line') && svg.includes('Mon') || svg.includes('Thu'));
+  assert.ok(usageChartSvg([{ t: 1000, h: 5 }], 'h', 0, 5 * 3600000).includes(':00'));
+  assert.ok(!usageChartSvg([{ t: 1000, h: 5 }], 'w', 0, 1).includes('uc-line')); // no data for that meter
+}
+
 // ── parseModelWeekly ──────────────────────────────────
 assert.deepStrictEqual(parseModelWeekly({}), []);
 assert.deepStrictEqual(parseModelWeekly(null), []);

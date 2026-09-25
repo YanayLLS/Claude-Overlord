@@ -2565,7 +2565,21 @@ function armClickupTimer() {
 let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
 // Set before any programmatic quit so the close confirmation doesn't block it.
 let forceQuit = false;
-const { parseModelWeekly, parseOauthUsage, carryModelWeekly } = require('./usage-core');
+const { parseModelWeekly, parseOauthUsage, carryModelWeekly, appendUsageSample } = require('./usage-core');
+// Usage readings over time, per account (one login's limits say nothing about another's), for the meter charts.
+const USAGE_HISTORY_FILE = path.join(STATE_DIR, 'usage-history.json');
+let usageHistory = null; // { [account]: [{ t, h, w, 'm:<model>' }] }, loaded on first use
+function usageAccountKey() { return getAccountEmail() || loadAccounts().activeLabel || 'default'; }
+function loadUsageHistory() {
+  if (!usageHistory) { try { usageHistory = JSON.parse(fs.readFileSync(USAGE_HISTORY_FILE, 'utf8')) || {}; } catch { usageHistory = {}; } }
+  return usageHistory;
+}
+function recordUsage(usage) {
+  const all = loadUsageHistory(), key = usageAccountKey();
+  all[key] = appendUsageSample(all[key], usage, usage.fetchedAt);
+  // ponytail: plain write, a torn file only loses chart history, never state
+  try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(USAGE_HISTORY_FILE, JSON.stringify(all)); } catch (e) { console.log('[Overlord] Failed to save usage history:', e.message); }
+}
 let lastUsage = null;
 
 function getApiKey() {
@@ -2671,6 +2685,7 @@ function fetchUsage() {
         usageInFlight = false;
         usage.fetchedAt = Date.now();
         lastUsage = usage;
+        recordUsage(usage);
         send({ type: 'usage', usage });
         console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
       } else fallback('gave ' + res.statusCode);
@@ -2726,6 +2741,7 @@ function fetchUsageFromHeaders(apiKey) {
       if (Object.keys(usage).length > 0) {
         usage.fetchedAt = Date.now();
         lastUsage = carryModelWeekly(usage, lastUsage, usage.fetchedAt);
+        recordUsage(usage);
         send({ type: 'usage', usage });
         console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
       } else {
@@ -3945,6 +3961,7 @@ function handleIpc(msg) {
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
     case 'fetchUsage': fetchUsage(); break;
+    case 'getUsageHistory': send({ type: 'usageHistory', points: loadUsageHistory()[usageAccountKey()] || [] }); break;
     case 'getAccountInfo': send({ type: 'accountInfo', ...getCurrentAccountInfo() }); break;
     case 'saveAccount': {
       const data = loadAccounts();
