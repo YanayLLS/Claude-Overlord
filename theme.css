@@ -363,7 +363,7 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 #actions-dropdown .act-repo { padding: 10px 14px 3px; }
 
 /* Each project is a soft card: header + its agents in one panel, gaps between projects */
-#list { padding: 4px 8px 12px; }
+#list { padding: 4px 0 12px 8px; }
 .group { margin: 0 0 8px; border-radius: var(--r-lg); background: rgba(var(--ink),.022); border: 1px solid rgba(var(--ink),.045); }
 .group.collapsed { background: transparent; border-color: transparent; }
 .group-header { margin: 0; padding: 8px 8px 6px 8px; }
