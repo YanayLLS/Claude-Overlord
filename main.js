@@ -88,6 +88,7 @@ const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./pr-eta');
 const { pickResumedFile } = require('./resume-core');
 const { applyBgRecord } = require('./bg-core');
+const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
 const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
 const { parseState } = require('./state-core');
@@ -3719,6 +3720,9 @@ function handleIpc(msg) {
     }
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;
     case 'saveSettings': Object.assign(settings, msg.settings); saveState(); break;
+    case 'setTheme': // the window buttons Windows draws over the header follow the theme
+      if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.setTitleBarOverlay(titleBarColors(msg.theme)); mainWindow.setBackgroundColor(themeOf(msg.theme).bg); } catch {} }
+      break;
     case 'peersEnable': {
       settings.peersEnabled = !!msg.enabled;
       saveState();
@@ -4998,10 +5002,10 @@ app.whenReady().then(() => {
     width: bounds.width || 750, height: bounds.height || 800,
     minWidth: 500, minHeight: 400,
     title: 'Overlord',
-    backgroundColor: '#0e0e10',
+    backgroundColor: themeOf(settings.theme).bg,
     // The app header is the title bar; Windows draws only its min/max/close buttons over it
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#0e0e10', symbolColor: '#9a9aa3', height: 44 },
+    titleBarOverlay: { ...titleBarColors(settings.theme), height: 44 },
     show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   };

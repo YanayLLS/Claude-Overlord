@@ -11,10 +11,12 @@
   --surface0: #1c1c20; --surface1: #26262b; --surface2: #3a3a41;
   --title-bg: #0e0e10; --panel-bg: #0e0e10; --editor-bg: #0e0e10;
   --tab-active-bg: #0e0e10; --tab-inactive-bg: #0b0b0d;
-  --hover: rgba(255,255,255,.045); --hover-strong: rgba(255,255,255,.08);
+  --hover: rgba(var(--ink),.045); --hover-strong: rgba(var(--ink),.08);
   --accent-soft: rgba(124,140,255,.14);
+  --pop: #151518; --sidebar: #131316; --tip: #26262b; --row-solid: #1d1d21; --on-accent: #0b0b0d; --tip-fg: #f4f4f5; --term-bg: #0e0e10;
+  --ink: 255,255,255; /* tints and hairlines are rgba(var(--ink), a): white on dark themes, black on light */
   --r-sm: 6px; --r: 8px; --r-lg: 12px;
-  --pop-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06);
+  --pop-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(var(--ink),.06);
 }
 
 html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; font-size: 13px; letter-spacing: 0; }
@@ -36,7 +38,7 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 .bookmark:hover { color: var(--text); background: var(--surface1); }
 #addBtn, #featBtn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 10px;
   font-size: 12px; font-weight: 600; letter-spacing: 0; border-radius: var(--r); transition: background .12s, filter .12s; }
-#addBtn { background: var(--accent); color: #0b0b0d; border: none; }
+#addBtn { background: var(--accent); color: var(--on-accent); border: none; }
 #addBtn:hover { opacity: 1; filter: brightness(1.1); }
 #featBtn { background: var(--surface0); color: var(--text); border: 1px solid var(--border-hi); }
 #featBtn:hover { background: var(--surface1); color: var(--text); }
@@ -97,13 +99,13 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 .agent-right { gap: 0; }
 .agent-model-slot { display: none; width: auto; }
 .agent:hover .agent-model-slot { display: flex; position: absolute; right: 34px; top: 50%; transform: translateY(-50%); z-index: 2;
-  padding-left: 28px; background: linear-gradient(90deg, transparent, #19191b 24px); }
+  padding-left: 28px; background: linear-gradient(90deg, transparent, var(--row-solid) 24px); }
 .agent.selected:hover .agent-model-slot { background: linear-gradient(90deg, transparent, var(--surface1) 24px); }
 .model-tag { font-size: 10px; font-weight: 600; text-transform: lowercase; letter-spacing: 0; border-radius: var(--r-sm);
   border: 1px solid var(--border-hi); color: var(--subtext); background: var(--surface0); }
 .model-tag.opus, .model-tag.sonnet, .model-tag.haiku, .model-tag.fable { border-color: var(--border-hi); color: var(--subtext); }
 .model-tag .mt-chev { border-left-color: var(--border-hi); }
-.agent-actions { padding-left: 8px; background: #19191b; }
+.agent-actions { padding-left: 8px; background: var(--row-solid); }
 .agent.selected .agent-actions { background: var(--surface1); }
 .btn-close { border-radius: var(--r-sm); }
 .agent.needs-answer { border-radius: var(--r); }
@@ -112,7 +114,7 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 
 /* ── Popovers and menus ── */
 .group-dropdown, #pr-dropdown, #actions-dropdown, #pr-snooze-pop, .branch-menu, #agent-tip {
-  background: #151518; border: none; border-radius: var(--r-lg); box-shadow: var(--pop-shadow); }
+  background: var(--pop); border: none; border-radius: var(--r-lg); box-shadow: var(--pop-shadow); }
 .group-dropdown { padding: 5px; }
 .group-dropdown button { border-radius: var(--r-sm); padding: 7px 10px; font-size: 12px; letter-spacing: 0; }
 .group-dropdown button:hover { background: var(--hover-strong); }
@@ -141,13 +143,13 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 #term-header .term-title { font-size: 12px; color: var(--dim); letter-spacing: 0; }
 #term-header button { border-radius: var(--r-sm); }
 #term-header button:hover { background: var(--hover-strong); }
-#term-container { background: var(--bg); padding: 8px 0 0 10px; }
+#term-container { background: var(--term-bg); padding: 8px 0 0 10px; }
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 999px; }
 #term-scroll-nav { gap: 8px; right: 22px; }
 #term-scroll-nav button { width: 30px; height: 30px; line-height: 28px; font-size: 13px; opacity: .85; color: var(--subtext);
   background: rgba(28,28,32,.75); border: 1px solid var(--border-hi); backdrop-filter: blur(8px); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
 #term-scroll-nav button:hover { background: var(--surface1); color: var(--text); opacity: 1; }
-#prompt-rail .pr-pop { background: #151518; border: none; box-shadow: var(--pop-shadow); }
+#prompt-rail .pr-pop { background: var(--pop); border: none; box-shadow: var(--pop-shadow); }
 #prompt-rail .pr-dashes i.on { background: var(--accent); }
 #term-search, #filter-bar { background: var(--bg); }
 #term-search-input, #filter-input { border-radius: var(--r); background: var(--surface0); border-color: var(--border); padding: 6px 10px; }
@@ -159,8 +161,8 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 
 /* ── Modals ── */
 #settings-overlay, #confirm-overlay { background: rgba(0,0,0,.6); backdrop-filter: blur(6px); }
-.settings-modal, .confirm-modal { background: #131316; border: none; border-radius: 16px; box-shadow: var(--pop-shadow); padding: 22px 26px; }
-.settings-header { background: #131316; }
+.settings-modal, .confirm-modal { background: var(--sidebar); border: none; border-radius: 16px; box-shadow: var(--pop-shadow); padding: 22px 26px; }
+.settings-header { background: var(--sidebar); }
 .settings-sec > summary:hover { color: var(--text); }
 .settings-label input[type="checkbox"] { width: 32px; height: 18px; border: none; border-radius: 999px; background: var(--surface2); transition: background .15s; }
 .settings-label input[type="checkbox"]::after { content: ''; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
@@ -171,7 +173,7 @@ html, body { font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-
 .confirm-actions button:hover { background: var(--surface1); }
 
 /* ── Toast ── */
-.toast { background: #1c1c20; color: var(--text); border: none; border-radius: 999px; padding: 9px 18px;
+.toast { background: var(--tip); color: var(--tip-fg); border: none; border-radius: 999px; padding: 9px 18px;
   box-shadow: var(--pop-shadow); }
 
 /* ── Generic form controls inside panels and modals ── */
@@ -199,11 +201,11 @@ input[type="text"], input[type="search"], input[type="number"], select, textarea
 body:not(.world-mode) #term-header { display: none; }
 
 /* ── Layering like ClickUp: the list is a sidebar surface, the terminal is the page ── */
-#list-col { background: #131316; border-right: 1px solid var(--border); }
-#term, #term-container, #term-order, #conversation { background: var(--bg); }
-.agent:hover .agent-model-slot { background: linear-gradient(90deg, transparent, #1d1d21 24px); }
-.agent-actions { background: #1d1d21; }
-.agent:hover, .agent[data-status]:hover { background: rgba(255,255,255,.05); }
+#list-col { background: var(--sidebar); border-right: 1px solid var(--border); }
+#term, #term-container, #term-order, #conversation { background: var(--term-bg); }
+.agent:hover .agent-model-slot { background: linear-gradient(90deg, transparent, var(--row-solid) 24px); }
+.agent-actions { background: var(--row-solid); }
+.agent:hover, .agent[data-status]:hover { background: rgba(var(--ink),.05); }
 
 /* Group headers: small quiet section labels, thin chevron, no path (it's the tooltip) */
 .group-header { padding: 12px 10px 4px 8px; }
@@ -236,7 +238,7 @@ body:not(.world-mode) #term-header { display: none; }
 .group-actions { opacity: 1; }
 .group-actions button { height: 24px; padding: 0 10px; font-size: 11.5px; font-weight: 600; border-radius: 999px;
   background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(124,140,255,.25); }
-.group-actions button:hover { background: var(--accent); color: #0b0b0d; border-color: var(--accent); }
+.group-actions button:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
 /* ── Sidebar footer: status chips on one row, then compact usage meters ── */
 #list-foot { flex-shrink: 0; border-top: 1px solid var(--border); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -268,8 +270,8 @@ body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 
 /* ── App tooltip (tooltip.js): dark bubble, arrow pointing at the element ── */
 #app-tip { position: fixed; z-index: 100000; max-width: 320px; padding: 6px 10px; border-radius: 8px;
-  background: #26262b; color: #f4f4f5; font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere;
-  box-shadow: 0 8px 24px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.06); pointer-events: none;
+  background: var(--tip); color: var(--tip-fg); font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5), 0 0 0 1px rgba(var(--ink),.06); pointer-events: none;
   opacity: 0; transition: opacity .12s, transform .12s; }
 #app-tip.show { opacity: 1; transform: none; }
 /* A cut-off agent name, shown whole: the row spills past the list's edge over the terminal (tooltip.js) */
@@ -278,11 +280,11 @@ body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 #name-peek.show { display: block; }
 #app-tip.top { transform-origin: bottom; } #app-tip.bottom { transform-origin: top; }
 #app-tip:not(.show).top { transform: translateY(3px); } #app-tip:not(.show).bottom { transform: translateY(-3px); }
-#app-tip::after { content: ''; position: absolute; width: 8px; height: 8px; background: #26262b; transform: rotate(45deg); }
-#app-tip.top::after    { bottom: -4px; left: calc(var(--arrow) - 4px); box-shadow: 1px 1px 0 rgba(255,255,255,.06); }
-#app-tip.bottom::after { top: -4px;    left: calc(var(--arrow) - 4px); box-shadow: -1px -1px 0 rgba(255,255,255,.06); }
-#app-tip.left::after   { right: -4px;  top: calc(var(--arrow) - 4px);  box-shadow: 1px -1px 0 rgba(255,255,255,.06); }
-#app-tip.right::after  { left: -4px;   top: calc(var(--arrow) - 4px);  box-shadow: -1px 1px 0 rgba(255,255,255,.06); }
+#app-tip::after { content: ''; position: absolute; width: 8px; height: 8px; background: var(--tip); transform: rotate(45deg); }
+#app-tip.top::after    { bottom: -4px; left: calc(var(--arrow) - 4px); box-shadow: 1px 1px 0 rgba(var(--ink),.06); }
+#app-tip.bottom::after { top: -4px;    left: calc(var(--arrow) - 4px); box-shadow: -1px -1px 0 rgba(var(--ink),.06); }
+#app-tip.left::after   { right: -4px;  top: calc(var(--arrow) - 4px);  box-shadow: 1px -1px 0 rgba(var(--ink),.06); }
+#app-tip.right::after  { left: -4px;   top: calc(var(--arrow) - 4px);  box-shadow: -1px 1px 0 rgba(var(--ink),.06); }
 
 /* Finished agents (your turn) get a quiet hollow dot; color is kept for working, blocked, crashed */
 .agent[data-status="waiting"] .agent-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--subtext); }
@@ -290,7 +292,7 @@ body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 /* Header ⋯ menu */
 #hdr-more-wrap { position: relative; }
 #hdr-more { display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 200; min-width: 180px; padding: 5px;
-  background: #151518; border-radius: var(--r-lg); box-shadow: var(--pop-shadow); }
+  background: var(--pop); border-radius: var(--r-lg); box-shadow: var(--pop-shadow); }
 #hdr-more.open { display: block; }
 .hdr-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 10px; border: none; border-radius: var(--r-sm);
   background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
@@ -306,7 +308,7 @@ body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 
 /* Tracked Actions dropdown: runs grouped under a repo label */
 .act-repo { display: flex; align-items: baseline; gap: 6px; padding: 12px 14px 4px; font-size: 11px; font-weight: 600; color: var(--subtext);
-  position: sticky; top: 33px; background: #151518; z-index: 1; }
+  position: sticky; top: 33px; background: var(--pop); z-index: 1; }
 .act-repo .act-owner { font-weight: 400; color: var(--dim); font-size: 10.5px; }
 .act-row { margin: 0 6px; padding: 7px 10px; border-bottom: none; border-left: none; border-radius: var(--r); font-size: 12.5px; }
 .act-row:hover { background: var(--hover-strong); }
@@ -318,7 +320,7 @@ body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 .act-row .act-meta { font-size: 11px; margin-top: 3px; }
 .act-pill { font-size: 9.5px; padding: 1px 7px; letter-spacing: .02em; }
 #actions-dropdown { padding-bottom: 6px; }
-#actions-dropdown .pr-dhead { padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--text); background: #151518; border-bottom: 1px solid var(--border); }
+#actions-dropdown .pr-dhead { padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--text); background: var(--pop); border-bottom: 1px solid var(--border); }
 
 /* Sidebar search: always on screen; Ctrl+F still jumps into it, × clears */
 #filter-bar { display: flex; padding: 10px 10px 4px; border-bottom: none; background: transparent; }
@@ -362,12 +364,12 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 
 /* Each project is a soft card: header + its agents in one panel, gaps between projects */
 #list { padding: 4px 8px 12px; }
-.group { margin: 0 0 8px; border-radius: var(--r-lg); background: rgba(255,255,255,.022); border: 1px solid rgba(255,255,255,.045); }
+.group { margin: 0 0 8px; border-radius: var(--r-lg); background: rgba(var(--ink),.022); border: 1px solid rgba(var(--ink),.045); }
 .group.collapsed { background: transparent; border-color: transparent; }
 .group-header { margin: 0; padding: 8px 8px 6px 8px; }
 .group-name { color: var(--text); font-size: 12.5px; }
 .group.collapsed .group-name { color: var(--subtext); }
-.agents { margin-left: 14px; padding: 0 6px 6px 4px; border-left-color: rgba(255,255,255,.05); }
+.agents { margin-left: 14px; padding: 0 6px 6px 4px; border-left-color: rgba(var(--ink),.05); }
 .feature { border-radius: var(--r-lg); }
 
 /* Right padding = exactly the area Windows' min/max/close overlay covers (env vars from
@@ -377,10 +379,10 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 /* Pull requests dropdown: same language as Tracked Actions — quiet repo labels, rounded rows,
    a thin colored edge + soft tint only when a PR needs you */
 #pr-dropdown { width: 560px; max-width: calc(100vw - 24px); padding-bottom: 6px; }
-#pr-dropdown .pr-dhead { padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--text); background: #151518; border-bottom: 1px solid var(--border); }
-.pr-group-header { padding: 12px 14px 4px; background: #151518; border-bottom: none; font-size: 11px; font-weight: 600; color: var(--subtext);
+#pr-dropdown .pr-dhead { padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--text); background: var(--pop); border-bottom: 1px solid var(--border); }
+.pr-group-header { padding: 12px 14px 4px; background: var(--pop); border-bottom: none; font-size: 11px; font-weight: 600; color: var(--subtext);
   position: sticky; top: 33px; z-index: 1; }
-.pr-group-header:hover { background: #151518; color: var(--text); }
+.pr-group-header:hover { background: var(--pop); color: var(--text); }
 .pr-group-header .pr-count { font-weight: 400; color: var(--dim); }
 .pr-row { margin: 0 6px; padding: 8px 10px; border-bottom: none; border-left: none !important; border-radius: var(--r); font-size: 12.5px; }
 .pr-row:hover { background: var(--hover-strong); }
@@ -419,3 +421,46 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 .pr-sub { min-width: 0; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pr-refs { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; }
 .pr-row:hover .pr-num { visibility: hidden; } /* the action buttons take that corner on hover */
+
+/* ── Themes (Settings → Theme). Midnight is :root above; each block overrides the palette.
+   theme-core.js holds the matching terminal and title-bar colors. ── */
+html[data-theme="graphite"] {
+  --bg: #1a1a1d; --bg2: #161618; --bg3: #242428; --border: #2c2c31; --border-hi: #3a3a40;
+  --accent: #8b9bff; --accent-soft: rgba(139,155,255,.15);
+  --text: #ececef; --fg: #ececef; --dim: #9a9aa3; --subtext: #b4b4bb; --card: #202023;
+  --surface0: #26262a; --surface1: #303035; --surface2: #45454c;
+  --title-bg: #1a1a1d; --panel-bg: #1a1a1d; --editor-bg: #1a1a1d;
+  --pop: #222226; --sidebar: #1f1f22; --tip: #36363c; --row-solid: #2a2a2e; --term-bg: #18181b;
+}
+html[data-theme="nord"] {
+  --bg: #2e3440; --bg2: #2a2f3a; --bg3: #3b4252; --border: #3b4252; --border-hi: #434c5e;
+  --accent: #88c0d0; --accent-soft: rgba(136,192,208,.16); --on-accent: #2e3440;
+  --green: #a3be8c; --yellow: #ebcb8b; --red: #bf616a; --purple: #b48ead; --cyan: #8fbcbb; --peach: #d08770; --pink: #b48ead;
+  --text: #eceff4; --fg: #eceff4; --dim: #8f9bb3; --subtext: #d8dee9; --card: #353c4a;
+  --surface0: #3b4252; --surface1: #434c5e; --surface2: #4c566a;
+  --title-bg: #2e3440; --panel-bg: #2e3440; --editor-bg: #2e3440;
+  --pop: #353c4a; --sidebar: #323846; --tip: #434c5e; --row-solid: #3a4150; --term-bg: #2b303b;
+}
+html[data-theme="catppuccin"] {
+  --bg: #1e1e2e; --bg2: #181825; --bg3: #313244; --border: #313244; --border-hi: #45475a;
+  --accent: #89b4fa; --accent-soft: rgba(137,180,250,.15); --on-accent: #1e1e2e;
+  --green: #a6e3a1; --yellow: #f9e2af; --red: #f38ba8; --purple: #cba6f7; --cyan: #94e2d5; --peach: #fab387; --pink: #f5c2e7;
+  --text: #cdd6f4; --fg: #cdd6f4; --dim: #9399b2; --subtext: #bac2de; --card: #24243a;
+  --surface0: #313244; --surface1: #45475a; --surface2: #585b70;
+  --title-bg: #1e1e2e; --panel-bg: #1e1e2e; --editor-bg: #1e1e2e;
+  --pop: #24243a; --sidebar: #222233; --tip: #45475a; --row-solid: #2c2c40; --term-bg: #1e1e2e;
+}
+/* Light: the app goes light, the terminal stays dark (Claude's own output colors assume a dark background). */
+html[data-theme="light"] {
+  --ink: 0,0,0;
+  --bg: #ffffff; --bg2: #f4f4f5; --bg3: #ececee; --border: #e4e4e7; --border-hi: #d4d4d8;
+  --accent: #4f5bd5; --accent-soft: rgba(79,91,213,.11); --on-accent: #ffffff;
+  --green: #16a34a; --yellow: #ca8a04; --red: #dc2626; --purple: #7c3aed; --cyan: #0891b2; --peach: #ea580c; --pink: #db2777;
+  --text: #18181b; --fg: #18181b; --dim: #71717a; --subtext: #52525b; --card: #ffffff; --shadow: #d4d4d8;
+  --surface0: #f4f4f5; --surface1: #e9e9ec; --surface2: #d4d4d8;
+  --title-bg: #fafafa; --panel-bg: #fafafa; --editor-bg: #ffffff;
+  --pop: #ffffff; --sidebar: #f7f7f8; --tip: #18181b; --tip-fg: #fafafa; --row-solid: #ececee; --term-bg: #18181b;
+  --pop-shadow: 0 12px 32px rgba(0,0,0,.14), 0 0 0 1px rgba(0,0,0,.08);
+}
+html[data-theme="light"] #term-scroll-nav button { color: #a1a1aa; }
+html[data-theme="light"] ::selection { background: rgba(79,91,213,.22); }

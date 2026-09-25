@@ -1165,6 +1165,10 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">Off: nothing of the world is loaded or run &mdash; no 3D renderer, no header button, no economy. On: the game starts, showing your agents as a hex-tile island beside the list. Everything you can do in the list still works; the map is another way to look at the same state. Show or hide it with the &#x2B22; button in the header.</div>
       <label class="settings-label">
+        <span>Theme</span>
+        <select id="sel-theme" onchange="setTheme(this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
+      </label>
+      <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
       </label>
@@ -1392,6 +1396,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./prompt-copy.js"></script>
 <script src="./prompt-nav.js"></script>
 <script src="./tooltip.js"></script>
+<script src="./theme-core.js"></script>
 <script src="./term-size-core.js"></script>
 <script src="./shift-select-core.js"></script>
 <script src="./usage-core.js"></script>
@@ -2047,6 +2052,21 @@ function toggleHdrMore(e) {
     m.classList.remove('open'); document.removeEventListener('click', close);
   });
 }
+// Theme: the palette is CSS (theme.css, html[data-theme]); terminals and the Windows title bar
+// are told separately (theme-core.js). The last choice is cached locally so a reload doesn't flash Midnight.
+let currentTheme = (() => { try { return localStorage.getItem('theme') || 'midnight'; } catch { return 'midnight'; } })();
+document.documentElement.dataset.theme = currentTheme;
+function setTheme(name, persist = true) {
+  currentTheme = THEMES[name] ? name : 'midnight';
+  document.documentElement.dataset.theme = currentTheme;
+  try { localStorage.setItem('theme', currentTheme); } catch {}
+  for (const [, x] of xterms) x.terminal.options.theme = xtermTheme(currentTheme);
+  const sel = document.getElementById('sel-theme'); if (sel) sel.value = currentTheme;
+  api.send({ type: 'setTheme', theme: currentTheme });
+  if (persist) api.send({ type: 'saveSettings', settings: { theme: currentTheme } });
+}
+document.getElementById('sel-theme').innerHTML = Object.entries(THEMES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
+document.getElementById('sel-theme').value = currentTheme;
 function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
@@ -2741,9 +2761,7 @@ function createXterm(id) {
   container.appendChild(el);
   const fitAddon = new XFitAddon();
   const terminal = new XTerminal({
-    theme: { background:'#0e0e10', foreground:'#e4e4e7', cursor:'#e4e4e7', cursorAccent:'#0e0e10', selectionBackground:'#585b7066',
-      black:'#45475a', red:'#f38ba8', green:'#a6e3a1', yellow:'#f9e2af', blue:'#89b4fa', magenta:'#cba6f7', cyan:'#94e2d5', white:'#bac2de',
-      brightBlack:'#585b70', brightRed:'#f38ba8', brightGreen:'#a6e3a1', brightYellow:'#f9e2af', brightBlue:'#89b4fa', brightMagenta:'#cba6f7', brightCyan:'#94e2d5', brightWhite:'#a6adc8' },
+    theme: xtermTheme(currentTheme), // theme-core.js
     fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: true, scrollback: 10000, cursorStyle: 'bar', cursorWidth: 2,
   });
   const searchAddon = new XSearchAddon();
@@ -4099,6 +4117,7 @@ const DONE_CONFIRM_MS = 3000;
 let planBudget = 100;
 
 function applySettings(s) {
+  if (s.theme) setTheme(s.theme, false);
   if (s.zoom) { uiZoom = s.zoom; api.setZoom(uiZoom / 100); }
   if (s.termWidth) { settings_termWidth = s.termWidth; applyLayout(); }
   if (s.bypassPermissions !== undefined) {
