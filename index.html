@@ -1137,6 +1137,11 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">Hides agents that are actively working, resuming, or settling.</div>
       <label class="settings-label">
+        <input type="checkbox" id="chk-mobile" onchange="setMobileRemote(this.checked)" />
+        <span>Mobile remote (feature flag)</span>
+      </label>
+      <div class="settings-hint">Shows the QR button in the header; scan it to watch and drive your agents from a phone on the same network. Off hides the button and refuses phone connections. LAN peers are not affected.</div>
+      <label class="settings-label">
         <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
         <span>Prompt autocomplete (ghost text)</span>
       </label>
@@ -4213,6 +4218,7 @@ function applySettings(s) {
     if (chk) chk.checked = notificationSoundEnabled;
   }
   if (s.worldEconomy) { worldEconomy = Object.assign(worldEconomyDefault(), s.worldEconomy); worldEconomy.stats = Object.assign(worldEconomyDefault().stats, worldEconomy.stats || {}); }
+  setMobileRemote(s.mobileRemote !== false, false);
   setWorldEnabled(s.worldEnabled !== undefined ? !!s.worldEnabled : !!s.worldView, false, s.worldView !== false); // older settings had only worldView: on meant the game ran
   if (s.worldRosterW) worldRosterW = Math.max(200, Math.min(600, +s.worldRosterW || 300));
   if (s.worldRosterHidden !== undefined) worldRosterHidden = !!s.worldRosterHidden;
@@ -4562,6 +4568,13 @@ function toggleQr() {
   el.style.display = 'flex';
   el.style.opacity = '0';
   requestAnimationFrame(() => el.style.opacity = '1');
+}
+// Feature flag: the mobile remote (QR button + phone connections). On unless turned off.
+function setMobileRemote(on, persist = true) {
+  document.body.classList.toggle('mobile-on', !!on);
+  const chk = document.getElementById('chk-mobile'); if (chk) chk.checked = !!on;
+  if (!on && document.getElementById('qr-overlay').style.display === 'flex') closeQr();
+  if (persist) api.send({ type: 'saveSettings', settings: { mobileRemote: !!on } });
 }
 function closeQr() {
   const el = document.getElementById('qr-overlay');

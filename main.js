@@ -3745,7 +3745,11 @@ function handleIpc(msg) {
       break;
     }
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;
-    case 'saveSettings': Object.assign(settings, msg.settings); saveState(); if ('worldEnabled' in msg.settings) armClickupTimer(); break;
+    case 'saveSettings':
+      Object.assign(settings, msg.settings); saveState();
+      if ('worldEnabled' in msg.settings) armClickupTimer();
+      if (msg.settings.mobileRemote === false && remoteWs) { try { remoteWs.destroy(); } catch {} remoteWs = null; remoteViewingAgent = null; }
+      break;
     case 'setTheme': // the window buttons Windows draws over the header follow the theme
       if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.setTitleBarOverlay(titleBarColors(msg.theme)); mainWindow.setBackgroundColor(themeOf(msg.theme).bg); } catch {} }
       break;
@@ -4243,6 +4247,7 @@ function startRemoteServer() {
     try { u = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
     if (u.pathname === '/peer') { handlePeerUpgrade(req, socket, u); return; }
     if (u.pathname !== '/ws') { socket.destroy(); return; }
+    if (settings.mobileRemote === false) { socket.destroy(); return; } // mobile remote flag is off
     if (!pc.checkCode(settings.peerCode, u.searchParams.get('code'))) { socket.destroy(); return; }
     if (remoteWs && !remoteWs.destroyed) {
       try { remoteWs.end(); } catch {}
