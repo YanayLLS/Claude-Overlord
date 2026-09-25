@@ -467,4 +467,4 @@ html[data-theme="light"] ::selection { background: rgba(79,91,213,.22); }
 
 /* ── Terminal sits in a rounded card on the sidebar surface ── */
 #term { background: var(--sidebar); border-left: none; }
-#term-container { margin: 8px; border: 1px solid var(--border); border-radius: var(--r-lg); }
+#term-container { margin: 4px; padding: 4px 0 0 6px; border: 1px solid var(--border); border-radius: var(--r); }
