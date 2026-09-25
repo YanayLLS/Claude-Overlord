@@ -103,3 +103,24 @@
 
 /* manual deploy: a hand on the cell, colour still says whether what's live is known-good */
 .rl-hand { width:12px; height:12px; flex-shrink:0; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; color:var(--subtext); }
+
+/* Board / Timeline tabs: a small segmented control next to the title */
+.rl-head .rl-tabs { display:flex; gap:2px; padding:2px; border-radius:999px; background:var(--surface0); border:1px solid var(--border); flex-shrink:0; }
+.rl-head .rl-tabs button { width:auto; height:22px; padding:0 11px; border-radius:999px; font-size:11.5px; font-weight:500; color:var(--subtext); }
+.rl-head .rl-tabs button.on { background:var(--surface2); color:var(--text); }
+
+/* Timeline: env filter chips, day headings, one row per landing */
+.rl-tl { width:min(760px, 88vw); padding-top:10px; }
+.rl-tl-filter { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+.rl-tl-filter button { font:inherit; font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid var(--border); background:var(--surface0); color:var(--subtext); cursor:pointer; }
+.rl-tl-filter button:hover { background:var(--surface1); }
+.rl-tl-filter button.on { border-color:var(--accent); background:var(--accent-soft); color:var(--text); }
+.rl-tl-filter .rl-env { font-size:10.5px; }
+.rl-tl-day { padding:12px 2px 4px; font-size:10px; font-weight:600; letter-spacing:.9px; text-transform:uppercase; color:var(--dim); position:sticky; top:0; background:var(--bg2); z-index:1; }
+.rl-tl-row { display:grid; grid-template-columns:42px 84px 150px 62px 1fr; align-items:center; gap:10px; padding:5px 8px; border-radius:var(--r-sm); cursor:pointer; white-space:nowrap; }
+.rl-tl-row:hover { background:var(--hover); }
+.rl-tl-row .rl-env { font-size:10px; }
+.rl-tl-time { color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; }
+.rl-tl-repo { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; }
+.rl-tl-title { color:var(--subtext); font-size:11.5px; overflow:hidden; text-overflow:ellipsis; }
+.rl-tl-empty { padding:24px 4px; color:var(--dim); }

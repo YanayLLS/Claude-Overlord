@@ -5,10 +5,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
+const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
 const PENDING_SHOWN = 10;
+const HISTORY_SHOWN = 10;
+const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
 module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal }) {
   const file = path.join(stateDir, 'releases.json');
@@ -51,26 +53,31 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
 
   // Every branch tip and every promote count in one GraphQL call. A missing
   // branch comes back as a null ref, not an error, so one bad row can't sink the rest.
-  // lists=true is the slower second pass: only the waiting commits behind each count,
-  // which nobody sees until they click a cell.
+  // lists=true is the slower second pass, same single call: the waiting commits behind each
+  // count (seen on click) and each env branch's last HISTORY_SHOWN commits (the Timeline tab).
   async function fetchResults(cfg, lists = false) {
     const { commits, compares } = requestsFor(cfg);
-    const repos = [...new Set([...(lists ? [] : commits), ...compares].map(x => x.repo))];
-    if (!repos.length) return { results: { commits: {}, compares: {} } };
+    const repos = [...new Set([...commits, ...compares].map(x => x.repo))];
+    if (!repos.length) return { results: { commits: {}, compares: {}, history: {} } };
     const q = JSON.stringify;
     const parts = repos.map((repo, i) => {
       const [owner, name] = repo.split('/');
-      const tips = lists ? [] : commits.filter(c => c.repo === repo).map((c, j) =>
-        `t${j}: ref(qualifiedName: ${q('refs/heads/' + c.branch)}) { target { ... on Commit { oid messageHeadline messageBody committedDate url author { name user { login } } } } }`);
+      const tips = commits.filter(c => c.repo === repo).map((c, j) => lists
+        ? `h${j}: ref(qualifiedName: ${q('refs/heads/' + c.branch)}) { target { ... on Commit { history(first: ${HISTORY_SCAN}) { nodes { oid messageHeadline messageBody committedDate url parents(first: 1) { nodes { oid } } } } } } }`
+        : `t${j}: ref(qualifiedName: ${q('refs/heads/' + c.branch)}) { target { ... on Commit { oid messageHeadline messageBody committedDate url author { name user { login } } } } }`);
       const cmps = compares.filter(c => c.repo === repo).map((c, j) =>
         `c${j}: ref(qualifiedName: ${q('refs/heads/' + c.base)}) { compare(headRef: ${q(c.head)}) { aheadBy${lists ? ` commits(last: ${PENDING_SHOWN}) { nodes { oid messageHeadline messageBody url } }` : ''} } }`);
       return `r${i}: repository(owner: ${q(owner)}, name: ${q(name)}) { ${[...tips, ...cmps].join(' ')} }`;
     });
     const res = await ghGraphql(`query { ${parts.join(' ')} }`);
-    const out = { commits: {}, compares: {} };
+    const out = { commits: {}, compares: {}, history: {} };
     if (res.error) return { error: res.error, errorCode: res.errorCode || null };
     repos.forEach((repo, i) => {
       const node = res.data[`r${i}`];
+      if (lists) commits.filter(c => c.repo === repo).forEach((c, j) => {
+        const h = node && node[`h${j}`] && node[`h${j}`].target && node[`h${j}`].target.history;
+        out.history[`${repo}|${c.env}`] = h ? firstParentChain(h.nodes, HISTORY_SHOWN).map(n => ({ sha: n.oid, title: commitTitle(n.messageHeadline, n.messageBody), date: n.committedDate, url: n.url })) : [];
+      });
       if (!lists) commits.filter(c => c.repo === repo).forEach((c, j) => {
         const key = `${repo}|${c.env}`;
         if (!node) { out.commits[key] = { error: 'Repo not found, or no access' }; return; }
@@ -174,12 +181,14 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const prev = (state.results && state.results.compares) || {};
       if (state.results && state.results.deploys) fetched.results.deploys = state.results.deploys;
       if (state.results && state.results.lives) fetched.results.lives = state.results.lives;
+      if (state.results && state.results.history) fetched.results.history = state.results.history;
       for (const [k, v] of Object.entries(fetched.results.compares)) if (prev[k] && prev[k].ahead === v.ahead) v.commits = prev[k].commits;
       push({ error: null, errorCode: null, problems: null, localOnly: loaded.localOnly || null, config: cfg, results: fetched.results,
         grid: buildGrid(cfg, fetched.results), updatedAt: Date.now() });
       const [listed, deploys, lives] = await Promise.all([fetchResults(cfg, true), fetchDeploys(cfg), fetchLives(cfg)]);
       if (state.config !== cfg) return;
-      const results = { commits: state.results.commits, compares: listed.error ? state.results.compares : listed.results.compares, deploys, lives };
+      const results = { commits: state.results.commits, compares: listed.error ? state.results.compares : listed.results.compares,
+        history: listed.error ? state.results.history : listed.results.history, deploys, lives };
       push({ results, grid: buildGrid(cfg, results) });
     } finally {
       inFlight = false;

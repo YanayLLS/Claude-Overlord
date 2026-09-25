@@ -218,4 +218,34 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(bad({ dev: { from: 'nope', match: '(x)' } }), ['repos[0].live.dev.from: must be owner/repo:path[@ref]']);
   assert.deepStrictEqual(bad({ dev: { from: 'o/i:f@dev', match: 'no group' } }), ['repos[0].live.dev.match: must be a regex with one (capture group) for the sha']);
 }
+
+// ── buildTimeline: every env branch's recent commits, newest first; env filter; live-pinned envs skipped ──
+{
+  const { buildTimeline } = require('./releases-core');
+  const cfg = { envs: ['dev', 'prod'], repos: [
+    { repo: 'o/a', label: 'front', branches: { dev: 'dev', prod: 'main' } },
+    { repo: 'o/ai', branches: { dev: 'dev', prod: 'dev' }, live: { prod: { from: 'o/i:f@dev', match: '(x)' } } },
+  ] };
+  const c = (sha, date) => ({ sha, title: 't' + sha, date, url: 'u' + sha });
+  const history = {
+    'o/a|dev': [c('d2', '2026-09-24T10:00:00Z'), c('d1', '2026-09-20T10:00:00Z')],
+    'o/a|prod': [c('p1', '2026-09-22T10:00:00Z')],
+    'o/ai|dev': [c('a1', '2026-09-23T10:00:00Z')],
+    'o/ai|prod': [c('a1', '2026-09-23T10:00:00Z')],
+  };
+  const all = buildTimeline(cfg, history);
+  assert.deepStrictEqual(all.map(e => e.label + ':' + e.env + ':' + e.sha), ['front:dev:d2', 'ai:dev:a1', 'front:prod:p1', 'front:dev:d1']);
+  assert.deepStrictEqual(buildTimeline(cfg, history, 'prod').map(e => e.sha), ['p1']);
+  assert.deepStrictEqual(buildTimeline(cfg, {}), []);
+}
+// ── firstParentChain: merges on the branch, not what they brought along ──
+{
+  const { firstParentChain } = require('./releases-core');
+  const n = (oid, parent) => ({ oid, parents: { nodes: parent ? [{ oid: parent }] : [] } });
+  // m2 merged feature f1 (whose parent is m1); history order interleaves them
+  const nodes = [n('m2', 'm1'), n('f1', 'm1'), n('m1', 'm0'), n('m0')];
+  assert.deepStrictEqual(firstParentChain(nodes, 10).map(x => x.oid), ['m2', 'm1', 'm0']);
+  assert.deepStrictEqual(firstParentChain(nodes, 2).map(x => x.oid), ['m2', 'm1']);
+  assert.deepStrictEqual(firstParentChain([], 5), []);
+}
 console.log('releases-core: all passed');

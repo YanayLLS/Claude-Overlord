@@ -3,6 +3,7 @@
 // and forwards { type: 'releases' } messages to releasesUi.onMsg.
 (function () {
   let state = null, open = false, sel = null; // sel = [rowIdx, cellIdx]
+  let tab = 'board', tlEnv = ''; // tab: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
 
   const core = document.createElement('script');
   core.src = './releases-core.js';
@@ -57,6 +58,8 @@
       api.send({ type: 'releasesSetSource', source: v });
     },
     deselect: () => { sel = null; render(); },
+    tab: (el) => { tab = el.dataset.tab; sel = null; render(); },
+    tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
     cancelSource: () => { state = { ...(state || {}), editing: false }; render(); },
   };
 
@@ -122,6 +125,37 @@
 
   const ENV_HUE = { dev: 'var(--accent)', alpha: 'var(--purple)', staging: 'var(--yellow)', prod: 'var(--green)', production: 'var(--green)' };
   const HUES = ['var(--accent)', 'var(--purple)', 'var(--cyan)', 'var(--yellow)', 'var(--green)'];
+
+  const hueOf = (env, envs) => ENV_HUE[env.toLowerCase()] || HUES[envs.indexOf(env) % HUES.length];
+
+  // Timeline tab: what landed on each env branch, newest first, grouped by day. Same data the
+  // board's second pass already fetched — no extra calls.
+  function timelineHtml(s) {
+    const envs = s.config.envs;
+    const items = ReleasesCore.buildTimeline(s.config, s.results && s.results.history, tlEnv);
+    let h = '<div class="rl-tl"><div class="rl-tl-filter">'
+      + [''].concat(envs).map(e => `<button data-act="tlEnv" data-env="${esc(e)}" class="${e === tlEnv ? 'on' : ''}">`
+        + (e ? `<span class="rl-env" style="--hue:${hueOf(e, envs)}">${esc(e)}</span>` : 'All') + '</button>').join('') + '</div>';
+    if (!s.results || !s.results.history) return h + '<div class="rl-tl-empty">Loading history…</div></div>';
+    if (!items.length) return h + '<div class="rl-tl-empty">Nothing landed here recently.</div></div>';
+    const dayOf = (iso) => {
+      const d = new Date(iso), t = new Date(), y = new Date(Date.now() - 864e5);
+      return d.toDateString() === t.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday'
+        : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+    };
+    let day = null;
+    for (const e of items) {
+      const dd = dayOf(e.date);
+      if (dd !== day) { day = dd; h += `<div class="rl-tl-day">${esc(dd)}</div>`; }
+      h += `<div class="rl-tl-row" data-url="${esc(e.url)}" title="${esc(e.title)}\n${esc(e.branch)} · ${esc(e.sha.slice(0, 7))}">`
+        + `<span class="rl-tl-time">${esc(new Date(e.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }))}</span>`
+        + `<span class="rl-env" style="--hue:${hueOf(e.env, envs)}">${esc(e.env)}</span>`
+        + `<span class="rl-tl-repo">${esc(e.label)}</span>`
+        + `<span class="rl-sha">${esc(refOf(e))}</span>`
+        + `<span class="rl-tl-title">${esc(e.title.replace(/^#\d+ /, ''))}</span></div>`;
+    }
+    return h + '</div>';
+  }
 
   function gridHtml(g) {
     let h = `<div class="rl-grid" style="grid-template-columns:max-content repeat(${g.envs.length}, minmax(108px, max-content))">`
@@ -216,6 +250,8 @@
     const s = state || { source: '', loading: true };
     const upd = s.updatedAt ? `updated ${new Date(s.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
     let h = '<div class="rl-head"><h2>Releases</h2>'
+      + (s.grid ? `<div class="rl-tabs"><button data-act="tab" data-tab="board" class="${tab === 'board' ? 'on' : ''}">Board</button>`
+        + `<button data-act="tab" data-tab="timeline" class="${tab === 'timeline' ? 'on' : ''}">Timeline</button></div>` : '')
       + `<span class="rl-src" data-act="editSource" title="Change config source">${esc(s.source)}</span>`
       + `<span class="rl-upd">${s.loading ? 'loading…' : esc(upd)}</span>`
       + `<button data-act="refresh" class="${s.loading ? 'spin' : ''}" title="Refresh"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>`
@@ -228,7 +264,7 @@
     } else {
       // Header and footer stay put; only the board scrolls. The clicked cell's detail is a
       // drawer over the board's bottom edge, so opening it never resizes the modal.
-      h += gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND
+      h += (tab === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
         + (s.localOnly ? `<div class="rl-local" title="It isn't on GitHub yet, so teammates can't see this board. Commit and push it to share.">Local config, not pushed yet · <code>${esc(s.localOnly)}</code></div>` : '');
     }
     const prev = modal.querySelector('.rl-body'), top = prev ? prev.scrollTop : 0, left = prev ? prev.scrollLeft : 0;

@@ -168,6 +168,36 @@ function runState(conclusion, failedJobs, everSucceeded) {
   return everSucceeded === false ? 'dead' : 'failure';
 }
 
+// A branch's own line of commits: tip, its first parent, that one's first parent… Each is the
+// moment something LANDED on the branch (a merge, a squash, a direct push); the commits a merge
+// brought along are skipped. nodes = GraphQL history (newest first) with parents(first: 1).
+function firstParentChain(nodes, max) {
+  const byOid = new Map((nodes || []).map(n => [n.oid, n]));
+  const out = [];
+  for (let n = nodes && nodes[0]; n && out.length < max; ) {
+    out.push(n);
+    const p = n.parents && n.parents.nodes && n.parents.nodes[0];
+    n = p && byOid.get(p.oid);
+  }
+  return out;
+}
+
+// Timeline: the recent commits on every env branch, newest first — when each thing landed where.
+// Envs whose live commit is pinned elsewhere (`live`) are skipped: their branch's history is
+// not their release history. env = optional filter.
+function buildTimeline(cfg, history, env) {
+  const out = [];
+  for (const r of cfg.repos) {
+    if (!r.branches) continue;
+    const label = r.label || r.repo.split('/')[1];
+    for (const e of cfg.envs) {
+      if (!r.branches[e] || (env && e !== env) || (r.live && r.live[e])) continue;
+      for (const c of (history && history[`${r.repo}|${e}`]) || []) out.push({ repo: r.repo, label, env: e, branch: r.branches[e], ...c });
+    }
+  }
+  return out.sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+}
+
 // "label · env" for every cell whose last deploy run failed — what the footer badge warns about.
 function failedDeploys(grid) {
   const out = [];
@@ -177,7 +207,7 @@ function failedDeploys(grid) {
   return out;
 }
 
-const api = { parseSource, validateConfig, requestsFor, buildGrid, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
+const api = { parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);
