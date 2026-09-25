@@ -69,11 +69,18 @@
 
   // One cell = one env of one repo. Line 1: deploy dot, sha, age, and what's waiting for the
   // next env. Line 2: the commit title. Branch, author and deploy details live in tooltips.
-  // Dot colour + a short label; the tooltip shows the same dot as a badge beside the label.
+  // Deploy status → the cell's colour (st-*) + a short label. The tooltip shows the same colour as a
+  // small badge beside the label; the legend uses the same swatches.
   const DOT = { success: ['ok', 'Deployed'], failure: ['bad', 'Deploy failed'], partial: ['part', 'Deployed · a follow-up job failed'],
     dead: ['manual', 'CI has never succeeded here · deployed some other way (likely by hand)'],
     running: ['run', 'Deploying now'], cancelled: ['off', 'Deploy cancelled'], never: ['off', 'Never deployed'] };
   function deployInfo(c) {
+    // a pinned live commit beats everything else we could guess
+    if (c.live && !c.live.error) {
+      return c.live.behind
+        ? { cls: 'manual', url: c.live.compareUrl, text: `Live: ${c.live.sha.slice(0, 7)} · ${c.live.behind} newer commit${c.live.behind === 1 ? '' : 's'} not deployed yet` }
+        : { cls: 'ok', url: c.live.url, text: 'Live: this commit is deployed' };
+    }
     if (c.deploy === 'manual') return { cls: 'manual', text: 'Manual deploy · no CI/CD · this tip may not be live yet' };
     if (!c.deploy) return { cls: 'none', text: 'No deploy workflow' };
     if (!c.run) return { cls: 'off', text: 'Deploy status loading…' };
@@ -82,34 +89,33 @@
     const why = (c.run.failed || []).map(f => f.job + (f.step ? ` › ${f.step}` : '')).join('; ');
     return { cls, url: c.run.url, text: label + (c.run.date && c.run.state !== 'running' ? ` · ${age(c.run.date)} ago` : '') + (why ? ` · ${why}` : '') };
   }
-  function dotHtml(c) {
-    const d = deployInfo(c), attrs = `title="${esc(d.text)}" data-tip-dot="rl-dot ${d.cls}"`;
-    return d.url ? `<a class="rl-dot ${d.cls}" data-url="${esc(d.url)}" ${attrs}></a>` : `<span class="rl-dot ${d.cls}" ${attrs}></span>`;
-  }
+
+  // PR number when the commit is a merge ("#933 fix: …"), else the short sha
+  const refOf = (commit) => { const pr = (commit.title.match(/^#(\d+) /) || [])[1]; return pr ? '#' + pr : commit.sha.slice(0, 7); };
 
   function cellHtml(c, r, i) {
     if (!c) return '<div class="rl-empty"></div>';
+    const d = deployInfo(c);
+    // a manually deployed env with a pinned commit shows THAT commit, not the branch tip
+    const shown = c.live && !c.live.error ? c.live : c.commit;
     let top;
     if (c.loading) top = '<span class="rl-age">loading…</span>';
     else if (c.missing) top = '<span class="rl-bad">branch missing</span>';
     else if (c.error) top = `<span class="rl-bad" title="${esc(c.error)}">! error</span>`;
-    else {
-      // PR number when the tip is a merge ("#933 fix: …"), else the short sha; the title lives in the tooltip
-      const pr = (c.commit.title.match(/^#(\d+) /) || [])[1];
-      top = `<span class="rl-sha">${pr ? '#' + pr : esc(c.commit.sha.slice(0, 7))}</span><span class="rl-age">${esc(age(c.commit.date))}</span>`;
-    }
+    else top = `<span class="rl-sha">${esc(refOf(shown))}</span><span class="rl-age">${esc(age(shown.date))}</span>`;
     let next = '';
-    if (c.next) {
+    if (c.live && c.live.behind) next = `<span class="rl-next" title="${c.live.behind} commits on ${esc(c.branch)} not deployed">${link(c.live.compareUrl, `<b>${c.live.behind}</b> not live`)}</span>`;
+    else if (c.next) {
       const n = c.next;
       if (n.loading) next = `<span class="rl-next zero">… ${esc(n.to)}</span>`;
       else if (n.error) next = `<span class="rl-next rl-bad" title="${esc(n.error)}">? ${esc(n.to)}</span>`;
       else if (!n.ahead) next = `<span class="rl-next zero" title="Nothing waiting for ${esc(n.to)}">✓ ${esc(n.to)}</span>`;
       else next = `<span class="rl-next" title="${n.ahead} commits not yet in ${esc(n.to)}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>`;
     }
-    const tip = [deployInfo(c).text, c.commit && c.commit.title,
-      [c.branch, c.commit && c.commit.sha.slice(0, 7), c.commit && c.commit.author].filter(Boolean).join(' · ')].filter(Boolean).join('\n');
+    const tip = [d.text, shown && shown.title,
+      [c.branch, shown && shown.sha.slice(0, 7), c.commit && c.commit.author].filter(Boolean).join(' · ')].filter(Boolean).join('\n');
     const isSel = sel && sel[0] === r && sel[1] === i;
-    return `<div class="rl-cell${isSel ? ' sel' : ''}" data-r="${r}" data-c="${i}" title="${esc(tip)}" data-tip-dot="rl-dot ${deployInfo(c).cls}"><div class="rl-top">${dotHtml(c)}${top}${next}</div></div>`;
+    return `<div class="rl-cell st-${d.cls}${isSel ? ' sel' : ''}" data-r="${r}" data-c="${i}" title="${esc(tip)}" data-tip-dot="rl-dot ${d.cls}"><div class="rl-top">${top}${next}</div></div>`;
   }
 
   const ENV_HUE = { dev: 'var(--accent)', alpha: 'var(--purple)', staging: 'var(--yellow)', prod: 'var(--green)', production: 'var(--green)' };
@@ -130,11 +136,11 @@
 
   // Each item is one unbreakable unit; the row wraps between items, never inside one.
   const LEGEND = '<div class="rl-legend">'
-    + '<span><i class="rl-dot ok"></i>deployed</span>'
-    + '<span><i class="rl-dot bad"></i>deploy failed</span>'
-    + '<span><i class="rl-dot part"></i>deployed, side job failed</span>'
-    + '<span><i class="rl-dot run"></i>deploying</span>'
-    + '<span><i class="rl-dot manual"></i>manual deploy</span>'
+    + '<span><i class="rl-sw st-ok"></i>deployed</span>'
+    + '<span><i class="rl-sw st-bad"></i>deploy failed</span>'
+    + '<span><i class="rl-sw st-part"></i>deployed, side job failed</span>'
+    + '<span><i class="rl-sw st-run"></i>deploying</span>'
+    + '<span><i class="rl-sw st-manual"></i>manual / not live yet</span>'
     + '<span><span class="rl-next"><b>12</b> → prod</span>waiting to promote</span></div>';
 
   function detailHtml(grid) {
@@ -143,6 +149,12 @@
     if (!c) return '';
     let h = `<div class="rl-detail"><button class="rl-x" data-act="deselect" title="Close"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>`
       + `<h3>${esc(row.label)} · ${esc(c.env)} <span class="rl-mono">(${esc(c.branch)})</span></h3>`;
+    const d = deployInfo(c);
+    h += `<div class="rl-dep-line"><i class="rl-dot ${d.cls}"></i>${d.url ? link(d.url, esc(d.text)) : esc(d.text)}</div>`;
+    if (c.live && !c.live.error) {
+      h += `<div>Live: ${link(c.live.url, `<span class="rl-mono">${esc(c.live.sha.slice(0, 7))}</span> ${esc(c.live.title)}`)}`
+        + ` — ${esc(age(c.live.date))} ago <span class="rl-mono">(pinned in ${esc(c.live.from)})</span></div>`;
+    } else if (c.live && c.live.error) h += `<div class="rl-bad">Live commit unknown: ${esc(c.live.error)}</div>`;
     if (c.commit) {
       h += `<div>${link(c.commit.url, `<span class="rl-mono">${esc(c.commit.sha.slice(0, 7))}</span> ${esc(c.commit.title)}`)}`
         + ` — ${esc(c.commit.author)}, ${esc(age(c.commit.date))} ago</div>`;

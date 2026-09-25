@@ -56,6 +56,15 @@ function validateConfig(cfg) {
         else if (how !== 'manual' && !/^[\w.-]+\.ya?ml$/.test(String(how))) out.push(`${at}.deploy.${env}: "${how}" is not a workflow file or "manual"`);
       }
     }
+    if (r.live != null) {
+      if (typeof r.live !== 'object' || Array.isArray(r.live)) out.push(`${at}.live: must be an object`);
+      else for (const [env, l] of Object.entries(r.live)) {
+        if (!Object.prototype.hasOwnProperty.call(r.branches, env)) { out.push(`${at}.live.${env}: "${env}" is not in branches`); continue; }
+        const src = parseSource(l && l.from);
+        if (!src || src.kind !== 'gh') out.push(`${at}.live.${env}.from: must be owner/repo:path[@ref]`);
+        if (!hasCaptureGroup(l && l.match)) out.push(`${at}.live.${env}.match: must be a regex with one (capture group) for the sha`);
+      }
+    }
     if (r.promote == null) return;
     if (!Array.isArray(r.promote) || r.promote.length < 2) { out.push(`${at}.promote: needs at least 2 envs`); return; }
     r.promote.forEach((env, j) => {
@@ -72,12 +81,14 @@ function promotePairs(r) {
 
 // The gh calls a refresh needs. Assumes a validated config.
 function requestsFor(cfg) {
-  const commits = [], compares = [], deploys = [];
+  const commits = [], compares = [], deploys = [], lives = [];
   for (const r of cfg.repos) {
     if (!r.branches) continue;
     for (const env of cfg.envs) {
       if (!r.branches[env]) continue;
       commits.push({ repo: r.repo, env, branch: r.branches[env] });
+      const l = r.live && r.live[env];
+      if (l) lives.push({ repo: r.repo, env, branch: r.branches[env], from: l.from, match: l.match });
       const file = r.deploy && r.deploy[env];
       if (file && file !== 'manual') deploys.push({ repo: r.repo, env, branch: r.branches[env], file });
     }
@@ -85,13 +96,13 @@ function requestsFor(cfg) {
       compares.push({ repo: r.repo, from, to, base: r.branches[to], head: r.branches[from] });
     }
   }
-  return { commits, compares, deploys };
+  return { commits, compares, deploys, lives };
 }
 
 // View model: one row per repo, one cell per env (null = repo has no branch there).
 // results.commits['repo|env'] and results.compares['repo|from'] — missing = still loading.
 function buildGrid(cfg, results) {
-  const commits = (results && results.commits) || {}, compares = (results && results.compares) || {}, deploys = (results && results.deploys) || {};
+  const commits = (results && results.commits) || {}, compares = (results && results.compares) || {}, deploys = (results && results.deploys) || {}, lives = (results && results.lives) || {};
   const rows = cfg.repos.map((r) => {
     const label = r.label || r.repo.split('/')[1];
     const group = r.group || '';
@@ -102,7 +113,7 @@ function buildGrid(cfg, results) {
       const branch = r.branches[env];
       if (!branch) return null;
       const res = commits[`${r.repo}|${env}`];
-      const cell = { env, branch, deploy: (r.deploy && r.deploy[env]) || null, run: deploys[`${r.repo}|${env}`] || null, commit: null, error: null, missing: false, loading: !res, next: null };
+      const cell = { env, branch, deploy: (r.deploy && r.deploy[env]) || null, run: deploys[`${r.repo}|${env}`] || null, live: lives[`${r.repo}|${env}`] || null, commit: null, error: null, missing: false, loading: !res, next: null };
       if (res && res.error) cell.error = res.error;
       else if (res && res.missing) cell.missing = true;
       else if (res) cell.commit = res;
@@ -133,6 +144,16 @@ function age(iso, now = Date.now()) {
   return `${Math.floor(m / 10080)}w`;
 }
 
+function hasCaptureGroup(pattern) {
+  try { return new RegExp(String(pattern) + '|').exec('').length > 1; } catch { return false; }
+}
+
+// The sha a pinning file (terraform tfvars, a manifest…) says is live: the regex's first
+// capture group. null when nothing matches or the pattern is broken — "unknown", not a crash.
+function liveSha(text, pattern) {
+  try { const m = new RegExp(pattern).exec(String(text || '')); return (m && m[1]) || null; } catch { return null; }
+}
+
 // A deploy workflow's run is red when ANY job fails, but a follow-up job (opening a PR,
 // posting a ticket) failing after the deploy went out doesn't mean the env is broken.
 // "partial" = the run failed but no failed job or step is a deploy one.
@@ -156,7 +177,7 @@ function failedDeploys(grid) {
   return out;
 }
 
-const api = { parseSource, validateConfig, requestsFor, buildGrid, failedDeploys, runState, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
+const api = { parseSource, validateConfig, requestsFor, buildGrid, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

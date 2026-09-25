@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, runState, DEFAULT_SOURCE } = require('./releases-core');
+const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
 const PENDING_SHOWN = 10;
@@ -124,6 +124,35 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     return out;
   }
 
+  // What a manually deployed env really runs: the sha pinned in some file (terraform tfvars…),
+  // then one compare against the branch for that commit and how many newer ones aren't live.
+  async function fetchLives(cfg) {
+    const out = {}, files = new Map(); // each pinning file fetched once, however many envs read it
+    const read = (from) => {
+      if (!files.has(from)) files.set(from, (async () => {
+        const src = parseSource(from);
+        const res = await ghJson(['api', `repos/${src.repo}/contents/${src.path}${src.ref ? `?ref=${src.ref}` : ''}`]);
+        return res.data && typeof res.data.content === 'string' ? Buffer.from(res.data.content, 'base64').toString('utf-8') : null;
+      })());
+      return files.get(from);
+    };
+    await Promise.all(requestsFor(cfg).lives.map(async (l) => {
+      const key = `${l.repo}|${l.env}`;
+      const text = await read(l.from);
+      const sha = liveSha(text, l.match);
+      if (!sha || !SAFE_REF_RE.test(sha)) { out[key] = { error: text == null ? `Can't read ${l.from}` : `No commit found in ${l.from}` }; return; }
+      const cmp = await ghJson(['api', `repos/${l.repo}/compare/${sha}...${l.branch}`]);
+      const b = cmp.data && cmp.data.base_commit;
+      if (!b) { out[key] = { sha, error: `Commit ${sha} not found in ${l.repo}` }; return; }
+      out[key] = {
+        sha: b.sha, title: commitTitle(b.commit.message.split('\n')[0], b.commit.message.split('\n').slice(2).join('\n')),
+        date: b.commit.committer && b.commit.committer.date, url: b.html_url, from: l.from,
+        behind: cmp.data.ahead_by, compareUrl: cmp.data.html_url,
+      };
+    }));
+    return out;
+  }
+
   async function refresh() {
     if (inFlight) return;
     inFlight = true;
@@ -144,12 +173,13 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       // keep the previous pass's commit lists on screen until the new ones land
       const prev = (state.results && state.results.compares) || {};
       if (state.results && state.results.deploys) fetched.results.deploys = state.results.deploys;
+      if (state.results && state.results.lives) fetched.results.lives = state.results.lives;
       for (const [k, v] of Object.entries(fetched.results.compares)) if (prev[k] && prev[k].ahead === v.ahead) v.commits = prev[k].commits;
       push({ error: null, errorCode: null, problems: null, localOnly: loaded.localOnly || null, config: cfg, results: fetched.results,
         grid: buildGrid(cfg, fetched.results), updatedAt: Date.now() });
-      const [listed, deploys] = await Promise.all([fetchResults(cfg, true), fetchDeploys(cfg)]);
+      const [listed, deploys, lives] = await Promise.all([fetchResults(cfg, true), fetchDeploys(cfg), fetchLives(cfg)]);
       if (state.config !== cfg) return;
-      const results = { commits: state.results.commits, compares: listed.error ? state.results.compares : listed.results.compares, deploys };
+      const results = { commits: state.results.commits, compares: listed.error ? state.results.compares : listed.results.compares, deploys, lives };
       push({ results, grid: buildGrid(cfg, results) });
     } finally {
       inFlight = false;

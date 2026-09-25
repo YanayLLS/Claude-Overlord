@@ -195,4 +195,27 @@ assert.strictEqual(age('garbage', now), '');
   const g = buildGrid({ envs: ['dev'], repos: [{ repo: 'o/a', branches: { dev: 'dev' }, deploy: { dev: 'd.yml' } }] }, { deploys: { 'o/a|dev': { state: 'dead' } } });
   assert.deepStrictEqual(failedDeploys(g), []); // not "failing": it never worked, so nothing broke
 }
+
+// ── live: the commit an env really runs, read from a file that pins it (e.g. terraform tfvars) ──
+{
+  const { liveSha } = require('./releases-core');
+  const tf = '  "ai-microservice" = {\n    tag                  = "1.0.15-dfba9c5"\n  }\n  "x" = {\n    tag = "latest"\n  }';
+  const m = String.raw`"ai-microservice" = \{\s*tag\s*=\s*"[^"]*?([0-9a-f]{7,40})"`;
+  assert.strictEqual(liveSha(tf, m), 'dfba9c5');
+  assert.strictEqual(liveSha('nothing here', m), null);
+  assert.strictEqual(liveSha(tf, '(unclosed'), null); // a bad pattern is "unknown", not a crash
+
+  const cfg = { envs: ['dev', 'prod'], repos: [{ repo: 'o/ai', branches: { dev: 'dev', prod: 'dev' }, deploy: { prod: 'manual' },
+    live: { prod: { from: 'o/infra:env/prod.tfvars@dev', match: m } } }] };
+  assert.deepStrictEqual(validateConfig(cfg), []);
+  assert.deepStrictEqual(requestsFor(cfg).lives, [{ repo: 'o/ai', env: 'prod', branch: 'dev', from: 'o/infra:env/prod.tfvars@dev', match: m }]);
+  const live = { sha: 'dfba9c5aaaa', behind: 3 };
+  assert.deepStrictEqual(buildGrid(cfg, { lives: { 'o/ai|prod': live } }).rows[0].cells[1].live, live);
+  assert.strictEqual(buildGrid(cfg, {}).rows[0].cells[0].live, null);
+
+  const bad = (live) => validateConfig({ envs: ['dev'], repos: [{ repo: 'o/a', branches: { dev: 'dev' }, live }] });
+  assert.deepStrictEqual(bad({ prod: { from: 'o/i:f@dev', match: '(x)' } }), ['repos[0].live.prod: "prod" is not in branches']);
+  assert.deepStrictEqual(bad({ dev: { from: 'nope', match: '(x)' } }), ['repos[0].live.dev.from: must be owner/repo:path[@ref]']);
+  assert.deepStrictEqual(bad({ dev: { from: 'o/i:f@dev', match: 'no group' } }), ['repos[0].live.dev.match: must be a regex with one (capture group) for the sha']);
+}
 console.log('releases-core: all passed');
