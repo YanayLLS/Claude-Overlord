@@ -400,11 +400,11 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 .pr-testing { color: var(--yellow); }
 
 /* PR row structure: [checks icon] title ··· #num / chips (review, checks) · quiet refs, commits, age */
-.pr-l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.pr-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; color: var(--text); }
+.pr-l1 { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.pr-title { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; color: var(--text); }
 .pr-type { color: var(--dim); font-weight: 400; }
-.pr-num { flex-shrink: 0; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
-.pr-ci { flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%; position: relative; }
+.pr-num { flex-shrink: 0; margin-top: 2px; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.pr-ci { flex-shrink: 0; margin-top: 2px; width: 14px; height: 14px; border-radius: 50%; position: relative; }
 .pr-ci.pass { background: rgba(74,222,128,.16); box-shadow: inset 0 0 0 1.5px var(--green); }
 .pr-ci.pass::after { content: ''; position: absolute; left: 4.5px; top: 2.5px; width: 3px; height: 6px; border: solid var(--green); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 .pr-ci.fail { background: rgba(248,113,113,.16); box-shadow: inset 0 0 0 1.5px var(--red); }
@@ -412,13 +412,13 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 .pr-ci.pending { border: 1.5px solid rgba(250,204,21,.25); border-top-color: var(--yellow); animation: pr-spin 1s linear infinite; }
 .pr-ci.none { box-shadow: inset 0 0 0 1.5px var(--surface2); }
 @media (prefers-reduced-motion: reduce) { .pr-ci.pending { animation: none; } }
-.pr-l2 { display: flex; align-items: center; gap: 6px; margin: 5px 0 0 22px; min-width: 0; }
+.pr-l2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 5px 0 0 22px; min-width: 0; }
 .pr-chip { flex-shrink: 0; height: 18px; padding: 0 7px; display: inline-flex; align-items: center; border-radius: 999px; font-size: 10.5px; font-weight: 600;
   background: var(--surface1); color: var(--subtext); }
 .pr-chip.good { background: rgba(74,222,128,.14); color: var(--green); }
 .pr-chip.warn { background: rgba(250,204,21,.13); color: var(--yellow); }
 .pr-chip.bad { background: rgba(248,113,113,.15); color: var(--red); }
-.pr-sub { min-width: 0; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-sub { min-width: 0; font-size: 11px; color: var(--dim); }
 .pr-refs { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; }
 .pr-row:hover .pr-num { visibility: hidden; } /* the action buttons take that corner on hover */
 
