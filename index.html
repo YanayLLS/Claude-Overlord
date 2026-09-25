@@ -1230,6 +1230,7 @@ button:focus-visible { outline-offset:0; }
         <span>World game (feature flag)</span>
       </label>
       <div class="settings-hint">Off: nothing of the world is loaded or run &mdash; no 3D renderer, no header button, no economy. On: the game starts, showing your agents as a hex-tile island beside the list. Everything you can do in the list still works; the map is another way to look at the same state. Show or hide it with the &#x2B22; button in the header.</div>
+      <div id="world-raids">
       <div class="settings-subhead">ClickUp raids</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-clickup" onchange="onClickupEnableChange(this.checked)" />
@@ -1275,6 +1276,7 @@ button:focus-visible { outline-offset:0; }
         <input type="number" id="inp-clickup-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
       </label>
       <div class="settings-hint" id="clickup-live" style="padding-left:0;"></div>
+      </div>
       </div>
       </details>
 
@@ -5805,8 +5807,8 @@ function renderSettingsChips() {
   n('chip-pr', pr, pr ? `on · ${prN} repo${prN === 1 ? '' : 's'}` : 'off');
   const ac = actionsSettings.enabled, acN = (actionsSettings.workflows || []).length;
   n('chip-actions', ac, ac ? `on · ${acN} workflow${acN === 1 ? '' : 's'}` : 'off');
-  const cuOn = clickupSettings.enabled, cuN = (clickupSettings.lists || []).length, cuR = clickupState.tasks.length;
-  n('chip-clickup', cuOn, cuOn ? `on · ${cuN} board${cuN === 1 ? '' : 's'} · ${cuR} raid${cuR === 1 ? '' : 's'}` : 'off');
+  const cuOn = worldEnabled && clickupSettings.enabled, cuN = (clickupSettings.lists || []).length, cuR = clickupState.tasks.length;
+  n('chip-clickup', worldEnabled, !worldEnabled ? 'off' : cuOn ? `on · ${cuN} board${cuN === 1 ? '' : 's'} · ${cuR} raid${cuR === 1 ? '' : 's'}` : 'on · no raids');
 }
 
 function loadRepos() {
@@ -5903,6 +5905,7 @@ function setWorldEnabled(on, persist = true, view = true) {
   worldEnabled = !!on;
   document.body.classList.toggle('world-on', worldEnabled);
   const chk = document.getElementById('chk-world'); if (chk) chk.checked = worldEnabled;
+  if (typeof renderSettingsChips === 'function') renderSettingsChips();
   if (persist) api.send({ type: 'saveSettings', settings: { worldEnabled } });
   if (!worldEnabled) { setWorldView(false, persist); return; }
   loadWorld().then(() => { if (worldEnabled) setWorldView(view, persist); }, e => {

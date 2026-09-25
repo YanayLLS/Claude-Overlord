@@ -513,3 +513,4 @@ html[data-theme="light"] ::selection { background: rgba(79,91,213,.22); }
   .settings-nav { flex: none; flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--border); padding: 0 0 10px; }
 }
 .settings-subhead { margin: 18px 0 6px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--text); }
+body:not(.world-on) #world-raids { display: none; } /* raids are part of the World game */

@@ -2491,7 +2491,8 @@ let lastClickup = { tasks: [], error: null, fetchedAt: 0 };
 
 function clickupCfg() {
   const c = settings.clickupSettings || {};
-  return { enabled: !!c.enabled, teamId: String(c.teamId || ''), lists: cu.sanitizeLists(c.lists), statuses: Array.isArray(c.statuses) && c.statuses.length ? c.statuses : ['failed qa'],
+  // Raids only exist in the World game, so they are off (no polling) while it is.
+  return { enabled: !!c.enabled && !!settings.worldEnabled, teamId: String(c.teamId || ''), lists: cu.sanitizeLists(c.lists), statuses: Array.isArray(c.statuses) && c.statuses.length ? c.statuses : ['failed qa'],
     fightStatuses: Array.isArray(c.fightStatuses) ? c.fightStatuses : ['in development'], platformMap: cu.sanitizePlatformMap(c.platformMap),
     intervalSec: Math.max(30, Number(c.intervalSec) || 60), onlyMine: c.onlyMine !== false, user: c.user && c.user.id ? c.user : null, platformField: String(c.platformField || 'platform') };
 }
@@ -3740,7 +3741,7 @@ function handleIpc(msg) {
       break;
     }
     case 'exportTranscript': exportTranscript(msg.id).catch(e => console.log('[Overlord] Export failed:', e.message)); break;
-    case 'saveSettings': Object.assign(settings, msg.settings); saveState(); break;
+    case 'saveSettings': Object.assign(settings, msg.settings); saveState(); if ('worldEnabled' in msg.settings) armClickupTimer(); break;
     case 'setTheme': // the window buttons Windows draws over the header follow the theme
       if (mainWindow && !mainWindow.isDestroyed()) { try { mainWindow.setTitleBarOverlay(titleBarColors(msg.theme)); mainWindow.setBackgroundColor(themeOf(msg.theme).bg); } catch {} }
       break;
