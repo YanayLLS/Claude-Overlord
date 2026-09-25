@@ -1319,6 +1319,7 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+D</span><span class="help-desc">Duplicate agent (same project, pre-filled prompt)</span></div>
       <div class="help-row"><span class="help-key">Ctrl+L</span><span class="help-desc">Clear terminal display</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+W</span><span class="help-desc">Close all done agents</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Z</span><span class="help-desc">Bring back the last Ctrl+W agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+↑/↓</span><span class="help-desc">Previous / next agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Tab</span><span class="help-desc">Next agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+Tab</span><span class="help-desc">Previous agent</span></div>
@@ -1944,6 +1945,19 @@ function archiveAgent(id) {
 }
 function unarchiveAgent(id) {
   api.send({ type: 'unarchiveAgent', id });
+}
+// Agents archived by Ctrl+W, newest last. Ctrl+Z pops one back and focuses it.
+const closedStack = [];
+let focusOnUnarchive = null;
+function popClosed() {
+  while (closedStack.length) {
+    const id = closedStack.pop();
+    if (!agents.get(id)?.archived) continue; // unarchived or deleted meanwhile
+    focusOnUnarchive = id;
+    unarchiveAgent(id);
+    return true;
+  }
+  return false;
 }
 
 let _archiveModalCwd = null;
@@ -2839,6 +2853,9 @@ function createXterm(id) {
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
     if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
     if ((e.ctrlKey || e.metaKey) && e.key === 'n') return false; // new agent, not ^N to the shell
+    if ((e.ctrlKey || e.metaKey) && e.key === 'w') return false; // archive agent, not ^W to the shell
+    // Ctrl+Z undoes a Ctrl+W while there is one to undo; otherwise the shell gets it.
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && closedStack.some(i => agents.get(i)?.archived)) return false;
     // Bare PageUp/PageDown cycle agents. xterm binds them to scrollPages and its cancel()
     // calls stopPropagation(), which would kill the event before the document handler sees
     // it. Shift+PageUp/Down still scrolls the terminal.
@@ -3560,7 +3577,8 @@ function handleAgentMsg(msg) {
       if (a) {
         a.archived = false;
         refreshArchiveModal(a.cwd);
-        scheduleRender();
+        if (focusOnUnarchive === msg.id) { focusOnUnarchive = null; focusAgent(msg.id); }
+        else scheduleRender();
       }
       break;
     }
@@ -4206,8 +4224,15 @@ document.addEventListener('keydown', (e) => {
         if (st === 'waiting' || st === 'idle') closeAgent(id);
       }
     } else if (selectedId && agents.has(selectedId)) {
-      closeAgent(selectedId);
+      // Archive, not close: the session survives so Ctrl+Z can bring it back.
+      closedStack.push(selectedId);
+      archiveAgent(selectedId);
     }
+    return;
+  }
+  // Ctrl+Z: undo the last Ctrl+W — unarchive that agent and switch to it
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey && popClosed()) {
+    e.preventDefault();
     return;
   }
   // Ctrl+Shift+Up/Down: previous / next agent in list order, across projects
