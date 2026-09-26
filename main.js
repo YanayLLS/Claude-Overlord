@@ -262,24 +262,23 @@ const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
 const SETTINGS_FILE = path.join(STATE_DIR, 'overlord-settings.json');
 const CLAUDE_JSON = path.join(os.homedir(), '.claude.json');
 
-function protectClaudeConfig() {
+// Runs before claude launches. Also: every worktree of a repo you trust is trusted
+// too, so no agent sits parked on Claude's "trust this folder?" prompt. `extra` is
+// [{ repo, path }] for worktree folders not in settings. One read, at most one write.
+const { inheritTrust } = require('./trust-core');
+function protectClaudeConfig(extra = []) {
   try {
     const data = JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf-8'));
+    let changed = false;
     if (!data.hasCompletedOnboarding) {
-      data.hasCompletedOnboarding = true;
-      fs.writeFileSync(CLAUDE_JSON, JSON.stringify(data, null, 2));
+      data.hasCompletedOnboarding = true; changed = true;
       console.log('[Overlord] Restored hasCompletedOnboarding in ~/.claude.json');
     }
+    for (const w of [...(settings.worktrees || []), ...extra]) {
+      if (inheritTrust(data, w.repo, w.path)) changed = true;
+    }
+    if (changed) fs.writeFileSync(CLAUDE_JSON, JSON.stringify(data, null, 2));
   } catch {}
-}
-// Worktree of a repo you trust → trusted too, so an unattended agent isn't parked on
-// Claude's trust prompt. Same rewrite pattern as above; claude re-reads the file on boot.
-const { inheritTrust } = require('./trust-core');
-function trustLikeRepo(repoDir, dir) {
-  try {
-    const data = JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf-8'));
-    if (inheritTrust(data, repoDir, dir)) fs.writeFileSync(CLAUDE_JSON, JSON.stringify(data, null, 2));
-  } catch (e) { flog('trustLikeRepo failed:', e); }
 }
 const ACCOUNTS_PATH = path.join(STATE_DIR, 'accounts.json');
 const LOG_FILE = path.join(STATE_DIR, 'overlord.log');
@@ -1456,6 +1455,7 @@ function takeSpare(cwd) {
 // running, so it can't take one.
 function createAgent(folderPath, initialPrompt, argPrompt) {
   const cwd = folderPath || os.homedir();
+  protectClaudeConfig();
   const warm = argPrompt ? null : takeSpare(cwd);
   const sessionId = warm ? warm.sessionId : crypto.randomUUID();
   const id = warm ? warm.id : nextId++;
@@ -2445,7 +2445,7 @@ async function fixActionRun(run) {
     dir = (await doCreateWorktree({ repo: plan.repoDir, branch: plan.branch, base: plan.startPoint })).path;
     projectConfig(plan.repoDir).defaultBase = prevBase || 'dev'; saveState();
   }
-  trustLikeRepo(plan.repoDir, dir);
+  protectClaudeConfig([{ repo: plan.repoDir, path: dir }]);
   createAgent(dir, null, plan.prompt);
 }
 
