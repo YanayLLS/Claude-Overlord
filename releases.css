@@ -170,3 +170,9 @@
 #rl-tlx-tip .tt-chip { font-size:10.5px; padding:1px 7px; border-radius:var(--r-sm); background:var(--surface1); color:var(--subtext); }
 #rl-tlx-tip .tt-chip.mono { font-family:'Geist Mono',ui-monospace,Consolas,monospace; }
 #rl-tlx-tip .tt-foot { margin-top:8px; font-size:10.5px; color:var(--dim); }
+#rl-tlx-tip .tt-lines { display:flex; flex-direction:column; gap:3px; margin-top:8px; padding-top:8px; border-top:1px solid rgba(var(--ink),.08); font-size:11px; color:var(--subtext); }
+#rl-tlx-tip .tt-lines b { color:var(--text); font-weight:600; }
+#rl-tlx-tip .tt-lines b.warn { color:var(--peach); }
+#rl-tlx-tip .tt-lines .bad { color:var(--red); }
+#rl-tlx-tip .tt-lines .mono { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; }
+.rl-uses { cursor:default; }

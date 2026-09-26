@@ -101,7 +101,7 @@
     if (!c) return '<div class="rl-empty"></div>';
     // no deployment of its own: say whose it runs instead of leaving a hole
     if (c.uses) {
-      return `<div class="rl-uses" title="${esc(c.env)} has no deployment of its own for this repo — it uses ${esc(c.uses)}'s">`
+      return `<div class="rl-uses" data-r="${r}" data-c="${i}">`
         + `uses <span class="rl-env" style="--hue:${ENV_HUE[c.uses.toLowerCase()] || 'var(--dim)'}">${esc(c.uses)}</span></div>`;
     }
     const d = deployInfo(c);
@@ -113,20 +113,18 @@
     else if (c.error) top = `<span class="rl-bad" title="${esc(c.error)}">! error</span>`;
     else top = `<span class="rl-sha">${esc(refOf(shown))}</span><span class="rl-age">${esc(age(shown.date))}</span>`;
     let next = '';
-    if (c.live && c.live.behind) next = `<span class="rl-next" title="${c.live.behind} commits on ${esc(c.branch)} not deployed">${link(c.live.compareUrl, `<b>${c.live.behind}</b> not live`)}</span>`;
+    if (c.live && c.live.behind) next = `<span class="rl-next">${link(c.live.compareUrl, `<b>${c.live.behind}</b> not live`)}</span>`;
     // one count per step out of this env — a fork (dev → alpha, dev → prod) shows both
     else next = (c.nexts || []).map((n, k) => {
       const lead = k ? ' rl-next-more' : '';
       if (n.loading) return `<span class="rl-next zero${lead}">… ${esc(n.to)}</span>`;
-      if (n.error) return `<span class="rl-next rl-bad${lead}" title="${esc(n.error)}">? ${esc(n.to)}</span>`;
-      if (!n.ahead) return `<span class="rl-next zero${lead}" title="Nothing waiting for ${esc(n.to)}">✓ ${esc(n.to)}</span>`;
-      return `<span class="rl-next${lead}" title="${n.ahead} commits not yet in ${esc(n.to)}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>`;
+      if (n.error) return `<span class="rl-next rl-bad${lead}">? ${esc(n.to)}</span>`;
+      if (!n.ahead) return `<span class="rl-next zero${lead}">✓ ${esc(n.to)}</span>`;
+      return `<span class="rl-next${lead}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>`;
     }).join('');
     const hand = d.manual ? '<svg class="rl-hand" viewBox="0 0 24 24" aria-label="manual deploy"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>' : '';
-    const tip = [d.text, shown && shown.title,
-      [c.branch, shown && shown.sha.slice(0, 7), c.commit && c.commit.author].filter(Boolean).join(' · ')].filter(Boolean).join('\n');
     const isSel = sel && sel[0] === r && sel[1] === i;
-    return `<div class="rl-cell st-${d.cls}${isSel ? ' sel' : ''}" data-r="${r}" data-c="${i}" title="${esc(tip)}" data-tip-dot="rl-dot ${d.cls}"><div class="rl-top">${hand}${top}${next}</div></div>`;
+    return `<div class="rl-cell st-${d.cls}${isSel ? ' sel' : ''}" data-r="${r}" data-c="${i}"><div class="rl-top">${hand}${top}${next}</div></div>`;
   }
 
   const ENV_HUE = { dev: 'var(--accent)', alpha: 'var(--purple)', staging: 'var(--yellow)', prod: 'var(--green)', production: 'var(--green)' };
@@ -159,17 +157,64 @@
       + (e.actor ? `<span class="tt-chip">@${esc(e.actor)}</span>` : '') + '</div>'
       + `<div class="tt-foot">${e.kind === 'merge' ? 'Go-live time unknown · click to open the commit' : 'Click to open the run on GitHub'}</div>`;
   }
+  // Hover card for a board cell: env + deploy-status badges and age, the commit, chips, then
+  // what's waiting / what's live / what failed.
+  const CELL_BADGE = { ok: ['ok', 'Deployed'], bad: ['bad', 'Deploy failed'], part: ['part', 'Deployed · side job failed'], run: ['part', 'Deploying now'] };
+  function cellTipHtml(row, c) {
+    const envBadge = `<span class="tt-env" style="--hue:${ENV_HUE[c.env.toLowerCase()] || 'var(--dim)'}">${esc(c.env)}</span>`;
+    if (c.uses) {
+      return `<div class="tt-head">${envBadge}<span class="tt-state off">uses ${esc(c.uses)}</span></div>`
+        + `<div class="tt-repo">${esc(row.label)}</div>`
+        + `<div class="tt-title">No deployment of its own — ${esc(c.env)} runs ${esc(c.uses)}'s.</div>`;
+    }
+    const d = deployInfo(c), shown = c.live && !c.live.error ? c.live : c.commit;
+    const [cls, label] = CELL_BADGE[d.cls] || ['off', d.manual ? 'Live version unknown' : (c.run ? 'Deploy ' + c.run.state : 'No CI status')];
+    const runDate = c.run && c.run.date && c.run.state !== 'dead' ? `deploy ${age(c.run.date)} ago` : shown ? `${age(shown.date)} ago` : '';
+    let h = `<div class="tt-head">${envBadge}<span class="tt-state ${cls}">${esc(label)}</span>`
+      + (d.manual ? '<span class="tt-state hand">✋ Manual</span>' : '') + `<span class="tt-when">${esc(runDate)}</span></div>`
+      + `<div class="tt-repo">${esc(row.label)}</div>`;
+    if (shown) {
+      const pr = (shown.title.match(/^#(\d+) /) || [])[1];
+      h += `<div class="tt-title">${esc(shown.title.replace(/^#\d+ /, ''))}</div>`
+        + '<div class="tt-chips">' + (pr ? `<span class="tt-chip">#${esc(pr)}</span>` : '')
+        + `<span class="tt-chip mono">${esc(shown.sha.slice(0, 7))}</span><span class="tt-chip">⎇ ${esc(c.branch)}</span>`
+        + (c.commit && c.commit.author ? `<span class="tt-chip">@${esc(c.commit.author)}</span>` : '') + '</div>';
+    } else if (c.error || c.missing) h += `<div class="tt-title">${esc(c.missing ? 'Branch ' + c.branch + ' is missing' : c.error)}</div>`;
+    const lines = [];
+    if (c.live && !c.live.error) lines.push(`<b>Live</b> ${esc(c.live.sha.slice(0, 7))}${c.live.behind ? ` · <b class="warn">${c.live.behind}</b> newer not deployed` : ' · up to date'}`);
+    for (const n of c.nexts || []) {
+      if (n.loading) continue;
+      lines.push(n.error ? `→ ${esc(n.to)}: can't compare` : n.ahead ? `<b class="warn">${n.ahead}</b> waiting → ${esc(n.to)}` : `✓ nothing waiting for ${esc(n.to)}`);
+    }
+    const dead = c.run && c.run.state === 'dead';
+    if (c.deploy && c.deploy !== 'manual') lines.push(dead ? `CI <span class="mono">${esc(c.deploy)}</span> has never succeeded — not how this env ships` : `CI <span class="mono">${esc(c.deploy)}</span>`);
+    if (!dead) for (const f of (c.run && c.run.failed) || []) lines.push(`<span class="bad">✕ ${esc(f.job)}${f.step ? ' › ' + esc(f.step) : ''}</span>`);
+    if (c.live && c.live.from) lines.push(`pinned in <span class="mono">${esc(c.live.from.split(':')[1] || c.live.from)}</span>`);
+    if (lines.length) h += '<div class="tt-lines">' + lines.map(l => `<div>${l}</div>`).join('') + '</div>';
+    return h + '<div class="tt-foot">Click for details</div>';
+  }
+
   overlay.addEventListener('mouseover', (ev) => {
-    const m = ev.target.closest && ev.target.closest('.rl-tlx-mark');
-    if (!m || !tlMarks[m.dataset.i]) return;
-    tlTip.innerHTML = tipHtml(tlMarks[m.dataset.i]);
+    const m = ev.target.closest && ev.target.closest('.rl-tlx-mark, .rl-cell[data-r], .rl-uses[data-r]');
+    if (!m) return;
+    let html = '';
+    if (m.classList.contains('rl-tlx-mark')) { if (tlMarks[m.dataset.i]) html = tipHtml(tlMarks[m.dataset.i]); }
+    else {
+      const row = state && state.grid && state.grid.rows[m.dataset.r], c = row && row.cells && row.cells[m.dataset.c];
+      if (c) html = cellTipHtml(row, c);
+    }
+    if (!html) return;
+    tlTip.innerHTML = html;
     tlTip.classList.add('show');
     const r = m.getBoundingClientRect(), w = tlTip.offsetWidth, h = tlTip.offsetHeight;
     const x = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2));
     const y = r.top - h - 10 >= 8 ? r.top - h - 10 : r.bottom + 10; // above the dot, or below when there's no room
     tlTip.style.left = x + 'px'; tlTip.style.top = y + 'px';
   });
-  overlay.addEventListener('mouseout', (ev) => { if (ev.target.closest && ev.target.closest('.rl-tlx-mark')) tlTip.classList.remove('show'); });
+  overlay.addEventListener('mouseout', (ev) => {
+    const from = ev.target.closest && ev.target.closest('.rl-tlx-mark, .rl-cell[data-r], .rl-uses[data-r]');
+    if (from && !(ev.relatedTarget && from.contains(ev.relatedTarget))) tlTip.classList.remove('show');
+  });
 
   function timelineHtml(s) {
     tlMarks = [];
