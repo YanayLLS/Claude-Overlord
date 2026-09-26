@@ -209,3 +209,49 @@
   font:700 9px/14px inherit; font-style:normal; letter-spacing:0; }
 .rl-rel-bell.done { opacity:.4; cursor:default; }
 .rl-rel-bell.done:hover { background:none; color:var(--subtext); }
+
+/* ── Hover pass: every interactive piece of the Releases feature answers the pointer ── */
+.rl-head .rl-tabs button { transition:background .12s, color .12s; }
+.rl-head .rl-tabs button:not(.on):hover { background:var(--hover-strong); color:var(--text); }
+.rl-head .rl-release { transition:filter .12s, transform .12s, box-shadow .12s; }
+.rl-head .rl-release:hover { transform:translateY(-1px); box-shadow:0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); }
+.rl-head .rl-src { transition:color .12s; }
+/* board cells lift a touch; the repo name and "uses" placeholders respond too */
+.rl-cell { transition:background .12s, border-color .12s, transform .12s, box-shadow .12s; }
+.rl-cell:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.25); }
+.rl-label .rl-link { transition:color .12s; }
+.rl-label:hover .rl-link { color:var(--accent); }
+.rl-uses { transition:border-color .12s, color .12s, background .12s; }
+.rl-uses:hover { border-color:rgba(var(--ink),.28); color:var(--subtext); background:rgba(var(--ink),.02); }
+.rl-next a { transition:color .12s, filter .12s; }
+.rl-next a:hover { color:var(--text); }
+.rl-next a:hover b { filter:brightness(1.2); }
+/* timeline: the lane under the pointer highlights, filter chips and dots respond */
+.rl-tl-filter button { transition:background .12s, border-color .12s, color .12s; }
+.rl-tl-filter button:hover { color:var(--text); border-color:var(--border-hi); }
+.rl-tlx-track { transition:background-color .12s; }
+.rl-tlx-row:hover .rl-tlx-track { background-color:rgba(var(--ink),.03); }
+.rl-tlx-row:hover .rl-tlx-repo { color:var(--accent); }
+.rl-tlx-repo { transition:color .12s; }
+.rl-tlx-day { transition:background .12s; }
+.rl-tlx-day:hover { background:rgba(var(--ink),.04); }
+/* release picker */
+.rl-rel-env { transition:background .12s, border-color .12s, transform .12s; }
+.rl-rel-env:hover { border-color:var(--border-hi); transform:translateX(2px); }
+.rl-rel-env.on:hover { border-color:var(--accent); }
+.rl-rel-actions button { transition:background .12s, border-color .12s, filter .12s; }
+.rl-rel-actions button:not(.go):not(:disabled):hover { background:var(--surface1); border-color:var(--border-hi); }
+.rl-rel-actions button.go:not(:disabled):hover { filter:brightness(1.12); }
+.rl-rel-bell { transition:background .12s, color .12s; }
+/* detail drawer links and the setup screen */
+.rl-detail .rl-link { transition:color .12s; }
+.rl-detail .rl-link:hover { color:var(--accent); }
+.rl-detail li { border-radius:var(--r-sm); padding:1px 4px; margin-left:-4px; transition:background .12s; }
+.rl-detail li:hover { background:var(--hover); }
+.rl-setup button, .rl-setup input { transition:background .12s, border-color .12s, filter .12s; }
+.rl-setup input:hover:not(:focus) { border-color:var(--border-hi); }
+/* legend swatches nudge so the key reads as live */
+.rl-legend > span { transition:color .12s; }
+.rl-legend > span:hover { color:var(--subtext); }
+.rl-cell.sel:hover { box-shadow:0 0 0 1.5px var(--accent), 0 4px 12px rgba(0,0,0,.25); }
+.rl-skel .rl-cell:hover { transform:none; box-shadow:none; }
