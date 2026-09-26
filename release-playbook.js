@@ -6,7 +6,7 @@
 function releaseBrief({ envs, plan, configSource, flagCheck }) {
   const L = [];
   L.push(`# Release: ${envs.join(' + ')}`, '');
-  L.push('You were started by Overlord\'s **Release** button. Open the promotion PRs below, open a back-merge PR wherever the target is ahead of the source, resolve conflicts through a PR into the source, and finish with the report table. Work through every row; run independent rows in parallel.', '');
+  L.push('You were started by Overlord\'s **Release** button. Open the promotion PRs below, open a back-merge PR wherever the target is ahead of the source, unblock conflicting or red release PRs (new or already open) through a PR into the source, and finish with the report table. Work through every row; run independent rows in parallel.', '');
   L.push('**Never merge a PR. Never push to `dev`/`alpha`/`master`/`main`/`prod-one`/`staging`.** PR heads are existing remote branches, so nothing local is touched, except a conflict resolution branch (see [Conflicts](#conflicts--resolve-back-into-the-source)).', '');
   L.push(`The list comes from the releases config \`${configSource}\` (its \`branches\` + \`promote\`). Never infer a target from \`origin/HEAD\`, \`gh repo view\` or the branch name \`main\`.`, '');
 
@@ -37,7 +37,7 @@ function releaseBrief({ envs, plan, configSource, flagCheck }) {
    \`gh api repos/<repo>/compare/<target>...<source> --jq '{ahead: .ahead_by, files: (.files|length)}'\`
    - \`ahead == 0\` or \`files == 0\` → "nothing to release", no PR.
    - **Hotfix check:** \`gh api repos/<repo>/compare/<source>...<target> --jq '[.commits[]|select(.parents|length==1)]|length'\`. Non-zero → the target holds real commits the source lacks. Still open the release PR, flag it in the report and body, **and open a back-merge PR** (below). Ignore raw \`behind_by\`: every past release merge commit counts there. A repo whose target carries its own \`ci(deploy)\` commits (e.g. remote-support-web \`prod-one\`) is never 0 there; drop those before deciding.
-2. **Already open?** \`gh pr list -R <repo> --base <target> --head <source> --state open --json number,url\`. If one exists, report it and do not open a second. Re-check right before step 4.
+2. **Already open?** \`gh pr list -R <repo> --base <target> --head <source> --state open --json number,url\`. If one exists, do not open a second: skip to step 5 and **unblock it** (conflicts, failing checks) exactly as if you had just opened it. Re-check right before step 4.
 3. **Body.** Compare returns 250 commits per page, so paginate:
    \`gh api --paginate "repos/<repo>/compare/<target>...<source>?per_page=100" --jq '.commits[]|select(.parents|length==1)|.commit.message|split("\\n")[0]'\`
    - one line: env + what merging deploys (read the target branch's deploy workflow: \`gh api repos/<repo>/contents/.github/workflows?ref=<target>\`)
@@ -47,6 +47,17 @@ function releaseBrief({ envs, plan, configSource, flagCheck }) {
    - end with the PR attribution lines from your system reminder
 4. **Open.** \`gh pr create -R <repo> --base <target> --head <source> --title "chore(release): promote <source> to <target>" --body-file <scratchpad file>\`
 5. \`gh pr view <url> --json mergeable\`: \`UNKNOWN\` → wait a few seconds and ask again; \`CONFLICTING\` → the back-merge below is what unblocks it. Never leave a conflicting release PR only "flagged".
+6. **Checks.** \`gh pr checks <url>\`. Pending → note it, don't wait on it. Failing → [Unblock a failing release PR](#unblock-a-failing-release-pr). Never leave a red release PR only "flagged".
+
+## Unblock a failing release PR
+
+A release PR's head IS the source branch, so the fix goes **into the source** through its own PR; once that merges, the release PR re-runs and turns green by itself. Never open a second release PR.
+
+1. **Read why:** \`gh pr checks <url>\` for the failed check → its run id → \`gh run view <id> -R <repo> --log-failed\`. Already a fix PR open into the source? (\`gh pr list -R <repo> --base <source> --head fix/release-<target>-checks --state open\`) → reuse it, report it.
+2. **Flaky / infra, not code** (timeouts, a registry or network error, a runner that died, a test that passes on retry): \`gh run rerun <id> -R <repo> --failed\` once and report "re-ran <check>". If it fails the same way again, treat it as real.
+3. **Real failure:** a worktree off the source exactly as in [Conflicts](#conflicts--resolve-back-into-the-source) step 1, but branch \`fix/release-<target>-checks\`. Reproduce locally (the failing test/typecheck/lint command from the log), make the smallest fix, re-run that command until it passes, commit with the attribution line, push the fix branch only, and open \`gh pr create -R <repo> --base <source> --head fix/release-<target>-checks --title "fix: unblock the <target> release — <what failed>" --body-file <file>\`. Body: which release PR it unblocks (link), the failing check and root cause, what changed, the verification you ran. Into the frontend's \`dev\` → add the \`\`\`bdd block. Clean up the worktree.
+4. **Can't fix it safely** (needs secrets, a product decision, or a change you can't verify): don't guess. Report the failing check, the root cause you found, and what's needed.
+5. Report: "merge fix PR #N first, then the release PR".
 
 ## Back-merge: align the source with the target first
 
@@ -99,7 +110,9 @@ End with a TL;DR table, one row per repo × env (release PRs first, then the han
 - Adding a \`\`\`bdd block to a release PR: BDD only runs on PRs into \`dev\`. The resolution / back-merge PR into \`dev\` does need one.
 - Flagging "target ahead" without opening the back-merge PR.
 - Resolving a conflict by pushing to the source directly, or by PR-ing into the target.
-- Opening a second release PR after resolving: the existing one turns mergeable once the resolution merges.
+- Opening a second release PR after resolving or fixing: the existing one turns mergeable/green once the fix merges into the source.
+- Skipping an already-open release PR because it exists: it still needs unblocking (conflicts, red checks).
+- Pushing a fix straight to the source branch: every fix goes through a PR into the source.
 `);
   return L.join('\n');
 }
