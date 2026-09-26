@@ -74,17 +74,31 @@ function validateConfig(cfg) {
       }
     }
     if (r.promote == null) return;
-    if (!Array.isArray(r.promote) || r.promote.length < 2) { out.push(`${at}.promote: needs at least 2 envs`); return; }
-    r.promote.forEach((env, j) => {
-      if (!Object.prototype.hasOwnProperty.call(r.branches, env)) out.push(`${at}.promote[${j}]: "${env}" is not in branches`);
+    // one path ["dev","alpha","prod"], or several that fork: [["dev","alpha"],["dev","prod"]]
+    const nested = Array.isArray(r.promote) && Array.isArray(r.promote[0]);
+    const chains = nested ? r.promote : [r.promote];
+    chains.forEach((chain, i) => {
+      const where = nested ? `${at}.promote[${i}]` : `${at}.promote`;
+      if (!Array.isArray(chain) || chain.length < 2) { out.push(`${where}: needs at least 2 envs`); return; }
+      chain.forEach((env, j) => {
+        if (!Object.prototype.hasOwnProperty.call(r.branches, env)) out.push(`${where}[${j}]: "${env}" is not in branches`);
+      });
     });
   });
   return out;
 }
 
+// Every from → to step of the promote path(s), each once.
 function promotePairs(r) {
   const p = r.promote || [];
-  return p.slice(1).map((to, i) => ({ from: p[i], to }));
+  const seen = new Set(), out = [];
+  for (const chain of Array.isArray(p[0]) ? p : [p]) {
+    chain.slice(1).forEach((to, i) => {
+      const k = chain[i] + '>' + to;
+      if (!seen.has(k)) { seen.add(k); out.push({ from: chain[i], to }); }
+    });
+  }
+  return out;
 }
 
 // The gh calls a refresh needs. Assumes a validated config.
@@ -108,7 +122,8 @@ function requestsFor(cfg) {
 }
 
 // View model: one row per repo, one cell per env (null = repo has no branch there).
-// results.commits['repo|env'] and results.compares['repo|from'] — missing = still loading.
+// results.commits['repo|env'] and results.compares['repo|from>to'] — missing = still loading.
+// cell.nexts = every step out of that env (a fork has several); cell.next = the first.
 function buildGrid(cfg, results) {
   const commits = (results && results.commits) || {}, compares = (results && results.compares) || {}, deploys = (results && results.deploys) || {}, lives = (results && results.lives) || {};
   const rows = cfg.repos.map((r) => {
@@ -116,17 +131,18 @@ function buildGrid(cfg, results) {
     const group = r.group || '';
     if (!r.branches) return { repo: r.repo, label, group, note: String(r.note) };
     const nextOf = {};
-    for (const { from, to } of promotePairs(r)) nextOf[from] = to;
+    for (const { from, to } of promotePairs(r)) (nextOf[from] = nextOf[from] || []).push(to);
     const cells = cfg.envs.map((env) => {
       const branch = r.branches[env];
       // no deployment of its own: this env runs another env's (config `uses`), or nothing
       if (!branch) return r.uses && r.uses[env] ? { env, uses: r.uses[env] } : null;
       const res = commits[`${r.repo}|${env}`];
-      const cell = { env, branch, deploy: (r.deploy && r.deploy[env]) || null, run: deploys[`${r.repo}|${env}`] || null, live: lives[`${r.repo}|${env}`] || null, commit: null, error: null, missing: false, loading: !res, next: null };
+      const cell = { env, branch, deploy: (r.deploy && r.deploy[env]) || null, run: deploys[`${r.repo}|${env}`] || null, live: lives[`${r.repo}|${env}`] || null, commit: null, error: null, missing: false, loading: !res, next: null, nexts: [] };
       if (res && res.error) cell.error = res.error;
       else if (res && res.missing) cell.missing = true;
       else if (res) cell.commit = res;
-      if (nextOf[env]) cell.next = compares[`${r.repo}|${env}`] || { to: nextOf[env], loading: true };
+      cell.nexts = (nextOf[env] || []).map(to => compares[`${r.repo}|${env}>${to}`] || { to, loading: true });
+      cell.next = cell.nexts[0] || null;
       return cell;
     });
     return { repo: r.repo, label, group, cells };

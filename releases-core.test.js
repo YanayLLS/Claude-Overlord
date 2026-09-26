@@ -90,9 +90,9 @@ assert.deepStrictEqual(validateConfig(frontline), []);
       'o/id|dev': c('ccccccc1'), 'o/id|prod': c('ddddddd1'),
     },
     compares: {
-      'o/web|dev': { to: 'alpha', ahead: 12, url: 'cmp1', commits: [] },
-      'o/web|alpha': { error: 'nope' },
-      'o/id|dev': { to: 'prod', ahead: 4, url: 'cmp3', commits: [] },
+      'o/web|dev>alpha': { to: 'alpha', ahead: 12, url: 'cmp1', commits: [] },
+      'o/web|alpha>prod': { error: 'nope' },
+      'o/id|dev>prod': { to: 'prod', ahead: 4, url: 'cmp3', commits: [] },
     },
   });
   assert.deepStrictEqual(g.envs, ['dev', 'alpha', 'prod']);
@@ -260,5 +260,16 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(bad({ alpha: 'prod' }), ['repos[0].uses.alpha: "prod" has no branch in this repo']);
   assert.deepStrictEqual(bad({ dev: 'dev' }), ['repos[0].uses.dev: dev has its own branch']);
   assert.deepStrictEqual(bad({ qa: 'dev' }), ['repos[0].uses.qa: "qa" is not in envs']);
+}
+// ── promote that forks: dev feeds alpha AND prod, each with its own waiting count ──
+{
+  const cfg = { envs: ['dev', 'alpha', 'prod'], repos: [{ repo: 'o/f', branches: { dev: 'dev', alpha: 'alpha', prod: 'master' }, promote: [['dev', 'alpha'], ['dev', 'prod']] }] };
+  assert.deepStrictEqual(validateConfig(cfg), []);
+  assert.deepStrictEqual(requestsFor(cfg).compares.map(c => c.from + '>' + c.to), ['dev>alpha', 'dev>prod']);
+  const dev = buildGrid(cfg, { compares: { 'o/f|dev>alpha': { to: 'alpha', ahead: 9 }, 'o/f|dev>prod': { to: 'prod', ahead: 30 } } }).rows[0].cells[0];
+  assert.deepStrictEqual(dev.nexts.map(n => n.to + ':' + n.ahead), ['alpha:9', 'prod:30']);
+  assert.strictEqual(dev.next.to, 'alpha');
+  assert.strictEqual(buildGrid(cfg, {}).rows[0].cells[1].nexts.length, 0); // alpha feeds nothing
+  assert.deepStrictEqual(validateConfig({ envs: ['dev'], repos: [{ repo: 'o/a', branches: { dev: 'dev' }, promote: [['dev']] }] }), ['repos[0].promote[0]: needs at least 2 envs']);
 }
 console.log('releases-core: all passed');

@@ -114,13 +114,14 @@
     else top = `<span class="rl-sha">${esc(refOf(shown))}</span><span class="rl-age">${esc(age(shown.date))}</span>`;
     let next = '';
     if (c.live && c.live.behind) next = `<span class="rl-next" title="${c.live.behind} commits on ${esc(c.branch)} not deployed">${link(c.live.compareUrl, `<b>${c.live.behind}</b> not live`)}</span>`;
-    else if (c.next) {
-      const n = c.next;
-      if (n.loading) next = `<span class="rl-next zero">… ${esc(n.to)}</span>`;
-      else if (n.error) next = `<span class="rl-next rl-bad" title="${esc(n.error)}">? ${esc(n.to)}</span>`;
-      else if (!n.ahead) next = `<span class="rl-next zero" title="Nothing waiting for ${esc(n.to)}">✓ ${esc(n.to)}</span>`;
-      else next = `<span class="rl-next" title="${n.ahead} commits not yet in ${esc(n.to)}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>`;
-    }
+    // one count per step out of this env — a fork (dev → alpha, dev → prod) shows both
+    else next = (c.nexts || []).map((n, k) => {
+      const lead = k ? ' rl-next-more' : '';
+      if (n.loading) return `<span class="rl-next zero${lead}">… ${esc(n.to)}</span>`;
+      if (n.error) return `<span class="rl-next rl-bad${lead}" title="${esc(n.error)}">? ${esc(n.to)}</span>`;
+      if (!n.ahead) return `<span class="rl-next zero${lead}" title="Nothing waiting for ${esc(n.to)}">✓ ${esc(n.to)}</span>`;
+      return `<span class="rl-next${lead}" title="${n.ahead} commits not yet in ${esc(n.to)}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>`;
+    }).join('');
     const hand = d.manual ? '<svg class="rl-hand" viewBox="0 0 24 24" aria-label="manual deploy"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>' : '';
     const tip = [d.text, shown && shown.title,
       [c.branch, shown && shown.sha.slice(0, 7), c.commit && c.commit.author].filter(Boolean).join(' · ')].filter(Boolean).join('\n');
@@ -225,16 +226,14 @@
       h += `<div>${link(c.commit.url, `<span class="rl-mono">${esc(c.commit.sha.slice(0, 7))}</span> ${esc(c.commit.title)}`)}`
         + ` — ${esc(c.commit.author)}, ${esc(age(c.commit.date))} ago</div>`;
     }
-    const n = c.next;
-    if (n && !n.loading && !n.error) {
-      if (!n.ahead) h += `<div style="margin-top:6px">Nothing waiting for ${esc(n.to)}.</div>`;
-      else {
-        h += `<div style="margin-top:6px">${n.ahead} commit${n.ahead === 1 ? '' : 's'} not yet in ${esc(n.to)} (newest first):</div><ul>`;
-        if (!n.commits) h += '<li class="rl-age">loading…</li>';
-        else for (const m of n.commits) h += `<li>${link(m.url, `<span class="rl-mono">${esc(m.sha.slice(0, 7))}</span> ${esc(m.title)}`)}</li>`;
-        h += '</ul>';
-        if (n.commits && n.ahead > n.commits.length) h += `<div>${link(n.url, `…and ${n.ahead - n.commits.length} more — compare on GitHub`)}</div>`;
-      }
+    for (const n of c.nexts || []) {
+      if (n.loading || n.error) continue;
+      if (!n.ahead) { h += `<div style="margin-top:6px">Nothing waiting for ${esc(n.to)}.</div>`; continue; }
+      h += `<div style="margin-top:6px">${n.ahead} commit${n.ahead === 1 ? '' : 's'} not yet in ${esc(n.to)} (newest first):</div><ul>`;
+      if (!n.commits) h += '<li class="rl-age">loading…</li>';
+      else for (const m of n.commits) h += `<li>${link(m.url, `<span class="rl-mono">${esc(m.sha.slice(0, 7))}</span> ${esc(m.title)}`)}</li>`;
+      h += '</ul>';
+      if (n.commits && n.ahead > n.commits.length) h += `<div>${link(n.url, `…and ${n.ahead - n.commits.length} more — compare on GitHub`)}</div>`;
     }
     return h + '</div>';
   }

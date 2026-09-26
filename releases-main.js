@@ -95,7 +95,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         };
       });
       compares.filter(c => c.repo === repo).forEach((c, j) => {
-        const key = `${repo}|${c.from}`;
+        const key = `${repo}|${c.from}>${c.to}`;
         const cmp = node && node[`c${j}`] && node[`c${j}`].compare;
         const url = `https://github.com/${repo}/compare/${encodeURIComponent(c.base)}...${encodeURIComponent(c.head)}`;
         out.compares[key] = !cmp ? { to: c.to, error: 'Could not compare these branches', url } : {
