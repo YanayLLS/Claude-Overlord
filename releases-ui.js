@@ -59,12 +59,14 @@
       api.send({ type: 'releasesSetSource', source: v });
     },
     deselect: () => { sel = null; render(); },
-    // opens with every env picked; slides in once, then re-renders (toggles, refreshes) keep it still
+    // opens (hover or click) with every env picked; slides in once, then re-renders keep it still
     releaseMenu: () => {
-      relOpen = !relOpen; relShown = false;
-      if (relOpen && state && state.config) relSel = new Set(ReleasesCore.releaseTargets(state.config));
+      if (relOpen) return;
+      relOpen = true; relShown = false;
+      if (state && state.config) relSel = new Set(ReleasesCore.releaseTargets(state.config));
       render();
     },
+    releaseClose: () => { relOpen = false; render(); },
     relToggle: (el) => { const e = el.dataset.env; relSel.has(e) ? relSel.delete(e) : relSel.add(e); render(); },
     releaseGo: () => {
       if (!relSel.size) return;
@@ -388,9 +390,25 @@
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
       : 'Pick one or more environments') + '</div>'
       + '<div class="rl-rel-note">An agent opens the PRs (plus back-merges and conflict fixes). It never merges or pushes to release branches.</div>'
-      + `<div class="rl-rel-actions"><button data-act="releaseMenu">Cancel</button><button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release agent</button></div></div>`;
+      + `<div class="rl-rel-actions"><button data-act="releaseClose">Cancel</button><button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release agent</button></div></div>`;
     return h;
   }
+
+  // Hovering Release opens the picker; leaving both the button and the picker closes it after a
+  // beat (long enough to cross the gap between them).
+  const REL_ZONE = '.rl-release, .rl-rel-pop';
+  let relLeave = null;
+  overlay.addEventListener('mouseover', (ev) => {
+    if (!ev.target.closest || !ev.target.closest(REL_ZONE)) return;
+    clearTimeout(relLeave);
+    actions.releaseMenu();
+  });
+  overlay.addEventListener('mouseout', (ev) => {
+    if (!ev.target.closest || !ev.target.closest(REL_ZONE)) return;
+    if (ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest(REL_ZONE)) return;
+    clearTimeout(relLeave);
+    relLeave = setTimeout(() => { if (relOpen) actions.releaseClose(); }, 400);
+  });
 
   function render() {
     tlTip.classList.remove('show');
