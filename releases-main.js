@@ -272,13 +272,13 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     });
   }
 
-  // Fix on one blocked row: an agent with the playbook scoped to that repo.
-  async function fixRow(i) {
-    const row = state.releaseRun && state.releaseRun.rows[i];
-    if (!row) return;
-    const p = path.join(runsDir(), `fix-${row.repo.split('/')[1]}-${row.env}-${stamp()}.md`);
-    fs.writeFileSync(p, releaseFixBrief({ row, configSource: state.source }));
-    const prompt = `Unblock the ${row.env} release of ${row.repo}. Read and follow ${p.replace(/\\/g, '/')} and end with its report table.`;
+  // Fix all: one agent for every blocked row of the last run.
+  async function fixAll() {
+    const rows = ((state.releaseRun && state.releaseRun.rows) || []).filter(r => r.status === 'blocked' || r.status === 'error');
+    if (!rows.length) return;
+    const p = path.join(runsDir(), `fix-release-${stamp()}.md`);
+    fs.writeFileSync(p, releaseFixBrief({ rows, configSource: state.source }));
+    const prompt = `Unblock the release: ${rows.length} blocked. Read and follow ${p.replace(/\\/g, '/')} and end with its report table.`;
     startAgent(await configCheckout(), prompt.replace(/[^\w\s.,:/#@()'=+-]/g, '').replace(/\s+/g, ' '));
   }
 
@@ -292,7 +292,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesClose': return true;
       case 'releasesRefresh': refresh(); return true;
       case 'releasesRelease': release(msg.envs).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
-      case 'releasesFix': fixRow(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
+      case 'releasesFix': fixAll().catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
       case 'releasesClearRun': push({ releaseRun: null }); persist(); return true;
       case 'releasesSetSource': {
         const source = String(msg.source || '').trim() || DEFAULT_SOURCE;

@@ -82,7 +82,8 @@
       api.send({ type: 'releasesRelease', envs: [...relSel] });
     },
     // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
-    relFix: (el) => { api.send({ type: 'releasesFix', i: +el.dataset.i }); relOpen = false; show(false); },
+    // one agent for every blocked row — leave the modal to land on it
+    relFix: () => { api.send({ type: 'releasesFix' }); relOpen = false; show(false); },
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; render(); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
@@ -401,10 +402,8 @@
       if (r.checks === 'pass') bits.push('<span class="rl-rr-chip ok">checks green</span>');
       if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">already red on ${esc(r.target)}: ${esc(r.knownFailing.join(', '))}</span>`);
       if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);
-      const fix = !r.running && (r.status === 'blocked' || r.status === 'error')
-        ? `<button class="rl-rr-fix" data-act="relFix" data-i="${i}" title="Start an agent that unblocks this one repo">🔧 Fix</button>` : '';
       h += `<div class="rl-rr-row st-${esc(r.status || 'running')}"><div class="rl-rr-top"><b>${esc(r.label)}</b>${env}`
-        + `<span class="rl-rr-branches">${esc(r.source)} → ${esc(r.target)}</span>${fix}</div><div class="rl-rr-bits">${bits.join('')}</div></div>`;
+        + `<span class="rl-rr-branches">${esc(r.source)} → ${esc(r.target)}</span></div><div class="rl-rr-bits">${bits.join('')}</div></div>`;
     });
     h += '</div>';
     if (run.manual.length) {
@@ -420,7 +419,9 @@
     if (run.flags && run.flags.missing && run.flags.missing.length) h += `<div class="rl-rr-flag bad">⚠ Seed these prod feature flags before merging: ${esc(run.flags.missing.join(', '))}</div>`;
     else if (run.flags && run.flags.missing) h += '<div class="rl-rr-flag">Prod feature flags: nothing missing</div>';
     else if (run.flags && run.flags.error) h += `<div class="rl-rr-flag">Flag check failed: ${esc(run.flags.error)}</div>`;
-    h += '<div class="rl-rel-actions">' + (run.running ? '' : '<button data-act="relNew">New release</button>')
+    const blocked = run.running ? 0 : run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
+    h += '<div class="rl-rel-actions">' + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
+      + (run.running ? '' : '<button data-act="relNew">New release</button>')
       + '<button data-act="releaseClose">Close</button></div></div>';
     return h;
   }
