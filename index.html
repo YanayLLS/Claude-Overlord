@@ -6073,15 +6073,22 @@ function closeZoomMenu() {
 
 // ── Performance popover: which agent's process tree is heavy (main.js samplePerf) ──
 const PERF_POLL_MS = 5000;
-let perfTimer = null;
-const fmtBytes = (b) => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB';
+let perfTimer = null, perfWait = null;
+// Placeholder rows shaped like the real ones, one per agent (max 5), while the first scan runs.
+function perfSkeleton() {
+  const n = Math.min(5, Math.max(1, agents.size));
+  const row = '<div class="pf-agent pf-skel"><div class="pf-row"><i style="width:60%"></i><i></i><i></i></div>'
+    + '<div class="pf-proc"><i style="width:40%"></i><i></i><i></i></div></div>';
+  return '<div class="pf-sys pf-skel"><i style="width:45%"></i><i style="width:25%"></i></div>' + row.repeat(n);
+}
+const fmtMem = (b) => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB';
 const fmtCpu = (c) => c === null || c === undefined ? '—' : c.toFixed(c < 10 ? 1 : 0) + '%';
 function togglePerfMenu(e) {
   e.stopPropagation();
   if (document.getElementById('perf-menu')) { closePerfMenu(); return; }
   const m = document.createElement('div');
   m.id = 'perf-menu'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-label', 'Performance');
-  m.innerHTML = '<div class="zm-head"><span>Performance</span></div><div class="pf-body"><div class="zm-hint">Scanning processes…</div></div>';
+  m.innerHTML = '<div class="zm-head"><span>Performance</span></div><div class="pf-body" aria-busy="true">' + perfSkeleton() + '</div>';
   m.onclick = (ev) => { const row = ev.target.closest('[data-agent]'); if (row) { focusAgent(+row.dataset.agent); closePerfMenu(); } };
   const r = e.currentTarget.getBoundingClientRect();
   m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(8, innerWidth - r.right) + 'px';
@@ -6103,14 +6110,14 @@ function renderPerf(msg) {
   if (!body) return;
   if (msg.error) { body.innerHTML = `<div class="zm-hint">${escapeHtml(msg.error)}</div>`; return; }
   const used = msg.total - msg.free;
-  const sys = `<div class="pf-sys"><span>RAM ${fmtBytes(used)} / ${fmtBytes(msg.total)}</span><span>Overlord ${fmtBytes(msg.appMem)}</span></div>`;
+  const sys = `<div class="pf-sys"><span>RAM ${fmtMem(used)} / ${fmtMem(msg.total)}</span><span>Overlord ${fmtMem(msg.appMem)}</span></div>`;
   const rows = msg.rows.map(r => {
     const a = agents.get(r.id);
     const title = a ? (a.title || 'New agent') : 'Agent ' + r.id;
     const top = r.top.slice(0, 4).map(g => `<div class="pf-proc" title="${escapeHtml(g.cmd)}"><span>${escapeHtml(g.name)}${g.count > 1 ? ' ×' + g.count : ''}</span>`
-      + `<span>${fmtBytes(g.mem)}</span><span>${fmtCpu(g.cpu)}</span></div>`).join('');
+      + `<span>${fmtMem(g.mem)}</span><span>${fmtCpu(g.cpu)}</span></div>`).join('');
     return `<div class="pf-agent" data-agent="${r.id}" title="Go to this agent"><div class="pf-row"><span class="pf-name">${escapeHtml(title)}</span>`
-      + `<span>${fmtBytes(r.mem)}</span><span>${fmtCpu(r.cpu)}</span></div>${top}</div>`;
+      + `<span>${fmtMem(r.mem)}</span><span>${fmtCpu(r.cpu)}</span></div>${top}</div>`;
   }).join('') || '<div class="zm-hint">No running agents.</div>';
   body.innerHTML = sys + '<div class="pf-row pf-cols"><span>Agent · processes it started</span><span>Memory</span><span>CPU</span></div>' + rows
     + `<div class="zm-hint">Heaviest first · CPU is % of the whole PC · refreshes every ${PERF_POLL_MS / 1000}s</div>`;
@@ -6123,12 +6130,16 @@ setInterval(() => {
     if (!el) continue;
     const txt = statusMetaText(a);
     if (txt) el.textContent = txt; else el.textContent = '';
+  // A scan takes ~1s. Silence means the main process predates this feature (the window
+  // reloaded, main didn't) — say so instead of a skeleton forever.
+  perfWait = setTimeout(() => renderPerf({ error: 'No answer from Overlord — restart it to finish updating.' }), 15000);
   }
 }, 1000);
 
 // ── World view (3D map) ─────────────────────────────────
 // Off by default. When on, world.js draws the same state the list shows, beside it.
 // Every click in the world calls the same functions the list calls; nothing here changes behavior.
+  clearTimeout(perfWait); perfWait = null;
 // (worldView itself is declared with the other view state near the top.)
 // The roster column in World view: resizable by its grip, and it can slide away (a tab on the stage brings it back).
 let worldRosterW = 300, worldRosterHidden = false;
@@ -6136,6 +6147,8 @@ function applyWorldRoster() {
   document.body.style.setProperty('--w-roster', (worldRosterHidden ? 0 : worldRosterW) + 'px');
   document.body.classList.toggle('roster-hidden', worldRosterHidden);
   const n = document.getElementById('world-roster-tab-n'); if (n) { let live = 0; for (const [, a] of agents) if (!a.archived) live++; n.textContent = live; }
+  clearTimeout(perfWait); perfWait = null;
+  body.removeAttribute('aria-busy');
 }
 function setWorldRosterHidden(h, persist = true) {
   worldRosterHidden = !!h; applyWorldRoster();

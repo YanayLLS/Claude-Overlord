@@ -603,6 +603,11 @@ body:not(.mobile-on) #qr-btn { display: none !important; } /* mobile remote feat
 .pf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-proc { font-size: 11px; color: var(--subtext); padding-left: 10px; }
 .pf-proc > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-skel { cursor: default; }
+.pf-skel:hover { background: none; }
+.pf-skel i { display: block; height: 9px; margin: 3px 0; border-radius: 4px; background: var(--surface1); animation: pulse 1.4s ease-in-out infinite; }
+.pf-skel .pf-row i:not(:first-child), .pf-skel .pf-proc i:not(:first-child) { justify-self: end; width: 70%; }
+@media (prefers-reduced-motion: reduce) { .pf-skel i { animation: none; } }
 #zoom-menu { max-width: calc(100vw - 16px); }
 #header h1 { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 @media (max-width: 560px) {
