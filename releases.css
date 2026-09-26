@@ -284,3 +284,7 @@
 .rl-rr-man b + .rl-env { font-size:9.5px; }
 .rl-rr-flag { margin-top:10px; font-size:11px; color:var(--dim); }
 .rl-rr-flag.bad { color:var(--peach); }
+/* the picker/results never outgrow the modal: it scrolls inside, buttons stay reachable at the bottom */
+.rl-rel-pop, .rl-rel-pop.rl-rr { box-sizing:border-box; max-height:calc(100% - 56px); overflow:auto; overscroll-behavior:contain; }
+.rl-rel-pop .rl-rel-actions { position:sticky; bottom:-12px; margin:12px -12px -12px; padding:10px 12px; background:var(--pop);
+  border-top:1px solid var(--border); border-radius:0 0 var(--r-lg) var(--r-lg); }
