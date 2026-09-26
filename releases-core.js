@@ -207,17 +207,26 @@ function firstParentChain(nodes, max) {
   return out;
 }
 
-// Timeline: the recent commits on every env branch, newest first — when each thing landed where.
-// Envs whose live commit is pinned elsewhere (`live`) are skipped: their branch's history is
-// not their release history. env = optional filter.
-function buildTimeline(cfg, history, env) {
+// Timeline, newest first. Where CI deploys an env, its entries are the real deploy runs
+// (kind 'deploy': when it went out, who, and whether it worked); elsewhere — manual deploys,
+// or a CI workflow that never worked — what landed on the branch (kind 'merge'), since
+// nothing records when it went live. A run that failed only in a side job while the env's
+// latest run reads 'partial' is shown as partial too. Envs pinned via `live` are skipped.
+// env = optional filter.
+function buildTimeline(cfg, history, env, deploys) {
   const out = [];
   for (const r of cfg.repos) {
     if (!r.branches) continue;
     const label = r.label || r.repo.split('/')[1];
     for (const e of cfg.envs) {
       if (!r.branches[e] || (env && e !== env) || (r.live && r.live[e])) continue;
-      for (const c of (history && history[`${r.repo}|${e}`]) || []) out.push({ repo: r.repo, label, env: e, branch: r.branches[e], ...c });
+      const key = `${r.repo}|${e}`, d = deploys && deploys[key];
+      const base = { repo: r.repo, label, env: e, branch: r.branches[e] };
+      if (d && d.runs && d.state !== 'dead') {
+        for (const run of d.runs) out.push({ ...base, ...run, kind: 'deploy', state: run.state === 'failure' && d.state === 'partial' ? 'partial' : run.state });
+      } else {
+        for (const c of (history && history[key]) || []) out.push({ ...base, ...c, kind: 'merge' });
+      }
     }
   }
   return out.sort((a, b) => Date.parse(b.date) - Date.parse(a.date));

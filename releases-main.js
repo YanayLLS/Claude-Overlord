@@ -10,6 +10,7 @@ const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstP
 const REFRESH_MS = 5 * 60 * 1000;
 const PENDING_SHOWN = 10;
 const HISTORY_SHOWN = 10;
+const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
 module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal }) {
@@ -113,12 +114,17 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   async function fetchDeploys(cfg) {
     const out = {};
     await Promise.all(requestsFor(cfg).deploys.map(async (d) => {
-      const res = await ghJson(['api', '-X', 'GET', `repos/${d.repo}/actions/workflows/${d.file}/runs`, '-f', `branch=${d.branch}`, '-f', 'per_page=1']);
-      const run = res.data && res.data.workflow_runs && res.data.workflow_runs[0];
+      const res = await ghJson(['api', '-X', 'GET', `repos/${d.repo}/actions/workflows/${d.file}/runs`, '-f', `branch=${d.branch}`, '-f', `per_page=${RUNS_SHOWN}`]);
+      const all = (res.data && res.data.workflow_runs) || [], run = all[0];
+      // finished runs for the Timeline: when each deploy went out, who ran it, did it work
+      const runs = all.filter(x => x.status === 'completed' && x.conclusion !== 'cancelled' && x.conclusion !== 'skipped').map(x => ({
+        sha: x.head_sha, date: x.updated_at, state: x.conclusion, url: x.html_url, actor: (x.actor && x.actor.login) || '',
+        title: commitTitle(String((x.head_commit && x.head_commit.message) || x.display_title || '').split('\n')[0], String((x.head_commit && x.head_commit.message) || '').split('\n').slice(2).join('\n')),
+      }));
       const key = `${d.repo}|${d.env}`;
       if (res.error) { out[key] = { state: 'unknown', error: res.error }; return; }
       if (!run) { out[key] = { state: 'never', url: `https://github.com/${d.repo}/actions/workflows/${d.file}` }; return; }
-      const base = { url: run.html_url, date: run.updated_at || run.created_at };
+      const base = { url: run.html_url, date: run.updated_at || run.created_at, runs };
       if (run.status !== 'completed') { out[key] = { ...base, state: 'running' }; return; }
       // Red run: one more call to learn WHICH job failed — the deploy, or a follow-up after it
       // plus whether it has EVER gone green here: one that never has isn't what deploys this env

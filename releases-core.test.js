@@ -272,4 +272,23 @@ assert.strictEqual(age('garbage', now), '');
   assert.strictEqual(buildGrid(cfg, {}).rows[0].cells[1].nexts.length, 0); // alpha feeds nothing
   assert.deepStrictEqual(validateConfig({ envs: ['dev'], repos: [{ repo: 'o/a', branches: { dev: 'dev' }, promote: [['dev']] }] }), ['repos[0].promote[0]: needs at least 2 envs']);
 }
+// ── timeline uses real deploy runs where CI deploys; merges (kind 'merge') only where it doesn't ──
+{
+  const { buildTimeline } = require('./releases-core');
+  const cfg = { envs: ['dev', 'staging', 'prod'], repos: [
+    { repo: 'o/a', branches: { dev: 'dev', staging: 'staging', prod: 'main' }, deploy: { dev: 'd.yml', staging: 's.yml', prod: 'manual' } },
+  ] };
+  const run = (sha, date, state) => ({ sha, date, state, title: 't' + sha, url: 'r' + sha, actor: 'ann' });
+  const deploys = {
+    'o/a|dev': { state: 'success', runs: [run('d2', '2026-09-24T10:00:00Z', 'success'), run('d1', '2026-09-23T10:00:00Z', 'failure')] },
+    'o/a|staging': { state: 'partial', runs: [run('s1', '2026-09-22T10:00:00Z', 'failure')] },
+  };
+  const history = { 'o/a|dev': [{ sha: 'm1', date: '2026-09-24T09:00:00Z', title: 'merge' }], 'o/a|prod': [{ sha: 'p1', date: '2026-09-21T10:00:00Z', title: 'rel' }] };
+  const t = buildTimeline(cfg, history, '', deploys);
+  assert.deepStrictEqual(t.map(e => `${e.env}:${e.sha}:${e.kind}:${e.state || ''}`),
+    ['dev:d2:deploy:success', 'dev:d1:deploy:failure', 'staging:s1:deploy:partial', 'prod:p1:merge:']);
+  // a CI workflow that has never worked isn't the deploy: fall back to merges
+  const dead = buildTimeline(cfg, history, 'dev', { 'o/a|dev': { state: 'dead', runs: [run('x', '2026-09-24T10:00:00Z', 'failure')] } });
+  assert.deepStrictEqual(dead.map(e => e.kind + ':' + e.sha), ['merge:m1']);
+}
 console.log('releases-core: all passed');

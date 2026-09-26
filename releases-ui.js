@@ -144,7 +144,7 @@
       + [''].concat(envs).map(e => `<button data-act="tlEnv" data-env="${esc(e)}" class="${e === tlEnv ? 'on' : ''}">`
         + (e ? `<span class="rl-env" style="--hue:${hueOf(e, envs)}">${esc(e)}</span>` : 'All') + '</button>').join('') + '</div>';
     if (!history) return h + '<div class="rl-tl-empty">Loading history…</div>';
-    const items = ReleasesCore.buildTimeline(cfg, history, tlEnv);
+    const items = ReleasesCore.buildTimeline(cfg, history, tlEnv, s.results && s.results.deploys);
     if (!items.length) return h + '<div class="rl-tl-empty">Nothing landed here recently.</div>';
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -178,10 +178,17 @@
         + `<div class="rl-tlx-track"><i class="rl-tlx-now" style="left:${nowX}px"></i>`;
       lane.forEach((e, k) => {
         const x = xOf(Date.parse(e.date)), nx = k + 1 < lane.length ? xOf(Date.parse(lane[k + 1].date)) : Infinity;
-        const room = e.env.length * 7 + 26; // the pill's width: env name + dot + padding
+        const room = e.env.length * 7 + (e.kind === 'merge' ? 40 : 26); // the pill's width: env name + dot + padding
         const when = new Date(e.date).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-        h += `<a class="rl-tlx-mark${nx - x < room ? ' dot' : ''}" data-url="${esc(e.url)}" style="left:${x}px; --hue:${hueOf(e.env, envs)}"`
-          + ` title="${esc(e.env.toUpperCase())} · ${esc(refOf(e))} · ${esc(when)}\n${esc(e.title.replace(/^#\d+ /, ''))}\n${esc(e.branch)} · ${esc(e.sha.slice(0, 7))}">${esc(e.env.toUpperCase())}</a>`;
+        // deploy runs: when it went out, by whom, did it work. merges: hand-deployed envs, go-live time unknown
+        const what = e.kind === 'merge' ? 'merged · deployed by hand, go-live time unknown'
+          : e.state === 'success' ? `deployed${e.actor ? ' by ' + e.actor : ''}`
+          : e.state === 'partial' ? `deployed${e.actor ? ' by ' + e.actor : ''} · a follow-up job failed`
+          : `deploy ${e.state === 'failure' ? 'FAILED' : e.state}${e.actor ? ' · ' + e.actor : ''}`;
+        const kind = e.kind === 'merge' ? ' merge' : e.state === 'failure' ? ' fail' : e.state === 'partial' ? ' part' : '';
+        h += `<a class="rl-tlx-mark${kind}${nx - x < room ? ' dot' : ''}" data-url="${esc(e.url)}" style="left:${x}px; --hue:${hueOf(e.env, envs)}"`
+          + ` title="${esc(e.env.toUpperCase())} ${esc(what)} · ${esc(when)}\n${esc(refOf(e))} ${esc(e.title.replace(/^#\d+ /, ''))}\n${esc(e.branch)} · ${esc(e.sha.slice(0, 7))}">`
+          + `${e.kind === 'merge' ? '✋ ' : ''}${esc(e.env.toUpperCase())}</a>`;
       });
       h += '</div></div>';
     }

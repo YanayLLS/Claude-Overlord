@@ -146,3 +146,10 @@
 .rl-uses { display:flex; align-items:center; gap:6px; padding:0 10px; border:1px dashed rgba(var(--ink),.12); border-radius:var(--r-sm); font-size:10.5px; color:var(--dim); white-space:nowrap; }
 .rl-uses .rl-env { font-size:9.5px; color:var(--subtext); }
 .rl-next.rl-next-more { margin-left:0; padding-left:6px; } /* a second waiting count sits right after the first */
+/* timeline pill states: a failed deploy is red, a side-job failure red-edged, a hand-deployed merge dashed */
+.rl-tlx-mark.fail { background:rgba(248,113,113,.18); border-color:rgba(248,113,113,.75); }
+.rl-tlx-mark.fail::before { background:var(--red); }
+.rl-tlx-mark.part { border-color:rgba(248,113,113,.6); }
+.rl-tlx-mark.merge { background:none; border-style:dashed; }
+.rl-tlx-mark.dot.fail { background:var(--red); }
+.rl-tlx-mark.dot.merge { background:none; border:1.5px dashed var(--hue); }
