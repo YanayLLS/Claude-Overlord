@@ -150,3 +150,23 @@
 .rl-tlx-key.fail { background:var(--red); }
 .rl-tlx-key.part { box-shadow:0 0 0 2px var(--bg2), 0 0 0 3px var(--red); }
 .rl-tlx-key.merge { background:none; border:1.5px dashed var(--subtext); }
+
+/* timeline dot hover card: badges on top, title, chips */
+#rl-tlx-tip { position:fixed; z-index:100000; max-width:340px; padding:10px 12px; border-radius:var(--r-lg); background:var(--pop); color:var(--text);
+  box-shadow:var(--pop-shadow); font-size:12px; pointer-events:none; opacity:0; transform:translateY(3px); transition:opacity .12s, transform .12s; }
+#rl-tlx-tip.show { opacity:1; transform:none; }
+#rl-tlx-tip .tt-head { display:flex; align-items:center; gap:6px; }
+#rl-tlx-tip .tt-env { font-size:10px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; padding:2px 7px; border-radius:999px;
+  color:var(--hue); background:color-mix(in srgb, var(--hue) 16%, transparent); border:1px solid color-mix(in srgb, var(--hue) 45%, transparent); }
+#rl-tlx-tip .tt-state { font-size:10.5px; font-weight:600; padding:2px 7px; border-radius:999px; }
+#rl-tlx-tip .tt-state.ok { color:var(--green); background:rgba(74,222,128,.12); }
+#rl-tlx-tip .tt-state.bad { color:var(--red); background:rgba(248,113,113,.14); }
+#rl-tlx-tip .tt-state.part { color:var(--peach); background:rgba(251,146,60,.13); }
+#rl-tlx-tip .tt-state.hand, #rl-tlx-tip .tt-state.off { color:var(--subtext); background:var(--surface1); }
+#rl-tlx-tip .tt-when { margin-left:auto; padding-left:10px; font-size:11px; color:var(--dim); white-space:nowrap; }
+#rl-tlx-tip .tt-repo { margin-top:8px; font-size:11px; font-weight:600; color:var(--subtext); }
+#rl-tlx-tip .tt-title { margin-top:2px; font-weight:500; line-height:1.4; }
+#rl-tlx-tip .tt-chips { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
+#rl-tlx-tip .tt-chip { font-size:10.5px; padding:1px 7px; border-radius:var(--r-sm); background:var(--surface1); color:var(--subtext); }
+#rl-tlx-tip .tt-chip.mono { font-family:'Geist Mono',ui-monospace,Consolas,monospace; }
+#rl-tlx-tip .tt-foot { margin-top:8px; font-size:10.5px; color:var(--dim); }

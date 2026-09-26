@@ -138,7 +138,41 @@
   // env's branch is a pill at its moment. Same data the board's second pass already fetched —
   // no extra calls. Pills too close to their neighbour shrink to dots (hover for the rest).
   const DAY_MS = 864e5, DAY_W = 64, MAX_DAYS = 30, MIN_DAYS = 7;
+  let tlMarks = []; // what each timeline dot stands for, by its data-i — read by the hover card
+
+  // Hover card for a timeline dot: env + status badges and the time on top, the title, then
+  // chips for PR, sha, branch and who. The app tooltip is text-only, so the dots bring their own.
+  const tlTip = document.createElement('div');
+  tlTip.id = 'rl-tlx-tip';
+  document.body.appendChild(tlTip);
+  const STATE_BADGE = { success: ['ok', 'Deployed'], failure: ['bad', 'Deploy failed'], partial: ['part', 'Deployed · side job failed'] };
+  function tipHtml(e) {
+    const [cls, label] = e.kind === 'merge' ? ['hand', '✋ Merged · deployed by hand'] : STATE_BADGE[e.state] || ['off', e.state];
+    const when = new Date(e.date).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+    const pr = (e.title.match(/^#(\d+) /) || [])[1];
+    return `<div class="tt-head"><span class="tt-env" style="--hue:${e.hue}">${esc(e.env)}</span><span class="tt-state ${cls}">${esc(label)}</span>`
+      + `<span class="tt-when">${esc(when)}</span></div>`
+      + `<div class="tt-repo">${esc(e.label)}</div>`
+      + `<div class="tt-title">${esc(e.title.replace(/^#\d+ /, ''))}</div>`
+      + '<div class="tt-chips">' + (pr ? `<span class="tt-chip">#${esc(pr)}</span>` : '')
+      + `<span class="tt-chip mono">${esc(e.sha.slice(0, 7))}</span><span class="tt-chip">⎇ ${esc(e.branch)}</span>`
+      + (e.actor ? `<span class="tt-chip">@${esc(e.actor)}</span>` : '') + '</div>'
+      + `<div class="tt-foot">${e.kind === 'merge' ? 'Go-live time unknown · click to open the commit' : 'Click to open the run on GitHub'}</div>`;
+  }
+  overlay.addEventListener('mouseover', (ev) => {
+    const m = ev.target.closest && ev.target.closest('.rl-tlx-mark');
+    if (!m || !tlMarks[m.dataset.i]) return;
+    tlTip.innerHTML = tipHtml(tlMarks[m.dataset.i]);
+    tlTip.classList.add('show');
+    const r = m.getBoundingClientRect(), w = tlTip.offsetWidth, h = tlTip.offsetHeight;
+    const x = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2));
+    const y = r.top - h - 10 >= 8 ? r.top - h - 10 : r.bottom + 10; // above the dot, or below when there's no room
+    tlTip.style.left = x + 'px'; tlTip.style.top = y + 'px';
+  });
+  overlay.addEventListener('mouseout', (ev) => { if (ev.target.closest && ev.target.closest('.rl-tlx-mark')) tlTip.classList.remove('show'); });
+
   function timelineHtml(s) {
+    tlMarks = [];
     const cfg = s.config, envs = cfg.envs, history = s.results && s.results.history;
     let h = '<div class="rl-tl-filter">'
       + [''].concat(envs).map(e => `<button data-act="tlEnv" data-env="${esc(e)}" class="${e === tlEnv ? 'on' : ''}">`
@@ -176,17 +210,9 @@
       h += `<div class="rl-tlx-row"><div class="rl-tlx-label" title="${esc(r.repo)}"><span class="rl-tlx-repo">${esc(label)}</span></div>`
         + `<div class="rl-tlx-track"><i class="rl-tlx-now" style="left:${nowX}px"></i>`;
       lane.forEach((e) => {
-        const x = xOf(Date.parse(e.date));
-        const when = new Date(e.date).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
-        // deploy runs: when it went out, by whom, did it work. merges: hand-deployed envs, go-live time unknown
-        const what = e.kind === 'merge' ? 'merged · deployed by hand, go-live time unknown'
-          : e.state === 'success' ? `deployed${e.actor ? ' by ' + e.actor : ''}`
-          : e.state === 'partial' ? `deployed${e.actor ? ' by ' + e.actor : ''} · a follow-up job failed`
-          : `deploy ${e.state === 'failure' ? 'FAILED' : e.state}${e.actor ? ' · ' + e.actor : ''}`;
         const kind = e.kind === 'merge' ? ' merge' : e.state === 'failure' ? ' fail' : e.state === 'partial' ? ' part' : '';
-        h += `<a class="rl-tlx-mark${kind}" data-url="${esc(e.url)}" style="left:${x}px; --hue:${hueOf(e.env, envs)}"`
-          + ` title="${esc(e.env.toUpperCase())} ${esc(what)} · ${esc(when)}\n${esc(refOf(e))} ${esc(e.title.replace(/^#\d+ /, ''))}\n${esc(e.branch)} · ${esc(e.sha.slice(0, 7))}">`
-          + '</a>';
+        tlMarks.push({ ...e, hue: hueOf(e.env, envs) });
+        h += `<a class="rl-tlx-mark${kind}" data-url="${esc(e.url)}" data-i="${tlMarks.length - 1}" style="left:${xOf(Date.parse(e.date))}px; --hue:${hueOf(e.env, envs)}"></a>`;
       });
       h += '</div></div>';
     }
@@ -284,6 +310,7 @@
   }
 
   function render() {
+    tlTip.classList.remove('show');
     if (!open) return;
     const s = state || { source: '', loading: true };
     const upd = s.updatedAt ? `updated ${new Date(s.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
