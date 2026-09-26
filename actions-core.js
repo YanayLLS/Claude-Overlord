@@ -79,6 +79,29 @@ function groupRunsByRepo(runs) {
   return [...by].map(([repo, list]) => ({ repo, runs: list }));
 }
 
+// Plan for the "Fix" button on a failed run: which local checkout to branch from,
+// the fix branch off the failed branch, and the agent's opening prompt. The agent
+// pulls the log itself with gh — pasting a big log into the terminal is fragile.
+// Main checkouts beat worktrees (those belong to other work). No checkout → error.
+function fixRunPlan(run, infos, worktreeDirs) {
+  const id = ((run && run.url) || '').match(/\/actions\/runs\/(\d+)/);
+  if (!id) return { error: 'No run to fix' };
+  // head_branch can come from a fork's PR and worktree.js runs git through a shell on Windows
+  if (!/^[\w./-]+$/.test(run.branch || '')) return { error: `Can't fix a run on branch "${run.branch}"` };
+  const wts = new Set(worktreeDirs || []);
+  const mine = (infos || []).filter(i => i.repo.toLowerCase() === run.repo.toLowerCase());
+  const pick = mine.find(i => !wts.has(i.dir)) || mine[0];
+  if (!pick) return { error: `No local checkout of ${run.repo} — open an agent in it once` };
+  return {
+    repoDir: pick.dir,
+    branch: `fix/ci-${run.runNumber || id[1]}`,
+    base: run.branch,
+    prompt: `GitHub Actions run "${run.name}" #${run.runNumber} failed on branch ${run.branch}: ${run.url} `
+      + `— run \`gh run view ${id[1]} --repo ${run.repo} --log-failed\` to read the failing steps, `
+      + `find the root cause, fix it on this branch (based on ${run.branch}), and verify the fix locally before committing.`,
+  };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, REPO_RE };
+  module.exports = { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, fixRunPlan, REPO_RE };
 }

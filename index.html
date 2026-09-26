@@ -86,6 +86,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   color:var(--text); border:1px solid var(--border); border-radius:4px; cursor:pointer; }
 .act-row:hover .act-copy { display:block; }
 .act-copy:hover { background:var(--border); }
+.act-fix { right:96px; } /* sits left of Copy URL */
 .act-pill { font-size:10px; font-weight:700; padding:1px 6px; border-radius:999px; margin-left:6px; color:#11111b; vertical-align:1px; }
 .act-pill.act-running { background:#89b4fa; }
 .act-pill.act-success { background:#a6e3a1; }
@@ -5751,10 +5752,14 @@ function actionsRowHtml(r) {
   const copyBtn = r.state === 'failure' && r.url
     ? `<button class="act-copy" title="Copy run URL" onclick="event.stopPropagation();copyActionUrl('${r.url.replace(/'/g, "\\'")}',this)">⧉ Copy URL</button>`
     : '';
+  // Hands the failed run to a new agent in a fix/ci-N worktree (main.js fixActionRun).
+  const fixBtn = r.state === 'failure' && r.url
+    ? `<button class="act-copy act-fix" title="New agent in a fix branch reads the failed log and fixes it" onclick="event.stopPropagation();fixActionRun('${escapeHtml(r.key)}')">🔧 Fix</button>`
+    : '';
   // Commits of yours that this workflow's branch hasn't got — i.e. the PR you owe.
   const ahead = r.ahead
     ? `<span class="act-ahead" title="${escapeHtml(r.ahead.title)}">+${r.ahead.count}</span>` : '';
-  return `<div class="act-row act-${state}" onclick="openActionRun('${u}')">${copyBtn}`
+  return `<div class="act-row act-${state}" onclick="openActionRun('${u}')">${copyBtn}${fixBtn}`
     + `<div>${escapeHtml(r.name || r.file)}<span class="act-pill act-${state}">${label}</span>${ahead}</div>`
     + (meta ? `<div class="act-meta">${meta}</div>` : '') + `</div>`; // the repo is the group header above
 }
@@ -5826,6 +5831,15 @@ function toggleActionsDropdown(e) {
 
 function openActionRun(url) {
   if (url) api.send({ type: 'openUrl', url });
+  document.getElementById('actions-dropdown').style.display = 'none';
+  stopActElapsed();
+}
+
+function fixActionRun(key) {
+  const r = actionsState.runs.find(x => x.key === key);
+  if (!r) return;
+  api.send({ type: 'fixActionRun', run: r });
+  showToast(`Starting a fix agent for ${r.name || r.file}…`);
   document.getElementById('actions-dropdown').style.display = 'none';
   stopActElapsed();
 }

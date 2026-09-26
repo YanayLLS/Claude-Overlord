@@ -90,3 +90,31 @@ assert.deepStrictEqual(groupRunsByRepo(runs).map(g => [g.repo, g.runs.map(r => r
 assert.deepStrictEqual(groupRunsByRepo([]), []);
 
 console.log('ok — all actions-core checks passed');
+
+// ── fixRunPlan ────────────────────────────────────────
+const { fixRunPlan } = require('./actions-core');
+{
+  const run = { repo: 'o/r', branch: 'dev', name: 'CI', runNumber: 42, state: 'failure',
+    url: 'https://github.com/o/r/actions/runs/123456789' };
+  const infos = [
+    { dir: 'C:/x/other', repo: 'o/other', branch: 'dev' },
+    { dir: 'C:/x/r-wt', repo: 'o/r', branch: 'feat' },
+    { dir: 'C:/x/r', repo: 'O/R', branch: 'master' },
+  ];
+  const p = fixRunPlan(run, infos, ['C:/x/r-wt']);
+  // main checkout wins over a worktree; repo match ignores case
+  assert.strictEqual(p.repoDir, 'C:/x/r');
+  assert.strictEqual(p.branch, 'fix/ci-42');
+  assert.strictEqual(p.base, 'dev');
+  assert.ok(p.prompt.includes('gh run view 123456789 --repo o/r --log-failed'));
+  assert.ok(p.prompt.includes(run.url));
+  // only a worktree checkout → still usable
+  assert.strictEqual(fixRunPlan(run, infos.slice(0, 2), ['C:/x/r-wt']).repoDir, 'C:/x/r-wt');
+  // no checkout of that repo → error, not a guess
+  assert.ok(fixRunPlan(run, infos.slice(0, 1), []).error);
+  // branch names reach a shell (worktree.js on Windows) — anything odd is refused
+  assert.ok(fixRunPlan({ ...run, branch: 'x&calc' }, infos, []).error);
+  assert.ok(fixRunPlan({ ...run, branch: '' }, infos, []).error);
+  // no run id in the url (never-run / workflow list url) → error
+  assert.ok(fixRunPlan({ ...run, url: 'https://github.com/o/r/actions/workflows/ci.yml' }, infos, []).error);
+}

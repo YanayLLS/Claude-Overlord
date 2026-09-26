@@ -2271,7 +2271,7 @@ function armPrTimer() {
 }
 
 // ── GitHub Actions tracking ───────────────────────────
-const { runState, nextPollDelay, diffNewFailures, REPO_RE: WF_REPO_RE } = require('./actions-core');
+const { runState, nextPollDelay, diffNewFailures, fixRunPlan, REPO_RE: WF_REPO_RE } = require('./actions-core');
 const { git: gitIn, checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
 const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
 let actionsTimer = null;
@@ -2411,6 +2411,24 @@ async function fetchWorkflowRun(w) {
     updatedAt: run.updated_at || '',
     url: run.html_url || `https://github.com/${w.repo}/actions/workflows/${w.file}`,
   };
+}
+
+// "Fix" on a failed run: a fix/ci-N worktree off the failed branch, with an agent
+// told to read the failed log and fix it. Clicking again reuses that worktree.
+async function fixActionRun(run) {
+  const infos = (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean);
+  const plan = fixRunPlan(run, infos, (settings.worktrees || []).map(w => w.path));
+  if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
+  let entry = (settings.worktrees || []).find(w => w.repo === plan.repoDir && w.branch === plan.branch);
+  if (!entry) {
+    await gitIn(plan.repoDir, ['fetch', 'origin', plan.base, '--quiet'], 60000);
+    // origin/<base>: the commit CI ran, not a stale local copy. Keep the repo's
+    // defaultBase — a one-off fix off master shouldn't change where features start.
+    const prevBase = (projectConfig(plan.repoDir) || {}).defaultBase;
+    entry = await doCreateWorktree({ repo: plan.repoDir, branch: plan.branch, base: `origin/${plan.base}` });
+    projectConfig(plan.repoDir).defaultBase = prevBase || 'dev'; saveState();
+  }
+  createAgent(entry.path, plan.prompt);
 }
 
 // The local checkouts Overlord already knows about: every agent's cwd plus every
@@ -3603,6 +3621,7 @@ function handleIpc(msg) {
       break;
     }
     case 'pollActionsNow': armActionsTimer(); break;
+    case 'fixActionRun': fixActionRun(msg.run || {}).catch(e => { flog('fixActionRun failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
     case 'saveClickupSettings': {
       const c = msg.clickupSettings || {}, prev = clickupCfg();
       settings.clickupSettings = {
