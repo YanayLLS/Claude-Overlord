@@ -386,8 +386,10 @@
   function releaseResultsHtml(s) {
     const run = s.releaseRun;
     const prLink = (p, label) => p && p.url ? link(p.url, label) : '';
-    let h = `<div class="rl-rel-pop rl-rr${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release ${esc(run.envs.join(' + '))}</span>`
-      + (run.running ? '<span class="rl-rr-spin">running…</span>' : '') + '</div><div class="rl-rr-rows">';
+    const pending = !run.running && run.rows.some(r => r.pr && !r.merged && !r.closed && (r.checks === 'pending' || r.checks === 'none' || r.conflict === null));
+    let h = `<div class="rl-rel-pop rl-rr${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release ${esc(run.envs.join(' + '))} · ${esc(age(new Date(run.startedAt).toISOString()))} ago</span>`
+      + (run.running ? '<span class="rl-rr-spin">running…</span>' : pending ? '<span class="rl-rr-spin" title="Re-checking open PRs every minute">watching checks…</span>' : '')
+      + '</div><div class="rl-rr-rows">';
     relShown = true;
     run.rows.forEach((r, i) => {
       const env = `<span class="rl-env" style="--hue:${ENV_HUE[r.env.toLowerCase()] || 'var(--dim)'}">${esc(r.env)}</span>`;
@@ -396,10 +398,14 @@
       if (r.status === 'nothing') bits.push('<span class="rl-rr-chip">nothing to release</span>');
       if (r.pr) bits.push(`<span class="rl-rr-chip ok">${prLink(r.pr, `#${r.pr.number}`)} ${r.reused ? 'already open' : 'opened'}${r.ahead ? ` · ${r.ahead} commits` : ''}</span>`);
       if (r.backMerge && r.backMerge.url) bits.push(`<span class="rl-rr-chip${r.backMerge.conflict ? ' bad' : ' warn'}">back-merge ${prLink(r.backMerge, '#' + r.backMerge.number)}${r.backMerge.conflict ? ' conflicts' : ' — merge first'}</span>`);
-      if (r.conflict) bits.push('<span class="rl-rr-chip bad">conflicts</span>');
+      if (r.merged) bits.push('<span class="rl-rr-chip ok">merged ✓</span>');
+      else if (r.closed) bits.push('<span class="rl-rr-chip">closed</span>');
+      if (r.conflict === true) bits.push('<span class="rl-rr-chip bad">conflicts</span>');
+      if (r.pr && r.conflict === null && !r.merged && !r.closed && !r.running) bits.push('<span class="rl-rr-chip" title="GitHub is still working out whether it merges cleanly">mergeable?</span>');
       if (r.checks === 'fail') bits.push('<span class="rl-rr-chip bad">checks failing</span>');
       if (r.checks === 'pending') bits.push('<span class="rl-rr-chip">checks running</span>');
       if (r.checks === 'pass') bits.push('<span class="rl-rr-chip ok">checks green</span>');
+      if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them — merging isn't blocked">not required: ${esc(r.advisory.join(', '))}</span>`);
       if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">already red on ${esc(r.target)}: ${esc(r.knownFailing.join(', '))}</span>`);
       if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);
       h += `<div class="rl-rr-row st-${esc(r.status || 'running')}"><div class="rl-rr-top"><b>${esc(r.label)}</b>${env}`

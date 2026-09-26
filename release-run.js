@@ -47,51 +47,102 @@ function releaseBody({ env, source, target, workflow, ahead, titles, hotfixes })
 }
 
 const BAD = ['failure', 'timed_out', 'action_required', 'startup_failure'];
-const failingNames = (runs) => (runs || []).filter(r => BAD.includes(r.conclusion)).map(r => r.name);
+const BAD_STATUS = ['failure', 'error'];
+// Everything red on a commit, by name: check runs (Actions, apps) and commit statuses (Snyk & co).
+const failingNames = (runs, combined) => [
+  ...(runs || []).filter(r => BAD.includes(r.conclusion)).map(r => r.name),
+  ...((combined && combined.statuses) || []).filter(s => BAD_STATUS.includes(s.state)).map(s => s.context),
+];
 
 // Check runs + commit statuses on the PR head → 'fail' | 'pending' | 'pass' | 'none'. known =
-// check names that also fail on the target branch: red before this release, so not its fault.
+// names that also fail on the target branch: red before this release, so not its fault.
 function checksState(checkRuns, combined, known) {
   const skip = new Set(known || []);
   const runs = (checkRuns || []).filter(r => !skip.has(r.name));
-  if (runs.some(r => BAD.includes(r.conclusion)) || (combined && combined.state === 'failure' && combined.total_count)) return 'fail';
-  if (runs.some(r => r.status !== 'completed') || (combined && combined.state === 'pending' && combined.total_count)) return 'pending';
-  return runs.length || (combined && combined.total_count) ? 'pass' : 'none';
+  const statuses = ((combined && combined.statuses) || []).filter(s => !skip.has(s.context));
+  if (runs.some(r => BAD.includes(r.conclusion)) || statuses.some(s => BAD_STATUS.includes(s.state))) return 'fail';
+  if (runs.some(r => r.status !== 'completed') || statuses.some(s => s.state === 'pending')) return 'pending';
+  return runs.length || statuses.length ? 'pass' : 'none';
 }
 
 // A row's headline from its parts.
 function rowStatus(r) {
   if (r.error) return 'error';
   if (r.nothing) return 'nothing';
-  if (r.conflict || r.checks === 'fail' || (r.backMerge && r.backMerge.conflict)) return 'blocked';
+  if (r.merged) return 'merged';
+  if (r.closed) return 'closed';
+  if (r.conflict === true || r.checks === 'fail' || (r.backMerge && r.backMerge.conflict)) return 'blocked';
   return 'ok';
 }
 
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
+// Check names the branch's protection requires ([] when unprotected or not readable).
+function requiredChecks(branch) {
+  const rsc = branch && branch.protection && branch.protection.required_status_checks;
+  if (!rsc) return [];
+  return [...new Set([...(rsc.contexts || []), ...((rsc.checks || []).map(c => c.context))])];
+}
+
+// Is PR #n mergeable, and are its checks green? conflict: true | false | null (GitHub still
+// computing — unknown, not "fine"). Checks that also fail on the target branch were red before
+// this release and don't count (knownFailing).
+async function prHealth(gh, repo, n, target, wait = sleep) {
+  const api = (...a) => gh(['api', ...a]);
+  let st = null;
+  for (let i = 0; i < 6 && !st; i++) {
+    const r = await api(`repos/${repo}/pulls/${n}`);
+    if (r.data && r.data.state === 'closed') return { closed: true, merged: !!r.data.merged };
+    if (r.data && r.data.mergeable !== null && r.data.mergeable !== undefined) st = r.data;
+    else await wait(1500);
+  }
+  const conflict = st ? st.mergeable === false : null;
+  let checks = 'none', knownFailing = [], advisory = [];
+  const sha = st && st.head && st.head.sha;
+  if (sha) {
+    const [runs, status, baseRuns, baseStatus, branch] = await Promise.all([
+      api('-X', 'GET', `repos/${repo}/commits/${sha}/check-runs`, '-f', 'per_page=100'),
+      api(`repos/${repo}/commits/${sha}/status`),
+      api('-X', 'GET', `repos/${repo}/commits/${target}/check-runs`, '-f', 'per_page=100'),
+      api(`repos/${repo}/commits/${target}/status`),
+      api(`repos/${repo}/branches/${target}`),
+    ]);
+    const headRuns = runs.data && runs.data.check_runs, headStatus = status.data;
+    const failing = failingNames(headRuns, headStatus);
+    const req = requiredChecks(branch.data);
+    if (req.length) {
+      // the target's branch protection names what must pass: only those block, the rest advise
+      checks = checksState((headRuns || []).filter(r => req.includes(r.name)),
+        { statuses: ((headStatus && headStatus.statuses) || []).filter(x => req.includes(x.context)) });
+      advisory = failing.filter(x => !req.includes(x));
+    } else {
+      // nothing required: our CI (check runs) blocks unless it was already red on the target;
+      // external commit statuses (Snyk & co.) only advise, since nothing makes them gate a merge
+      const onTarget = new Set(failingNames(baseRuns.data && baseRuns.data.check_runs, baseStatus.data));
+      knownFailing = failing.filter(x => onTarget.has(x));
+      checks = checksState(headRuns, null, knownFailing);
+      advisory = failingNames(null, headStatus).filter(x => !onTarget.has(x));
+    }
+  }
+  return { conflict, checks, knownFailing, advisory };
+}
+
 // One (repo, env, source → target) row. update(patch) streams progress to the UI.
 async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   const { repo, source, target } = row;
-  const owner = repo.split('/')[0];
   const api = (...a) => gh(['api', ...a]);
+  // GitHub's `head=owner:branch` filter silently returns nothing on some repos (seen on
+  // frontline.io-web), so list the base's open PRs and match the head branch here.
   const findOpen = async (base, head) => {
-    const r = await api('-X', 'GET', `repos/${repo}/pulls`, '-f', 'state=open', '-f', `base=${base}`, '-f', `head=${owner}:${head}`);
-    return r.error ? { error: r.error } : { pr: (r.data || [])[0] || null };
+    const r = await api('-X', 'GET', `repos/${repo}/pulls`, '-f', 'state=open', '-f', `base=${base}`, '-f', 'per_page=100');
+    if (r.error) return { error: r.error };
+    const same = (p) => p.head && p.head.ref === head && (!p.head.repo || p.head.repo.full_name.toLowerCase() === repo.toLowerCase());
+    return { pr: (r.data || []).find(same) || null };
   };
   const open = async (payload) => {
     const r = await api('-X', 'POST', `repos/${repo}/pulls`, '--input', writeJson(payload));
     return r.error || !r.data || !r.data.number ? { error: r.error || (r.data && r.data.message) || 'could not open PR' } : { pr: r.data };
   };
-  // GitHub computes mergeability lazily: ask until it answers (null = still computing)
-  const mergeState = async (n) => {
-    for (let i = 0; i < 6; i++) {
-      const r = await api(`repos/${repo}/pulls/${n}`);
-      if (r.data && r.data.mergeable !== null && r.data.mergeable !== undefined) return r.data;
-      await wait(1500);
-    }
-    return null;
-  };
-
   const cmp = await api(`repos/${repo}/compare/${target}...${source}`);
   if (cmp.error || !cmp.data) return { error: cmp.error || 'compare failed' };
   const ahead = cmp.data.ahead_by, files = (cmp.data.files || []).length;
@@ -104,10 +155,10 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   // the release PR: reuse an open one, else open it
   let found = await findOpen(target, source);
   if (found.error) return { error: found.error };
-  let pr = found.pr, reused = !!pr;
+  let pr = found.pr, reused = !!pr, lastBody = null;
   if (!pr) {
-    const made = await open({ title: `chore(release): promote ${source} to ${target}`, head: source, base: target,
-      body: releaseBody({ env: row.env, source, target, workflow: row.deploy, ahead, titles, hotfixes }) });
+    lastBody = releaseBody({ env: row.env, source, target, workflow: row.deploy, ahead, titles, hotfixes });
+    const made = await open({ title: `chore(release): promote ${source} to ${target}`, head: source, base: target, body: lastBody });
     if (made.error) return { error: made.error, ahead };
     pr = made.pr;
   }
@@ -127,28 +178,15 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
       if (made.error) backMerge = { error: made.error };
     }
     if (bpr) {
-      const st = await mergeState(bpr.number);
-      backMerge = { number: bpr.number, url: bpr.html_url, conflict: !!(st && st.mergeable === false) };
+      const h = await prHealth(gh, repo, bpr.number, source, wait);
+      backMerge = { number: bpr.number, url: bpr.html_url, conflict: h.conflict === true };
     }
     update({ backMerge });
   }
 
   // is the release PR mergeable, and are its checks green?
-  const st = await mergeState(pr.number);
-  const conflict = !!(st && st.mergeable === false);
-  let checks = 'none', knownFailing = [];
-  const sha = st && st.head && st.head.sha;
-  if (sha) {
-    const [runs, status, base] = await Promise.all([
-      api('-X', 'GET', `repos/${repo}/commits/${sha}/check-runs`, '-f', 'per_page=100'),
-      api(`repos/${repo}/commits/${sha}/status`),
-      api('-X', 'GET', `repos/${repo}/commits/${target}/check-runs`, '-f', 'per_page=100'),
-    ]);
-    const onTarget = new Set(failingNames(base.data && base.data.check_runs));
-    knownFailing = failingNames(runs.data && runs.data.check_runs).filter(n => onTarget.has(n));
-    checks = checksState(runs.data && runs.data.check_runs, status.data, knownFailing);
-  }
-  return { ahead, hotfixes: hotfixes.length, pr: { number: pr.number, url: pr.html_url }, reused, backMerge, conflict, checks, knownFailing };
+  const health = await prHealth(gh, repo, pr.number, target, wait);
+  return { ahead, hotfixes: hotfixes.length, pr: { number: pr.number, url: pr.html_url }, reused, body: reused ? null : lastBody, backMerge, ...health };
 }
 
 // Every row in parallel; onRow(i, row) after each change.
@@ -165,4 +203,4 @@ async function runRelease(gh, prs, { writeJson, onRow, wait }) {
   return rows;
 }
 
-module.exports = { hotfixTitles, releaseBody, checksState, rowStatus, releaseRow, runRelease };
+module.exports = { hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease };

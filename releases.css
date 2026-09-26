@@ -289,3 +289,5 @@
 .rl-rel-pop .rl-rel-actions { position:sticky; bottom:-12px; margin:12px -12px -12px; padding:10px 12px; background:var(--pop);
   border-top:1px solid var(--border); border-radius:0 0 var(--r-lg) var(--r-lg); }
 .rl-rel-actions .rl-rr-fix { margin-left:0; margin-right:auto; padding:6px 12px; font-size:12px; }
+.rl-rr-row.st-merged { border-color:rgba(74,222,128,.55); background:rgba(74,222,128,.06); }
+.rl-rr-row.st-closed { opacity:.55; }

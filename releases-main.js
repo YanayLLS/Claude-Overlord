@@ -6,13 +6,16 @@
 const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
-const { runRelease } = require('./release-run');
+const { runRelease, prHealth, rowStatus } = require('./release-run');
 const { execFile } = require('child_process');
 const os = require('os');
 const { releaseTargets, releasePlan } = require('./releases-core');
 const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
+const RUN_TTL_MS = 24 * 3600 * 1000;   // release results older than this are dropped on load
+const RECHECK_MS = 60 * 1000;           // re-read release PRs' checks this often…
+const RECHECK_FOR_MS = 30 * 60 * 1000;  // …for this long after a run, until they settle
 const PENDING_SHOWN = 10;
 const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
@@ -23,6 +26,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
   let state = { source: saved.source || DEFAULT_SOURCE, ...(saved.cache || {}), loading: false };
+  if (state.releaseRun && (state.releaseRun.running || Date.now() - state.releaseRun.startedAt > RUN_TTL_MS)) state.releaseRun = null;
   let timer = null, inFlight = false;
 
   function persist() {
@@ -253,12 +257,47 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const onRow = (i, row) => { run.rows[i] = { ...row }; push({ releaseRun: { ...run } }); };
     await runRelease(ghJson, plan.prs, { writeJson, onRow });
     run.flags = await flags;
+    // missing prod flags: say so at the top of every prod release PR this run opened
+    if (run.flags && run.flags.missing && run.flags.missing.length) {
+      const warn = `> ⚠ **Seed before merging:** prod is missing the feature flag${run.flags.missing.length === 1 ? '' : 's'} ${run.flags.missing.map(k => '\`' + k + '\`').join(', ')}. `
+        + 'Dry run first: `cd C:/Work/back-office && node server/scripts/syncFlagCatalog.js --only <Key> --allow-prod`, then `--apply`.\n\n';
+      await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && !r.reused && r.body).map(r =>
+        ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeJson({ body: warn + r.body })])));
+    }
     run.running = false;
+    for (const r of run.rows) delete r.body; // only needed for that patch
     push({ releaseRun: { ...run } });
     persist();
+    recheck(run);
     const blocked = run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
     const opened = run.rows.filter(r => r.pr && !r.reused).length;
     send({ type: 'toast', text: `Release ${envs.join(' + ')}: ${opened} PR${opened === 1 ? '' : 's'} opened${blocked ? `, ${blocked} blocked` : ''}` });
+  }
+
+  // After a run: a fresh PR's own checks only start once it exists, so re-read every open row
+  // each minute until nothing is pending or unknown (or half an hour passes, or a new run starts).
+  let recheckTimer = null;
+  function recheck(run) {
+    clearTimeout(recheckTimer);
+    const settled = (r) => !r.pr || r.merged || r.closed || (r.checks !== 'pending' && r.checks !== 'none' && r.conflict !== null);
+    const tick = async () => {
+      if (state.releaseRun !== run && (!state.releaseRun || state.releaseRun.startedAt !== run.startedAt)) return;
+      const cur = state.releaseRun;
+      const open = cur.rows.map((r, i) => [r, i]).filter(([r]) => !settled(r));
+      if (!open.length || Date.now() - cur.startedAt > RECHECK_FOR_MS) return;
+      await Promise.all(open.map(async ([r, i]) => {
+        const h = await prHealth(ghJson, r.repo, r.pr.number, r.target);
+        const row = { ...r, ...h };
+        row.status = rowStatus(row);
+        cur.rows[i] = row;
+      }));
+      push({ releaseRun: { ...cur, checkedAt: Date.now() } });
+      persist();
+      recheckTimer = setTimeout(tick, RECHECK_MS);
+      if (recheckTimer.unref) recheckTimer.unref();
+    };
+    recheckTimer = setTimeout(tick, RECHECK_MS);
+    if (recheckTimer.unref) recheckTimer.unref();
   }
 
   // The frontend's prod feature-flag gap check, when this machine has it. Read-only.
@@ -293,7 +332,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesRefresh': refresh(); return true;
       case 'releasesRelease': release(msg.envs).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll().catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
-      case 'releasesClearRun': push({ releaseRun: null }); persist(); return true;
+      case 'releasesClearRun': clearTimeout(recheckTimer); push({ releaseRun: null }); persist(); return true;
       case 'releasesSetSource': {
         const source = String(msg.source || '').trim() || DEFAULT_SOURCE;
         push({ source, grid: null, problems: null, error: null, updatedAt: null, config: null, results: null });
