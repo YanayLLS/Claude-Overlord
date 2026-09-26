@@ -199,3 +199,4 @@
 .rl-rel-actions button { font:inherit; font-size:12px; font-weight:500; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:var(--surface0); color:var(--text); cursor:pointer; }
 .rl-rel-actions button.go { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:600; }
 .rl-rel-actions button:disabled { opacity:.45; cursor:default; }
+.rl-rel-pop.still { animation:none; }

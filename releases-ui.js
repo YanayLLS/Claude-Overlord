@@ -3,7 +3,7 @@
 // and forwards { type: 'releases' } messages to releasesUi.onMsg.
 (function () {
   let state = null, open = false, sel = null; // sel = [rowIdx, cellIdx]
-  let relOpen = false, relSel = new Set(); // Release picker: open?, chosen envs
+  let relOpen = false, relSel = new Set(), relShown = false; // Release picker: open?, chosen envs, already animated in?
   let tab = 'board', tlEnv = '', toToday = false; // tab: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
 
   const core = document.createElement('script');
@@ -59,7 +59,12 @@
       api.send({ type: 'releasesSetSource', source: v });
     },
     deselect: () => { sel = null; render(); },
-    releaseMenu: () => { relOpen = !relOpen; render(); },
+    // opens with every env picked; slides in once, then re-renders (toggles, refreshes) keep it still
+    releaseMenu: () => {
+      relOpen = !relOpen; relShown = false;
+      if (relOpen && state && state.config) relSel = new Set(ReleasesCore.releaseTargets(state.config));
+      render();
+    },
     relToggle: (el) => { const e = el.dataset.env; relSel.has(e) ? relSel.delete(e) : relSel.add(e); render(); },
     releaseGo: () => {
       if (!relSel.size) return;
@@ -371,7 +376,8 @@
       if (n.ahead) waiting[n.to] = (waiting[n.to] || 0) + n.ahead;
     }
     const plan = ReleasesCore.releasePlan(cfg, [...relSel]);
-    let h = '<div class="rl-rel-pop"><div class="rl-rel-head">Release to</div><div class="rl-rel-envs">';
+    let h = `<div class="rl-rel-pop${relShown ? ' still' : ''}"><div class="rl-rel-head">Release to</div><div class="rl-rel-envs">`;
+    relShown = true;
     for (const e of targets) {
       h += `<button class="rl-rel-env${relSel.has(e) ? ' on' : ''}" data-act="relToggle" data-env="${esc(e)}">`
         + `<span class="rl-env" style="--hue:${ENV_HUE[e.toLowerCase()] || 'var(--dim)'}">${esc(e)}</span>`
