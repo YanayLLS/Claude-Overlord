@@ -102,6 +102,13 @@ const { fixRunPlan } = require('./actions-core');
     { dir: 'C:/x/r', repo: 'O/R', branch: 'master' },
   ];
   const p = fixRunPlan(run, infos, ['C:/x/r-wt']);
+  // the prompt rides the claude command line (cmd.exe / sh -c) — nothing a shell reads
+  assert.ok(!/["&|<>^%!$`\\;\n]/.test(fixRunPlan({ ...run, name: 'x"&$(rm)`;|<>^%!' }, infos, []).prompt));
+  // start from the exact commit CI ran when known, else the branch tip
+  assert.strictEqual(p.startPoint, 'origin/dev');
+  const sha = 'a'.repeat(40);
+  assert.strictEqual(fixRunPlan({ ...run, sha }, infos, []).startPoint, sha);
+  assert.strictEqual(fixRunPlan({ ...run, sha: 'x&y' }, infos, []).startPoint, 'origin/dev');
   // main checkout wins over a worktree; repo match ignores case
   assert.strictEqual(p.repoDir, 'C:/x/r');
   assert.strictEqual(p.branch, 'fix/ci-42');

@@ -1442,9 +1442,12 @@ function takeSpare(cwd) {
   return s;
 }
 
-function createAgent(folderPath, initialPrompt) {
+// argPrompt: submitted by claude itself at boot — instant and never lost, unlike the
+// typed initialPrompt. Must already be shell-safe (see fixRunPlan). A spare is already
+// running, so it can't take one.
+function createAgent(folderPath, initialPrompt, argPrompt) {
   const cwd = folderPath || os.homedir();
-  const warm = takeSpare(cwd);
+  const warm = argPrompt ? null : takeSpare(cwd);
   const sessionId = warm ? warm.sessionId : crypto.randomUUID();
   const id = warm ? warm.id : nextId++;
   const agent = {
@@ -1464,7 +1467,7 @@ function createAgent(folderPath, initialPrompt) {
 
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const feat = featureAgentArgs(cwd);
-  const claudeCmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}`;
+  const claudeCmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}${argPrompt ? ` "${argPrompt}"` : ''}`;
   const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
   const shellArgs = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
@@ -2405,6 +2408,7 @@ async function fetchWorkflowRun(w) {
     // leaves this undefined, which the badge treats as mine (fails loud).
     mine: ghLogin ? actorOf(run) === ghLogin : undefined,
     event: run.event || '',
+    sha: run.head_sha || '',
     runNumber: run.run_number || 0,
     title: run.display_title || run.head_commit && run.head_commit.message || '',
     startedAt: run.run_started_at || run.created_at || '',
@@ -2416,19 +2420,21 @@ async function fetchWorkflowRun(w) {
 // "Fix" on a failed run: a fix/ci-N worktree off the failed branch, with an agent
 // told to read the failed log and fix it. Clicking again reuses that worktree.
 async function fixActionRun(run) {
-  const infos = (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean);
-  const plan = fixRunPlan(run, infos, (settings.worktrees || []).map(w => w.path));
+  // The last actions poll already walked every checkout; rescan only if it missed this repo.
+  const wts = (settings.worktrees || []).map(w => w.path);
+  let plan = fixRunPlan(run, lastCheckoutInfos || [], wts);
+  if (plan.error) plan = fixRunPlan(run, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
   if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
   let entry = (settings.worktrees || []).find(w => w.repo === plan.repoDir && w.branch === plan.branch);
   if (!entry) {
-    await gitIn(plan.repoDir, ['fetch', 'origin', plan.base, '--quiet'], 60000);
-    // origin/<base>: the commit CI ran, not a stale local copy. Keep the repo's
-    // defaultBase — a one-off fix off master shouldn't change where features start.
+    // createWorktree fetches its base — that covers a sha, not an origin/<branch> ref.
+    if (plan.startPoint.startsWith('origin/')) await gitIn(plan.repoDir, ['fetch', 'origin', plan.base, '--quiet'], 60000);
+    // Keep the repo's defaultBase — a one-off fix shouldn't change where features start.
     const prevBase = (projectConfig(plan.repoDir) || {}).defaultBase;
-    entry = await doCreateWorktree({ repo: plan.repoDir, branch: plan.branch, base: `origin/${plan.base}` });
+    entry = await doCreateWorktree({ repo: plan.repoDir, branch: plan.branch, base: plan.startPoint });
     projectConfig(plan.repoDir).defaultBase = prevBase || 'dev'; saveState();
   }
-  createAgent(entry.path, plan.prompt);
+  createAgent(entry.path, null, plan.prompt);
 }
 
 // The local checkouts Overlord already knows about: every agent's cwd plus every
@@ -2442,10 +2448,12 @@ function localCheckoutDirs() {
 
 // Hang an { count, title } badge on each row: how far your local branches run
 // ahead of the branch that workflow last deployed. That gap is the PR you owe.
+let lastCheckoutInfos = null; // fixActionRun reuses the poll's scan
 async function annotateAhead(rows) {
   const targets = rows.filter(r => !r.error && r.branch);
   if (!targets.length) return;
   const infos = (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean);
+  lastCheckoutInfos = infos;
   if (!infos.length) return;
   const now = Date.now();
   await Promise.all(targets.map(async (r) => {
