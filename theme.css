@@ -591,7 +591,18 @@ body:not(.mobile-on) #qr-btn { display: none !important; } /* mobile remote feat
 .usage-modal svg { width: 100%; height: auto; } /* the chart scales with the modal instead of overflowing it */
 #chat-panel { width: min(372px, calc(100vw - 28px)); }
 #preview-col { max-width: 60vw; }
-#filter-menu, #zoom-menu { max-height: calc(100vh - 60px); overflow-y: auto; }
+#filter-menu, #zoom-menu, #perf-menu { max-height: calc(100vh - 60px); overflow-y: auto; }
+#perf-menu { position: fixed; z-index: 1000; width: 380px; max-width: calc(100vw - 16px); padding: 12px; border-radius: var(--r-lg); background: var(--pop); box-shadow: var(--pop-shadow); }
+.pf-sys { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--subtext); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.pf-row, .pf-proc { display: grid; grid-template-columns: 1fr 64px 48px; gap: 8px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.pf-row > span:not(:first-child), .pf-proc > span:not(:first-child) { text-align: right; }
+.pf-cols { font-size: 10.5px; color: var(--dim); padding: 0 6px 4px; }
+.pf-agent { padding: 6px; border-radius: var(--r); cursor: pointer; }
+.pf-agent:hover { background: var(--surface0); }
+.pf-row { font-size: 12px; color: var(--text); font-weight: 600; }
+.pf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-proc { font-size: 11px; color: var(--subtext); padding-left: 10px; }
+.pf-proc > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #zoom-menu { max-width: calc(100vw - 16px); }
 #header h1 { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 @media (max-width: 560px) {

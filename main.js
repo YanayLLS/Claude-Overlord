@@ -498,6 +498,33 @@ function killProcessesByCmdline(substrings) {
   });
 }
 
+// ── Performance popover: per-agent memory/CPU ──────────
+// One CIM scan of every process; perf-core.js walks each agent's tree from its shell pid.
+// ponytail: a PowerShell spawn per sample (~0.5s CPU) — fine at the popover's 5s poll,
+// swap for a native module if it ever needs to run continuously.
+const { parseProcLines, agentUsage } = require('./perf-core');
+const PERF_PS = "Get-CimInstance Win32_Process | ForEach-Object { '' + $_.ProcessId + '|' + $_.ParentProcessId + '|' + $_.WorkingSetSize + '|' + ($_.KernelModeTime + $_.UserModeTime) + '|' + $(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }) + '|' + $_.Name + '|' + $_.CommandLine }";
+let perfPrev = null, perfPrevAt = 0, perfBusy = false;
+function samplePerf() {
+  if (process.platform !== 'win32') { send({ type: 'perfUsage', error: 'Windows only for now' }); return; }
+  if (perfBusy) return;
+  perfBusy = true;
+  execFile('powershell', ['-NoProfile', '-Command', PERF_PS], { timeout: 20000, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, out) => {
+    perfBusy = false;
+    if (err || !out) { send({ type: 'perfUsage', error: 'Process scan failed' }); return; }
+    const now = Date.now();
+    // A stale baseline (popover closed a while) would average CPU over minutes — restart it.
+    const prev = now - perfPrevAt < 30000 ? perfPrev : null;
+    const roots = [...terminals].map(([id, t]) => ({ id, pid: t && t.pid })).filter(r => r.pid);
+    const { rows, cpuByPid } = agentUsage(parseProcLines(out), roots, prev, now - perfPrevAt, os.cpus().length);
+    perfPrev = cpuByPid; perfPrevAt = now;
+    for (const r of rows) for (const g of r.top) g.cmd = (g.cmd || '').slice(0, 300);
+    let appMem = 0;
+    try { for (const m of app.getAppMetrics()) appMem += m.memory.workingSetSize * 1024; } catch {}
+    send({ type: 'perfUsage', rows, total: os.totalmem(), free: os.freemem(), appMem });
+  });
+}
+
 function killSessionProcessesAsync(sessionId) {
   if (!sessionId) return Promise.resolve();
   return killProcessesByCmdline([sessionId]);
@@ -3641,6 +3668,7 @@ function handleIpc(msg) {
       break;
     }
     case 'pollActionsNow': armActionsTimer(); break;
+    case 'perfSample': samplePerf(); break;
     case 'fixActionRun': fixActionRun(msg.run || {}).catch(e => { flog('fixActionRun failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
     case 'saveClickupSettings': {
       const c = msg.clickupSettings || {}, prev = clickupCfg();

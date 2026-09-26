@@ -1051,6 +1051,7 @@ button:focus-visible { outline-offset:0; }
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM21 21h.01M17 21h.01M21 17h.01"/></svg></button>
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
+    <button class="hdr-btn" id="perf-btn" onclick="togglePerfMenu(event)" title="Performance — memory and CPU per agent" aria-haspopup="dialog" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></button>
     <button class="hdr-btn" id="zoom-btn" onclick="toggleZoomMenu(event)" title="UI size (Ctrl+wheel, Ctrl+0 resets)" aria-haspopup="dialog" aria-expanded="false">100%</button>
     <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button>
 
@@ -3767,6 +3768,7 @@ function handleAgentMsg(msg) {
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
     case 'toast': showToast(msg.text); break;
+    case 'perfUsage': renderPerf(msg); break;
     case 'models': setModels(msg.models || [], msg.error); break;
     case 'branchList': if (_branchCbs[msg.repo]) _branchCbs[msg.repo](msg.branches, msg.error); break;
     case 'featureRepoAdded':
@@ -6068,6 +6070,51 @@ function closeZoomMenu() {
   document.removeEventListener('mousedown', closeZoomMenuOutside);
 }
 
+
+// ── Performance popover: which agent's process tree is heavy (main.js samplePerf) ──
+const PERF_POLL_MS = 5000;
+let perfTimer = null;
+const fmtBytes = (b) => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB';
+const fmtCpu = (c) => c === null || c === undefined ? '—' : c.toFixed(c < 10 ? 1 : 0) + '%';
+function togglePerfMenu(e) {
+  e.stopPropagation();
+  if (document.getElementById('perf-menu')) { closePerfMenu(); return; }
+  const m = document.createElement('div');
+  m.id = 'perf-menu'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-label', 'Performance');
+  m.innerHTML = '<div class="zm-head"><span>Performance</span></div><div class="pf-body"><div class="zm-hint">Scanning processes…</div></div>';
+  m.onclick = (ev) => { const row = ev.target.closest('[data-agent]'); if (row) { focusAgent(+row.dataset.agent); closePerfMenu(); } };
+  const r = e.currentTarget.getBoundingClientRect();
+  m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(8, innerWidth - r.right) + 'px';
+  document.body.appendChild(m);
+  e.currentTarget.setAttribute('aria-expanded', 'true');
+  api.send({ type: 'perfSample' });
+  perfTimer = setInterval(() => api.send({ type: 'perfSample' }), PERF_POLL_MS);
+  setTimeout(() => document.addEventListener('mousedown', closePerfMenuOutside));
+}
+function closePerfMenuOutside(ev) { if (!ev.target.closest('#perf-menu, #perf-btn')) closePerfMenu(); }
+function closePerfMenu() {
+  clearInterval(perfTimer); perfTimer = null;
+  document.getElementById('perf-menu')?.remove();
+  document.getElementById('perf-btn')?.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('mousedown', closePerfMenuOutside);
+}
+function renderPerf(msg) {
+  const body = document.querySelector('#perf-menu .pf-body');
+  if (!body) return;
+  if (msg.error) { body.innerHTML = `<div class="zm-hint">${escapeHtml(msg.error)}</div>`; return; }
+  const used = msg.total - msg.free;
+  const sys = `<div class="pf-sys"><span>RAM ${fmtBytes(used)} / ${fmtBytes(msg.total)}</span><span>Overlord ${fmtBytes(msg.appMem)}</span></div>`;
+  const rows = msg.rows.map(r => {
+    const a = agents.get(r.id);
+    const title = a ? (a.title || 'New agent') : 'Agent ' + r.id;
+    const top = r.top.slice(0, 4).map(g => `<div class="pf-proc" title="${escapeHtml(g.cmd)}"><span>${escapeHtml(g.name)}${g.count > 1 ? ' ×' + g.count : ''}</span>`
+      + `<span>${fmtBytes(g.mem)}</span><span>${fmtCpu(g.cpu)}</span></div>`).join('');
+    return `<div class="pf-agent" data-agent="${r.id}" title="Go to this agent"><div class="pf-row"><span class="pf-name">${escapeHtml(title)}</span>`
+      + `<span>${fmtBytes(r.mem)}</span><span>${fmtCpu(r.cpu)}</span></div>${top}</div>`;
+  }).join('') || '<div class="zm-hint">No running agents.</div>';
+  body.innerHTML = sys + '<div class="pf-row pf-cols"><span>Agent · processes it started</span><span>Memory</span><span>CPU</span></div>' + rows
+    + `<div class="zm-hint">Heaviest first · CPU is % of the whole PC · refreshes every ${PERF_POLL_MS / 1000}s</div>`;
+}
 
 // Live status line timer — update every second without full re-render
 setInterval(() => {
