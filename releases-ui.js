@@ -67,6 +67,14 @@
       render();
     },
     releaseClose: () => { relOpen = false; render(); },
+    // bell: add every repo of the release config the PRs panel isn't watching yet
+    relWatch: () => {
+      const missing = prsUnwatched();
+      if (!missing || !missing.length) return;
+      api.send({ type: 'savePrSettings', prSettings: { ...prSettings, repos: [...(prSettings.repos || []), ...missing] } });
+      if (typeof showToast === 'function') showToast(`Watching ${missing.length} more repo${missing.length === 1 ? '' : 's'} in the PRs panel`);
+      render();
+    },
     relToggle: (el) => { const e = el.dataset.env; relSel.has(e) ? relSel.delete(e) : relSel.add(e); render(); },
     releaseGo: () => {
       if (!relSel.size) return;
@@ -370,6 +378,14 @@
     return h + '</div>';
   }
 
+  // Repos in the release config the PRs panel doesn't watch yet; null when that panel is off.
+  // prSettings is index.html's (a shared global), refreshed whenever main echoes the settings.
+  function prsUnwatched() {
+    if (typeof prSettings === 'undefined' || !prSettings.enabled || !state || !state.config) return null;
+    const have = new Set((prSettings.repos || []).map(r => r.toLowerCase()));
+    return [...new Set(state.config.repos.filter(r => r.branches).map(r => r.repo))].filter(r => !have.has(r.toLowerCase()));
+  }
+
   // Release picker: one toggle per env the config promotes into, with what's waiting for it;
   // the footer says what the agent will do (PRs to open, hand-deployed envs to report).
   function releasePickerHtml(s) {
@@ -379,7 +395,14 @@
       if (n.ahead) waiting[n.to] = (waiting[n.to] || 0) + n.ahead;
     }
     const plan = ReleasesCore.releasePlan(cfg, [...relSel]);
-    let h = `<div class="rl-rel-pop${relShown ? ' still' : ''}"><div class="rl-rel-head">Release to</div><div class="rl-rel-envs">`;
+    const unwatched = prsUnwatched();
+    const bell = !unwatched ? ''
+      : `<button class="rl-rel-bell${unwatched.length ? '' : ' done'}" data-act="relWatch" title="${unwatched.length
+        ? `Watch PRs for the ${unwatched.length} release repo${unwatched.length === 1 ? '' : 's'} not in the PRs panel yet: ${esc(unwatched.map(r => r.split('/')[1]).join(', '))}`
+        : 'Every release repo is already in the PRs panel'}"${unwatched.length ? '' : ' disabled'}>`
+        + '<svg class="ic" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'
+        + (unwatched.length ? `<i>${unwatched.length}</i>` : '') + '</button>';
+    let h = `<div class="rl-rel-pop${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release to</span>${bell}</div><div class="rl-rel-envs">`;
     relShown = true;
     for (const e of targets) {
       h += `<button class="rl-rel-env${relSel.has(e) ? ' on' : ''}" data-act="relToggle" data-env="${esc(e)}">`

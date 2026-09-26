@@ -200,3 +200,12 @@
 .rl-rel-actions button.go { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:600; }
 .rl-rel-actions button:disabled { opacity:.45; cursor:default; }
 .rl-rel-pop.still { animation:none; }
+.rl-rel-head { display:flex; align-items:center; justify-content:space-between; }
+.rl-rel-bell { position:relative; width:26px; height:26px; display:flex; align-items:center; justify-content:center; border:none; border-radius:var(--r);
+  background:none; color:var(--subtext); cursor:pointer; margin:-6px -4px -6px 0; }
+.rl-rel-bell:hover { background:var(--hover-strong); color:var(--text); }
+.rl-rel-bell .ic { width:15px; height:15px; }
+.rl-rel-bell i { position:absolute; top:1px; right:0; min-width:14px; height:14px; padding:0 3px; border-radius:999px; background:var(--accent); color:var(--on-accent);
+  font:700 9px/14px inherit; font-style:normal; letter-spacing:0; }
+.rl-rel-bell.done { opacity:.4; cursor:default; }
+.rl-rel-bell.done:hover { background:none; color:var(--subtext); }
