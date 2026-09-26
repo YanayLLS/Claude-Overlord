@@ -165,8 +165,7 @@
 
     const nowX = xOf(Date.now());
     let group = null;
-    // one lane per repo; each pill names its env (DEV / STAGING / PROD…) in that env's colour,
-    // and a pill that would run into the next one shrinks to a dot. PR, title, time: on hover.
+    // one lane per repo; each release is a dot in its env's colour — env, PR, title, time on hover
     for (const r of cfg.repos) {
       if (!r.branches) continue;
       const label = r.label || r.repo.split('/')[1];
@@ -176,9 +175,8 @@
       if ((r.group || '') !== group) { group = r.group || ''; if (group) h += `<div class="rl-tlx-group">${esc(group)}</div>`; }
       h += `<div class="rl-tlx-row"><div class="rl-tlx-label" title="${esc(r.repo)}"><span class="rl-tlx-repo">${esc(label)}</span></div>`
         + `<div class="rl-tlx-track"><i class="rl-tlx-now" style="left:${nowX}px"></i>`;
-      lane.forEach((e, k) => {
-        const x = xOf(Date.parse(e.date)), nx = k + 1 < lane.length ? xOf(Date.parse(lane[k + 1].date)) : Infinity;
-        const room = e.env.length * 7 + (e.kind === 'merge' ? 40 : 26); // the pill's width: env name + dot + padding
+      lane.forEach((e) => {
+        const x = xOf(Date.parse(e.date));
         const when = new Date(e.date).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
         // deploy runs: when it went out, by whom, did it work. merges: hand-deployed envs, go-live time unknown
         const what = e.kind === 'merge' ? 'merged · deployed by hand, go-live time unknown'
@@ -186,14 +184,18 @@
           : e.state === 'partial' ? `deployed${e.actor ? ' by ' + e.actor : ''} · a follow-up job failed`
           : `deploy ${e.state === 'failure' ? 'FAILED' : e.state}${e.actor ? ' · ' + e.actor : ''}`;
         const kind = e.kind === 'merge' ? ' merge' : e.state === 'failure' ? ' fail' : e.state === 'partial' ? ' part' : '';
-        h += `<a class="rl-tlx-mark${kind}${nx - x < room ? ' dot' : ''}" data-url="${esc(e.url)}" style="left:${x}px; --hue:${hueOf(e.env, envs)}"`
+        h += `<a class="rl-tlx-mark${kind}" data-url="${esc(e.url)}" style="left:${x}px; --hue:${hueOf(e.env, envs)}"`
           + ` title="${esc(e.env.toUpperCase())} ${esc(what)} · ${esc(when)}\n${esc(refOf(e))} ${esc(e.title.replace(/^#\d+ /, ''))}\n${esc(e.branch)} · ${esc(e.sha.slice(0, 7))}">`
-          + `${e.kind === 'merge' ? '✋ ' : ''}${esc(e.env.toUpperCase())}</a>`;
+          + '</a>';
       });
       h += '</div></div>';
     }
     return h + '</div>';
   }
+
+  const TL_LEGEND = '<div class="rl-legend"><span><i class="rl-tlx-key"></i>deployed</span><span><i class="rl-tlx-key fail"></i>deploy failed</span>'
+    + '<span><i class="rl-tlx-key part"></i>deployed, side job failed</span><span><i class="rl-tlx-key merge"></i>merged, deployed by hand</span>'
+    + '<span>colour = env</span></div>';
 
   function gridHtml(g) {
     let h = `<div class="rl-grid" style="grid-template-columns:max-content repeat(${g.envs.length}, minmax(108px, max-content))">`
@@ -300,7 +302,7 @@
     } else {
       // Header and footer stay put; only the board scrolls. The clicked cell's detail is a
       // drawer over the board's bottom edge, so opening it never resizes the modal.
-      h += (tab === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
+      h += (tab === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
         + (s.localOnly ? `<div class="rl-local" title="It isn't on GitHub yet, so teammates can't see this board. Commit and push it to share.">Local config, not pushed yet · <code>${esc(s.localOnly)}</code></div>` : '');
     }
     const prev = modal.querySelector('.rl-body'), top = prev ? prev.scrollTop : 0, left = prev ? prev.scrollLeft : 0;

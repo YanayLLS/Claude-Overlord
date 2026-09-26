@@ -121,35 +121,32 @@
 .rl-tl-filter { padding-top:10px; position:sticky; left:0; width:max-content; }
 .rl-tlx { width:calc(160px + var(--days) * var(--dayw)); padding-bottom:6px; }
 .rl-tlx-head { display:flex; position:sticky; top:0; z-index:3; background:var(--bg2); border-bottom:1px solid var(--border); }
-.rl-tlx-corner { width:160px; flex-shrink:0; position:sticky; left:0; background:var(--bg2); z-index:4; }
+.rl-tlx-corner { box-shadow:-18px 0 0 var(--bg2); width:160px; flex-shrink:0; position:sticky; left:0; background:var(--bg2); z-index:4; }
 .rl-tlx-axis { display:flex; }
 .rl-tlx-day { width:var(--dayw); flex-shrink:0; display:flex; align-items:baseline; justify-content:center; gap:4px; padding:6px 0 5px; font-size:10px; color:var(--dim); border-left:1px solid rgba(var(--ink),.04); }
 .rl-tlx-day b { font-size:12px; font-weight:600; color:var(--subtext); }
 .rl-tlx-day.wk { background:rgba(var(--ink),.02); }
 .rl-tlx-day.today { color:var(--accent); } .rl-tlx-day.today b { color:var(--accent); }
-.rl-tlx-group { position:sticky; left:0; width:160px; padding:10px 2px 2px; font-size:10px; font-weight:600; letter-spacing:.9px; text-transform:uppercase; color:var(--dim); }
+.rl-tlx-group { box-shadow:-18px 0 0 var(--bg2); position:sticky; left:0; width:160px; padding:10px 2px 2px; font-size:10px; font-weight:600; letter-spacing:.9px; text-transform:uppercase; color:var(--dim); }
 .rl-tlx-row { display:flex; height:32px; border-bottom:1px solid rgba(var(--ink),.04); }
-.rl-tlx-label { width:160px; flex-shrink:0; position:sticky; left:0; z-index:2; display:flex; align-items:center; gap:8px; padding:0 10px 0 2px; background:var(--bg2); white-space:nowrap; }
+.rl-tlx-label { box-shadow:-18px 0 0 var(--bg2); width:160px; flex-shrink:0; position:sticky; left:0; z-index:2; display:flex; align-items:center; gap:8px; padding:0 10px 0 2px; background:var(--bg2); white-space:nowrap; }
 .rl-tlx-repo { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; }
 .rl-tlx-track { position:relative; flex-shrink:0; width:calc(var(--days) * var(--dayw));
   background:repeating-linear-gradient(90deg, rgba(var(--ink),.04) 0 1px, transparent 1px var(--dayw)); }
 .rl-tlx-now { position:absolute; top:0; bottom:0; width:2px; margin-left:-1px; background:var(--accent); opacity:.5; }
-.rl-tlx-mark { position:absolute; top:50%; transform:translate(-4px, -50%); height:18px; line-height:18px; padding:0 7px 0 14px; border-radius:999px;
-  font-size:9.5px; font-weight:600; letter-spacing:.5px; color:var(--text); white-space:nowrap; cursor:pointer; text-decoration:none;
-  background:color-mix(in srgb, var(--hue) 20%, var(--bg2)); border:1px solid color-mix(in srgb, var(--hue) 55%, transparent); }
-.rl-tlx-mark::before { content:''; position:absolute; left:4px; top:50%; width:6px; height:6px; margin-top:-3px; border-radius:50%; background:var(--hue); }
-.rl-tlx-mark:hover { z-index:2; background:color-mix(in srgb, var(--hue) 35%, var(--bg2)); }
-.rl-tlx-mark.dot { width:10px; height:10px; padding:0; font-size:0; border:none; background:var(--hue); transform:translate(-5px, -50%); }
-.rl-tlx-mark.dot::before { display:none; }
-.rl-tlx-mark.dot:hover { transform:translate(-5px, -50%) scale(1.4); }
 /* an env that runs another env's deployment: a faint dashed placeholder naming whose */
 .rl-uses { display:flex; align-items:center; gap:6px; padding:0 10px; border:1px dashed rgba(var(--ink),.12); border-radius:var(--r-sm); font-size:10.5px; color:var(--dim); white-space:nowrap; }
 .rl-uses .rl-env { font-size:9.5px; color:var(--subtext); }
 .rl-next.rl-next-more { margin-left:0; padding-left:6px; } /* a second waiting count sits right after the first */
 /* timeline pill states: a failed deploy is red, a side-job failure red-edged, a hand-deployed merge dashed */
-.rl-tlx-mark.fail { background:rgba(248,113,113,.18); border-color:rgba(248,113,113,.75); }
-.rl-tlx-mark.fail::before { background:var(--red); }
-.rl-tlx-mark.part { border-color:rgba(248,113,113,.6); }
-.rl-tlx-mark.merge { background:none; border-style:dashed; }
-.rl-tlx-mark.dot.fail { background:var(--red); }
-.rl-tlx-mark.dot.merge { background:none; border:1.5px dashed var(--hue); }
+
+/* timeline marks: one dot per release, coloured by env; state in the ring */
+.rl-tlx-mark { position:absolute; top:50%; width:10px; height:10px; margin:-5px 0 0 -5px; border-radius:50%; background:var(--hue); cursor:pointer; transition:transform .1s; }
+.rl-tlx-mark:hover { z-index:1; transform:scale(1.5); }
+.rl-tlx-mark.fail { box-shadow:0 0 0 2px var(--bg2), 0 0 0 3.5px var(--red); background:var(--red); }
+.rl-tlx-mark.part { box-shadow:0 0 0 2px var(--bg2), 0 0 0 3.5px var(--red); }
+.rl-tlx-mark.merge { background:none; border:1.5px dashed var(--hue); }
+.rl-tlx-key { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--subtext); }
+.rl-tlx-key.fail { background:var(--red); }
+.rl-tlx-key.part { box-shadow:0 0 0 2px var(--bg2), 0 0 0 3px var(--red); }
+.rl-tlx-key.merge { background:none; border:1.5px dashed var(--subtext); }
