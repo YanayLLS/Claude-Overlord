@@ -116,6 +116,9 @@ const { fixRunPlan } = require('./actions-core');
   assert.strictEqual(p.base, 'dev');
   assert.ok(p.prompt.includes('gh run view 123456789 --repo o/r --log-failed'));
   assert.ok(p.prompt.includes(run.url));
+  // an open PR (or a newer push) may already fix it — the agent checks before touching code
+  assert.ok(p.prompt.includes('gh pr list --repo o/r --base dev --state open'));
+  assert.ok(/already fix/i.test(p.prompt));
   // only a worktree checkout → still usable
   assert.strictEqual(fixRunPlan(run, infos.slice(0, 2), ['C:/x/r-wt']).repoDir, 'C:/x/r-wt');
   // no checkout of that repo → error, not a guess

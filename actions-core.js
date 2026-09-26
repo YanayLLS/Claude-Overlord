@@ -93,8 +93,10 @@ function fixRunPlan(run, infos, worktreeDirs) {
   const pick = mine.find(i => !wts.has(i.dir)) || mine[0];
   if (!pick) return { error: `No local checkout of ${run.repo} — open an agent in it once` };
   const prompt = `GitHub Actions run ${run.name} #${run.runNumber} failed on branch ${run.branch}: ${run.url} `
-    + `- run: gh run view ${id[1]} --repo ${run.repo} --log-failed - to read the failing steps, `
-    + `find the root cause, fix it on this branch (based on ${run.branch}), and verify the fix locally before committing.`;
+    + `- run: gh run view ${id[1]} --repo ${run.repo} --log-failed - to read the failing steps and find the root cause. `
+    + `Before changing any code, check whether a fix already exists: gh pr list --repo ${run.repo} --base ${run.branch} --state open, `
+    + `and commits on origin/${run.branch} newer than the failed one. If an open PR or a newer commit would already fix it, `
+    + `make no changes - report which one and why. Otherwise fix it on this branch (based on ${run.branch}) and verify the fix locally before committing.`;
   return {
     repoDir: pick.dir,
     branch: `fix/ci-${run.runNumber || id[1]}`,
