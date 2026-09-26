@@ -2414,7 +2414,8 @@ async function releasesFindLocal(repo, rel, ref) {
   }
   return found;
 }
-const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal }); // Releases board — self-contained, see releases-*.js
+const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
+  startAgent: (cwd, prompt) => createAgent(cwd, null, prompt) }); // Releases board — self-contained, see releases-*.js
 
 // Latest run on any branch for one workflow. per_page=1 keeps it to a single
 // row; a workflow that has never run comes back with an empty list, not an error.

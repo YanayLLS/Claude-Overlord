@@ -232,6 +232,32 @@ function buildTimeline(cfg, history, env, deploys) {
   return out.sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
 }
 
+// Envs a release can target: every env some repo promotes INTO, in board order.
+function releaseTargets(cfg) {
+  const to = new Set();
+  for (const r of cfg.repos) if (r.branches) for (const p of promotePairs(r)) to.add(p.to);
+  return cfg.envs.filter(e => to.has(e));
+}
+
+// What releasing to `envs` means. prs: one promotion PR per repo step that lands in a selected
+// env (source/target are branch names). manual: selected envs a repo deploys by hand — nothing
+// to PR, report their state instead (live = the pinned-commit config, when there is one).
+function releasePlan(cfg, envs) {
+  const prs = [], manual = [];
+  for (const r of cfg.repos) {
+    if (!r.branches) continue;
+    const label = r.label || r.repo.split('/')[1];
+    for (const env of envs) {
+      const steps = promotePairs(r).filter(p => p.to === env);
+      for (const p of steps) prs.push({ repo: r.repo, label, env, source: r.branches[p.from], target: r.branches[p.to] });
+      if (!steps.length && r.branches[env] && r.deploy && r.deploy[env] === 'manual') {
+        manual.push({ repo: r.repo, label, env, branch: r.branches[env], live: (r.live && r.live[env]) || null });
+      }
+    }
+  }
+  return { prs, manual };
+}
+
 // "label · env" for every cell whose last deploy run failed — what the footer badge warns about.
 function failedDeploys(grid) {
   const out = [];
@@ -241,7 +267,7 @@ function failedDeploys(grid) {
   return out;
 }
 
-const api = { parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
+const api = { parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

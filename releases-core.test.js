@@ -291,4 +291,24 @@ assert.strictEqual(age('garbage', now), '');
   const dead = buildTimeline(cfg, history, 'dev', { 'o/a|dev': { state: 'dead', runs: [run('x', '2026-09-24T10:00:00Z', 'failure')] } });
   assert.deepStrictEqual(dead.map(e => e.kind + ':' + e.sha), ['merge:m1']);
 }
+// ── releasePlan: which PRs a release to these envs means, and which envs ship by hand ──
+{
+  const { releasePlan, releaseTargets } = require('./releases-core');
+  const cfg = { envs: ['dev', 'alpha', 'staging', 'prod'], repos: [
+    { repo: 'o/front', label: 'frontend', branches: { dev: 'dev', alpha: 'alpha', prod: 'master' }, promote: [['dev', 'alpha'], ['dev', 'prod']] },
+    { repo: 'o/chat', branches: { staging: 'staging', prod: 'prod-one' }, promote: ['staging', 'prod'] },
+    { repo: 'o/auth', branches: { dev: 'main', prod: 'main' }, deploy: { dev: 'd.yml', prod: 'manual' } },
+    { repo: 'o/ai', branches: { dev: 'dev', prod: 'dev' }, deploy: { prod: 'manual' }, live: { prod: { from: 'o/i:f@dev', match: '(x)' } } },
+    { repo: 'o/lib', branches: { dev: 'dev' } },
+  ] };
+  assert.deepStrictEqual(releaseTargets(cfg), ['alpha', 'prod']);
+  const p = releasePlan(cfg, ['prod']);
+  assert.deepStrictEqual(p.prs, [
+    { repo: 'o/front', label: 'frontend', env: 'prod', source: 'dev', target: 'master' },
+    { repo: 'o/chat', label: 'chat', env: 'prod', source: 'staging', target: 'prod-one' },
+  ]);
+  assert.deepStrictEqual(p.manual.map(m => m.repo + ':' + m.env + ':' + m.branch + ':' + !!m.live), ['o/auth:prod:main:false', 'o/ai:prod:dev:true']);
+  assert.deepStrictEqual(releasePlan(cfg, ['alpha']).prs.map(x => x.repo + ' ' + x.source + '→' + x.target), ['o/front dev→alpha']);
+  assert.deepStrictEqual(releasePlan(cfg, ['alpha']).manual, []);
+}
 console.log('releases-core: all passed');

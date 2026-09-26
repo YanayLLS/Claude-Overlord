@@ -5,6 +5,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const { releaseBrief } = require('./release-playbook');
+const os = require('os');
+const { releaseTargets, releasePlan } = require('./releases-core');
 const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -13,7 +16,7 @@ const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
-module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal }) {
+module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal, startAgent }) {
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
@@ -214,6 +217,35 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // Starts late so it stays out of the app's startup rush.
   setTimeout(() => { refresh(); timer = setInterval(refresh, REFRESH_MS); timer.unref?.(); }, 20000).unref?.(); // unref: never the reason a process stays alive
 
+  // Release button: write a brief for the chosen envs (which PRs, from the config; how, from
+  // release-playbook.js) and start an agent on it in the config repo's local checkout, where the
+  // frontend's flag-gap check lives. The prompt only points at the brief — it rides the claude
+  // command line, so it must stay short and shell-safe.
+  async function release(envs) {
+    const cfg = state.config;
+    const targets = cfg ? releaseTargets(cfg) : [];
+    envs = (Array.isArray(envs) ? envs : []).filter(e => targets.includes(e));
+    if (!cfg || !envs.length) { send({ type: 'toast', text: 'Nothing to release: pick an environment first' }); return; }
+    const src = parseSource(state.source);
+    let cwd = os.homedir();
+    if (src && src.kind === 'gh' && findLocal) {
+      const local = await findLocal(src.repo, src.path, src.ref);
+      if (local) cwd = local.path.slice(0, local.path.length - src.path.length).replace(/[\\/]+$/, '');
+    } else if (src && src.kind === 'file') cwd = path.dirname(src.path);
+    const flag = path.join(cwd, '.claude', 'skills', 'release', 'flag-gap.cjs');
+    const brief = releaseBrief({
+      envs, plan: releasePlan(cfg, envs), configSource: state.source,
+      flagCheck: envs.includes('prod') && fs.existsSync(flag) ? '.claude/skills/release/flag-gap.cjs' : null,
+    });
+    const dir = path.join(stateDir, 'release-runs');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `release-${envs.join('-')}-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.md`);
+    fs.writeFileSync(file, brief);
+    const prompt = `Release to ${envs.join(' + ')}. Read and follow every step of ${file.replace(/\\/g, '/')} and end with its report table.`;
+    startAgent(cwd, prompt.replace(/[^\w\s.,:/#@()'=+-]/g, '').replace(/\s+/g, ' '));
+    send({ type: 'toast', text: `Release agent started for ${envs.join(' + ')}` });
+  }
+
   function handle(msg) {
     switch (msg && msg.type) {
       case 'releasesOpen':
@@ -223,6 +255,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         return true;
       case 'releasesClose': return true;
       case 'releasesRefresh': refresh(); return true;
+      case 'releasesRelease': release(msg.envs).catch(e => send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') })); return true;
       case 'releasesSetSource': {
         const source = String(msg.source || '').trim() || DEFAULT_SOURCE;
         push({ source, grid: null, problems: null, error: null, updatedAt: null, config: null, results: null });

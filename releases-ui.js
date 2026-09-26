@@ -3,6 +3,7 @@
 // and forwards { type: 'releases' } messages to releasesUi.onMsg.
 (function () {
   let state = null, open = false, sel = null; // sel = [rowIdx, cellIdx]
+  let relOpen = false, relSel = new Set(); // Release picker: open?, chosen envs
   let tab = 'board', tlEnv = '', toToday = false; // tab: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
 
   const core = document.createElement('script');
@@ -45,7 +46,7 @@
   document.addEventListener('keydown', (e) => {
     if (!open || e.key !== 'Escape') return;
     e.stopPropagation();
-    if (sel) { sel = null; render(); } else show(false);
+    if (relOpen) { relOpen = false; render(); } else if (sel) { sel = null; render(); } else show(false);
   }, true);
 
   const actions = {
@@ -58,6 +59,13 @@
       api.send({ type: 'releasesSetSource', source: v });
     },
     deselect: () => { sel = null; render(); },
+    releaseMenu: () => { relOpen = !relOpen; render(); },
+    relToggle: (el) => { const e = el.dataset.env; relSel.has(e) ? relSel.delete(e) : relSel.add(e); render(); },
+    releaseGo: () => {
+      if (!relSel.size) return;
+      api.send({ type: 'releasesRelease', envs: [...relSel] });
+      relOpen = false; render();
+    },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; render(); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
     cancelSource: () => { state = { ...(state || {}), editing: false }; render(); },
@@ -354,6 +362,30 @@
     return h + '</div>';
   }
 
+  // Release picker: one toggle per env the config promotes into, with what's waiting for it;
+  // the footer says what the agent will do (PRs to open, hand-deployed envs to report).
+  function releasePickerHtml(s) {
+    const cfg = s.config, targets = ReleasesCore.releaseTargets(cfg);
+    const waiting = {};
+    for (const row of (s.grid && s.grid.rows) || []) for (const c of row.cells || []) for (const n of (c && c.nexts) || []) {
+      if (n.ahead) waiting[n.to] = (waiting[n.to] || 0) + n.ahead;
+    }
+    const plan = ReleasesCore.releasePlan(cfg, [...relSel]);
+    let h = '<div class="rl-rel-pop"><div class="rl-rel-head">Release to</div><div class="rl-rel-envs">';
+    for (const e of targets) {
+      h += `<button class="rl-rel-env${relSel.has(e) ? ' on' : ''}" data-act="relToggle" data-env="${esc(e)}">`
+        + `<span class="rl-env" style="--hue:${ENV_HUE[e.toLowerCase()] || 'var(--dim)'}">${esc(e)}</span>`
+        + `<span class="rl-rel-wait">${waiting[e] ? `<b>${waiting[e]}</b> waiting` : 'up to date'}</span></button>`;
+    }
+    h += '</div><div class="rl-rel-sum">' + (relSel.size
+      ? `${plan.prs.length} release PR${plan.prs.length === 1 ? '' : 's'} to check and open`
+        + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
+      : 'Pick one or more environments') + '</div>'
+      + '<div class="rl-rel-note">An agent opens the PRs (plus back-merges and conflict fixes). It never merges or pushes to release branches.</div>'
+      + `<div class="rl-rel-actions"><button data-act="releaseMenu">Cancel</button><button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release agent</button></div></div>`;
+    return h;
+  }
+
   function render() {
     tlTip.classList.remove('show');
     if (!open) return;
@@ -364,8 +396,13 @@
         + `<button data-act="tab" data-tab="timeline" class="${tab === 'timeline' ? 'on' : ''}">Timeline</button></div>` : '')
       + `<span class="rl-src" data-act="editSource" title="Change config source">${esc(s.source)}</span>`
       + `<span class="rl-upd">${s.loading ? 'loading…' : esc(upd)}</span>`
+      + (s.config && window.ReleasesCore && ReleasesCore.releaseTargets(s.config).length
+        ? `<button class="rl-release${relOpen ? ' on' : ''}" data-act="releaseMenu" title="Open the release PRs for the envs you pick — an agent does the rest">`
+          + '<svg class="ic" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>Release</button>'
+        : '')
       + `<button data-act="refresh" class="${s.loading ? 'spin' : ''}" title="Refresh"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>`
       + '<button data-act="close" title="Close (Esc)"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><div class="rl-body">';
+    if (relOpen && s.config) h += releasePickerHtml(s);
     const g = s.grid;
     if (s.editing || !g || s.error || s.problems) {
       h += (!g && s.loading && !s.error && !s.problems && !s.editing) ? skeletonHtml() : setupHtml(s);
