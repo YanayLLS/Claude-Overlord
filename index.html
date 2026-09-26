@@ -595,11 +595,16 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #term-container::after { content:''; position:absolute; left:0; right:0; top:0; height:36px; z-index:4; pointer-events:none;
   background:linear-gradient(to bottom, var(--term-bg, #000), transparent); }
 #term-container .xterm { height:100%; width:100%; }
-/* 18px hit area, 5px transparent border keeps the visible thumb slim — easier to grab, same look */
-#term-container .xterm .xterm-viewport::-webkit-scrollbar { width:18px; }
-#term-container .xterm .xterm-viewport::-webkit-scrollbar-track { background:transparent; }
-#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:var(--surface0); border-radius:9px; border:5px solid transparent; background-clip:padding-box; min-height:48px; }
-#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background:var(--surface1); }
+/* 15px = xterm's fallback scrollBarWidth (measured 0 when opened hidden); wider overlaps the last column.
+   Thin pill that fades in on hover and fattens while grabbed; the transparent border keeps the full 15px hit area. */
+#term-container .xterm .xterm-viewport::-webkit-scrollbar { width:15px; background:transparent; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-track,
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-corner { background:transparent; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-button { display:none; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:rgba(166,173,200,.14); border-radius:99px; border:5px solid transparent; background-clip:padding-box; min-height:40px; }
+#term-container:hover .xterm .xterm-viewport::-webkit-scrollbar-thumb { background-color:rgba(166,173,200,.28); }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb:hover { background-color:rgba(166,173,200,.45); border-width:4px; }
+#term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb:active { background-color:var(--accent); border-width:4px; }
 /* Inline ghost-text autocomplete overlay — floats over the terminal canvas, never written to the xterm buffer */
 #ghost-suggest { position:fixed; z-index:50; color:#585b70; opacity:.85; white-space:pre; pointer-events:none; display:none; }
 #ghost-suggest .ghost-hint { font-size:9px; opacity:.7; margin-left:6px; border:1px solid #585b70; border-radius:3px; padding:0 3px; }
@@ -1093,8 +1098,8 @@ button:focus-visible { outline-offset:0; }
   <div id="quest-log-dim" onclick="toggleQuestLog(false)"></div>
   <aside id="quest-log" aria-label="Quest log"><div class="ql-head"><div><div class="ql-eyebrow">ClickUp &middot; raids</div><h2>Quest Log</h2></div><div class="ql-tools"></div><button class="ql-x" onclick="toggleQuestLog(false)" title="Close (Esc)">&times;</button></div><div class="ql-body"><div class="ql-side"><div class="ql-list"></div><div class="ql-foot"></div></div><div id="quest-scroll" role="region" aria-label="Quest"></div></div></aside>
   <div id="world-stage"></div>
-  <div id="resize"></div>
-  <div id="term">
+  <div id="resize" class="open"></div>
+  <div id="term" class="open"><!-- open from first paint so a refresh doesn't flash a full-width sidebar; autoOpenFirstAgent closes it if nothing to show -->
     <div id="term-dossier"></div>
     <div id="term-header">
       <div class="term-tabs">
@@ -1431,6 +1436,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./theme-core.js"></script>
 <script src="./term-size-core.js"></script>
 <script src="./shift-select-core.js"></script>
+<script src="./link-core.js"></script>
 <script src="./usage-core.js"></script>
 <script src="./preview-ui-dom.js"></script>
 <script src="./preview-ui-device.js"></script>
@@ -2081,7 +2087,7 @@ function renderArchiveList(cwd) {
     return;
   }
   list.innerHTML = items.map(([id, a]) => {
-    const title = a.customName ? a.title : (a.title || a.prompt || 'Untitled');
+    const title = a.title || 'Untitled';
     const last = a.preview || a.prompt || '';
     const when = a.createdAt ? new Date(a.createdAt).toLocaleString() : '';
     return `<div class="archive-item">
@@ -2666,7 +2672,7 @@ function render() {
     for (const [id, a] of sortedItems) {
       const st = agentStatus(a);
       const m = statusMeta[st];
-      const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
+      const title = a.title || 'New agent';
       const sel = selectedId === id;
       const agentCtxWin = ctxWindow(a.stats?.modelFamily, a.stats?.ctxTok);
       const ctxPct = a.stats?.ctxTok ? Math.min(100, Math.round((a.stats.ctxTok / agentCtxWin) * 100)) : 0;
@@ -2843,14 +2849,13 @@ function createXterm(id) {
   const terminal = new XTerminal({
     theme: xtermTheme(currentTheme), // theme-core.js
     fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: true, scrollback: 10000, cursorStyle: 'bar', cursorWidth: 2,
+    allowProposedApi: true, // search highlight decorations (TERM_SEARCH_OPTS) throw without it
   });
   const searchAddon = new XSearchAddon();
   const imageAddon = new XImageAddon({ sixelSupport: false, iipSupport: true, enableSizeReports: true, storageLimit: 8 }); // MB of decoded images kept per terminal (the addon's default is 128)
-  const webLinksAddon = new XWebLinksAddon((_e, uri) => api.send({ type: 'openUrl', url: uri }));
   terminal.loadAddon(fitAddon);
   terminal.loadAddon(searchAddon);
   terminal.loadAddon(imageAddon);
-  terminal.loadAddon(webLinksAddon);
   terminal.open(el);
   // onScroll skips mouse-wheel scrolls in xterm 5.5; the viewport's own event catches them
   el.querySelector('.xterm-viewport').addEventListener('scroll', () => { if (id === selectedId) highlightPromptRail(); }, { passive: true });
@@ -2875,6 +2880,18 @@ function createXterm(id) {
   // is what corrupts the viewport. Skipped when #term is closed (container has no size);
   // showXterm's first-show fit covers that case, and the buffer is still small then.
   if (termMeasurable()) { try { fitAddon.fit(); } catch {} }
+  // URL links, followed across Claude's hard-wrapped rows (link-core.js)
+  terminal.registerLinkProvider({
+    provideLinks(y, callback) {
+      const b = terminal.buffer.active;
+      const getLine = (i) => { const l = b.getLine(i); return l ? { text: l.translateToString(), isWrapped: l.isWrapped } : null; };
+      const links = urlLinksAt(getLine, y - 1, terminal.cols).map(l => ({
+        range: { start: l.start, end: l.end }, text: l.url,
+        activate: () => api.send({ type: 'openUrl', url: l.url }),
+      }));
+      callback(links.length ? links : undefined);
+    }
+  });
   // File path link provider — detects Windows/Unix paths with optional :line:col
   terminal.registerLinkProvider({
     provideLinks(y, callback) {
@@ -3169,7 +3186,7 @@ function openTerm(id) {
   selectedId = id;
   document.getElementById('term').classList.add('open');
   document.getElementById('resize').classList.add('open');
-  const title = a.customName ? a.title : (a.prompt || a.title || 'New agent');
+  const title = a.title || 'New agent';
   const namePrefix = a.agentName ? a.agentName + ' \u2014 ' : '';
   document.getElementById('term-title').textContent = namePrefix + title + ' \u2014 ' + pathLabel(a.cwd || '');
   document.getElementById('term-name-chip').textContent = title; // no agentName prefix
@@ -3313,6 +3330,13 @@ function highlightPromptRail() {
   dashes.forEach((d, i) => d.classList.toggle('on', i + off === on));
   rail.querySelectorAll('.pr-pop div').forEach((d, i) => d.classList.toggle('on', i === on));
 }
+
+// Opening the hover list scrolls it to the prompt you're on (or the newest).
+document.getElementById('prompt-rail').addEventListener('mouseenter', () => {
+  const pop = document.querySelector('#prompt-rail .pr-pop');
+  const on = pop.querySelector('div.on') || pop.lastElementChild;
+  if (on) pop.scrollTop = on.offsetTop - (pop.clientHeight - on.offsetHeight) / 2;
+});
 
 function jumpToPromptIdx(i) {
   const a = selectedId != null ? agents.get(selectedId) : null;
@@ -3644,6 +3668,17 @@ api.on((msg) => {
   handleAgentMsg(msg);
 });
 
+// On launch, restored agents arrive in a burst; once it settles, open the top card so the
+// terminal isn't empty. ponytail: 400ms debounce, fine unless restore is slower per agent.
+let autoOpenDone = false, autoOpenTimer = null;
+function autoOpenFirstAgent() {
+  autoOpenDone = true;
+  if (selectedId != null) return;
+  const card = document.querySelector('.agent[data-id]');
+  if (card) focusAgent(+card.dataset.id); else closeTerm();
+}
+setTimeout(() => { if (!autoOpenDone && !autoOpenTimer) autoOpenFirstAgent(); }, 3000); // no restored agents at all
+
 function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
@@ -3657,7 +3692,7 @@ function handleAgentMsg(msg) {
         saveAgentOrder();
       }
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
-      else scheduleRender();
+      else { scheduleRender(); if (!autoOpenDone) { clearTimeout(autoOpenTimer); autoOpenTimer = setTimeout(autoOpenFirstAgent, 400); } }
       break;
     }
     case 'agentArchived': {
@@ -5129,11 +5164,9 @@ function prRowHtml(p, dim) {
     : p.checks === 'fail' ? `<span class="pr-chip bad" title="Checks failed on GitHub">${p.failed > 1 ? p.failed + ' checks failed' : 'Checks failed'}</span>` : '';
   const reqChip = showReq ? '<span class="pr-chip bad">Your review</span>' : '';
   const behindChip = p.behindBy > 0 ? `<span class="pr-chip warn" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">${p.behindBy} behind</span>` : '';
-  const sub = [
-    p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}</span>` : '',
-    p.commitCount ? `${p.commitCount} commit${p.commitCount === 1 ? '' : 's'}` : '',
-    p.createdAt ? `<span class="pr-age" data-created="${p.createdAt}">${escapeHtml(prRelTime(p.createdAt))}</span>` : '',
-  ].filter(Boolean).join(' · ');
+  // One table row per PR: each piece in its own column so rows line up (headers: prDropdownHead).
+  const refs = p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${prRefHtml(p.headRef)} → ${prRefHtml(p.baseRef)}</span>` : '';
+  const age = p.createdAt ? `<span class="pr-age" data-created="${p.createdAt}">${escapeHtml(prRelTime(p.createdAt))}</span>` : '';
   // "feat(dt-ai):" is metadata, not the headline: dim it
   const t = escapeHtml(p.title), pre = t.match(/^[a-z]+(\([^)]*\))?!?:\s*/i);
   const titleHtml = pre ? `<span class="pr-type">${pre[0]}</span>${t.slice(pre[0].length)}` : t;
@@ -5145,7 +5178,7 @@ function prRowHtml(p, dim) {
   const mi = prMergeInfo(p);
   const canMerge = p.mine && !dim && mi.enabled && prApproved(p);
   const conflict = !dim && mi.label === 'conflicts';
-  const cls = 'pr-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '')
+  const cls = 'pr-row dt-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '')
     + (conflict ? ' pr-conflict' : '') + (dim ? ' pr-muted' : '');
   const act = prBranchAction(p); // pr-behind.js
   const updBtn = act === 'conflict'
@@ -5155,8 +5188,17 @@ function prRowHtml(p, dim) {
       : '';
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
-    + `<div class="pr-l1"><span class="pr-ci ${p.checks || 'none'}" title="Checks: ${escapeHtml(p.checks || 'none')}"></span><span class="pr-title" title="${t}">${titleHtml}</span><span class="pr-num">#${p.number}</span></div>`
-    + `<div class="pr-l2">${prAuthorHtml(p)}${reqChip}${reviewChip}${checksChip}${behindChip}<span class="pr-sub">${sub}</span></div></div>`;
+    + `<span class="pr-ci ${p.checks || 'none'}" title="Checks: ${escapeHtml(p.checks || 'none')}"></span>`
+    + `<span class="pr-title" title="${t}">${titleHtml}</span><span class="pr-num">#${p.number}</span>`
+    + `<span class="dt-td">${prAuthorHtml(p)}</span><span class="dt-td">${reqChip}${reviewChip}</span><span class="dt-td">${checksChip}${behindChip}</span>`
+    + `<span class="dt-td dt-sub">${refs}</span><span class="dt-td dt-sub dt-n">${p.commitCount || ''}</span><span class="dt-td dt-sub">${age}</span></div>`;
+}
+
+// Env branches wear the Releases board's env hues (ENV_HUE in releases-ui.js); prod's branches go by several names.
+const PR_BRANCH_HUE = { dev: 'var(--accent)', alpha: 'var(--purple)', staging: 'var(--yellow)', master: 'var(--green)', main: 'var(--green)', prod: 'var(--green)', production: 'var(--green)' };
+function prRefHtml(ref) {
+  const hue = PR_BRANCH_HUE[ref.toLowerCase()] || (/^prod-/i.test(ref) ? 'var(--green)' : '');
+  return hue ? `<span style="color:${hue}">${escapeHtml(ref)}</span>` : escapeHtml(ref);
 }
 
 // Who opened the PR, first on the row: GitHub avatar (a plain image URL, no API call) + login.
@@ -5172,7 +5214,7 @@ function prGroupHeader(repo, count, muted) {
   const muteBtn = muted
     ? `<button class="pr-repo-mute" title="Un-mute repo" onclick="event.stopPropagation();unmuteRepo('${r}')">🔔</button>`
     : `<button class="pr-repo-mute" title="Mute repo — no red/notify for its PRs" onclick="event.stopPropagation();muteRepo('${r}')">🔕</button>`;
-  return `<div class="pr-group-header${muted ? ' pr-group-muted' : ''}" onclick="event.stopPropagation();togglePrRepo('${r}')">`
+  return `<div class="pr-group-header dt-group${muted ? ' pr-group-muted' : ''}" onclick="event.stopPropagation();togglePrRepo('${r}')">`
     + `<span>${collapsed ? '▸' : '▾'} ${escapeHtml(repo)}</span>`
     + `<span class="pr-ghead-right">${muteBtn}<span class="pr-count">${count}</span></span></div>`;
 }
@@ -5211,6 +5253,14 @@ function prDropdownHead() {
     + `<button class="pr-refresh pr-close" title="Close" onclick="event.stopPropagation();closePrDropdown()">✕</button>`
     + `</span></div>`;
 }
+
+// Dropdown table shared by Pull requests and Tracked Actions (styles: .dt-* in theme.css, columns: --dt-cols
+// per dropdown). A header row, a framed .dt-group band per repo, then one .dt-row grid row per item of .dt-td cells.
+// Column labels starting with '>' are numeric: right-aligned.
+function dtHeadHtml(cols) {
+  return `<div class="dt-head">${cols.map(c => c[0] === '>' ? `<span class="dt-n">${c.slice(1)}</span>` : `<span>${c}</span>`).join('')}</div>`;
+}
+const PR_COLS = ['', 'Title', '#', 'Author', 'Review', 'Checks', 'Branch', '>Commits', 'Opened'];
 
 function closePrDropdown() {
   document.getElementById('pr-dropdown').style.display = 'none';
@@ -5294,7 +5344,7 @@ function prDropdownHtml() {
   const muted = live.filter(p => p.muted);
   const showArchived = prCollapsed.has('__archived_open__'); // toggled by the 📦 header button
   if (!live.length && !(showArchived && archived.length)) return head + '<div class="pr-empty">No open PRs.</div>';
-  let html = head;
+  let html = head + dtHeadHtml(PR_COLS);
   // Active repos
   for (const [repo, prs] of prGroupByRepo(active)) {
     html += prGroupHeader(repo, prs.length, false);
@@ -5312,20 +5362,20 @@ function prDropdownHtml() {
   // Snoozed PRs
   if (snoozed.length) {
     const collapsed = prCollapsed.has('__snoozed__');
-    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__snoozed__')">`
+    html += `<div class="pr-group-header dt-group" onclick="event.stopPropagation();togglePrRepo('__snoozed__')">`
       + `<span>${collapsed ? '▸' : '▾'} ⏰ Snoozed</span><span class="pr-count">${snoozed.length}</span></div>`;
     if (!collapsed) html += snoozed.map(prSnoozedRowHtml).join('');
   }
   // Individually muted PRs
   if (muted.length) {
     const collapsed = prCollapsed.has('__muted__');
-    html += `<div class="pr-group-header" onclick="event.stopPropagation();togglePrRepo('__muted__')">`
+    html += `<div class="pr-group-header dt-group" onclick="event.stopPropagation();togglePrRepo('__muted__')">`
       + `<span>${collapsed ? '▸' : '▾'} 🔕 Muted</span><span class="pr-count">${muted.length}</span></div>`;
     if (!collapsed) html += muted.map(prMutedRowHtml).join('');
   }
   // Archived PRs — hidden unless the 📦 header toggle is on; the only way back from archive
   if (showArchived && archived.length) {
-    html += `<div class="pr-group-header"><span>📦 Archived</span><span class="pr-count">${archived.length}</span></div>`;
+    html += `<div class="pr-group-header dt-group"><span>📦 Archived</span><span class="pr-count">${archived.length}</span></div>`;
     html += archived.map(prArchivedRowHtml).join('');
   }
   if (prState.failedRepos && prState.failedRepos.length) {
@@ -5367,6 +5417,7 @@ function togglePrDropdown(e) {
   d.style.top = 'auto';
   d.style.bottom = (window.innerHeight - r.top + 4) + 'px';
   d.style.display = 'block';
+  d.style.left = Math.max(12, Math.min(r.left, window.innerWidth - d.offsetWidth - 12)) + 'px'; // the table is wide
 }
 
 function togglePrRepo(repo) {
@@ -5720,6 +5771,7 @@ function renderTrackedWorkflows() {
   }).join('');
 }
 
+const ACT_COLS = ['Status', 'Workflow', 'Ahead', 'Branch', 'By', '>Run', 'When'];
 const ACT_LABEL = { running: 'RUNNING', success: 'OK', failure: 'FAILED', cancelled: 'CANCELLED', none: 'NEVER RUN' };
 
 // "45s" / "3m 12s" / "1h 04m" — elapsed since an ISO timestamp, ticking live.
@@ -5745,10 +5797,6 @@ function actionsRowHtml(r) {
   const timeHtml = r.state === 'running' && r.startedAt
     ? `⏱ <span class="act-elapsed" data-started="${escapeHtml(r.startedAt)}">${escapeHtml(elapsedStr(r.startedAt))}</span>`
     : (when ? escapeHtml(prRelTime(when)) : '');
-  const meta = r.error
-    ? escapeHtml(r.error)
-    : [r.branch && escapeHtml(r.branch), r.actor && '@' + escapeHtml(r.actor),
-       r.runNumber ? '#' + r.runNumber : '', timeHtml].filter(Boolean).join(' · ');
   // Failed runs get the run's own URL on the clipboard — that's the link you paste
   // into Claude to have it read the logs. Not the workflow list the row opens.
   const copyBtn = r.state === 'failure' && r.url
@@ -5761,9 +5809,14 @@ function actionsRowHtml(r) {
   // Commits of yours that this workflow's branch hasn't got — i.e. the PR you owe.
   const ahead = r.ahead
     ? `<span class="act-ahead" title="${escapeHtml(r.ahead.title)}">+${r.ahead.count}</span>` : '';
-  return `<div class="act-row act-${state}" onclick="openActionRun('${u}')">${copyBtn}${fixBtn}`
-    + `<div>${escapeHtml(r.name || r.file)}<span class="act-pill act-${state}">${label}</span>${ahead}</div>`
-    + (meta ? `<div class="act-meta">${meta}</div>` : '') + `</div>`; // the repo is the group header above
+  const td = (h, cls = '') => `<span class="dt-td${cls}">${h}</span>`;
+  const cells = r.error
+    ? td(escapeHtml(r.error), ' dt-sub act-err') // spans the detail columns
+    : td(r.branch ? `<span class="pr-refs">${prRefHtml(r.branch)}</span>` : '', ' dt-sub') + td(r.actor ? '@' + escapeHtml(r.actor) : '', ' dt-sub')
+      + td(r.runNumber ? '#' + r.runNumber : '', ' dt-sub dt-n') + td(timeHtml, ' dt-sub');
+  return `<div class="act-row dt-row act-${state}" onclick="openActionRun('${u}')">${copyBtn}${fixBtn}`
+    + td(`<span class="act-pill act-${state}">${label}</span>`) + `<span class="pr-title">${escapeHtml(r.name || r.file)}</span>`
+    + td(ahead) + cells + `</div>`; // the repo is the group band above
 }
 
 function actionsDropdownHtml() {
@@ -5782,10 +5835,10 @@ function actionsDropdownHtml() {
   // Grouped by repo; the repo with a running or failed run comes first (actions-core.js)
   const groups = groupRunsByRepo(sorted).map(g => {
     const [owner, name] = g.repo.split('/');
-    return `<div class="act-repo" title="${escapeHtml(g.repo)}"><span>${escapeHtml(name || g.repo)}</span><span class="act-owner">${escapeHtml(owner)}</span></div>`
+    return `<div class="act-repo dt-group" title="${escapeHtml(g.repo)}"><span>${escapeHtml(name || g.repo)}</span><span class="act-owner">${escapeHtml(owner)}</span></div>`
       + g.runs.map(actionsRowHtml).join('');
   }).join('');
-  return head + groups + stale;
+  return head + dtHeadHtml(ACT_COLS) + groups + stale;
 }
 
 function renderActionsBadge() {
@@ -5828,6 +5881,7 @@ function toggleActionsDropdown(e) {
   d.style.top = 'auto';
   d.style.bottom = (window.innerHeight - r.top + 4) + 'px';
   d.style.display = 'block';
+  d.style.left = Math.max(12, Math.min(r.left, window.innerWidth - d.offsetWidth - 12)) + 'px'; // the table is wide
   startActElapsed();
 }
 
@@ -6095,12 +6149,16 @@ function togglePerfMenu(e) {
   document.body.appendChild(m);
   e.currentTarget.setAttribute('aria-expanded', 'true');
   api.send({ type: 'perfSample' });
+  // A scan takes ~1s. Silence means the main process predates this feature (the window
+  // reloaded, main didn't) — say so instead of a skeleton forever.
+  perfWait = setTimeout(() => renderPerf({ error: 'No answer from Overlord — restart it to finish updating.' }), 15000);
   perfTimer = setInterval(() => api.send({ type: 'perfSample' }), PERF_POLL_MS);
   setTimeout(() => document.addEventListener('mousedown', closePerfMenuOutside));
 }
 function closePerfMenuOutside(ev) { if (!ev.target.closest('#perf-menu, #perf-btn')) closePerfMenu(); }
 function closePerfMenu() {
   clearInterval(perfTimer); perfTimer = null;
+  clearTimeout(perfWait); perfWait = null;
   document.getElementById('perf-menu')?.remove();
   document.getElementById('perf-btn')?.setAttribute('aria-expanded', 'false');
   document.removeEventListener('mousedown', closePerfMenuOutside);
@@ -6108,6 +6166,8 @@ function closePerfMenu() {
 function renderPerf(msg) {
   const body = document.querySelector('#perf-menu .pf-body');
   if (!body) return;
+  clearTimeout(perfWait); perfWait = null;
+  body.removeAttribute('aria-busy');
   if (msg.error) { body.innerHTML = `<div class="zm-hint">${escapeHtml(msg.error)}</div>`; return; }
   const used = msg.total - msg.free;
   const sys = `<div class="pf-sys"><span>RAM ${fmtMem(used)} / ${fmtMem(msg.total)}</span><span>Overlord ${fmtMem(msg.appMem)}</span></div>`;
@@ -6130,16 +6190,12 @@ setInterval(() => {
     if (!el) continue;
     const txt = statusMetaText(a);
     if (txt) el.textContent = txt; else el.textContent = '';
-  // A scan takes ~1s. Silence means the main process predates this feature (the window
-  // reloaded, main didn't) — say so instead of a skeleton forever.
-  perfWait = setTimeout(() => renderPerf({ error: 'No answer from Overlord — restart it to finish updating.' }), 15000);
   }
 }, 1000);
 
 // ── World view (3D map) ─────────────────────────────────
 // Off by default. When on, world.js draws the same state the list shows, beside it.
 // Every click in the world calls the same functions the list calls; nothing here changes behavior.
-  clearTimeout(perfWait); perfWait = null;
 // (worldView itself is declared with the other view state near the top.)
 // The roster column in World view: resizable by its grip, and it can slide away (a tab on the stage brings it back).
 let worldRosterW = 300, worldRosterHidden = false;
@@ -6147,8 +6203,6 @@ function applyWorldRoster() {
   document.body.style.setProperty('--w-roster', (worldRosterHidden ? 0 : worldRosterW) + 'px');
   document.body.classList.toggle('roster-hidden', worldRosterHidden);
   const n = document.getElementById('world-roster-tab-n'); if (n) { let live = 0; for (const [, a] of agents) if (!a.archived) live++; n.textContent = live; }
-  clearTimeout(perfWait); perfWait = null;
-  body.removeAttribute('aria-busy');
 }
 function setWorldRosterHidden(h, persist = true) {
   worldRosterHidden = !!h; applyWorldRoster();

@@ -356,14 +356,8 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 #prompt-rail:hover .pr-dashes i { opacity: .8; }
 #prompt-rail .pr-dashes i.on { width: 18px; background: var(--accent); opacity: 1; }
 
-/* Tracked Actions: wide, one line per workflow (name + status left, details right) */
-#actions-dropdown { width: max-content; min-width: 300px; max-width: min(640px, calc(100vw - 24px)); } /* as wide as its longest row */
-#actions-dropdown .act-row { display: flex; align-items: center; gap: 28px; padding: 6px 10px; }
-#actions-dropdown .act-row > div:first-of-type { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; white-space: nowrap; }
-#actions-dropdown .act-row .act-meta { margin: 0 0 0 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
-#actions-dropdown .act-row:hover .act-meta { visibility: hidden; } /* the Copy URL button sits there on failed rows */
-#actions-dropdown .act-row:not(.act-failure):hover .act-meta { visibility: visible; }
-#actions-dropdown .act-repo { padding: 10px 14px 3px; }
+/* Tracked Actions: the shared dropdown table (.dt-*, below) */
+#actions-dropdown { width: 820px; max-width: calc(100vw - 24px); }
 
 /* Each project is a soft card: header + its agents in one panel, gaps between projects */
 #list { padding: 4px 0 12px 8px; }
@@ -381,7 +375,34 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 
 /* Pull requests dropdown: same language as Tracked Actions — quiet repo labels, rounded rows,
    a thin colored edge + soft tint only when a PR needs you */
-#pr-dropdown { width: 560px; max-width: calc(100vw - 24px); padding-bottom: 6px; }
+#pr-dropdown { width: 1080px; max-width: calc(100vw - 24px); padding-bottom: 6px; }
+/* Dropdown table, shared by Pull requests and Tracked Actions (dtHeadHtml in index.html): a header row, a framed
+   band per repo, one grid row per item. Each dropdown only sets its columns. */
+#pr-dropdown { --dt-cols: 12px minmax(240px, 1fr) 42px 64px 96px 176px minmax(100px, 160px) 54px 100px; }
+#actions-dropdown { --dt-cols: 84px minmax(150px, 1fr) 48px minmax(80px, 120px) 110px 44px 110px; }
+:is(#pr-dropdown, #actions-dropdown) :is(.dt-head, .dt-row) { display: grid; grid-template-columns: var(--dt-cols); column-gap: 8px; align-items: center; }
+:is(#pr-dropdown, #actions-dropdown) .dt-row { padding: 3px 10px; font-size: 12px; }
+.dt-head { margin: 0 6px; padding: 5px 10px 2px; font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.dt-td { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.dt-sub { font-size: 11px; color: var(--dim); }
+.dt-n { text-align: right; justify-content: flex-end; font-variant-numeric: tabular-nums; }
+.dt-row .pr-chip { height: 16px; padding: 0 6px; font-size: 10px; }
+.dt-row .pr-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.dt-row .pr-refs { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-row :is(.pr-actions, .act-copy) { background: var(--pop); }
+/* Repo band: framed across the table, so each repo reads as its own section */
+:is(#pr-dropdown, #actions-dropdown) .dt-group, :is(#pr-dropdown, #actions-dropdown) .dt-group:hover { margin: 6px 6px 2px; padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--hover-strong); box-shadow: inset 3px 0 0 var(--accent); font-size: 11.5px; color: var(--text); }
+:is(#pr-dropdown, #actions-dropdown) .dt-head + .dt-group { margin-top: 2px; }
+/* PR-only cells */
+.dt-row .pr-ci { width: 12px; height: 12px; margin-top: 0; }
+.dt-row .pr-ci.pass::after { left: 3.5px; top: 1.5px; }
+.dt-row .pr-ci.fail::after { font-size: 11px; line-height: 11px; }
+.dt-row .pr-num { margin-top: 0; }
+.dt-row .pr-actions { padding: 2px 4px; border-radius: var(--r-sm); }
+/* Actions-only cells */
+.dt-row .act-pill { margin-left: 0; }
+.dt-row .act-err { grid-column: 4 / -1; color: var(--peach); }
 #pr-dropdown .pr-dhead { padding: 8px 14px; font-size: 12px; font-weight: 600; color: var(--text); background: var(--pop); border-bottom: 1px solid var(--border); }
 .pr-group-header { padding: 12px 14px 4px; background: var(--pop); border-bottom: none; font-size: 11px; font-weight: 600; color: var(--subtext);
   position: sticky; top: 33px; z-index: 1; }
@@ -403,7 +424,6 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 .pr-testing { color: var(--yellow); }
 
 /* PR row structure: [checks icon] title ··· #num / chips (review, checks) · quiet refs, commits, age */
-.pr-l1 { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .pr-title { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; color: var(--text); }
 .pr-type { color: var(--dim); font-weight: 400; }
 .pr-num { flex-shrink: 0; margin-top: 2px; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
@@ -415,7 +435,6 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 .pr-ci.pending { border: 1.5px solid rgba(250,204,21,.25); border-top-color: var(--yellow); animation: pr-spin 1s linear infinite; }
 .pr-ci.none { box-shadow: inset 0 0 0 1.5px var(--surface2); }
 @media (prefers-reduced-motion: reduce) { .pr-ci.pending { animation: none; } }
-.pr-l2 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 5px 0 0 22px; min-width: 0; }
 .pr-chip { flex-shrink: 0; height: 18px; padding: 0 7px; display: inline-flex; align-items: center; border-radius: 999px; font-size: 10.5px; font-weight: 600;
   background: var(--surface1); color: var(--subtext); }
 .pr-chip.good { background: rgba(74,222,128,.14); color: var(--green); }

@@ -28,7 +28,6 @@ const PREVIEW_MAX = 200;
 const PROMPT_HISTORY_MAX = 50;
 const PROMPT_BRIEF_MAX = 150;
 const TITLE_MODEL = 'claude-haiku-4-5-20251001';
-const TITLE_REGEN_TURNS = 3;
 // Tools that don't imply the agent is blocked waiting on the user, so they don't
 // trigger the permission timer. AskUserQuestion is NOT here: it blocks on the user,
 // so it should surface as "needs you" (permission) rather than stay 'active'.
@@ -86,8 +85,9 @@ autoUpdater.on('error', err => {
 const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./pr-eta');
-const { pickResumedFile } = require('./resume-core');
+const { pickResumedFile, sessionSwitchKind } = require('./resume-core');
 const { applyBgRecord } = require('./bg-core');
+const { applyAskRecord } = require('./ask-core');
 const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
 const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
@@ -366,12 +366,11 @@ const pendingResumeAgents = new Map(); // agentId -> ms epoch of the /resume
 const RESUME_WINDOW_MS = 3 * 60 * 1000; // picker is interactive; give it time, then give up
 function markResume(id) { pendingResumeAgents.set(id, Date.now()); }
 // A submitted line that moves the agent to a different session file.
-const SESSION_SWITCH_RE = /^\s*\/(clear|resume)(\s+\S+)?\s*$/;
 function markSessionSwitch(id, line) {
-  const m = SESSION_SWITCH_RE.exec(line);
-  if (!m) return;
+  const kind = sessionSwitchKind(line);
+  if (!kind) return;
   markClear(id);
-  if (m[1] === 'resume') markResume(id);
+  if (kind === 'resume') markResume(id);
 }
 const TERM_BUFFER_MAX = 1_000_000; // ~10k lines — matches xterm scrollback so a reload can restore the whole visible history
 let remoteWs = null; // current WebSocket connection (only one at a time)
@@ -379,7 +378,15 @@ let remoteViewingAgent = null; // which agent the mobile client is viewing
 const REMOTE_PORT = 7778;
 let nextId = 1;
 
+const lastStatusSent = new Map();
 function send(data) {
+  // Status trail: each change of an agent's dot, with the code line that caused it — the
+  // evidence for "why does this row show the wrong state" (see ~/.overlord/overlord.log).
+  if (data.type === 'status' && lastStatusSent.get(data.id) !== data.status) {
+    const a = agents.get(data.id);
+    flog(`status ${data.id} "${(a?.title || '').slice(0, 30)}" ${lastStatusSent.get(data.id) || '-'} -> ${data.status} tools=${a?.toolIds?.size ?? '?'} bg=${a?.bgTasks?.size ?? 0} at ${(new Error().stack.split('\n')[2] || '').trim().replace(/^at /, '')}`);
+    lastStatusSent.set(data.id, data.status);
+  }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
   // Forward to mobile WebSocket client (skip termData unless viewing that agent)
   if (remoteWs && !remoteWs.destroyed) {
@@ -447,12 +454,6 @@ function claudeDir(projectPath) {
   return path.join(os.homedir(), '.claude', 'projects', projectPath.replace(/[^a-zA-Z0-9]/g, '-'));
 }
 
-function deriveTitle(text) {
-  const clean = text.replace(/[\n\r]+/g, ' ').trim();
-  const words = clean.split(/\s+/).slice(0, 5).join(' ');
-  return words.length > 40 ? words.slice(0, 40) + '\u2026' : words;
-}
-
 // All process cleanup is async — sync wmic/taskkill calls used to block the main
 // process (and the whole UI) for seconds per call. wmic is also removed on newer
 // Windows 11 builds, so process lookup goes through PowerShell CIM instead.
@@ -466,6 +467,18 @@ function killProcessTreeAsync(pid) {
       resolve();
     }
   });
+}
+
+// pid → start time (ms). One PowerShell spawn for all pids; missing/failed → absent.
+function processStartTimes(pids) {
+  const ids = pids.filter(Boolean);
+  if (!ids.length || process.platform !== 'win32') return Promise.resolve(new Map());
+  const ps = `Get-Process -Id ${ids.join(',')} -ErrorAction SilentlyContinue | ForEach-Object { $_.Id.ToString() + '|' + $_.StartTime.ToUniversalTime().ToString('o') }`;
+  return new Promise(resolve => execFile('powershell', ['-NoProfile', '-Command', ps], { timeout: 20000, windowsHide: true }, (err, out) => {
+    const m = new Map();
+    for (const line of String(out || '').split(/[\r\n]+/)) { const [pid, t] = line.split('|'); const ms = Date.parse(t); if (pid && ms) m.set(+pid, ms); }
+    resolve(m);
+  }));
 }
 
 // One process-table scan, then kill every PID whose command line contains any of
@@ -581,34 +594,6 @@ function clearServers(id) {
 }
 
 
-async function generateSummaryTitle(id) {
-  const a = agents.get(id);
-  if (!a || a.customName || !a.promptHistory || a.promptHistory.length === 0 || a.titlePending) return;
-  const auth = anthropicAuthHeaders();
-  if (!auth) return;
-  a.titlePending = true;
-  const context = a.promptHistory.map((p, i) => `Prompt ${i + 1}: ${p}`).join('\n');
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { ...auth, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: TITLE_MODEL, max_tokens: 30,
-        messages: [{ role: 'user', content: `Summarize this coding session in exactly 5 words. Be specific about what's being worked on. No punctuation, no quotes. Just 5 lowercase words.\n\n${context}` }],
-      }),
-    });
-    if (!resp.ok) return;
-    const data = await resp.json();
-    if (!agents.has(id)) return;
-    const text = data.content?.[0]?.text?.trim();
-    if (!text) return;
-    a.title = text.split(/\s+/).slice(0, 5).join(' ');
-    send({ type: 'title', id, text: a.title });
-    saveState();
-  } catch (e) { console.log('[Overlord] Title generation failed:', e.message); }
-  finally { if (a) a.titlePending = false; }
-}
-
 // Inline ghost-text autocomplete: complete the partial prompt the user is
 // typing into a live agent's terminal. Replies with a `ghost` message the
 // renderer overlays. Silent (empty suggestion) on no creds / error / timeout.
@@ -638,6 +623,11 @@ async function ghostComplete(id, reqId, prefix, context) {
 
 // Check if text is a system/internal message rather than a real user prompt
 const SYSTEM_MSG_RE = /^<(?:command-name|local-command|system-reminder|task-notification|user-prompt-submit-hook|antml:)/;
+// A transcript line that means the turn moved on (the user answered, a tool finished, the model spoke)
+function movesTurn(line) { try { return /^(assistant|user|progress)$/.test(JSON.parse(line).type); } catch { return false; } }
+// Claude's input box is up. Spaces arrive as cursor moves, so the stripped text has none;
+// in bypass mode the footer shows "shift+tab to cycle" instead of "? for shortcuts".
+const CLAUDE_READY_RE = /Welcome back|\?\s*for\s*shortcuts|shift\+tab\s*to\s*cycle|Try\s*["']/;
 function isSystemMessage(text) { return SYSTEM_MSG_RE.test(text.trim()); }
 // Claude Code appends reminder-only user records while idle (e.g. after /rename) — not a turn start
 function isReminderOnly(text) { return text.trim().startsWith('<system-reminder>'); }
@@ -736,11 +726,6 @@ function setPrompt(id, a, text) {
   const brief = text.length > PROMPT_BRIEF_MAX ? text.slice(0, PROMPT_BRIEF_MAX) : text;
   a.promptHistory.push(brief);
   if (a.promptHistory.length > PROMPT_HISTORY_MAX) a.promptHistory.shift();
-  if (!a.customName) {
-    a.title = deriveTitle(text);
-    send({ type: 'title', id, text: a.title });
-    saveState();
-  }
   send({ type: 'prompt', id, text: a.lastPrompt });
   send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
 }
@@ -764,8 +749,8 @@ function extractSpinnerText(id, data) {
           const a = agents.get(id);
           if (a) {
             if (a.spinnerText) { a.spinnerText = ''; send({ type: 'spinnerText', id, text: '' }); }
-            // ponytail: pty completion line = ground-truth turn-done; backstop when turn_duration is missing (else stuck 'active' forever)
-            if (!a.isWaiting) { a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers); send({ type: 'status', id, status: shownStatus(a) }); flushPeerMsgs(id); }
+            // No status flip here: Claude repaints old "done" lines on resize/reattach, so a
+            // mid-turn agent would read as done. turn_duration + the status watchdog decide.
           }
           return;
         }
@@ -955,7 +940,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null });
+    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -1073,12 +1058,14 @@ function restoreAgents(state) {
       toolIds: new Set(), toolStatuses: new Map(), toolNames: new Map(),
       subToolIds: new Map(), subToolNames: new Map(),
       isWaiting: true, permSent: false, hadTools: false, turnTools: 0, claudeReady: false,
-      lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', customName: customName || false,
+      lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', aiTitle: entry.aiTitle || '', customName: customName || false,
       promptHistory: entry.promptHistory || [], titlePending: false, createdAt: createdAt || Date.now(),
       crashCount: 0, cronCount: entry.cronCount || 0, compacting: false, orphanAlive: false, agentName: agentName, spinnerText: '',
       archived: entry.archived || false,
       stats: savedStats,
     };
+    // ponytail: one sync JSONL read per agent, only until aiTitle is in saved state
+    if (!agent.customName && !agent.aiTitle) agent.title = agent.aiTitle = readSessionTitle(jsonlFile).ai;
     agents.set(id, agent);
     if (entry.mcpToken && mcpServer) mcpServer.mintToken(id, entry.mcpToken);
     if (!agent.agentName) agent.agentName = pickAgentName();
@@ -1114,14 +1101,28 @@ function restoreAgents(state) {
     const survivors = agentEntries.filter(({ entry }) => entry.ptyKey && live.has(entry.ptyKey));
     const fresh = agentEntries.filter(x => !survivors.includes(x));
     for (const key of live) if (!survivors.some(({ entry }) => entry.ptyKey === key)) ptyHost.kill(key); // a spare or closed agent nobody will reattach
+    const startTimes = await processStartTimes(survivors.map(({ entry }) => entry.pid));
     for (const { id, entry } of survivors) {
       const proc = await ptyHost.attach(entry.ptyKey);
       const ag = agents.get(id);
       if (!proc || !ag) continue;
       ag.isWaiting = !entry.wasActive;
       try { ag.fileOffset = fs.statSync(ag.jsonlFile).size; } catch {} // doSpawnTerminal starts the watcher: don't re-read the whole transcript
+      // Same Claude process: its background shells/agents are still running — rebuild the
+      // ledger from this process's records only (earlier processes' tasks died unreported).
+      // Same pass finds a question still waiting on the user.
+      ag.bgTasks = new Set(); ag.askIds = new Set();
+      const since = startTimes.get(entry.pid);
+      if (since) try {
+        for (const l of fs.readFileSync(ag.jsonlFile, 'utf-8').split('\n')) {
+          if (!/toolUseResult|task-notification|tool_result|turn_duration|AskUserQuestion|ExitPlanMode/.test(l)) continue;
+          try { const r = JSON.parse(l); if (Date.parse(r.timestamp) >= since) { applyBgRecord(ag.bgTasks, r); applyAskRecord(ag.askIds, r); } } catch {}
+        }
+      } catch {}
       doSpawnTerminal(id, proc);
       send({ type: 'status', id, status: shownStatus(ag) });
+      for (const tid of ag.askIds) { ag.isWaiting = false; ag.toolIds.add(tid); ag.toolNames.set(tid, 'AskUserQuestion'); send({ type: 'toolStart', id, toolId: tid, status: 'Waiting for your answer', name: 'AskUserQuestion' }); }
+      if (ag.askIds.size) { ag.permSent = true; send({ type: 'perm', id, ask: true }); }
     }
     const sweep = (async () => {
       await Promise.all(fresh.map(({ entry }) => killProcessTreeAsync(entry.pid)));
@@ -1173,7 +1174,6 @@ function restoreAgents(state) {
                 else if (Array.isArray(c)) pTxt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
                 if (pTxt && !isSystemMessage(pTxt)) {
                   agent.lastPrompt = pTxt.length > PREVIEW_MAX ? pTxt.slice(0, PREVIEW_MAX) + '\u2026' : pTxt;
-                  if (!agent.title && !agent.customName) agent.title = deriveTitle(pTxt);
                   const brief = pTxt.length > PROMPT_BRIEF_MAX ? pTxt.slice(0, PROMPT_BRIEF_MAX) : pTxt;
                   agent.promptHistory.push(brief);
                   if (agent.promptHistory.length > PROMPT_HISTORY_MAX) agent.promptHistory.shift();
@@ -1369,7 +1369,7 @@ function doSpawnTerminal(id, attached) {
       // detector in createAgent for the reasoning).
       if (!a.claudeReady && !a._readyTimer) {
         const probe = (a._readyBuf || '') + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|[\x00-\x08\x0b-\x1f\x7f]/g, '');
-        if (/Welcome back|\? for shortcuts|Try ["']/.test(probe)) {
+        if (CLAUDE_READY_RE.test(probe)) {
           a._readyBuf = '';
           a._readyTimer = setTimeout(() => {
             a._readyTimer = null; a.claudeReady = true;
@@ -1538,7 +1538,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
       // that too, and injecting into a shell would execute the message.
       if (!agent.claudeReady && !agent._readyTimer) {
         const probe = (agent._readyBuf || '') + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|[\x00-\x08\x0b-\x1f\x7f]/g, '');
-        if (/Welcome back|\? for shortcuts|Try ["']/.test(probe)) {
+        if (CLAUDE_READY_RE.test(probe)) {
           agent._readyBuf = '';
           agent._readyTimer = setTimeout(() => { agent._readyTimer = null; agent.claudeReady = true; flushPeerMsgs(id); }, 4000);
         } else {
@@ -1677,7 +1677,9 @@ function readLines(id) {
     a.fileOffset = st.size;
     const text = a.lineBuffer + buf.toString('utf-8');
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
-    if (lines.some(l => l.trim())) { a.crashed = false; clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
+    if (lines.some(l => l.trim())) a.crashed = false;
+    // Only turn progress ends a pending ask/permission — queued notifications, attachments etc. do not
+    if (!a.askIds?.size && lines.some(movesTurn)) { clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
     for (const line of lines) { if (line.trim()) parseLine(id, line); }
   } catch (e) { logToRenderer(`[readLines] Agent ${id} error: ${e.message} — file: ${a.jsonlFile}`); }
 }
@@ -1696,6 +1698,17 @@ function parseLine(id, line) {
         a.title = r.customTitle;
         a.customName = true;
         send({ type: 'title', id, text: a.title, customName: true });
+        saveState();
+      }
+      return;
+    }
+    // Claude Code's auto-generated chat name — replaces Overlord's own
+    // prompt/summary titles, but never an explicit custom name.
+    if (r.type === 'ai-title' && r.aiTitle) {
+      a.aiTitle = r.aiTitle;
+      if (!a.customName && a.title !== r.aiTitle) {
+        a.title = r.aiTitle;
+        send({ type: 'title', id, text: a.title });
         saveState();
       }
       return;
@@ -1728,8 +1741,7 @@ function parseLine(id, line) {
         }
         // These tools always block on a human choice — flag now, don't wait out the timer.
         // They also block under bypassPermissions, which startPermTimer skips.
-        if (blocks.some(b => b.type === 'tool_use' && (b.name === 'AskUserQuestion' || b.name === 'ExitPlanMode'))) {
-          logToRenderer(`[ASKDBG] agent ${id}: ask tool_use parsed at ${new Date().toISOString()} -> sending perm ask`);
+        if (applyAskRecord(a.askIds ||= new Set(), r) && a.askIds.size) {
           clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id, ask: true }); notifyPermission(id, a);
         } else if (nonExempt) startPermTimer(id);
       }
@@ -1748,6 +1760,7 @@ function parseLine(id, line) {
             }
           }
           if (a.toolIds.size === 0) { a.hadTools = false; }
+          if (applyAskRecord(a.askIds ||= new Set(), r) && !a.askIds.size) { a.permSent = false; send({ type: 'permClear', id }); }
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
           if (!isReminderOnly(txt)) {
@@ -1770,6 +1783,7 @@ function parseLine(id, line) {
     } else if (r.type === 'system' && r.subtype === 'turn_duration') {
       clrTimer(id, permTimers);
       a.stats.turns++; a.stats.durMs += r.durationMs || 0;
+      a.askIds?.clear();
       a.stats.lastTurnAt = Date.parse(r.timestamp) || Date.now(); // "Stale" filter
       send({ type: 'stats', id, stats: a.stats });
       if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
@@ -1782,7 +1796,6 @@ function parseLine(id, line) {
       }
       send({ type: 'status', id, status: shownStatus(a) });
       flushPeerMsgs(id);
-      if (a.stats.turns === 1 || a.stats.turns % TITLE_REGEN_TURNS === 0) generateSummaryTitle(id);
     } else if (r.type === 'progress') {
       const ptid = r.parentToolUseID, d = r.data;
       if (ptid && d) {
@@ -1920,8 +1933,8 @@ function reconcileResumedAgents() {
   }
 }
 
-// Newest chat name from a session's JSONL — user /rename (custom-title) wins over
-// the auto-generated ai-title. '' if neither (e.g. a fresh /clear session).
+// Newest chat names from a session's JSONL: user /rename (custom-title) and
+// Claude's auto-generated ai-title. '' when absent (e.g. a fresh /clear session).
 function readSessionTitle(file) {
   let custom = '', ai = '';
   try {
@@ -1934,7 +1947,7 @@ function readSessionTitle(file) {
       } catch {}
     }
   } catch {}
-  return custom || ai;
+  return { custom, ai };
 }
 
 function reassignAgentToFile(id, newFilePath) {
@@ -1956,11 +1969,12 @@ function reassignAgentToFile(id, newFilePath) {
   // Reset title, prompt, preview for new session. On /resume, Claude forks a new
   // JSONL that already carries the resumed chat's name — adopt it as a sticky title
   // so the card shows which chat you're back in. /clear's file has no title yet.
-  const resumedTitle = readSessionTitle(newFilePath);
-  if (resumedTitle) {
-    a.title = resumedTitle;
-    a.customName = true;
-    send({ type: 'title', id, text: a.title, customName: true });
+  const { custom, ai } = readSessionTitle(newFilePath);
+  a.aiTitle = ai;
+  if (custom || ai) {
+    a.title = custom || ai;
+    a.customName = !!custom;
+    send({ type: 'title', id, text: a.title, customName: a.customName });
   } else if (!a.customName) {
     a.title = '';
     send({ type: 'title', id, text: '' });
@@ -3551,7 +3565,7 @@ function handleIpc(msg) {
     case 'archiveAgent': archiveAgent(msg.id); break;
     case 'unarchiveAgent': unarchiveAgent(msg.id); break;
     case 'renameAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); if (t) t.write(`/rename ${msg.name}\r`); } break; }
-    case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); generateSummaryTitle(msg.id); } break; }
+    case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; a.title = a.aiTitle || ''; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); } break; }
     // Resume the SAME session after a crash — spawnTerminal re-attaches with
     // `claude --resume <sessionId>`, keeping the conversation. restartAgent (below)
     // throws the chat away and creates a fresh agent, so it can't serve this.
@@ -5319,7 +5333,7 @@ app.on('before-quit', () => {
   // Agents live on in the pty host. A restart keeps all of them; a real close
   // keeps only the ones mid-turn, so their work finishes and they reattach next launch.
   if (!_restarting) {
-    for (const [id, a] of agents) { const t = terminals.get(id); if (t && t.key && a.isWaiting) killPty(t); }
+    for (const [id, a] of agents) { const t = terminals.get(id); if (t && t.key && shownStatus(a) === 'waiting') killPty(t); } // background work keeps it alive too
   }
 });
 app.on('window-all-closed', () => app.quit());
