@@ -109,6 +109,7 @@ const { fixRunPlan } = require('./actions-core');
   const sha = 'a'.repeat(40);
   assert.strictEqual(fixRunPlan({ ...run, sha }, infos, []).startPoint, sha);
   assert.strictEqual(fixRunPlan({ ...run, sha: 'x&y' }, infos, []).startPoint, 'origin/dev');
+  assert.strictEqual(fixRunPlan({ ...run, sha, event: 'pull_request' }, infos, []).startPoint, 'origin/dev');
   // main checkout wins over a worktree; repo match ignores case
   assert.strictEqual(p.repoDir, 'C:/x/r');
   assert.strictEqual(p.branch, 'fix/ci-42');

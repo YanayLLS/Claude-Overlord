@@ -100,7 +100,10 @@ function fixRunPlan(run, infos, worktreeDirs) {
     branch: `fix/ci-${run.runNumber || id[1]}`,
     base: run.branch,
     // The exact commit CI ran — one fetch of a sha, no stale local branch.
-    startPoint: /^[0-9a-f]{40}$/.test(run.sha || '') ? run.sha : `origin/${run.branch}`,
+    // Not for a PR run: that sha may be a fork's code, and the worktree inherits the
+    // repo's folder trust. A fork branch isn't on origin, so its fetch just fails.
+    startPoint: /^[0-9a-f]{40}$/.test(run.sha || '') && !/^pull_request/.test(run.event || '')
+      ? run.sha : `origin/${run.branch}`,
     // Passed on the claude command line so it submits at boot. That line goes through
     // cmd.exe / sh -c, so only characters no shell treats specially survive.
     prompt: prompt.replace(/[^\w\s.,:/#@()'=+-]/g, '').replace(/\s+/g, ' '),

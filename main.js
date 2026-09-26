@@ -272,6 +272,15 @@ function protectClaudeConfig() {
     }
   } catch {}
 }
+// Worktree of a repo you trust → trusted too, so an unattended agent isn't parked on
+// Claude's trust prompt. Same rewrite pattern as above; claude re-reads the file on boot.
+const { inheritTrust } = require('./trust-core');
+function trustLikeRepo(repoDir, dir) {
+  try {
+    const data = JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf-8'));
+    if (inheritTrust(data, repoDir, dir)) fs.writeFileSync(CLAUDE_JSON, JSON.stringify(data, null, 2));
+  } catch (e) { flog('trustLikeRepo failed:', e); }
+}
 const ACCOUNTS_PATH = path.join(STATE_DIR, 'accounts.json');
 const LOG_FILE = path.join(STATE_DIR, 'overlord.log');
 
@@ -2436,6 +2445,7 @@ async function fixActionRun(run) {
     dir = (await doCreateWorktree({ repo: plan.repoDir, branch: plan.branch, base: plan.startPoint })).path;
     projectConfig(plan.repoDir).defaultBase = prevBase || 'dev'; saveState();
   }
+  trustLikeRepo(plan.repoDir, dir);
   createAgent(dir, null, plan.prompt);
 }
 
