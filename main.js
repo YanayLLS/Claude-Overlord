@@ -2425,16 +2425,18 @@ async function fixActionRun(run) {
   let plan = fixRunPlan(run, lastCheckoutInfos || [], wts);
   if (plan.error) plan = fixRunPlan(run, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
   if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
-  let entry = (settings.worktrees || []).find(w => w.repo === plan.repoDir && w.branch === plan.branch);
-  if (!entry) {
+  // Reuse by folder, not by settings entry: an earlier click (or another checkout of the
+  // same repo) may have made it without a matching entry, and git refuses to re-add it.
+  let dir = wt.worktreePath(plan.repoDir, wt.safeBranch(plan.branch));
+  if (!fs.existsSync(dir)) {
     // createWorktree fetches its base — that covers a sha, not an origin/<branch> ref.
     if (plan.startPoint.startsWith('origin/')) await gitIn(plan.repoDir, ['fetch', 'origin', plan.base, '--quiet'], 60000);
     // Keep the repo's defaultBase — a one-off fix shouldn't change where features start.
     const prevBase = (projectConfig(plan.repoDir) || {}).defaultBase;
-    entry = await doCreateWorktree({ repo: plan.repoDir, branch: plan.branch, base: plan.startPoint });
+    dir = (await doCreateWorktree({ repo: plan.repoDir, branch: plan.branch, base: plan.startPoint })).path;
     projectConfig(plan.repoDir).defaultBase = prevBase || 'dev'; saveState();
   }
-  createAgent(entry.path, null, plan.prompt);
+  createAgent(dir, null, plan.prompt);
 }
 
 // The local checkouts Overlord already knows about: every agent's cwd plus every
