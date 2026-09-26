@@ -117,4 +117,23 @@ End with a TL;DR table, one row per repo × env (release PRs first, then the han
   return L.join('\n');
 }
 
-module.exports = { releaseBrief };
+// The Fix button on one blocked release row: the same playbook scoped to that repo, led by
+// what the deterministic run found, so the agent starts at the blocker.
+function releaseFixBrief({ row, configSource }) {
+  const why = [];
+  if (row.conflict) why.push(`the release PR #${row.pr.number} conflicts with \`${row.target}\``);
+  if (row.checks === 'fail') why.push(`the release PR #${row.pr.number} has failing checks`);
+  if (row.backMerge && row.backMerge.conflict) why.push(`the back-merge PR #${row.backMerge.number} (\`${row.target}\` → \`${row.source}\`) conflicts`);
+  if (row.error) why.push(`the release run failed: ${row.error}`);
+  const head = [
+    `# Unblock the ${row.env} release of \`${row.repo}\``, '',
+    'Overlord already ran this release deterministically. This one row is blocked:', '',
+    ...why.map(w => `- ${w}`), '',
+    ...(row.pr ? [`Release PR: ${row.pr.url}`] : []),
+    ...(row.backMerge && row.backMerge.url ? [`Back-merge PR: ${row.backMerge.url}`] : []), '',
+    '**Only this repo.** Do not open a new release PR; unblock the existing one with the sections below (Back-merge / Conflicts / Unblock a failing release PR), then report.', '',
+  ];
+  return head.join('\n') + '\n' + releaseBrief({ envs: [row.env], plan: { prs: [row], manual: [] }, configSource, flagCheck: null });
+}
+
+module.exports = { releaseBrief, releaseFixBrief };

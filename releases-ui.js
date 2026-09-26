@@ -78,10 +78,12 @@
     relToggle: (el) => { const e = el.dataset.env; relSel.has(e) ? relSel.delete(e) : relSel.add(e); render(); },
     releaseGo: () => {
       if (!relSel.size) return;
+      // runs in main without an agent; the panel turns into its live results
       api.send({ type: 'releasesRelease', envs: [...relSel] });
-      // get out of the way: the new agent is focused as soon as main creates it
-      relOpen = false; show(false);
     },
+    // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
+    relFix: (el) => { api.send({ type: 'releasesFix', i: +el.dataset.i }); relOpen = false; show(false); },
+    relNew: () => { api.send({ type: 'releasesClearRun' }); },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; render(); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
     cancelSource: () => { state = { ...(state || {}), editing: false }; render(); },
@@ -378,6 +380,51 @@
     return h + '</div>';
   }
 
+  // The run's results: one row per release PR as it goes (open/reuse → back-merge → mergeable →
+  // checks), a Fix on anything blocked, then the hand-deployed envs and the flag check.
+  function releaseResultsHtml(s) {
+    const run = s.releaseRun;
+    const prLink = (p, label) => p && p.url ? link(p.url, label) : '';
+    let h = `<div class="rl-rel-pop rl-rr${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release ${esc(run.envs.join(' + '))}</span>`
+      + (run.running ? '<span class="rl-rr-spin">running…</span>' : '') + '</div><div class="rl-rr-rows">';
+    relShown = true;
+    run.rows.forEach((r, i) => {
+      const env = `<span class="rl-env" style="--hue:${ENV_HUE[r.env.toLowerCase()] || 'var(--dim)'}">${esc(r.env)}</span>`;
+      const bits = [];
+      if (r.running && !r.pr) bits.push('<span class="rl-rr-chip">checking…</span>');
+      if (r.status === 'nothing') bits.push('<span class="rl-rr-chip">nothing to release</span>');
+      if (r.pr) bits.push(`<span class="rl-rr-chip ok">${prLink(r.pr, `#${r.pr.number}`)} ${r.reused ? 'already open' : 'opened'}${r.ahead ? ` · ${r.ahead} commits` : ''}</span>`);
+      if (r.backMerge && r.backMerge.url) bits.push(`<span class="rl-rr-chip${r.backMerge.conflict ? ' bad' : ' warn'}">back-merge ${prLink(r.backMerge, '#' + r.backMerge.number)}${r.backMerge.conflict ? ' conflicts' : ' — merge first'}</span>`);
+      if (r.conflict) bits.push('<span class="rl-rr-chip bad">conflicts</span>');
+      if (r.checks === 'fail') bits.push('<span class="rl-rr-chip bad">checks failing</span>');
+      if (r.checks === 'pending') bits.push('<span class="rl-rr-chip">checks running</span>');
+      if (r.checks === 'pass') bits.push('<span class="rl-rr-chip ok">checks green</span>');
+      if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">already red on ${esc(r.target)}: ${esc(r.knownFailing.join(', '))}</span>`);
+      if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);
+      const fix = !r.running && (r.status === 'blocked' || r.status === 'error')
+        ? `<button class="rl-rr-fix" data-act="relFix" data-i="${i}" title="Start an agent that unblocks this one repo">🔧 Fix</button>` : '';
+      h += `<div class="rl-rr-row st-${esc(r.status || 'running')}"><div class="rl-rr-top"><b>${esc(r.label)}</b>${env}`
+        + `<span class="rl-rr-branches">${esc(r.source)} → ${esc(r.target)}</span>${fix}</div><div class="rl-rr-bits">${bits.join('')}</div></div>`;
+    });
+    h += '</div>';
+    if (run.manual.length) {
+      h += '<div class="rl-rr-sub">Deployed by hand: nothing to PR</div>';
+      for (const m of run.manual) {
+        const row = s.grid && s.grid.rows.find(x => x.repo === m.repo);
+        const cell = row && row.cells && row.cells[s.grid.envs.indexOf(m.env)];
+        const live = cell && cell.live && !cell.live.error
+          ? `live ${esc(cell.live.sha.slice(0, 7))}${cell.live.behind ? ` · <b>${cell.live.behind}</b> not live` : ' · up to date'}` : 'live commit unknown';
+        h += `<div class="rl-rr-man">✋ <b>${esc(m.label)}</b> <span class="rl-env" style="--hue:${ENV_HUE[m.env.toLowerCase()] || 'var(--dim)'}">${esc(m.env)}</span> <span>${live}</span></div>`;
+      }
+    }
+    if (run.flags && run.flags.missing && run.flags.missing.length) h += `<div class="rl-rr-flag bad">⚠ Seed these prod feature flags before merging: ${esc(run.flags.missing.join(', '))}</div>`;
+    else if (run.flags && run.flags.missing) h += '<div class="rl-rr-flag">Prod feature flags: nothing missing</div>';
+    else if (run.flags && run.flags.error) h += `<div class="rl-rr-flag">Flag check failed: ${esc(run.flags.error)}</div>`;
+    h += '<div class="rl-rel-actions">' + (run.running ? '' : '<button data-act="relNew">New release</button>')
+      + '<button data-act="releaseClose">Close</button></div></div>';
+    return h;
+  }
+
   // Repos in the release config the PRs panel doesn't watch yet; null when that panel is off.
   // prSettings is index.html's (a shared global), refreshed whenever main echoes the settings.
   function prsUnwatched() {
@@ -430,6 +477,7 @@
   overlay.addEventListener('mouseout', (ev) => {
     if (!ev.target.closest || !ev.target.closest(REL_ZONE)) return;
     if (ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest(REL_ZONE)) return;
+    if (state && state.releaseRun) return;
     clearTimeout(relLeave);
     relLeave = setTimeout(() => { if (relOpen) actions.releaseClose(); }, 400);
   });
@@ -450,7 +498,7 @@
         : '')
       + `<button data-act="refresh" class="${s.loading ? 'spin' : ''}" title="Refresh"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>`
       + '<button data-act="close" title="Close (Esc)"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><div class="rl-body">';
-    if (relOpen && s.config) h += releasePickerHtml(s);
+    if (relOpen && s.config) h += s.releaseRun ? releaseResultsHtml(s) : releasePickerHtml(s);
     const g = s.grid;
     if (s.editing || !g || s.error || s.problems) {
       h += (!g && s.loading && !s.error && !s.problems && !s.editing) ? skeletonHtml() : setupHtml(s);

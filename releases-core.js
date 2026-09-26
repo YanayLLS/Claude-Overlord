@@ -249,7 +249,8 @@ function releasePlan(cfg, envs) {
     const label = r.label || r.repo.split('/')[1];
     for (const env of envs) {
       const steps = promotePairs(r).filter(p => p.to === env);
-      for (const p of steps) prs.push({ repo: r.repo, label, env, source: r.branches[p.from], target: r.branches[p.to] });
+      const deploy = r.deploy && r.deploy[env] && r.deploy[env] !== 'manual' ? r.deploy[env] : null; // what merging the target runs
+      for (const p of steps) prs.push({ repo: r.repo, label, env, source: r.branches[p.from], target: r.branches[p.to], deploy });
       if (!steps.length && r.branches[env] && r.deploy && r.deploy[env] === 'manual') {
         manual.push({ repo: r.repo, label, env, branch: r.branches[env], live: (r.live && r.live[env]) || null });
       }

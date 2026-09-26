@@ -304,8 +304,8 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(releaseTargets(cfg), ['alpha', 'prod']);
   const p = releasePlan(cfg, ['prod']);
   assert.deepStrictEqual(p.prs, [
-    { repo: 'o/front', label: 'frontend', env: 'prod', source: 'dev', target: 'master' },
-    { repo: 'o/chat', label: 'chat', env: 'prod', source: 'staging', target: 'prod-one' },
+    { repo: 'o/front', label: 'frontend', env: 'prod', source: 'dev', target: 'master', deploy: null },
+    { repo: 'o/chat', label: 'chat', env: 'prod', source: 'staging', target: 'prod-one', deploy: null },
   ]);
   assert.deepStrictEqual(p.manual.map(m => m.repo + ':' + m.env + ':' + m.branch + ':' + !!m.live), ['o/auth:prod:main:false', 'o/ai:prod:dev:true']);
   assert.deepStrictEqual(releasePlan(cfg, ['alpha']).prs.map(x => x.repo + ' ' + x.source + '→' + x.target), ['o/front dev→alpha']);

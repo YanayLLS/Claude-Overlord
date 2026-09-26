@@ -255,3 +255,32 @@
 .rl-legend > span:hover { color:var(--subtext); }
 .rl-cell.sel:hover { box-shadow:0 0 0 1.5px var(--accent), 0 4px 12px rgba(0,0,0,.25); }
 .rl-skel .rl-cell:hover { transform:none; box-shadow:none; }
+
+/* release results (deterministic run) */
+.rl-rel-pop.rl-rr { width:440px; max-height:calc(100vh - 140px); overflow:auto; }
+.rl-rr-spin { font-size:10.5px; text-transform:none; letter-spacing:0; font-weight:500; color:var(--accent); animation:rl-pulse 1.2s ease-in-out infinite; }
+.rl-rr-rows { display:flex; flex-direction:column; gap:6px; }
+.rl-rr-row { padding:8px 10px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); transition:border-color .12s, background .12s; }
+.rl-rr-row:hover { border-color:var(--border-hi); }
+.rl-rr-row.st-ok { border-color:rgba(74,222,128,.35); }
+.rl-rr-row.st-blocked, .rl-rr-row.st-error { border-color:rgba(248,113,113,.5); background:rgba(248,113,113,.06); }
+.rl-rr-row.st-nothing { opacity:.65; }
+.rl-rr-top { display:flex; align-items:center; gap:8px; }
+.rl-rr-top b { font-size:12px; }
+.rl-rr-branches { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); }
+.rl-rr-fix { margin-left:auto; font:inherit; font-size:11px; font-weight:600; padding:3px 10px; border-radius:999px; border:1px solid rgba(248,113,113,.5);
+  background:rgba(248,113,113,.12); color:var(--red); cursor:pointer; transition:background .12s; }
+.rl-rr-fix:hover { background:rgba(248,113,113,.22); }
+.rl-rr-bits { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.rl-rr-bits:empty { display:none; }
+.rl-rr-chip { font-size:10.5px; padding:1px 7px; border-radius:var(--r-sm); background:var(--surface1); color:var(--subtext); }
+.rl-rr-chip a { color:var(--text); font-weight:600; }
+.rl-rr-chip.ok { color:var(--green); background:rgba(74,222,128,.1); }
+.rl-rr-chip.warn { color:var(--peach); background:rgba(251,146,60,.12); }
+.rl-rr-chip.bad { color:var(--red); background:rgba(248,113,113,.12); }
+.rl-rr-sub { margin:12px 0 4px; font-size:10px; font-weight:600; letter-spacing:.9px; text-transform:uppercase; color:var(--dim); }
+.rl-rr-man { display:flex; align-items:center; gap:6px; padding:3px 0; font-size:11.5px; color:var(--subtext); }
+.rl-rr-man b { color:var(--text); }
+.rl-rr-man b + .rl-env { font-size:9.5px; }
+.rl-rr-flag { margin-top:10px; font-size:11px; color:var(--dim); }
+.rl-rr-flag.bad { color:var(--peach); }

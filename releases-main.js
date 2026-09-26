@@ -5,7 +5,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { releaseBrief } = require('./release-playbook');
+const { releaseFixBrief } = require('./release-playbook');
+const { runRelease } = require('./release-run');
+const { execFile } = require('child_process');
 const os = require('os');
 const { releaseTargets, releasePlan } = require('./releases-core');
 const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
@@ -217,33 +219,67 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // Starts late so it stays out of the app's startup rush.
   setTimeout(() => { refresh(); timer = setInterval(refresh, REFRESH_MS); timer.unref?.(); }, 20000).unref?.(); // unref: never the reason a process stays alive
 
-  // Release button: write a brief for the chosen envs (which PRs, from the config; how, from
-  // release-playbook.js) and start an agent on it in the config repo's local checkout, where the
-  // frontend's flag-gap check lives. The prompt only points at the brief — it rides the claude
-  // command line, so it must stay short and shell-safe.
+  // The config repo's local checkout (where the frontend's flag-gap check and a Fix agent work),
+  // else the home dir.
+  async function configCheckout() {
+    const src = parseSource(state.source);
+    if (src && src.kind === 'file') return path.dirname(src.path);
+    if (src && src.kind === 'gh' && findLocal) {
+      const local = await findLocal(src.repo, src.path, src.ref);
+      if (local) return local.path.slice(0, local.path.length - src.path.length).replace(/[\\/]+$/, '');
+    }
+    return os.homedir();
+  }
+  const runsDir = () => { const d = path.join(stateDir, 'release-runs'); fs.mkdirSync(d, { recursive: true }); return d; };
+  const stamp = () => new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+
+  // Release button, deterministic: every PR of the plan opened/reused + back-merges + mergeable
+  // and checks state, streamed into state.releaseRun row by row. No agent unless a row is
+  // blocked and someone presses its Fix.
   async function release(envs) {
     const cfg = state.config;
     const targets = cfg ? releaseTargets(cfg) : [];
     envs = (Array.isArray(envs) ? envs : []).filter(e => targets.includes(e));
     if (!cfg || !envs.length) { send({ type: 'toast', text: 'Nothing to release: pick an environment first' }); return; }
-    const src = parseSource(state.source);
-    let cwd = os.homedir();
-    if (src && src.kind === 'gh' && findLocal) {
-      const local = await findLocal(src.repo, src.path, src.ref);
-      if (local) cwd = local.path.slice(0, local.path.length - src.path.length).replace(/[\\/]+$/, '');
-    } else if (src && src.kind === 'file') cwd = path.dirname(src.path);
-    const flag = path.join(cwd, '.claude', 'skills', 'release', 'flag-gap.cjs');
-    const brief = releaseBrief({
-      envs, plan: releasePlan(cfg, envs), configSource: state.source,
-      flagCheck: envs.includes('prod') && fs.existsSync(flag) ? '.claude/skills/release/flag-gap.cjs' : null,
+    if (state.releaseRun && state.releaseRun.running) { send({ type: 'toast', text: 'A release is already running' }); return; }
+    const plan = releasePlan(cfg, envs);
+    const run = { envs, startedAt: Date.now(), running: true, rows: plan.prs.map(p => ({ ...p, running: true })), manual: plan.manual, flags: null };
+    push({ releaseRun: run });
+    const cwd = await configCheckout();
+    const flagScript = path.join(cwd, '.claude', 'skills', 'release', 'flag-gap.cjs');
+    const flags = envs.includes('prod') && fs.existsSync(flagScript) ? flagGap(cwd, flagScript) : Promise.resolve(null);
+    let n = 0;
+    const writeJson = (payload) => { const p = path.join(runsDir(), `pr-${stamp()}-${n++}.json`); fs.writeFileSync(p, JSON.stringify(payload)); return p; };
+    const onRow = (i, row) => { run.rows[i] = { ...row }; push({ releaseRun: { ...run } }); };
+    await runRelease(ghJson, plan.prs, { writeJson, onRow });
+    run.flags = await flags;
+    run.running = false;
+    push({ releaseRun: { ...run } });
+    persist();
+    const blocked = run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
+    const opened = run.rows.filter(r => r.pr && !r.reused).length;
+    send({ type: 'toast', text: `Release ${envs.join(' + ')}: ${opened} PR${opened === 1 ? '' : 's'} opened${blocked ? `, ${blocked} blocked` : ''}` });
+  }
+
+  // The frontend's prod feature-flag gap check, when this machine has it. Read-only.
+  function flagGap(cwd, script) {
+    return new Promise((resolve) => {
+      execFile('node', [script], { cwd, timeout: 120000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+        (err, stdout, stderr) => {
+          try { const j = JSON.parse(stdout); resolve({ missing: (j.catalogueMissingOnProd || []).map(x => x.key) }); }
+          catch { resolve({ error: String(stderr || (err && err.message) || 'no output').trim().split('\n').pop().slice(0, 200) }); }
+        });
     });
-    const dir = path.join(stateDir, 'release-runs');
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, `release-${envs.join('-')}-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.md`);
-    fs.writeFileSync(file, brief);
-    const prompt = `Release to ${envs.join(' + ')}. Read and follow every step of ${file.replace(/\\/g, '/')} and end with its report table.`;
-    startAgent(cwd, prompt.replace(/[^\w\s.,:/#@()'=+-]/g, '').replace(/\s+/g, ' '));
-    send({ type: 'toast', text: `Release agent started for ${envs.join(' + ')}` });
+  }
+
+  // Fix on one blocked row: an agent with the playbook scoped to that repo.
+  async function fixRow(i) {
+    const row = state.releaseRun && state.releaseRun.rows[i];
+    if (!row) return;
+    const p = path.join(runsDir(), `fix-${row.repo.split('/')[1]}-${row.env}-${stamp()}.md`);
+    fs.writeFileSync(p, releaseFixBrief({ row, configSource: state.source }));
+    const prompt = `Unblock the ${row.env} release of ${row.repo}. Read and follow ${p.replace(/\\/g, '/')} and end with its report table.`;
+    startAgent(await configCheckout(), prompt.replace(/[^\w\s.,:/#@()'=+-]/g, '').replace(/\s+/g, ' '));
   }
 
   function handle(msg) {
@@ -255,7 +291,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         return true;
       case 'releasesClose': return true;
       case 'releasesRefresh': refresh(); return true;
-      case 'releasesRelease': release(msg.envs).catch(e => send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') })); return true;
+      case 'releasesRelease': release(msg.envs).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
+      case 'releasesFix': fixRow(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
+      case 'releasesClearRun': push({ releaseRun: null }); persist(); return true;
       case 'releasesSetSource': {
         const source = String(msg.source || '').trim() || DEFAULT_SOURCE;
         push({ source, grid: null, problems: null, error: null, updatedAt: null, config: null, results: null });
