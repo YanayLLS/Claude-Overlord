@@ -71,7 +71,8 @@
     releaseGo: () => {
       if (!relSel.size) return;
       api.send({ type: 'releasesRelease', envs: [...relSel] });
-      relOpen = false; render();
+      // get out of the way: the new agent is focused as soon as main creates it
+      relOpen = false; show(false);
     },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; render(); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
