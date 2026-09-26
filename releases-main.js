@@ -221,7 +221,12 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
 
   // Polls even while the modal is closed: the footer badge says when a deploy is failing.
   // Starts late so it stays out of the app's startup rush.
-  setTimeout(() => { refresh(); timer = setInterval(refresh, REFRESH_MS); timer.unref?.(); }, 20000).unref?.(); // unref: never the reason a process stays alive
+  setTimeout(() => {
+    refresh(); timer = setInterval(refresh, REFRESH_MS); timer.unref?.();
+    // Overlord restarted while a recent run was still settling: keep watching its PRs
+    const r = state.releaseRun;
+    if (r && !r.running && Date.now() - r.startedAt < RECHECK_FOR_MS) recheck(r);
+  }, 20000).unref?.(); // unref: never the reason a process stays alive
 
   // The config repo's local checkout (where the frontend's flag-gap check and a Fix agent work),
   // else the home dir.
@@ -257,12 +262,17 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const onRow = (i, row) => { run.rows[i] = { ...row }; push({ releaseRun: { ...run } }); };
     await runRelease(ghJson, plan.prs, { writeJson, onRow });
     run.flags = await flags;
-    // missing prod flags: say so at the top of every prod release PR this run opened
+    // missing prod flags: say so at the top of every open prod release PR (opened now or in an
+    // earlier run), once — a PR that already carries the warning is left alone
     if (run.flags && run.flags.missing && run.flags.missing.length) {
       const warn = `> ⚠ **Seed before merging:** prod is missing the feature flag${run.flags.missing.length === 1 ? '' : 's'} ${run.flags.missing.map(k => '\`' + k + '\`').join(', ')}. `
         + 'Dry run first: `cd C:/Work/back-office && node server/scripts/syncFlagCatalog.js --only <Key> --allow-prod`, then `--apply`.\n\n';
-      await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && !r.reused && r.body).map(r =>
-        ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeJson({ body: warn + r.body })])));
+      await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed).map(async (r) => {
+        const cur = r.body != null ? { data: { body: r.body } } : await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
+        const body = (cur.data && cur.data.body) || '';
+        if (cur.error || body.includes('Seed before merging')) return;
+        await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeJson({ body: warn + body })]);
+      }));
     }
     run.running = false;
     for (const r of run.rows) delete r.body; // only needed for that patch

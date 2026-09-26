@@ -405,6 +405,14 @@
       if (r.checks === 'fail') bits.push('<span class="rl-rr-chip bad">checks failing</span>');
       if (r.checks === 'pending') bits.push('<span class="rl-rr-chip">checks running</span>');
       if (r.checks === 'pass') bits.push('<span class="rl-rr-chip ok">checks green</span>');
+      // the source branch's own deploy is red (board: that env's last deploy run) — merging runs
+      // the same build for the target, so it will likely fail there too. A warning, not a block.
+      const srcRow = s.grid && s.grid.rows.find(x => x.repo === r.repo);
+      const srcCell = srcRow && (srcRow.cells || []).find(c => c && c.branch === r.source && c.run);
+      if (srcCell && srcCell.run.state === 'failure') {
+        const what = (srcCell.run.failed || []).map(f => f.job + (f.step ? ' › ' + f.step : '')).join('; ') || 'its deploy';
+        bits.push(`<span class="rl-rr-chip warn" title="${esc(what)}">⚠ ${esc(r.source)}'s own deploy is failing — ${esc(r.env)} deploy will likely fail the same way</span>`);
+      }
       if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them — merging isn't blocked">not required: ${esc(r.advisory.join(', '))}</span>`);
       if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">already red on ${esc(r.target)}: ${esc(r.knownFailing.join(', '))}</span>`);
       if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);
