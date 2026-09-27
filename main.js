@@ -1322,6 +1322,28 @@ function spawnTerminal(id) {
   })();
 }
 
+// Plain shell in the agent's cwd (no Claude), for running commands after it exits.
+// Bypasses handleTermExit on purpose: leaving the shell is never a crash.
+function spawnShell(id) {
+  const a = agents.get(id);
+  if (!a) return;
+  const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+  try {
+    const proc = agentPty().spawn(sh, [], { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({}) });
+    terminals.set(id, proc);
+    applyLastTermSize(id, proc);
+    send({ type: 'termData', id, data: '\r\n\x1b[90m[Plain shell — type exit to leave]\x1b[0m\r\n' });
+    proc.onData((d) => {
+      try { send({ type: 'termData', id, data: d }); } catch {}
+      const buf = (termBuffers.get(id) || '') + d;
+      termBuffers.set(id, buf.length > TERM_BUFFER_MAX ? buf.slice(-TERM_BUFFER_MAX) : buf);
+    });
+    proc.onExit((e) => { proc._ovKilled = true; terminals.delete(id); send({ type: 'termExit', id, code: e?.exitCode }); });
+  } catch (e) {
+    send({ type: 'termData', id, data: `\r\n\x1b[31mFailed to start shell: ${e.message}\x1b[0m\r\n` });
+  }
+}
+
 // attached: a pty still running in the host from before an app restart.
 function doSpawnTerminal(id, attached) {
   const a = agents.get(id);
@@ -3579,6 +3601,10 @@ function handleIpc(msg) {
         send({ type: 'crashCleared', id: msg.id });
         spawnTerminal(msg.id);
       }
+      break;
+    }
+    case 'shellAgent': {
+      if (agents.has(msg.id) && !terminals.has(msg.id)) spawnShell(msg.id);
       break;
     }
     case 'restartAgent': {
