@@ -31,14 +31,20 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 #header > * { -webkit-app-region:no-drag; }
 #header h1 {
-  font-size:13px; font-weight:500; flex:1; letter-spacing:.4px; color:var(--dim);
+  font-size:13px; font-weight:500; flex:0 0 auto; letter-spacing:.4px; color:var(--dim);
   -webkit-app-region:drag;
 }
 #header h1 span { color:var(--accent); font-weight:600; }
 #headerBadges { display:flex; gap:4px; align-items:center; }
 #headerBadges:empty { display:none; }
 /* names are no longer truncated, so scroll rather than clip when the row runs long */
-#bookmarks { display:flex; gap:4px; align-items:center; min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+#bookmarks { display:flex; gap:4px; align-items:center; flex:1 1 auto; min-width:48px; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+#bookmarks.overflow { mask-image:linear-gradient(90deg, #000 calc(100% - 28px), transparent); -webkit-mask-image:linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+/* The bar is a container so the counters can shed their labels when room runs out: the numbers stay, the words return on hover (title). */
+#header { container-type:inline-size; container-name:header; }
+/* The bar's content box is about 160px narrower than the window (16px left, 144px right for the window controls), so 1540 is a ~1700px window and 1190 a ~1350px one. */
+@container header (max-width: 1540px) { #header .wc { font-size:0; gap:4px; padding:0 8px; } #header .wc b { font-size:13px; } #header .wc em { font-size:10px; padding-left:5px; margin-left:0; } #header .wc.wc-quiet { display:none; } body.world-mode #header .wc { padding:0 8px; } }
+@container header (max-width: 1190px) { #header .wc.wc-gold, #header .wc.wc-coins { display:none; } }
 #bookmarks::-webkit-scrollbar { display:none; }
 .bookmark { white-space:nowrap; flex-shrink:0; border-radius:4px; } /* width follows the name — no truncation */
 .bookmark-add { opacity:.5; }
@@ -1054,18 +1060,14 @@ button:focus-visible { outline-offset:0; }
     <div id="headerBadges"></div>
     <div id="world-counters"></div>
     <div id="bookmarks"></div>
-    <button class="hdr-btn" id="qr-btn" onclick="toggleQr()" title="Mobile remote (QR)" style="display:none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM21 21h.01M17 21h.01M21 17h.01"/></svg></button>
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
-    <button class="hdr-btn" id="perf-btn" onclick="togglePerfMenu(event)" title="Performance — memory and CPU per agent" aria-haspopup="dialog" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></button>
-    <button class="hdr-btn" id="zoom-btn" onclick="toggleZoomMenu(event)" title="UI size (Ctrl+wheel, Ctrl+0 resets)" aria-haspopup="dialog" aria-expanded="false">100%</button>
-    <button class="hdr-btn" onclick="toggleHelp()" title="Keyboard shortcuts (?)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button>
 
     <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
     <div id="hdr-more-wrap">
       <button class="hdr-btn" id="hdr-more-btn" onclick="toggleHdrMore(event)" title="More"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
-      <div id="hdr-more"><button class="hdr-menu-item" onclick="window.api.send({type:'fullRestart'})"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg><span>Restart app</span></button></div>
+      <div id="hdr-more"><button class="hdr-menu-item" id="perf-btn" onclick="togglePerfMenu(event)" aria-haspopup="dialog" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>Performance</span></button><button class="hdr-menu-item" id="zoom-btn" onclick="toggleZoomMenu(event)" aria-haspopup="dialog" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3M11 8v6M8 11h6"/></svg><span>UI size <b id="zoom-btn-val">100%</b></span></button><button class="hdr-menu-item" onclick="toggleHelp()"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg><span>Keyboard shortcuts</span></button><button class="hdr-menu-item" id="qr-btn" onclick="toggleQr()" style="display:none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM21 21h.01M17 21h.01M21 17h.01"/></svg><span>Mobile remote (QR)</span></button><button class="hdr-menu-item" onclick="window.api.send({type:'fullRestart'})"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg><span>Restart app</span></button></div>
     </div>
     <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Agent</button>
     <button id="featBtn" onclick="openNewFeature()" title="Create a feature: one branch across multiple repos"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Feature</button>
@@ -4262,6 +4264,7 @@ function renderBookmarks(bookmarks) {
   _bookmarks = bookmarks;
   const el = document.getElementById('bookmarks');
   if (!el) return;
+  if (!el._wheel) { el._wheel = true; el.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && el.scrollWidth > el.clientWidth) { el.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false }); new ResizeObserver(() => el.classList.toggle('overflow', el.scrollWidth > el.clientWidth + 1)).observe(el); }
   el.innerHTML = '';
   for (const b of bookmarks) {
     const btn = document.createElement('button');
@@ -4288,6 +4291,7 @@ function renderBookmarks(bookmarks) {
     { label: 'Add folder…', action: () => api.send({ type: 'addBookmark', dir: true }) },
   ]);
   el.appendChild(add);
+  el.classList.toggle('overflow', el.scrollWidth > el.clientWidth + 1);
 }
 
 // ── Toast ──────────────────────────────────────────────
@@ -6063,7 +6067,7 @@ const ZOOM_MIN = 60, ZOOM_MAX = 200, ZOOM_PRESETS = [75, 90, 100, 110, 125, 150,
 function setUiZoom(z, persist = true) {
   uiZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(z)));
   api.setZoom(uiZoom / 100);
-  document.getElementById('zoom-btn').textContent = uiZoom + '%';
+  { const v = document.getElementById('zoom-btn-val'); if (v) v.textContent = uiZoom + '%'; }
   const menu = document.getElementById('zoom-menu');
   if (menu) {
     menu.querySelector('input').value = uiZoom;
@@ -6260,6 +6264,7 @@ function setWorldView(on, persist = true) {
       refreshUsage: () => refreshUsage(),
       openRaid: (url) => openLink(url),
       openQuest: (task, base) => openQuest(task, base),
+      openQuestLog: () => toggleQuestLog(true),
       copyLink: (url) => copyLink(url),
     }); window.World.ready = true; worldDailyStreak(); worldSync(); }
     catch (e) {
@@ -6433,11 +6438,11 @@ function worldGithubChips(s) {
   if (toApprove) pr = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpPr()" title="Pull requests waiting for your review — click to fly to the first"><i></i><b>${toApprove}</b>to approve<em>${prs.length} open</em></span>`;
   else if (changes) pr = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpPr()" title="Changes requested on your pull requests — click to fly there"><i></i><b>${changes}</b>changes asked<em>${prs.length} open</em></span>`;
   else if (ready) pr = `<span class="wc" style="--c:var(--green)" onclick="worldJumpPr()" title="Your pull requests ready to merge — click to fly there"><i></i><b>${ready}</b>ready to merge<em>${prs.length} open</em></span>`;
-  else pr = `<span class="wc" style="--c:#94e2d5" onclick="worldJumpPr()" title="Open pull requests on the watched repos — click to fly to the harbour"><i></i><b>${prs.length}</b>PRs</span>`;
+  else pr = `<span class="wc wc-quiet" style="--c:#94e2d5" onclick="worldJumpPr()" title="Open pull requests on the watched repos — click to fly to the harbour"><i></i><b>${prs.length}</b>PRs</span>`;
   let run;
   if (running) run = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpRun()" title="Deployments in progress — click to fly to the first"><i class="spin"></i><b>${running}</b>deploying${failed ? '<em>' + failed + ' failed</em>' : ''}</span>`;
   else if (failed) run = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpRun()" title="Failed deployments — click to fly to the first"><i></i><b>${failed}</b>deploy${failed === 1 ? '' : 's'} failed</span>`;
-  else if (runs.length) run = `<span class="wc" style="--c:var(--green)" onclick="worldJumpRun()" title="Tracked workflows, all passing — click to fly to the harbour"><i></i><b>${runs.length}</b>deploy${runs.length === 1 ? '' : 's'} ok</span>`;
+  else if (runs.length) run = `<span class="wc wc-quiet" style="--c:var(--green)" onclick="worldJumpRun()" title="Tracked workflows, all passing — click to fly to the harbour"><i></i><b>${runs.length}</b>deploy${runs.length === 1 ? '' : 's'} ok</span>`;
   else run = '';
   return pr + run;
 }
@@ -6447,7 +6452,7 @@ function renderWorldRoster(s) {
   { const n = document.getElementById('world-roster-tab-n'); if (n) n.textContent = s.agents.length; }
   const st = { work: 0, need: 0, done: 0, down: 0 }; let cost = 0;
   for (const a of s.agents) { if (a.status === 'active' || a.status === 'settling' || a.status === 'resuming') st.work++; else if (a.status === 'permission' || a.status === 'question') st.need++; else if (a.status === 'waiting') st.done++; else if (a.status === 'crashed') st.down++; cost += a.cost; }
-  const chip = (c, n, label, onclick, title) => `<span class="wc" style="--c:${c}" ${onclick ? `onclick="${onclick}"` : ''} title="${escAttr(title || label)}"><i></i><b>${n}</b>${label}</span>`;
+  const chip = (c, n, label, onclick, title) => (!n && (label === 'need you' || label === 'down')) ? '' : `<span class="wc" style="--c:${c}" ${onclick ? `onclick="${onclick}"` : ''} title="${escAttr(title || label)}"><i></i><b>${n}</b>${label}</span>`;
   document.getElementById('world-counters').innerHTML =
     chip('var(--accent)', st.work, 'working') + chip('var(--yellow)', st.need, 'need you', 'focusNextPerm()', 'Units waiting for approval or an answer — click to jump') + chip('var(--green)', st.done, 'done') + chip('var(--red)', st.down, 'down')
     + `<span class="wc wc-gold" title="Spend across all open agents"><i class="coin"></i><b>${fmtCost(cost)}</b>today</span>`

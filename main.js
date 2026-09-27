@@ -1027,10 +1027,13 @@ function loadState() {
   return state;
 }
 
+// worldEnabled arrived in 1.78; a settings file from before then has only worldView. The renderer already reads
+// the old flag as the new one, so main must too, or the ClickUp raids stay silent until the user re-ticks the box.
+function settleWorldFlag() { if (settings.worldEnabled === undefined && settings.worldView !== undefined) settings.worldEnabled = !!settings.worldView; }
 function restoreAgents(state) {
   const savedSz = state && state.settings && state.settings.lastTermSize; if (savedSz && savedSz.cols > 0) lastAnyTermSize = savedSz; // settings survive parseState; a top-level field would not
   if (!state) state = loadState();
-  if (!settings._merged) { settings = { ...settings, ...state.settings }; settings._merged = true; }
+  if (!settings._merged) { settings = { ...settings, ...state.settings }; settings._merged = true; settleWorldFlag(); }
   const saved = state.agents;
   _stateRestored = true; // from here on the in-memory agent list is the truth; saving is safe
   if (saved.length === 0) return;
@@ -5198,7 +5201,7 @@ app.whenReady().then(() => {
   if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
   // Load settings early (fast) so window bounds are correct, but defer heavy agent restoration
   const state = loadState();
-  settings = { ...settings, ...state.settings };
+  settings = { ...settings, ...state.settings }; settleWorldFlag();
   const bounds = settings.windowBounds || {};
   const opts = {
     width: bounds.width || 750, height: bounds.height || 800,
