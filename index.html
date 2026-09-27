@@ -1259,7 +1259,7 @@ button:focus-visible { outline-offset:0; }
       <div class="settings-hint">Your tickets in a matching status become enemies that attack the base of their platform. Each user signs in with their own ClickUp account: the token stays on this machine and is only sent to api.clickup.com.</div>
       <label class="settings-label" style="display:block;">
         <span>Sign in:</span>
-        <div class="settings-hint" style="padding:2px 0 4px;">1. <a href="#" onclick="api.send({type:'openUrl',url:'https://app.clickup.com/settings/apps'});return false;" style="color:var(--accent,#89b4fa)">Get a token</a> — the ClickUp page has a one-click “Generate” button. 2. Paste it here and press Connect.</div>
+        <div class="settings-hint" style="padding:2px 0 4px;">1. <a href="#" onclick="openLink('https://app.clickup.com/settings/apps');return false;" style="color:var(--accent,#89b4fa)">Get a token</a> — the ClickUp page has a one-click “Generate” button. 2. Paste it here and press Connect.</div>
         <div style="display:flex;gap:6px;margin-top:4px;">
           <input type="password" id="inp-clickup-token" placeholder="pk_… personal API token" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();clickupConnect();}" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
           <button onclick="clickupConnect()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Connect</button>
@@ -2230,7 +2230,12 @@ function showAgentMenu(e, id) {
   const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
-function openUrl(url) { api.send({ type: 'openUrl', url }); }
+// The one way anything opens a link: web/file:// URLs go to the browser/shell, bare paths
+// open in the editor (relative ones resolve against terminal `id`'s cwd).
+function openLink(target, id) {
+  if (/^(?:https?|file):\/\//.test(target)) api.send({ type: 'openUrl', url: target });
+  else if (target) api.send({ type: 'openFile', id, path: target });
+}
 function killServer(port) { api.send({ type: 'killServer', port }); }
 function restartServer(port) { api.send({ type: 'restartServer', port }); }
 // Servers per group, keyed by cwd — set during render so the badge's onclick can look
@@ -2244,7 +2249,7 @@ function showServersMenu(e, cwd) {
   for (const [port, url] of servers) {
     if (items.length) items.push({ sep: true });
     items.push({ header: `:${port}` });
-    items.push({ label: 'Open in browser', action: () => openUrl(url) });
+    items.push({ label: 'Open in browser', action: () => openLink(url) });
     items.push({ label: 'Restart', action: () => restartServer(port) });
     items.push({ label: 'Remove', action: () => killServer(port), cls: 'ctx-danger' });
   }
@@ -2420,7 +2425,6 @@ function setEffort(id, level) {
 }
 
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
-function openFile(id, filePath) { if (filePath) api.send({ type: 'openFile', id, path: filePath }); }
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
 function compactAgent(id) { api.send({ type: 'compactAgent', id }); }
 function focusTeamMember(teamName, memberName, isLead) { api.send({ type: 'focusTeamMember', teamName, memberName, isLead }); }
@@ -2635,8 +2639,8 @@ function render() {
     const wtUrl = wtEntry ? fillPort(projects[wtEntry.repo] && projects[wtEntry.repo].urlTemplate, wtEntry.port) : '';
     // When the proxy is on and this server is up, prefer the clean hostname.
     const wtServerBadge = wtEntry && running
-      ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openUrl('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${esc(running.url.replace(/^https?:\/\//, ''))}<span class="server-menu-btn">&#x2197;</span></a></div>`
-      : (wtEntry ? `<a class="wt-port" onclick="event.stopPropagation();openUrl('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
+      ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openLink('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${esc(running.url.replace(/^https?:\/\//, ''))}<span class="server-menu-btn">&#x2197;</span></a></div>`
+      : (wtEntry ? `<a class="wt-port" onclick="event.stopPropagation();openLink('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
     html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}"><div class="group-header" onclick="toggleGroup('${safeCwd}')">
       <span class="group-chevron">&#x25BC;</span>
       <div class="group-info" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>
@@ -2880,38 +2884,14 @@ function createXterm(id) {
   // is what corrupts the viewport. Skipped when #term is closed (container has no size);
   // showXterm's first-show fit covers that case, and the buffer is still small then.
   if (termMeasurable()) { try { fitAddon.fit(); } catch {} }
-  // URL links, followed across Claude's hard-wrapped rows (link-core.js)
+  // URL and path links, followed across Claude's hard-wrapped rows (link-core.js)
   terminal.registerLinkProvider({
     provideLinks(y, callback) {
       const b = terminal.buffer.active;
       const getLine = (i) => { const l = b.getLine(i); return l ? { text: l.translateToString(), isWrapped: l.isWrapped } : null; };
-      const links = urlLinksAt(getLine, y - 1, terminal.cols).map(l => ({
-        range: { start: l.start, end: l.end }, text: l.url,
-        activate: () => api.send({ type: 'openUrl', url: l.url }),
+      const links = linksAt(getLine, y - 1, terminal.cols).map(l => ({
+        range: { start: l.start, end: l.end }, text: l.text, activate: () => openLink(l.text, id),
       }));
-      callback(links.length ? links : undefined);
-    }
-  });
-  // File path link provider — detects Windows/Unix paths with optional :line:col
-  terminal.registerLinkProvider({
-    provideLinks(y, callback) {
-      const line = terminal.buffer.active.getLine(y - 1);
-      if (!line) { callback(undefined); return; }
-      const text = line.translateToString();
-      const links = [];
-      const re = /(?:file:\/\/\/)?(?:[A-Za-z]:[\\\/]|\.{0,2}\/)[^\s:*?"<>|,()]+(?::\d+(?::\d+)?)?/g;
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        const filePath = m[0];
-        const startX = m.index + 1;
-        const endX = m.index + filePath.length;
-        const isFileUrl = filePath.startsWith('file:///');
-        links.push({
-          range: { start: { x: startX, y }, end: { x: endX, y } },
-          text: filePath,
-          activate: () => isFileUrl ? api.send({ type: 'openUrl', url: filePath }) : api.send({ type: 'openFile', id, path: filePath }),
-        });
-      }
       callback(links.length ? links : undefined);
     }
   });
@@ -5427,7 +5407,7 @@ function togglePrRepo(repo) {
 }
 
 function openPr(url) {
-  api.send({ type: 'openUrl', url });
+  openLink(url);
   document.getElementById('pr-dropdown').style.display = 'none';
 }
 
@@ -5605,7 +5585,7 @@ function questAttachHtml(list) {
   const media = list.filter(a => questKind(a) !== 'file'), files = list.filter(a => questKind(a) === 'file');
   let h = '';
   if (media.length) h += '<div class="q-attach">' + media.map((a, i) => { const k = questKind(a); return '<div class="q-thumb' + (k === 'video' ? ' video' : '') + '" onclick="openQuestView(' + i + ')" title="' + escAttr(a.title || k) + '">' + (a.thumb || k === 'image' ? '<img src="' + escAttr(a.thumb || a.url) + '" alt="" loading="lazy">' : '<video src="' + escAttr(a.url) + '#t=0.5" preload="metadata" muted playsinline></video>') + (k === 'video' ? '<span class="q-play">&#x25B6;</span>' : '') + '</div>'; }).join('') + '</div>';
-  if (files.length) h += '<div class="q-files">' + files.map(a => '<a href="#" class="q-file" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(a.url) + '\'});return false;">&#x1F4CE; ' + esc(a.title || a.ext || 'file') + (a.size ? ' <small>' + (a.size > 1048576 ? (a.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(a.size / 1024)) + ' KB') + '</small>' : '') + '</a>').join('') + '</div>';
+  if (files.length) h += '<div class="q-files">' + files.map(a => '<a href="#" class="q-file" onclick="openLink(\'' + escAttr(a.url) + '\');return false;">&#x1F4CE; ' + esc(a.title || a.ext || 'file') + (a.size ? ' <small>' + (a.size > 1048576 ? (a.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(a.size / 1024)) + ' KB') + '</small>' : '') + '</a>').join('') + '</div>';
   return h;
 }
 let questView = null; // { list, i }
@@ -5616,7 +5596,7 @@ function questViewStep(d) { if (!questView) return; questView.i = (questView.i +
 function renderQuestView() {
   const v = questView; if (!v) return; const a = v.list[v.i], box = document.getElementById('quest-view-box'), cap = document.getElementById('quest-view-cap');
   box.innerHTML = questKind(a) === 'video' ? '<video src="' + escAttr(a.url) + '" controls autoplay playsinline></video>' : '<img src="' + escAttr(a.url) + '" alt="">';
-  cap.innerHTML = esc(a.title || '') + (v.list.length > 1 ? ' <span>' + (v.i + 1) + ' / ' + v.list.length + '</span>' : '') + ' <a href="#" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(a.url) + '\'});return false;">open in browser</a>';
+  cap.innerHTML = esc(a.title || '') + (v.list.length > 1 ? ' <span>' + (v.i + 1) + ' / ' + v.list.length + '</span>' : '') + ' <a href="#" onclick="openLink(\'' + escAttr(a.url) + '\');return false;">open in browser</a>';
   document.querySelectorAll('#quest-view .qv-nav').forEach(b => b.hidden = v.list.length < 2);
 }
 // Markdown as ClickUp writes it, rendered safely: everything is escaped first, then a handful of constructs are recognised.
@@ -5624,7 +5604,7 @@ function questMd(src) {
   const inl = s => esc(s)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/!\[([^\]]*)\]\((https?:[^\s)]+)\)/g, (m, alt, url) => '<img class="q-inline" src="' + url.replace(/"/g, '%22') + '" alt="' + alt + '" loading="lazy" onclick="openQuestViewUrl(this.src)">')
-    .replace(/\[([^\]]+)\]\((https?:[^\s)]+)\)/g, (m, txt, url) => '<a href="#" onclick="api.send({type:\'openUrl\',url:\'' + url.replace(/'/g, '%27') + '\'});return false;">' + txt + '</a>')
+    .replace(/\[([^\]]+)\]\((https?:[^\s)]+)\)/g, (m, txt, url) => '<a href="#" onclick="openLink(\'' + url.replace(/'/g, '%27') + '\');return false;">' + txt + '</a>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<i>$2</i>').replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, '$1<i>$2</i>').replace(/~~([^~]+)~~/g, '<s>$1</s>');
   const lines = String(src || '').replace(/\r/g, '').split('\n'); let h = '', para = [], list = null, code = null;
   const flush = () => { if (para.length) { h += '<p>' + para.map(inl).join('<br>') + '</p>'; para = []; } if (list) { h += '</' + list + '>'; list = null; } };
@@ -5655,7 +5635,7 @@ function renderQuest() {
     + '<div class="q-chips">' + chip('Platform', (t.platforms || []).join(', ')) + chip('Board', t.list && t.list.name) + chip('Status', t.status) + chip('Assigned', (t.assignees || []).join(', ')) + chip('Besieging', q.base) + chip('Here for', sinceStr) + chip('Due', when(t.due)) + chip('Tags', (t.tags || []).join(', ')) + fields.map(f => chip(f.name, f.values.join(', '))).join('') + '</div>'
     + '<div class="q-text">' + (q.error ? '<p class="q-empty">Could not read the scroll: ' + esc(q.error) + '</p>' : !q.body ? '<p class="q-empty q-wait">Unrolling the scroll…</p>' : questMd(t.markdown)) + '</div>'
     + (q.body && t.attachments && t.attachments.length ? questAttachHtml(t.attachments.filter(a => !(t.markdown || '').includes(a.url))) : '')
-    + '<div class="q-actions"><button class="q-btn q-main" onclick="questFly(\'' + escAttr(q.id) + '\')" title="Close the log and fly the camera to this monster">&#x2694; Fly to the monster</button><button class="q-btn" onclick="copyLink(\'' + escAttr(t.url) + '\')">&#x2398; Copy link</button><button class="q-btn" onclick="api.send({type:\'openUrl\',url:\'' + escAttr(t.url) + '\'})">&#x2197; Open in ClickUp</button></div></div>';
+    + '<div class="q-actions"><button class="q-btn q-main" onclick="questFly(\'' + escAttr(q.id) + '\')" title="Close the log and fly the camera to this monster">&#x2694; Fly to the monster</button><button class="q-btn" onclick="copyLink(\'' + escAttr(t.url) + '\')">&#x2398; Copy link</button><button class="q-btn" onclick="openLink(\'' + escAttr(t.url) + '\')">&#x2197; Open in ClickUp</button></div></div>';
 }
 function renderClickupLive() {
   const el = document.getElementById('clickup-live'); if (!el) return;
@@ -5886,7 +5866,7 @@ function toggleActionsDropdown(e) {
 }
 
 function openActionRun(url) {
-  if (url) api.send({ type: 'openUrl', url });
+  if (url) openLink(url);
   document.getElementById('actions-dropdown').style.display = 'none';
   stopActElapsed();
 }
@@ -6264,7 +6244,7 @@ function setWorldView(on, persist = true) {
       award: (kind, amount, label) => worldAward(kind, amount, label),
       spend: (cost, patch) => worldSpend(cost, patch),
       refreshUsage: () => refreshUsage(),
-      openRaid: (url) => api.send({ type: 'openUrl', url }),
+      openRaid: (url) => openLink(url),
       openQuest: (task, base) => openQuest(task, base),
       copyLink: (url) => copyLink(url),
     }); window.World.ready = true; worldDailyStreak(); worldSync(); }

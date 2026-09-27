@@ -1,8 +1,10 @@
-// URL links that span terminal rows. xterm's web-links addon only follows soft wraps
-// (isWrapped); Claude hard-wraps long URLs with a newline + indent, so a click opened
-// just the first row's piece. Shared by the renderer (index.html) and the node self-check.
+// URL and file-path links that span terminal rows. xterm's web-links addon only follows
+// soft wraps (isWrapped); Claude hard-wraps long URLs/paths with a newline + indent, so a
+// click opened just the first row's piece. Shared by the renderer (index.html) and the node self-check.
 
 const URL_RE = /https?:\/\/[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/g;
+// Windows/Unix paths, optional file:/// and :line:col
+const PATH_RE = /(?:file:\/\/\/)?(?:[A-Za-z]:[\\/]|\.{0,2}\/)[^\s:*?"<>|,()]+(?::\d+(?::\d+)?)?/g;
 const MAX_ROWS = 20; // ponytail: cap on rows one URL may span; raise if longer URLs show up
 
 // Does row i run on into row i+1? Soft wrap, or a hard wrap: row i filled to the edge
@@ -16,9 +18,9 @@ function continues(getLine, i, cols, slack = 2) {
 }
 
 // getLine(i) → { text, isWrapped } | null for buffer row i (0-based).
-// Returns the URLs touching row y as xterm link ranges (1-based x and y).
+// Returns the links touching row y: { kind: 'url'|'path', text, start, end }, 1-based x/y.
 // ponytail: one char = one cell; wide (CJK) chars before a URL shift its range.
-function urlLinksAt(getLine, y, cols) {
+function linksAt(getLine, y, cols) {
   if (!getLine(y)) return [];
   let top = y;
   while (top > 0 && y - top < MAX_ROWS && getLine(top - 1) && continues(getLine, top - 1, cols)) top--;
@@ -31,14 +33,18 @@ function urlLinksAt(getLine, y, cols) {
     for (let x = x0; x < t.length; x++) { text += t[x]; pos.push({ x: x + 1, y: i + 1 }); }
     if (!continues(getLine, i, cols)) break;
   }
-  const links = [];
-  for (const m of text.matchAll(URL_RE)) {
+  const links = [], urls = [...text.matchAll(URL_RE)];
+  const add = (kind, m) => {
     const start = pos[m.index], end = pos[m.index + m[0].length - 1];
-    if (start.y <= y + 1 && end.y >= y + 1) links.push({ url: m[0], start, end });
+    if (start.y <= y + 1 && end.y >= y + 1) links.push({ kind, text: m[0], start, end });
+  };
+  urls.forEach(m => add('url', m));
+  for (const m of text.matchAll(PATH_RE)) { // skip the "//host/..." bit of a URL
+    if (!urls.some(u => m.index < u.index + u[0].length && u.index < m.index + m[0].length)) add('path', m);
   }
   return links;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { urlLinksAt };
+  module.exports = { linksAt };
 }
