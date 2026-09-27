@@ -441,6 +441,7 @@ function sendFullState() {
     send({ type: 'teamDetected', team: { name: teamData.name, leadAgentId: teamData.leadAgentId, members: teamData.members, tasks: teamData.tasks } });
   }
   if (lastUsage) send({ type: 'usage', usage: lastUsage });
+  if (lastUsageCost) send({ type: 'usageCost', cost: lastUsageCost });
   send({ type: 'accountInfo', ...getCurrentAccountInfo() });
   if (remoteServer) sendPeersState(); // only meaningful once the server picked its port
   // Replay peer messages still awaiting approval so a renderer reload keeps them visible
@@ -2756,7 +2757,26 @@ function armClickupTimer() {
 let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
 // Set before any programmatic quit so the close confirmation doesn't block it.
 let forceQuit = false;
-const { parseModelWeekly, parseOauthUsage, carryModelWeekly, appendUsageSample } = require('./usage-core');
+const { parseModelWeekly, parseOauthUsage, carryModelWeekly, appendUsageSample, usageMeters } = require('./usage-core');
+const { scanCosts, sumCost } = require('./api-cost');
+// What each meter's current window would have cost at API prices, from every transcript on this machine.
+let lastUsageCost = null, costScanning = false;
+async function sendUsageCost(usage) {
+  if (costScanning) return;
+  costScanning = true;
+  try {
+    const now = Date.now();
+    await scanCosts(path.join(os.homedir(), '.claude', 'projects'), now);
+    const cost = {};
+    for (const m of usageMeters(usage)) {
+      const end = m.reset > now ? m.reset : now;
+      cost[m.key] = sumCost(end - m.span, now, m.key.startsWith('m:') ? m.key.slice(2) : '');
+    }
+    lastUsageCost = cost;
+    send({ type: 'usageCost', cost });
+  } catch (e) { console.log('[Overlord] API cost scan failed:', e.message); }
+  finally { costScanning = false; }
+}
 // Usage readings over time, per account (one login's limits say nothing about another's), for the meter charts.
 const USAGE_HISTORY_FILE = path.join(STATE_DIR, 'usage-history.json');
 let usageHistory = null; // { [account]: [{ t, h, w, 'm:<model>' }] }, loaded on first use
@@ -2766,6 +2786,7 @@ function loadUsageHistory() {
   return usageHistory;
 }
 function recordUsage(usage) {
+  sendUsageCost(usage);
   const all = loadUsageHistory(), key = usageAccountKey();
   const before = (all[key] || []).length;
   all[key] = appendUsageSample(all[key], usage, usage.fetchedAt);

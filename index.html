@@ -2822,7 +2822,8 @@ function render() {
   }
   tip.push(`${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? `, ${activeCount} active` : ''}`, 'Click to refresh');
   // With meters, each has its own chart tooltip; the bar-wide one would stack on top of it.
-  if (currentUsage) bar.removeAttribute('title'); else bar.title = tip.join('\n');
+  // tooltip.js moves title into data-tip, so both go.
+  if (currentUsage) { bar.removeAttribute('title'); delete bar.dataset.tip; } else bar.title = tip.join('\n');
   bar.innerHTML = barHtml;
   bar.onclick = (e) => { const m = e.target.closest('[data-meter]'); if (m) openUsageModal(m.dataset.meter); else refreshUsage(); };
   bar.classList.add('show');
@@ -3912,6 +3913,7 @@ function handleAgentMsg(msg) {
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;
+    case 'usageCost': usageCost = msg.cost; scheduleRender(); renderUsageModal(); break;
     case 'usageHistory': handleUsageHistory(msg.points, msg.since); break;
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); break;
@@ -4109,6 +4111,7 @@ api.send({ type: 'getAccountInfo' });
 
 // ── Usage display ─────────────────────────────────────
 let currentUsage = null;
+let usageCost = {}; // meter key -> $ this window would cost at API list prices (main, api-cost.js)
 function handleUsage(usage) {
   currentUsage = usage;
   scheduleRender();
@@ -4132,9 +4135,11 @@ function usagePanelHTML(key, W, H, win) {
   const foot = past
     ? `<span>${usageWhen(start, long)} – ${usageWhen(end, long)}</span><span>Ended at ${pct.toFixed(1)}%</span>`
     : `<span><i class="ut-key-pace"></i>On pace: ${Math.round(expected)}% by now</span>${m.reset ? `<span>Resets ${escapeHtml(usageWhen(m.reset, long))}</span>` : ''}`;
+  const usd = past ? null : usageCost[key];
+  const costRow = usd == null ? '' : `<div class="ut-foot" title="Tokens in every Claude Code transcript on this machine this window, priced at pay-per-token API rates per model"><span>At API prices</span><span class="ut-cost">$${usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>`;
   return `<div class="ut-head"><span>${escapeHtml(m.label)}${past ? ' <span class="ut-past">past</span>' : ''}</span><span class="ut-pct um-pct ${cls}">${pct == null ? '–' : pct.toFixed(1) + '%'}</span></div>`
     + usageChartSvg(usageHist, key, start, end, W, H)
-    + `<div class="ut-foot">${foot}</div>`;
+    + `<div class="ut-foot">${foot}</div>` + costRow;
 }
 const usageTip = document.createElement('div');
 usageTip.id = 'usage-tip'; usageTip.setAttribute('role', 'tooltip');

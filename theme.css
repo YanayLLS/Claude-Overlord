@@ -502,6 +502,7 @@ html[data-theme="light"] ::selection { background: rgba(79,91,213,.22); }
 .usage-modal { --pop: var(--editor-bg); }
 .ut-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
 .ut-pct { font-size: 13px; }
+.ut-cost { color: var(--text); font-weight: 600; }
 .ut-foot { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; color: var(--dim); margin-top: 2px; }
 .ut-key-pace { display: inline-block; width: 12px; margin-right: 6px; vertical-align: middle; border-top: 1.5px dashed var(--dim); }
 .ut-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
