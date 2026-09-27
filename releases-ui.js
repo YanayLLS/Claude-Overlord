@@ -413,6 +413,13 @@
         const what = (srcCell.run.failed || []).map(f => f.job + (f.step ? ' › ' + f.step : '')).join('; ') || 'its deploy';
         bits.push(`<span class="rl-rr-chip warn" title="${esc(what)}">⚠ ${esc(r.source)}'s own deploy is failing — ${esc(r.env)} deploy will likely fail the same way</span>`);
       }
+      // dbschemas: blocked when the release uses a field its build won't ship; otherwise info
+      const d = r.dbschemas;
+      if (d && d.used && d.used.length) bits.push(`<span class="rl-rr-chip bad" title="Added in dbschemas after ${esc(d.shipped)} — bump @llsltd/dbschemas to ${esc(d.latest)} before merging">✕ uses ${esc(d.used.join(', '))} but ships dbschemas ${esc(d.shipped)}</span>`);
+      else if (d && d.otherLine) bits.push(`<span class="rl-rr-chip warn" title="Latest is ${esc(d.latest)}: a different major line, so fields can't be compared">dbschemas ${esc(d.shipped)} (old line)</span>`);
+      else if (d && d.shipped && d.shipped !== d.latest) bits.push(`<span class="rl-rr-chip" title="${esc((d.newFields || []).join(', ') || 'no new fields')}">dbschemas ${esc(d.shipped)} · ${d.behind != null ? d.behind + ' change' + (d.behind === 1 ? '' : 's') + ' behind' : 'behind ' + esc(d.latest)}</span>`);
+      else if (d && d.shipped) bits.push(`<span class="rl-rr-chip ok">dbschemas ${esc(d.shipped)}${d.via === 'latest' ? ' (latest at build)' : ''}</span>`);
+      if (r.pr && !r.running && r.builds === 'none') bits.push('<span class="rl-rr-chip warn" title="No check on this PR builds or tests it, so nothing verifies it still builds after merging">⚠ no CI build on this PR</span>');
       if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them — merging isn't blocked">not required: ${esc(r.advisory.join(', '))}</span>`);
       if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">already red on ${esc(r.target)}: ${esc(r.knownFailing.join(', '))}</span>`);
       if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);

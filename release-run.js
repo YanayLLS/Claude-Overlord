@@ -71,7 +71,7 @@ function rowStatus(r) {
   if (r.nothing) return 'nothing';
   if (r.merged) return 'merged';
   if (r.closed) return 'closed';
-  if (r.conflict === true || r.checks === 'fail' || (r.backMerge && r.backMerge.conflict)) return 'blocked';
+  if (r.conflict === true || r.checks === 'fail' || (r.dbschemas && r.dbschemas.used && r.dbschemas.used.length) || (r.backMerge && r.backMerge.conflict)) return 'blocked';
   return 'ok';
 }
 
@@ -97,7 +97,7 @@ async function prHealth(gh, repo, n, target, wait = sleep) {
     else await wait(1500);
   }
   const conflict = st ? st.mergeable === false : null;
-  let checks = 'none', knownFailing = [], advisory = [];
+  let checks = 'none', knownFailing = [], advisory = [], builds = 'none';
   const sha = st && st.head && st.head.sha;
   if (sha) {
     const [runs, status, baseRuns, baseStatus, branch] = await Promise.all([
@@ -108,6 +108,7 @@ async function prHealth(gh, repo, n, target, wait = sleep) {
       api(`repos/${repo}/branches/${target}`),
     ]);
     const headRuns = runs.data && runs.data.check_runs, headStatus = status.data;
+    builds = buildCoverage(headRuns);
     const failing = failingNames(headRuns, headStatus);
     const req = requiredChecks(branch.data);
     if (req.length) {
@@ -124,7 +125,7 @@ async function prHealth(gh, repo, n, target, wait = sleep) {
       advisory = failingNames(null, headStatus).filter(x => !onTarget.has(x));
     }
   }
-  return { conflict, checks, knownFailing, advisory };
+  return { conflict, checks, knownFailing, advisory, builds };
 }
 
 // One (repo, env, source → target) row. update(patch) streams progress to the UI.
@@ -185,13 +186,86 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   }
 
   // is the release PR mergeable, and are its checks green?
-  const health = await prHealth(gh, repo, pr.number, target, wait);
-  return { ahead, hotfixes: hotfixes.length, pr: { number: pr.number, url: pr.html_url }, reused, body: reused ? null : lastBody, backMerge, ...health };
+  const [health, dbschemas] = await Promise.all([
+    prHealth(gh, repo, pr.number, target, wait),
+    dbschemasCheck(gh, repo, source, cmp.data.files, row.dbschemasLatest).catch(e => ({ error: e.message })),
+  ]);
+  return { ahead, hotfixes: hotfixes.length, pr: { number: pr.number, url: pr.html_url }, reused, body: reused ? null : lastBody, backMerge, dbschemas, ...health };
+}
+
+// ── dbschemas: does this release need a newer shared-schema package than its build ships? ──
+const DBS = '@llsltd/dbschemas';
+const DBS_REPO = 'LLSLtd/dbschemas';
+
+// Mongoose schema syntax, not fields: `type: String`, `required: true`, …
+const SCHEMA_KEYWORDS = new Set(['type', 'required', 'default', 'ref', 'enum', 'index', 'unique', 'sparse', 'min', 'max',
+  'minlength', 'maxlength', 'trim', 'lowercase', 'uppercase', 'select', 'validate', 'immutable', 'alias', 'get', 'set', 'timestamps', 'versionKey', 'strict', 'collection']);
+
+// Field names a dbschemas diff adds: `+  fieldName: Type` lines in schema files (tests, package.json out).
+function addedSchemaFields(files) {
+  const out = new Set();
+  for (const f of files || []) {
+    if (!/\.js$/.test(f.filename) || /\.test\.js$|package/.test(f.filename)) continue;
+    for (const line of String(f.patch || '').split('\n')) {
+      const m = line.match(/^\+\s*['"]?([A-Za-z_][A-Za-z0-9_]{3,})['"]?\s*:/);
+      if (m && !SCHEMA_KEYWORDS.has(m[1])) out.add(m[1]);
+    }
+  }
+  return [...out];
+}
+
+// Which of those fields the release's own changes use as a property: `.Name`, `Name:`, `'Name'`,
+// `"Name"` on added lines. A bare word ("Draft" in a comment) isn't a use.
+function fieldsUsed(fields, releaseFiles) {
+  const added = (releaseFiles || []).map(f => String(f.patch || '').split('\n').filter(l => l.startsWith('+')).join('\n')).join('\n');
+  return fields.filter(n => new RegExp('(\\.' + n + '\\b|\\b' + n + '\\s*:|[\'"`]' + n + '[\'"`])').test(added));
+}
+
+// The dbschemas version a source branch's image build really installs: @latest when its
+// Dockerfile installs @latest, else the lock file's version (npm ci / npm install keep it).
+function shippedVersion({ pkg, lock, dockerfile, latest }) {
+  const deps = { ...(pkg && pkg.dependencies), ...(pkg && pkg.devDependencies) };
+  if (!deps[DBS]) return null;
+  if (/dbschemas@latest/.test(dockerfile || '')) return { version: latest, via: 'latest' };
+  const locked = lock && ((lock.packages && lock.packages['node_modules/' + DBS]) || (lock.dependencies && lock.dependencies[DBS]));
+  return { version: locked ? locked.version : String(deps[DBS]).replace(/^[\^~=]/, ''), via: locked ? 'lock' : 'package.json' };
+}
+
+async function dbschemasCheck(gh, repo, source, releaseFiles, latest) {
+  if (!latest) return null;
+  const raw = (p) => gh(['api', '-H', 'Accept:application/vnd.github.raw', `repos/${repo}/contents/${p}?ref=${source}`]);
+  const [pkg, lock, docker] = await Promise.all([raw('package.json'), raw('package-lock.json'),
+    gh(['api', `repos/${repo}/contents/Dockerfile?ref=${source}`])]);
+  const dockerfile = docker.data && docker.data.content ? Buffer.from(docker.data.content, 'base64').toString('utf8') : '';
+  const shipped = shippedVersion({ pkg: pkg.data, lock: lock.data, dockerfile, latest });
+  if (!shipped) return null; // this repo doesn't use dbschemas
+  const res = { shipped: shipped.version, via: shipped.via, latest, newFields: [], used: [] };
+  if (shipped.version === latest) return res;
+  if (shipped.version.split('.')[0] !== latest.split('.')[0]) return { ...res, otherLine: true }; // e.g. 23.x vs 26.x: diverged lines, no field diff
+  const cmp = await gh(['api', `repos/${DBS_REPO}/compare/${shipped.version}...${latest}`]);
+  if (cmp.error || !cmp.data) return { ...res, error: 'could not diff dbschemas ' + shipped.version + '...' + latest };
+  res.behind = (cmp.data.commits || []).filter(c => !/^bump package version/i.test(firstLine(c.commit && c.commit.message))).length;
+  res.newFields = addedSchemaFields(cmp.data.files);
+  res.used = fieldsUsed(res.newFields, releaseFiles);
+  return res;
+}
+
+// Does anything on the PR build or test it? A green build check runs on the PR's merge result,
+// so it's the "will it still build after merging" answer; none means nothing verifies that.
+const BUILDISH = /build|test|compile|typecheck|lint|\bci\b/i;
+function buildCoverage(checkRuns) {
+  const b = (checkRuns || []).filter(r => BUILDISH.test(r.name));
+  if (!b.length) return 'none';
+  if (b.some(r => BAD.includes(r.conclusion))) return 'fail';
+  if (b.some(r => r.status !== 'completed')) return 'pending';
+  return 'pass';
 }
 
 // Every row in parallel; onRow(i, row) after each change.
 async function runRelease(gh, prs, { writeJson, onRow, wait }) {
-  const rows = prs.map(p => ({ ...p, running: true }));
+  const pkg = await gh(['api', '-H', 'Accept:application/vnd.github.raw', `repos/${DBS_REPO}/contents/package.json?ref=dev`]);
+  const dbschemasLatest = (pkg.data && pkg.data.version) || null; // what dbschemas' dev last published
+  const rows = prs.map(p => ({ ...p, running: true, dbschemasLatest }));
   await Promise.all(rows.map(async (row, i) => {
     const update = (patch) => { Object.assign(row, patch); onRow(i, row); };
     let res;
@@ -203,4 +277,5 @@ async function runRelease(gh, prs, { writeJson, onRow, wait }) {
   return rows;
 }
 
-module.exports = { hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease };
+module.exports = { hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
+  addedSchemaFields, fieldsUsed, shippedVersion, dbschemasCheck, buildCoverage };

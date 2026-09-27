@@ -99,5 +99,34 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
   }, 'o/f', 7, 'master', async () => {});
   assert.strictEqual(prot.checks, 'pass');
   assert.deepStrictEqual(prot.advisory.sort(), ['Deploy to dev', 'security/snyk']);
+  // ── dbschemas: shipped version, new fields, fields the release uses ──
+  const { addedSchemaFields, fieldsUsed, shippedVersion, dbschemasCheck, buildCoverage } = require('./release-run');
+  assert.deepStrictEqual(addedSchemaFields([
+    { filename: 'Procedure.js', patch: '@@\n+    coverImgIsCustom: Boolean,\n     title: String,\n+    DeletedBy: UserRefType,' },
+    { filename: 'Room.test.js', patch: '+    testOnly: 1,' }, { filename: 'package.json', patch: '+  "version": "1",' },
+  ]), ['coverImgIsCustom', 'DeletedBy']);
+  assert.deepStrictEqual(fieldsUsed(['coverImgIsCustom', 'DeletedBy'], [{ patch: '+ if (p.coverImgIsCustom) x()\n- DeletedBy old' }]), ['coverImgIsCustom']);
+  // a bare word isn't a use; a key or a quoted name is; schema keywords never count as fields
+  assert.deepStrictEqual(fieldsUsed(['Draft', 'Label', 'Note'], [{ patch: "+ // Draft mode\n+ { Label: x }\n+ get('Note')" }]), ['Label', 'Note']);
+  assert.deepStrictEqual(addedSchemaFields([{ filename: 'A.js', patch: '+    type: String,\n+    required: true,\n+    IsSoloAllowed: Boolean,' }]), ['IsSoloAllowed']);
+  const lock = { packages: { 'node_modules/@llsltd/dbschemas': { version: '26.3.77' } } };
+  const pkgJ = { dependencies: { '@llsltd/dbschemas': '^26.3.77' } };
+  assert.deepStrictEqual(shippedVersion({ pkg: pkgJ, lock, dockerfile: 'RUN npm ci', latest: '26.3.95' }), { version: '26.3.77', via: 'lock' });
+  assert.deepStrictEqual(shippedVersion({ pkg: pkgJ, lock, dockerfile: 'RUN npm install @llsltd/dbschemas@latest', latest: '26.3.95' }), { version: '26.3.95', via: 'latest' });
+  assert.strictEqual(shippedVersion({ pkg: { dependencies: {} }, lock, dockerfile: '', latest: '1' }), null);
+  const dbs = await dbschemasCheck(async (args) => {
+    const a = args.join(' ');
+    if (a.includes('package.json')) return { data: pkgJ };
+    if (a.includes('package-lock.json')) return { data: lock };
+    if (a.includes('Dockerfile')) return { data: { content: Buffer.from('RUN npm ci').toString('base64') } };
+    if (a.includes('dbschemas/compare/26.3.77...26.3.95')) return { data: {
+      commits: [{ commit: { message: 'feat(procedure): cover' } }, { commit: { message: 'bump package version to 26.3.95 [skip ci]' } }],
+      files: [{ filename: 'Procedure.js', patch: '+    coverImgIsCustom: Boolean,' }] } };
+    return { error: 'unexpected ' + a };
+  }, 'o/id', 'dev', [{ patch: '+ doc.coverImgIsCustom = true' }], '26.3.95');
+  assert.deepStrictEqual({ shipped: dbs.shipped, behind: dbs.behind, used: dbs.used }, { shipped: '26.3.77', behind: 1, used: ['coverImgIsCustom'] });
+  assert.strictEqual(rowStatus({ pr: {}, checks: 'pass', dbschemas: dbs }), 'blocked');
+  assert.strictEqual(buildCoverage([{ name: 'Production Build', status: 'completed', conclusion: 'success' }]), 'pass');
+  assert.strictEqual(buildCoverage([{ name: 'Semgrep', status: 'completed', conclusion: 'success' }]), 'none');
   console.log('release-run: all passed');
 })().catch(e => { console.error(e); process.exit(1); });

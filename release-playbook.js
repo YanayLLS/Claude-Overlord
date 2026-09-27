@@ -128,6 +128,9 @@ function releaseFixBrief({ rows, configSource }) {
     if (row.checks === 'fail') why.push(`release PR #${row.pr.number} has failing checks`);
     if (row.backMerge && row.backMerge.conflict) why.push(`back-merge PR #${row.backMerge.number} (\`${row.target}\` → \`${row.source}\`) conflicts`);
     if (row.error) why.push(`the run failed: ${row.error}`);
+    if (row.dbschemas && row.dbschemas.used && row.dbschemas.used.length) {
+      why.push(`it uses ${row.dbschemas.used.map(f => '\`' + f + '\`').join(', ')} from dbschemas, but its build ships ${row.dbschemas.shipped} (latest ${row.dbschemas.latest}): bump \`@llsltd/dbschemas\` to ${row.dbschemas.latest} in the source (package.json + lock) through a PR into \`${row.source}\``);
+    }
     lines.push(`- **\`${row.repo}\` · ${row.env}** (\`${row.source}\` → \`${row.target}\`): ${why.join('; ')}`
       + (row.pr ? ` · ${row.pr.url}` : '') + (row.backMerge && row.backMerge.url ? ` · back-merge ${row.backMerge.url}` : ''));
   }
