@@ -1332,6 +1332,7 @@ function spawnShell(id) {
   const sh = agentShell();
   try {
     const proc = agentPty().spawn(sh, [], { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({}) });
+    proc._ovShell = true; // no Claude here: an image paste types its path instead of Alt+V
     terminals.set(id, proc);
     applyLastTermSize(id, proc);
     send({ type: 'termData', id, data: '\r\n\x1b[90m[Plain shell — type exit to leave]\x1b[0m\r\n' });
@@ -1551,6 +1552,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
     }
     const onData = (d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
+      if (agent._imgPending) bindImageTag(id, agent, d);
       // Buffer terminal output for mobile remote
       let buf = termBuffers.get(id) || '';
       buf += d;
@@ -3135,6 +3137,18 @@ function savePasteToFile(content) {
   return file;
 }
 
+// After an Alt+V, the first new [Image #N] Claude draws is that image. Claude's counter is
+// shared with [Pasted text #N] and restarts on /clear, so N is read, never predicted.
+function bindImageTag(id, a, d) {
+  const p = a._imgPending;
+  if (Date.now() > p.until) { a._imgPending = null; return; }
+  p.buf = (p.buf + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')).slice(-4000);
+  const ns = [...p.buf.matchAll(/\[Image #(\d+)\]/g)].map(m => +m[1]);
+  if (!ns.length) return;
+  a._imgPending = null;
+  send({ type: 'imagePasted', id, path: p.path, tagged: true, n: Math.max(...ns) });
+}
+
 function handleTermInput(id, data) {
   const t = terminals.get(id);
   if (!t) {
@@ -3887,6 +3901,8 @@ function handleIpc(msg) {
     }
     case 'pasteImage': {
       const img = clipboard.readImage();
+      const pt = terminals.get(msg.id);
+      if (img.isEmpty() && msg.alt && pt && !pt._ovShell) { pt.write('\x1bv'); break; } // Claude says "no image" itself
       if (img.isEmpty()) {
         // No bitmap on clipboard — likely a file reference (e.g. image file copied from Explorer).
         // Fall through to file-path paste logic.
@@ -3900,6 +3916,15 @@ function handleIpc(msg) {
       const filePath = path.join(dir, filename);
       fs.writeFileSync(filePath, img.toPNG());
       const insertPath = filePath.replace(/\\/g, '/');
+      const t = terminals.get(msg.id);
+      if (t && !t._ovShell) {
+        // Alt+V is Claude's own image paste: it reads the clipboard and shows [Image #N].
+        // The saved copy backs the hover preview on that tag.
+        const a = agents.get(msg.id);
+        if (a) a._imgPending = { path: insertPath, buf: '', until: Date.now() + 5000 };
+        t.write('\x1bv');
+        break;
+      }
       handleTermInput(msg.id, insertPath + ' ');
       send({ type: 'imagePasted', id: msg.id, path: insertPath });
       break;

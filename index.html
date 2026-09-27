@@ -1027,6 +1027,7 @@ button:focus-visible { outline-offset:0; }
 #preview-toggle.active { color:var(--cyan); background:rgba(148,226,213,.12); }
 #preview-resize { width:4px; height:auto; background:transparent; cursor:ew-resize; flex-shrink:0; display:none; position:relative; border-left:1px solid var(--border); }
 #preview-resize::after { content:''; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:2px; height:24px; background:transparent; border-radius:1px; transition:background .15s; }
+#image-pop { position:fixed; z-index:10000; display:none; max-width:400px; max-height:300px; border:1px solid var(--bg3); border-radius:6px; background:var(--bg); box-shadow:0 6px 24px rgba(0,0,0,.5); pointer-events:none; }
 #preview-resize:hover::after { background:var(--cyan); }
 #preview-resize.open { display:block; }
 #preview-col { display:none; flex-direction:column; flex-shrink:0; width:520px; min-width:280px; border-left:1px solid var(--border); background:var(--editor-bg); position:relative; }
@@ -2900,6 +2901,21 @@ function createXterm(id) {
       callback(links.length ? links : undefined);
     }
   });
+  // [Image #N] tags: hover shows the pasted image
+  terminal.registerLinkProvider({
+    provideLinks(y, callback) {
+      const line = terminal.buffer.active.getLine(y - 1)?.translateToString() || '';
+      const links = [...line.matchAll(/\[Image #(\d+)\]/g)].map(m => {
+        const src = pastedImages.get(id)?.get(+m[1]);
+        return src && {
+          range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } }, text: m[0],
+          decorations: { underline: false, pointerCursor: false },
+          activate: () => {}, hover: (ev) => showImagePop(src, ev), leave: hideImagePop,
+        };
+      }).filter(Boolean);
+      callback(links.length ? links : undefined);
+    }
+  });
   terminal.onData((data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); });
   terminal.onScroll(() => {
     ghostClear();
@@ -2940,6 +2956,8 @@ function createXterm(id) {
     // Ctrl+C with no selection: Claude clears the input box. Copy what was typed first so it isn't lost.
     if (e.ctrlKey && e.key === 'c' && !terminal.hasSelection()) { const t = readPromptBox(terminal); if (t) navigator.clipboard.writeText(t); return true; }
     if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
+    // Alt+V goes through main too, so the pasted image is kept for the [Image #N] hover preview
+    if (e.altKey && !e.ctrlKey && e.key === 'v') { api.send({ type: 'pasteImage', id, alt: true }); return false; }
     if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey && !e.altKey) { selectPromptBox(terminal); return false; }
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
     if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
@@ -3611,7 +3629,10 @@ api.on((msg) => {
   if (msg.type === 'imagePasted') {
     // ponytail: no inline thumbnail. Writing to xterm out-of-band desyncs the
     // TUI's own redraw (it does not know those rows exist) and scrambles the prompt.
-    showToast('Image pasted — path inserted');
+    if (!msg.tagged) { showToast('Image pasted — path inserted'); return; }
+    // ponytail: after /clear a new #1 replaces the old one, so an old #1 in scrollback previews the new image
+    if (!pastedImages.has(msg.id)) pastedImages.set(msg.id, new Map());
+    pastedImages.get(msg.id).set(+msg.n, msg.path);
     return;
   }
   if (msg.type === 'ghost') {
@@ -4311,6 +4332,17 @@ function renderBookmarks(bookmarks) {
 }
 
 // ── Toast ──────────────────────────────────────────────
+const pastedImages = new Map(); // agentId -> Map(N of [Image #N] -> png path)
+function showImagePop(src, ev) {
+  let pop = document.getElementById('image-pop');
+  if (!pop) { pop = document.createElement('img'); pop.id = 'image-pop'; document.body.appendChild(pop); }
+  pop.src = encodeURI('file:///' + src.replace(/^\//, ''));
+  pop.style.left = Math.min(ev.clientX + 12, innerWidth - 420) + 'px';
+  pop.style.top = Math.max(8, ev.clientY - 312) + 'px';
+  pop.style.display = 'block';
+}
+function hideImagePop() { const pop = document.getElementById('image-pop'); if (pop) pop.style.display = 'none'; }
+
 function showToast(text, onClick) {
   let el = document.getElementById('toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
