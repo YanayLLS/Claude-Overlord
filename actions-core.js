@@ -88,9 +88,7 @@ function fixRunPlan(run, infos, worktreeDirs) {
   if (!id) return { error: 'No run to fix' };
   // head_branch can come from a fork's PR and worktree.js runs git through a shell on Windows
   if (!/^[\w./-]+$/.test(run.branch || '')) return { error: `Can't fix a run on branch "${run.branch}"` };
-  const wts = new Set(worktreeDirs || []);
-  const mine = (infos || []).filter(i => i.repo.toLowerCase() === run.repo.toLowerCase());
-  const pick = mine.find(i => !wts.has(i.dir)) || mine[0];
+  const pick = pickCheckout(run.repo, infos, worktreeDirs);
   if (!pick) return { error: `No local checkout of ${run.repo} — open an agent in it once` };
   const prompt = `GitHub Actions run ${run.name} #${run.runNumber} failed on branch ${run.branch}: ${run.url} `
     + `- run: gh run view ${id[1]} --repo ${run.repo} --log-failed - to read the failing steps and find the root cause. `
@@ -106,12 +104,49 @@ function fixRunPlan(run, infos, worktreeDirs) {
     // repo's folder trust. A fork branch isn't on origin, so its fetch just fails.
     startPoint: /^[0-9a-f]{40}$/.test(run.sha || '') && !/^pull_request/.test(run.event || '')
       ? run.sha : `origin/${run.branch}`,
-    // Passed on the claude command line so it submits at boot. That line goes through
-    // cmd.exe / sh -c, so only characters no shell treats specially survive.
-    prompt: prompt.replace(/[^\w\s.,:/#@()'=+-]/g, '').replace(/\s+/g, ' '),
+    prompt: shellSafe(prompt),
   };
 }
 
+// Passed on the claude command line so it submits at boot. That line goes through
+// cmd.exe / sh -c, so only characters no shell treats specially survive.
+const shellSafe = (s) => s.replace(/[^\w\s.,:/#@()'=+-]/g, '').replace(/\s+/g, ' ');
+
+// Main checkouts beat worktrees (those belong to other work); repo match ignores case.
+function pickCheckout(repo, infos, worktreeDirs) {
+  const wts = new Set(worktreeDirs || []);
+  const mine = (infos || []).filter(i => i.repo.toLowerCase() === repo.toLowerCase());
+  return mine.find(i => !wts.has(i.dir)) || mine[0];
+}
+
+// Env branches: never pushed to directly, a fix goes in by PR (same list as the PR panel's release filter).
+const ENV_BRANCH = /^(dev|develop|alpha|staging|master|main|production|prod(-.*)?)$/i;
+
+// Plan for "Fix" on a PR with failing checks: a fix/pr-N worktree off the PR's head, and an
+// agent that loops — read the failed logs, fix or rerun, push to the PR, watch — until green.
+// Its own branch name, so a checkout already on the head branch doesn't block the worktree.
+function fixPrPlan(pr, infos, worktreeDirs) {
+  if (!pr || !pr.repo || !pr.number) return { error: 'No PR to fix' };
+  if (pr.isCrossRepository) return { error: `#${pr.number} comes from a fork — its branch can't be pushed to` };
+  if (!/^[\w./-]+$/.test(pr.headRef || '')) return { error: `Can't fix a PR from branch "${pr.headRef}"` };
+  const pick = pickCheckout(pr.repo, infos, worktreeDirs);
+  if (!pick) return { error: `No local checkout of ${pr.repo} — open an agent in it once` };
+  const n = pr.number, repo = pr.repo, head = pr.headRef, base = pr.baseRef || 'its base';
+  const push = ENV_BRANCH.test(head)
+    ? `${head} is an environment branch - never push to it. Push this branch and open one fix PR into it: gh pr create --repo ${repo} --base ${head}, then work on that PR's checks the same way, and keep pushing to it (no new PR per round)`
+    : `push to the PR: git push origin HEAD:${head}`;
+  const prompt = `PR #${n} in ${repo} (${head} into ${base}) has failing checks: ${pr.url} - get it green. `
+    + `You are in a worktree on a fix branch started from origin/${head}. Loop until every check passes: `
+    + `1. gh pr checks ${n} --repo ${repo} to see what failed, then gh run view (run id) --repo ${repo} --log-failed for each failed run, and find the root cause. `
+    + `2. A flaky or infra failure (timeout, network, runner, rate limit) unrelated to the change: rerun it with gh run rerun (run id) --failed --repo ${repo}, no code change. `
+    + `3. A real failure: git pull origin ${head} first (the PR may have moved), fix the root cause, run the matching tests or build locally, commit, and ${push}. `
+    + `If the failure comes from being behind ${base}, merge origin/${base} in and resolve the conflicts. `
+    + `4. Wait with gh pr checks ${n} --repo ${repo} --watch, then go back to 1. `
+    + `Stop when all checks are green, or after 5 rounds with no progress - then report what blocks it. `
+    + `Never merge the PR, never force push, and never skip, delete or loosen a test or check to make it pass.`;
+  return { repoDir: pick.dir, branch: `fix/pr-${n}`, base: head, startPoint: `origin/${head}`, prompt: shellSafe(prompt) };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, fixRunPlan, REPO_RE };
+  module.exports = { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, fixRunPlan, fixPrPlan, REPO_RE };
 }

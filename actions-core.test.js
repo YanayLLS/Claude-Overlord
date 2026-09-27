@@ -129,3 +129,30 @@ const { fixRunPlan } = require('./actions-core');
   // no run id in the url (never-run / workflow list url) → error
   assert.ok(fixRunPlan({ ...run, url: 'https://github.com/o/r/actions/workflows/ci.yml' }, infos, []).error);
 }
+
+// ── fixPrPlan: the Fix button on a red PR ─────────────
+const { fixPrPlan } = require('./actions-core');
+{
+  const pr = { repo: 'o/r', number: 948, headRef: 'yanay-features', baseRef: 'dev', url: 'https://github.com/o/r/pull/948' };
+  const infos = [{ dir: 'C:/x/r-wt', repo: 'o/r', branch: 'feat' }, { dir: 'C:/x/r', repo: 'o/r', branch: 'yanay-features' }];
+  const p = fixPrPlan(pr, infos, ['C:/x/r-wt']);
+  assert.strictEqual(p.repoDir, 'C:/x/r');
+  // its own branch off the PR head — never collides with a checkout already on the head branch
+  assert.strictEqual(p.branch, 'fix/pr-948');
+  assert.strictEqual(p.startPoint, 'origin/yanay-features');
+  assert.strictEqual(p.base, 'yanay-features');
+  // pushes land on the PR, and it loops on the checks until green
+  assert.ok(p.prompt.includes('git push origin HEAD:yanay-features'));
+  assert.ok(p.prompt.includes('gh pr checks 948 --repo o/r --watch'));
+  assert.ok(p.prompt.includes('--log-failed'));
+  assert.ok(/never merge/i.test(p.prompt));
+  assert.ok(!/["&|<>^%!$`\;\n]/.test(fixPrPlan({ ...pr, url: 'x"&$(rm)`;|<>' }, infos, []).prompt));
+  // a release PR's head is an env branch: no direct push, a fix PR into it instead
+  const rel = fixPrPlan({ ...pr, headRef: 'dev', baseRef: 'alpha' }, infos, []);
+  assert.ok(!rel.prompt.includes('HEAD:dev'));
+  assert.ok(rel.prompt.includes('--base dev'));
+  // refused: a fork (can't push), odd branch names (reach a shell), no checkout
+  assert.ok(fixPrPlan({ ...pr, isCrossRepository: true }, infos, []).error);
+  assert.ok(fixPrPlan({ ...pr, headRef: 'x&calc' }, infos, []).error);
+  assert.ok(fixPrPlan({ ...pr, repo: 'o/none' }, infos, []).error);
+}

@@ -126,6 +126,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-approve:disabled { opacity:.6; cursor:default; }
 .pr-update { background:var(--peach,#fab387); }
 .pr-update:hover { background:#f9c096; }
+.pr-fix, .pr-fix:hover { background:var(--red,#f38ba8); }
+.pr-fix:hover { filter:brightness(1.1); }
 .pr-conflictbtn { background:#f38ba8; }
 .pr-conflictbtn:hover { background:#f17497; }
 .pr-behind { color:var(--peach,#fab387); font-weight:600; }
@@ -5183,6 +5185,9 @@ function prRowHtml(p, dim) {
   const conflict = !dim && mi.label === 'conflicts';
   const cls = 'pr-row dt-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '')
     + (conflict ? ' pr-conflict' : '') + (dim ? ' pr-muted' : '');
+  // Red checks (or some already failed while others run): an agent fixes and pushes to the PR until green (main.js fixPr).
+  const fixBtn = !dim && (p.checks === 'fail' || p.failed)
+    ? `<button class="pr-approve pr-fix" title="New agent reads the failed checks, pushes fixes to this PR and watches until it's green" onclick="event.stopPropagation();fixPr('${k}')">🔧 Fix</button>` : '';
   const act = prBranchAction(p); // pr-behind.js
   const updBtn = act === 'conflict'
     ? `<button class="pr-approve pr-conflictbtn" title="Conflicts with ${escapeHtml(p.baseRef)} — resolve them on GitHub, then update" onclick="event.stopPropagation();openPr('${u}/conflicts')">⚠ Conflicts</button>`
@@ -5190,7 +5195,7 @@ function prRowHtml(p, dim) {
       ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>`
       : '';
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
-    + `<div class="pr-actions">${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
+    + `<div class="pr-actions">${fixBtn}${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
     + `<span class="pr-ci ${p.checks || 'none'}" title="Checks: ${escapeHtml(p.checks || 'none')}"></span>`
     + `<span class="pr-title" title="${t}">${titleHtml}</span><span class="pr-num">#${p.number}</span>`
     + `<span class="dt-td">${prAuthorHtml(p)}</span><span class="dt-td">${reqChip}${reviewChip}</span><span class="dt-td">${checksChip}${behindChip}</span>`
@@ -5267,6 +5272,13 @@ function dtHeadHtml(cols) {
   return `<div class="dt-head">${cols.map(c => c[0] === '>' ? `<span class="dt-n">${c.slice(1)}</span>` : `<span>${c}</span>`).join('')}</div>`;
 }
 const PR_COLS = ['', 'Title', '#', 'Author', 'Review', 'Checks', 'Branch', '>Commits', 'Opened'];
+
+function fixPr(key) {
+  const pr = prState.prs.find(p => p.key === key);
+  if (!pr) return;
+  api.send({ type: 'fixPr', pr });
+  closePrDropdown();
+}
 
 function closePrDropdown() {
   document.getElementById('pr-dropdown').style.display = 'none';

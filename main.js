@@ -2150,7 +2150,7 @@ function fetchAllPRs(repos) {
       return `r${i}: repository(owner:${JSON.stringify(owner)}, name:${JSON.stringify(name)}) { `
         // ponytail: `first:` limits set the GraphQL point cost (12/poll at these; 40 at 100/20/20/50). Raise if a repo tops 30 open PRs.
         + `pullRequests(states: OPEN, first: 30) { nodes { number title url isDraft createdAt `
-        + `author { login } reviewDecision mergeable mergeStateStatus headRefName baseRefName `
+        + `author { login } reviewDecision mergeable mergeStateStatus headRefName baseRefName isCrossRepository `
         + `reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 10) { nodes { author { login } state } } `
         + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state `
@@ -2197,7 +2197,7 @@ function fetchAllPRs(repos) {
             running: runningWorkflows(rollup && rollup.contexts && rollup.contexts.nodes),
             mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
             requested, createdAt: pr.createdAt || '', approvedBy, changesBy,
-            headRef: pr.headRefName || '', baseRef: pr.baseRefName || '',
+            headRef: pr.headRefName || '', baseRef: pr.baseRefName || '', isCrossRepository: !!pr.isCrossRepository,
             commitCount: (pr.commits && pr.commits.totalCount) || 0,
           });
         }
@@ -2349,7 +2349,7 @@ function armPrTimer() {
 }
 
 // ── GitHub Actions tracking ───────────────────────────
-const { runState, nextPollDelay, diffNewFailures, fixRunPlan, REPO_RE: WF_REPO_RE } = require('./actions-core');
+const { runState, nextPollDelay, diffNewFailures, fixRunPlan, fixPrPlan, REPO_RE: WF_REPO_RE } = require('./actions-core');
 const { git: gitIn, checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
 const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
 let actionsTimer = null;
@@ -2495,11 +2495,17 @@ async function fetchWorkflowRun(w) {
 
 // "Fix" on a failed run: a fix/ci-N worktree off the failed branch, with an agent
 // told to read the failed log and fix it. Clicking again reuses that worktree.
-async function fixActionRun(run) {
+async function fixActionRun(run) { return startFixAgent(fixRunPlan, run); }
+
+// "Fix" on a PR with failing checks: a fix/pr-N worktree off its head, with an agent that
+// pushes fixes to the PR until its checks are green (actions-core.js fixPrPlan).
+async function fixPr(pr) { return startFixAgent(fixPrPlan, pr); }
+
+async function startFixAgent(planFor, target) {
   // The last actions poll already walked every checkout; rescan only if it missed this repo.
   const wts = (settings.worktrees || []).map(w => w.path);
-  let plan = fixRunPlan(run, lastCheckoutInfos || [], wts);
-  if (plan.error) plan = fixRunPlan(run, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
+  let plan = planFor(target, lastCheckoutInfos || [], wts);
+  if (plan.error) plan = planFor(target, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
   if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
   // Reuse by folder, not by settings entry: an earlier click (or another checkout of the
   // same repo) may have made it without a matching entry, and git refuses to re-add it.
@@ -3714,6 +3720,7 @@ function handleIpc(msg) {
     case 'pollActionsNow': armActionsTimer(); break;
     case 'perfSample': samplePerf(); break;
     case 'fixActionRun': fixActionRun(msg.run || {}).catch(e => { flog('fixActionRun failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
+    case 'fixPr': fixPr(msg.pr || {}).catch(e => { flog('fixPr failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
     case 'saveClickupSettings': {
       const c = msg.clickupSettings || {}, prev = clickupCfg();
       settings.clickupSettings = {
