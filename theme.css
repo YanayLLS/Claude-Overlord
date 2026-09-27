@@ -635,3 +635,11 @@ body:not(.mobile-on) #qr-btn { display: none !important; } /* mobile remote feat
   .ut-nav span { min-width: 0; }
   .ut-tabs { flex-wrap: wrap; }
 }
+
+/* PR scope filter: a segmented control in the Pull requests header */
+.pr-scope { display: inline-flex; margin: 0 auto 0 14px; padding: 2px; gap: 2px; border-radius: var(--r); background: var(--surface1); }
+.pr-seg { border: none; background: none; color: var(--subtext); font: inherit; font-size: 11px; font-weight: 500; padding: 2px 9px; border-radius: var(--r-sm); cursor: pointer; display: inline-flex; gap: 5px; align-items: center; }
+.pr-seg em { font-style: normal; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+.pr-seg:hover { color: var(--text); background: var(--hover-strong); }
+.pr-seg.on { background: var(--pop); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.pr-seg.on em { color: var(--accent); }
