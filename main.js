@@ -16,6 +16,7 @@ const { writeAgentConfig, settingsFlags, removeAgentConfig } = require('./mcp/ag
 const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
 const { createPtyClient, pipePathFor, hostLauncher } = require('./pty-client');
+const { agentShell } = require('./shell-core');
 
 
 // ── Constants ──────────────────────────────────────────
@@ -1328,7 +1329,7 @@ function spawnTerminal(id) {
 function spawnShell(id) {
   const a = agents.get(id);
   if (!a) return;
-  const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+  const sh = agentShell();
   try {
     const proc = agentPty().spawn(sh, [], { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({}) });
     terminals.set(id, proc);
@@ -1354,7 +1355,7 @@ function doSpawnTerminal(id, attached) {
   const useResume = hasJsonl && !a._resumeFailed;
   const feat = featureAgentArgs(a.cwd);
   const claudeCmd = (useResume ? `claude --resume ${a.sessionId}${skip}` : `claude --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id);
-  const sh = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+  const sh = agentShell();
   // /c, not /k: /k left cmd.exe alive after Claude died, so the pty never exited and
   // crashes went unnoticed (no auto-resume). /c exits with Claude's own exit code.
   const args = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
@@ -1486,7 +1487,7 @@ function scheduleSpare(cwd) {
     const feat = featureAgentArgs(cwd);
     const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
     const cmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}`;
-    const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+    const shell = agentShell();
     const args = process.platform === 'win32' ? `/c ${cmd}` : ['-c', cmd];
     try {
       const s = { id, sessionId, cwd, key: spareKey(cwd), buf: '', bornAt: Date.now(), exited: false, adopted: false };
@@ -1530,7 +1531,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const feat = featureAgentArgs(cwd);
   const claudeCmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}${argPrompt ? ` "${argPrompt}"` : ''}`;
-  const shell = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+  const shell = agentShell();
   const shellArgs = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
   send({ type: 'stats', id, stats: agent.stats });
@@ -3420,7 +3421,7 @@ function startDevServer(p) {
   entry.serverLog = logPath;
   try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.writeFileSync(logPath, `# ${cfg.devCommand}\n# cwd ${entry.path}  PORT=${entry.port}\n# started ${new Date().toISOString()}\n\n`); } catch {}
   const append = d => { try { fs.appendFileSync(logPath, d); } catch {} };
-  const shell2 = process.platform === 'win32' ? 'cmd.exe' : (process.env.SHELL || 'bash');
+  const shell2 = agentShell();
   const shellArgs = process.platform === 'win32' ? ['/c', cfg.devCommand] : ['-c', cfg.devCommand];
   const env = { ...process.env, PORT: String(entry.port), PORT_BASE: String(entry.port) };
   try {

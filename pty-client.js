@@ -115,9 +115,14 @@ function pipePathFor(stateDir, platform = process.platform) {
 
 // The host runs under Electron's own binary in plain-Node mode: node-pty is built
 // against Electron's ABI, so a system `node` couldn't load it.
-function hostLauncher(hostScript, pipePath) {
+// cwd is pinned rather than inherited: the installer relaunches Overlord from
+// C:\Windows\System32, and a host sitting in a folder that holds cmd.exe made
+// node-pty's own shell lookup come back empty (see shell-core.js). The shell is
+// absolute now, so this is belt-and-braces — but it also keeps the detached host
+// from pinning System32 (or a worktree) open for its whole life.
+function hostLauncher(hostScript, pipePath, cwd = require('os').homedir()) {
   return () => spawnProc(process.execPath, [hostScript, pipePath], {
-    detached: true, stdio: 'ignore', windowsHide: true,
+    detached: true, stdio: 'ignore', windowsHide: true, cwd,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
   }).unref();
 }
