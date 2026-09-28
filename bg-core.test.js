@@ -70,8 +70,3 @@ test('teammate: spawn → working, idle notice → done, lead message → workin
   assert.deepStrictEqual([...t], ['tm:fix-colour']);
 });
 
-test('teammate idle but its own background run is going → still working', () => {
-  const t = new Set(['tm:bdd']);
-  applyBgRecord(t, idle('bdd'), name => name === 'bdd');
-  assert.deepStrictEqual([...t], ['tm:bdd']);
-});

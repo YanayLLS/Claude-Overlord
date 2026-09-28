@@ -4370,8 +4370,10 @@ function showImagePop(src, ev, tag) {
   Object.assign(hl.style, { left: tag.left + 'px', top: tag.top + 'px', width: tag.width + 'px', height: tag.height + 'px', display: 'block' });
   const url = encodeURI('file:///' + src.replace(/^\//, ''));
   if (pop.dataset.src !== url) { pop.src = url; pop.dataset.src = url; }
-  pop.style.left = Math.min(ev.clientX + 12, innerWidth - 420) + 'px';
-  pop.style.top = Math.max(8, ev.clientY - 312) + 'px';
+  // Anchored to the tag: just above it (bottom edge 6px over the tag), or just below if there's no room above.
+  const above = tag.top > 200;
+  Object.assign(pop.style, { left: Math.max(8, Math.min(tag.left, innerWidth - 408)) + 'px',
+    top: above ? 'auto' : tag.top + tag.height + 6 + 'px', bottom: above ? innerHeight - tag.top + 6 + 'px' : 'auto' });
   pop.style.display = 'block';
 }
 function hideImagePop() { for (const i of ['image-pop', 'image-tag-hl']) { const e = document.getElementById(i); if (e) e.style.display = 'none'; } }

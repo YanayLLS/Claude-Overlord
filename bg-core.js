@@ -13,8 +13,7 @@ function recordText(r) {
 }
 
 // Mutates `tasks` (Set of task ids; teammates as "tm:<name>"). Returns true if it changed.
-// `teammateBusy(name)` says whether an idle teammate still has background work of its own.
-function applyBgRecord(tasks, r, teammateBusy = () => false) {
+function applyBgRecord(tasks, r) {
   const before = tasks.size;
   const tur = r.toolUseResult;
   if (tur && typeof tur === 'object') {
@@ -41,11 +40,12 @@ function applyBgRecord(tasks, r, teammateBusy = () => false) {
       for (const id of ids) { if (pending) tasks.add(id); else tasks.delete(id); }
     }
   }
-  // A teammate's turn ended. It stays busy only if its own background work is still going.
+  // A teammate's turn ended: it's done (its own shells' completions never reach its transcript,
+  // so they can't be tracked — same as the lead's shells, they don't count as working).
   if (text.includes('<teammate-message')) {
     for (const m of text.matchAll(/<teammate-message[^>]*>\s*(\{[\s\S]*?\})\s*<\/teammate-message>/g)) {
       let j; try { j = JSON.parse(m[1]); } catch { continue; }
-      if (j.type === 'idle_notification' && j.from && !teammateBusy(j.from)) tasks.delete('tm:' + j.from);
+      if (j.type === 'idle_notification' && j.from) tasks.delete('tm:' + j.from);
     }
   }
   return tasks.size !== before;

@@ -494,17 +494,6 @@ function killProcessTreeAsync(pid) {
   });
 }
 
-// An idle teammate can still have background work of its own (e.g. "waiting for run
-// results"). Its transcript is <session>/subagents/agent-a<name>-<hash>.jsonl.
-function teammateBgBusy(jsonlFile, name) {
-  const dir = path.join(jsonlFile.replace(/\.jsonl$/, ''), 'subagents');
-  let f; try { f = fs.readdirSync(dir).find(x => x.startsWith('agent-a' + name + '-') && x.endsWith('.jsonl')); } catch {}
-  if (!f) return false;
-  const t = new Set();
-  try { for (const l of fs.readFileSync(path.join(dir, f), 'utf-8').split('\n')) { if (/toolUseResult|task-notification/.test(l)) { try { applyBgRecord(t, JSON.parse(l)); } catch {} } } } catch {}
-  return t.size > 0;
-}
-
 // pid → start time (ms). One PowerShell spawn for all pids; missing/failed → absent.
 function processStartTimes(pids) {
   const ids = pids.filter(Boolean);
@@ -1140,19 +1129,28 @@ function restoreAgents(state) {
       const proc = await ptyHost.attach(entry.ptyKey);
       const ag = agents.get(id);
       if (!proc || !ag) continue;
-      ag.isWaiting = !entry.wasActive;
       try { ag.fileOffset = fs.statSync(ag.jsonlFile).size; } catch {} // doSpawnTerminal starts the watcher: don't re-read the whole transcript
       // Same Claude process: its background shells/agents are still running — rebuild the
       // ledger from this process's records only (earlier processes' tasks died unreported).
       // Same pass finds a question still waiting on the user.
       ag.bgTasks = new Set(); ag.askIds = new Set();
-      const since = startTimes.get(entry.pid);
-      if (since) try {
+      // Mid-turn comes from the transcript too (the model's last message didn't end the turn) —
+      // the saved wasActive flag just carries whatever the previous instance believed.
+      const since = startTimes.get(entry.pid) || Infinity;
+      let midTurn = false;
+      try {
         for (const l of fs.readFileSync(ag.jsonlFile, 'utf-8').split('\n')) {
-          if (!/toolUseResult|task-notification|tool_result|turn_duration|AskUserQuestion|ExitPlanMode/.test(l)) continue;
-          try { const r = JSON.parse(l); if (Date.parse(r.timestamp) >= since) { applyBgRecord(ag.bgTasks, r, n => teammateBgBusy(ag.jsonlFile, n)); applyAskRecord(ag.askIds, r); } } catch {}
+          if (!/toolUseResult|task-notification|teammate-message|tool_result|turn_duration|"type":"assistant"|AskUserQuestion|ExitPlanMode/.test(l)) continue;
+          try {
+            const r = JSON.parse(l);
+            // end_turn = the model finished; turns woken by a teammate message write no turn_duration
+            if (r.type === 'assistant') midTurn = r.message?.stop_reason !== 'end_turn';
+            else if (r.type === 'system' && r.subtype === 'turn_duration') midTurn = false;
+            if (Date.parse(r.timestamp) >= since) { applyBgRecord(ag.bgTasks, r); applyAskRecord(ag.askIds, r); }
+          } catch {}
         }
       } catch {}
+      ag.isWaiting = !midTurn;
       doSpawnTerminal(id, proc);
       send({ type: 'status', id, status: shownStatus(ag) });
       for (const tid of ag.askIds) { ag.isWaiting = false; ag.toolIds.add(tid); ag.toolNames.set(tid, 'AskUserQuestion'); send({ type: 'toolStart', id, toolId: tid, status: 'Waiting for your answer', name: 'AskUserQuestion' }); }
@@ -1748,7 +1746,7 @@ function parseLine(id, line) {
   try {
     const r = JSON.parse(line);
     // Ledger moved while at the prompt (e.g. a background task finished) → re-show status
-    if (applyBgRecord(a.bgTasks ||= new Set(), r, n => teammateBgBusy(a.jsonlFile, n)) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
+    if (applyBgRecord(a.bgTasks ||= new Set(), r) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
     // Session rename. Claude Code persists /rename as a custom-title line, and
     // agents that rename themselves append the same line — so this is the one
     // source that covers both, and it's what /resume displays.
@@ -1803,6 +1801,12 @@ function parseLine(id, line) {
         if (applyAskRecord(a.askIds ||= new Set(), r) && a.askIds.size) {
           clrTimer(id, permTimers); a.permSent = true; send({ type: 'perm', id, ask: true }); notifyPermission(id, a);
         } else if (nonExempt) startPermTimer(id);
+      }
+      // The model ended its turn. Turns woken by a teammate message never write turn_duration,
+      // so this is the turn-end signal for them (turn_duration still does the full reset).
+      if (r.message?.stop_reason === 'end_turn' && !a.isWaiting && !a.askIds?.size) {
+        a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers);
+        send({ type: 'status', id, status: shownStatus(a) });
       }
     } else if (r.type === 'user') {
       const c = r.message?.content;
