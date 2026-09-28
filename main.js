@@ -1572,7 +1572,6 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
     }
     const onData = (d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
-      if (agent._imgPending) bindImageTag(id, agent, d);
       // Buffer terminal output for mobile remote
       let buf = termBuffers.get(id) || '';
       buf += d;
@@ -3157,18 +3156,6 @@ function savePasteToFile(content) {
   return file;
 }
 
-// After an Alt+V, the first new [Image #N] Claude draws is that image. Claude's counter is
-// shared with [Pasted text #N] and restarts on /clear, so N is read, never predicted.
-function bindImageTag(id, a, d) {
-  const p = a._imgPending;
-  if (Date.now() > p.until) { a._imgPending = null; return; }
-  p.buf = (p.buf + d.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')).slice(-4000);
-  const ns = [...p.buf.matchAll(/\[Image #(\d+)\]/g)].map(m => +m[1]);
-  if (!ns.length) return;
-  a._imgPending = null;
-  send({ type: 'imagePasted', id, path: p.path, tagged: true, n: Math.max(...ns) });
-}
-
 function handleTermInput(id, data) {
   const t = terminals.get(id);
   if (!t) {
@@ -3938,11 +3925,11 @@ function handleIpc(msg) {
       const insertPath = filePath.replace(/\\/g, '/');
       const t = terminals.get(msg.id);
       if (t && !t._ovShell) {
-        // Alt+V is Claude's own image paste: it reads the clipboard and shows [Image #N].
-        // The saved copy backs the hover preview on that tag.
-        const a = agents.get(msg.id);
-        if (a) a._imgPending = { path: insertPath, buf: '', until: Date.now() + 5000 };
-        t.write('\x1bv');
+        // Claude turns a bracket-pasted image path into [Image #N] in ~30ms; Alt+V
+        // makes it read the clipboard itself (~1s). The file also backs the hover preview:
+        // the renderer binds it to the new tag it sees on screen (sent first, so it snapshots before the tag lands).
+        send({ type: 'imagePasted', id: msg.id, path: insertPath, tagged: true });
+        t.write('\x1b[200~' + insertPath + '\x1b[201~');
         break;
       }
       handleTermInput(msg.id, insertPath + ' ');

@@ -1010,6 +1010,7 @@ button:focus-visible { outline-offset:0; }
 #preview-toggle.active { color:var(--cyan); background:rgba(148,226,213,.12); }
 #preview-resize { width:4px; height:auto; background:transparent; cursor:ew-resize; flex-shrink:0; display:none; position:relative; border-left:1px solid var(--border); }
 #preview-resize::after { content:''; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:2px; height:24px; background:transparent; border-radius:1px; transition:background .15s; }
+#image-tag-hl { position:fixed; z-index:9999; display:none; pointer-events:none; border-radius:3px; background:rgba(137,180,250,.22); box-shadow:inset 0 -1.5px 0 var(--accent); }
 #image-pop { position:fixed; z-index:10000; display:none; max-width:400px; max-height:300px; border:1px solid var(--bg3); border-radius:6px; background:var(--bg); box-shadow:0 6px 24px rgba(0,0,0,.5); pointer-events:none; }
 #preview-resize:hover::after { background:var(--cyan); }
 #preview-resize.open { display:block; }
@@ -1067,7 +1068,7 @@ button:focus-visible { outline-offset:0; }
       <input id="filter-input" type="text" placeholder="Search agents  (Ctrl+F)" />
       <span id="filter-count"></span>
       <button id="filter-close" onclick="closeFilter()" aria-label="Clear search">&times;</button>
-      <button id="filter-mode" onclick="toggleFilterMenu(event)" aria-haspopup="menu" aria-expanded="false" title="Filter agents"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span id="filter-mode-label">All</span></button>
+      <button id="filter-mode" onclick="toggleFilterMenu(event)" onmouseenter="filterMenuHoverIn(event)" onmouseleave="filterMenuHoverOut()" aria-haspopup="menu" aria-expanded="false" title="Filter agents"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span id="filter-mode-label">All</span><span id="filter-mode-clear" onclick="event.stopPropagation();setFilterMode('all')" role="button" aria-label="Clear filter" title="Clear filter" hidden>&times;</span></button>
     </div>
     <div id="world-attn"></div>
     <div id="list"></div>
@@ -1451,7 +1452,7 @@ const WORKING = new Set(['active', 'resuming', 'settling']);
 const agentCtxPct = a => a.stats?.ctxTok ? Math.round(a.stats.ctxTok / ctxWindow(a.stats.modelFamily, a.stats.ctxTok) * 100) : 0;
 const AGENT_FILTERS = [
   { key: 'all', label: 'All', test: () => true },
-  { key: 'needs', label: 'Needs me', hint: 'Waiting on an approval or your reply', test: a => { const st = agentStatus(a); return st === 'permission' || st === 'waiting' || st === 'crashed'; } },
+  { key: 'needs', label: 'Needs me', hint: 'Waiting on an approval, your reply, or a first prompt', test: a => { const st = agentStatus(a); return st === 'permission' || st === 'waiting' || st === 'crashed' || (st === 'idle' && !a.archived && !a.prompt && !a.title); } },
   { key: 'working', label: 'Working', hint: 'Running, resuming or finishing', test: a => WORKING.has(agentStatus(a)) },
   { key: 'ready', label: 'Ready', hint: 'Not working right now', test: a => !WORKING.has(agentStatus(a)) },
   { key: 'ctx', label: 'Context high', hint: '80%+ of the context window used', test: a => agentCtxPct(a) >= 80 },
@@ -1462,6 +1463,7 @@ function setFilterMode(key, persist = true) {
   filterMode = AGENT_FILTERS.some(f => f.key === key) ? key : 'all';
   const b = document.getElementById('filter-mode');
   b.classList.toggle('on', filterMode !== 'all');
+  document.getElementById('filter-mode-clear').hidden = filterMode === 'all';
   document.getElementById('filter-mode-label').textContent = agentFilter().label;
   if (persist) api.send({ type: 'saveSettings', settings: { agentFilter: filterMode } });
   closeFilterMenu();
@@ -1469,7 +1471,9 @@ function setFilterMode(key, persist = true) {
 }
 function toggleFilterMenu(e) {
   e.stopPropagation();
-  if (document.getElementById('filter-menu')) { closeFilterMenu(); return; }
+  const open = document.getElementById('filter-menu');
+  if (open?.dataset.hover) { delete open.dataset.hover; return; } // click on a hover-opened menu pins it
+  if (open) { closeFilterMenu(); return; }
   const live = [...agents.values()].filter(a => !a.archived);
   const m = document.createElement('div');
   m.id = 'filter-menu'; m.setAttribute('role', 'menu');
@@ -1481,6 +1485,20 @@ function toggleFilterMenu(e) {
   document.body.appendChild(m);
   e.currentTarget.setAttribute('aria-expanded', 'true');
   setTimeout(() => document.addEventListener('mousedown', closeFilterMenuOutside));
+}
+// No filter set: hovering the button opens the menu; leaving button + menu closes it.
+let filterMenuHoverTimer = 0;
+function filterMenuHoverIn(e) {
+  clearTimeout(filterMenuHoverTimer);
+  if (filterMode !== 'all' || document.getElementById('filter-menu')) return;
+  toggleFilterMenu(e);
+  const m = document.getElementById('filter-menu');
+  m.dataset.hover = '1';
+  m.onmouseenter = () => clearTimeout(filterMenuHoverTimer);
+  m.onmouseleave = filterMenuHoverOut;
+}
+function filterMenuHoverOut() {
+  if (document.getElementById('filter-menu')?.dataset.hover) filterMenuHoverTimer = setTimeout(closeFilterMenu, 250);
 }
 function closeFilterMenuOutside(ev) { if (!ev.target.closest('#filter-menu, #filter-mode')) closeFilterMenu(); }
 function closeFilterMenu() {
@@ -2876,21 +2894,21 @@ function createXterm(id) {
       callback(links.length ? links : undefined);
     }
   });
-  // [Image #N] tags: hover shows the pasted image
-  terminal.registerLinkProvider({
-    provideLinks(y, callback) {
-      const line = terminal.buffer.active.getLine(y - 1)?.translateToString() || '';
-      const links = [...line.matchAll(/\[Image #(\d+)\]/g)].map(m => {
-        const src = pastedImages.get(id)?.get(+m[1]);
-        return src && {
-          range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } }, text: m[0],
-          decorations: { underline: false, pointerCursor: false },
-          activate: () => {}, hover: (ev) => showImagePop(src, ev), leave: hideImagePop,
-        };
-      }).filter(Boolean);
-      callback(links.length ? links : undefined);
-    }
-  });
+  // [Image #N] tags: hover shows the pasted image and tints the tag.
+  // Plain mousemove, not a link provider: Claude redraws the prompt rows constantly, and xterm drops link hover on every redraw.
+  el.addEventListener('mousemove', (ev) => {
+    const scr = el.querySelector('.xterm-screen'), r = scr && scr.getBoundingClientRect();
+    if (!r || !r.width) return hideImagePop();
+    const cw = r.width / terminal.cols, ch = r.height / terminal.rows;
+    const col = Math.floor((ev.clientX - r.left) / cw), row = Math.floor((ev.clientY - r.top) / ch);
+    const buf = terminal.buffer.active, line = buf.getLine(buf.viewportY + row)?.translateToString() || '';
+    // ponytail: string index = cell column, off by one per wide char (emoji) before the tag on that row
+    const m = [...line.matchAll(/\[Image #(\d+)\]/g)].find(m => col >= m.index && col < m.index + m[0].length);
+    const src = m && pastedImages.get(id)?.get(+m[1]);
+    if (!src) return hideImagePop();
+    showImagePop(src, ev, { left: r.left + m.index * cw, top: r.top + row * ch, width: m[0].length * cw, height: ch });
+  }, true); // capture: with mouse reporting on (Claude's prompt), xterm stops the event before it bubbles here
+  el.addEventListener('mouseleave', hideImagePop);
   terminal.onData((data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); });
   terminal.onScroll(() => {
     ghostClear();
@@ -3605,9 +3623,7 @@ api.on((msg) => {
     // ponytail: no inline thumbnail. Writing to xterm out-of-band desyncs the
     // TUI's own redraw (it does not know those rows exist) and scrambles the prompt.
     if (!msg.tagged) { showToast('Image pasted — path inserted'); return; }
-    // ponytail: after /clear a new #1 replaces the old one, so an old #1 in scrollback previews the new image
-    if (!pastedImages.has(msg.id)) pastedImages.set(msg.id, new Map());
-    pastedImages.get(msg.id).set(+msg.n, msg.path);
+    bindImageTag(msg.id, msg.path);
     return;
   }
   if (msg.type === 'ghost') {
@@ -4307,15 +4323,37 @@ function renderBookmarks(bookmarks) {
 
 // ── Toast ──────────────────────────────────────────────
 const pastedImages = new Map(); // agentId -> Map(N of [Image #N] -> png path)
-function showImagePop(src, ev) {
+// The image just pasted is the [Image #N] that wasn't on screen before. Read from the rendered buffer, not the pty
+// stream: Claude redraws only changed cells, so a tag can arrive in pieces. N is read, never predicted (the counter
+// is shared with [Pasted text #N] and restarts on /clear).
+function screenImageTags(t) {
+  const b = t.buffer.active, out = new Set();
+  for (let y = Math.max(0, b.length - 40); y < b.length; y++) for (const m of (b.getLine(y)?.translateToString() || '').matchAll(/\[Image #(\d+)\]/g)) out.add(+m[1]);
+  return out;
+}
+function bindImageTag(id, path) {
+  const t = xterms.get(id)?.terminal; if (!t) return;
+  const before = screenImageTags(t), until = Date.now() + 5000;
+  (function poll() {
+    const fresh = [...screenImageTags(t)].filter(n => !before.has(n));
+    // ponytail: after /clear a new #1 replaces the old one, so an old #1 in scrollback previews the new image
+    if (fresh.length) { if (!pastedImages.has(id)) pastedImages.set(id, new Map()); pastedImages.get(id).set(Math.max(...fresh), path); }
+    else if (Date.now() < until) setTimeout(poll, 100);
+  })();
+}
+function showImagePop(src, ev, tag) {
   let pop = document.getElementById('image-pop');
   if (!pop) { pop = document.createElement('img'); pop.id = 'image-pop'; document.body.appendChild(pop); }
-  pop.src = encodeURI('file:///' + src.replace(/^\//, ''));
+  let hl = document.getElementById('image-tag-hl');
+  if (!hl) { hl = document.createElement('div'); hl.id = 'image-tag-hl'; document.body.appendChild(hl); }
+  Object.assign(hl.style, { left: tag.left + 'px', top: tag.top + 'px', width: tag.width + 'px', height: tag.height + 'px', display: 'block' });
+  const url = encodeURI('file:///' + src.replace(/^\//, ''));
+  if (pop.dataset.src !== url) { pop.src = url; pop.dataset.src = url; }
   pop.style.left = Math.min(ev.clientX + 12, innerWidth - 420) + 'px';
   pop.style.top = Math.max(8, ev.clientY - 312) + 'px';
   pop.style.display = 'block';
 }
-function hideImagePop() { const pop = document.getElementById('image-pop'); if (pop) pop.style.display = 'none'; }
+function hideImagePop() { for (const i of ['image-pop', 'image-tag-hl']) { const e = document.getElementById(i); if (e) e.style.display = 'none'; } }
 
 function showToast(text, onClick) {
   let el = document.getElementById('toast');
@@ -5178,12 +5216,18 @@ function prRowHtml(p, dim) {
     : act === 'update'
       ? `<button class="pr-approve pr-update" title="Merge ${escapeHtml(p.baseRef)} into this PR's branch on GitHub — your local checkout is untouched" onclick="event.stopPropagation();updatePrBranch('${u}',this)">⤴ Update</button>`
       : '';
+  // Main action sits in its own always-visible column; the rest wait for hover.
+  // Mine but can't merge → the button that unblocks it (Fix/Update/Conflicts) takes the column instead.
+  const unblock = p.mine && !mi.enabled && (fixBtn || updBtn);
+  const mainBtn = unblock || prActionBtn(p, u);
+  const extra = unblock ? (unblock === fixBtn ? updBtn : fixBtn) : fixBtn + updBtn;
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
-    + `<div class="pr-actions">${fixBtn}${updBtn}${prActionBtn(p, u)}${snoozeBtn}${muteBtn}${archBtn}</div>`
+    + `<div class="pr-actions">${extra}${snoozeBtn}${muteBtn}${archBtn}</div>`
     + `<span class="pr-ci ${p.checks || 'none'}" title="Checks: ${escapeHtml(p.checks || 'none')}"></span>`
-    + `<span class="pr-title" title="${t}">${titleHtml}</span><span class="pr-num">#${p.number}</span>`
-    + `<span class="dt-td">${prAuthorHtml(p)}</span><span class="dt-td">${reqChip}${reviewChip}</span><span class="dt-td">${checksChip}${behindChip}</span>`
-    + `<span class="dt-td dt-sub">${refs}</span><span class="dt-td dt-sub dt-n">${p.commitCount || ''}</span><span class="dt-td dt-sub">${age}</span></div>`;
+    + `<div class="pr-l1"><span class="pr-title" title="${t}">${titleHtml}</span><span class="pr-num">#${p.number}</span></div>`
+    + `<span class="pr-main">${mainBtn}</span>`
+    + `<div class="pr-l2">${prAuthorHtml(p)}${reqChip}${reviewChip}${checksChip}${behindChip}`
+    + `<span class="pr-sub pr-l2-tail">${refs}${p.commitCount ? `<span>${p.commitCount} commit${p.commitCount === 1 ? '' : 's'}</span>` : ''}${age}</span></div></div>`;
 }
 
 // Env branches wear the Releases board's env hues (ENV_HUE in releases-ui.js); prod's branches go by several names.
@@ -5255,7 +5299,6 @@ function prDropdownHead() {
 function dtHeadHtml(cols) {
   return `<div class="dt-head">${cols.map(c => c[0] === '>' ? `<span class="dt-n">${c.slice(1)}</span>` : `<span>${c}</span>`).join('')}</div>`;
 }
-const PR_COLS = ['', 'Title', '#', 'Author', 'Review', 'Checks', 'Branch', '>Commits', 'Opened'];
 
 function fixPr(key) {
   const pr = prState.prs.find(p => p.key === key);
@@ -5347,7 +5390,7 @@ function prDropdownHtml() {
   const showArchived = prCollapsed.has('__archived_open__'); // toggled by the 📦 header button
   if (!live.length && !(showArchived && archived.length)) return head + (prScope === 'all' ? '<div class="pr-empty">No open PRs.</div>'
     : `<div class="pr-empty">No PRs match this filter. <a href="#" onclick="event.preventDefault();event.stopPropagation();setPrScope('all')">Show all</a></div>`);
-  let html = head + dtHeadHtml(PR_COLS);
+  let html = head; // PR rows are two-line cards, no column header
   // Active repos
   for (const [repo, prs] of prGroupByRepo(active)) {
     html += prGroupHeader(repo, prs.length, false);

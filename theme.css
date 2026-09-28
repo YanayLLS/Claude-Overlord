@@ -375,10 +375,23 @@ body.world-mode #filter-bar:not(.open) { display: none; }
 
 /* Pull requests dropdown: same language as Tracked Actions — quiet repo labels, rounded rows,
    a thin colored edge + soft tint only when a PR needs you */
-#pr-dropdown { width: 1080px; max-width: calc(100vw - 24px); padding-bottom: 6px; }
+#pr-dropdown { width: 760px; max-width: calc(100vw - 24px); padding-bottom: 6px; }
 /* Dropdown table, shared by Pull requests and Tracked Actions (dtHeadHtml in index.html): a header row, a framed
    band per repo, one grid row per item. Each dropdown only sets its columns. */
-#pr-dropdown { --dt-cols: 12px minmax(240px, 1fr) 42px 64px 96px 176px minmax(100px, 160px) 54px 100px; }
+/* PR card, two lines: [dot] title #num            [action]
+                          author · chips · branch · commits · age  [  ↕   ] */
+#pr-dropdown { --dt-cols: 14px minmax(0, 1fr) auto; }
+#pr-dropdown .dt-row.pr-row { row-gap: 3px; column-gap: 10px; padding: 7px 12px; }
+#pr-dropdown .pr-l1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+#pr-dropdown .pr-l1 .pr-title { flex: 0 1 auto; font-size: 12.5px; }
+#pr-dropdown .pr-main { grid-column: 3; grid-row: 1 / span 2; }
+#pr-dropdown .pr-main .pr-approve { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pr-dropdown .pr-l2 { grid-column: 2; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+#pr-dropdown .pr-l2-tail { display: flex; gap: 10px; min-width: 0; margin-left: 4px; }
+#pr-dropdown .pr-l2-tail > * { flex-shrink: 0; }
+#pr-dropdown .pr-l2-tail > .pr-refs { flex-shrink: 1; min-width: 0; }
+#pr-dropdown .pr-row:hover .pr-num { visibility: visible; }
+#pr-dropdown .pr-row .pr-actions { right: 150px; } /* hover tools sit left of the action */
 #actions-dropdown { --dt-cols: 84px minmax(150px, 1fr) 48px minmax(80px, 120px) 110px 44px 110px; }
 :is(#pr-dropdown, #actions-dropdown) :is(.dt-head, .dt-row) { display: grid; grid-template-columns: var(--dt-cols); column-gap: 8px; align-items: center; }
 :is(#pr-dropdown, #actions-dropdown) .dt-row { padding: 3px 10px; font-size: 12px; }
@@ -571,6 +584,8 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
 #filter-mode .ic { width: 13px; height: 13px; }
 #filter-mode:hover { color: var(--text); background: var(--surface1); }
 #filter-mode.on { color: var(--text); background: var(--accent-soft); border-color: var(--accent); }
+#filter-mode-clear { margin-right: -4px; padding: 0 3px; border-radius: 4px; color: var(--dim); font-size: 14px; line-height: 1; }
+#filter-mode-clear:hover { color: var(--text); background: var(--hover); }
 #filter-menu { position: fixed; z-index: 1000; min-width: 180px; padding: 4px; border-radius: var(--r-lg); background: var(--pop); box-shadow: var(--pop-shadow); }
 #filter-menu button { display: flex; width: 100%; align-items: center; gap: 12px; padding: 7px 10px; border: none; border-radius: var(--r-sm);
   background: none; color: var(--subtext); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
