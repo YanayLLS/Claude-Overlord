@@ -30,6 +30,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   background:var(--title-bg); -webkit-app-region:drag;
 }
 #header > * { -webkit-app-region:no-drag; }
+/* Every control carries no-drag itself: a nested button must not depend on its parent's hole in the drag region. */
+#header button, #header .wc, #header .bookmark, #header .hdr-menu-item, #hdr-more, #hdr-more-wrap, #bookmarks, #world-counters, #headerBadges, #account-btn { -webkit-app-region:no-drag; }
+#header { position:relative; }
+#hdr-drag-sentinel { position:absolute; left:0; bottom:0; width:2px; height:2px; opacity:0; pointer-events:none; }
 #header h1 {
   font-size:13px; font-weight:500; flex:0 0 auto; letter-spacing:.4px; color:var(--dim);
   -webkit-app-region:drag;
@@ -4287,6 +4291,23 @@ function renameBookmark(b, btn) {
 }
 
 let _bookmarks = [];
+// The bar is a window-drag region with the controls cut out as "no-drag" holes. Chromium computes the holes
+// when an element's app-region style is set and not when the bar re-lays out, so every time a chip grew or a
+// badge appeared, the controls to its right moved while their holes stayed put: a bookmark landed on drag
+// area and went dead, a chip worked on one side only. After any change in the bar, once layout has settled,
+// a hidden sentinel flips between drag and no-drag; that style change makes Chromium recompute every hole
+// where the controls now are.
+(function keepHeaderDragRegionsFresh() {
+  const header = document.getElementById('header'); if (!header) return;
+  const sentinel = document.createElement('div'); sentinel.id = 'hdr-drag-sentinel'; header.appendChild(sentinel);
+  let flip = false, queued = false;
+  const refresh = () => { if (queued) return; queued = true; requestAnimationFrame(() => requestAnimationFrame(() => { queued = false; flip = !flip; sentinel.style.webkitAppRegion = flip ? 'drag' : 'no-drag'; })); };
+  new MutationObserver((list) => { if (list.some(m => m.target !== sentinel)) refresh(); }).observe(header, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+  const ro = new ResizeObserver(refresh); ro.observe(header); for (const c of header.children) ro.observe(c);
+  new MutationObserver(() => { for (const c of header.children) ro.observe(c); }).observe(header, { childList: true });
+  window.addEventListener('resize', refresh);
+  refresh();
+})();
 function renderBookmarks(bookmarks) {
   _bookmarks = bookmarks;
   const el = document.getElementById('bookmarks');
