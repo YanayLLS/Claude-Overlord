@@ -1,4 +1,4 @@
-// Background work that outlives a turn (run_in_background Bash, async Agent/fork).
+// Background work that outlives a turn (run_in_background Bash, async Agent/fork, teammates).
 // The transcript is the ledger: a launch is a structured tool result, an end is a
 // <task-notification> with a final <status>. Turn-level state alone says "idle".
 
@@ -12,14 +12,19 @@ function recordText(r) {
   return Array.isArray(c) ? c.filter(b => b.type === 'text').map(b => b.text || '').join('') : '';
 }
 
-// Mutates `tasks` (Set of task ids). Returns true if it changed.
-function applyBgRecord(tasks, r) {
+// Mutates `tasks` (Set of task ids; teammates as "tm:<name>"). Returns true if it changed.
+// `teammateBusy(name)` says whether an idle teammate still has background work of its own.
+function applyBgRecord(tasks, r, teammateBusy = () => false) {
   const before = tasks.size;
   const tur = r.toolUseResult;
   if (tur && typeof tur === 'object') {
     if (tur.backgroundTaskId) tasks.add(tur.backgroundTaskId);
     if (tur.status === 'async_launched' && tur.agentId) tasks.add(tur.agentId);
     if (tur.resumedAgentId) tasks.add(tur.resumedAgentId); // SendMessage woke a finished agent
+    // Agent-team teammate: working from spawn, and again whenever the lead messages it
+    if (tur.status === 'teammate_spawned' && tur.name) tasks.add('tm:' + tur.name);
+    const to = tur.routing?.target;
+    if (tur.success && typeof to === 'string' && to.startsWith('@')) tasks.add('tm:' + to.slice(1));
     // TaskStop / KillShell end a task without a notification
     const stopped = tur.task_id || tur.shell_id;
     if (stopped && /^Successfully (stopped|killed)/.test(tur.message || '')) tasks.delete(stopped);
@@ -34,6 +39,13 @@ function applyBgRecord(tasks, r) {
       // An agent that stopped with its own background work still going will notify again
       const pending = status === 'running' || NOTE_STILL_RUNNING.test(block);
       for (const id of ids) { if (pending) tasks.add(id); else tasks.delete(id); }
+    }
+  }
+  // A teammate's turn ended. It stays busy only if its own background work is still going.
+  if (text.includes('<teammate-message')) {
+    for (const m of text.matchAll(/<teammate-message[^>]*>\s*(\{[\s\S]*?\})\s*<\/teammate-message>/g)) {
+      let j; try { j = JSON.parse(m[1]); } catch { continue; }
+      if (j.type === 'idle_notification' && j.from && !teammateBusy(j.from)) tasks.delete('tm:' + j.from);
     }
   }
   return tasks.size !== before;

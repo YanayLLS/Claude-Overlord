@@ -57,3 +57,21 @@ test('assistant text quoting a notification is ignored', () => {
   applyBgRecord(t, { type: 'assistant', message: { content: [{ type: 'text', text: note('b1', 'completed') }] } });
   assert.strictEqual(t.size, 1);
 });
+
+const idle = (from) => ({ type: 'user', message: { content: `Another Claude session sent a message: <teammate-message teammate_id="${from}" color="blue">\n{"type":"idle_notification","from":"${from}","result":"done"}\n</teammate-message>` } });
+
+test('teammate: spawn → working, idle notice → done, lead message → working again', () => {
+  const t = new Set();
+  applyBgRecord(t, { type: 'user', toolUseResult: { status: 'teammate_spawned', name: 'fix-colour', agent_id: 'fix-colour@session-x' } });
+  assert.deepStrictEqual([...t], ['tm:fix-colour']);
+  applyBgRecord(t, idle('fix-colour'));
+  assert.strictEqual(t.size, 0);
+  applyBgRecord(t, { type: 'user', toolUseResult: { success: true, message: "Message sent to fix-colour's inbox", routing: { target: '@fix-colour' } } });
+  assert.deepStrictEqual([...t], ['tm:fix-colour']);
+});
+
+test('teammate idle but its own background run is going → still working', () => {
+  const t = new Set(['tm:bdd']);
+  applyBgRecord(t, idle('bdd'), name => name === 'bdd');
+  assert.deepStrictEqual([...t], ['tm:bdd']);
+});

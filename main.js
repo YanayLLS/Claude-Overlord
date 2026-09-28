@@ -494,6 +494,17 @@ function killProcessTreeAsync(pid) {
   });
 }
 
+// An idle teammate can still have background work of its own (e.g. "waiting for run
+// results"). Its transcript is <session>/subagents/agent-a<name>-<hash>.jsonl.
+function teammateBgBusy(jsonlFile, name) {
+  const dir = path.join(jsonlFile.replace(/\.jsonl$/, ''), 'subagents');
+  let f; try { f = fs.readdirSync(dir).find(x => x.startsWith('agent-a' + name + '-') && x.endsWith('.jsonl')); } catch {}
+  if (!f) return false;
+  const t = new Set();
+  try { for (const l of fs.readFileSync(path.join(dir, f), 'utf-8').split('\n')) { if (/toolUseResult|task-notification/.test(l)) { try { applyBgRecord(t, JSON.parse(l)); } catch {} } } } catch {}
+  return t.size > 0;
+}
+
 // pid → start time (ms). One PowerShell spawn for all pids; missing/failed → absent.
 function processStartTimes(pids) {
   const ids = pids.filter(Boolean);
@@ -1139,7 +1150,7 @@ function restoreAgents(state) {
       if (since) try {
         for (const l of fs.readFileSync(ag.jsonlFile, 'utf-8').split('\n')) {
           if (!/toolUseResult|task-notification|tool_result|turn_duration|AskUserQuestion|ExitPlanMode/.test(l)) continue;
-          try { const r = JSON.parse(l); if (Date.parse(r.timestamp) >= since) { applyBgRecord(ag.bgTasks, r); applyAskRecord(ag.askIds, r); } } catch {}
+          try { const r = JSON.parse(l); if (Date.parse(r.timestamp) >= since) { applyBgRecord(ag.bgTasks, r, n => teammateBgBusy(ag.jsonlFile, n)); applyAskRecord(ag.askIds, r); } } catch {}
         }
       } catch {}
       doSpawnTerminal(id, proc);
@@ -1737,7 +1748,7 @@ function parseLine(id, line) {
   try {
     const r = JSON.parse(line);
     // Ledger moved while at the prompt (e.g. a background task finished) → re-show status
-    if (applyBgRecord(a.bgTasks ||= new Set(), r) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
+    if (applyBgRecord(a.bgTasks ||= new Set(), r, n => teammateBgBusy(a.jsonlFile, n)) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
     // Session rename. Claude Code persists /rename as a custom-title line, and
     // agents that rename themselves append the same line — so this is the one
     // source that covers both, and it's what /resume displays.
