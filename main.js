@@ -380,8 +380,6 @@ function markSessionSwitch(id, line) {
   if (kind === 'resume') markResume(id);
 }
 const TERM_BUFFER_MAX = 1_000_000; // ~10k lines — matches xterm scrollback so a reload can restore the whole visible history
-let remoteWs = null; // current WebSocket connection (only one at a time)
-let remoteViewingAgent = null; // which agent the mobile client is viewing
 const REMOTE_PORT = 7778;
 let nextId = 1;
 
@@ -395,14 +393,6 @@ function send(data) {
     lastStatusSent.set(data.id, data.status);
   }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
-  // Forward to mobile WebSocket client (skip termData unless viewing that agent)
-  if (remoteWs && !remoteWs.destroyed) {
-    if (data.type === 'termData') {
-      if (data.id === remoteViewingAgent) wsSend(remoteWs, data);
-    } else {
-      wsSend(remoteWs, data);
-    }
-  }
 }
 function logToRenderer(...args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
@@ -410,7 +400,7 @@ function logToRenderer(...args) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('main-log', msg);
 }
 
-// What the renderer (and the mobile client over the LAN socket) may see of the settings:
+// What the renderer may see of the settings:
 // the ClickUp API token stays in the main process, only its presence is reported.
 // The header is 44 CSS px; the window buttons Windows draws over it are device px, so scale them with the UI zoom.
 function titleBarOverlay(theme) { return { ...titleBarColors(theme), height: Math.round(44 * (settings.zoom || 100) / 100) }; }
@@ -720,11 +710,6 @@ function wsDecodeFrame(buffer) {
     payload = buffer.slice(offset, offset + payloadLen);
   }
   return { opcode, data: payload.toString('utf8'), totalLen };
-}
-
-function wsSend(socket, data) {
-  if (!socket || socket.destroyed) return;
-  try { socket.write(wsEncodeFrame(typeof data === 'string' ? data : JSON.stringify(data))); } catch {}
 }
 
 function setPrompt(id, a, text) {
@@ -4000,7 +3985,6 @@ function handleIpc(msg) {
     case 'saveSettings':
       Object.assign(settings, msg.settings); saveState();
       if ('worldEnabled' in msg.settings) armClickupTimer();
-      if (msg.settings.mobileRemote === false && remoteWs) { try { remoteWs.destroy(); } catch {} remoteWs = null; remoteViewingAgent = null; }
       break;
     case 'uiZoom': // the header scales with the UI, so the native window buttons must too
       settings.zoom = Math.max(60, Math.min(200, Number(msg.zoom) || 100));
@@ -4415,145 +4399,21 @@ function hasActiveAgents() { for (const a of agents.values()) { if (!a.isWaiting
 function isUsageStale() { return !lastUsage || (Date.now() - lastUsage.fetchedAt > USAGE_STALE_MS); }
 setInterval(() => { if (isUserActive() || hasActiveAgents() || isUsageStale()) fetchUsage(); }, USAGE_POLL_MS);
 
-// ── Remote (mobile) command handler ──────────────────
-function handleRemoteCmd(msg) {
-  switch (msg.type) {
-    case 'viewAgent': {
-      remoteViewingAgent = msg.id;
-      const buf = termBuffers.get(msg.id);
-      if (buf) wsSend(remoteWs, { type: 'termData', id: msg.id, data: buf });
-      break;
-    }
-    case 'getState': {
-      const agentList = [];
-      for (const [id, a] of agents) {
-        const st = shownStatus(a) === 'waiting' ? 'waiting' : (a.bgTasks?.size || a.toolIds.size > 0 || a.hadTools ? 'active' : 'idle');
-        agentList.push({
-          id, cwd: a.cwd, title: a.title, customName: a.customName,
-          agentName: a.agentName, status: st, lastPrompt: a.lastPrompt,
-          preview: a.lastText, createdAt: a.createdAt,
-          stats: a.stats, spinnerText: a.spinnerText,
-        });
-      }
-      wsSend(remoteWs, { type: 'fullState', agents: agentList });
-      break;
-    }
-    case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
-    case 'closeAgent': closeAgent(msg.id); break;
-    case 'restartAgent': {
-      const a = agents.get(msg.id);
-      if (a) {
-        const c = a.cwd;
-        const savedTitle = a.title || '';
-        const savedCustomName = a.customName;
-        const savedAgentName = a.agentName;
-        closeAgent(msg.id);
-        const newId = createAgent(c);
-        const na = agents.get(newId);
-        if (na && savedAgentName) { na.agentName = savedAgentName; send({ type: 'agentNameChanged', id: newId, agentName: savedAgentName }); }
-        if (savedTitle && na) { na.title = savedTitle; na.customName = savedCustomName; send({ type: 'title', id: newId, text: savedTitle, customName: savedCustomName }); saveState(); }
-      }
-      break;
-    }
-    case 'termInput': handleTermInput(msg.id, msg.data); break;
-    // Peer-message approvals are allowed from the phone remote too — same
-    // authenticated channel, and approving from your phone is genuinely useful.
-    case 'peerMsgApprove': resolvePeerMsg(msg.agentId, msg.msgId, true); break;
-    case 'peerMsgDismiss': resolvePeerMsg(msg.agentId, msg.msgId, false); break;
-    // Chat from the same authenticated channel (drives the E2E; enables phone chat later)
-    case 'chatSend': chatSendText(msg.to || {}, msg.text); break;
-    case 'chatTypingPing': { const { conns, group } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerTyping', groupId: group ? group.id : undefined }); break; }
-    case 'chatRead': { const { conns } = chatTargets(msg.to || {}); for (const c of conns) wsSendPeer(c, { type: 'peerChatRead', ids: msg.ids }); break; }
-    case 'chatSendFilePath': chatSendFile(msg.to || {}, String(msg.filePath || '')); break;
-    case 'createGroup': createChatGroup(msg.name, msg.members); break;
-    case 'getProjects': {
-      const projects = new Set();
-      for (const [, a] of agents) if (a.cwd) projects.add(a.cwd);
-      wsSend(remoteWs, { type: 'projects', projects: [...projects] });
-      break;
-    }
-  }
-}
-
-// ── Remote access HTTP/WebSocket server ──────────────
+// ── LAN peer server (/peer) ──────────────
 let remoteServer = null;
-let remoteUrl = null;
 
 function startRemoteServer() {
-  // Pairing code gates both control channels (/ws for the phone, /peer for other
-  // Overlords). Generated once and persisted. This runs after restoreAgents, so
-  // saveState() here writes the full agent list, not an empty one.
+  // Pairing code gates /peer, the link to other Overlords. Generated once and
+  // persisted. This runs after restoreAgents, so saveState() here writes the full
+  // agent list, not an empty one.
   if (!settings.peerCode) { settings.peerCode = pc.generatePairingCode(); saveState(); }
-  let mobileHtml;
-  try { mobileHtml = fs.readFileSync(path.join(__dirname, 'mobile.html'), 'utf-8'); }
-  catch { mobileHtml = '<html><body>mobile.html not found</body></html>'; }
-
-  let generateQRSvg;
-  try { generateQRSvg = require('./qr.js').generateQRSvg; }
-  catch (e) { console.log('[Overlord] QR module not found:', e.message); generateQRSvg = () => '<svg></svg>'; }
-
-  const server = http.createServer((req, res) => {
-    if (req.url === '/' || req.url === '/index.html') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
-      res.end(mobileHtml);
-    } else {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  });
+  const server = http.createServer((req, res) => { res.writeHead(404); res.end('Not found'); });
 
   server.on('upgrade', (req, socket) => {
     let u;
     try { u = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
     if (u.pathname === '/peer') { handlePeerUpgrade(req, socket, u); return; }
-    if (u.pathname !== '/ws') { socket.destroy(); return; }
-    if (settings.mobileRemote === false) { socket.destroy(); return; } // mobile remote flag is off
-    if (!pc.checkCode(settings.peerCode, u.searchParams.get('code'))) { socket.destroy(); return; }
-    if (remoteWs && !remoteWs.destroyed) {
-      try { remoteWs.end(); } catch {}
-      remoteWs = null;
-    }
-    const ws = wsHandshake(req, socket);
-    if (!ws) return;
-    remoteWs = ws;
-    remoteViewingAgent = null;
-    console.log('[Overlord] Mobile client connected');
-    handleRemoteCmd({ type: 'getState' });
-
-    let wsBuf = Buffer.alloc(0);
-    ws.on('data', (chunk) => {
-      wsBuf = Buffer.concat([wsBuf, chunk]);
-      while (wsBuf.length >= 2) {
-        const frame = wsDecodeFrame(wsBuf);
-        if (!frame) break;
-        wsBuf = wsBuf.slice(frame.totalLen);
-        if (frame.opcode === 0x8) {
-          try { ws.end(wsEncodeFrame('')); } catch {}
-          ws.destroy();
-          if (remoteWs === ws) { remoteWs = null; remoteViewingAgent = null; }
-          console.log('[Overlord] Mobile client disconnected');
-          return;
-        }
-        if (frame.opcode === 0x9) {
-          const pong = Buffer.alloc(2);
-          pong[0] = 0x8a; pong[1] = 0;
-          try { ws.write(pong); } catch {}
-          continue;
-        }
-        if (frame.opcode === 0x1) {
-          try { handleRemoteCmd(JSON.parse(frame.data)); }
-          catch (e) { console.log('[Overlord] Bad remote message:', e.message); }
-        }
-      }
-    });
-
-    ws.on('close', () => {
-      if (remoteWs === ws) { remoteWs = null; remoteViewingAgent = null; }
-      console.log('[Overlord] Mobile client disconnected');
-    });
-    ws.on('error', () => {
-      if (remoteWs === ws) { remoteWs = null; remoteViewingAgent = null; }
-    });
+    socket.destroy();
   });
 
   const tryListen = (port) => {
@@ -4566,15 +4426,9 @@ function startRemoteServer() {
       }
     });
     server.listen(port, '0.0.0.0', () => {
-      const ip = getLanIp();
-      remoteUrl = `http://${ip}:${port}`;
       remotePort = port;
       remoteServer = server;
-      // QR embeds the pairing code — a scan connects without typing it
-      const qrUrl = `${remoteUrl}/?code=${settings.peerCode}`;
-      const svg = generateQRSvg(qrUrl, 4);
-      send({ type: 'remoteReady', url: qrUrl, qrSvg: svg });
-      console.log(`[Overlord] Remote access: ${remoteUrl}`);
+      console.log(`[Overlord] Peer server: http://${getLanIp()}:${port}`);
       startPeerClients();
       sendPeersState();
     });
@@ -5416,7 +5270,6 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   clearTimeout(_spareTimer); dropSpare();
   if (remoteServer) { try { remoteServer.close(); } catch {} }
-  if (remoteWs) { try { remoteWs.destroy(); } catch {} }
   if (mcpServer) { try { mcpServer.stop(); } catch {} }
   if (preview) { try { preview.destroy(); } catch {} }
   if (browserRegistry) { try { browserRegistry.destroyAll(); } catch {} }
