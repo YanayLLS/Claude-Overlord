@@ -338,12 +338,11 @@ function agentClaudeFlags(id, { browser = true } = {}) {
     return '';
   }
 }
-// Remote Control: the session shows in the Claude mobile app / claude.ai/code under the
-// agent's name. Name is stripped to shell-safe chars — it rides a cmd.exe / sh -c line.
-function remoteControlFlag(name) {
-  if (settings.remoteControl === false) return '';
-  return ` --remote-control "${String(name || '').replace(/[^\w .-]/g, '').trim() || 'Overlord'}"`;
-}
+// Remote Control: the session shows in the Claude mobile app / claude.ai/code. No name
+// given, so the phone shows Claude's own session title: the ai-title / /rename that the
+// agent's row shows here. The flag takes an optional value, so it goes right after
+// `claude`, where the next token is always another flag, never the prompt.
+function claudeBin() { return settings.remoteControl === false ? 'claude' : 'claude --remote-control'; }
 const agents = new Map();
 const terminals = new Map();
 // The size the renderer last asked for, per agent. A respawned pty (resume, crash
@@ -1352,7 +1351,7 @@ function doSpawnTerminal(id, attached) {
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const useResume = hasJsonl && !a._resumeFailed;
   const feat = featureAgentArgs(a.cwd);
-  const claudeCmd = (useResume ? `claude --resume ${a.sessionId}${skip}` : `claude --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id) + remoteControlFlag(a.agentName);
+  const claudeCmd = (useResume ? `${claudeBin()} --resume ${a.sessionId}${skip}` : `${claudeBin()} --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id);
   const sh = agentShell();
   // /c, not /k: /k left cmd.exe alive after Claude died, so the pty never exited and
   // crashes went unnoticed (no auto-resume). /c exits with Claude's own exit code.
@@ -1484,12 +1483,11 @@ function scheduleSpare(cwd) {
     const sessionId = crypto.randomUUID();
     const feat = featureAgentArgs(cwd);
     const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
-    const agentName = pickAgentName(); // decided now: the name is baked into --remote-control
-    const cmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}${remoteControlFlag(agentName)}`;
+    const cmd = `${claudeBin()} --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}`;
     const shell = agentShell();
     const args = process.platform === 'win32' ? `/c ${cmd}` : ['-c', cmd];
     try {
-      const s = { id, sessionId, cwd, agentName, key: spareKey(cwd), buf: '', bornAt: Date.now(), exited: false, adopted: false };
+      const s = { id, sessionId, cwd, key: spareKey(cwd), buf: '', bornAt: Date.now(), exited: false, adopted: false };
       s.proc = agentPty().spawn(shell, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env }) });
       s.proc.onData((d) => { if (!s.adopted) s.buf += d; });
       s.proc.onExit(() => { s.exited = true; if (spare === s) dropSpare(); });
@@ -1521,7 +1519,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
     isWaiting: false, permSent: false, hadTools: false, turnTools: 0, claudeReady: false,
     lastText: '', lastPrompt: '', title: '', customName: false,
     promptHistory: [], titlePending: false, createdAt: Date.now(),
-    crashCount: 0, cronCount: 0, compacting: false, agentName: warm ? warm.agentName : pickAgentName(), spinnerText: '',
+    crashCount: 0, cronCount: 0, compacting: false, agentName: pickAgentName(), spinnerText: '',
     archived: false,
     stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: modelFamily(defaultModel()), model: defaultModel() || undefined },
   };
@@ -1529,7 +1527,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
 
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const feat = featureAgentArgs(cwd);
-  const claudeCmd = `claude --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}${remoteControlFlag(agent.agentName)}${argPrompt ? ` "${argPrompt}"` : ''}`;
+  const claudeCmd = `${claudeBin()} --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}${argPrompt ? ` "${argPrompt}"` : ''}`;
   const shell = agentShell();
   const shellArgs = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
