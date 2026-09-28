@@ -278,6 +278,12 @@ function protectClaudeConfig(extra = []) {
     for (const w of [...(settings.worktrees || []), ...extra]) {
       if (inheritTrust(data, w.repo, w.path)) changed = true;
     }
+    // The phone's "session ready" push is a Claude Code tip capped by this counter.
+    // Every agent is on Remote Control, so spend the cap instead of a push per agent.
+    // ponytail: a new tip key from Anthropic lets one push through, then this re-caps it.
+    if (settings.remoteControl !== false && data.remoteControlReadyPushCount !== 9999) {
+      data.remoteControlReadyPushCount = 9999; data.remoteControlReadyPushKey ??= 'v1'; changed = true;
+    }
     if (changed) fs.writeFileSync(CLAUDE_JSON, JSON.stringify(data, null, 2));
   } catch {}
 }
