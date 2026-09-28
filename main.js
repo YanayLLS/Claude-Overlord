@@ -343,6 +343,28 @@ function agentClaudeFlags(id, { browser = true } = {}) {
 // agent's row shows here. The flag takes an optional value, so it goes right after
 // `claude`, where the next token is always another flag, never the prompt.
 function claudeBin() { return settings.remoteControl === false ? 'claude' : 'claude --remote-control'; }
+// The toggle also reaches running agents: type /remote-control into each idle one with an
+// empty input line, then answer the menu it opens. Off→on shows an "Enable Remote Control"
+// confirm (Enter); a connected session shows Disconnect / Show QR / Continue with Continue
+// selected (Up Up Enter). Esc when it's already in the wanted state. A busy agent is
+// retried by the interval once its turn ends.
+function syncRemoteControl() {
+  const want = settings.remoteControl !== false;
+  for (const [id, a] of agents) {
+    const t = terminals.get(id);
+    if (!t || a.rc === want || a._rcSyncing || !a.claudeReady || !a.isWaiting || a.crashed || inputBuffers.get(id)) continue;
+    a._rcSyncing = true;
+    try { t.write('/remote-control\r'); } catch { a._rcSyncing = false; continue; }
+    setTimeout(() => {
+      const tail = (termBuffers.get(id) || '').slice(-6000).replace(/\x1b\[[0-9;?]*[a-zA-Z]|\s+/g, '');
+      const isOn = tail.lastIndexOf('Disconnectthissession') > tail.lastIndexOf('EnableRemoteControl');
+      const keys = isOn === want ? '\x1b' : want ? '\r' : '\x1b[A\x1b[A';
+      try { t.write(keys); if (keys.startsWith('\x1b[A')) setTimeout(() => { try { t.write('\r'); } catch {} }, 400); } catch {}
+      setTimeout(() => { a.rc = want; a._rcSyncing = false; }, 1000);
+    }, 1500);
+  }
+}
+setInterval(syncRemoteControl, 5000);
 const agents = new Map();
 const terminals = new Map();
 // The size the renderer last asked for, per agent. A respawned pty (resume, crash
@@ -1359,6 +1381,8 @@ function doSpawnTerminal(id, attached) {
   try {
     const proc = attached || agentPty().spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
     terminals.set(id, proc);
+    // ponytail: an adopted pty's Remote Control state is unknown; assume the setting. Toggling off/on fixes a stray one.
+    if (!attached || a.rc === undefined) a.rc = settings.remoteControl !== false;
     if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
     if (attached) {
       // Same Claude process as before the restart: it's already at its prompt or mid-turn.
@@ -1520,7 +1544,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
     lastText: '', lastPrompt: '', title: '', customName: false,
     promptHistory: [], titlePending: false, createdAt: Date.now(),
     crashCount: 0, cronCount: 0, compacting: false, agentName: pickAgentName(), spinnerText: '',
-    archived: false,
+    archived: false, rc: settings.remoteControl !== false, // a spare only fits when spawned under the same setting (spareKey)
     stats: { inTok: 0, outTok: 0, cacheTok: 0, cacheRead: 0, ctxTok: 0, turns: 0, durMs: 0, tools: {}, files: 0, modelFamily: modelFamily(defaultModel()), model: defaultModel() || undefined },
   };
   agents.set(id, agent);
@@ -3989,6 +4013,7 @@ function handleIpc(msg) {
     case 'saveSettings':
       Object.assign(settings, msg.settings); saveState();
       if ('worldEnabled' in msg.settings) armClickupTimer();
+      if ('remoteControl' in msg.settings) syncRemoteControl();
       break;
     case 'uiZoom': // the header scales with the UI, so the native window buttons must too
       settings.zoom = Math.max(60, Math.min(200, Number(msg.zoom) || 100));

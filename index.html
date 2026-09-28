@@ -1136,7 +1136,7 @@ button:focus-visible { outline-offset:0; }
         <input type="checkbox" id="chk-remote-control" checked onchange="api.send({ type: 'saveSettings', settings: { remoteControl: this.checked } })" />
         <span>Remote Control (continue agents in the Claude mobile app)</span>
       </label>
-      <div class="settings-hint">Agents show under their chat title in the app and at claude.ai/code. Applies to newly spawned agents.</div>
+      <div class="settings-hint">Agents show under their chat title in the app and at claude.ai/code. Switching it also connects or disconnects running agents as soon as each is idle.</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
         <span>Prompt autocomplete (ghost text)</span>
