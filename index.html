@@ -337,7 +337,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent:hover .agent-actions { display:flex; }
 .agent:hover .agent-tail .ctx-pct { visibility:hidden; }
 .agent-actions .agent-btn { opacity:1; }
-.agent-actions .btn-close { opacity:1 !important; width:20px; padding:0; }
+.agent-actions .btn-close { opacity:1 !important; width:20px; padding:0 0 2px; }
 .agent-btn.model { font-size:8px; font-weight:700; letter-spacing:.4px; padding:2px 5px; }
 /* Hover tooltip — last prompts (shown on the status dot) */
 #agent-tip { position:fixed; z-index:1000; max-width:300px; max-height:60vh; overflow:hidden; background:var(--bg2,#181825);
@@ -417,10 +417,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 .agent:hover .agent-btn { opacity:.35; }
 .agent-btn:hover { opacity:1 !important; color:var(--red); background:rgba(243,139,168,.08); }
-.btn-close { opacity:0 !important; width:0; height:20px; overflow:hidden; padding:0; transition:opacity .12s, width .12s;
+/* padding-bottom, not padding:0 — '×' hangs 4.1px above the baseline, so flex
+   centering of the line box left the glyph 1px low in the red square. Shrinking
+   the content box by 2px lifts the baseline 15px→14px and lands it dead centre.
+   line-height can't fix this: the item's top and its baseline shift by equal and
+   opposite amounts, so the baseline is pinned whatever value it takes. */
+.btn-close { opacity:0 !important; width:0; height:20px; overflow:hidden; padding:0 0 2px; transition:opacity .12s, width .12s;
   display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box;
   color:#fff !important; background:var(--red); border-radius:5px; font-size:14px; line-height:1; }
-.agent:hover .btn-close { opacity:1 !important; width:20px; padding:0; }
+.agent:hover .btn-close { opacity:1 !important; width:20px; padding:0 0 2px; }
 .btn-loop {
   font-size:10px; letter-spacing:.3px; padding:1px 5px; border:1px solid var(--border); border-radius:3px;
   opacity:1 !important; display:inline-flex; align-items:center; gap:3px;
