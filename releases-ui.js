@@ -617,7 +617,8 @@
       + (ready && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge" data-act="relMerge" title="${esc(readyTip)}">🚀 Release all · ${ready}</button>` : '')
       + (!ready && unsignedProd.length && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge locked" aria-disabled="true" title="${esc(`Prod waits for 2 approvers' signatures:\n${unsignedProd.map(r => `• ${r.label} #${r.pr.number} (${r.signoff ? r.signoff.count : 0}/2)`).join('\n')}`)}">🔒 Release all · needs signatures</button>` : '')
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
-      + (run.running ? '' : '<button data-act="relNew">New release</button>')
+      // a new release only once this one's PRs are all merged or closed (Release again just reuses open PRs anyway)
+      + (run.running || open.length ? '' : '<button data-act="relNew">New release</button>')
       + '<button data-act="releaseClose">Close</button></div></div>';
     return h;
   }
