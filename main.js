@@ -2219,16 +2219,18 @@ function fetchAllPRs(repos) {
         if (!node) { failed.push(r); return; }
         for (const pr of (node.pullRequests && node.pullRequests.nodes) || []) {
           const mine = !!ghLogin && pr.author && pr.author.login === ghLogin;
-          // Drafts and others' approved PRs aren't yours to act on: they only show in the menu's "All open" view.
-          const list = pr.isDraft || (pr.reviewDecision === 'APPROVED' && !mine) ? extra : prs;
           const rollup = pr.commits && pr.commits.nodes[0] && pr.commits.nodes[0].commit.statusCheckRollup;
           const requested = !!ghLogin && ((pr.reviewRequests && pr.reviewRequests.nodes) || [])
             .some(n => n.requestedReviewer && n.requestedReviewer.login === ghLogin);
           const reviews = (pr.latestReviews && pr.latestReviews.nodes) || [];
           const approvedBy = reviews.filter(r => r.state === 'APPROVED' && r.author).map(r => r.author.login);
           const changesBy = reviews.filter(r => r.state === 'CHANGES_REQUESTED' && r.author).map(r => r.author.login);
+          // Drafts and PRs I already approved aren't mine to act on: they only show in the menu's "All open" view.
+          // Someone else's approval doesn't count — it still waits for mine.
+          const approvedByMe = !!ghLogin && approvedBy.includes(ghLogin);
+          const list = pr.isDraft || (!mine && approvedByMe) ? extra : prs;
           list.push({
-            key: prKey(r, pr.number), isDraft: !!pr.isDraft, repo: r, number: pr.number, title: pr.title, url: pr.url,
+            key: prKey(r, pr.number), isDraft: !!pr.isDraft, approvedByMe, repo: r, number: pr.number, title: pr.title, url: pr.url,
             author: (pr.author && pr.author.login) || '',
             reviewDecision: pr.reviewDecision || '', mine,
             // Per-check summary when GitHub gave us the checks; the rollup only as a fallback (it says FAILURE while a rerun is still going).
@@ -2286,6 +2288,24 @@ async function fetchWorkflowDurations(repo) {
   return by;
 }
 
+// Stamp mute/snooze/archive state from settings onto the PR list.
+function applyPrFlags(prs) {
+  const muted = new Set(settings.prMuted || []);
+  const mutedRepos = new Set(settings.prMutedRepos || []);
+  const archived = new Set(settings.prArchived || []);
+  const nowMs = Date.now();
+  const snoozes = settings.prSnoozed || {};
+  for (const k of Object.keys(snoozes)) if (snoozes[k] <= nowMs) delete snoozes[k]; // drop expired
+  settings.prSnoozed = snoozes;
+  prs.forEach(p => {
+    p.muted = muted.has(p.key);
+    p.repoMuted = mutedRepos.has(p.repo);
+    p.snoozed = snoozes[p.key] > nowMs;
+    p.archived = archived.has(p.key);
+    p.snoozeUntil = snoozes[p.key] || 0;
+  });
+}
+
 async function pollPRs() {
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
@@ -2307,20 +2327,7 @@ async function pollPRs() {
   if (!failedRepos.length) prGhErrorLogged = false;
   const prs = res.prs;
   const currentKeys = prs.map(p => p.key);
-  const muted = new Set(settings.prMuted || []);
-  const mutedRepos = new Set(settings.prMutedRepos || []);
-  const archived = new Set(settings.prArchived || []);
-  const nowMs = Date.now();
-  const snoozes = settings.prSnoozed || {};
-  for (const k of Object.keys(snoozes)) if (snoozes[k] <= nowMs) delete snoozes[k]; // drop expired
-  settings.prSnoozed = snoozes;
-  prs.forEach(p => {
-    p.muted = muted.has(p.key);
-    p.repoMuted = mutedRepos.has(p.repo);
-    p.snoozed = snoozes[p.key] > nowMs;
-    p.archived = archived.has(p.key);
-    p.snoozeUntil = snoozes[p.key] || 0;
-  });
+  applyPrFlags(prs);
   const seen = settings.prSeen || [];
   if (!prSeenSeeded && seen.length === 0) {
     // First run with no history: seed silently, no toasts for pre-existing PRs.
@@ -2358,6 +2365,7 @@ async function pollPRs() {
     p.checksEta = null;
     if (p.checks === 'pending' && p.running.length) p.checksEta = checksEta(p.running, await fetchWorkflowDurations(p.repo));
   }
+  applyPrFlags(prs); // a mute/archive clicked while we awaited must not be reverted
   send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
 }
 
