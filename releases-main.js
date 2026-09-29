@@ -8,7 +8,8 @@ const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
 const { runRelease, prHealth, rowStatus } = require('./release-run');
 const createHistory = require('./release-history');
-const { signoff, reviewMark, hasSigned, openerMark, OPENER_RE } = require('./signoff-core');
+const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_RE } = require('./signoff-core');
+const { releaseIdOf } = require('./manifest-core');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
@@ -365,9 +366,35 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (back) return { ok: true, warn: `Back-merge into ${back.source}: the open ${back.target} release PR gets a new commit, so its approvals no longer count — it needs signing again` };
     if (!prodStep(m[1], pr.data.base.ref, pr.data.head.ref)) return { ok: true }; // not a prod release PR
     if (!state.approvers || !state.approvers.exists) await loadApprovers();
-    const s = await signoffOf(m[1], m[2]);
+    const s = await releaseSignoffOf(m[1], m[2]);
     if (s.error) return { ok: false, reason: s.error };
-    return s.ok ? { ok: true, signoff: s } : { ok: false, reason: `prod release needs ${s.need} approvers' signatures (has ${s.count}${s.count ? ': ' + s.signers.map(x => '@' + x.login).join(', ') : ''})` };
+    return s.ok ? { ok: true, signoff: s } : { ok: false, reason: `the release needs ${s.need} approvers' signatures (has ${s.count}${s.count ? ': ' + s.signers.map(x => '@' + x.login).join(', ') : ''})${gapsText(s)}` };
+  }
+  const gapsText = (s) => (s.gaps || []).map(g => ` · @${g.login} still to sign ${g.missing.map(x => x.label + (x.older ? ' (new commits)' : '')).join(', ')}`).join('');
+
+  // The release is signed as one (signoff-core releaseSignoff): this PR's sign-off together with
+  // every other still-open PR of its release (the release-id its body carries → the manifest).
+  async function releaseSignoffOf(repo, n) {
+    const s = await signoffOf(repo, n);
+    if (s.error) return s;
+    const id = releaseIdOf(s.pr.body);
+    if (id && !((state.history && state.history.items) || []).some(x => x.id === id)) await history.load().catch(() => {});
+    const man = id && ((state.history && state.history.items) || []).find(x => x.id === id);
+    const label = (r) => (man && (man.repos.find(x => x.repo === r) || {}).label) || r.split('/')[1];
+    const list = [{ label: label(repo), signoff: s }];
+    for (const r of (man ? man.repos : [])) {
+      if (r.mergeSha || r.closed || (r.repo === repo && r.pr.number === Number(n))) continue;
+      const o = await signoffOf(r.repo, r.pr.number);
+      if (o.error) return o;
+      if (o.pr.state === 'open') list.push({ label: r.label, signoff: o });
+    }
+    return releaseSignoff(list);
+  }
+  // A run's prod PRs are one release: stamp its release-level sign-off for the UI
+  function stampSignoff(run) {
+    const prs = run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed && r.signoff);
+    run.signoff = prs.length ? releaseSignoff(prs) : null;
+    return run;
   }
 
   // Prod release PRs open right now that are waiting on MY signature — found from the config, so
@@ -382,18 +409,25 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const who = await whoAmI();
     if (!state.approvers.isApprover || !who.github) { if ((state.toSign || []).length) push({ toSign: [] }); return; }
     const steps = releasePlan(cfg, ['prod']).prs;
-    const found = [];
+    const found = [], all = [];
     await Promise.all(steps.map(async (p) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
       const prs = (Array.isArray(r.data) ? r.data : []).filter(x => x.head && (x.head.ref === p.source || ROLLBACK_HEAD.test(x.head.ref))
         && (!x.head.repo || x.head.repo.full_name.toLowerCase() === p.repo.toLowerCase()));
       for (const pr of prs) {
         const s = await signoffOf(p.repo, pr.number);
-        if (s.error || hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue;
+        if (s.error) continue;
+        all.push({ label: p.label, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s });
+        if (hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue;
         found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url, head: s.pr.head.sha, commits: s.pr.commits || null, author: s.pr.user.login,
-          signers: s.signers.map(x => x.login), count: s.count, need: s.need });
+          release: all[all.length - 1].release, signers: s.signers.map(x => x.login), count: s.count, need: s.need });
       }
     }));
+    // the counts people see are the release's (signed as one), not each PR's
+    for (const f of found) {
+      const rs = releaseSignoff(all.filter(x => x.release === f.release));
+      Object.assign(f, { signers: rs.signers.map(x => x.login), count: rs.count });
+    }
     found.sort((a, b) => a.label.localeCompare(b.label));
     push({ toSign: found });
     const nkey = (f) => f.repo + '#' + f.number + '@' + f.head; // a new commit = sign again = tell again
@@ -424,7 +458,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     let signed = 0;
     for (const t of targets.values()) {
       const s = await signoffOf(t.repo, t.number);
-      if (s.error || hasSigned(s, who.github)) continue;
+      if (s.error) { send({ type: 'toast', text: `Sign ${t.label} #${t.number}: ${s.error}` }); continue; }
+      if (hasSigned(s, who.github)) continue;
       if (s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue; // the opener already signed by opening it
       const res = await ghJson(['api', '-X', 'POST', `repos/${t.repo}/pulls/${t.number}/reviews`, '--input',
         writeTmp({ event: 'APPROVE', commit_id: s.pr.head.sha, body: reviewMark(who.clickup) })]);
@@ -436,7 +471,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         if (!after.error) run.rows[i] = { ...run.rows[i], signoff: { signers: after.signers, count: after.count, need: after.need, ok: after.ok } };
       }
     }
-    if (run) push({ releaseRun: { ...run } });
+    if (run) push({ releaseRun: { ...stampSignoff(run) } });
     persist();
     await checkToSign().catch(() => {});
     reconcileHistory().catch(() => {});
@@ -615,7 +650,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     }));
     run.running = false;
     for (const r of run.rows) delete r.body; // only needed for that patch
-    push({ releaseRun: { ...run } });
+    push({ releaseRun: { ...stampSignoff(run) } });
     persist();
     recheck(run);
     // the shared record: this release's manifest in <org>/release-manifests
@@ -633,7 +668,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   let recheckTimer = null;
   function recheck(run) {
     clearTimeout(recheckTimer);
-    const unsigned = (r) => r.env === 'prod' && r.signoff && !r.signoff.ok;
+    const unsigned = (r) => { const s = (state.releaseRun || run).signoff; return r.env === 'prod' && s && !s.ok; };
     const settled = (r) => !r.pr || r.merged || r.closed || (r.checks !== 'pending' && r.checks !== 'none' && r.conflict !== null && !unsigned(r));
     const tick = async () => {
       if (state.releaseRun !== run && (!state.releaseRun || state.releaseRun.startedAt !== run.startedAt)) return;
@@ -647,7 +682,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         row.status = rowStatus(row);
         cur.rows[i] = row;
       }));
-      push({ releaseRun: { ...cur, checkedAt: Date.now() } });
+      push({ releaseRun: { ...stampSignoff(cur), checkedAt: Date.now() } });
       persist();
       recheckTimer = setTimeout(tick, signing ? SIGN_POLL_MS : RECHECK_MS);
       if (recheckTimer.unref) recheckTimer.unref();

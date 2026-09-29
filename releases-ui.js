@@ -452,14 +452,18 @@
     const toSign = new Set((s.toSign || []).map(t => t.repo + '#' + t.number));
     for (const m of hs.items) {
       const [cls, label] = STATUS_CHIP[m.status] || ['', m.status];
-      const signers = [...new Set(m.repos.flatMap(r => r.signers || []))];
       const pending = m.status === 'pending';
+      // signed as one: while pending, a signer is someone on every still-open PR
+      const openRepos = m.repos.filter(r => !r.mergeSha && !r.closed);
+      const anyone = [...new Set(m.repos.flatMap(r => r.signers || []))];
+      const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
       h += `<div class="rl-hist-card${pending ? ' pending' : ''}"><div class="rl-hist-top">`
         + `<b>${m.kind === 'rollback' ? '↩ Rollback' : 'Release'} ${esc(m.id)}</b>`
         + (m.kind === 'rollback' ? `<span class="rl-rr-chip">restores ${esc(m.rollbackOf)}</span>` : '')
         + (m.imported ? '<span class="rl-rr-chip" title="Built from merged release PRs, before release manifests existed">imported</span>' : '')
         + (!m.imported && m.repos.some(r => r.unsigned) ? `<span class="rl-rr-chip bad" title="Merged with fewer than 2 approvers' signatures (e.g. on github.com): ${esc(m.repos.filter(r => r.unsigned).map(r => r.label).join(', '))}">merged unsigned ⚠</span>` : '')
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
+        + (pending ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR at its latest commit">✍ ${signers.length}/2 signed</span>` : '')
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
       h += '<div class="rl-hist-repos">';
@@ -470,7 +474,7 @@
         const dep = r.deploy ? (r.deploy.state === 'success' ? '<span class="ok">deployed</span>' : r.deploy.state === 'failure' ? '<span class="bad">deploy failed</span>' : r.mergeSha ? 'deploying…' : '') : '✋ by hand';
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
-          + `<span class="rl-hist-state">${r.closed && !r.mergeSha ? 'closed' : need ? `✍ ${signed}/2${toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : ''}` : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-state">${r.closed && !r.mergeSha ? 'closed' : need ? (() => { const miss = anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
       }
       h += '</div>';
       if (m.manual && m.manual.length) h += `<div class="rl-hist-man">Hand-deployed at the time: ${m.manual.map(x => esc(x.label) + (x.live && x.live.sha ? ' ' + shortSha(x.live.sha) : '')).join(' · ')}</div>`;
@@ -546,11 +550,10 @@
       if (r.status === 'nothing') bits.push('<span class="rl-rr-chip">nothing to release</span>');
       if (r.pr) bits.push(`<span class="rl-rr-chip ok">${prLink(r.pr, `#${r.pr.number}`)} ${r.reused ? 'already open' : 'opened'}${r.ahead ? ` · ${r.ahead} commits` : ''}</span>`);
       if (r.backMerge && r.backMerge.url) bits.push(`<span class="rl-rr-chip${r.backMerge.conflict ? ' bad' : ' warn'}">back-merge ${prLink(r.backMerge, '#' + r.backMerge.number)}${r.backMerge.conflict ? ' conflicts' : ' — merge first'}</span>`);
-      if (r.env === 'prod' && r.signoff && !r.merged) {
-        const who = r.signoff.signers.map(x => '@' + x.login).join(', ');
-        bits.push(r.signoff.ok
-          ? `<span class="rl-rr-chip ok" title="Signed by ${esc(who)}">✍ signed ${r.signoff.count}/${r.signoff.need} · ${esc(who)}</span>`
-          : `<span class="rl-rr-chip warn" title="Merging needs ${r.signoff.need} release approvers: the opener plus an approval, on the latest commit">✍ ${r.signoff.count}/${r.signoff.need} signed${who ? ' · ' + esc(who) : ''} — needs another approver</span>`);
+      // the release is signed as one (count in the footer); a row only says who it's still missing
+      if (r.env === 'prod' && run.signoff && !r.merged && !r.closed) {
+        const gap = run.signoff.gaps.map(g => [g.login, g.missing.find(x => x.label === r.label)]).filter(([, x]) => x);
+        if (gap.length) bits.push(`<span class="rl-rr-chip warn" title="Their signature on the release doesn't cover this PR yet">✍ ${gap.map(([l, x]) => '@' + esc(l) + (x.older ? ' (new commits)' : '')).join(', ')} to sign</span>`);
       }
       if (r.merged) bits.push('<span class="rl-rr-chip ok">merged ✓</span>');
       else if (r.closed) bits.push('<span class="rl-rr-chip">closed</span>');
@@ -603,19 +606,21 @@
     const toSign = a.isApprover ? new Set([...open.filter(r => r.env === 'prod' && r.signoff && !r.signoff.signers.some(x => x.login.toLowerCase() === meL)).map(r => r.repo + '#' + r.pr.number),
       ...(s.toSign || []).map(x => x.repo + '#' + x.number)]).size : 0;
     // what Release all would actually merge now, by env — and the prod PRs still waiting for signatures
-    const readyRows = open.filter(r => r.status === 'ok' && r.conflict === false && (r.env !== 'prod' || (r.signoff && r.signoff.ok)));
+    const relOk = !!(run.signoff && run.signoff.ok), relCount = run.signoff ? run.signoff.count : 0;
+    const readyRows = open.filter(r => r.status === 'ok' && r.conflict === false && (r.env !== 'prod' || relOk));
     const ready = readyRows.length;
-    const unsignedProd = open.filter(r => r.env === 'prod' && !(r.signoff && r.signoff.ok));
+    const unsignedProd = relOk ? [] : open.filter(r => r.env === 'prod');
     const byEnv = {};
     for (const r of readyRows) byEnv[r.env] = (byEnv[r.env] || 0) + 1;
     const readyLabel = Object.entries(byEnv).map(([e, n]) => `${n} ${e}`).join(' + ');
     const readyTip = `${readyLabel}. Merges now, in release order (services → iframes → frontend), waiting for each wave's deploys:\n`
       + readyRows.map(r => `• ${r.label} ${r.env} #${r.pr.number}`).join('\n')
-      + (unsignedProd.length ? `\n\nNot merged — waiting for 2 signatures:\n${unsignedProd.map(r => `• ${r.label} prod #${r.pr.number} (${r.signoff ? r.signoff.count : 0}/2)`).join('\n')}` : '');
+      + (unsignedProd.length ? `\n\nNot merged — the prod release has ${relCount}/2 signatures:\n${unsignedProd.map(r => `• ${r.label} prod #${r.pr.number}`).join('\n')}` : '');
+    if (run.signoff) h += `<div class="rl-rr-flag${run.signoff.ok ? '' : ' bad'}">✍ Prod release signed ${run.signoff.count}/${run.signoff.need}${run.signoff.count ? ' · ' + run.signoff.signers.map(x => '@' + esc(x.login)).join(', ') : ''}</div>`;
     h += releaseAllHtml(s) + '<div class="rl-rel-actions">'
-      + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign (${toSign})</button>` : '')
+      + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign the release</button>` : '')
       + (ready && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge" data-act="relMerge" title="${esc(readyTip)}">🚀 Release all · ${ready}</button>` : '')
-      + (!ready && unsignedProd.length && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge locked" aria-disabled="true" title="${esc(`Prod waits for 2 approvers' signatures:\n${unsignedProd.map(r => `• ${r.label} #${r.pr.number} (${r.signoff ? r.signoff.count : 0}/2)`).join('\n')}`)}">🔒 Release all · needs signatures</button>` : '')
+      + (!ready && unsignedProd.length && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge locked" aria-disabled="true" title="${esc(`Prod waits for 2 approvers to sign the release (${relCount}/2):\n${unsignedProd.map(r => `• ${r.label} #${r.pr.number}`).join('\n')}`)}">🔒 Release all · needs signatures</button>` : '')
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
       // a new release only once this one's PRs are all merged or closed (Release again just reuses open PRs anyway)
       + (run.running || open.length ? '' : '<button data-act="relNew">New release</button>')
@@ -638,9 +643,9 @@
     if (!t.length) return '';
     const by = [...new Set(t.flatMap(x => x.signers))].map(x => '@' + esc(x)).join(', ');
     return '<div class="rl-tosign"><div class="rl-tosign-head">✍ Waiting for your signature</div>'
-      + t.map(x => `<div class="rl-tosign-row"><b>${esc(x.label)}</b>${link(x.url, '#' + x.number)}<span>${x.count}/${x.need} signed</span></div>`).join('')
-      + `<div class="rl-tosign-by">${by ? 'Opened by ' + by + '. ' : ''}Your approval is the second signature.</div>`
-      + `<button class="rl-rr-sign" data-act="relSign">✍ Sign ${t.length} PR${t.length === 1 ? '' : 's'}</button></div>`;
+      + t.map(x => `<div class="rl-tosign-row"><b>${esc(x.label)}</b>${link(x.url, '#' + x.number)}</div>`).join('')
+      + `<div class="rl-tosign-by">${by ? 'Opened by ' + by + '. ' : ''}One signature covers the whole release: ${t[0].count}/${t[0].need} signed so far.</div>`
+      + `<button class="rl-rr-sign" data-act="relSign">✍ Sign the release</button></div>`;
   }
 
   function releasePickerHtml(s) {
@@ -792,12 +797,12 @@
     signOverlay.innerHTML = '<div class="rl-sign-box" role="dialog" aria-label="Sign the release">'
       + '<div class="rl-sign-icon">✍</div>'
       + `<h2>Prod release waiting for your signature</h2>`
-      + `<div class="rl-sign-sub">${by.length ? by.map(x => '@' + esc(x)).join(', ') + ' released' : 'A release is waiting'} — prod merges only once two approvers sign. Your approval is the second signature.</div>`
+      + `<div class="rl-sign-sub">${by.length ? by.map(x => '@' + esc(x)).join(', ') + ' released' : 'A release is waiting'} — prod merges only once two approvers sign. One signature covers the whole release: ${esc(t[0].count)}/${esc(t[0].need)} signed so far.</div>`
       + '<div class="rl-sign-list">' + t.map(x => `<div class="rl-sign-row"><b>${esc(x.label)}</b>`
         + `<a data-url="${esc(x.url)}">#${esc(x.number)}</a>`
-        + `<span>${x.commits ? esc(x.commits) + ' commit' + (x.commits === 1 ? '' : 's') + ' · ' : ''}${esc(x.count)}/${esc(x.need)} signed</span></div>`).join('') + '</div>'
+        + `<span>${x.commits ? esc(x.commits) + ' commit' + (x.commits === 1 ? '' : 's') + '' : ''}</span></div>`).join('') + '</div>'
       + '<div class="rl-sign-acts"><button data-sign="later">Later</button><button data-sign="review">Review first</button>'
-      + `<button class="go" data-sign="now">✍ Sign now (${t.length})</button></div></div>`;
+      + `<button class="go" data-sign="now">✍ Sign the release</button></div></div>`;
     signOverlay.classList.add('open');
   }
 

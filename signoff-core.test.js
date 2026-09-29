@@ -21,6 +21,17 @@ const rev = (login, state, t, sha = 'h2', body = '') => ({ user: { login }, stat
 }
 // an approval on an older commit doesn't count; a later "changes requested" withdraws it
 assert.strictEqual(signoff(pr('alice'), [rev('bob', 'APPROVED', 1, 'h1')], team).ok, false);
+assert.deepStrictEqual(signoff(pr('alice'), [rev('bob', 'APPROVED', 1, 'h1')], team).stale, ['bob']);
+{ // the release is signed as one: bob counts only once he signed every PR at its current commit
+  const { releaseSignoff } = require('./signoff-core');
+  const a = { label: 'a', signoff: signoff(pr('alice'), [rev('bob', 'APPROVED', 1)], team) };
+  const b = { label: 'b', signoff: signoff(pr('alice'), [rev('bob', 'APPROVED', 1, 'h1')], team) };
+  const c = { label: 'c', signoff: signoff(pr('alice'), [], team) };
+  const r = releaseSignoff([a, b, c]);
+  assert.deepStrictEqual([r.count, r.ok, r.signers.map(x => x.login)], [1, false, ['alice']]);
+  assert.deepStrictEqual(r.gaps, [{ login: 'bob', missing: [{ label: 'b', older: true }, { label: 'c', older: false }] }]);
+  assert.strictEqual(releaseSignoff([a]).ok, true);
+}
 assert.strictEqual(signoff(pr('alice'), [rev('bob', 'APPROVED', 1), rev('bob', 'CHANGES_REQUESTED', 2)], team).ok, false);
 // a COMMENTED review after an approval doesn't withdraw it
 assert.strictEqual(signoff(pr('alice'), [rev('bob', 'APPROVED', 1), rev('bob', 'COMMENTED', 2)], team).ok, true);
