@@ -335,7 +335,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const listErr = apiErr(list), missing = !!listErr && /404|Not Found/i.test(listErr);
     const members = Array.isArray(list.data) ? list.data.map(u => ({ login: u.login, avatar: u.avatar_url })) : [];
     push({ approvers: {
-      org, team: APPROVERS_TEAM, exists: !listErr, error: missing ? null : listErr, members,
+      org, team: APPROVERS_TEAM, exists: !listErr, error: missing ? null : listErr, members, loadedAt: Date.now(),
       me: who.github, meClickup: who.clickup,
       isApprover: !!who.github && members.some(m => m.login.toLowerCase() === who.github.toLowerCase()),
       canEdit: !apiErr(mine) && !!(mine.data && mine.data.role === 'maintainer' && mine.data.state === 'active'),
@@ -480,9 +480,16 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
 
   // Sign: approve every open prod release PR waiting on me — from the last run here, and any found
   // by checkToSign (a release someone else opened).
+  // Signing shows at once (state.signing → the buttons say "Signing…"); the team list is reused when
+  // it's fresh — re-reading it cost two GitHub calls before anything happened.
   async function signRelease() {
+    if (state.signing) return;
+    push({ signing: true });
+    try { await signNow(); } finally { push({ signing: false }); }
+  }
+  async function signNow() {
     const who = await whoAmI();
-    await loadApprovers();
+    if (!state.approvers || !state.approvers.loadedAt || Date.now() - state.approvers.loadedAt > 5 * 60 * 1000) await loadApprovers();
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can sign' });
     if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
     const run = state.releaseRun;

@@ -428,6 +428,11 @@
   // The one Release all button (release results + History): ready = what merges now (any env);
   // waiting = prod PRs held back until the release is signed 2/2. Nothing ready → locked, saying who still has to sign what.
   // signoff: { count, need, signers: [login], gaps: [{ login, missing: [{ label, older }] }] }
+  // A Sign button; "Signing…" and not clickable while main is signing (s.signing)
+  function signBtn(s, cls, label, title) {
+    return s && s.signing ? `<button class="${cls} locked" aria-disabled="true">✍ Signing…</button>`
+      : `<button class="${cls}" data-act="relSign"${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
+  }
   let armed = null, armTimer = null;
   const ARM_MS = 6000;
   function arm(key) {
@@ -519,7 +524,7 @@
       if (m.flags && m.flags.missing && m.flags.missing.length) h += `<div class="rl-hist-man bad">Flags to seed: ${esc(m.flags.missing.join(', '))}</div>`;
       // actions
       const acts = [];
-      if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push('<button class="rl-hist-btn go" data-act="relSign">✍ Sign</button>');
+      if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push(signBtn(s, 'rl-hist-btn go', '✍ Sign'));
       if (pending && a.isApprover) acts.push(releaseAllBtn(s, {
         ready: signers.length >= 2 ? openRepos : [],
         waiting: signers.length >= 2 ? [] : openRepos,
@@ -657,7 +662,7 @@
     const unsignedProd = relOk ? [] : open.filter(r => r.env === 'prod');
     if (run.signoff) h += `<div class="rl-rr-flag${run.signoff.ok ? '' : ' bad'}">✍ Prod release signed ${run.signoff.count}/${run.signoff.need}${run.signoff.count ? ' · ' + run.signoff.signers.map(x => '@' + esc(x.login)).join(', ') : ''}</div>`;
     h += releaseAllHtml(s) + '<div class="rl-rel-actions">'
-      + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign the release</button>` : '')
+      + (toSign ? signBtn(s, 'rl-rr-sign', '✍ Sign the release', `Approve every prod release PR as @${a.me}: your signature`) : '')
       + releaseAllBtn(s, { ready: readyRows, waiting: unsignedProd, signoff: run.signoff && { ...run.signoff, signers: run.signoff.signers.map(x => x.login) },
         attrs: 'class="rl-rr-merge" data-act="relMerge"', lockedCls: 'rl-rr-merge', armKey: 'run' })
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
@@ -684,7 +689,7 @@
     return '<div class="rl-tosign"><div class="rl-tosign-head">✍ Waiting for your signature</div>'
       + t.map(x => `<div class="rl-tosign-row"><b>${esc(x.label)}</b>${link(x.url, '#' + x.number)}</div>`).join('')
       + `<div class="rl-tosign-by">${by ? 'Opened by ' + by + '. ' : ''}One signature covers the whole release: ${t[0].count}/${t[0].need} signed so far.</div>`
-      + `<button class="rl-rr-sign" data-act="relSign">✍ Sign the release</button></div>`;
+      + signBtn(s, 'rl-rr-sign', '✍ Sign the release') + '</div>';
   }
 
   function releasePickerHtml(s) {
