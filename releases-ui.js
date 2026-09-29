@@ -483,7 +483,10 @@
       // actions
       const acts = [];
       if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push('<button class="rl-hist-btn go" data-act="relSign">✍ Sign</button>');
-      if (pending && a.isApprover && !(s.releaseAll && s.releaseAll.running)) acts.push(`<button class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}" title="Merge in release order (services, then iframes, then frontend), waiting for each wave's deploys; stops on a failed deploy">🚀 Release all</button>`);
+      if (pending && a.isApprover && !(s.releaseAll && s.releaseAll.running) && signers.length < 2) acts.push(`<button class="rl-hist-btn locked" aria-disabled="true" title="${esc(`Prod merges once 2 approvers sign the release: ${signers.length}/2${signers.length ? ' (' + signers.map(l => '@' + l).join(', ') + ')' : ''}`
+        + anyone.filter(l => !signers.includes(l)).map(l => `
+@${l} still to sign: ${openRepos.filter(r => !(r.signers || []).includes(l)).map(r => r.label).join(', ')}`).join(''))}">🔒 Release all · needs signatures</button>`);
+      else if (pending && a.isApprover && !(s.releaseAll && s.releaseAll.running)) acts.push(`<button class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}" title="Merge in release order (services, then iframes, then frontend), waiting for each wave's deploys; stops on a failed deploy">🚀 Release all</button>`);
       if (!pending && m.status !== 'abandoned' && m.repos.some(r => r.mergeSha) && a.isApprover) {
         acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}">↩ Roll back to this</button>`);
       }
