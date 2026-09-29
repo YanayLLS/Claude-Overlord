@@ -492,7 +492,7 @@
         const dep = r.deploy ? (r.deploy.state === 'success' ? '<span class="ok">deployed</span>' : r.deploy.state === 'failure' ? '<span class="bad">deploy failed</span>' : r.mergeSha ? 'deploying…' : '') : '✋ by hand';
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
-          + `<span class="rl-hist-state">${r.closed && !r.mergeSha ? 'closed' : need ? (() => { const miss = anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-state">${r.closed && !r.mergeSha ? 'closed' : need ? (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
       }
       h += '</div>';
       if (m.manual && m.manual.length) h += `<div class="rl-hist-man">Hand-deployed at the time: ${m.manual.map(x => esc(x.label) + (x.live && x.live.sha ? ' ' + shortSha(x.live.sha) : '')).join(' · ')}</div>`;
@@ -576,7 +576,7 @@
       if (r.status === 'nothing') bits.push('<span class="rl-rr-chip">nothing to release</span>');
       if (r.backMerge && r.backMerge.url) bits.push(`<span class="rl-rr-chip${r.backMerge.conflict ? ' bad' : ' warn'}" title="Back-merge ${esc(r.target)} → ${esc(r.source)}: merge it first">back-merge ${prLink(r.backMerge, '#' + r.backMerge.number)}${r.backMerge.conflict ? ' conflicts' : ' first'}</span>`);
       // the release is signed as one (count in the footer); a row only says who it's still missing
-      if (r.env === 'prod' && run.signoff && !r.merged && !r.closed) {
+      if (r.env === 'prod' && run.signoff && !run.signoff.ok && !r.merged && !r.closed) {
         const gap = run.signoff.gaps.map(g => [g.login, g.missing.find(x => x.label === r.label)]).filter(([, x]) => x);
         if (gap.length) bits.push(`<span class="rl-rr-chip warn" title="Their signature on the release doesn't cover this PR yet">✍ ${gap.map(([l, x]) => '@' + esc(l) + (x.older ? ' (new commits)' : '')).join(', ')} to sign</span>`);
       }
