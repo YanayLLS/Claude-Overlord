@@ -121,6 +121,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-group-header:hover { background:var(--bg2,#1e1e2e); }
 .pr-group-header .pr-count { color:var(--dim); font-weight:400; }
 .pr-row { position:relative; padding:8px 12px 8px 20px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
+.pr-row.pr-leaving { overflow:hidden; pointer-events:none; }
+.pr-row.pr-leaving .pr-actions { display:none !important; }
+.pr-stamp { position:absolute; right:14px; top:50%; font-size:12px; font-weight:800; letter-spacing:.3px; padding:2px 8px; border:2px solid currentColor; border-radius:6px; transform:translateY(-50%) rotate(-6deg); animation:pr-stamp-in .28s cubic-bezier(.3,1.6,.5,1) both; }
+@keyframes pr-stamp-in { from { opacity:0; transform:translateY(-50%) rotate(-6deg) scale(1.8); } }
 .pr-actions { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:none; gap:6px; align-items:center; }
 .pr-row:hover .pr-actions { display:flex; }
 .pr-approve { font-family:inherit; font-size:11px; font-weight:600; padding:3px 9px; background:#a6e3a1; color:#11111b; border:none; border-radius:4px; cursor:pointer; }
@@ -5597,8 +5601,27 @@ function prOptimistic(url, action) {
   refreshOpenDropdown('pr-dropdown', prDropdownHtml);
   if (worldView) scheduleRender();
 }
-function approvePr(url) { prOptimistic(url, 'approve'); api.send({ type: 'approvePr', url }); }
-function mergePr(url) { prOptimistic(url, 'merge'); api.send({ type: 'mergePr', url }); }
+// Row send-off: flash the action's colour, stamp what happened, slide out and collapse; then the list updates.
+// Acts on the row last clicked in the PR menu, so any action gets it without passing the row around.
+let prClickedRow = null;
+document.getElementById('pr-dropdown').addEventListener('pointerdown', e => { prClickedRow = { el: e.target.closest('.pr-row'), at: Date.now() }; }, true);
+function prAnimateOut(label, color) {
+  const row = prClickedRow && Date.now() - prClickedRow.at < 30000 && prClickedRow.el;
+  prClickedRow = null;
+  if (!row || !row.isConnected || matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+  row.classList.add('pr-leaving');
+  row.insertAdjacentHTML('beforeend', `<span class="pr-stamp" style="color:${color}">${label}</span>`);
+  const h = row.offsetHeight + 'px', tint = `color-mix(in srgb, ${color} 20%, transparent)`;
+  const anim = row.animate([
+    { background: 'transparent', height: h, paddingTop: '8px', paddingBottom: '8px', opacity: 1, transform: 'none' },
+    { background: tint, height: h, paddingTop: '8px', paddingBottom: '8px', opacity: 1, transform: 'none', offset: .5 },
+    { background: tint, height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0, transform: 'translateX(48px)' },
+  ], { duration: 700, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
+  // A hidden/occluded window draws no frames, so .finished can stall: the action must land regardless.
+  return Promise.race([anim.finished.catch(() => {}), new Promise(r => setTimeout(r, 800))]);
+}
+function approvePr(url) { api.send({ type: 'approvePr', url }); prAnimateOut('✓ Approved', 'var(--green)').then(() => prOptimistic(url, 'approve')); }
+function mergePr(url) { api.send({ type: 'mergePr', url }); prAnimateOut('⤵ Merged', 'var(--purple)').then(() => prOptimistic(url, 'merge')); }
 
 function updatePrBranch(url, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '⤴ Updating…'; }
