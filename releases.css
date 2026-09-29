@@ -429,3 +429,6 @@
 .rl-manual-row .rl-env { margin-left:0; font-size:10.5px; }
 /* Release all armed: the second click merges to prod */
 .rl-rr-merge.armed, .rl-hist-btn.armed { background:rgba(251,191,36,.18); border-color:rgba(251,191,36,.7); color:var(--yellow, #fbbf24); }
+.rl-sign-rel { font-size:10.5px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--dim); text-align:left; margin:0 0 6px 2px; }
+.rl-sign-row.done { opacity:.6; }
+.rl-sign-row.done span { color:var(--green); }

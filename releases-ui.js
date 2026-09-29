@@ -842,9 +842,11 @@
       + '<div class="rl-sign-icon">✍</div>'
       + `<h2>Prod release waiting for your signature</h2>`
       + `<div class="rl-sign-sub">${by.length ? by.map(x => '@' + esc(x)).join(', ') + ' released' : 'A release is waiting'} — prod merges only once two approvers sign. One signature covers the whole release: ${esc(t[0].count)}/${esc(t[0].need)} signed so far.</div>`
-      + '<div class="rl-sign-list">' + t.map(x => `<div class="rl-sign-row"><b>${esc(x.label)}</b>`
-        + `<a data-url="${esc(x.url)}">#${esc(x.number)}</a>`
-        + `<span>${x.commits ? esc(x.commits) + ' commit' + (x.commits === 1 ? '' : 's') + '' : ''}</span></div>`).join('') + '</div>'
+      // the release, whole: every repo in it; ✓ where my signature already covers it
+      + ((state.toSignReleases && state.toSignReleases.length) ? state.toSignReleases.map(r => (state.toSignReleases.length > 1 || /^\d/.test(r.id) ? `<div class="rl-sign-rel">Release ${esc(r.id)}</div>` : '')
+        + '<div class="rl-sign-list">' + r.repos.map(x => `<div class="rl-sign-row${x.mine ? ' done' : ''}"><b>${esc(x.label)}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a>`
+          + `<span>${x.mine ? '✓ signed' : x.older ? 'new commits since you signed' : 'needs your signature'}</span></div>`).join('') + '</div>').join('')
+        : '<div class="rl-sign-list">' + t.map(x => `<div class="rl-sign-row"><b>${esc(x.label)}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a></div>`).join('') + '</div>')
       + '<div class="rl-sign-acts"><button data-sign="later">Later</button><button data-sign="review">Review first</button>'
       + `<button class="go" data-sign="now">✍ Sign the release</button></div></div>`;
     signOverlay.classList.add('open');

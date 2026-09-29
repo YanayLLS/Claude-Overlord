@@ -26,7 +26,7 @@ const SIGN_POLL_MS = 30 * 1000;         // while a prod release waits for its 2n
 const SIGN_WATCH_MS = 24 * 3600 * 1000; // …for up to a day
 const ROLLBACK_HEAD = /^rollback\/[\d-]+$/; // a Rollback's PR head (release-history.js)
 const TO_SIGN_POLL_MS = 60 * 1000;      // an approver with a release waiting on them re-checks this often
-const SIGN_PING_MS = 10 * 1000;         // approvers look for a new review request / release-manifests change this often (1 GraphQL call)
+const SIGN_PING_MS = 5 * 1000;          // approvers look for a new review request / release-manifests change this often (1 GraphQL call)
 const PENDING_SHOWN = 10;
 const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
@@ -439,7 +439,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       for (const pr of prs) {
         const s = await signoffOf(p.repo, pr.number);
         if (s.error) continue;
-        all.push({ label: p.label, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s });
+        const meL = String(who.github).toLowerCase();
+        all.push({ label: p.label, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s, number: pr.number, url: pr.html_url,
+          mine: hasSigned(s, who.github), older: (s.stale || []).some(l => l.toLowerCase() === meL) });
         if (hasSigned(s, who.github)) continue; // (a PR I opened counts until new commits land on it)
         found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url, head: s.pr.head.sha, commits: s.pr.commits || null, author: s.pr.user.login,
           release: all[all.length - 1].release, signers: s.signers.map(x => x.login), count: s.count, need: s.need });
@@ -451,7 +453,10 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       Object.assign(f, { signers: rs.signers.map(x => x.login), count: rs.count });
     }
     found.sort((a, b) => a.label.localeCompare(b.label));
-    push({ toSign: found });
+    // the prompt shows each release whole: every repo in it, and which ones still need me
+    const toSignReleases = [...new Set(found.map(f => f.release))].map(id => ({ id, repos: all.filter(x => x.release === id)
+      .map(x => ({ label: x.label, number: x.number, url: x.url, mine: x.mine, older: x.older })).sort((a, b) => a.label.localeCompare(b.label)) }));
+    push({ toSign: found, toSignReleases });
     const nkey = (f) => f.repo + '#' + f.number + '@' + f.head; // a new commit = sign again = tell again
     const fresh = found.filter(f => !notifiedToSign.has(nkey(f)));
     if (fresh.length && notify) {
@@ -496,20 +501,32 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const targets = new Map();
     for (const r of ((run && run.rows) || [])) if (r.env === 'prod' && r.pr && !r.merged && !r.closed) targets.set(r.repo + '#' + r.pr.number, { repo: r.repo, label: r.label, number: r.pr.number });
     for (const t of (state.toSign || [])) targets.set(t.repo + '#' + t.number, { repo: t.repo, label: t.label, number: t.number });
-    // every PR at once: one signature for the whole release
+    // every PR at once: one signature for the whole release. Each one that lands shows right away:
+    // the History item gets me as its signer, the prompt ticks the repo, it leaves my to-sign list
     const done = [], failed = [];
+    const meL = who.github.toLowerCase();
+    const signed = (t) => {
+      done.push(t);
+      const h = state.history;
+      const items = h && h.items && h.items.map(m => !m.repos.some(r => r.repo === t.repo && r.pr.number === t.number) ? m
+        : { ...m, repos: m.repos.map(r => r.repo === t.repo && r.pr.number === t.number && !(r.signers || []).some(l => l.toLowerCase() === meL)
+          ? { ...r, signers: (r.signers || []).concat(who.github) } : r) });
+      push({ ...(items ? { history: { ...h, items } } : {}),
+        toSign: (state.toSign || []).filter(x => !(x.repo === t.repo && x.number === t.number)),
+        toSignReleases: (state.toSignReleases || []).map(rel => ({ ...rel, repos: rel.repos.map(x => x.number === t.number && x.label === t.label ? { ...x, mine: true, older: false } : x) })) });
+    };
     await Promise.all([...targets.values()].map(async (t) => {
       const s = await signoffOf(t.repo, t.number);
       if (s.error) return failed.push(`${t.label} #${t.number}: ${s.error}`);
-      if (hasSigned(s, who.github)) return done.push(t);
+      if (hasSigned(s, who.github)) return signed(t);
       if (s.pr.user.login.toLowerCase() === who.github.toLowerCase()) { // mine: re-stamp my opener line on the new head
         if (!(await stampOpener(t.repo, t.number, who))) return failed.push(`${t.label}: couldn't update my signature line`);
-        return done.push(t);
+        return signed(t);
       }
       const res = await ghJson(['api', '-X', 'POST', `repos/${t.repo}/pulls/${t.number}/reviews`, '--input',
         writeTmp({ event: 'APPROVE', commit_id: s.pr.head.sha, body: reviewMark(who.clickup) })]);
       if (apiErr(res)) return failed.push(`${t.label}: ${apiErr(res)}`);
-      done.push(t);
+      signed(t);
       const i = run ? run.rows.findIndex(r => r.repo === t.repo && r.pr && r.pr.number === t.number) : -1;
       if (i >= 0) {
         const r = run.rows[i], so = r.signoff || { signers: [], need: 2 };
