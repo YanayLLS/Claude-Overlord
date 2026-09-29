@@ -15,7 +15,8 @@ const { releaseTargets, releasePlan } = require('./releases-core');
 const { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
-const DEPLOYING_MS = 10 * 1000;       // re-read deploy runs this often while one is in flight
+const DEPLOYING_MS = 10 * 1000;       // re-read deploy runs this often while one is in flight…
+const DEPLOY_IDLE_MS = 60 * 1000;     // …and this often otherwise, so a new deploy shows within a minute
 const RUN_TTL_MS = 24 * 3600 * 1000;   // release results older than this are dropped on load
 const RECHECK_MS = 60 * 1000;           // re-read release PRs' checks this often…
 const RECHECK_FOR_MS = 30 * 60 * 1000;  // …for this long after a run, until they settle
@@ -125,9 +126,10 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // Last run of each env's deploy workflow on its branch: a CI tag whose pipeline
   // has been red for a year shouldn't read the same as a green one. Query args go
   // through -f, not the URL, because ghJson runs through a shell on Windows ("&").
-  async function fetchDeploys(cfg) {
+  async function fetchDeploys(cfg, prev) {
     const out = {};
     await Promise.all(requestsFor(cfg).deploys.map(async (d) => {
+      const key = `${d.repo}|${d.env}`;
       const res = await ghJson(['api', '-X', 'GET', `repos/${d.repo}/actions/workflows/${d.file}/runs`, '-f', `branch=${d.branch}`, '-f', `per_page=${RUNS_SHOWN}`]);
       const all = (res.data && res.data.workflow_runs) || [], run = all[0];
       // finished runs for the Timeline: when each deploy went out, who ran it, did it work
@@ -135,7 +137,6 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         sha: x.head_sha, date: x.updated_at, state: x.conclusion, url: x.html_url, actor: (x.actor && x.actor.login) || '',
         title: commitTitle(String((x.head_commit && x.head_commit.message) || x.display_title || '').split('\n')[0], String((x.head_commit && x.head_commit.message) || '').split('\n').slice(2).join('\n')),
       }));
-      const key = `${d.repo}|${d.env}`;
       if (res.error) { out[key] = { state: 'unknown', error: res.error }; return; }
       if (!run) { out[key] = { state: 'never', url: `https://github.com/${d.repo}/actions/workflows/${d.file}` }; return; }
       // repo/branch/name/runNumber/sha/event: what a Fix agent needs (actions-core fixRunPlan)
@@ -145,7 +146,12 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       // Red run: one more call to learn WHICH job failed — the deploy, or a follow-up after it
       // plus whether it has EVER gone green here: one that never has isn't what deploys this env
       let failed = [], everSucceeded;
-      if (run.conclusion === 'failure') {
+      // same red run as last poll: its jobs won't change, skip the two extra calls
+      const seen = prev && prev[key];
+      if (run.conclusion === 'failure' && seen && seen.url === run.html_url && seen.state !== 'running' && seen.state !== 'unknown') {
+        failed = seen.failed || [];
+        everSucceeded = seen.state === 'dead' ? false : undefined;
+      } else if (run.conclusion === 'failure') {
         const [jobs, wins] = await Promise.all([
           ghJson(['api', `repos/${d.repo}/actions/runs/${run.id}/jobs`]),
           ghJson(['api', '-X', 'GET', `repos/${d.repo}/actions/workflows/${d.file}/runs`, '-f', `branch=${d.branch}`, '-f', 'status=success', '-f', 'per_page=1']),
@@ -214,7 +220,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       for (const [k, v] of Object.entries(fetched.results.compares)) if (prev[k] && prev[k].ahead === v.ahead) v.commits = prev[k].commits;
       push({ error: null, errorCode: null, problems: null, localOnly: loaded.localOnly || null, config: cfg, results: fetched.results,
         grid: buildGrid(cfg, fetched.results), updatedAt: Date.now() });
-      const [listed, deploys, lives] = await Promise.all([fetchResults(cfg, true), fetchDeploys(cfg), fetchLives(cfg)]);
+      const [listed, deploys, lives] = await Promise.all([fetchResults(cfg, true), fetchDeploys(cfg, state.results && state.results.deploys), fetchLives(cfg)]);
       if (state.config !== cfg) return;
       const results = { commits: state.results.commits, compares: listed.error ? state.results.compares : listed.results.compares,
         history: listed.error ? state.results.history : listed.results.history, deploys, lives };
@@ -229,7 +235,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   }
 
   // A deploy just went red: say so once (the transition, not every poll), click opens the run.
-  // Then, while any deploy is in flight, re-read just the deploy runs every few seconds.
+  // Between full refreshes, re-read just the deploy runs: every few seconds while one is in
+  // flight, every minute otherwise (a red run's job details are reused, so that's 1 call per env).
   let deployTimer = null;
   function deploysChanged(prev, next) {
     for (const k of newDeployFailures(prev, next)) {
@@ -237,18 +244,20 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const why = (d.failed || []).map(f => f.job + (f.step ? ' › ' + f.step : '')).join('; ');
       if (notify) notify(`❌ Deploy failed · ${repo.split('/')[1]} · ${env}`, why || d.name || '', d.url);
     }
+    armDeploys(Object.values(next || {}).some(d => d.state === 'running') ? DEPLOYING_MS : DEPLOY_IDLE_MS);
+  }
+  function armDeploys(ms) {
     clearTimeout(deployTimer);
-    if (!Object.values(next || {}).some(d => d.state === 'running')) return;
     deployTimer = setTimeout(async () => {
       const cfg = state.config;
-      if (!cfg || inFlight) return; // a full refresh is on it and calls back here
-      const prevDeploys = state.results.deploys, deploys = await fetchDeploys(cfg);
-      if (state.config !== cfg || inFlight) return;
+      if (!cfg || inFlight || !state.results) return armDeploys(DEPLOY_IDLE_MS); // a full refresh is on it
+      const prevDeploys = state.results.deploys, deploys = await fetchDeploys(cfg, prevDeploys);
+      if (state.config !== cfg || inFlight) return armDeploys(DEPLOY_IDLE_MS);
       const results = { ...state.results, deploys };
-      push({ results, grid: buildGrid(cfg, results), updatedAt: Date.now() });
+      push({ results, grid: buildGrid(cfg, results) }); // not updatedAt: only deploys are fresh, opening still does a full refresh
       persist();
       deploysChanged(prevDeploys, deploys);
-    }, DEPLOYING_MS);
+    }, ms);
     deployTimer.unref?.();
   }
 
