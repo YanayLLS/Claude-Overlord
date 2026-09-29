@@ -2839,7 +2839,12 @@ async function sendUsageCost(usage) {
 // Usage readings over time, per account (one login's limits say nothing about another's), for the meter charts.
 const USAGE_HISTORY_FILE = path.join(STATE_DIR, 'usage-history.json');
 let usageHistory = null; // { [account]: [{ t, h, w, 'm:<model>' }] }, loaded on first use
-function usageAccountKey() { return getAccountEmail() || loadAccounts().activeLabel || 'default'; }
+// The active saved account first: a switch only swaps the credentials file, and `claude auth status`
+// keeps reporting the previous login's email (it reads ~/.claude.json), which mixed two accounts' history.
+function usageAccountKey() {
+  const data = loadAccounts(), active = data.accounts.find(a => a.label === data.activeLabel);
+  return active?.email || active?.label || getAccountEmail() || 'default';
+}
 function loadUsageHistory() {
   if (!usageHistory) { try { usageHistory = JSON.parse(fs.readFileSync(USAGE_HISTORY_FILE, 'utf8')) || {}; } catch { usageHistory = {}; } }
   return usageHistory;

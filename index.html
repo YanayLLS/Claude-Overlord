@@ -4046,6 +4046,7 @@ function handleAgentMsg(msg) {
 // ── Account switching ─────────────────────────────────
 let _accountInfo = null;
 function handleAccountInfo(msg) {
+  if (_accountInfo && _accountInfo.activeLabel !== msg.activeLabel) { usageHist = []; usageHistAll = false; } // another account's chart
   _accountInfo = msg;
   const btn = document.getElementById('account-btn');
   if (msg.hasCredentials) {
