@@ -268,7 +268,14 @@ function failedDeploys(grid) {
   return out;
 }
 
-const api = { parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
+// Deploys (key → { state }) that just turned red: failing now, and seen green/running last time.
+// No prior state, or a failed fetch, is not a transition — nothing to announce.
+function newDeployFailures(prev, next) {
+  return Object.keys(next || {}).filter(k => next[k].state === 'failure'
+    && prev && prev[k] && !['failure', 'unknown'].includes(prev[k].state));
+}
+
+const api = { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

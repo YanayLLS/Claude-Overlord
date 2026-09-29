@@ -7,21 +7,26 @@ const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
 const { runRelease, prHealth, rowStatus } = require('./release-run');
+const { signoff, reviewMark, hasSigned } = require('./signoff-core');
+const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
 const { releaseTargets, releasePlan } = require('./releases-core');
-const { parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
+const { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
+const DEPLOYING_MS = 10 * 1000;       // re-read deploy runs this often while one is in flight
 const RUN_TTL_MS = 24 * 3600 * 1000;   // release results older than this are dropped on load
 const RECHECK_MS = 60 * 1000;           // re-read release PRs' checks this often…
 const RECHECK_FOR_MS = 30 * 60 * 1000;  // …for this long after a run, until they settle
+const SIGN_POLL_MS = 30 * 1000;         // while a prod release waits for its 2nd signature, look this often…
+const SIGN_WATCH_MS = 24 * 3600 * 1000; // …for up to a day
 const PENDING_SHOWN = 10;
 const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
-module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal, startAgent }) {
+module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal, startAgent, whoami, notify, fixRun }) {
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
@@ -133,7 +138,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const key = `${d.repo}|${d.env}`;
       if (res.error) { out[key] = { state: 'unknown', error: res.error }; return; }
       if (!run) { out[key] = { state: 'never', url: `https://github.com/${d.repo}/actions/workflows/${d.file}` }; return; }
-      const base = { url: run.html_url, date: run.updated_at || run.created_at, runs };
+      // repo/branch/name/runNumber/sha/event: what a Fix agent needs (actions-core fixRunPlan)
+      const base = { url: run.html_url, date: run.updated_at || run.created_at, runs, repo: d.repo, branch: d.branch, name: run.name || d.file,
+        runNumber: run.run_number || 0, sha: run.head_sha || '', event: run.event || '', actor: (run.actor && run.actor.login) || '' };
       if (run.status !== 'completed') { out[key] = { ...base, state: 'running' }; return; }
       // Red run: one more call to learn WHICH job failed — the deploy, or a follow-up after it
       // plus whether it has EVER gone green here: one that never has isn't what deploys this env
@@ -211,12 +218,38 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       if (state.config !== cfg) return;
       const results = { commits: state.results.commits, compares: listed.error ? state.results.compares : listed.results.compares,
         history: listed.error ? state.results.history : listed.results.history, deploys, lives };
+      const prevDeploys = state.results.deploys;
       push({ results, grid: buildGrid(cfg, results) });
+      deploysChanged(prevDeploys, deploys);
     } finally {
       inFlight = false;
       push({ loading: false });
       persist();
     }
+  }
+
+  // A deploy just went red: say so once (the transition, not every poll), click opens the run.
+  // Then, while any deploy is in flight, re-read just the deploy runs every few seconds.
+  let deployTimer = null;
+  function deploysChanged(prev, next) {
+    for (const k of newDeployFailures(prev, next)) {
+      const d = next[k], [repo, env] = k.split('|');
+      const why = (d.failed || []).map(f => f.job + (f.step ? ' › ' + f.step : '')).join('; ');
+      if (notify) notify(`❌ Deploy failed · ${repo.split('/')[1]} · ${env}`, why || d.name || '', d.url);
+    }
+    clearTimeout(deployTimer);
+    if (!Object.values(next || {}).some(d => d.state === 'running')) return;
+    deployTimer = setTimeout(async () => {
+      const cfg = state.config;
+      if (!cfg || inFlight) return; // a full refresh is on it and calls back here
+      const prevDeploys = state.results.deploys, deploys = await fetchDeploys(cfg);
+      if (state.config !== cfg || inFlight) return;
+      const results = { ...state.results, deploys };
+      push({ results, grid: buildGrid(cfg, results), updatedAt: Date.now() });
+      persist();
+      deploysChanged(prevDeploys, deploys);
+    }, DEPLOYING_MS);
+    deployTimer.unref?.();
   }
 
   // Polls even while the modal is closed: the footer badge says when a deploy is failing.
@@ -227,6 +260,121 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const r = state.releaseRun;
     if (r && !r.running && Date.now() - r.startedAt < RECHECK_FOR_MS) recheck(r);
   }, 20000).unref?.(); // unref: never the reason a process stays alive
+
+  // ── Prod sign-off (SOC2): the approvers are the `release-approvers` team of the config repo's
+  // org. Only its members may release or sign; Overlord merges a prod release PR only once two
+  // of them have signed it (signoff-core). Editing the team is GitHub's call (team maintainers).
+  // gh hands a failed call's JSON body back as data ({ message, status: "404" }): that's an error too
+  const apiErr = (r) => r.error || (r.data && !Array.isArray(r.data) && r.data.message && r.data.status ? `${r.data.message} (${r.data.status})` : null);
+  const approversOrg = () => { const src = parseSource(state.source); return src && src.kind === 'gh' ? src.repo.split('/')[0] : null; };
+  let me = null; // { github, clickup }
+  async function whoAmI() { if (!me || !me.github) me = await whoami().catch(() => ({ github: null, clickup: null })); return me; }
+
+  async function loadApprovers() {
+    const org = approversOrg();
+    if (!org) return push({ approvers: { error: 'Approvers need a GitHub config source (owner/repo:path)' } });
+    const who = await whoAmI();
+    const [list, mine] = await Promise.all([
+      ghJson(['api', '-X', 'GET', `orgs/${org}/teams/${APPROVERS_TEAM}/members`, '-f', 'per_page=100']),
+      who.github ? ghJson(['api', `orgs/${org}/teams/${APPROVERS_TEAM}/memberships/${who.github}`]) : Promise.resolve({ error: 'no gh login' }),
+    ]);
+    const listErr = apiErr(list), missing = !!listErr && /404|Not Found/i.test(listErr);
+    const members = Array.isArray(list.data) ? list.data.map(u => ({ login: u.login, avatar: u.avatar_url })) : [];
+    push({ approvers: {
+      org, team: APPROVERS_TEAM, exists: !listErr, error: missing ? null : listErr, members,
+      me: who.github, meClickup: who.clickup,
+      isApprover: !!who.github && members.some(m => m.login.toLowerCase() === who.github.toLowerCase()),
+      canEdit: !apiErr(mine) && !!(mine.data && mine.data.role === 'maintainer' && mine.data.state === 'active'),
+    } });
+  }
+  const memberLogins = () => ((state.approvers && state.approvers.members) || []).map(m => m.login);
+
+  async function approversEdit(kind, login) {
+    const org = approversOrg();
+    if (!org) return;
+    let r;
+    if (kind === 'create') r = await ghJson(['api', '-X', 'POST', `orgs/${org}/teams`, '-f', `name=${APPROVERS_TEAM}`, '-f', 'privacy=closed',
+      '-f', 'description=Approve prod releases: Overlord needs two of these people to sign before a prod release PR merges']);
+    else if (!/^[A-Za-z0-9-]{1,39}$/.test(String(login || ''))) return send({ type: 'toast', text: 'Not a GitHub username' });
+    else if (kind === 'add') r = await ghJson(['api', '-X', 'PUT', `orgs/${org}/teams/${APPROVERS_TEAM}/memberships/${login}`, '-f', 'role=member']);
+    else r = await ghJson(['api', '-X', 'DELETE', `orgs/${org}/teams/${APPROVERS_TEAM}/memberships/${login}`]);
+    // a DELETE answers 204 with no body: ghJson reports that as an unparsable reply, not a failure
+    const e = apiErr(r);
+    if (e && !(kind === 'remove' && /Unexpected end|JSON/i.test(e))) send({ type: 'toast', text: `Approvers: ${e}` });
+    await loadApprovers();
+  }
+
+  // Fresh sign-off of one PR (always re-read — this is what gates a merge)
+  async function signoffOf(repo, n) {
+    const [pr, rv] = await Promise.all([ghJson(['api', `repos/${repo}/pulls/${n}`]),
+      ghJson(['api', '-X', 'GET', `repos/${repo}/pulls/${n}/reviews`, '-f', 'per_page=100'])]);
+    if (apiErr(pr) || !pr.data) return { error: apiErr(pr) || 'PR not found' };
+    return { pr: pr.data, ...signoff(pr.data, rv.data || [], memberLogins()) };
+  }
+
+  // Is this PR a prod release step of the config (target = a prod branch, head = its promote source)?
+  function prodStep(repo, base, head) {
+    const cfg = state.config;
+    if (!cfg) return null;
+    return releasePlan(cfg, ['prod']).prs.find(p => p.repo.toLowerCase() === repo.toLowerCase() && p.target === base && p.source === head) || null;
+  }
+
+  // The gate every Overlord merge goes through: prod release PRs need two approvers' signatures.
+  async function mergeGate(url) {
+    const m = String(url).match(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/);
+    if (!m) return { ok: true };
+    const pr = await ghJson(['api', `repos/${m[1]}/pulls/${m[2]}`]);
+    if (!state.config) await refresh(); // just launched: never let a merge through before the config is known
+    if (!state.config) return { ok: false, reason: "release config not loaded yet: open Releases once, then retry" };
+    // fail closed: a PR we can't read might be a prod release PR
+    if (!pr.data || !pr.data.base || !pr.data.head) return { ok: false, reason: "couldn't read the PR to verify its release sign-off: " + (pr.error || (pr.data && pr.data.message) || "no reply") };
+    if (!prodStep(m[1], pr.data.base.ref, pr.data.head.ref)) return { ok: true }; // not a prod release PR
+    if (!state.approvers || !state.approvers.exists) await loadApprovers();
+    const s = await signoffOf(m[1], m[2]);
+    if (s.error) return { ok: false, reason: s.error };
+    return s.ok ? { ok: true, signoff: s } : { ok: false, reason: `prod release needs ${s.need} approvers' signatures (has ${s.count}${s.count ? ': ' + s.signers.map(x => '@' + x.login).join(', ') : ''})` };
+  }
+
+  // Sign: approve every open prod release PR of the last run that I haven't signed yet.
+  async function signRelease() {
+    const who = await whoAmI();
+    await loadApprovers();
+    if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can sign' });
+    const run = state.releaseRun;
+    const rows = ((run && run.rows) || []).map((r, i) => [r, i]).filter(([r]) => r.env === 'prod' && r.pr && !r.merged && !r.closed);
+    let signed = 0;
+    for (const [r, i] of rows) {
+      const s = await signoffOf(r.repo, r.pr.number);
+      if (s.error || hasSigned(s, who.github)) continue;
+      if (s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue; // the opener already signed by opening it
+      const res = await ghJson(['api', '-X', 'POST', `repos/${r.repo}/pulls/${r.pr.number}/reviews`, '--input',
+        writeTmp({ event: 'APPROVE', commit_id: s.pr.head.sha, body: reviewMark(who.clickup) })]);
+      if (apiErr(res)) { send({ type: 'toast', text: `Sign ${r.label}: ${apiErr(res)}` }); continue; }
+      signed++;
+      const after = await signoffOf(r.repo, r.pr.number);
+      run.rows[i] = { ...r, signoff: after.error ? r.signoff : { signers: after.signers, count: after.count, need: after.need, ok: after.ok } };
+    }
+    push({ releaseRun: { ...run } }); persist();
+    send({ type: 'toast', text: signed ? `Signed ${signed} prod release PR${signed === 1 ? '' : 's'}` : 'Nothing left for you to sign' });
+  }
+
+  // Merge every prod/alpha release PR that's ready: signed (prod), mergeable, checks not failing.
+  async function mergeReady() {
+    const run = state.releaseRun;
+    let merged = 0;
+    for (const [r, i] of ((run && run.rows) || []).map((r, i) => [r, i])) {
+      if (!r.pr || r.merged || r.closed || r.status === 'blocked' || r.status === 'error' || r.conflict !== false) continue;
+      const gate = await mergeGate(`https://github.com/${r.repo}/pull/${r.pr.number}`);
+      if (!gate.ok) continue;
+      const res = await ghJson(['api', '-X', 'PUT', `repos/${r.repo}/pulls/${r.pr.number}/merge`, '-f', 'merge_method=merge']);
+      if (apiErr(res)) { send({ type: 'toast', text: `Merge ${r.label} ${r.env}: ${apiErr(res)}` }); continue; }
+      merged++;
+      run.rows[i] = { ...r, merged: true, status: 'merged' };
+    }
+    push({ releaseRun: { ...run } }); persist();
+    send({ type: 'toast', text: merged ? `Merged ${merged} release PR${merged === 1 ? '' : 's'}` : 'Nothing ready to merge' });
+  }
+  const writeTmp = (payload) => { const p = path.join(runsDir(), `api-${stamp()}-${Math.random().toString(36).slice(2, 7)}.json`); fs.writeFileSync(p, JSON.stringify(payload)); return p; };
 
   // The config repo's local checkout (where the frontend's flag-gap check and a Fix agent work),
   // else the home dir.
@@ -251,6 +399,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     envs = (Array.isArray(envs) ? envs : []).filter(e => targets.includes(e));
     if (!cfg || !envs.length) { send({ type: 'toast', text: 'Nothing to release: pick an environment first' }); return; }
     if (state.releaseRun && state.releaseRun.running) { send({ type: 'toast', text: 'A release is already running' }); return; }
+    await loadApprovers();
+    if (!state.approvers.isApprover) { send({ type: 'toast', text: 'Only release approvers can release — see 👥 Approvers' }); return; }
     const plan = releasePlan(cfg, envs);
     const run = { envs, startedAt: Date.now(), running: true, rows: plan.prs.map(p => ({ ...p, running: true })), manual: plan.manual, flags: null };
     push({ releaseRun: run });
@@ -260,7 +410,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     let n = 0;
     const writeJson = (payload) => { const p = path.join(runsDir(), `pr-${stamp()}-${n++}.json`); fs.writeFileSync(p, JSON.stringify(payload)); return p; };
     const onRow = (i, row) => { run.rows[i] = { ...row }; push({ releaseRun: { ...run } }); };
-    await runRelease(ghJson, plan.prs, { writeJson, onRow });
+    const members = memberLogins(), who = await whoAmI();
+    const prs = plan.prs.map(p => p.env === 'prod' ? { ...p, members, opener: { login: who.github, clickup: who.clickup } } : p);
+    await runRelease(ghJson, prs, { writeJson, onRow });
     run.flags = await flags;
     // missing prod flags: say so at the top of every open prod release PR (opened now or in an
     // earlier run), once — a PR that already carries the warning is left alone
@@ -289,21 +441,23 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   let recheckTimer = null;
   function recheck(run) {
     clearTimeout(recheckTimer);
-    const settled = (r) => !r.pr || r.merged || r.closed || (r.checks !== 'pending' && r.checks !== 'none' && r.conflict !== null);
+    const unsigned = (r) => r.env === 'prod' && r.signoff && !r.signoff.ok;
+    const settled = (r) => !r.pr || r.merged || r.closed || (r.checks !== 'pending' && r.checks !== 'none' && r.conflict !== null && !unsigned(r));
     const tick = async () => {
       if (state.releaseRun !== run && (!state.releaseRun || state.releaseRun.startedAt !== run.startedAt)) return;
       const cur = state.releaseRun;
       const open = cur.rows.map((r, i) => [r, i]).filter(([r]) => !settled(r));
-      if (!open.length || Date.now() - cur.startedAt > RECHECK_FOR_MS) return;
+      const signing = cur.rows.some(r => !r.merged && !r.closed && unsigned(r));
+      if (!open.length || Date.now() - cur.startedAt > (signing ? SIGN_WATCH_MS : RECHECK_FOR_MS)) return;
       await Promise.all(open.map(async ([r, i]) => {
-        const h = await prHealth(ghJson, r.repo, r.pr.number, r.target);
+        const h = await prHealth(ghJson, r.repo, r.pr.number, r.target, undefined, r.env === 'prod' ? memberLogins() : null);
         const row = { ...r, ...h };
         row.status = rowStatus(row);
         cur.rows[i] = row;
       }));
       push({ releaseRun: { ...cur, checkedAt: Date.now() } });
       persist();
-      recheckTimer = setTimeout(tick, RECHECK_MS);
+      recheckTimer = setTimeout(tick, signing ? SIGN_POLL_MS : RECHECK_MS);
       if (recheckTimer.unref) recheckTimer.unref();
     };
     recheckTimer = setTimeout(tick, RECHECK_MS);
@@ -335,6 +489,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     switch (msg && msg.type) {
       case 'releasesOpen':
         send({ type: 'releases', state });
+        loadApprovers().catch(() => {});
         // reopened within a minute: what's on screen is fresh enough, the timer takes it from here
         if (!state.updatedAt || Date.now() - state.updatedAt > 60000) refresh();
         return true;
@@ -342,6 +497,15 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesRefresh': refresh(); return true;
       case 'releasesRelease': release(msg.envs).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll().catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
+      case 'releasesApprovers': loadApprovers().catch(() => {}); return true;
+      case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;
+      case 'releasesSign': signRelease().catch(e => send({ type: 'toast', text: 'Sign failed: ' + (e.message || 'error') })); return true;
+      case 'releasesMerge': mergeReady().catch(e => send({ type: 'toast', text: 'Merge failed: ' + (e.message || 'error') })); return true;
+      case 'releasesFixDeploy': { // Fix on a failed deploy cell: same agent as the Actions list's Fix
+        const d = state.results && state.results.deploys && state.results.deploys[msg.key];
+        if (d && fixRun) fixRun(d).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }));
+        return true;
+      }
       case 'releasesClearRun': clearTimeout(recheckTimer); push({ releaseRun: null }); persist(); return true;
       case 'releasesSetSource': {
         const source = String(msg.source || '').trim() || DEFAULT_SOURCE;
@@ -354,5 +518,5 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     }
   }
 
-  return { handle };
+  return { handle, mergeGate };
 };

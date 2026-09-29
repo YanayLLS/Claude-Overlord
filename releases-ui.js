@@ -3,6 +3,7 @@
 // and forwards { type: 'releases' } messages to releasesUi.onMsg.
 (function () {
   let state = null, open = false, sel = null; // sel = [rowIdx, cellIdx]
+  let apprOpen = false; // 👥 approvers panel
   let relOpen = false, relSel = new Set(), relShown = false; // Release picker: open?, chosen envs, already animated in?
   let tab = 'board', tlEnv = '', toToday = false; // tab: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
 
@@ -46,7 +47,7 @@
   document.addEventListener('keydown', (e) => {
     if (!open || e.key !== 'Escape') return;
     e.stopPropagation();
-    if (relOpen) { relOpen = false; render(); } else if (sel) { sel = null; render(); } else show(false);
+    if (apprOpen) { apprOpen = false; render(); } else if (relOpen) { relOpen = false; render(); } else if (sel) { sel = null; render(); } else show(false);
   }, true);
 
   const actions = {
@@ -61,12 +62,22 @@
     deselect: () => { sel = null; render(); },
     // opens (hover or click) with every env picked; slides in once, then re-renders keep it still
     releaseMenu: () => {
-      if (relOpen) return;
+      if (relOpen || apprOpen) return;
       relOpen = true; relShown = false;
       if (state && state.config) relSel = new Set(ReleasesCore.releaseTargets(state.config));
       render();
     },
     releaseClose: () => { relOpen = false; render(); },
+    apprMenu: () => { apprOpen = !apprOpen; relOpen = false; if (apprOpen) api.send({ type: 'releasesApprovers' }); render(); },
+    apprAdd: () => {
+      const inp = modal.querySelector('#rl-appr-add');
+      const login = inp && inp.value.trim().replace(/^@/, '');
+      if (login) api.send({ type: 'releasesApproversEdit', kind: 'add', login });
+    },
+    apprRemove: (el) => { api.send({ type: 'releasesApproversEdit', kind: 'remove', login: el.dataset.login }); },
+    apprCreate: () => { api.send({ type: 'releasesApproversEdit', kind: 'create' }); },
+    relSign: () => { api.send({ type: 'releasesSign' }); },
+    relMerge: () => { api.send({ type: 'releasesMerge' }); },
     // bell: add every repo of the release config the PRs panel isn't watching yet
     relWatch: () => {
       const missing = prsUnwatched();
@@ -83,6 +94,7 @@
     },
     // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
     // one agent for every blocked row — leave the modal to land on it
+    fixDeploy: (el) => { api.send({ type: 'releasesFixDeploy', key: el.dataset.key }); show(false); },
     relFix: () => { api.send({ type: 'releasesFix' }); relOpen = false; show(false); },
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; render(); },
@@ -324,7 +336,9 @@
     let h = `<div class="rl-detail"><button class="rl-x" data-act="deselect" title="Close"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>`
       + `<h3>${esc(row.label)} · ${esc(c.env)} <span class="rl-mono">(${esc(c.branch)})</span></h3>`;
     const d = deployInfo(c);
-    h += `<div class="rl-dep-line"><i class="rl-dot ${d.cls}"></i>${d.url ? link(d.url, esc(d.text)) : esc(d.text)}</div>`;
+    const fix = c.run && (c.run.state === 'failure' || c.run.state === 'partial') && c.run.runNumber
+      ? ` <button class="rl-rr-fix" data-act="fixDeploy" data-key="${esc(row.repo + '|' + c.env)}" title="Agent reads the failed log and fixes it on a fix/ci branch">🔧 Fix</button>` : '';
+    h += `<div class="rl-dep-line"><i class="rl-dot ${d.cls}"></i>${d.url ? link(d.url, esc(d.text)) : esc(d.text)}${fix}</div>`;
     if (c.live && !c.live.error) {
       h += `<div>Live: ${link(c.live.url, `<span class="rl-mono">${esc(c.live.sha.slice(0, 7))}</span> ${esc(c.live.title)}`)}`
         + ` — ${esc(age(c.live.date))} ago <span class="rl-mono">(pinned in ${esc(c.live.from)})</span></div>`;
@@ -381,6 +395,31 @@
     return h + '</div>';
   }
 
+  // 👥 Release approvers: the GitHub team whose members may release and sign prod. Editing is up
+  // to GitHub: team maintainers can add/remove here, everyone else sees the list.
+  function approversHtml(s) {
+    const a = s.approvers || {};
+    let h = `<div class="rl-rel-pop rl-appr${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release approvers</span></div>`;
+    relShown = true;
+    h += `<div class="rl-appr-note">Prod releases need <b>2</b> of these people: whoever opens the release, plus one approval (✍ Sign). Overlord won't merge a prod release PR before that.</div>`;
+    if (!a.org) h += '<div class="rl-rr-flag">Loading…</div>';
+    else if (a.error) h += `<div class="rl-rr-flag bad">${esc(a.error)}</div>`;
+    else if (!a.exists) {
+      h += `<div class="rl-appr-note">There's no <code>${esc(a.org)}/${esc(a.team)}</code> team yet.</div>`
+        + '<div class="rl-rel-actions"><button class="go" data-act="apprCreate">Create the approvers team</button></div>';
+    } else {
+      h += '<div class="rl-appr-list">' + (a.members.length ? a.members.map(m => `<div class="rl-appr-row">`
+        + `<img src="${esc(m.avatar)}&s=48" alt=""><b>@${esc(m.login)}</b>${m.login.toLowerCase() === (a.me || '').toLowerCase() ? '<span class="rl-appr-you">you</span>' : ''}`
+        + (a.canEdit ? `<button class="rl-appr-x" data-act="apprRemove" data-login="${esc(m.login)}" title="Remove @${esc(m.login)}">×</button>` : '') + '</div>').join('')
+        : '<div class="rl-rr-flag">No approvers yet</div>') + '</div>';
+      if (a.canEdit) h += '<div class="rl-appr-add"><input id="rl-appr-add" placeholder="GitHub username" spellcheck="false"><button data-act="apprAdd">Add</button></div>';
+      else h += `<div class="rl-appr-note dim">Only maintainers of <code>${esc(a.team)}</code> can change the list${a.me ? ` (you're @${esc(a.me)}${a.isApprover ? ', an approver' : ''})` : ''}.</div>`;
+      if (a.members.length && a.members.length < 2) h += '<div class="rl-rr-flag bad">Fewer than 2 approvers: no prod release can be signed.</div>';
+    }
+    if (a.me && !a.meClickup) h += '<div class="rl-appr-note dim">Connect ClickUp in Settings so your signature assigns you on the release ticket.</div>';
+    return h + '</div>';
+  }
+
   // The run's results: one row per release PR as it goes (open/reuse → back-merge → mergeable →
   // checks), a Fix on anything blocked, then the hand-deployed envs and the flag check.
   function releaseResultsHtml(s) {
@@ -398,6 +437,12 @@
       if (r.status === 'nothing') bits.push('<span class="rl-rr-chip">nothing to release</span>');
       if (r.pr) bits.push(`<span class="rl-rr-chip ok">${prLink(r.pr, `#${r.pr.number}`)} ${r.reused ? 'already open' : 'opened'}${r.ahead ? ` · ${r.ahead} commits` : ''}</span>`);
       if (r.backMerge && r.backMerge.url) bits.push(`<span class="rl-rr-chip${r.backMerge.conflict ? ' bad' : ' warn'}">back-merge ${prLink(r.backMerge, '#' + r.backMerge.number)}${r.backMerge.conflict ? ' conflicts' : ' — merge first'}</span>`);
+      if (r.env === 'prod' && r.signoff && !r.merged) {
+        const who = r.signoff.signers.map(x => '@' + x.login).join(', ');
+        bits.push(r.signoff.ok
+          ? `<span class="rl-rr-chip ok" title="Signed by ${esc(who)}">✍ signed ${r.signoff.count}/${r.signoff.need} · ${esc(who)}</span>`
+          : `<span class="rl-rr-chip warn" title="Merging needs ${r.signoff.need} release approvers: the opener plus an approval, on the latest commit">✍ ${r.signoff.count}/${r.signoff.need} signed${who ? ' · ' + esc(who) : ''} — needs another approver</span>`);
+      }
       if (r.merged) bits.push('<span class="rl-rr-chip ok">merged ✓</span>');
       else if (r.closed) bits.push('<span class="rl-rr-chip">closed</span>');
       if (r.conflict === true) bits.push('<span class="rl-rr-chip bad">conflicts</span>');
@@ -441,7 +486,15 @@
     else if (run.flags && run.flags.missing) h += '<div class="rl-rr-flag">Prod feature flags: nothing missing</div>';
     else if (run.flags && run.flags.error) h += `<div class="rl-rr-flag">Flag check failed: ${esc(run.flags.error)}</div>`;
     const blocked = run.running ? 0 : run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
-    h += '<div class="rl-rel-actions">' + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
+    const a = s.approvers || {};
+    const meL = (a.me || '').toLowerCase();
+    const open = run.running ? [] : run.rows.filter(r => r.pr && !r.merged && !r.closed);
+    const toSign = a.isApprover ? open.filter(r => r.env === 'prod' && r.signoff && !r.signoff.signers.some(x => x.login.toLowerCase() === meL)).length : 0;
+    const ready = open.filter(r => r.status === 'ok' && r.conflict === false && (r.env !== 'prod' || (r.signoff && r.signoff.ok))).length;
+    h += '<div class="rl-rel-actions">'
+      + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign (${toSign})</button>` : '')
+      + (ready ? `<button class="rl-rr-merge" data-act="relMerge" title="Merge every release PR that's signed (prod), mergeable and not failing">⤵ Merge ready (${ready})</button>` : '')
+      + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
       + (run.running ? '' : '<button data-act="relNew">New release</button>')
       + '<button data-act="releaseClose">Close</button></div></div>';
     return h;
@@ -489,7 +542,7 @@
 
   // Hovering Release opens the picker; leaving both the button and the picker closes it after a
   // beat (long enough to cross the gap between them).
-  const REL_ZONE = '.rl-release, .rl-rel-pop';
+  const REL_ZONE = '.rl-release, .rl-rel-pop:not(.rl-appr)'; // the approvers panel isn't part of the Release hover
   let relLeave = null;
   overlay.addEventListener('mouseover', (ev) => {
     if (!ev.target.closest || !ev.target.closest(REL_ZONE)) return;
@@ -514,13 +567,18 @@
         + `<button data-act="tab" data-tab="timeline" class="${tab === 'timeline' ? 'on' : ''}">Timeline</button></div>` : '')
       + `<span class="rl-src" data-act="editSource" title="Change config source">${esc(s.source)}</span>`
       + `<span class="rl-upd">${s.loading ? 'loading…' : esc(upd)}</span>`
+      + (s.config ? `<button class="rl-appr-btn${apprOpen ? ' on' : ''}" data-act="apprMenu" title="Release approvers: releasing and merging prod needs two of them"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
+        + `<span>${s.approvers && s.approvers.members ? s.approvers.members.length : ''}</span></button>` : '')
       + (s.config && window.ReleasesCore && ReleasesCore.releaseTargets(s.config).length
-        ? `<button class="rl-release${relOpen ? ' on' : ''}" data-act="releaseMenu" title="Open the release PRs for the envs you pick — an agent does the rest">`
+        ? (s.approvers && s.approvers.me && !s.approvers.isApprover
+          ? `<button class="rl-release" disabled title="Only release approvers can release (you're @${esc(s.approvers.me)}) — see 👥">`
+          : `<button class="rl-release${relOpen ? ' on' : ''}" data-act="releaseMenu" title="Open the release PRs for the envs you pick">`)
           + '<svg class="ic" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>Release</button>'
         : '')
       + `<button data-act="refresh" class="${s.loading ? 'spin' : ''}" title="Refresh"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>`
       + '<button data-act="close" title="Close (Esc)"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><div class="rl-body">';
-    if (relOpen && s.config) h += s.releaseRun ? releaseResultsHtml(s) : releasePickerHtml(s);
+    if (apprOpen && s.config) h += approversHtml(s);
+    else if (relOpen && s.config) h += s.releaseRun ? releaseResultsHtml(s) : releasePickerHtml(s);
     const g = s.grid;
     if (s.editing || !g || s.error || s.problems) {
       h += (!g && s.loading && !s.error && !s.problems && !s.editing) ? skeletonHtml() : setupHtml(s);
@@ -550,6 +608,8 @@
         if (over > 0) body.scrollTop += over;
       }
     }
+    const addInp = modal.querySelector('#rl-appr-add');
+    if (addInp) addInp.onkeydown = (e) => { if (e.key === 'Enter') actions.apprAdd(); };
     const inp = modal.querySelector('#rl-src-input');
     if (inp) inp.onkeydown = (e) => { if (e.key === 'Enter') actions.saveSource(); };
   }
@@ -558,7 +618,8 @@
   function renderBadge() {
     const failed = window.ReleasesCore && state ? ReleasesCore.failedDeploys(state.grid) : [];
     badge.classList.toggle('alert', failed.length > 0);
-    badge.textContent = failed.length ? `Releases · ${failed.length} failing` : 'Releases';
+    const running = ((state && state.grid && state.grid.rows) || []).reduce((n, r) => n + (r.cells || []).filter(c => c && c.run && c.run.state === 'running').length, 0);
+    badge.textContent = 'Releases' + (failed.length ? ` · ${failed.length} failing` : '') + (running ? ` · ${running} deploying` : '');
     badge.title = failed.length ? `Deploy failing: ${failed.join(', ')}` : "Releases — what's merged in each environment of each repo";
   }
 

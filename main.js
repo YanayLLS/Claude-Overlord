@@ -2492,7 +2492,16 @@ async function releasesFindLocal(repo, rel, ref) {
   return found;
 }
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
-  startAgent: (cwd, prompt) => createAgent(cwd, null, prompt) }); // Releases board — self-contained, see releases-*.js
+  startAgent: (cwd, prompt) => createAgent(cwd, null, prompt),
+  fixRun: (run) => fixActionRun(run),
+  notify: (title, body, url) => {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title, body, silent: true });
+    n.on('click', () => shell.openExternal(url).catch(() => {}));
+    n.show();
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
+  },
+  whoami: async () => ({ github: await fetchGhLogin(), clickup: settings.clickupToken ? (await clickupWhoAmI(settings.clickupToken).catch(() => ({}))).id || null : null }) }); // Releases board — self-contained, see releases-*.js
 
 // Latest run on any branch for one workflow. per_page=1 keeps it to a single
 // row; a workflow that has never run comes back with an empty list, not an error.
@@ -4217,11 +4226,15 @@ function handleIpc(msg) {
     case 'mergePr': {
       const url = msg.url;
       if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
-      execFile('gh', ['pr', 'merge', url, '--merge'],
-        { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-          if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
-          pollPRs(); // merged PR drops from the list
-        });
+      // prod release PRs merge only with two release approvers' signatures (SOC2)
+      releases.mergeGate(url).then((gate) => {
+        if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return; }
+        execFile('gh', ['pr', 'merge', url, '--merge'],
+          { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+            if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
+            pollPRs(); // merged PR drops from the list
+          });
+      }).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
       break;
     }
     // Merges the base branch into the PR branch server-side on GitHub — passing

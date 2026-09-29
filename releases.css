@@ -291,3 +291,27 @@
 .rl-rel-actions .rl-rr-fix { margin-left:0; margin-right:auto; padding:6px 12px; font-size:12px; }
 .rl-rr-row.st-merged { border-color:rgba(74,222,128,.55); background:rgba(74,222,128,.06); }
 .rl-rr-row.st-closed { opacity:.55; }
+
+/* ── Release approvers (SOC2 sign-off) ── */
+.rl-head .rl-appr-btn { width:auto; height:26px; padding:0 9px; gap:5px; border-radius:999px; border:1px solid var(--border); font-size:11.5px; font-weight:600; color:var(--subtext); }
+.rl-head .rl-appr-btn .ic { width:14px; height:14px; }
+.rl-head .rl-appr-btn.on, .rl-head .rl-appr-btn:hover { color:var(--text); border-color:var(--border-hi); background:var(--hover-strong); }
+.rl-head .rl-release:disabled { opacity:.45; cursor:not-allowed; transform:none; box-shadow:none; filter:none; }
+.rl-rel-pop.rl-appr { width:340px; }
+.rl-appr-note { font-size:11.5px; color:var(--subtext); line-height:1.45; margin-bottom:10px; }
+.rl-appr-note.dim { color:var(--dim); margin:10px 0 0; }
+.rl-appr-note code { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; }
+.rl-appr-list { display:flex; flex-direction:column; gap:4px; }
+.rl-appr-row { display:flex; align-items:center; gap:9px; padding:6px 8px; border-radius:var(--r); background:var(--surface0); border:1px solid var(--border); transition:border-color .12s; }
+.rl-appr-row:hover { border-color:var(--border-hi); }
+.rl-appr-row img { width:22px; height:22px; border-radius:50%; }
+.rl-appr-row b { font-size:12px; }
+.rl-appr-you { font-size:10px; padding:0 6px; border-radius:999px; background:var(--accent-soft); color:var(--accent); }
+.rl-appr-x { margin-left:auto; width:22px; height:22px; border:none; border-radius:var(--r-sm); background:none; color:var(--dim); font-size:15px; cursor:pointer; }
+.rl-appr-x:hover { background:rgba(248,113,113,.15); color:var(--red); }
+.rl-appr-add { display:flex; gap:6px; margin-top:10px; }
+.rl-appr-add input { flex:1; font:inherit; font-size:12px; padding:6px 10px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); color:var(--text); outline:none; }
+.rl-appr-add input:focus { border-color:var(--accent); }
+.rl-appr-add button { font:inherit; font-size:12px; font-weight:600; padding:6px 12px; border-radius:999px; border:none; background:var(--accent); color:var(--on-accent); cursor:pointer; }
+.rl-rel-actions .rl-rr-sign { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:600; }
+.rl-rel-actions .rl-rr-merge { background:rgba(74,222,128,.15); border-color:rgba(74,222,128,.5); color:var(--green); font-weight:600; }

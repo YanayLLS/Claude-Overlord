@@ -4,6 +4,7 @@
 // blocked row (the Fix button). gh = ghJson (never rejects; { data } | { error }).
 // Self-check: release-run.test.js
 
+const { signoff, openerMark } = require('./signoff-core');
 const CI_DEPLOY = /^ci\(deploy\)/i;
 const firstLine = (m) => String(m || '').split('\n')[0];
 const MAX_TOP_AREAS = 8;
@@ -87,7 +88,8 @@ function requiredChecks(branch) {
 // Is PR #n mergeable, and are its checks green? conflict: true | false | null (GitHub still
 // computing — unknown, not "fine"). Checks that also fail on the target branch were red before
 // this release and don't count (knownFailing).
-async function prHealth(gh, repo, n, target, wait = sleep) {
+// members (prod only): the approvers team — then the PR's sign-off is read too.
+async function prHealth(gh, repo, n, target, wait = sleep, members = null) {
   const api = (...a) => gh(['api', ...a]);
   let st = null;
   for (let i = 0; i < 6 && !st; i++) {
@@ -125,7 +127,12 @@ async function prHealth(gh, repo, n, target, wait = sleep) {
       advisory = failingNames(null, headStatus).filter(x => !onTarget.has(x));
     }
   }
-  return { conflict, checks, knownFailing, advisory, builds };
+  let sign = null;
+  if (members && st) {
+    const rv = await api('-X', 'GET', `repos/${repo}/pulls/${n}/reviews`, '-f', 'per_page=100');
+    sign = signoff(st, rv.data || [], members);
+  }
+  return { conflict, checks, knownFailing, advisory, builds, signoff: sign };
 }
 
 // One (repo, env, source → target) row. update(patch) streams progress to the UI.
@@ -158,7 +165,8 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   if (found.error) return { error: found.error };
   let pr = found.pr, reused = !!pr, lastBody = null;
   if (!pr) {
-    lastBody = releaseBody({ env: row.env, source, target, workflow: row.deploy, ahead, titles, hotfixes });
+    lastBody = releaseBody({ env: row.env, source, target, workflow: row.deploy, ahead, titles, hotfixes })
+      + (row.members && row.opener ? '\n\n' + openerMark(row.opener.login, row.opener.clickup) : '');
     const made = await open({ title: `chore(release): promote ${source} to ${target}`, head: source, base: target, body: lastBody });
     if (made.error) return { error: made.error, ahead };
     pr = made.pr;
@@ -187,7 +195,7 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
 
   // is the release PR mergeable, and are its checks green?
   const [health, dbschemas] = await Promise.all([
-    prHealth(gh, repo, pr.number, target, wait),
+    prHealth(gh, repo, pr.number, target, wait, row.members || null),
     dbschemasCheck(gh, repo, source, cmp.data.files, row.dbschemasLatest).catch(e => ({ error: e.message })),
   ]);
   return { ahead, hotfixes: hotfixes.length, pr: { number: pr.number, url: pr.html_url }, reused, body: reused ? null : lastBody, backMerge, dbschemas, ...health };

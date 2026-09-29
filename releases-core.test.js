@@ -311,4 +311,12 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(releasePlan(cfg, ['alpha']).prs.map(x => x.repo + ' ' + x.source + '→' + x.target), ['o/front dev→alpha']);
   assert.deepStrictEqual(releasePlan(cfg, ['alpha']).manual, []);
 }
+// ── newDeployFailures: only a transition into red, never a first sighting or a failed fetch ──
+{
+  const { newDeployFailures } = require('./releases-core');
+  const prev = { a: { state: 'success' }, b: { state: 'failure' }, c: { state: 'running' }, d: { state: 'unknown' } };
+  const next = { a: { state: 'failure' }, b: { state: 'failure' }, c: { state: 'failure' }, d: { state: 'failure' }, e: { state: 'failure' }, f: { state: 'success' } };
+  assert.deepStrictEqual(newDeployFailures(prev, next), ['a', 'c']);
+  assert.deepStrictEqual(newDeployFailures(null, next), []);
+}
 console.log('releases-core: all passed');
