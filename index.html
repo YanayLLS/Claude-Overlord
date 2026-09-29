@@ -3841,7 +3841,7 @@ function handleAgentMsg(msg) {
       break;
     case 'prList': {
       if (msg.error) { prState.error = msg.error; prState.errorCode = msg.errorCode || null; }
-      else { prState.prs = msg.prs || []; prState.extra = msg.extraPrs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; }
+      else { prState.prs = msg.prs || []; prState.extra = msg.extraPrs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; prApplyPending(); }
       renderPrBadge();
       refreshOpenDropdown('pr-dropdown', prDropdownHtml);
       if (worldView) scheduleRender();
@@ -3926,6 +3926,7 @@ function handleAgentMsg(msg) {
       break;
     }
     case 'prActionError': {
+      if (prPending.delete(msg.url)) api.send({ type: 'pollPrsNow' }); // the optimistic approve/merge didn't happen: fetch the real list back
       alert('PR action failed: ' + (msg.error || 'unknown error'));
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
@@ -5577,15 +5578,27 @@ function openPr(url) {
   document.getElementById('pr-dropdown').style.display = 'none';
 }
 
-function approvePr(url, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
-  api.send({ type: 'approvePr', url });
+// Approve/merge show in the list at once; main's gh call and re-poll confirm it, prActionError puts it back.
+const prPending = new Map(); // url -> { action, until }
+function prApplyPending() {
+  for (const [url, x] of prPending) {
+    if (Date.now() > x.until) { prPending.delete(url); continue; }
+    const p = prState.prs.find(q => q.url === url);
+    if (p) prState.prs = prState.prs.filter(q => q !== p);
+    // Approved: it's someone else's you've now approved, so it moves to "All open" like main does it.
+    if (x.action === 'approve') { if (p) prState.extra = [...(prState.extra || []), { ...p, approvedByMe: true }]; }
+    else prState.extra = (prState.extra || []).filter(q => q.url !== url);
+  }
 }
-
-function mergePr(url, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Merging…'; }
-  api.send({ type: 'mergePr', url });
+function prOptimistic(url, action) {
+  prPending.set(url, { action, until: Date.now() + 60000 }); // ponytail: 60s covers gh (30s timeout) + a re-poll
+  prApplyPending();
+  renderPrBadge();
+  refreshOpenDropdown('pr-dropdown', prDropdownHtml);
+  if (worldView) scheduleRender();
 }
+function approvePr(url) { prOptimistic(url, 'approve'); api.send({ type: 'approvePr', url }); }
+function mergePr(url) { prOptimistic(url, 'merge'); api.send({ type: 'mergePr', url }); }
 
 function updatePrBranch(url, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '⤴ Updating…'; }
