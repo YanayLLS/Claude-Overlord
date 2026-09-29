@@ -26,7 +26,7 @@ const SIGN_POLL_MS = 30 * 1000;         // while a prod release waits for its 2n
 const SIGN_WATCH_MS = 24 * 3600 * 1000; // …for up to a day
 const ROLLBACK_HEAD = /^rollback\/[\d-]+$/; // a Rollback's PR head (release-history.js)
 const TO_SIGN_POLL_MS = 60 * 1000;      // an approver with a release waiting on them re-checks this often
-const SIGN_PING_MS = 20 * 1000;         // approvers look for a new review request on a release this often (1 search)
+const SIGN_PING_MS = 10 * 1000;         // approvers look for a new review request / release-manifests change this often (1 GraphQL call)
 const PENDING_SHOWN = 10;
 const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
@@ -273,15 +273,23 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // Near-instant "a release needs you": every SIGN_PING_MS, one GitHub search for open PRs that
   // ask ME for review (a release asks every other approver). When that set changes, run the full checkToSign (which
   // notifies). Cheap: a single search call, only on approvers' machines.
-  let lastPing = null;
+  // The same call watches <org>/release-manifests' head: every sign, merge or new release writes a
+  // manifest, so a new commit there = something changed for the team → reload history, re-read the
+  // run, re-check what waits on me. That's what makes a teammate's signature show up here within seconds.
+  let lastPing = null, lastManifests = null;
   async function signPing() {
     const org = approversOrg();
     if (!org || !state.config || !state.approvers || !state.approvers.isApprover) return;
     const q = `is:pr is:open archived:false org:${org} user-review-requested:@me`;
-    const res = await ghGraphql(`query { search(query: ${JSON.stringify(q)}, type: ISSUE, first: 50) { nodes { ... on PullRequest { number repository { nameWithOwner } } } } }`);
+    const res = await ghGraphql(`query { search(query: ${JSON.stringify(q)}, type: ISSUE, first: 50) { nodes { ... on PullRequest { number repository { nameWithOwner } } } }`
+      + ` manifests: repository(owner: ${JSON.stringify(org)}, name: "release-manifests") { ref(qualifiedName: "main") { target { oid } } } }`);
     if (!res.data) return;
     const key = res.data.search.nodes.map(n => n.repository.nameWithOwner + '#' + n.number).sort().join(',');
-    if (key !== lastPing) { lastPing = key; await checkToSign(); }
+    const man = res.data.manifests && res.data.manifests.ref && res.data.manifests.ref.target.oid;
+    const manChanged = man && lastManifests && man !== lastManifests;
+    lastManifests = man || lastManifests;
+    if (manChanged) await Promise.all([history.load(), refreshRun()]).catch(() => {});
+    if (key !== lastPing || manChanged) { lastPing = key; await checkToSign(); }
   }
   const pingTimer = setInterval(() => signPing().catch(() => {}), SIGN_PING_MS);
   if (pingTimer.unref) pingTimer.unref();
@@ -455,27 +463,32 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const targets = new Map();
     for (const r of ((run && run.rows) || [])) if (r.env === 'prod' && r.pr && !r.merged && !r.closed) targets.set(r.repo + '#' + r.pr.number, { repo: r.repo, label: r.label, number: r.pr.number });
     for (const t of (state.toSign || [])) targets.set(t.repo + '#' + t.number, { repo: t.repo, label: t.label, number: t.number });
-    let signed = 0;
-    for (const t of targets.values()) {
+    // every PR at once: one signature for the whole release
+    const done = [], failed = [];
+    await Promise.all([...targets.values()].map(async (t) => {
       const s = await signoffOf(t.repo, t.number);
-      if (s.error) { send({ type: 'toast', text: `Sign ${t.label} #${t.number}: ${s.error}` }); continue; }
-      if (hasSigned(s, who.github)) continue;
-      if (s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue; // the opener already signed by opening it
+      if (s.error) return failed.push(`${t.label} #${t.number}: ${s.error}`);
+      if (hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) return done.push(t); // opener signed by opening it
       const res = await ghJson(['api', '-X', 'POST', `repos/${t.repo}/pulls/${t.number}/reviews`, '--input',
         writeTmp({ event: 'APPROVE', commit_id: s.pr.head.sha, body: reviewMark(who.clickup) })]);
-      if (apiErr(res)) { send({ type: 'toast', text: `Sign ${t.label}: ${apiErr(res)}` }); continue; }
-      signed++;
+      if (apiErr(res)) return failed.push(`${t.label}: ${apiErr(res)}`);
+      done.push(t);
       const i = run ? run.rows.findIndex(r => r.repo === t.repo && r.pr && r.pr.number === t.number) : -1;
       if (i >= 0) {
-        const after = await signoffOf(t.repo, t.number);
-        if (!after.error) run.rows[i] = { ...run.rows[i], signoff: { signers: after.signers, count: after.count, need: after.need, ok: after.ok } };
+        const r = run.rows[i], so = r.signoff || { signers: [], need: 2 };
+        const signers = so.signers.some(x => x.login.toLowerCase() === who.github.toLowerCase()) ? so.signers : so.signers.concat({ login: who.github, via: 'approved', clickup: who.clickup });
+        run.rows[i] = { ...r, signoff: { ...so, signers, count: signers.length, ok: signers.length >= so.need } };
       }
-    }
-    if (run) push({ releaseRun: { ...stampSignoff(run) } });
+    }));
+    // show it right away (my run, my to-sign list), then write it to the manifest: that commit is what
+    // the teammates' Overlords see within SIGN_PING_MS
+    const key = (t) => t.repo + '#' + t.number;
+    const signedKeys = new Set(done.map(key));
+    push({ toSign: (state.toSign || []).filter(t => !signedKeys.has(key(t))), ...(run ? { releaseRun: { ...stampSignoff(run) } } : {}) });
     persist();
-    await checkToSign().catch(() => {});
-    reconcileHistory().catch(() => {});
-    send({ type: 'toast', text: signed ? `Signed ${signed} prod release PR${signed === 1 ? '' : 's'}` : 'Nothing left for you to sign' });
+    send({ type: 'toast', text: failed.length ? `Sign failed: ${failed.join('; ')}` : done.length ? 'Signed the release ✍' : 'Nothing left for you to sign' });
+    await reconcileHistory().catch(() => {});
+    checkToSign().catch(() => {});
   }
 
   // Release history: manifests in <org>/release-manifests (release-history.js)
@@ -486,8 +499,13 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   };
   const history = createHistory({ ghJson, writeTmp: (p) => writeTmp(p), push, getState: () => state, org: () => approversOrg(),
     signoffOf, requestReviews, whoAmI, send });
-  let reconciling = false;
-  const reconcileHistory = async () => { if (reconciling) return; reconciling = true; try { await history.reconcile(); } finally { reconciling = false; } };
+  // one at a time; a call during a run queues exactly one more (a sign mid-reconcile must still land)
+  let reconciling = null, again = false;
+  const reconcileHistory = async () => {
+    if (reconciling) { again = true; return reconciling; }
+    reconciling = (async () => { try { do { again = false; await history.reconcile(); } while (again); } finally { reconciling = null; } })();
+    return reconciling;
+  };
 
   // ── Release all: merge in the config's releaseOrder waves (services the others depend on
   // first, the frontend last); after each wave, wait for its CI deploys to go green before the

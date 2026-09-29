@@ -96,34 +96,43 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
   }
 
   // Fold what GitHub says now into every unfinished manifest; write back only what changed.
+  // Every PR is read at once, and a change shows here before its write lands (writes are the slow part).
   async function reconcile() {
     const loaded = await load();
     if (!loaded) return;
-    let wrote = false;
-    for (const { manifest, sha } of loaded.entries) {
-      if (!['pending', 'merged'].includes(manifest.status)) continue;
+    const show = (m) => {
+      const h = getState().history;
+      if (h && h.items) push({ history: { ...h, items: h.items.map(x => x.id === m.id ? m : x) } });
+    };
+    const wrote = await Promise.all(loaded.entries.filter(e => ['pending', 'merged'].includes(e.manifest.status)).map(async ({ manifest, sha }) => {
+      const seen = await Promise.all(manifest.repos.map(async (r) => {
+        const out = { r };
+        if (!r.mergeSha && !r.closed) out.s = await signoffOf(r.repo, r.pr.number);
+        return out;
+      }));
       let m = manifest, changed = false, c;
-      for (const r of m.repos) {
-        if (!r.mergeSha && !r.closed) {
-          const s = await signoffOf(r.repo, r.pr.number);
-          if (s.error || !s.pr) continue;
-          [m, c] = M.applyPr(m, r.repo, { number: r.pr.number, mergeSha: s.pr.merged ? s.pr.merge_commit_sha : null, mergedAt: s.pr.merged_at,
-            closed: s.pr.state === 'closed', headSha: s.pr.head && s.pr.head.sha, signers: s.signers.map(x => x.login) });
-          changed = changed || c;
-        }
-        const cur = m.repos.find(x => x.repo === r.repo && x.pr.number === r.pr.number);
-        if (cur.mergeSha && cur.deploy && !['success', 'failure'].includes(cur.deploy.state)) {
-          const runs = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${cur.deploy.workflow}/runs`, '-f', `head_sha=${cur.mergeSha}`, '-f', 'per_page=5']);
-          const done = ((runs.data && runs.data.workflow_runs) || []).find(x => x.status === 'completed');
-          if (done) {
-            [m, c] = M.applyDeploy(m, r.repo, { state: done.conclusion === 'success' ? 'success' : 'failure', url: done.html_url, at: done.updated_at });
-            changed = changed || c;
-          }
-        }
+      for (const { r, s } of seen) {
+        if (!s || s.error || !s.pr) continue;
+        [m, c] = M.applyPr(m, r.repo, { number: r.pr.number, mergeSha: s.pr.merged ? s.pr.merge_commit_sha : null, mergedAt: s.pr.merged_at,
+          closed: s.pr.state === 'closed', headSha: s.pr.head && s.pr.head.sha, signers: s.signers.map(x => x.login) });
+        changed = changed || c;
       }
-      if (changed) { const w = await write(m, sha); wrote = wrote || !!w.sha; }
-    }
-    if (wrote) await load();
+      if (changed) show(m);
+      const deploys = await Promise.all(m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state)).map(async (r) => {
+        const runs = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', `head_sha=${r.mergeSha}`, '-f', 'per_page=5']);
+        return [r, ((runs.data && runs.data.workflow_runs) || []).find(x => x.status === 'completed')];
+      }));
+      for (const [r, done] of deploys) {
+        if (!done) continue;
+        [m, c] = M.applyDeploy(m, r.repo, { state: done.conclusion === 'success' ? 'success' : 'failure', url: done.html_url, at: done.updated_at });
+        changed = changed || c;
+      }
+      if (!changed) return false;
+      show(m);
+      const w = await write(m, sha);
+      return !!w.sha;
+    }));
+    if (wrote.some(Boolean)) await load();
   }
 
   // Roll back to release `id`: per repo it merged (minus `skip`), a commit on top of the prod
