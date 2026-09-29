@@ -525,6 +525,26 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       .map(r => ({ repo: r.repo, label: r.label, env: r.env, source: r.source, target: r.target, pr: r.pr, deploy: r.deploy }));
   }
 
+  // A hand-deployed wave: show where to deploy each (state.releaseAll.manualWave) and wait until every
+  // one is live — checked through its `live` pin each poll — or someone presses "Deployed, continue".
+  // Returns null to go on, or why it stopped.
+  let manualDone = false;
+  async function waitManual(hand) {
+    manualDone = false;
+    for (;;) {
+      if (releaseAllStop) return 'Stopped by you';
+      const lives = await fetchLives(state.config).catch(() => null);
+      if (lives) push({ results: { ...(state.results || {}), lives } });
+      const left = manualLeft(state.config, [], hand, lives || (state.results && state.results.lives));
+      if (!left.length || manualDone) { progress({ manualWave: null }); return null; }
+      progress({ status: 'manual', detail: left.map(x => x.label).join(', '), manualWave: left.map(x => {
+        const l = lives && lives[`${x.repo}|${x.env}`];
+        return { ...x, auto: !!(l && !l.error) };
+      }) });
+      await new Promise(r => setTimeout(r, DEPLOY_POLL_MS));
+    }
+  }
+
   async function releaseAll(id) {
     if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is already running' });
     if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
@@ -545,8 +565,14 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     }
     if (!go.length) return send({ type: 'toast', text: `Nothing can merge yet: ${skipped.map(x => `${x.label} ${x.env} — ${x.why}`).join('; ')}` });
     const skippedNote = skipped.length ? ` · not merged (waiting): ${skipped.map(x => x.label + ' ' + x.env).join(', ')}` : '';
-    const waves = releaseWaves(state.config, go);
-    releaseAllStop = false;
+    // hand-deployed repos named in releaseOrder are waves too: Release all pauses there until they're live
+    // (seen through their `live` pin) or someone says they're deployed; the rest go in the end popup
+    const man = (id ? (((state.history && state.history.items) || []).find(x => x.id === id) || {}).manual || [] : (state.releaseRun && state.releaseRun.manual) || [])
+      .map(m => ({ env: 'prod', ...m, manual: true }));
+    const inOrder = (m) => (state.config.releaseOrder || []).some(w => w.some(x => x === m.label || x.toLowerCase() === m.repo.toLowerCase()));
+    const handWaves = man.filter(inOrder), handLater = man.filter(m => !inOrder(m));
+    const waves = releaseWaves(state.config, go.concat(handWaves));
+    releaseAllStop = false; manualDone = false;
     const shipped = [];
     progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '' });
     try {
@@ -555,7 +581,12 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         const wave = waves[w];
         progress({ wave: w + 1, status: 'merging', detail: wave.map(x => x.label + (x.env !== 'prod' ? ' ' + x.env : '')).join(', ') });
         const merged = [];
-        for (const it of wave) {
+        const hand = wave.filter(x => x.manual);
+        if (hand.length) {
+          const r = await waitManual(hand);
+          if (r) return progress({ running: false, status: 'stopped', detail: r, manualWave: null });
+        }
+        for (const it of wave.filter(x => !x.manual)) {
           const gate = await mergeGate(it.pr.url);
           if (!gate.ok) return progress({ running: false, status: 'stopped', detail: `${it.label}: ${gate.reason}` });
           const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
@@ -588,8 +619,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         }
       }
       // what's still on people: hand-deployed repos behind, and merged PRs whose target has no CI deploy
-      const man = id ? (((state.history && state.history.items) || []).find(x => x.id === id) || {}).manual || [] : (state.releaseRun && state.releaseRun.manual) || [];
-      const left = manualLeft(state.config, shipped, man.map(m => ({ env: 'prod', ...m })), state.results && state.results.lives);
+      const left = manualLeft(state.config, shipped, handLater, state.results && state.results.lives);
       progress({ running: false, status: 'done', detail: 'Every wave merged' + skippedNote, manualLeft: left, doneAt: Date.now() });
       send({ type: 'toast', text: 'Release all: every wave merged ✓' + skippedNote });
     } finally {
@@ -765,6 +795,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesSign': signRelease().catch(e => send({ type: 'toast', text: 'Sign failed: ' + (e.message || 'error') })); return true;
       case 'releasesMerge': releaseAll(null).catch(e => send({ type: 'toast', text: 'Release all failed: ' + (e.message || 'error') })); return true;
       case 'releasesReleaseAllStop': releaseAllStop = true; return true;
+      case 'releasesManualDone': manualDone = true; return true;
       case 'releasesFixDeploy': { // Fix on a failed deploy cell: same agent as the Actions list's Fix
         const d = state.results && state.results.deploys && state.results.deploys[msg.key];
         if (d && fixRun) fixRun(d).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }));

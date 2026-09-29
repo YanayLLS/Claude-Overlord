@@ -443,7 +443,7 @@
   function releaseAllHtml(s) {
     const p = s.releaseAll;
     if (!p) return '';
-    const head = p.running ? `🚀 Wave ${p.wave}/${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : 'merging'}: ${esc(p.detail || '')}`
+    const head = p.running ? `🚀 Wave ${p.wave}/${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : p.status === 'manual' ? 'deploy by hand' : 'merging'}: ${esc(p.detail || '')}`
       : p.status === 'done' ? `🚀 Released: ${esc(p.detail || 'every wave merged')} ✓`
       : `⏸ Release all stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
     return `<div class="rl-relall ${p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad'}"><span>${head}</span>`
@@ -837,6 +837,9 @@
   manualOverlay.addEventListener('click', (e) => {
     const u = e.target.closest('[data-url]');
     if (u) return api.send({ type: 'openUrl', url: u.dataset.url });
+    if (e.target.closest('[data-manual-go]')) return api.send({ type: 'releasesManualDone' });
+    if (e.target.closest('[data-manual-stop]')) return api.send({ type: 'releasesReleaseAllStop' });
+    if (state.releaseAll && state.releaseAll.running) return; // a paused wave stays up until it's deployed or stopped
     if (!e.target.closest('[data-close]') && e.target !== manualOverlay) return;
     manualSeen = String(state.releaseAll.doneAt);
     try { localStorage.setItem('rl-manual-seen', manualSeen); } catch {}
@@ -844,6 +847,20 @@
   });
   function renderManualLeft() {
     const p = state && state.releaseAll;
+    // Release all paused on a hand-deployed wave: the later waves wait for these
+    if (p && p.running && p.manualWave && p.manualWave.length) {
+      const auto = p.manualWave.some(x => x.auto);
+      manualOverlay.innerHTML = '<div class="rl-sign-box" role="dialog" aria-label="Deploy by hand">'
+        + `<div class="rl-sign-icon">✋</div><h2>Wave ${esc(p.wave)}/${esc(p.waves)}: deploy these by hand first</h2>`
+        + '<div class="rl-sign-sub">The next waves depend on them. Click one to open where it is deployed.'
+        + (auto ? ' Release all goes on by itself once they are live.' : '') + '</div>'
+        + '<div class="rl-sign-list">' + p.manualWave.map(x => `<button class="rl-sign-row rl-manual-row" data-url="${esc(x.url)}" title="${esc(x.url)}">`
+          + `<b>${esc(x.label)}</b><span class="rl-env" style="--hue:${ENV_HUE[x.env.toLowerCase()] || 'var(--dim)'}">${esc(x.env)}</span>`
+          + `<span>${esc(x.why)}${x.auto ? ' · watching live' : ''} ↗</span></button>`).join('') + '</div>'
+        + '<div class="rl-sign-acts"><button data-manual-stop>Stop release</button><button class="go" data-manual-go>Deployed, continue</button></div></div>';
+      manualOverlay.classList.add('open');
+      return;
+    }
     const left = p && p.status === 'done' && p.manualLeft;
     if (!left || !left.length || String(p.doneAt) === manualSeen) { manualOverlay.classList.remove('open'); return; }
     manualOverlay.innerHTML = '<div class="rl-sign-box" role="dialog" aria-label="Deploy by hand">'
