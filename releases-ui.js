@@ -590,12 +590,12 @@
     const byEnv = {};
     for (const r of readyRows) byEnv[r.env] = (byEnv[r.env] || 0) + 1;
     const readyLabel = Object.entries(byEnv).map(([e, n]) => `${n} ${e}`).join(' + ');
-    const readyTip = `Merges now, in release order (services → iframes → frontend), waiting for each wave's deploys:\n`
+    const readyTip = `${readyLabel}. Merges now, in release order (services → iframes → frontend), waiting for each wave's deploys:\n`
       + readyRows.map(r => `• ${r.label} ${r.env} #${r.pr.number}`).join('\n')
       + (unsignedProd.length ? `\n\nNot merged — waiting for 2 signatures:\n${unsignedProd.map(r => `• ${r.label} prod #${r.pr.number} (${r.signoff ? r.signoff.count : 0}/2)`).join('\n')}` : '');
     h += releaseAllHtml(s) + '<div class="rl-rel-actions">'
       + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign (${toSign})</button>` : '')
-      + (ready && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge" data-act="relMerge" title="${esc(readyTip)}">🚀 Release all (${esc(readyLabel)})</button>` : '')
+      + (ready && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge" data-act="relMerge" title="${esc(readyTip)}">🚀 Release all · ${ready}</button>` : '')
       + (!ready && unsignedProd.length && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge locked" aria-disabled="true" title="${esc(`Prod waits for 2 approvers' signatures:\n${unsignedProd.map(r => `• ${r.label} #${r.pr.number} (${r.signoff ? r.signoff.count : 0}/2)`).join('\n')}`)}">🔒 Release all · needs signatures</button>` : '')
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
       + (run.running ? '' : '<button data-act="relNew">New release</button>')

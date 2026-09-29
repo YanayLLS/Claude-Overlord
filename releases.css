@@ -397,3 +397,12 @@
 .rl-sign-acts button:hover { background:var(--surface2); }
 .rl-sign-acts button.go { background:var(--accent); border-color:var(--accent); color:var(--on-accent); padding:8px 22px; }
 .rl-sign-acts button.go:hover { filter:brightness(1.1); background:var(--accent); }
+
+/* results footer: one line per button, primary actions first, secondary ones quieter; wraps whole buttons, never their text */
+.rl-rel-pop.rl-rr .rl-rel-actions { flex-wrap:wrap; justify-content:flex-start; row-gap:6px; }
+.rl-rel-pop .rl-rel-actions button { white-space:nowrap; }
+.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="relNew"],
+.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="releaseClose"] { background:none; border-color:transparent; color:var(--subtext); padding:6px 10px; }
+.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="relNew"] { margin-left:auto; }
+.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="relNew"]:hover,
+.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="releaseClose"]:hover { color:var(--text); background:var(--hover-strong); }
