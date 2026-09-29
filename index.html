@@ -5481,7 +5481,11 @@ function prDropdownHtml() {
   const snoozed = live.filter(p => p.snoozed && !p.muted && !p.repoMuted);
   const muted = live.filter(p => p.muted);
   const showArchived = prCollapsed.has('__archived_open__'); // toggled by the 📦 header button
-  if (!live.length && !(showArchived && archived.length)) return head + (!prShowAll && (prState.extra || []).some(p => prInScope(p))
+  // The chip counts every PR; say so when the scope filter is what empties the list, not "all caught up".
+  const outOfScope = prMenuList().filter(p => !p.archived && !prInScope(p)).length;
+  if (!live.length && !(showArchived && archived.length)) return head + (outOfScope
+    ? `<div class="pr-empty">${outOfScope} PR${outOfScope === 1 ? '' : 's'} hidden by the “${prScope === 'dev' ? 'Into dev' : 'Hide releases'}” filter. <a href="#" onclick="event.preventDefault();event.stopPropagation();setPrScope('all')">Show all</a></div>`
+    : !prShowAll && (prState.extra || []).some(p => prInScope(p))
     ? `<div class="pr-empty">Nothing to act on. <a href="#" onclick="event.preventDefault();event.stopPropagation();setPrShowAll(true)">Show all open PRs</a></div>`
     : prScope === 'all' ? '<div class="pr-empty">No open PRs.</div>'
     : `<div class="pr-empty">No PRs match this filter. <a href="#" onclick="event.preventDefault();event.stopPropagation();setPrScope('all')">Show all</a></div>`);
