@@ -668,8 +668,10 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   }
 
   // Fix all: one agent for every blocked row of the last run.
-  async function fixAll() {
-    const rows = ((state.releaseRun && state.releaseRun.rows) || []).filter(r => r.status === 'blocked' || r.status === 'error');
+  // i = one row (its own Fix button); none = every blocked row (Fix all)
+  async function fixAll(i) {
+    const all = (state.releaseRun && state.releaseRun.rows) || [];
+    const rows = (Number.isInteger(i) ? [all[i]] : all).filter(r => r && (r.status === 'blocked' || r.status === 'error'));
     if (!rows.length) return;
     const p = path.join(runsDir(), `fix-release-${stamp()}.md`);
     fs.writeFileSync(p, releaseFixBrief({ rows, configSource: state.source }));
@@ -688,7 +690,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesClose': return true;
       case 'releasesRefresh': refresh(); return true;
       case 'releasesRelease': release(msg.envs).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
-      case 'releasesFix': fixAll().catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
+      case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
       case 'releasesApprovers': loadApprovers().catch(() => {}); return true;
       case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;
       case 'releasesSign': signRelease().catch(e => send({ type: 'toast', text: 'Sign failed: ' + (e.message || 'error') })); return true;

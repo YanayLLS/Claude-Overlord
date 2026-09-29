@@ -97,7 +97,8 @@
     // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
     // one agent for every blocked row — leave the modal to land on it
     fixDeploy: (el) => { api.send({ type: 'releasesFixDeploy', key: el.dataset.key }); show(false); },
-    relFix: () => { api.send({ type: 'releasesFix' }); relOpen = false; show(false); },
+    // el.dataset.i = one row's Fix; none = Fix all
+    relFix: (el) => { const i = el && el.dataset.i != null ? +el.dataset.i : undefined; api.send({ type: 'releasesFix', i }); relOpen = false; show(false); },
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; if (tab === 'history') api.send({ type: 'releasesHistory' }); render(); },
     // history actions
@@ -561,7 +562,9 @@
       if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">already red on ${esc(r.target)}: ${esc(r.knownFailing.join(', '))}</span>`);
       if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);
       h += `<div class="rl-rr-row st-${esc(r.status || 'running')}"><div class="rl-rr-top"><b>${esc(r.label)}</b>${env}`
-        + `<span class="rl-rr-branches">${esc(r.source)} → ${esc(r.target)}</span></div><div class="rl-rr-bits">${bits.join('')}</div></div>`;
+        + `<span class="rl-rr-branches">${esc(r.source)} → ${esc(r.target)}</span>`
+        + (!r.running && (r.status === 'blocked' || r.status === 'error') ? `<button class="rl-rr-fix1" data-act="relFix" data-i="${i}" title="Start an agent that unblocks just ${esc(r.label)} ${esc(r.env)}">🔧 Fix</button>` : '')
+        + `</div><div class="rl-rr-bits">${bits.join('')}</div></div>`;
     });
     h += '</div>';
     if (run.manual.length) {
