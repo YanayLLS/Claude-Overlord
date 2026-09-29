@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
 const { runRelease, prHealth, rowStatus } = require('./release-run');
+const createHistory = require('./release-history');
 const { signoff, reviewMark, hasSigned, openerMark, OPENER_RE } = require('./signoff-core');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
@@ -22,6 +23,7 @@ const RECHECK_MS = 60 * 1000;           // re-read release PRs' checks this ofte
 const RECHECK_FOR_MS = 30 * 60 * 1000;  // …for this long after a run, until they settle
 const SIGN_POLL_MS = 30 * 1000;         // while a prod release waits for its 2nd signature, look this often…
 const SIGN_WATCH_MS = 24 * 3600 * 1000; // …for up to a day
+const ROLLBACK_HEAD = /^rollback\/[\d-]+$/; // a Rollback's PR head (release-history.js)
 const TO_SIGN_POLL_MS = 60 * 1000;      // an approver with a release waiting on them re-checks this often
 const SIGN_PING_MS = 20 * 1000;         // approvers look for a new review request on a release this often (1 search)
 const PENDING_SHOWN = 10;
@@ -230,6 +232,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       push({ results, grid: buildGrid(cfg, results) });
       deploysChanged(prevDeploys, deploys);
       checkToSign().catch(() => {});
+      reconcileHistory().catch(() => {});
     } finally {
       inFlight = false;
       push({ loading: false });
@@ -345,7 +348,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   function prodStep(repo, base, head) {
     const cfg = state.config;
     if (!cfg) return null;
-    return releasePlan(cfg, ['prod']).prs.find(p => p.repo.toLowerCase() === repo.toLowerCase() && p.target === base && p.source === head) || null;
+    return releasePlan(cfg, ['prod']).prs.find(p => p.repo.toLowerCase() === repo.toLowerCase() && p.target === base && (p.source === head || ROLLBACK_HEAD.test(head))) || null;
   }
 
   // The gate every Overlord merge goes through: prod release PRs need two approvers' signatures.
@@ -379,11 +382,14 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const found = [];
     await Promise.all(steps.map(async (p) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
-      const pr = Array.isArray(r.data) && r.data.find(x => x.head && x.head.ref === p.source && (!x.head.repo || x.head.repo.full_name.toLowerCase() === p.repo.toLowerCase()));
-      if (!pr) return;
-      const s = await signoffOf(p.repo, pr.number);
-      if (s.error || hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) return;
-      found.push({ repo: p.repo, label: p.label, number: pr.number, url: pr.html_url, signers: s.signers.map(x => x.login), count: s.count, need: s.need });
+      const prs = (Array.isArray(r.data) ? r.data : []).filter(x => x.head && (x.head.ref === p.source || ROLLBACK_HEAD.test(x.head.ref))
+        && (!x.head.repo || x.head.repo.full_name.toLowerCase() === p.repo.toLowerCase()));
+      for (const pr of prs) {
+        const s = await signoffOf(p.repo, pr.number);
+        if (s.error || hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue;
+        found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url,
+          signers: s.signers.map(x => x.login), count: s.count, need: s.need });
+      }
     }));
     found.sort((a, b) => a.label.localeCompare(b.label));
     push({ toSign: found });
@@ -425,6 +431,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (run) push({ releaseRun: { ...run } });
     persist();
     await checkToSign().catch(() => {});
+    reconcileHistory().catch(() => {});
     send({ type: 'toast', text: signed ? `Signed ${signed} prod release PR${signed === 1 ? '' : 's'}` : 'Nothing left for you to sign' });
   }
 
@@ -444,6 +451,33 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     push({ releaseRun: { ...run } }); persist();
     send({ type: 'toast', text: merged ? `Merged ${merged} release PR${merged === 1 ? '' : 's'}` : 'Nothing ready to merge' });
   }
+  // Release history: manifests in <org>/release-manifests (release-history.js)
+  const requestReviews = async (repo, n) => {
+    const who = await whoAmI();
+    const others = memberLogins().filter(m => m.toLowerCase() !== String(who.github).toLowerCase());
+    if (others.length) await ghJson(['api', '-X', 'POST', `repos/${repo}/pulls/${n}/requested_reviewers`, '--input', writeTmp({ reviewers: others })]);
+  };
+  const history = createHistory({ ghJson, writeTmp: (p) => writeTmp(p), push, getState: () => state, org: () => approversOrg(),
+    signoffOf, requestReviews, whoAmI, send });
+  let reconciling = false;
+  const reconcileHistory = async () => { if (reconciling) return; reconciling = true; try { await history.reconcile(); } finally { reconciling = false; } };
+
+  // Merge a pending release straight from the history: every open PR of it that the gate allows.
+  async function mergeRelease(id) {
+    const m = ((state.history && state.history.items) || []).find(x => x.id === id);
+    if (!m) return;
+    let merged = 0;
+    for (const r of m.repos.filter(x => !x.mergeSha && !x.closed)) {
+      const gate = await mergeGate(r.pr.url);
+      if (!gate.ok) { send({ type: 'toast', text: `${r.label}: ${gate.reason}` }); continue; }
+      const res = await ghJson(['api', '-X', 'PUT', `repos/${r.repo}/pulls/${r.pr.number}/merge`, '-f', 'merge_method=merge']);
+      if (apiErr(res)) { send({ type: 'toast', text: `Merge ${r.label}: ${apiErr(res)}` }); continue; }
+      merged++;
+    }
+    await reconcileHistory();
+    send({ type: 'toast', text: merged ? `Release ${id}: merged ${merged} PR${merged === 1 ? '' : 's'}` : `Release ${id}: nothing merged` });
+  }
+
   const writeTmp = (payload) => { const p = path.join(runsDir(), `api-${stamp()}-${Math.random().toString(36).slice(2, 7)}.json`); fs.writeFileSync(p, JSON.stringify(payload)); return p; };
 
   // The config repo's local checkout (where the frontend's flag-gap check and a Fix agent work),
@@ -515,6 +549,11 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     push({ releaseRun: { ...run } });
     persist();
     recheck(run);
+    // the shared record: this release's manifest in <org>/release-manifests
+    const lives = (state.results && state.results.lives) || {};
+    await history.recordRun(run, { opener: { login: who.github, clickup: who.clickup }, flags: run.flags,
+      manual: run.manual.map(m => ({ ...m, live: lives[`${m.repo}|${m.env}`] && !lives[`${m.repo}|${m.env}`].error
+        ? { sha: lives[`${m.repo}|${m.env}`].sha, behind: lives[`${m.repo}|${m.env}`].behind } : null })) }).catch(e => send({ type: 'toast', text: 'Release manifest: ' + e.message }));
     const blocked = run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
     const opened = run.rows.filter(r => r.pr && !r.reused).length;
     send({ type: 'toast', text: `Release ${envs.join(' + ')}: ${opened} PR${opened === 1 ? '' : 's'} opened${blocked ? `, ${blocked} blocked` : ''}` });
@@ -590,6 +629,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         if (d && fixRun) fixRun(d).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }));
         return true;
       }
+      case 'releasesHistory': history.load().then(() => reconcileHistory()).catch(e => push({ history: { error: e.message, items: [] } })); return true;
+      case 'releasesRollback': history.rollback(msg.id, msg.skip || []).catch(e => send({ type: 'toast', text: 'Rollback failed: ' + e.message })); return true;
+      case 'releasesMergeRelease': mergeRelease(msg.id).catch(e => send({ type: 'toast', text: 'Merge failed: ' + e.message })); return true;
       case 'releasesClearRun': clearTimeout(recheckTimer); push({ releaseRun: null }); persist(); return true;
       case 'releasesSetSource': {
         const source = String(msg.source || '').trim() || DEFAULT_SOURCE;

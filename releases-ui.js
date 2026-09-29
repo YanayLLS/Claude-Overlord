@@ -3,6 +3,7 @@
 // and forwards { type: 'releases' } messages to releasesUi.onMsg.
 (function () {
   let state = null, open = false, sel = null; // sel = [rowIdx, cellIdx]
+  let rbOpen = null, rbSkip = new Set(); // History: the release whose Rollback confirm is open, repos unticked
   let apprOpen = false; // 👥 approvers panel
   let relOpen = false, relSel = new Set(), relShown = false; // Release picker: open?, chosen envs, already animated in?
   let tab = 'board', tlEnv = '', toToday = false; // tab: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
@@ -97,7 +98,13 @@
     fixDeploy: (el) => { api.send({ type: 'releasesFixDeploy', key: el.dataset.key }); show(false); },
     relFix: () => { api.send({ type: 'releasesFix' }); relOpen = false; show(false); },
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
-    tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; render(); },
+    tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; if (tab === 'history') api.send({ type: 'releasesHistory' }); render(); },
+    // history actions
+    histRollback: (el) => { rbOpen = rbOpen === el.dataset.id ? null : el.dataset.id; rbSkip = new Set(); render(); },
+    histRbRepo: (el) => { const r = el.dataset.repo; rbSkip.has(r) ? rbSkip.delete(r) : rbSkip.add(r); render(); },
+    histRbGo: (el) => { api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
+    histMerge: (el) => { api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); },
+    histReload: () => { api.send({ type: 'releasesHistory' }); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
     cancelSource: () => { state = { ...(state || {}), editing: false }; render(); },
   };
@@ -395,6 +402,62 @@
     return h + '</div>';
   }
 
+  // ── History: every prod release from <org>/release-manifests, the pending one first ──
+  const STATUS_CHIP = { pending: ['warn', 'pending'], merged: ['', 'merged · deploying'], deployed: ['ok', 'deployed ✓'],
+    'deploy-failed': ['bad', 'deploy failed'], abandoned: ['', 'abandoned'] };
+  const shortSha = (x) => x ? esc(x.slice(0, 7)) : '—';
+  function historyHtml(s) {
+    const hs = s.history;
+    let h = '<div class="rl-hist">';
+    if (!hs) return h + '<div class="rl-tl-empty">Loading release history…</div></div>';
+    if (hs.error) return h + `<div class="rl-rr-flag bad">Release history: ${esc(hs.error)}</div><button class="rl-hist-btn" data-act="histReload">Retry</button></div>`;
+    if (!hs.items.length) return h + '<div class="rl-tl-empty">No prod release recorded yet. The next Release writes the first one.</div></div>';
+    const a = s.approvers || {}, meL = (a.me || '').toLowerCase();
+    const toSign = new Set((s.toSign || []).map(t => t.repo + '#' + t.number));
+    for (const m of hs.items) {
+      const [cls, label] = STATUS_CHIP[m.status] || ['', m.status];
+      const signers = [...new Set(m.repos.flatMap(r => r.signers || []))];
+      const pending = m.status === 'pending';
+      h += `<div class="rl-hist-card${pending ? ' pending' : ''}"><div class="rl-hist-top">`
+        + `<b>${m.kind === 'rollback' ? '↩ Rollback' : 'Release'} ${esc(m.id)}</b>`
+        + (m.kind === 'rollback' ? `<span class="rl-rr-chip">restores ${esc(m.rollbackOf)}</span>` : '')
+        + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
+        + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${esc(age(m.openedAt))} ago</span></div>`
+        + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
+      h += '<div class="rl-hist-repos">';
+      for (const r of m.repos) {
+        const need = pending && !r.mergeSha && !r.closed;
+        const signed = (r.signers || []).length;
+        const cmp = r.baseSha && (r.mergeSha || r.headSha) ? `https://github.com/${r.repo}/compare/${r.baseSha}...${r.mergeSha || r.headSha}` : null;
+        const dep = r.deploy ? (r.deploy.state === 'success' ? '<span class="ok">deployed</span>' : r.deploy.state === 'failure' ? '<span class="bad">deploy failed</span>' : r.mergeSha ? 'deploying…' : '') : '✋ by hand';
+        h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
+          + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
+          + `<span class="rl-hist-state">${r.closed && !r.mergeSha ? 'closed' : need ? `✍ ${signed}/2${toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : ''}` : r.mergeSha ? dep : ''}</span></div>`;
+      }
+      h += '</div>';
+      if (m.manual && m.manual.length) h += `<div class="rl-hist-man">Hand-deployed at the time: ${m.manual.map(x => esc(x.label) + (x.live && x.live.sha ? ' ' + shortSha(x.live.sha) : '')).join(' · ')}</div>`;
+      if (m.flags && m.flags.missing && m.flags.missing.length) h += `<div class="rl-hist-man bad">Flags to seed: ${esc(m.flags.missing.join(', '))}</div>`;
+      // actions
+      const acts = [];
+      if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push('<button class="rl-hist-btn go" data-act="relSign">✍ Sign</button>');
+      if (pending && a.isApprover) acts.push(`<button class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}" title="Merge every PR of this release that has its 2 signatures">⤵ Merge release</button>`);
+      if (!pending && m.status !== 'abandoned' && m.repos.some(r => r.mergeSha) && a.isApprover) {
+        acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}">↩ Roll back to this</button>`);
+      }
+      if (acts.length) h += '<div class="rl-hist-acts">' + acts.join('') + '</div>';
+      if (rbOpen === m.id) {
+        h += '<div class="rl-hist-rb"><div>Open rollback PRs that put prod back exactly as this release left it. Each needs 2 approvers\' signatures, like any release.</div>';
+        for (const r of m.repos.filter(x => x.mergeSha)) {
+          h += `<label class="rl-hist-rb-repo"><input type="checkbox" data-act="histRbRepo" data-repo="${esc(r.repo)}"${rbSkip.has(r.repo) ? '' : ' checked'}>`
+            + `<b>${esc(r.label)}</b><span>${esc(r.target)} → ${shortSha(r.mergeSha)}</span></label>`;
+        }
+        h += `<button class="rl-hist-btn danger" data-act="histRbGo" data-id="${esc(m.id)}">↩ Open rollback PRs</button></div>`;
+      }
+      h += '</div>';
+    }
+    return h + '</div>';
+  }
+
   // 👥 Release approvers: the GitHub team whose members may release and sign prod. Editing is up
   // to GitHub: team maintainers can add/remove here, everyone else sees the list.
   // Why Release is off for this person, and who can change that
@@ -582,7 +645,8 @@
     const upd = s.updatedAt ? `updated ${new Date(s.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
     let h = '<div class="rl-head"><h2>Releases</h2>'
       + (s.grid ? `<div class="rl-tabs"><button data-act="tab" data-tab="board" class="${tab === 'board' ? 'on' : ''}">Board</button>`
-        + `<button data-act="tab" data-tab="timeline" class="${tab === 'timeline' ? 'on' : ''}">Timeline</button></div>` : '')
+        + `<button data-act="tab" data-tab="timeline" class="${tab === 'timeline' ? 'on' : ''}">Timeline</button>`
+        + `<button data-act="tab" data-tab="history" class="${tab === 'history' ? 'on' : ''}">History</button></div>` : '')
       + `<span class="rl-src" data-act="editSource" title="Change config source">${esc(s.source)}</span>`
       + `<span class="rl-upd">${s.loading ? 'loading…' : esc(upd)}</span>`
       + (s.config ? `<button class="rl-appr-btn${apprOpen ? ' on' : ''}" data-act="apprMenu" title="Release approvers: releasing and merging prod needs two of them"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
@@ -605,7 +669,9 @@
     } else {
       // Header and footer stay put; only the board scrolls. The clicked cell's detail is a
       // drawer over the board's bottom edge, so opening it never resizes the modal.
-      h += (tab === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
+      h += (tab === 'history' && s.config ? historyHtml(s) + '</div><div class="rl-foot">'
+        + `<div class="rl-legend"><span>Prod releases, recorded in ${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
+        : tab === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
         + (s.localOnly ? `<div class="rl-local" title="It isn't on GitHub yet, so teammates can't see this board. Commit and push it to share.">Local config, not pushed yet · <code>${esc(s.localOnly)}</code></div>` : '');
     }
     const prev = modal.querySelector('.rl-body'), top = prev ? prev.scrollTop : 0, left = prev ? prev.scrollLeft : 0;

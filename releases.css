@@ -328,3 +328,31 @@
 .rl-tosign .rl-rr-sign:hover { filter:brightness(1.1); }
 /* locked Release: looks disabled but stays hoverable, so its tooltip explains why (a disabled button gets no mouse events) */
 .rl-head .rl-release.locked, .rl-head .rl-release.locked:hover { opacity:.45; cursor:not-allowed; transform:none; box-shadow:none; filter:none; }
+
+/* ── History tab: prod releases from release-manifests ── */
+.rl-hist { width:min(760px, 88vw); padding:10px 0 4px; display:flex; flex-direction:column; gap:8px; }
+.rl-hist-card { padding:10px 12px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); transition:border-color .12s; }
+.rl-hist-card:hover { border-color:var(--border-hi); }
+.rl-hist-card.pending { border-color:var(--accent); background:var(--accent-soft); }
+.rl-hist-top { display:flex; align-items:center; gap:8px; }
+.rl-hist-top b { font-size:13px; }
+.rl-hist-when { margin-left:auto; font-size:11px; color:var(--dim); }
+.rl-hist-who { font-size:11px; color:var(--subtext); margin:3px 0 6px; }
+.rl-hist-repos { display:flex; flex-direction:column; gap:2px; }
+.rl-hist-repo { display:grid; grid-template-columns:150px 60px 1fr auto; align-items:center; gap:8px; font-size:11.5px; padding:2px 0; }
+.rl-hist-repo a { color:var(--accent); }
+.rl-hist-sha { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); }
+.rl-hist-sha a { color:var(--subtext); }
+.rl-hist-state { font-size:11px; color:var(--subtext); white-space:nowrap; }
+.rl-hist-state .ok { color:var(--green); } .rl-hist-state .bad { color:var(--red); }
+.rl-hist-man { font-size:10.5px; color:var(--dim); margin-top:6px; }
+.rl-hist-man.bad { color:var(--peach); }
+.rl-hist-acts { display:flex; gap:6px; margin-top:8px; }
+.rl-hist-btn { font:inherit; font-size:11.5px; font-weight:600; padding:4px 11px; border-radius:999px; border:1px solid var(--border); background:var(--surface1); color:var(--text); cursor:pointer; transition:background .12s, border-color .12s; }
+.rl-hist-btn:hover { border-color:var(--border-hi); background:var(--surface2); }
+.rl-hist-btn.go { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+.rl-hist-btn.on { border-color:var(--peach); }
+.rl-hist-btn.danger { margin-top:8px; background:rgba(251,146,60,.15); border-color:rgba(251,146,60,.6); color:var(--peach); }
+.rl-hist-rb { margin-top:8px; padding:8px 10px; border-radius:var(--r-sm); border:1px dashed rgba(251,146,60,.5); font-size:11.5px; color:var(--subtext); }
+.rl-hist-rb-repo { display:flex; align-items:center; gap:8px; margin-top:4px; cursor:pointer; }
+.rl-hist-rb-repo span { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); }
