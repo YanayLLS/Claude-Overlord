@@ -1427,6 +1427,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./term-size-core.js"></script>
 <script src="./shift-select-core.js"></script>
 <script src="./link-core.js"></script>
+<script src="./paste-core.js"></script>
 <script src="./usage-core.js"></script>
 <script src="./preview-ui-dom.js"></script>
 <script src="./preview-ui-device.js"></script>
@@ -4708,42 +4709,28 @@ document.addEventListener('paste', (e) => {
   if (!selectedId) return;
   if (!document.getElementById('term').classList.contains('open')) return;
   if (termTab !== 'terminal') return;
-  const items = e.clipboardData?.items;
-  if (!items) return;
-  let hasImageFile = false;
-  let hasNonImageFile = false;
-  let hasText = false;
-  for (const item of items) {
+  let hasImageFile = false, hasNonImageFile = false, hasTextItem = false;
+  for (const item of e.clipboardData?.items || []) {
     if (item.kind === 'file') {
       if (item.type.startsWith('image/')) hasImageFile = true;
       else hasNonImageFile = true;
     } else if (item.kind === 'string') {
-      hasText = true;
+      hasTextItem = true;
     }
   }
-  // Check if clipboard has files (copied from Explorer/Finder)
-  // Files copied from OS file manager appear as file items
-  if (hasImageFile) {
-    e.preventDefault();
-    e.stopPropagation();
-    api.send({ type: 'pasteImage', id: selectedId });
-    return;
-  }
-  if (hasNonImageFile || (e.clipboardData?.files && e.clipboardData.files.length > 0)) {
-    e.preventDefault();
-    e.stopPropagation();
-    api.send({ type: 'pasteFiles', id: selectedId });
-    return;
-  }
-  if (hasText) return;
-  // items list sometimes empty even when clipboard has text (Electron/Chromium quirk).
-  // Check types array for text format before falling through to file-paste path.
-  const types = e.clipboardData?.types || [];
-  if (types.includes('text/plain') || types.includes('text')) return;
-  // Truly no text — try Windows FileNameW fallback for Explorer-copied files.
+  const tgt = e.target || {};
+  // paste-core.js owns the verdict; 'files' also covers "nothing legible on the
+  // clipboard", which main resolves by reading it fresh rather than dropping it.
+  const route = pasteRoute({
+    intoInput: pasteIntoInput({ tag: tgt.tagName, isContentEditable: tgt.isContentEditable, className: tgt.className }),
+    hasImageFile, hasNonImageFile, hasTextItem,
+    fileCount: e.clipboardData?.files?.length || 0,
+    types: [...(e.clipboardData?.types || [])],
+  });
+  if (route === 'ignore' || route === 'xterm') return; // xterm pastes it itself
   e.preventDefault();
   e.stopPropagation();
-  api.send({ type: 'pasteFiles', id: selectedId });
+  api.send({ type: route === 'image' ? 'pasteImage' : 'pasteFiles', id: selectedId });
 }, true);
 
 function toggleHelp() {

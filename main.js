@@ -94,6 +94,7 @@ const { themeOf, titleBarColors } = require('./theme-core');
 const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered } = require('./recover-core');
+const { normalizePasteText } = require('./paste-core');
 const { migrateLegacy } = require('./state-dir');
 const APP_DIR = __dirname;
 let gitUpdateBusy = false;
@@ -3180,6 +3181,13 @@ function savePasteToFile(content) {
   return file;
 }
 
+// Clipboard text delivered as a real bracketed paste: multi-line content has to
+// land as one prompt rather than submitting a line at a time, and going through
+// handleTermInput keeps the >500-char temp-file path applying to it too.
+function pasteTextToTerm(id, text) {
+  handleTermInput(id, '\x1b[200~' + normalizePasteText(text) + '\x1b[201~');
+}
+
 function handleTermInput(id, data) {
   const t = terminals.get(id);
   if (!t) {
@@ -3999,7 +4007,20 @@ function handleIpc(msg) {
       filePaths = filePaths.filter(p => {
         try { fs.statSync(p); return true; } catch (_) { return false; }
       });
-      if (filePaths.length === 0) break;
+      // No file on the clipboard. The renderer only routes here when its own
+      // DataTransfer came back empty, and Chromium empties it whenever the
+      // clipboard read loses a race — delayed rendering (Office, RDP bridges),
+      // a clipboard manager holding it open, a source app that has since quit.
+      // The text is almost always still there, and this is a fresh OS-level
+      // read rather than the snapshot taken at event time, so it finds it.
+      // Never return silently here: the renderer has already preventDefault'd,
+      // so dropping out means the paste vanishes with nothing to show for it.
+      if (filePaths.length === 0) {
+        const clip = clipboard.readText();
+        if (clip) { pasteTextToTerm(msg.id, clip); break; }
+        flog(`[Overlord] paste: no files, image or text on the clipboard (agent ${msg.id})`);
+        break;
+      }
       const text = filePaths
         .map(p => p.replace(/\\/g, '/'))
         .map(p => p.includes(' ') ? `"${p}"` : p)
