@@ -37,6 +37,7 @@
       relOpen = false; apprOpen = false; render();
       return;
     }
+    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"]')) { armed = null; render(); }
     if (e.target === overlay) return show(false);
     const a = e.target.closest('[data-url]');
     if (a) { e.stopPropagation(); return api.send({ type: 'openUrl', url: a.dataset.url }); }
@@ -90,7 +91,8 @@
     apprRemove: (el) => { api.send({ type: 'releasesApproversEdit', kind: 'remove', login: el.dataset.login }); },
     apprCreate: () => { api.send({ type: 'releasesApproversEdit', kind: 'create' }); },
     relSign: () => { api.send({ type: 'releasesSign' }); },
-    relMerge: () => { api.send({ type: 'releasesMerge' }); },
+    // Release all merges to prod: the first click arms it (the button asks to confirm), a second within ARM_MS starts it
+    relMerge: () => { if (armed !== 'run') return arm('run'); armed = null; api.send({ type: 'releasesMerge' }); render(); },
     relAllStop: () => { api.send({ type: 'releasesReleaseAllStop' }); },
     // bell: add every repo of the release config the PRs panel isn't watching yet
     relWatch: () => {
@@ -121,7 +123,7 @@
     histRollback: (el) => { rbOpen = rbOpen === el.dataset.id ? null : el.dataset.id; rbSkip = new Set(); render(); },
     histRbRepo: (el) => { const r = el.dataset.repo; rbSkip.has(r) ? rbSkip.delete(r) : rbSkip.add(r); render(); },
     histRbGo: (el) => { api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
-    histMerge: (el) => { api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); },
+    histMerge: (el) => { if (armed !== 'h:' + el.dataset.id) return arm('h:' + el.dataset.id); armed = null; api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); render(); },
     histReload: () => { api.send({ type: 'releasesHistory' }); },
     histImport: () => { api.send({ type: 'releasesImport' }); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
@@ -425,7 +427,14 @@
   // The one Release all button (release results + History): ready = what merges now (any env);
   // waiting = prod PRs held back until the release is signed 2/2. Nothing ready → locked, saying who still has to sign what.
   // signoff: { count, need, signers: [login], gaps: [{ login, missing: [{ label, older }] }] }
-  function releaseAllBtn(s, { ready, waiting, signoff, attrs, lockedCls }) {
+  let armed = null, armTimer = null;
+  const ARM_MS = 6000;
+  function arm(key) {
+    armed = key; clearTimeout(armTimer);
+    armTimer = setTimeout(() => { armed = null; render(); }, ARM_MS);
+    render();
+  }
+  function releaseAllBtn(s, { ready, waiting, signoff, attrs, lockedCls, armKey }) {
     if (s.releaseAll && s.releaseAll.running) return '';
     const so = signoff || { count: 0, need: 2, signers: [], gaps: [] };
     const signedLine = `the prod release is signed ${so.count}/${so.need}${so.signers.length ? ' (' + so.signers.map(l => '@' + l).join(', ') + ')' : ''}`;
@@ -437,6 +446,10 @@
     for (const r of ready) byEnv[r.env || 'prod'] = (byEnv[r.env || 'prod'] || 0) + 1;
     const tip = `${Object.entries(byEnv).map(([e, n]) => `${n} ${e}`).join(' + ')}. Merges now, in release order (services → iframes → frontend), waiting for each wave's deploys; stops on a failed deploy:\n`
       + ready.map(pr).join('\n') + (waiting.length ? `\n\nHeld back: ${signedLine}:\n${waiting.map(pr).join('\n')}${gapLines}` : '');
+    if (armed === armKey) {
+      const waves = s.config ? ReleasesCore.releaseWaves(s.config, ready).length : 1;
+      return `<button ${attrs.replace('class="', 'class="armed ')} title="${esc(tip)}">⚠ Confirm: merge ${ready.length} PR${ready.length === 1 ? '' : 's'} in ${waves} wave${waves === 1 ? '' : 's'}</button>`;
+    }
     return `<button ${attrs} title="${esc(tip)}">🚀 Release all · ${ready.length}</button>`;
   }
 
@@ -449,7 +462,7 @@
       : `⏸ Release all stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
     return `<div class="rl-relall ${p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad'}"><span>${head}</span>`
       + (p.merged && p.merged.length ? `<span class="rl-relall-merged">merged: ${esc(p.merged.join(', '))}</span>` : '')
-      + (p.running ? '<button class="rl-hist-btn" data-act="relAllStop">Stop after this step</button>' : '') + '</div>';
+      + (p.running ? '<button class="rl-hist-btn" data-act="relAllStop" title="Stops before the next merge. What already merged stays merged">⏹ Stop</button>' : '') + '</div>';
   }
 
   // ── History: every prod release from <org>/release-manifests, the pending one first ──
@@ -507,7 +520,7 @@
         waiting: signers.length >= 2 ? [] : openRepos,
         signoff: { count: signers.length, need: 2, signers, gaps: anyone.filter(l => !signers.includes(l))
           .map(login => ({ login, missing: openRepos.filter(r => !(r.signers || []).includes(login)).map(r => ({ label: r.label })) })) },
-        attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn' }));
+        attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn', armKey: 'h:' + m.id }));
       if (!pending && m.status !== 'abandoned' && m.repos.some(r => r.mergeSha) && a.isApprover) {
         acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}">↩ Roll back to this</button>`);
       }
@@ -641,7 +654,7 @@
     h += releaseAllHtml(s) + '<div class="rl-rel-actions">'
       + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign the release</button>` : '')
       + releaseAllBtn(s, { ready: readyRows, waiting: unsignedProd, signoff: run.signoff && { ...run.signoff, signers: run.signoff.signers.map(x => x.login) },
-        attrs: 'class="rl-rr-merge" data-act="relMerge"', lockedCls: 'rl-rr-merge' })
+        attrs: 'class="rl-rr-merge" data-act="relMerge"', lockedCls: 'rl-rr-merge', armKey: 'run' })
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
       // a new release only once this one's PRs are all merged or closed (Release again just reuses open PRs anyway)
       + (run.running || open.length ? '' : '<button data-act="relNew">New release</button>')

@@ -613,6 +613,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
           if (r) return progress({ running: false, status: 'stopped', detail: r, manualWave: null });
         }
         for (const it of wave.filter(x => !x.manual)) {
+          if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
           const gate = await mergeGate(it.pr.url);
           if (!gate.ok) return progress({ running: false, status: 'stopped', detail: `${it.label}: ${gate.reason}` });
           const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
