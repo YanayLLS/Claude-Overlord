@@ -409,7 +409,7 @@
     const p = s.releaseAll;
     if (!p) return '';
     const head = p.running ? `🚀 Wave ${p.wave}/${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : 'merging'}: ${esc(p.detail || '')}`
-      : p.status === 'done' ? '🚀 Released: every wave merged ✓'
+      : p.status === 'done' ? `🚀 Released: ${esc(p.detail || 'every wave merged')} ✓`
       : `⏸ Release all stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
     return `<div class="rl-relall ${p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad'}"><span>${head}</span>`
       + (p.merged && p.merged.length ? `<span class="rl-relall-merged">merged: ${esc(p.merged.join(', '))}</span>` : '')
@@ -583,10 +583,20 @@
     const open = run.running ? [] : run.rows.filter(r => r.pr && !r.merged && !r.closed);
     const toSign = a.isApprover ? new Set([...open.filter(r => r.env === 'prod' && r.signoff && !r.signoff.signers.some(x => x.login.toLowerCase() === meL)).map(r => r.repo + '#' + r.pr.number),
       ...(s.toSign || []).map(x => x.repo + '#' + x.number)]).size : 0;
-    const ready = open.filter(r => r.status === 'ok' && r.conflict === false && (r.env !== 'prod' || (r.signoff && r.signoff.ok))).length;
+    // what Release all would actually merge now, by env — and the prod PRs still waiting for signatures
+    const readyRows = open.filter(r => r.status === 'ok' && r.conflict === false && (r.env !== 'prod' || (r.signoff && r.signoff.ok)));
+    const ready = readyRows.length;
+    const unsignedProd = open.filter(r => r.env === 'prod' && !(r.signoff && r.signoff.ok));
+    const byEnv = {};
+    for (const r of readyRows) byEnv[r.env] = (byEnv[r.env] || 0) + 1;
+    const readyLabel = Object.entries(byEnv).map(([e, n]) => `${n} ${e}`).join(' + ');
+    const readyTip = `Merges now, in release order (services → iframes → frontend), waiting for each wave's deploys:\n`
+      + readyRows.map(r => `• ${r.label} ${r.env} #${r.pr.number}`).join('\n')
+      + (unsignedProd.length ? `\n\nNot merged — waiting for 2 signatures:\n${unsignedProd.map(r => `• ${r.label} prod #${r.pr.number} (${r.signoff ? r.signoff.count : 0}/2)`).join('\n')}` : '');
     h += releaseAllHtml(s) + '<div class="rl-rel-actions">'
       + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign (${toSign})</button>` : '')
-      + (ready && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge" data-act="relMerge" title="Merge in release order (services, then iframes, then frontend), waiting for each wave's deploys; stops on a failed deploy">🚀 Release all (${ready})</button>` : '')
+      + (ready && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge" data-act="relMerge" title="${esc(readyTip)}">🚀 Release all (${esc(readyLabel)})</button>` : '')
+      + (!ready && unsignedProd.length && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge locked" aria-disabled="true" title="${esc(`Prod waits for 2 approvers' signatures:\n${unsignedProd.map(r => `• ${r.label} #${r.pr.number} (${r.signoff ? r.signoff.count : 0}/2)`).join('\n')}`)}">🔒 Release all · needs signatures</button>` : '')
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
       + (run.running ? '' : '<button data-act="relNew">New release</button>')
       + '<button data-act="releaseClose">Close</button></div></div>';
@@ -734,5 +744,42 @@
       : failed.length ? `Deploy failing: ${failed.join(', ')}` : "Releases — what's merged in each environment of each repo";
   }
 
-  window.releasesUi = { onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; renderBadge(); if (msg.open && !open) show(true); render(); } };
+  // ── The big "sign this release" prompt: the moment a release waits on me, a centred window over
+  // everything (the footer badge alone is easy to miss). "Later" hides it until the next new
+  // thing to sign (another release, or a new commit on one). Remembered per machine.
+  const signOverlay = document.createElement('div');
+  signOverlay.id = 'rl-sign-overlay';
+  document.body.appendChild(signOverlay);
+  let promptDismissed = null;
+  try { promptDismissed = localStorage.getItem('rl-sign-dismissed'); } catch {}
+  signOverlay.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-sign]');
+    const u = e.target.closest('[data-url]');
+    if (u) { e.stopPropagation(); return api.send({ type: 'openUrl', url: u.dataset.url }); }
+    if (!a && e.target !== signOverlay) return;
+    const act = a ? a.dataset.sign : 'later';
+    if (act === 'now') api.send({ type: 'releasesSign' });
+    if (act === 'review') { relOpen = true; relShown = false; show(true); }
+    promptDismissed = state && state.signPromptKey; // any choice closes it until something new arrives
+    try { localStorage.setItem('rl-sign-dismissed', promptDismissed || ''); } catch {}
+    signOverlay.classList.remove('open');
+  });
+  function renderSignPrompt() {
+    const t = (state && state.toSign) || [];
+    const key = state && state.signPromptKey;
+    if (!t.length || !key || key === promptDismissed) { signOverlay.classList.remove('open'); return; }
+    const by = [...new Set(t.map(x => x.author).filter(Boolean))];
+    signOverlay.innerHTML = '<div class="rl-sign-box" role="dialog" aria-label="Sign the release">'
+      + '<div class="rl-sign-icon">✍</div>'
+      + `<h2>Prod release waiting for your signature</h2>`
+      + `<div class="rl-sign-sub">${by.length ? by.map(x => '@' + esc(x)).join(', ') + ' released' : 'A release is waiting'} — prod merges only once two approvers sign. Your approval is the second signature.</div>`
+      + '<div class="rl-sign-list">' + t.map(x => `<div class="rl-sign-row"><b>${esc(x.label)}</b>`
+        + `<a data-url="${esc(x.url)}">#${esc(x.number)}</a>`
+        + `<span>${x.commits ? esc(x.commits) + ' commit' + (x.commits === 1 ? '' : 's') + ' · ' : ''}${esc(x.count)}/${esc(x.need)} signed</span></div>`).join('') + '</div>'
+      + '<div class="rl-sign-acts"><button data-sign="later">Later</button><button data-sign="review">Review first</button>'
+      + `<button class="go" data-sign="now">✍ Sign now (${t.length})</button></div></div>`;
+    signOverlay.classList.add('open');
+  }
+
+  window.releasesUi = { onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; renderBadge(); renderSignPrompt(); if (msg.open && !open) show(true); render(); } };
 })();

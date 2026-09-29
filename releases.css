@@ -376,3 +376,24 @@
 .rl-relall a { color:inherit; text-decoration:underline; }
 .rl-relall-merged { color:var(--subtext); font-size:10.5px; }
 .rl-relall .rl-hist-btn { margin-left:auto; }
+.rl-rel-actions .rl-rr-merge.locked { opacity:.5; cursor:not-allowed; } /* prod not signed yet: shown, explained, not clickable */
+
+/* ── the big "sign this release" prompt ── */
+#rl-sign-overlay { position:fixed; inset:0; z-index:70; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(0,0,0,.55); backdrop-filter:blur(3px); }
+#rl-sign-overlay.open { display:flex; animation:rl-fade .18s ease-out; }
+@keyframes rl-fade { from { opacity:0; } }
+.rl-sign-box { width:min(480px, 100%); padding:26px 26px 20px; border-radius:16px; background:var(--pop); border:1px solid var(--accent);
+  box-shadow:0 24px 64px rgba(0,0,0,.6), 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent); text-align:center; animation:rl-up .22s ease-out; }
+.rl-sign-icon { width:52px; height:52px; margin:0 auto 12px; display:flex; align-items:center; justify-content:center; border-radius:50%;
+  font-size:24px; background:var(--accent-soft); border:1px solid var(--accent); }
+.rl-sign-box h2 { margin:0 0 6px; font-size:17px; font-weight:700; }
+.rl-sign-sub { font-size:12.5px; color:var(--subtext); line-height:1.5; margin-bottom:14px; }
+.rl-sign-list { display:flex; flex-direction:column; gap:5px; text-align:left; margin-bottom:18px; }
+.rl-sign-row { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:var(--r); background:var(--surface0); border:1px solid var(--border); font-size:12.5px; }
+.rl-sign-row a { color:var(--accent); font-weight:600; cursor:pointer; }
+.rl-sign-row span { margin-left:auto; font-size:11.5px; color:var(--subtext); }
+.rl-sign-acts { display:flex; gap:8px; justify-content:center; }
+.rl-sign-acts button { font:inherit; font-size:13px; font-weight:600; padding:8px 16px; border-radius:999px; border:1px solid var(--border); background:var(--surface1); color:var(--text); cursor:pointer; transition:background .12s, filter .12s; }
+.rl-sign-acts button:hover { background:var(--surface2); }
+.rl-sign-acts button.go { background:var(--accent); border-color:var(--accent); color:var(--on-accent); padding:8px 22px; }
+.rl-sign-acts button.go:hover { filter:brightness(1.1); background:var(--accent); }

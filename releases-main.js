@@ -390,7 +390,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       for (const pr of prs) {
         const s = await signoffOf(p.repo, pr.number);
         if (s.error || hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue;
-        found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url, head: s.pr.head.sha,
+        found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url, head: s.pr.head.sha, commits: s.pr.commits || null, author: s.pr.user.login,
           signers: s.signers.map(x => x.login), count: s.count, need: s.need });
       }
     }));
@@ -403,6 +403,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       notify(`✍ Prod release waiting for your signature`, `${found.length} PR${found.length === 1 ? '' : 's'}: ${found.map(f => f.label).join(', ')}${by ? ' · opened by ' + by : ''}`,
         found[0].url, () => send({ type: 'releases', state, open: true }));
     }
+    // the prompt's identity: a new release / a new commit = a new key = the big prompt shows again
+    const promptKey = found.map(nkey).sort().join(',');
+    if (promptKey !== state.signPromptKey) push({ signPromptKey: promptKey });
     notifiedToSign = new Set(found.map(nkey));
     if (found.length) { toSignTimer = setTimeout(() => checkToSign().catch(() => {}), TO_SIGN_POLL_MS); if (toSignTimer.unref) toSignTimer.unref(); }
   }
@@ -481,7 +484,15 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       if ((Array.isArray(r.data) ? r.data : []).some(p => p.head && p.head.ref === it.target)) backs.push(it.label);
     }));
     if (backs.length) return send({ type: 'toast', text: `Merge the back-merge PR first (${backs.join(', ')}), then have the release re-signed — its signatures cover the old commit` });
-    const waves = releaseWaves(state.config, items);
+    // set aside what can't merge yet (prod without its 2 signatures): merge the rest, report the skipped
+    const skipped = [], go = [];
+    for (const it of items) {
+      const gate = await mergeGate(it.pr.url);
+      (gate.ok ? go : skipped).push(gate.ok ? it : { ...it, why: gate.reason });
+    }
+    if (!go.length) return send({ type: 'toast', text: `Nothing can merge yet: ${skipped.map(x => `${x.label} ${x.env} — ${x.why}`).join('; ')}` });
+    const skippedNote = skipped.length ? ` · not merged (waiting): ${skipped.map(x => x.label + ' ' + x.env).join(', ')}` : '';
+    const waves = releaseWaves(state.config, go);
     releaseAllStop = false;
     progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '' });
     try {
@@ -521,8 +532,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
           pending = still;
         }
       }
-      progress({ running: false, status: 'done', detail: 'Every wave merged' });
-      send({ type: 'toast', text: 'Release all: every wave merged ✓' });
+      progress({ running: false, status: 'done', detail: 'Every wave merged' + skippedNote });
+      send({ type: 'toast', text: 'Release all: every wave merged ✓' + skippedNote });
     } finally {
       if (state.releaseAll && state.releaseAll.running) progress({ running: false });
       reconcileHistory().catch(() => {});
