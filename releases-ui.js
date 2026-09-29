@@ -421,6 +421,24 @@
     return h + '</div>';
   }
 
+  // The one Release all button (release results + History): ready = what merges now (any env);
+  // waiting = prod PRs held back until the release is signed 2/2. Nothing ready → locked, saying who still has to sign what.
+  // signoff: { count, need, signers: [login], gaps: [{ login, missing: [{ label, older }] }] }
+  function releaseAllBtn(s, { ready, waiting, signoff, attrs, lockedCls }) {
+    if (s.releaseAll && s.releaseAll.running) return '';
+    const so = signoff || { count: 0, need: 2, signers: [], gaps: [] };
+    const signedLine = `the prod release is signed ${so.count}/${so.need}${so.signers.length ? ' (' + so.signers.map(l => '@' + l).join(', ') + ')' : ''}`;
+    const gapLines = (so.gaps || []).map(g => `\n@${g.login} still to sign: ${g.missing.map(x => x.label + (x.older ? ' (new commits)' : '')).join(', ')}`).join('');
+    const pr = (r) => `• ${r.label} ${r.env || 'prod'}${r.pr ? ' #' + r.pr.number : ''}`;
+    if (!ready.length) return waiting.length
+      ? `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`Can't merge yet: ${signedLine}.${gapLines}`)}">🔒 Release all · needs signatures</button>` : '';
+    const byEnv = {};
+    for (const r of ready) byEnv[r.env || 'prod'] = (byEnv[r.env || 'prod'] || 0) + 1;
+    const tip = `${Object.entries(byEnv).map(([e, n]) => `${n} ${e}`).join(' + ')}. Merges now, in release order (services → iframes → frontend), waiting for each wave's deploys; stops on a failed deploy:\n`
+      + ready.map(pr).join('\n') + (waiting.length ? `\n\nHeld back: ${signedLine}:\n${waiting.map(pr).join('\n')}${gapLines}` : '');
+    return `<button ${attrs} title="${esc(tip)}">🚀 Release all · ${ready.length}</button>`;
+  }
+
   // Release all's live progress: which wave, merging or waiting for deploys, the outcome; Stop.
   function releaseAllHtml(s) {
     const p = s.releaseAll;
@@ -483,10 +501,12 @@
       // actions
       const acts = [];
       if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push('<button class="rl-hist-btn go" data-act="relSign">✍ Sign</button>');
-      if (pending && a.isApprover && !(s.releaseAll && s.releaseAll.running) && signers.length < 2) acts.push(`<button class="rl-hist-btn locked" aria-disabled="true" title="${esc(`Prod merges once 2 approvers sign the release: ${signers.length}/2${signers.length ? ' (' + signers.map(l => '@' + l).join(', ') + ')' : ''}`
-        + anyone.filter(l => !signers.includes(l)).map(l => `
-@${l} still to sign: ${openRepos.filter(r => !(r.signers || []).includes(l)).map(r => r.label).join(', ')}`).join(''))}">🔒 Release all · needs signatures</button>`);
-      else if (pending && a.isApprover && !(s.releaseAll && s.releaseAll.running)) acts.push(`<button class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}" title="Merge in release order (services, then iframes, then frontend), waiting for each wave's deploys; stops on a failed deploy">🚀 Release all</button>`);
+      if (pending && a.isApprover) acts.push(releaseAllBtn(s, {
+        ready: signers.length >= 2 ? openRepos : [],
+        waiting: signers.length >= 2 ? [] : openRepos,
+        signoff: { count: signers.length, need: 2, signers, gaps: anyone.filter(l => !signers.includes(l))
+          .map(login => ({ login, missing: openRepos.filter(r => !(r.signers || []).includes(login)).map(r => ({ label: r.label })) })) },
+        attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn' }));
       if (!pending && m.status !== 'abandoned' && m.repos.some(r => r.mergeSha) && a.isApprover) {
         acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}">↩ Roll back to this</button>`);
       }
@@ -546,13 +566,16 @@
       + (run.running ? '<span class="rl-rr-spin">running…</span>' : pending ? '<span class="rl-rr-spin" title="Re-checking open PRs every minute">watching checks…</span>' : '')
       + '</div><div class="rl-rr-rows">';
     relShown = true;
+    // compact: closed PRs and repos with nothing to release collapse into one line at the end
+    const quiet = run.running ? [] : run.rows.filter(r => r.closed || r.status === 'nothing');
     run.rows.forEach((r, i) => {
+      if (quiet.includes(r)) return;
       const env = `<span class="rl-env" style="--hue:${ENV_HUE[r.env.toLowerCase()] || 'var(--dim)'}">${esc(r.env)}</span>`;
       const bits = [];
       if (r.running && !r.pr) bits.push('<span class="rl-rr-chip">checking…</span>');
       if (r.status === 'nothing') bits.push('<span class="rl-rr-chip">nothing to release</span>');
-      if (r.pr) bits.push(`<span class="rl-rr-chip ok">${prLink(r.pr, `#${r.pr.number}`)} ${r.reused ? 'already open' : 'opened'}${r.ahead ? ` · ${r.ahead} commits` : ''}</span>`);
-      if (r.backMerge && r.backMerge.url) bits.push(`<span class="rl-rr-chip${r.backMerge.conflict ? ' bad' : ' warn'}">back-merge ${prLink(r.backMerge, '#' + r.backMerge.number)}${r.backMerge.conflict ? ' conflicts' : ' — merge first'}</span>`);
+      if (r.pr) bits.push(`<span class="rl-rr-chip ok">${prLink(r.pr, `#${r.pr.number}`)}${r.ahead ? ` · ${r.ahead} commits` : ''}</span>`);
+      if (r.backMerge && r.backMerge.url) bits.push(`<span class="rl-rr-chip${r.backMerge.conflict ? ' bad' : ' warn'}" title="Back-merge ${esc(r.target)} → ${esc(r.source)}: merge it first">back-merge ${prLink(r.backMerge, '#' + r.backMerge.number)}${r.backMerge.conflict ? ' conflicts' : ' first'}</span>`);
       // the release is signed as one (count in the footer); a row only says who it's still missing
       if (r.env === 'prod' && run.signoff && !r.merged && !r.closed) {
         const gap = run.signoff.gaps.map(g => [g.login, g.missing.find(x => x.label === r.label)]).filter(([, x]) => x);
@@ -571,7 +594,7 @@
       const srcCell = srcRow && (srcRow.cells || []).find(c => c && c.branch === r.source && c.run);
       if (srcCell && srcCell.run.state === 'failure') {
         const what = (srcCell.run.failed || []).map(f => f.job + (f.step ? ' › ' + f.step : '')).join('; ') || 'its deploy';
-        bits.push(`<span class="rl-rr-chip warn" title="${esc(what)}">⚠ ${esc(r.source)}'s own deploy is failing — ${esc(r.env)} deploy will likely fail the same way</span>`);
+        bits.push(`<span class="rl-rr-chip warn" title="${esc(r.source)}'s own deploy is failing, so the ${esc(r.env)} deploy will likely fail the same way: ${esc(what)}">⚠ ${esc(r.source)} deploy failing</span>`);
       }
       // dbschemas: blocked when the release uses a field its build won't ship; otherwise info
       const d = r.dbschemas;
@@ -579,9 +602,9 @@
       else if (d && d.otherLine) bits.push(`<span class="rl-rr-chip warn" title="Latest is ${esc(d.latest)}: a different major line, so fields can't be compared">dbschemas ${esc(d.shipped)} (old line)</span>`);
       else if (d && d.shipped && d.shipped !== d.latest) bits.push(`<span class="rl-rr-chip" title="${esc((d.newFields || []).join(', ') || 'no new fields')}">dbschemas ${esc(d.shipped)} · ${d.behind != null ? d.behind + ' change' + (d.behind === 1 ? '' : 's') + ' behind' : 'behind ' + esc(d.latest)}</span>`);
       else if (d && d.shipped) bits.push(`<span class="rl-rr-chip ok">dbschemas ${esc(d.shipped)}${d.via === 'latest' ? ' (latest at build)' : ''}</span>`);
-      if (r.pr && !r.running && r.builds === 'none') bits.push('<span class="rl-rr-chip warn" title="No check on this PR builds or tests it, so nothing verifies it still builds after merging">⚠ no CI build on this PR</span>');
+      if (r.pr && !r.running && r.builds === 'none') bits.push('<span class="rl-rr-chip warn" title="No check on this PR builds or tests it, so nothing verifies it still builds after merging">⚠ no CI build</span>');
       if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them — merging isn't blocked">not required: ${esc(r.advisory.join(', '))}</span>`);
-      if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">already red on ${esc(r.target)}: ${esc(r.knownFailing.join(', '))}</span>`);
+      if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">red before: ${esc(r.knownFailing.join(', '))}</span>`);
       if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);
       h += `<div class="rl-rr-row st-${esc(r.status || 'running')}"><div class="rl-rr-top"><b>${esc(r.label)}</b>${env}`
         + `<span class="rl-rr-branches">${esc(r.source)} → ${esc(r.target)}</span>`
@@ -589,6 +612,7 @@
         + `</div><div class="rl-rr-bits">${bits.join('')}</div></div>`;
     });
     h += '</div>';
+    if (quiet.length) h += `<div class="rl-rr-sub">Nothing to release: ${quiet.map(r => esc(r.label) + (r.closed ? ` ${esc(r.env)} (PR closed)` : '')).join(' · ')}</div>`;
     if (run.manual.length) {
       h += '<div class="rl-rr-sub">Deployed by hand: nothing to PR</div>';
       for (const m of run.manual) {
@@ -609,21 +633,14 @@
     const toSign = a.isApprover ? new Set([...open.filter(r => r.env === 'prod' && r.signoff && !r.signoff.signers.some(x => x.login.toLowerCase() === meL)).map(r => r.repo + '#' + r.pr.number),
       ...(s.toSign || []).map(x => x.repo + '#' + x.number)]).size : 0;
     // what Release all would actually merge now, by env — and the prod PRs still waiting for signatures
-    const relOk = !!(run.signoff && run.signoff.ok), relCount = run.signoff ? run.signoff.count : 0;
+    const relOk = !!(run.signoff && run.signoff.ok);
     const readyRows = open.filter(r => r.status === 'ok' && r.conflict === false && (r.env !== 'prod' || relOk));
-    const ready = readyRows.length;
     const unsignedProd = relOk ? [] : open.filter(r => r.env === 'prod');
-    const byEnv = {};
-    for (const r of readyRows) byEnv[r.env] = (byEnv[r.env] || 0) + 1;
-    const readyLabel = Object.entries(byEnv).map(([e, n]) => `${n} ${e}`).join(' + ');
-    const readyTip = `${readyLabel}. Merges now, in release order (services → iframes → frontend), waiting for each wave's deploys:\n`
-      + readyRows.map(r => `• ${r.label} ${r.env} #${r.pr.number}`).join('\n')
-      + (unsignedProd.length ? `\n\nNot merged — the prod release has ${relCount}/2 signatures:\n${unsignedProd.map(r => `• ${r.label} prod #${r.pr.number}`).join('\n')}` : '');
     if (run.signoff) h += `<div class="rl-rr-flag${run.signoff.ok ? '' : ' bad'}">✍ Prod release signed ${run.signoff.count}/${run.signoff.need}${run.signoff.count ? ' · ' + run.signoff.signers.map(x => '@' + esc(x.login)).join(', ') : ''}</div>`;
     h += releaseAllHtml(s) + '<div class="rl-rel-actions">'
       + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign the release</button>` : '')
-      + (ready && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge" data-act="relMerge" title="${esc(readyTip)}">🚀 Release all · ${ready}</button>` : '')
-      + (!ready && unsignedProd.length && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge locked" aria-disabled="true" title="${esc(`Prod waits for 2 approvers to sign the release (${relCount}/2):\n${unsignedProd.map(r => `• ${r.label} #${r.pr.number}`).join('\n')}`)}">🔒 Release all · needs signatures</button>` : '')
+      + releaseAllBtn(s, { ready: readyRows, waiting: unsignedProd, signoff: run.signoff && { ...run.signoff, signers: run.signoff.signers.map(x => x.login) },
+        attrs: 'class="rl-rr-merge" data-act="relMerge"', lockedCls: 'rl-rr-merge' })
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
       // a new release only once this one's PRs are all merged or closed (Release again just reuses open PRs anyway)
       + (run.running || open.length ? '' : '<button data-act="relNew">New release</button>')

@@ -666,6 +666,24 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // After a run: a fresh PR's own checks only start once it exists, so re-read every open row
   // each minute until nothing is pending or unknown (or half an hour passes, or a new run starts).
   let recheckTimer = null;
+  // re-read these [row, index] pairs of a run (state, checks, sign-off) and publish
+  async function recheckRows(cur, pairs) {
+    await Promise.all(pairs.map(async ([r, i]) => {
+      const h = await prHealth(ghJson, r.repo, r.pr.number, r.target, undefined, r.env === 'prod' ? memberLogins() : null);
+      const row = { ...r, ...h };
+      row.status = rowStatus(row);
+      cur.rows[i] = row;
+    }));
+    push({ releaseRun: { ...stampSignoff(cur), checkedAt: Date.now() } });
+    persist();
+  }
+  // opening Releases: the last run's rows can be hours old (PRs closed/merged/re-signed on GitHub since)
+  async function refreshRun() {
+    const cur = state.releaseRun;
+    if (!cur || cur.running) return;
+    const open = cur.rows.map((r, i) => [r, i]).filter(([r]) => r.pr && !r.merged && !r.closed);
+    if (open.length) await recheckRows(cur, open);
+  }
   function recheck(run) {
     clearTimeout(recheckTimer);
     const unsigned = (r) => { const s = (state.releaseRun || run).signoff; return r.env === 'prod' && s && !s.ok; };
@@ -676,14 +694,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const open = cur.rows.map((r, i) => [r, i]).filter(([r]) => !settled(r));
       const signing = cur.rows.some(r => !r.merged && !r.closed && unsigned(r));
       if (!open.length || Date.now() - cur.startedAt > (signing ? SIGN_WATCH_MS : RECHECK_FOR_MS)) return;
-      await Promise.all(open.map(async ([r, i]) => {
-        const h = await prHealth(ghJson, r.repo, r.pr.number, r.target, undefined, r.env === 'prod' ? memberLogins() : null);
-        const row = { ...r, ...h };
-        row.status = rowStatus(row);
-        cur.rows[i] = row;
-      }));
-      push({ releaseRun: { ...stampSignoff(cur), checkedAt: Date.now() } });
-      persist();
+      await recheckRows(cur, open);
       recheckTimer = setTimeout(tick, signing ? SIGN_POLL_MS : RECHECK_MS);
       if (recheckTimer.unref) recheckTimer.unref();
     };
@@ -718,7 +729,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     switch (msg && msg.type) {
       case 'releasesOpen':
         send({ type: 'releases', state });
-        loadApprovers().catch(() => {});
+        loadApprovers().then(refreshRun).catch(() => {});
         // reopened within a minute: what's on screen is fresh enough, the timer takes it from here
         if (!state.updatedAt || Date.now() - state.updatedAt > 60000) refresh();
         return true;
