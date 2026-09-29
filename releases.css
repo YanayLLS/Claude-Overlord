@@ -411,9 +411,12 @@
   border:1px solid rgba(248,113,113,.5); background:rgba(248,113,113,.12); color:var(--red); cursor:pointer; transition:background .12s; }
 .rl-rr-fix1:hover { background:rgba(248,113,113,.24); }
 .rl-hist-btn.locked, .rl-hist-btn.locked:hover { opacity:.5; cursor:not-allowed; transform:none; box-shadow:none; filter:none; } /* release not signed yet */
-/* compact release results: one line per repo, chips flow after the name */
+/* compact release results: line 1 = repo, env, branches, PR on the right; line 2 = status chips */
 .rl-rr-rows { gap:4px; }
-.rl-rr-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; padding:5px 8px; }
-.rl-rr-row .rl-rr-top { flex:0 1 auto; }
-.rl-rr-row .rl-rr-bits { margin-top:0; flex:1 1 180px; }
+.rl-rr-row { padding:6px 10px; }
+.rl-rr-bits { margin-top:4px; gap:3px; }
+.rl-rr-chip { font-size:10px; padding:0 6px; line-height:17px; }
+.rl-rr-pr { margin-left:auto; font-size:10.5px; color:var(--subtext); white-space:nowrap; }
+.rl-rr-pr a { color:var(--text); font-weight:600; }
+.rl-rr-pr + .rl-rr-fix1 { margin-left:0; }
 .rl-rel-pop.rl-rr { width:min(520px, calc(100vw - 32px)); }

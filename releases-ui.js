@@ -574,7 +574,6 @@
       const bits = [];
       if (r.running && !r.pr) bits.push('<span class="rl-rr-chip">checking…</span>');
       if (r.status === 'nothing') bits.push('<span class="rl-rr-chip">nothing to release</span>');
-      if (r.pr) bits.push(`<span class="rl-rr-chip ok">${prLink(r.pr, `#${r.pr.number}`)}${r.ahead ? ` · ${r.ahead} commits` : ''}</span>`);
       if (r.backMerge && r.backMerge.url) bits.push(`<span class="rl-rr-chip${r.backMerge.conflict ? ' bad' : ' warn'}" title="Back-merge ${esc(r.target)} → ${esc(r.source)}: merge it first">back-merge ${prLink(r.backMerge, '#' + r.backMerge.number)}${r.backMerge.conflict ? ' conflicts' : ' first'}</span>`);
       // the release is signed as one (count in the footer); a row only says who it's still missing
       if (r.env === 'prod' && run.signoff && !r.merged && !r.closed) {
@@ -603,11 +602,12 @@
       else if (d && d.shipped && d.shipped !== d.latest) bits.push(`<span class="rl-rr-chip" title="${esc((d.newFields || []).join(', ') || 'no new fields')}">dbschemas ${esc(d.shipped)} · ${d.behind != null ? d.behind + ' change' + (d.behind === 1 ? '' : 's') + ' behind' : 'behind ' + esc(d.latest)}</span>`);
       else if (d && d.shipped) bits.push(`<span class="rl-rr-chip ok">dbschemas ${esc(d.shipped)}${d.via === 'latest' ? ' (latest at build)' : ''}</span>`);
       if (r.pr && !r.running && r.builds === 'none') bits.push('<span class="rl-rr-chip warn" title="No check on this PR builds or tests it, so nothing verifies it still builds after merging">⚠ no CI build</span>');
-      if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them — merging isn't blocked">not required: ${esc(r.advisory.join(', '))}</span>`);
+      if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them, so merging isn't blocked: ${esc(r.advisory.join(', '))}">not required: ${esc([...new Set(r.advisory.map(x => x.replace(/\s*\(.*\)$/, '')))].join(', '))}</span>`);
       if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">red before: ${esc(r.knownFailing.join(', '))}</span>`);
       if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);
       h += `<div class="rl-rr-row st-${esc(r.status || 'running')}"><div class="rl-rr-top"><b>${esc(r.label)}</b>${env}`
         + `<span class="rl-rr-branches">${esc(r.source)} → ${esc(r.target)}</span>`
+        + (r.pr ? `<span class="rl-rr-pr">${prLink(r.pr, `#${r.pr.number}`)}${r.ahead ? ` · ${r.ahead} commits` : ''}</span>` : '')
         + (!r.running && (r.status === 'blocked' || r.status === 'error') ? `<button class="rl-rr-fix1" data-act="relFix" data-i="${i}" title="Start an agent that unblocks just ${esc(r.label)} ${esc(r.env)}">🔧 Fix</button>` : '')
         + `</div><div class="rl-rr-bits">${bits.join('')}</div></div>`;
     });
