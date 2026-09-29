@@ -1085,6 +1085,7 @@ button:focus-visible { outline-offset:0; }
     <div id="pr-dropdown" style="display:none"></div>
     <div id="actions-dropdown" style="display:none"></div>
     <div id="list-foot">
+      <div id="pr-nag" style="display:none" onclick="togglePrDropdown(event)"><button onclick="snoozePrNag(event)" title="Hide for 30 min" aria-label="Hide for 30 minutes">✕</button><b>Please approve your teammates' PR!</b><span></span></div>
       <div class="foot-chips">
         <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
         <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
@@ -5105,17 +5106,79 @@ function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;',
 function prNeedsApproval(p) { return !p.mine && p.reviewDecision !== 'CHANGES_REQUESTED'; }
 function prSilenced(p) { return p.muted || p.repoMuted || p.snoozed || p.archived; }
 
+// Nag bubble over the PR chip: a teammate's PR has sat unapproved for ~2 min of app time, in case the red chip was missed.
+const PR_NAG_AFTER_MS = 2 * 60 * 1000;
+const PR_NAG_LINES = [
+  "They've refreshed GitHub 14 times already.",
+  "Somewhere, a branch is getting stale.",
+  "Merge conflicts are forming as we speak.",
+  "Their coffee is going cold waiting for you.",
+  "A green checkmark costs you nothing.",
+  "LGTM is only four letters. You can do it.",
+  "Be the reviewer you wish you had.",
+  "It's probably fine. Probably.",
+  "They reviewed yours. Just saying.",
+  "The CI passed. The ball is in your court.",
+  "Every minute unreviewed, a rebase is born.",
+  "Karma is watching your approval rate.",
+  "They wrote tests. For you.",
+  "Think of it as a tiny code adventure.",
+  "Pull requests are like plants. They need attention.",
+  "The standup will ask. Be ready.",
+  "Approve now, feel smug later.",
+  "Your teammate is pretending not to wait.",
+  "Unreviewed PRs are how legacy code starts.",
+  "One click. Zero meetings.",
+  "The diff is shorter than this sentence. Maybe.",
+  "Review it before it reviews you.",
+  "Shipping is a team sport.",
+  "Nobody likes a lonely PR.",
+  "Somewhere a product manager just sighed.",
+  "Your future self will thank you. Theirs will too.",
+  "It's not going to merge itself. Trust us, we checked.",
+  "Friends don't let friends wait on review.",
+  "Read it like a short story with semicolons.",
+  "This popup will leave once you do. Deal?",
+  "A wild PR appeared! It's super effective.",
+  "The build is green. Are you?",
+  "Hot PRs in your area want your approval.",
+];
+const PR_NAG_SNOOZE_MS = 30 * 60 * 1000;
+let prNagWaiting = 0, prNagMs = 0, prNagSnoozeUntil = 0;
+// Only time with the app focused counts toward the 2 min.
+setInterval(() => {
+  if (!prNagWaiting || !document.hasFocus()) return;
+  prNagMs += 5000;
+  if (prNagMs >= PR_NAG_AFTER_MS) renderPrBadge();
+}, 5000);
+function renderPrNag(waiting) {
+  const n = document.getElementById('pr-nag');
+  if (!n) return;
+  if (waiting == null) { n.style.display = 'none'; return; } // failed PR check: hide, keep the clock
+  if (!waiting) prNagMs = 0;
+  // A new PR to approve ends a snooze; it gets its own 2 min before showing.
+  if (waiting > prNagWaiting && Date.now() < prNagSnoozeUntil) { prNagSnoozeUntil = 0; prNagMs = 0; }
+  prNagWaiting = waiting;
+  const due = waiting && prNagMs >= PR_NAG_AFTER_MS && Date.now() >= prNagSnoozeUntil;
+  // New line each time it appears, stable while it's up.
+  if (due && n.style.display === 'none') n.querySelector('span').textContent = PR_NAG_LINES[Math.floor(Math.random() * PR_NAG_LINES.length)];
+  n.style.display = due ? 'flex' : 'none';
+}
+function snoozePrNag(e) { e.stopPropagation(); prNagSnoozeUntil = Date.now() + PR_NAG_SNOOZE_MS; renderPrNag(prNagWaiting); }
+
 function renderPrBadge() {
   const b = document.getElementById('pr-badge');
   if (!b) return;
   if (prState.error) {
     b.style.display = 'flex'; b.className = 'err'; b.textContent = '⬢ PRs — check failed';
     b.title = 'PR check failed — ' + prState.error;
+    renderPrNag(null);
   } else if (prState.prs.some(p => !prSilenced(p))) {
     const active = prState.prs.filter(p => !prSilenced(p));
     const waiting = active.filter(prNeedsApproval).length;
     // Green = one of mine is mergeable with green checks; red = someone's waiting on my review; both = half and half.
     const ready = active.filter(p => p.mine && prApproved(p) && prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none')).length;
+    renderPrNag(waiting);
     b.style.display = 'flex'; b.className = waiting > 0 && ready > 0 ? 'split' : waiting > 0 ? 'alert' : ready > 0 ? 'ready' : '';
     b.textContent = active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '') + (ready > 0 ? ' · ' + ready + ' to merge' : '');
     b.title = [waiting > 0 && waiting + ' PR(s) waiting for approval', ready > 0 && ready + ' of yours ready to merge'].filter(Boolean).join(' · ') || active.length + ' open PR(s)';
@@ -5125,10 +5188,12 @@ function renderPrBadge() {
     b.style.display = 'flex'; b.className = '';
     b.textContent = n + ' muted';
     b.title = 'All watched PRs are muted — click to manage';
+    renderPrNag(0);
   } else {
     // Nothing open, or everything archived: nothing needs you, so no chip.
     b.style.display = 'none';
     document.getElementById('pr-dropdown').style.display = 'none';
+    renderPrNag(0);
   }
 }
 
@@ -5484,6 +5549,7 @@ function togglePrDropdown(e) {
   if (e) e.stopPropagation();
   const d = document.getElementById('pr-dropdown');
   if (d.style.display === 'block') { d.style.display = 'none'; return; }
+  prNagMs = 0; renderPrBadge(); // they've seen it: hide the nag, restart its 2 min clock
   d.innerHTML = prDropdownHtml();
   // Anchor above the bottom-left bar, opening upward.
   const bar = document.getElementById('pr-badge');

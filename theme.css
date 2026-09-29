@@ -254,6 +254,19 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-badge.alert, #actions-badge.alert { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
 #pr-badge.ready { background: rgba(74,222,128,.12); color: var(--green); border-color: rgba(74,222,128,.3); box-shadow: none; }
 #pr-badge.split { box-shadow: none; border-color: var(--border-hi); }
+#list-foot { position: relative; }
+#pr-nag { position: absolute; left: 10px; bottom: calc(100% + 8px); z-index: 50; max-width: min(260px, calc(100% - 20px)); flex-direction: column; gap: 2px;
+  padding: 8px 12px; border-radius: 10px; background: var(--red); color: #11111b; font-size: 11.5px; cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4); animation: pr-nag-in .3s ease-out, pr-nag-bob 2.4s ease-in-out .3s infinite; }
+#pr-nag span { font-size: 11px; opacity: .8; }
+#pr-nag b { padding-right: 14px; }
+#pr-nag button { position: absolute; top: 4px; right: 7px; padding: 0; border: 0; background: none; color: inherit; font-size: 11px; opacity: .6; cursor: pointer; }
+#pr-nag button:hover, #pr-nag button:focus-visible { opacity: 1; }
+#actions-dropdown[style*="block"] ~ #list-foot #pr-nag { display: none !important; }
+#pr-nag::after { content: ''; position: absolute; left: 18px; top: 100%; border: 6px solid transparent; border-top-color: var(--red); }
+@keyframes pr-nag-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes pr-nag-bob { 50% { transform: translateY(-3px); } }
+body.world-mode #pr-nag { display: none !important; }
 #summary-bar { display: none; padding: 0; border-top: none; flex-direction: row; flex-wrap: wrap; gap: 6px 14px; cursor: pointer; }
 #summary-bar.show { display: flex; }
 .usage-meter { flex: 1 1 120px; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 4px 4px; border-radius: var(--r-sm); }
