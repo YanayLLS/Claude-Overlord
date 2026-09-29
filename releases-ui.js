@@ -105,6 +105,7 @@
     histRbGo: (el) => { api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
     histMerge: (el) => { api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); },
     histReload: () => { api.send({ type: 'releasesHistory' }); },
+    histImport: () => { api.send({ type: 'releasesImport' }); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
     cancelSource: () => { state = { ...(state || {}), editing: false }; render(); },
   };
@@ -411,7 +412,12 @@
     let h = '<div class="rl-hist">';
     if (!hs) return h + '<div class="rl-tl-empty">Loading release history…</div></div>';
     if (hs.error) return h + `<div class="rl-rr-flag bad">Release history: ${esc(hs.error)}</div><button class="rl-hist-btn" data-act="histReload">Retry</button></div>`;
-    if (!hs.items.length) return h + '<div class="rl-tl-empty">No prod release recorded yet. The next Release writes the first one.</div></div>';
+    if (!hs.items.length) {
+      return h + '<div class="rl-hist-empty"><div class="rl-hist-empty-icon">🚀</div><b>No prod releases recorded yet</b>'
+        + '<div>Every Release from now on is recorded here: what shipped, who signed, how it deployed, with a one-click rollback.</div>'
+        + ((s.approvers || {}).isApprover ? '<button class="rl-hist-btn go" data-act="histImport">Import past releases from GitHub</button><div class="rl-hist-empty-note">Builds them from your merged release PRs.</div>' : '')
+        + '</div></div>';
+    }
     const a = s.approvers || {}, meL = (a.me || '').toLowerCase();
     const toSign = new Set((s.toSign || []).map(t => t.repo + '#' + t.number));
     for (const m of hs.items) {
@@ -421,6 +427,7 @@
       h += `<div class="rl-hist-card${pending ? ' pending' : ''}"><div class="rl-hist-top">`
         + `<b>${m.kind === 'rollback' ? '↩ Rollback' : 'Release'} ${esc(m.id)}</b>`
         + (m.kind === 'rollback' ? `<span class="rl-rr-chip">restores ${esc(m.rollbackOf)}</span>` : '')
+        + (m.imported ? '<span class="rl-rr-chip" title="Built from merged release PRs, before release manifests existed">imported</span>' : '')
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${esc(age(m.openedAt))} ago</span></div>`
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
@@ -617,7 +624,7 @@
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
       : 'Pick one or more environments') + '</div>'
       + '<div class="rl-rel-note">An agent opens the PRs (plus back-merges and conflict fixes). It never merges or pushes to release branches.</div>'
-      + `<div class="rl-rel-actions"><button data-act="releaseClose">Cancel</button><button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release agent</button></div></div>`;
+      + `<div class="rl-rel-actions"><button data-act="releaseClose">Cancel</button><button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release</button></div></div>`;
     return h;
   }
 

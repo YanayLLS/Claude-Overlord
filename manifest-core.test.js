@@ -44,4 +44,16 @@ const plan = M.rollbackPlan(m, { 'o/front': 'm9', 'o/id': 'm2' });
 assert.deepStrictEqual(plan.map(p => `${p.repo}:${p.toSha}:${p.noop}`), ['o/front:m1:false', 'o/id:m2:true']);
 assert.deepStrictEqual(M.rollbackPlan(m, {}, ['o/front']).map(p => p.repo), ['o/id']);
 
+// past releases: PRs merged close together are one release; the same repo twice splits them
+{
+  const p = (repo, t, n) => ({ repo, label: repo, source: 'dev', target: 'master', deploy: 'd.yml', number: n, url: 'u' + n, mergedAt: t, mergeSha: 'm' + n, author: 'al' });
+  const past = M.groupPast([
+    p('o/a', '2026-09-20T10:00:00Z', 1), p('o/b', '2026-09-20T11:00:00Z', 2), // one release
+    p('o/a', '2026-09-20T11:30:00Z', 3),                                    // same repo again: a new one
+    p('o/a', '2026-09-25T09:00:00Z', 4),
+  ]);
+  assert.deepStrictEqual(past.map(m => m.id + ':' + m.repos.map(r => r.pr.number).join(',')), ['2026-09-20-01:1,2', '2026-09-20-02:3', '2026-09-25-01:4']);
+  assert.ok(past.every(m => m.imported && m.status === 'merged'));
+  assert.strictEqual(M.groupPast([p('o/a', '2026-09-20T10:00:00Z', 1), p('o/a', '2026-09-21T10:00:00Z', 2)], { max: 1 }).length, 1);
+}
 console.log('manifest-core: all passed');

@@ -171,5 +171,30 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     send({ type: 'toast', text: `Rollback to ${id}: ${rows.length} PR${rows.length === 1 ? '' : 's'} opened — needs 2 signatures to merge` });
   }
 
-  return { load, recordRun, reconcile, rollback };
+  // Import past prod releases from merged release PRs (source → prod) of every prod step, when the
+  // history is empty. Deploy results fill in on the next reconcile.
+  async function importPast(steps) {
+    const loaded = await load();
+    if (!loaded) return;
+    if (loaded.files.length) return send({ type: 'toast', text: 'History already has releases: import is only for an empty history' });
+    const prs = [];
+    await Promise.all(steps.map(async (s) => {
+      const r = await ghJson(['api', '-X', 'GET', `repos/${s.repo}/pulls`, '-f', 'state=closed', '-f', `base=${s.target}`, '-f', 'per_page=50']);
+      for (const p of (Array.isArray(r.data) ? r.data : [])) {
+        if (!p.merged_at || !p.head || p.head.ref !== s.source) continue;
+        prs.push({ repo: s.repo, label: s.label, source: s.source, target: s.target, deploy: s.deploy, number: p.number, url: p.html_url,
+          mergedAt: p.merged_at, mergeSha: p.merge_commit_sha, baseSha: p.base && p.base.sha, headSha: p.head.sha, author: p.user && p.user.login });
+      }
+    }));
+    const past = M.groupPast(prs);
+    let wrote = 0;
+    for (const m of past) {
+      const w = await write(m, null, `release ${m.id}: imported from merged release PRs`);
+      if (w.sha) wrote++;
+    }
+    await load();
+    send({ type: 'toast', text: wrote ? `Imported ${wrote} past release${wrote === 1 ? '' : 's'}: deploy results fill in shortly` : 'No past release PRs found' });
+  }
+
+  return { load, recordRun, reconcile, rollback, importPast };
 };

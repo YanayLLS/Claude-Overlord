@@ -105,10 +105,34 @@ function rollbackPlan(m, heads, skip = []) {
   return out;
 }
 
+// Past releases from merged release PRs (for a history that starts before manifests existed):
+// PRs merged within `gapMs` of each other are one release. prs: [{ repo, label, source, target,
+// deploy, number, url, mergedAt, mergeSha, baseSha, headSha, author }]. Newest `max` releases,
+// oldest first, with ids by merge day.
+function groupPast(prs, { gapMs = 3 * 3600e3, max = 30 } = {}) {
+  const sorted = [...prs].sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
+  const groups = [];
+  for (const p of sorted) {
+    const g = groups[groups.length - 1];
+    if (g && Date.parse(p.mergedAt) - Date.parse(g[g.length - 1].mergedAt) <= gapMs && !g.some(x => x.repo === p.repo)) g.push(p);
+    else groups.push([p]);
+  }
+  const kept = groups.slice(-max), ids = [];
+  return kept.map(g => {
+    const id = nextId(ids, new Date(g[0].mergedAt)); ids.push(id);
+    const m = newManifest({ id, rows: g.map(p => ({ repo: p.repo, label: p.label, source: p.source, target: p.target, deploy: p.deploy,
+      pr: { number: p.number, url: p.url }, baseSha: p.baseSha, headSha: p.headSha })), opener: { login: g[0].author, clickup: null }, now: Date.parse(g[0].mergedAt) });
+    m.imported = true;
+    m.repos = m.repos.map(r => { const p = g.find(x => x.repo === r.repo); return { ...r, mergeSha: p.mergeSha, mergedAt: p.mergedAt }; });
+    m.status = deriveStatus(m);
+    return m;
+  });
+}
+
 // The manifest id a release PR belongs to (written into its body by Overlord).
 function releaseIdOf(body) { const m = String(body || '').match(RELEASE_ID_RE); return m ? m[1] : null; }
 
-const api = { SCHEMA, DIR, MANIFESTS_REPO, manifestPath, releaseIdMark, nextId, newManifest, deriveStatus, applyPr, applyDeploy, rollbackPlan, releaseIdOf };
+const api = { SCHEMA, DIR, MANIFESTS_REPO, manifestPath, releaseIdMark, nextId, newManifest, deriveStatus, groupPast, applyPr, applyDeploy, rollbackPlan, releaseIdOf };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ManifestCore = api;
 })(this);

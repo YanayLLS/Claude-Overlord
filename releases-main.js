@@ -631,6 +631,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       }
       case 'releasesHistory': history.load().then(() => reconcileHistory()).catch(e => push({ history: { error: e.message, items: [] } })); return true;
       case 'releasesRollback': history.rollback(msg.id, msg.skip || []).catch(e => send({ type: 'toast', text: 'Rollback failed: ' + e.message })); return true;
+      case 'releasesImport': history.importPast(state.config ? releasePlan(state.config, ['prod']).prs : []).then(() => reconcileHistory()).catch(e => send({ type: 'toast', text: 'Import failed: ' + e.message })); return true;
       case 'releasesMergeRelease': mergeRelease(msg.id).catch(e => send({ type: 'toast', text: 'Merge failed: ' + e.message })); return true;
       case 'releasesClearRun': clearTimeout(recheckTimer); push({ releaseRun: null }); persist(); return true;
       case 'releasesSetSource': {
