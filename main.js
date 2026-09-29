@@ -2495,10 +2495,14 @@ async function releasesFindLocal(repo, rel, ref) {
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
   startAgent: (cwd, prompt) => createAgent(cwd, null, prompt),
   fixRun: (run) => fixActionRun(run),
-  notify: (title, body, url) => {
+  notify: (title, body, url, onClick) => {
     if (!Notification.isSupported()) return;
     const n = new Notification({ title, body, silent: true });
-    n.on('click', () => shell.openExternal(url).catch(() => {}));
+    n.on('click', () => {
+      if (!onClick) return shell.openExternal(url).catch(() => {});
+      if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
+      onClick();
+    });
     n.show();
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
   },

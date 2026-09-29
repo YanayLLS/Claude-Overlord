@@ -397,6 +397,13 @@
 
   // 👥 Release approvers: the GitHub team whose members may release and sign prod. Editing is up
   // to GitHub: team maintainers can add/remove here, everyone else sees the list.
+  // Why Release is off for this person, and who can change that
+  function releaseLockedTip(a) {
+    if (!a.exists) return 'Releasing needs a release approvers team. Open 👥 Approvers to create it.';
+    const who = a.members.map(m => '@' + m.login).join(', ');
+    return `Only release approvers can release: prod needs two of them to sign. You're @${a.me}, not on the team${who ? ` (${who})` : ''}. A team maintainer can add you in 👥 Approvers.`;
+  }
+
   function approversHtml(s) {
     const a = s.approvers || {};
     let h = `<div class="rl-rel-pop rl-appr${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release approvers</span></div>`;
@@ -489,7 +496,8 @@
     const a = s.approvers || {};
     const meL = (a.me || '').toLowerCase();
     const open = run.running ? [] : run.rows.filter(r => r.pr && !r.merged && !r.closed);
-    const toSign = a.isApprover ? open.filter(r => r.env === 'prod' && r.signoff && !r.signoff.signers.some(x => x.login.toLowerCase() === meL)).length : 0;
+    const toSign = a.isApprover ? new Set([...open.filter(r => r.env === 'prod' && r.signoff && !r.signoff.signers.some(x => x.login.toLowerCase() === meL)).map(r => r.repo + '#' + r.pr.number),
+      ...(s.toSign || []).map(x => x.repo + '#' + x.number)]).size : 0;
     const ready = open.filter(r => r.status === 'ok' && r.conflict === false && (r.env !== 'prod' || (r.signoff && r.signoff.ok))).length;
     h += '<div class="rl-rel-actions">'
       + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign (${toSign})</button>` : '')
@@ -510,6 +518,16 @@
 
   // Release picker: one toggle per env the config promotes into, with what's waiting for it;
   // the footer says what the agent will do (PRs to open, hand-deployed envs to report).
+  function toSignHtml(s) {
+    const t = s.toSign || [];
+    if (!t.length) return '';
+    const by = [...new Set(t.flatMap(x => x.signers))].map(x => '@' + esc(x)).join(', ');
+    return '<div class="rl-tosign"><div class="rl-tosign-head">✍ Waiting for your signature</div>'
+      + t.map(x => `<div class="rl-tosign-row"><b>${esc(x.label)}</b>${link(x.url, '#' + x.number)}<span>${x.count}/${x.need} signed</span></div>`).join('')
+      + `<div class="rl-tosign-by">${by ? 'Opened by ' + by + '. ' : ''}Your approval is the second signature.</div>`
+      + `<button class="rl-rr-sign" data-act="relSign">✍ Sign ${t.length} PR${t.length === 1 ? '' : 's'}</button></div>`;
+  }
+
   function releasePickerHtml(s) {
     const cfg = s.config, targets = ReleasesCore.releaseTargets(cfg);
     const waiting = {};
@@ -524,7 +542,7 @@
         : 'Every release repo is already in the PRs panel'}"${unwatched.length ? '' : ' disabled'}>`
         + '<svg class="ic" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'
         + (unwatched.length ? `<i>${unwatched.length}</i>` : '') + '</button>';
-    let h = `<div class="rl-rel-pop${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release to</span>${bell}</div><div class="rl-rel-envs">`;
+    let h = `<div class="rl-rel-pop${relShown ? ' still' : ''}">${toSignHtml(s)}<div class="rl-rel-head"><span>Release to</span>${bell}</div><div class="rl-rel-envs">`;
     relShown = true;
     for (const e of targets) {
       h += `<button class="rl-rel-env${relSel.has(e) ? ' on' : ''}" data-act="relToggle" data-env="${esc(e)}">`
@@ -542,7 +560,7 @@
 
   // Hovering Release opens the picker; leaving both the button and the picker closes it after a
   // beat (long enough to cross the gap between them).
-  const REL_ZONE = '.rl-release, .rl-rel-pop:not(.rl-appr)'; // the approvers panel isn't part of the Release hover
+  const REL_ZONE = '.rl-release:not(.locked), .rl-rel-pop:not(.rl-appr)'; // the approvers panel isn't part of the Release hover
   let relLeave = null;
   overlay.addEventListener('mouseover', (ev) => {
     if (!ev.target.closest || !ev.target.closest(REL_ZONE)) return;
@@ -571,7 +589,7 @@
         + `<span>${s.approvers && s.approvers.members ? s.approvers.members.length : ''}</span></button>` : '')
       + (s.config && window.ReleasesCore && ReleasesCore.releaseTargets(s.config).length
         ? (s.approvers && s.approvers.me && !s.approvers.isApprover
-          ? `<button class="rl-release" disabled title="Only release approvers can release (you're @${esc(s.approvers.me)}) — see 👥">`
+          ? `<button class="rl-release locked" aria-disabled="true" title="${esc(releaseLockedTip(s.approvers))}">`
           : `<button class="rl-release${relOpen ? ' on' : ''}" data-act="releaseMenu" title="Open the release PRs for the envs you pick">`)
           + '<svg class="ic" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>Release</button>'
         : '')
@@ -619,9 +637,12 @@
     const failed = window.ReleasesCore && state ? ReleasesCore.failedDeploys(state.grid) : [];
     badge.classList.toggle('alert', failed.length > 0);
     const running = ((state && state.grid && state.grid.rows) || []).reduce((n, r) => n + (r.cells || []).filter(c => c && c.run && c.run.state === 'running').length, 0);
-    badge.textContent = 'Releases' + (failed.length ? ` · ${failed.length} failing` : '') + (running ? ` · ${running} deploying` : '');
-    badge.title = failed.length ? `Deploy failing: ${failed.join(', ')}` : "Releases — what's merged in each environment of each repo";
+    const toSign = (state && state.toSign) || [];
+    badge.classList.toggle('sign', toSign.length > 0 && !failed.length);
+    badge.textContent = 'Releases' + (toSign.length ? ` · ✍ ${toSign.length} to sign` : '') + (failed.length ? ` · ${failed.length} failing` : '') + (running ? ` · ${running} deploying` : '');
+    badge.title = toSign.length ? `Prod release waiting for your signature: ${toSign.map(t => t.label + ' #' + t.number).join(', ')}`
+      : failed.length ? `Deploy failing: ${failed.join(', ')}` : "Releases — what's merged in each environment of each repo";
   }
 
-  window.releasesUi = { onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; renderBadge(); render(); } };
+  window.releasesUi = { onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; renderBadge(); if (msg.open && !open) show(true); render(); } };
 })();

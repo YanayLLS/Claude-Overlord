@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
 const { runRelease, prHealth, rowStatus } = require('./release-run');
-const { signoff, reviewMark, hasSigned } = require('./signoff-core');
+const { signoff, reviewMark, hasSigned, openerMark, OPENER_RE } = require('./signoff-core');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
@@ -22,6 +22,7 @@ const RECHECK_MS = 60 * 1000;           // re-read release PRs' checks this ofte
 const RECHECK_FOR_MS = 30 * 60 * 1000;  // …for this long after a run, until they settle
 const SIGN_POLL_MS = 30 * 1000;         // while a prod release waits for its 2nd signature, look this often…
 const SIGN_WATCH_MS = 24 * 3600 * 1000; // …for up to a day
+const TO_SIGN_POLL_MS = 60 * 1000;      // an approver with a release waiting on them re-checks this often
 const PENDING_SHOWN = 10;
 const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
@@ -227,6 +228,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const prevDeploys = state.results.deploys;
       push({ results, grid: buildGrid(cfg, results) });
       deploysChanged(prevDeploys, deploys);
+      checkToSign().catch(() => {});
     } finally {
       inFlight = false;
       push({ loading: false });
@@ -345,26 +347,67 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     return s.ok ? { ok: true, signoff: s } : { ok: false, reason: `prod release needs ${s.need} approvers' signatures (has ${s.count}${s.count ? ': ' + s.signers.map(x => '@' + x.login).join(', ') : ''})` };
   }
 
-  // Sign: approve every open prod release PR of the last run that I haven't signed yet.
+  // Prod release PRs open right now that are waiting on MY signature — found from the config, so
+  // an approver who didn't run the release still sees it (release runs are per machine). A new
+  // one raises a notification; clicking it opens Releases. Re-checked every minute while any wait.
+  let toSignTimer = null, notifiedToSign = new Set();
+  async function checkToSign() {
+    clearTimeout(toSignTimer);
+    const cfg = state.config;
+    if (!cfg) return;
+    if (!state.approvers || state.approvers.members === undefined) await loadApprovers();
+    const who = await whoAmI();
+    if (!state.approvers.isApprover || !who.github) { if ((state.toSign || []).length) push({ toSign: [] }); return; }
+    const steps = releasePlan(cfg, ['prod']).prs;
+    const found = [];
+    await Promise.all(steps.map(async (p) => {
+      const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
+      const pr = Array.isArray(r.data) && r.data.find(x => x.head && x.head.ref === p.source && (!x.head.repo || x.head.repo.full_name.toLowerCase() === p.repo.toLowerCase()));
+      if (!pr) return;
+      const s = await signoffOf(p.repo, pr.number);
+      if (s.error || hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) return;
+      found.push({ repo: p.repo, label: p.label, number: pr.number, url: pr.html_url, signers: s.signers.map(x => x.login), count: s.count, need: s.need });
+    }));
+    found.sort((a, b) => a.label.localeCompare(b.label));
+    push({ toSign: found });
+    const fresh = found.filter(f => !notifiedToSign.has(f.repo + '#' + f.number));
+    if (fresh.length && notify) {
+      const by = [...new Set(found.flatMap(f => f.signers))].map(x => '@' + x).join(', ');
+      notify(`✍ Prod release waiting for your signature`, `${found.length} PR${found.length === 1 ? '' : 's'}: ${found.map(f => f.label).join(', ')}${by ? ' · opened by ' + by : ''}`,
+        found[0].url, () => send({ type: 'releases', state, open: true }));
+    }
+    notifiedToSign = new Set(found.map(f => f.repo + '#' + f.number));
+    if (found.length) { toSignTimer = setTimeout(() => checkToSign().catch(() => {}), TO_SIGN_POLL_MS); if (toSignTimer.unref) toSignTimer.unref(); }
+  }
+
+  // Sign: approve every open prod release PR waiting on me — from the last run here, and any found
+  // by checkToSign (a release someone else opened).
   async function signRelease() {
     const who = await whoAmI();
     await loadApprovers();
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can sign' });
     const run = state.releaseRun;
-    const rows = ((run && run.rows) || []).map((r, i) => [r, i]).filter(([r]) => r.env === 'prod' && r.pr && !r.merged && !r.closed);
+    const targets = new Map();
+    for (const r of ((run && run.rows) || [])) if (r.env === 'prod' && r.pr && !r.merged && !r.closed) targets.set(r.repo + '#' + r.pr.number, { repo: r.repo, label: r.label, number: r.pr.number });
+    for (const t of (state.toSign || [])) targets.set(t.repo + '#' + t.number, { repo: t.repo, label: t.label, number: t.number });
     let signed = 0;
-    for (const [r, i] of rows) {
-      const s = await signoffOf(r.repo, r.pr.number);
+    for (const t of targets.values()) {
+      const s = await signoffOf(t.repo, t.number);
       if (s.error || hasSigned(s, who.github)) continue;
       if (s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue; // the opener already signed by opening it
-      const res = await ghJson(['api', '-X', 'POST', `repos/${r.repo}/pulls/${r.pr.number}/reviews`, '--input',
+      const res = await ghJson(['api', '-X', 'POST', `repos/${t.repo}/pulls/${t.number}/reviews`, '--input',
         writeTmp({ event: 'APPROVE', commit_id: s.pr.head.sha, body: reviewMark(who.clickup) })]);
-      if (apiErr(res)) { send({ type: 'toast', text: `Sign ${r.label}: ${apiErr(res)}` }); continue; }
+      if (apiErr(res)) { send({ type: 'toast', text: `Sign ${t.label}: ${apiErr(res)}` }); continue; }
       signed++;
-      const after = await signoffOf(r.repo, r.pr.number);
-      run.rows[i] = { ...r, signoff: after.error ? r.signoff : { signers: after.signers, count: after.count, need: after.need, ok: after.ok } };
+      const i = run ? run.rows.findIndex(r => r.repo === t.repo && r.pr && r.pr.number === t.number) : -1;
+      if (i >= 0) {
+        const after = await signoffOf(t.repo, t.number);
+        if (!after.error) run.rows[i] = { ...run.rows[i], signoff: { signers: after.signers, count: after.count, need: after.need, ok: after.ok } };
+      }
     }
-    push({ releaseRun: { ...run } }); persist();
+    if (run) push({ releaseRun: { ...run } });
+    persist();
+    await checkToSign().catch(() => {});
     send({ type: 'toast', text: signed ? `Signed ${signed} prod release PR${signed === 1 ? '' : 's'}` : 'Nothing left for you to sign' });
   }
 
@@ -436,6 +479,14 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeJson({ body: warn + body })]);
       }));
     }
+    // a prod release PR I opened elsewhere (or before sign-off existed) gets my opener line now,
+    // so it carries my signature's ClickUp id like one Overlord opened
+    await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && r.reused && !r.merged && !r.closed).map(async (r) => {
+      const cur = await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
+      const p = cur.data;
+      if (apiErr(cur) || !p || !p.user || p.user.login.toLowerCase() !== String(who.github).toLowerCase() || OPENER_RE.test(p.body || '')) return;
+      await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeJson({ body: (p.body || '') + '\n\n' + openerMark(who.github, who.clickup) })]);
+    }));
     run.running = false;
     for (const r of run.rows) delete r.body; // only needed for that patch
     push({ releaseRun: { ...run } });
