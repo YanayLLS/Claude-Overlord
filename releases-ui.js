@@ -32,6 +32,11 @@
   const modal = overlay.firstChild;
 
   overlay.addEventListener('click', (e) => {
+    // a click outside an open popover (release picker/results, approvers) closes just the popover
+    if ((relOpen || apprOpen) && !e.target.closest('.rl-rel-pop, .rl-release, .rl-appr-btn')) {
+      relOpen = false; apprOpen = false; render();
+      return;
+    }
     if (e.target === overlay) return show(false);
     const a = e.target.closest('[data-url]');
     if (a) { e.stopPropagation(); return api.send({ type: 'openUrl', url: a.dataset.url }); }
@@ -65,7 +70,14 @@
     releaseMenu: () => {
       if (relOpen || apprOpen) return;
       relOpen = true; relShown = false;
-      if (state && state.config) relSel = new Set(ReleasesCore.releaseTargets(state.config));
+      // your last choice sticks (a hover-close + reopen must never re-tick an env you unticked);
+      // only the very first time does it start with every env picked
+      if (state && state.config) {
+        const targets = ReleasesCore.releaseTargets(state.config);
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem('rl-release-envs') || 'null'); } catch {}
+        relSel = new Set(Array.isArray(saved) ? saved.filter(e => targets.includes(e)) : targets);
+      }
       render();
     },
     releaseClose: () => { relOpen = false; render(); },
@@ -88,7 +100,11 @@
       if (typeof showToast === 'function') showToast(`Watching ${missing.length} more repo${missing.length === 1 ? '' : 's'} in the PRs panel`);
       render();
     },
-    relToggle: (el) => { const e = el.dataset.env; relSel.has(e) ? relSel.delete(e) : relSel.add(e); render(); },
+    relToggle: (el) => {
+      const e = el.dataset.env; relSel.has(e) ? relSel.delete(e) : relSel.add(e);
+      try { localStorage.setItem('rl-release-envs', JSON.stringify([...relSel])); } catch {}
+      render();
+    },
     releaseGo: () => {
       if (!relSel.size) return;
       // runs in main without an agent; the panel turns into its live results
