@@ -35,6 +35,9 @@ function validateConfig(cfg) {
   }
   envs.forEach((e, i) => { if (envs.indexOf(e) !== i) out.push(`envs[${i}]: "${e}" is listed twice`); });
   if (!Array.isArray(cfg.repos)) return [...out, 'repos: must be an array'];
+  if (cfg.releaseOrder != null && (!Array.isArray(cfg.releaseOrder) || cfg.releaseOrder.some(w => !Array.isArray(w) || w.some(x => typeof x !== 'string')))) {
+    out.push('releaseOrder: must be a list of waves (lists of repo labels or names)');
+  }
   cfg.repos.forEach((r, i) => {
     const at = `repos[${i}]`;
     if (!r || typeof r !== 'object') { out.push(`${at}: must be an object`); return; }
@@ -259,6 +262,24 @@ function releasePlan(cfg, envs) {
   return { prs, manual };
 }
 
+// Merge order for "Release all": config releaseOrder = [[wave 1 repos], [wave 2], …] by label or
+// owner/name; each wave merges and deploys before the next. Unlisted repos go in a last wave.
+function releaseWaves(cfg, rows) {
+  const order = Array.isArray(cfg && cfg.releaseOrder) ? cfg.releaseOrder : [];
+  const waveOf = (r) => order.findIndex(w => w.some(x => x === r.label || x.toLowerCase() === r.repo.toLowerCase()));
+  const waves = order.map(() => []), rest = [];
+  for (const r of rows) { const i = waveOf(r); (i < 0 ? rest : waves[i]).push(r); }
+  return waves.concat([rest]).filter(w => w.length);
+}
+
+// Is version a >= min? (semver-ish numbers; no min = yes)
+function versionAtLeast(a, min) {
+  if (!min) return true;
+  const x = String(a).split('.').map(Number), y = String(min).split('.').map(Number);
+  for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); }
+  return true;
+}
+
 // "label · env" for every cell whose last deploy run failed — what the footer badge warns about.
 function failedDeploys(grid) {
   const out = [];
@@ -275,7 +296,7 @@ function newDeployFailures(prev, next) {
     && prev && prev[k] && !['failure', 'unknown'].includes(prev[k].state));
 }
 
-const api = { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
+const api = { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

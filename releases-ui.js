@@ -79,6 +79,7 @@
     apprCreate: () => { api.send({ type: 'releasesApproversEdit', kind: 'create' }); },
     relSign: () => { api.send({ type: 'releasesSign' }); },
     relMerge: () => { api.send({ type: 'releasesMerge' }); },
+    relAllStop: () => { api.send({ type: 'releasesReleaseAllStop' }); },
     // bell: add every repo of the release config the PRs panel isn't watching yet
     relWatch: () => {
       const missing = prsUnwatched();
@@ -403,13 +404,25 @@
     return h + '</div>';
   }
 
+  // Release all's live progress: which wave, merging or waiting for deploys, the outcome; Stop.
+  function releaseAllHtml(s) {
+    const p = s.releaseAll;
+    if (!p) return '';
+    const head = p.running ? `🚀 Wave ${p.wave}/${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : 'merging'}: ${esc(p.detail || '')}`
+      : p.status === 'done' ? '🚀 Released: every wave merged ✓'
+      : `⏸ Release all stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
+    return `<div class="rl-relall ${p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad'}"><span>${head}</span>`
+      + (p.merged && p.merged.length ? `<span class="rl-relall-merged">merged: ${esc(p.merged.join(', '))}</span>` : '')
+      + (p.running ? '<button class="rl-hist-btn" data-act="relAllStop">Stop after this step</button>' : '') + '</div>';
+  }
+
   // ── History: every prod release from <org>/release-manifests, the pending one first ──
   const STATUS_CHIP = { pending: ['warn', 'pending'], merged: ['', 'merged · deploying'], deployed: ['ok', 'deployed ✓'],
     'deploy-failed': ['bad', 'deploy failed'], abandoned: ['', 'abandoned'] };
   const shortSha = (x) => x ? esc(x.slice(0, 7)) : '—';
   function historyHtml(s) {
     const hs = s.history;
-    let h = '<div class="rl-hist">';
+    let h = '<div class="rl-hist">' + releaseAllHtml(s);
     if (!hs) return h + '<div class="rl-tl-empty">Loading release history…</div></div>';
     if (hs.error) return h + `<div class="rl-rr-flag bad">Release history: ${esc(hs.error)}</div><button class="rl-hist-btn" data-act="histReload">Retry</button></div>`;
     if (!hs.items.length) {
@@ -428,8 +441,9 @@
         + `<b>${m.kind === 'rollback' ? '↩ Rollback' : 'Release'} ${esc(m.id)}</b>`
         + (m.kind === 'rollback' ? `<span class="rl-rr-chip">restores ${esc(m.rollbackOf)}</span>` : '')
         + (m.imported ? '<span class="rl-rr-chip" title="Built from merged release PRs, before release manifests existed">imported</span>' : '')
+        + (!m.imported && m.repos.some(r => r.unsigned) ? `<span class="rl-rr-chip bad" title="Merged with fewer than 2 approvers' signatures (e.g. on github.com): ${esc(m.repos.filter(r => r.unsigned).map(r => r.label).join(', '))}">merged unsigned ⚠</span>` : '')
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
-        + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${esc(age(m.openedAt))} ago</span></div>`
+        + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
       h += '<div class="rl-hist-repos">';
       for (const r of m.repos) {
@@ -443,11 +457,12 @@
       }
       h += '</div>';
       if (m.manual && m.manual.length) h += `<div class="rl-hist-man">Hand-deployed at the time: ${m.manual.map(x => esc(x.label) + (x.live && x.live.sha ? ' ' + shortSha(x.live.sha) : '')).join(' · ')}</div>`;
+      if (m.warnings && m.warnings.length) h += `<div class="rl-hist-man bad">⚠ Not rolled back (data changes): ${m.warnings.map(w => esc(w.label) + ': ' + w.files.map(esc).join(', ')).join(' · ')}</div>`;
       if (m.flags && m.flags.missing && m.flags.missing.length) h += `<div class="rl-hist-man bad">Flags to seed: ${esc(m.flags.missing.join(', '))}</div>`;
       // actions
       const acts = [];
       if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push('<button class="rl-hist-btn go" data-act="relSign">✍ Sign</button>');
-      if (pending && a.isApprover) acts.push(`<button class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}" title="Merge every PR of this release that has its 2 signatures">⤵ Merge release</button>`);
+      if (pending && a.isApprover && !(s.releaseAll && s.releaseAll.running)) acts.push(`<button class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}" title="Merge in release order (services, then iframes, then frontend), waiting for each wave's deploys; stops on a failed deploy">🚀 Release all</button>`);
       if (!pending && m.status !== 'abandoned' && m.repos.some(r => r.mergeSha) && a.isApprover) {
         acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}">↩ Roll back to this</button>`);
       }
@@ -569,9 +584,9 @@
     const toSign = a.isApprover ? new Set([...open.filter(r => r.env === 'prod' && r.signoff && !r.signoff.signers.some(x => x.login.toLowerCase() === meL)).map(r => r.repo + '#' + r.pr.number),
       ...(s.toSign || []).map(x => x.repo + '#' + x.number)]).size : 0;
     const ready = open.filter(r => r.status === 'ok' && r.conflict === false && (r.env !== 'prod' || (r.signoff && r.signoff.ok))).length;
-    h += '<div class="rl-rel-actions">'
+    h += releaseAllHtml(s) + '<div class="rl-rel-actions">'
       + (toSign ? `<button class="rl-rr-sign" data-act="relSign" title="Approve every prod release PR as @${esc(a.me)}: your signature">✍ Sign (${toSign})</button>` : '')
-      + (ready ? `<button class="rl-rr-merge" data-act="relMerge" title="Merge every release PR that's signed (prod), mergeable and not failing">⤵ Merge ready (${ready})</button>` : '')
+      + (ready && !(s.releaseAll && s.releaseAll.running) ? `<button class="rl-rr-merge" data-act="relMerge" title="Merge in release order (services, then iframes, then frontend), waiting for each wave's deploys; stops on a failed deploy">🚀 Release all (${ready})</button>` : '')
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
       + (run.running ? '' : '<button data-act="relNew">New release</button>')
       + '<button data-act="releaseClose">Close</button></div></div>';
@@ -659,7 +674,9 @@
       + (s.config ? `<button class="rl-appr-btn${apprOpen ? ' on' : ''}" data-act="apprMenu" title="Release approvers: releasing and merging prod needs two of them"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
         + `<span>${s.approvers && s.approvers.members ? s.approvers.members.length : ''}</span></button>` : '')
       + (s.config && window.ReleasesCore && ReleasesCore.releaseTargets(s.config).length
-        ? (s.approvers && s.approvers.me && !s.approvers.isApprover
+        ? (s.config.minOverlord && s.appVersion && !ReleasesCore.versionAtLeast(s.appVersion, s.config.minOverlord)
+          ? `<button class="rl-release locked" aria-disabled="true" title="Update Overlord to ${esc(s.config.minOverlord)} or later to release (this is ${esc(s.appVersion)}): older versions miss release rules">`
+          : s.approvers && s.approvers.me && !s.approvers.isApprover
           ? `<button class="rl-release locked" aria-disabled="true" title="${esc(releaseLockedTip(s.approvers))}">`
           : `<button class="rl-release${relOpen ? ' on' : ''}" data-act="releaseMenu" title="Open the release PRs for the envs you pick">`)
           + '<svg class="ic" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>Release</button>'

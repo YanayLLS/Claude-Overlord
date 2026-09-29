@@ -57,3 +57,12 @@ assert.deepStrictEqual(M.rollbackPlan(m, {}, ['o/front']).map(p => p.repo), ['o/
   assert.strictEqual(M.groupPast([p('o/a', '2026-09-20T10:00:00Z', 1), p('o/a', '2026-09-21T10:00:00Z', 2)], { max: 1 }).length, 1);
 }
 console.log('manifest-core: all passed');
+// merged with fewer than two signatures is flagged unsigned
+{
+  let u = M.newManifest({ id: 'u', rows: [{ repo: 'o/a', label: 'a', source: 'dev', target: 'master', pr: { number: 1, url: 'u' } }] });
+  [u] = M.applyPr(u, 'o/a', { number: 1, mergeSha: 'm', signers: ['alice'] });
+  assert.strictEqual(u.repos[0].unsigned, true);
+  [u] = M.applyPr(u, 'o/a', { number: 1, mergeSha: 'm', signers: ['alice', 'bob'] });
+  assert.strictEqual(u.repos[0].unsigned, false);
+  console.log('manifest-core: unsigned passed');
+}

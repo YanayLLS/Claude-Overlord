@@ -32,10 +32,11 @@ const createHistory = require('./release-history');
     if (a.includes('actions/workflows/d.yml/runs')) return { data: { workflow_runs: [{ status: 'completed', conclusion: 'success', html_url: 'run1', updated_at: 't' }] } };
     // rollback
     if (a.includes('repos/o/front/branches/master')) return { data: { commit: { sha: 'm9' } } };
+    if (a.includes('repos/o/front/compare/m1...m9')) return { data: { files: [{ filename: 'server/migrations/007-add-col.js' }, { filename: 'src/app.js' }] } };
     if (a.includes('repos/o/front/git/commits/m1')) return { data: { tree: { sha: 'tree1' } } };
     if (a.includes('-X POST repos/o/front/git/commits')) { const b = input(args); assert.deepStrictEqual([b.tree, b.parents[0]], ['tree1', 'm9']); return { data: { sha: 'rb1' } }; }
     if (a.includes('-X POST repos/o/front/git/refs')) { assert.ok(input(args).ref.startsWith('refs/heads/rollback/')); return { data: { ref: 'x' } }; }
-    if (a.includes('-X POST repos/o/front/pulls')) { const b = input(args); assert.strictEqual(b.base, 'master'); return { data: { number: 77, html_url: 'u77' } }; }
+    if (a.includes('-X POST repos/o/front/pulls')) { const b = input(args); assert.strictEqual(b.base, 'master'); assert.ok(b.body.includes('server/migrations/007-add-col.js'), 'the PR warns about the migration'); return { data: { number: 77, html_url: 'u77' } }; }
     return { error: 'unexpected ' + a };
   };
   const h = createHistory({ ghJson: gh, writeTmp, push: (p) => { state = { ...state, ...p }; }, getState: () => state, org: () => 'LLSLtd',
@@ -64,7 +65,7 @@ const createHistory = require('./release-history');
 
   // rollback to it: one commit with the release's tree on top of today's prod, as a rollback PR
   await h.rollback(id);
-  assert.ok(toasts.some(t => /Rollback to .*1 PR opened/.test(t)), toasts.join(' | '));
+  assert.ok(toasts.some(t => /Rollback to .*1 PR opened.*data changes in frontend/.test(t)), toasts.join(' | '));
   const rb = state.history.items.find(x => x.kind === 'rollback');
   assert.deepStrictEqual([rb.rollbackOf, rb.status, rb.repos[0].pr.number], [id, 'pending', 77]);
   console.log('release-history: all passed');

@@ -5,6 +5,7 @@
 (function (root) {
 
 const SCHEMA = 1;
+const SIGNATURES_NEEDED = 2; // same rule as signoff-core
 const DIR = 'releases';
 const MANIFESTS_REPO = 'release-manifests';
 const ID_RE = /^(\d{4}-\d{2}-\d{2})-(\d{2})$/;
@@ -66,6 +67,8 @@ function applyPr(m, repo, pr) {
     if (!pr.mergeSha && pr.closed && !next.closed) next.closed = true;
     if (pr.headSha && !next.mergeSha && next.headSha !== pr.headSha) next.headSha = pr.headSha;
     if (pr.signers && JSON.stringify(pr.signers) !== JSON.stringify(next.signers)) next.signers = pr.signers;
+    // merged without two approvers' signatures (e.g. on github.com): the audit exception
+    if (next.mergeSha) next.unsigned = (next.signers || []).length < SIGNATURES_NEEDED;
     if (JSON.stringify(next) !== JSON.stringify(r)) changed = true;
     return next;
   });

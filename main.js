@@ -4254,6 +4254,7 @@ function handleIpc(msg) {
       // prod release PRs merge only with two release approvers' signatures (SOC2)
       releases.mergeGate(url).then((gate) => {
         if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return; }
+        if (gate.warn) send({ type: 'toast', text: gate.warn });
         execFile('gh', ['pr', 'merge', url, '--merge'],
           { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
             if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }

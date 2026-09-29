@@ -319,4 +319,16 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(newDeployFailures(prev, next), ['a', 'c']);
   assert.deepStrictEqual(newDeployFailures(null, next), []);
 }
+
+// ── release waves: config releaseOrder (labels or repo names), unlisted repos last ──
+{
+  const { releaseWaves, versionAtLeast } = require('./releases-core');
+  const cfg = { releaseOrder: [['backend', 'o/id'], ['chat']], repos: [] };
+  const rows = [{ repo: 'o/front', label: 'frontend' }, { repo: 'o/back', label: 'backend' }, { repo: 'o/chat', label: 'chat' }, { repo: 'o/id', label: 'identity' }, { repo: 'o/x', label: 'x' }];
+  assert.deepStrictEqual(releaseWaves(cfg, rows).map(w => w.map(r => r.label)), [['backend', 'identity'], ['chat'], ['frontend', 'x']]);
+  assert.deepStrictEqual(releaseWaves({ repos: [] }, rows.slice(0, 2)).map(w => w.length), [2], 'no order: one wave');
+  assert.ok(versionAtLeast('1.96.0', '1.96.0') && versionAtLeast('1.100.1', '1.96.0') && !versionAtLeast('1.95.9', '1.96.0'));
+  assert.ok(versionAtLeast('1.0.0', undefined), 'no minimum set');
+  assert.deepStrictEqual(validateConfig({ envs: ['dev'], repos: [], releaseOrder: 'nope' }), ['releaseOrder: must be a list of waves (lists of repo labels or names)']);
+}
 console.log('releases-core: all passed');

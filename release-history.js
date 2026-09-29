@@ -8,6 +8,8 @@
 const M = require('./manifest-core');
 
 const HISTORY_SHOWN = 30;
+// Files whose effects live in the database, not the code: a rollback can't undo them
+const DATA_CHANGE = /(^|\/)(migrations?|migrate)\/|\.sql$|(^|\/)(schema|schemas)\//i;
 
 module.exports = function createHistory({ ghJson, writeTmp, push, getState, org, signoffOf, requestReviews, whoAmI, send }) {
   const repoOf = () => org() && `${org()}/${M.MANIFESTS_REPO}`;
@@ -143,7 +145,14 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     const rbId = M.nextId(loaded.files.map(f => f.name));
     const branch = `rollback/${rbId}`;
     const rows = [];
+    const warnings = [];
     for (const p of plan) {
+      // what restoring code can't undo: data migrations, schema files, a dbschemas bump since then
+      const since = await ghJson(['api', `repos/${p.repo}/compare/${p.toSha}...${p.fromSha}`]);
+      const risky = ((since.data && since.data.files) || []).filter(f => DATA_CHANGE.test(f.filename)
+        || (/(^|\/)package\.json$/.test(f.filename) && /@llsltd\/dbschemas/.test(f.patch || ''))).map(f => f.filename);
+      const warn = risky.length ? { repo: p.repo, label: p.label, files: risky } : null;
+      if (warn) warnings.push(warn);
       const commit = await ghJson(['api', `repos/${p.repo}/git/commits/${p.toSha}`]);
       if (apiErr(commit) || !commit.data.tree) { send({ type: 'toast', text: `Rollback ${p.label}: ${apiErr(commit) || 'no tree'}` }); continue; }
       const made = await ghJson(['api', '-X', 'POST', `repos/${p.repo}/git/commits`, '--input', writeTmp({
@@ -156,6 +165,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         title: `chore(rollback): restore ${p.target} to release ${id}`, head: branch, base: p.target,
         body: [`Rolls **${p.target}** back to release **${id}**: one commit whose files are exactly that release's (${p.toSha.slice(0, 7)}).`, '',
           `> Changes since then stay on the source branch — the next release brings them back unless they're reverted there too.`, '',
+          ...(warn ? [`> ⚠ **Data changes since that release are NOT rolled back** — check them by hand: ${warn.files.map(x => '`' + x + '`').join(', ')}`, ''] : []),
           `_Opened by Overlord's Rollback._`, '', require('./signoff-core').openerMark(who.github, who.clickup), M.releaseIdMark(rbId)].join('\n') })]);
       if (apiErr(pr)) { send({ type: 'toast', text: `Rollback ${p.label}: ${apiErr(pr)}` }); continue; }
       await requestReviews(p.repo, pr.data.number);
@@ -165,10 +175,12 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     }
     if (!rows.length) return;
     const m = M.newManifest({ id: rbId, kind: 'rollback', rollbackOf: id, rows, opener: { login: who.github, clickup: who.clickup } });
+    if (warnings.length) m.warnings = warnings;
     const w = await write(m, null, `rollback ${rbId}: restore release ${id}, opened by @${who.github}`);
     if (w.error) send({ type: 'toast', text: 'Rollback manifest: ' + w.error });
     await load();
-    send({ type: 'toast', text: `Rollback to ${id}: ${rows.length} PR${rows.length === 1 ? '' : 's'} opened — needs 2 signatures to merge` });
+    send({ type: 'toast', text: `Rollback to ${id}: ${rows.length} PR${rows.length === 1 ? '' : 's'} opened — needs 2 signatures to merge`
+      + (warnings.length ? ` · ⚠ data changes in ${warnings.map(w => w.label).join(', ')} are not rolled back` : '') });
   }
 
   // Import past prod releases from merged release PRs (source → prod) of every prod step, when the
