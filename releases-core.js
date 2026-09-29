@@ -76,6 +76,13 @@ function validateConfig(cfg) {
         if (!hasCaptureGroup(l && l.match)) out.push(`${at}.live.${env}.match: must be a regex with one (capture group) for the sha`);
       }
     }
+    if (r.deployUrl != null) {
+      if (typeof r.deployUrl !== 'object' || Array.isArray(r.deployUrl)) out.push(`${at}.deployUrl: must be an object`);
+      else for (const [env, url] of Object.entries(r.deployUrl)) {
+        if (!Object.prototype.hasOwnProperty.call(r.branches, env)) out.push(`${at}.deployUrl.${env}: "${env}" is not in branches`);
+        else if (!/^https:\/\//.test(String(url))) out.push(`${at}.deployUrl.${env}: must be an https:// link`);
+      }
+    }
     if (r.promote == null) return;
     // one path ["dev","alpha","prod"], or several that fork: [["dev","alpha"],["dev","prod"]]
     const nested = Array.isArray(r.promote) && Array.isArray(r.promote[0]);
@@ -296,7 +303,33 @@ function newDeployFailures(prev, next) {
     && prev && prev[k] && !['failure', 'unknown'].includes(prev[k].state));
 }
 
-const api = { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
+// After Release all: what's left to deploy by hand, each with where to do it. merged: [{ repo, label,
+// env, target, deploy }] (a PR whose target has no CI deploy still has to go out by hand); manual:
+// [{ repo, label, env, branch }] (repos deployed by hand; skipped once live is up to date);
+// lives: fetchLives' { 'repo|env': { behind, compareUrl } }. url: the repo's deployUrl for that env,
+// else the file that pins what's live (editing it is the deploy), else what isn't live yet, else the branch.
+function manualLeft(cfg, merged, manual, lives) {
+  const where = (repo, env, branch) => {
+    const r = (cfg.repos || []).find(x => x.repo === repo) || {};
+    const live = lives && lives[`${repo}|${env}`];
+    const pin = r.live && r.live[env] && parseSource(r.live[env].from);
+    return (r.deployUrl && r.deployUrl[env])
+      || (pin ? `https://github.com/${pin.repo}/${pin.ref ? 'edit/' + pin.ref : 'blob/HEAD'}/${pin.path}` : null)
+      || (live && live.compareUrl) || `https://github.com/${repo}/tree/${branch}`;
+  };
+  const out = (merged || []).filter(m => !m.deploy || m.deploy === 'manual')
+    .map(m => ({ repo: m.repo, label: m.label, env: m.env, branch: m.target, why: 'merged, deploy by hand', url: where(m.repo, m.env, m.target) }));
+  for (const m of manual || []) {
+    const live = lives && lives[`${m.repo}|${m.env}`];
+    if (live && !live.error && live.behind === 0) continue;
+    if (out.some(x => x.repo === m.repo && x.env === m.env)) continue;
+    out.push({ repo: m.repo, label: m.label, env: m.env, branch: m.branch, url: where(m.repo, m.env, m.branch),
+      why: live && !live.error ? `${live.behind} commit${live.behind === 1 ? '' : 's'} not live` : 'live commit unknown' });
+  }
+  return out;
+}
+
+const api = { manualLeft, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

@@ -13,7 +13,7 @@ const { releaseIdOf } = require('./manifest-core');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
-const { releaseTargets, releasePlan, releaseWaves, versionAtLeast } = require('./releases-core');
+const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft } = require('./releases-core');
 const { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -547,6 +547,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const skippedNote = skipped.length ? ` · not merged (waiting): ${skipped.map(x => x.label + ' ' + x.env).join(', ')}` : '';
     const waves = releaseWaves(state.config, go);
     releaseAllStop = false;
+    const shipped = [];
     progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '' });
     try {
       for (let w = 0; w < waves.length; w++) {
@@ -560,6 +561,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
           const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
           if (apiErr(res)) return progress({ running: false, status: 'stopped', detail: `Merge ${it.label}: ${apiErr(res)}` });
           merged.push({ ...it, sha: res.data && res.data.sha });
+          shipped.push(it);
           progress({ merged: (state.releaseAll.merged || []).concat(it.label + (it.env !== 'prod' ? ' ' + it.env : '')) });
         }
         // wait for this wave's CI deploys (repos deployed by hand can't be waited on)
@@ -585,7 +587,10 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
           pending = still;
         }
       }
-      progress({ running: false, status: 'done', detail: 'Every wave merged' + skippedNote });
+      // what's still on people: hand-deployed repos behind, and merged PRs whose target has no CI deploy
+      const man = id ? (((state.history && state.history.items) || []).find(x => x.id === id) || {}).manual || [] : (state.releaseRun && state.releaseRun.manual) || [];
+      const left = manualLeft(state.config, shipped, man.map(m => ({ env: 'prod', ...m })), state.results && state.results.lives);
+      progress({ running: false, status: 'done', detail: 'Every wave merged' + skippedNote, manualLeft: left, doneAt: Date.now() });
       send({ type: 'toast', text: 'Release all: every wave merged ✓' + skippedNote });
     } finally {
       if (state.releaseAll && state.releaseAll.running) progress({ running: false });

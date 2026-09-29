@@ -826,5 +826,35 @@
     signOverlay.classList.add('open');
   }
 
-  window.releasesUi = { onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; renderBadge(); renderSignPrompt(); if (msg.open && !open) show(true); render(); } };
+  // After Release all: a popup with what still goes out by hand — each row opens where to do it.
+  // Shown once per finished Release all (its doneAt), remembered per machine.
+  const manualOverlay = document.createElement('div');
+  manualOverlay.id = 'rl-manual-overlay';
+  manualOverlay.className = 'rl-overlay';
+  document.body.appendChild(manualOverlay);
+  let manualSeen = null;
+  try { manualSeen = localStorage.getItem('rl-manual-seen'); } catch {}
+  manualOverlay.addEventListener('click', (e) => {
+    const u = e.target.closest('[data-url]');
+    if (u) return api.send({ type: 'openUrl', url: u.dataset.url });
+    if (!e.target.closest('[data-close]') && e.target !== manualOverlay) return;
+    manualSeen = String(state.releaseAll.doneAt);
+    try { localStorage.setItem('rl-manual-seen', manualSeen); } catch {}
+    manualOverlay.classList.remove('open');
+  });
+  function renderManualLeft() {
+    const p = state && state.releaseAll;
+    const left = p && p.status === 'done' && p.manualLeft;
+    if (!left || !left.length || String(p.doneAt) === manualSeen) { manualOverlay.classList.remove('open'); return; }
+    manualOverlay.innerHTML = '<div class="rl-sign-box" role="dialog" aria-label="Deploy by hand">'
+      + '<div class="rl-sign-icon">✋</div><h2>Released: now deploy these by hand</h2>'
+      + '<div class="rl-sign-sub">Merging doesn\'t ship them: no CI deploy. Click one to open where it\'s deployed.</div>'
+      + '<div class="rl-sign-list">' + left.map(x => `<button class="rl-sign-row rl-manual-row" data-url="${esc(x.url)}" title="${esc(x.url)}">`
+        + `<b>${esc(x.label)}</b><span class="rl-env" style="--hue:${ENV_HUE[x.env.toLowerCase()] || 'var(--dim)'}">${esc(x.env)}</span>`
+        + `<span>${esc(x.why)} ↗</span></button>`).join('') + '</div>'
+      + '<div class="rl-sign-acts"><button class="go" data-close>Done</button></div></div>';
+    manualOverlay.classList.add('open');
+  }
+
+  window.releasesUi = { onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; renderBadge(); renderSignPrompt(); renderManualLeft(); if (msg.open && !open) show(true); render(); } };
 })();

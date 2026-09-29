@@ -331,4 +331,22 @@ assert.strictEqual(age('garbage', now), '');
   assert.ok(versionAtLeast('1.0.0', undefined), 'no minimum set');
   assert.deepStrictEqual(validateConfig({ envs: ['dev'], repos: [], releaseOrder: 'nope' }), ['releaseOrder: must be a list of waves (lists of repo labels or names)']);
 }
+{
+  const { manualLeft } = require('./releases-core');
+  const cfg = { repos: [
+    { repo: 'o/ai', branches: { prod: 'dev' }, live: { prod: { from: 'o/infra:env/prod.tfvars@dev', match: '(x)' } } },
+    { repo: 'o/jobs', branches: { prod: 'master' }, deployUrl: { prod: 'https://jenkins/jobs' } },
+    { repo: 'o/media', branches: { prod: 'master' } },
+    { repo: 'o/chat', branches: { staging: 'staging' } },
+  ] };
+  const left = manualLeft(cfg, [{ repo: 'o/chat', label: 'chat', env: 'staging', target: 'staging', deploy: null }, { repo: 'o/web', label: 'web', env: 'prod', target: 'master', deploy: 'd.yml' }],
+    [{ repo: 'o/ai', label: 'ai', env: 'prod', branch: 'dev' }, { repo: 'o/jobs', label: 'jobs', env: 'prod', branch: 'master' }, { repo: 'o/media', label: 'media', env: 'prod', branch: 'master' }],
+    { 'o/ai|prod': { behind: 3, compareUrl: 'c' }, 'o/media|prod': { behind: 0 } });
+  assert.deepStrictEqual(left.map(x => [x.label, x.why, x.url]), [
+    ['chat', 'merged, deploy by hand', 'https://github.com/o/chat/tree/staging'],
+    ['ai', '3 commits not live', 'https://github.com/o/infra/edit/dev/env/prod.tfvars'],
+    ['jobs', 'live commit unknown', 'https://jenkins/jobs'],
+  ]); // media is live already; web deploys by CI
+  assert.deepStrictEqual(validateConfig({ envs: ['prod'], repos: [{ repo: 'o/x', branches: { prod: 'm' }, deployUrl: { prod: 'http://x' } }] }), ['repos[0].deployUrl.prod: must be an https:// link']);
+}
 console.log('releases-core: all passed');
