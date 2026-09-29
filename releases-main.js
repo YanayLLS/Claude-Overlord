@@ -188,16 +188,27 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const text = await read(l.from);
       const sha = liveSha(text, l.match);
       if (!sha || !SAFE_REF_RE.test(sha)) { out[key] = { error: text == null ? `Can't read ${l.from}` : `No commit found in ${l.from}` }; return; }
-      const cmp = await ghJson(['api', `repos/${l.repo}/compare/${sha}...${l.branch}`]);
-      const b = cmp.data && cmp.data.base_commit;
-      if (!b) { out[key] = { sha, error: `Commit ${sha} not found in ${l.repo}` }; return; }
-      out[key] = {
-        sha: b.sha, title: commitTitle(b.commit.message.split('\n')[0], b.commit.message.split('\n').slice(2).join('\n')),
-        date: b.commit.committer && b.commit.committer.date, url: b.html_url, from: l.from,
-        behind: cmp.data.ahead_by, compareUrl: cmp.data.html_url,
-      };
+      out[key] = await liveAt(l.repo, l.branch, sha, { from: l.from });
     }));
+    // hand-deployed envs with no pin: the last deploy someone confirmed in Release all (confirmed.json)
+    const confirmed = await history.confirmed().catch(() => ({}));
+    await Promise.all((cfg.repos || []).flatMap(r => Object.entries(r.deploy || {}).filter(([env, how]) => how === 'manual' && r.branches && r.branches[env] && !(r.live && r.live[env]))
+      .map(async ([env]) => {
+        const c = confirmed[`${r.repo}|${env}`];
+        if (c && SAFE_REF_RE.test(c.sha)) out[`${r.repo}|${env}`] = await liveAt(r.repo, r.branches[env], c.sha, { confirmed: { by: c.by, at: c.at } });
+      })));
     return out;
+  }
+  // sha is what's live; how far the branch is ahead of it
+  async function liveAt(repo, branch, sha, extra) {
+    const cmp = await ghJson(['api', `repos/${repo}/compare/${sha}...${branch}`]);
+    const b = cmp.data && cmp.data.base_commit;
+    if (!b) return { sha, error: `Commit ${sha} not found in ${repo}` };
+    return {
+      sha: b.sha, title: commitTitle(b.commit.message.split('\n')[0], b.commit.message.split('\n').slice(2).join('\n')),
+      date: b.commit.committer && b.commit.committer.date, url: b.html_url, ...extra,
+      behind: cmp.data.ahead_by, compareUrl: cmp.data.html_url,
+    };
   }
 
   async function refresh() {
@@ -529,6 +540,20 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // one is live — checked through its `live` pin each poll — or someone presses "Deployed, continue".
   // Returns null to go on, or why it stopped.
   let manualDone = false;
+  // "Deployed": record each branch's head as what's live now, so the next release only asks when
+  // there's something new (fetchLives reads it back). Trusts the person: nothing verifies the deploy.
+  async function confirmDeployed(items) {
+    const who = await whoAmI();
+    const heads = await Promise.all(items.map(async (x) => {
+      const r = await ghJson(['api', `repos/${x.repo}/commits/${x.branch}`]);
+      return r.data && r.data.sha ? { repo: x.repo, env: x.env, sha: r.data.sha } : null;
+    }));
+    const ok = heads.filter(Boolean);
+    if (ok.length) await history.confirm(ok, who.github, state.releaseAll && state.releaseAll.id).catch(e => send({ type: 'toast', text: 'Confirm deploy: ' + e.message }));
+    if (ok.length < items.length) send({ type: 'toast', text: `Couldn't read the branch of ${items.filter((x, i) => !heads[i]).map(x => x.label).join(', ')}: not recorded` });
+    const lives = await fetchLives(state.config).catch(() => null);
+    if (lives) push({ results: { ...(state.results || {}), lives }, grid: buildGrid(state.config, { ...(state.results || {}), lives }) });
+  }
   async function waitManual(hand) {
     manualDone = false;
     for (;;) {
@@ -536,6 +561,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const lives = await fetchLives(state.config).catch(() => null);
       if (lives) push({ results: { ...(state.results || {}), lives } });
       const left = manualLeft(state.config, [], hand, lives || (state.results && state.results.lives));
+      if (manualDone) await confirmDeployed(left);
       if (!left.length || manualDone) { progress({ manualWave: null }); return null; }
       progress({ status: 'manual', detail: left.map(x => x.label).join(', '), manualWave: left.map(x => {
         const l = lives && lives[`${x.repo}|${x.env}`];
@@ -796,6 +822,11 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesMerge': releaseAll(null).catch(e => send({ type: 'toast', text: 'Release all failed: ' + (e.message || 'error') })); return true;
       case 'releasesReleaseAllStop': releaseAllStop = true; return true;
       case 'releasesManualDone': manualDone = true; return true;
+      case 'releasesManualConfirm': { // the end popup's "Deployed"
+        const left = (state.releaseAll && state.releaseAll.manualLeft) || [];
+        confirmDeployed(left).then(() => progress({ manualLeft: [] })).catch(e => send({ type: 'toast', text: 'Confirm deploy: ' + e.message }));
+        return true;
+      }
       case 'releasesFixDeploy': { // Fix on a failed deploy cell: same agent as the Actions list's Fix
         const d = state.results && state.results.deploys && state.results.deploys[msg.key];
         if (d && fixRun) fixRun(d).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }));

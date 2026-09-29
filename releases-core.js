@@ -324,7 +324,7 @@ function manualLeft(cfg, merged, manual, lives) {
     if (live && !live.error && live.behind === 0) continue;
     if (out.some(x => x.repo === m.repo && x.env === m.env)) continue;
     out.push({ repo: m.repo, label: m.label, env: m.env, branch: m.branch, url: where(m.repo, m.env, m.branch),
-      why: live && !live.error ? `${live.behind} commit${live.behind === 1 ? '' : 's'} not live` : 'live commit unknown' });
+      why: !live || live.error ? 'never confirmed deployed' : `${live.behind} commit${live.behind === 1 ? '' : 's'} ${live.confirmed ? `since @${live.confirmed.by}'s deploy` : 'not live'}` });
   }
   return out;
 }

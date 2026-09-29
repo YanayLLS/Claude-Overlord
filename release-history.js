@@ -217,5 +217,39 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     send({ type: 'toast', text: wrote ? `Imported ${wrote} past release${wrote === 1 ? '' : 's'}: deploy results fill in shortly` : 'No past release PRs found' });
   }
 
-  return { load, recordRun, reconcile, rollback, importPast };
+  // confirmed.json: per 'repo|env' the last hand deploy someone confirmed ({ sha, at, by, release }).
+  const CONFIRMED = 'confirmed.json';
+  let confirmedCache = null; // { sha, data }
+  async function readConfirmed() {
+    const r = await ghJson(['api', `repos/${repoOf()}/contents/${CONFIRMED}?ref=main`]);
+    if (apiErr(r)) return /404|empty/i.test(apiErr(r)) ? { sha: null, data: {} } : { error: apiErr(r) };
+    if (confirmedCache && confirmedCache.sha === r.data.sha) return confirmedCache;
+    try { confirmedCache = { sha: r.data.sha, data: JSON.parse(Buffer.from(r.data.content, 'base64').toString('utf8')) }; } catch { confirmedCache = { sha: r.data.sha, data: {} }; }
+    return confirmedCache;
+  }
+  async function confirmed() {
+    if (!repoOf()) return {};
+    const c = await readConfirmed();
+    return c.error ? {} : c.data;
+  }
+  // items: [{ repo, env, sha }]
+  async function confirm(items, by, release) {
+    if (!repoOf() || !items.length) return;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const cur = await readConfirmed();
+      if (cur.error) throw new Error(cur.error);
+      const data = { ...cur.data };
+      for (const x of items) data[`${x.repo}|${x.env}`] = { sha: x.sha, at: new Date().toISOString(), by: by || null, release: release || null };
+      const r = await ghJson(['api', '-X', 'PUT', `repos/${repoOf()}/contents/${CONFIRMED}`, '--input', writeTmp({
+        message: `deployed by hand: ${items.map(x => x.repo.split('/')[1] + ' ' + x.env).join(', ')}${by ? ' (@' + by + ')' : ''}`, branch: 'main', ...(cur.sha ? { sha: cur.sha } : {}),
+        content: Buffer.from(JSON.stringify(data, null, 2) + '\n').toString('base64'),
+      })]);
+      const e = apiErr(r);
+      if (!e) { confirmedCache = { sha: r.data && r.data.content && r.data.content.sha, data }; return; }
+      if (!/409|422|does not match/i.test(e)) throw new Error(e);
+    }
+    throw new Error('confirmed.json kept changing: try again');
+  }
+
+  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm };
 };

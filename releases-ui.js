@@ -255,6 +255,7 @@
     if (c.deploy && c.deploy !== 'manual') lines.push(dead ? `CI <span class="mono">${esc(c.deploy)}</span> has never succeeded — not how this env ships` : `CI <span class="mono">${esc(c.deploy)}</span>`);
     if (!dead) for (const f of (c.run && c.run.failed) || []) lines.push(`<span class="bad">✕ ${esc(f.job)}${f.step ? ' › ' + esc(f.step) : ''}</span>`);
     if (c.live && c.live.from) lines.push(`pinned in <span class="mono">${esc(c.live.from.split(':')[1] || c.live.from)}</span>`);
+    if (c.live && c.live.confirmed) lines.push(`deployed by hand, confirmed by @${esc(c.live.confirmed.by || '?')} ${esc(age(c.live.confirmed.at))} ago`);
     if (lines.length) h += '<div class="tt-lines">' + lines.map(l => `<div>${l}</div>`).join('') + '</div>';
     return h + '<div class="tt-foot">Click for details</div>';
   }
@@ -838,6 +839,7 @@
     const u = e.target.closest('[data-url]');
     if (u) return api.send({ type: 'openUrl', url: u.dataset.url });
     if (e.target.closest('[data-manual-go]')) return api.send({ type: 'releasesManualDone' });
+    if (e.target.closest('[data-confirm]') && !(state.releaseAll && state.releaseAll.running)) api.send({ type: 'releasesManualConfirm' });
     if (e.target.closest('[data-manual-stop]')) return api.send({ type: 'releasesReleaseAllStop' });
     if (state.releaseAll && state.releaseAll.running) return; // a paused wave stays up until it's deployed or stopped
     if (!e.target.closest('[data-close]') && e.target !== manualOverlay) return;
@@ -869,7 +871,7 @@
       + '<div class="rl-sign-list">' + left.map(x => `<button class="rl-sign-row rl-manual-row" data-url="${esc(x.url)}" title="${esc(x.url)}">`
         + `<b>${esc(x.label)}</b><span class="rl-env" style="--hue:${ENV_HUE[x.env.toLowerCase()] || 'var(--dim)'}">${esc(x.env)}</span>`
         + `<span>${esc(x.why)} ↗</span></button>`).join('') + '</div>'
-      + '<div class="rl-sign-acts"><button class="go" data-close>Done</button></div></div>';
+      + '<div class="rl-sign-acts"><button data-close>Later</button><button class="go" data-close data-confirm title="Records each branch as deployed: the next release only asks when there is something new">Deployed ✓</button></div></div>';
     manualOverlay.classList.add('open');
   }
 

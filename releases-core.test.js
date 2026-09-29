@@ -345,7 +345,7 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(left.map(x => [x.label, x.why, x.url]), [
     ['chat', 'merged, deploy by hand', 'https://github.com/o/chat/tree/staging'],
     ['ai', '3 commits not live', 'https://github.com/o/infra/edit/dev/env/prod.tfvars'],
-    ['jobs', 'live commit unknown', 'https://jenkins/jobs'],
+    ['jobs', 'never confirmed deployed', 'https://jenkins/jobs'],
   ]); // media is live already; web deploys by CI
   assert.deepStrictEqual(validateConfig({ envs: ['prod'], repos: [{ repo: 'o/x', branches: { prod: 'm' }, deployUrl: { prod: 'http://x' } }] }), ['repos[0].deployUrl.prod: must be an https:// link']);
 }
