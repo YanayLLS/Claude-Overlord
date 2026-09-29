@@ -3840,7 +3840,7 @@ function handleAgentMsg(msg) {
       break;
     case 'prList': {
       if (msg.error) { prState.error = msg.error; prState.errorCode = msg.errorCode || null; }
-      else { prState.prs = msg.prs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; }
+      else { prState.prs = msg.prs || []; prState.extra = msg.extraPrs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; }
       renderPrBadge();
       refreshOpenDropdown('pr-dropdown', prDropdownHtml);
       if (worldView) scheduleRender();
@@ -4449,6 +4449,7 @@ function applySettings(s) {
   if (s.lastFeatureRepos) lastFeatureRepos = s.lastFeatureRepos;
   if (s.prCollapsed) prCollapsed = new Set(s.prCollapsed);
   if (s.prScope) prScope = s.prScope;
+  if ('prShowAll' in s) prShowAll = !!s.prShowAll;
   if (s.prSettings) {
     prSettings = s.prSettings;
     selectedRepos = new Set(prSettings.repos || []);
@@ -5140,6 +5141,15 @@ function setPrScope(scope) {
   document.getElementById('pr-dropdown').innerHTML = prDropdownHtml();
   api.send({ type: 'saveSettings', settings: { prScope } });
 }
+// "To act on" (default): yours + others' not yet approved. "All open" adds drafts and others' approved PRs
+// (main.js sends those as extraPrs; they never count on the top-bar button or notify).
+let prShowAll = false;
+const prMenuList = () => prShowAll ? prState.prs.concat(prState.extra || []) : prState.prs;
+function setPrShowAll(on) {
+  prShowAll = on;
+  document.getElementById('pr-dropdown').innerHTML = prDropdownHtml();
+  api.send({ type: 'saveSettings', settings: { prShowAll } });
+}
 let prCollapsed = new Set(['__archived__']); // archived stays out of sight until asked for
 
 // Someone approved it (and nobody since asked for changes). Green means this, not just "GitHub
@@ -5204,7 +5214,7 @@ function prRowHtml(p, dim) {
     ? `<span class="pr-chip warn" title="Checks are still running on GitHub${p.checksEta ? ' — ' + escapeHtml(p.checksEta.name) + ', from its recent runs' : ''}">Testing${eta}</span>`
       + (p.failed ? `<span class="pr-chip bad" title="${p.failed} check(s) already failed while others still run">${p.failed} failed</span>` : '')
     : p.checks === 'fail' ? `<span class="pr-chip bad" title="Checks failed on GitHub">${p.failed > 1 ? p.failed + ' checks failed' : 'Checks failed'}</span>` : '';
-  const reqChip = showReq ? '<span class="pr-chip bad">Your review</span>' : '';
+  const reqChip = (showReq ? '<span class="pr-chip bad">Your review</span>' : '') + (p.isDraft ? '<span class="pr-chip">Draft</span>' : '');
   const behindChip = p.behindBy > 0 ? `<span class="pr-chip warn" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">${p.behindBy} behind</span>` : '';
   // One table row per PR: each piece in its own column so rows line up (headers: prDropdownHead).
   const refs = p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${prRefHtml(p.headRef)} → ${prRefHtml(p.baseRef)}</span>` : '';
@@ -5298,10 +5308,13 @@ function prArchivedRowHtml(p) {
 }
 
 function prDropdownHead() {
-  const live = prState.prs.filter(p => !p.archived);
+  const live = prMenuList().filter(p => !p.archived);
   const seg = (k, label, tip) => `<button class="pr-seg${prScope === k ? ' on' : ''}" title="${tip}" onclick="event.stopPropagation();setPrScope('${k}')">${label}<em>${live.filter(p => prInScope(p, k)).length}</em></button>`;
+  const n = (l) => l.filter(p => !p.archived && prInScope(p)).length;
+  const who = `<span class="pr-scope"><button class="pr-seg${prShowAll ? '' : ' on'}" title="Your PRs, and others' PRs nobody has approved yet" onclick="event.stopPropagation();setPrShowAll(false)">To act on<em>${n(prState.prs)}</em></button>`
+    + `<button class="pr-seg${prShowAll ? ' on' : ''}" title="Every open PR in the watched repos, including drafts and others' PRs that are already approved" onclick="event.stopPropagation();setPrShowAll(true)">All open<em>${n(prState.prs.concat(prState.extra || []))}</em></button></span>`;
   const scope = `<span class="pr-scope">${seg('all', 'All', 'Every open PR')}${seg('dev', 'Into dev', 'Only PRs merging into dev')}${seg('norel', 'Hide releases', 'Hide PRs into alpha, staging, master, main and prod')}</span>`;
-  return `<div class="pr-dhead"><span>Pull requests</span>${scope}<span class="pr-dhead-btns">`
+  return `<div class="pr-dhead"><span>Pull requests</span>${who}${scope}<span class="pr-dhead-btns">`
     + (prState.prs.some(p => p.archived) ? `<button class="pr-refresh" title="${prCollapsed.has('__archived_open__') ? 'Hide' : 'Show'} archived" style="opacity:${prCollapsed.has('__archived_open__') ? 1 : .45}" onclick="event.stopPropagation();togglePrRepo('__archived_open__')">📦</button>` : '')
     + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button>`
     + `<button class="pr-refresh pr-close" title="Close" onclick="event.stopPropagation();closePrDropdown()">✕</button>`
@@ -5396,14 +5409,16 @@ function prDropdownHtml() {
   const head = prDropdownHead();
   if (prState.error) return head + '<div class="pr-empty">PR check failed. '
     + escapeHtml(prState.error) + ghFixHtml(prState.errorCode) + '</div>';
-  const live = prState.prs.filter(p => !p.archived && prInScope(p));
+  const live = prMenuList().filter(p => !p.archived && prInScope(p));
   const archived = prState.prs.filter(p => p.archived);
   const active = live.filter(p => !p.muted && !p.repoMuted && !p.snoozed);
   const repoMuted = live.filter(p => p.repoMuted && !p.muted);
   const snoozed = live.filter(p => p.snoozed && !p.muted && !p.repoMuted);
   const muted = live.filter(p => p.muted);
   const showArchived = prCollapsed.has('__archived_open__'); // toggled by the 📦 header button
-  if (!live.length && !(showArchived && archived.length)) return head + (prScope === 'all' ? '<div class="pr-empty">No open PRs.</div>'
+  if (!live.length && !(showArchived && archived.length)) return head + (!prShowAll && (prState.extra || []).some(p => prInScope(p))
+    ? `<div class="pr-empty">Nothing to act on. <a href="#" onclick="event.preventDefault();event.stopPropagation();setPrShowAll(true)">Show all open PRs</a></div>`
+    : prScope === 'all' ? '<div class="pr-empty">No open PRs.</div>'
     : `<div class="pr-empty">No PRs match this filter. <a href="#" onclick="event.preventDefault();event.stopPropagation();setPrScope('all')">Show all</a></div>`);
   let html = head; // PR rows are two-line cards, no column header
   // Active repos

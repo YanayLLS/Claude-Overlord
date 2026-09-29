@@ -2213,22 +2213,22 @@ function fetchAllPRs(repos) {
         return finish({ prs: [], failed: valid, error: ghErr(e), errorCode: ghErrCode(e) });
       }
       const data = json.data || {};
-      const prs = [], failed = [];
+      const prs = [], extra = [], failed = [];
       valid.forEach((r, i) => {
         const node = data['r' + i];
         if (!node) { failed.push(r); return; }
         for (const pr of (node.pullRequests && node.pullRequests.nodes) || []) {
           const mine = !!ghLogin && pr.author && pr.author.login === ghLogin;
-          if (pr.isDraft) continue;
-          if (pr.reviewDecision === 'APPROVED' && !mine) continue; // hide approved unless mine
+          // Drafts and others' approved PRs aren't yours to act on: they only show in the menu's "All open" view.
+          const list = pr.isDraft || (pr.reviewDecision === 'APPROVED' && !mine) ? extra : prs;
           const rollup = pr.commits && pr.commits.nodes[0] && pr.commits.nodes[0].commit.statusCheckRollup;
           const requested = !!ghLogin && ((pr.reviewRequests && pr.reviewRequests.nodes) || [])
             .some(n => n.requestedReviewer && n.requestedReviewer.login === ghLogin);
           const reviews = (pr.latestReviews && pr.latestReviews.nodes) || [];
           const approvedBy = reviews.filter(r => r.state === 'APPROVED' && r.author).map(r => r.author.login);
           const changesBy = reviews.filter(r => r.state === 'CHANGES_REQUESTED' && r.author).map(r => r.author.login);
-          prs.push({
-            key: prKey(r, pr.number), repo: r, number: pr.number, title: pr.title, url: pr.url,
+          list.push({
+            key: prKey(r, pr.number), isDraft: !!pr.isDraft, repo: r, number: pr.number, title: pr.title, url: pr.url,
             author: (pr.author && pr.author.login) || '',
             reviewDecision: pr.reviewDecision || '', mine,
             // Per-check summary when GitHub gave us the checks; the rollup only as a fallback (it says FAILURE while a rerun is still going).
@@ -2243,7 +2243,7 @@ function fetchAllPRs(repos) {
       });
       // Every alias null + GraphQL errors = the query itself was rejected; say why instead of "couldn't reach".
       const gqlErr = !prs.length && failed.length === valid.length && json.errors && json.errors[0] && json.errors[0].message;
-      finish(gqlErr ? { prs, failed, error: 'GitHub: ' + String(gqlErr).slice(0, 200) } : { prs, failed });
+      finish(gqlErr ? { prs, failed, error: 'GitHub: ' + String(gqlErr).slice(0, 200) } : { prs, extra, failed });
     });
     try { proc.stdin.write(query); proc.stdin.end(); } catch {}
   });
@@ -2351,14 +2351,14 @@ async function pollPRs() {
   settings.prCache = { prs, failedRepos };
   saveState();
   // Show the list now; "commits behind" and the checks ETA take a call per PR, so they follow.
-  send({ type: 'prList', prs, error: null, failedRepos });
+  send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
   const behind = await fetchBehind(prs);
   prs.forEach(p => { p.behindBy = behind[p.key] ?? null; });
   for (const p of prs) {
     p.checksEta = null;
     if (p.checks === 'pending' && p.running.length) p.checksEta = checksEta(p.running, await fetchWorkflowDurations(p.repo));
   }
-  send({ type: 'prList', prs, error: null, failedRepos });
+  send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
 }
 
 function notifyNewPR(pr) {
