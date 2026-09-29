@@ -86,7 +86,8 @@ autoUpdater.on('error', err => {
 const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./pr-eta');
-const { pickResumedFile, sessionSwitchKind } = require('./resume-core');
+const { sessionSwitchKind } = require('./resume-core');
+const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
 const { applyBgRecord } = require('./bg-core');
 const { applyAskRecord } = require('./ask-core');
 const { themeOf, titleBarColors } = require('./theme-core');
@@ -394,18 +395,48 @@ function markClear(id) {
   const a = agents.get(id);
   if (a) { a.stats.ctxTok = 0; send({ type: 'stats', id, stats: a.stats }); }
 }
-// /resume submitted: unlike /clear it usually lands in an existing JSONL (the picked
-// chat's own), so reconcileResumedAgents() has to go find it. Rewinding to an older
-// message forks a new file instead — markClear() covers that half.
-const pendingResumeAgents = new Map(); // agentId -> ms epoch of the /resume
-const RESUME_WINDOW_MS = 3 * 60 * 1000; // picker is interactive; give it time, then give up
-function markResume(id) { pendingResumeAgents.set(id, Date.now()); }
-// A submitted line that moves the agent to a different session file.
+// A submitted line that moves the agent to a different session file. /resume lands in the
+// picked chat's existing JSONL — followPrompts() finds it from the next prompt.
 function markSessionSwitch(id, line) {
-  const kind = sessionSwitchKind(line);
-  if (!kind) return;
-  markClear(id);
-  if (kind === 'resume') markResume(id);
+  if (sessionSwitchKind(line)) markClear(id);
+}
+// Follow the prompt: remember what was submitted; if it doesn't show up in the agent's
+// watched transcript, followPrompts() looks for the file it did land in.
+const FOLLOW_AFTER_MS = 4000, FOLLOW_GIVE_UP_MS = 60000, FOLLOW_TAIL_BYTES = 64 * 1024;
+function notePrompt(id, text) {
+  const a = agents.get(id), key = promptKey(text);
+  if (a && key) a.pendingPrompt = { key, at: Date.now() };
+}
+function readTail(file, bytes) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const size = fs.fstatSync(fd).size, n = Math.min(bytes, size), buf = Buffer.alloc(n);
+    fs.readSync(fd, buf, 0, n, size - n);
+    return { size, start: size - n, text: buf.toString('utf-8') };
+  } finally { fs.closeSync(fd); }
+}
+// ponytail: only files touched since the submit are read, only their last 64 KB, and only
+// for a prompt still missing after 4 s — the normal case costs nothing.
+function followPrompts() {
+  const now = Date.now();
+  for (const [id, a] of agents) {
+    const p = a.pendingPrompt;
+    if (!p || now - p.at < FOLLOW_AFTER_MS) continue;
+    if (now - p.at > FOLLOW_GIVE_UP_MS) { a.pendingPrompt = null; continue; }
+    const dir = path.dirname(a.jsonlFile);
+    let files = [];
+    try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => path.join(dir, f)); } catch { continue; }
+    for (const file of files) {
+      if (file === a.jsonlFile) continue;
+      try { if (fs.statSync(file).mtimeMs < p.at - 2000) continue; } catch { continue; }
+      let tail; try { tail = readTail(file, FOLLOW_TAIL_BYTES); } catch { continue; }
+      if (!linesHavePrompt(tail.text.split('\n'), p.key, p.at)) continue;
+      a.pendingPrompt = null;
+      console.log(`[Overlord] prompt landed in ${path.basename(file)} — agent ${id} follows it`);
+      reassignAgentToFile(id, file, tail.start); // read from the tail, not the whole history
+      break;
+    }
+  }
 }
 const TERM_BUFFER_MAX = 1_000_000; // ~10k lines — matches xterm scrollback so a reload can restore the whole visible history
 const REMOTE_PORT = 7778;
@@ -1746,6 +1777,7 @@ function parseLine(id, line) {
   const a = agents.get(id); if (!a) return;
   try {
     const r = JSON.parse(line);
+    if (a.pendingPrompt && recordHasPrompt(r, a.pendingPrompt.key, a.pendingPrompt.at)) a.pendingPrompt = null;
     // Ledger moved while at the prompt (e.g. a background task finished) → re-show status
     if (applyBgRecord(a.bgTasks ||= new Set(), r) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
     // Session rename. Claude Code persists /rename as a custom-title line, and
@@ -1968,34 +2000,6 @@ function scanForNewJsonlFiles() {
   }
 }
 
-// After /resume the agent is writing to the picked chat's existing JSONL, so it's
-// still tailing — and titled after — the session it left. Re-point it at whichever
-// other transcript in the project dir went live since the /resume.
-// ponytail: mtime is the only signal Claude Code leaves; a session started outside
-// Overlord in the same dir inside the 3-min window could be picked by mistake.
-function reconcileResumedAgents() {
-  for (const [id, since] of pendingResumeAgents) {
-    const a = agents.get(id);
-    if (!a || !terminals.has(id) || Date.now() - since > RESUME_WINDOW_MS) { pendingResumeAgents.delete(id); continue; }
-    const dir = claudeDir(a.cwd);
-    const owned = new Set();
-    for (const [oid, o] of agents) if (oid !== id) owned.add(o.jsonlFile);
-    const entries = [];
-    try {
-      for (const f of fs.readdirSync(dir)) {
-        if (!f.endsWith('.jsonl')) continue;
-        const file = path.join(dir, f);
-        try { entries.push({ file, mtimeMs: fs.statSync(file).mtimeMs }); } catch {}
-      }
-    } catch { continue; }
-    const file = pickResumedFile({ entries, since, current: a.jsonlFile, owned });
-    if (!file) continue;
-    pendingResumeAgents.delete(id);
-    pendingClearAgents.delete(id); // resume landed in an existing file, not a fresh one
-    console.log(`[Overlord] /resume detected: agent ${id} -> ${path.basename(file)}`);
-    reassignAgentToFile(id, file);
-  }
-}
 
 // Newest chat names from a session's JSONL: user /rename (custom-title) and
 // Claude's auto-generated ai-title. '' when absent (e.g. a fresh /clear session).
@@ -2014,7 +2018,7 @@ function readSessionTitle(file) {
   return { custom, ai };
 }
 
-function reassignAgentToFile(id, newFilePath) {
+function reassignAgentToFile(id, newFilePath, startAt = 0) {
   const a = agents.get(id); if (!a) return;
   // Stop old watchers
   const w = watchers.get(id); if (w) { try { w.close(); } catch {} watchers.delete(id); }
@@ -2056,7 +2060,7 @@ function reassignAgentToFile(id, newFilePath) {
   const newSessionId = path.basename(newFilePath, '.jsonl');
   a.sessionId = newSessionId;
   a.jsonlFile = newFilePath;
-  a.fileOffset = 0;
+  a.fileOffset = startAt; // >0: a followed prompt in a long transcript — skip its history (partial first line is dropped)
   a.lineBuffer = '';
   saveState();
   // Start watching new file
@@ -3284,6 +3288,7 @@ function handleTermInput(id, data) {
       return;
     }
     markSessionSwitch(id, full.slice(0, lastCR));
+    notePrompt(id, data.length > LONG_PASTE_THRESHOLD ? '' : full.slice(0, lastCR));
     { const ag = agents.get(id); if (ag) ag.peerHopBase = 0; } // human-submitted line resets the agent-chain budget
     const renameMatch = full.slice(0, lastCR).match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameMatch) { const a = agents.get(id); if (a) { a.title = renameMatch[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
@@ -3301,6 +3306,7 @@ function handleTermInput(id, data) {
   if (data === '\r') {
     // Detect /clear or /resume — both move the agent to a different JSONL file
     markSessionSwitch(id, buf);
+    notePrompt(id, buf);
     const renameM = buf.match(/^\s*\/rename\s+(.+?)\s*$/);
     if (renameM) { const a = agents.get(id); if (a) { a.title = renameM[1]; a.customName = true; send({ type: 'title', id, text: a.title, customName: true }); saveState(); } }
     // Enter pressed — a line with a remote mention (@Agent@peer) is a message
@@ -4453,7 +4459,7 @@ ipcMain.on('cmd', (_e, msg) => {
 setInterval(() => {
   for (const [id, a] of agents) send({ type: 'stats', id, stats: a.stats });
   scanForNewJsonlFiles();
-  reconcileResumedAgents();
+  followPrompts();
 }, 5000);
 
 // Status watchdog — reconcile agents stuck on 'active'. The JSONL transcript is the
