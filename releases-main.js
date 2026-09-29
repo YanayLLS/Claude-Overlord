@@ -302,8 +302,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const org = approversOrg();
     if (!org) return;
     let r;
-    if (kind === 'create') r = await ghJson(['api', '-X', 'POST', `orgs/${org}/teams`, '-f', `name=${APPROVERS_TEAM}`, '-f', 'privacy=closed',
-      '-f', 'description=Approve prod releases: Overlord needs two of these people to sign before a prod release PR merges']);
+    // fields go as a JSON file: ghJson runs through a shell on Windows, which splits a spaced -f value
+    if (kind === 'create') r = await ghJson(['api', '-X', 'POST', `orgs/${org}/teams`, '--input', writeTmp({ name: APPROVERS_TEAM, privacy: 'closed',
+      description: 'Approve prod releases: Overlord needs two of these people to sign before a prod release PR merges' })]);
     else if (!/^[A-Za-z0-9-]{1,39}$/.test(String(login || ''))) return send({ type: 'toast', text: 'Not a GitHub username' });
     else if (kind === 'add') r = await ghJson(['api', '-X', 'PUT', `orgs/${org}/teams/${APPROVERS_TEAM}/memberships/${login}`, '-f', 'role=member']);
     else r = await ghJson(['api', '-X', 'DELETE', `orgs/${org}/teams/${APPROVERS_TEAM}/memberships/${login}`]);
