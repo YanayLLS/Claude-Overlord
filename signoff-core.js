@@ -7,12 +7,15 @@
 
 const NEED = 2;
 const REVIEW_MARK = '✍ Release signed via Overlord';
-const OPENER_RE = /<!-- release-opener:([\w-]+)(?: clickup:(\d+))? -->/;
+const OPENER_RE = /<!-- release-opener:([\w-]+)(?: clickup:(\d+))?(?: sha:([0-9a-f]{7,40}))? -->/;
+// the whole opener line, to re-stamp it with a new commit
+const OPENER_LINE_RE = /✍ Opened and signed by @[\w-]+ via Overlord <!-- release-opener:[^>]*-->/;
 const CLICKUP_RE = /clickup:(\d+)/;
 
-// PR body line for the person opening the release (signature 1)
-function openerMark(login, clickupId) {
-  return `✍ Opened and signed by @${login} via Overlord <!-- release-opener:${login}${clickupId ? ` clickup:${clickupId}` : ''} -->`;
+// PR body line for the person opening the release (signature 1). sha = the head commit it covers:
+// new commits void it like any other signature (Sign re-stamps it). Marks without a sha predate this.
+function openerMark(login, clickupId, sha) {
+  return `✍ Opened and signed by @${login} via Overlord <!-- release-opener:${login}${clickupId ? ` clickup:${clickupId}` : ''}${sha ? ` sha:${sha}` : ''} -->`;
 }
 // Review body for signature 2+
 function reviewMark(clickupId) { return REVIEW_MARK + (clickupId ? ` · clickup:${clickupId}` : ''); }
@@ -25,7 +28,9 @@ function signoff(pr, reviews, members) {
   const signers = [], stale = [];
   if (author && team.has(author.toLowerCase())) {
     const m = String((pr && pr.body) || '').match(OPENER_RE);
-    signers.push({ login: author, via: 'opened', clickup: m && m[1].toLowerCase() === author.toLowerCase() ? m[2] || null : null });
+    const mine = m && m[1].toLowerCase() === author.toLowerCase();
+    if (mine && m[3] && head && m[3] !== head) stale.push(author); // opened (signed) an older commit
+    else signers.push({ login: author, via: 'opened', clickup: mine ? m[2] || null : null });
   }
   // each person's latest decisive review wins (a later "changes requested" or dismissal withdraws)
   const latest = new Map();
@@ -63,4 +68,4 @@ function releaseSignoff(prs) {
 // Has `login` already signed this PR (opened it, or approved its current head)?
 function hasSigned(s, login) { return !!login && s.signers.some(x => x.login.toLowerCase() === login.toLowerCase()); }
 
-module.exports = { NEED, openerMark, reviewMark, signoff, releaseSignoff, hasSigned, OPENER_RE };
+module.exports = { NEED, openerMark, reviewMark, signoff, releaseSignoff, hasSigned, OPENER_RE, OPENER_LINE_RE };

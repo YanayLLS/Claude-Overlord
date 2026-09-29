@@ -94,6 +94,7 @@
     // Release all merges to prod: the first click arms it (the button asks to confirm), a second within ARM_MS starts it
     relMerge: () => { if (armed !== 'run') return arm('run'); armed = null; api.send({ type: 'releasesMerge' }); render(); },
     relAllStop: () => { api.send({ type: 'releasesReleaseAllStop' }); },
+    relAllResume: (el) => { api.send(el.dataset.id ? { type: 'releasesMergeRelease', id: el.dataset.id } : { type: 'releasesMerge' }); },
     // bell: add every repo of the release config the PRs panel isn't watching yet
     relWatch: () => {
       const missing = prsUnwatched();
@@ -436,6 +437,8 @@
   }
   function releaseAllBtn(s, { ready, waiting, signoff, attrs, lockedCls, armKey }) {
     if (s.releaseAll && s.releaseAll.running) return '';
+    // one Release all across the team: someone else's is running
+    if (s.teamRun) return `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`@${s.teamRun.by} is running Release all: wave ${s.teamRun.wave}/${s.teamRun.waves}, ${s.teamRun.status}${s.teamRun.detail ? ' (' + s.teamRun.detail + ')' : ''}${(s.teamRun.merged || []).length ? '\nmerged: ' + s.teamRun.merged.join(', ') : ''}`)}">🚀 Running on @${esc(s.teamRun.by)}'s Overlord · wave ${esc(s.teamRun.wave)}/${esc(s.teamRun.waves)}</button>`;
     const so = signoff || { count: 0, need: 2, signers: [], gaps: [] };
     const signedLine = `the prod release is signed ${so.count}/${so.need}${so.signers.length ? ' (' + so.signers.map(l => '@' + l).join(', ') + ')' : ''}`;
     const gapLines = (so.gaps || []).map(g => `\n@${g.login} still to sign: ${g.missing.map(x => x.label + (x.older ? ' (new commits)' : '')).join(', ')}`).join('');
@@ -459,9 +462,11 @@
     if (!p) return '';
     const head = p.running ? `🚀 Wave ${p.wave}/${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : p.status === 'manual' ? 'deploy by hand' : 'merging'}: ${esc(p.detail || '')}`
       : p.status === 'done' ? `🚀 Released: ${esc(p.detail || 'every wave merged')} ✓`
+      : p.status === 'interrupted' ? `⏸ Release all interrupted: Overlord closed at wave ${esc(p.wave)}/${esc(p.waves)}`
       : `⏸ Release all stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
     return `<div class="rl-relall ${p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad'}"><span>${head}</span>`
       + (p.merged && p.merged.length ? `<span class="rl-relall-merged">merged: ${esc(p.merged.join(', '))}</span>` : '')
+      + (p.status === 'interrupted' ? `<button class="rl-hist-btn go" data-act="relAllResume" data-id="${esc(p.id || '')}" title="Picks up with what is still open: merged PRs are skipped, a deploy still running is waited on first">▶ Resume</button>` : '')
       + (p.running ? '<button class="rl-hist-btn" data-act="relAllStop" title="Stops before the next merge. What already merged stays merged">⏹ Stop</button>' : '') + '</div>';
   }
 

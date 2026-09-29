@@ -42,5 +42,12 @@ assert.strictEqual(signoff(pr('alice'), [rev('mallory', 'APPROVED', 1)], team).o
 assert.strictEqual(signoff(pr('mallory'), [rev('bob', 'APPROVED', 1), rev('carol', 'APPROVED', 2)], team).ok, true);
 // an opener mark naming someone else doesn't lend them its ClickUp id
 assert.strictEqual(signoff(pr('alice', openerMark('bob', '999')), [], team).signers[0].clickup, null);
+{ // the opener's signature covers the commit it was stamped on: new commits void it
+  const at = (body) => ({ ...pr('alice', body), head: { sha: 'abcdef2' } });
+  const fresh = signoff(at(openerMark('alice', '1', 'abcdef2')), [], team);
+  const old = signoff(at(openerMark('alice', '1', 'abcdef1')), [], team);
+  assert.deepStrictEqual([fresh.count, old.count, old.stale], [1, 0, ['alice']]);
+  assert.strictEqual(signoff(pr('alice', openerMark('alice', '1')), [], team).count, 1, 'marks from before shas still count');
+}
 
 console.log('signoff-core: all passed');

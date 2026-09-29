@@ -175,7 +175,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         body: [`Rolls **${p.target}** back to release **${id}**: one commit whose files are exactly that release's (${p.toSha.slice(0, 7)}).`, '',
           `> Changes since then stay on the source branch — the next release brings them back unless they're reverted there too.`, '',
           ...(warn ? [`> ⚠ **Data changes since that release are NOT rolled back** — check them by hand: ${warn.files.map(x => '`' + x + '`').join(', ')}`, ''] : []),
-          `_Opened by Overlord's Rollback._`, '', require('./signoff-core').openerMark(who.github, who.clickup), M.releaseIdMark(rbId)].join('\n') })]);
+          `_Opened by Overlord's Rollback._`, '', require('./signoff-core').openerMark(who.github, who.clickup, made.data.sha), M.releaseIdMark(rbId)].join('\n') })]);
       if (apiErr(pr)) { send({ type: 'toast', text: `Rollback ${p.label}: ${apiErr(pr)}` }); continue; }
       await requestReviews(p.repo, pr.data.number);
       const src = target.repos.find(r => r.repo === p.repo);
@@ -251,5 +251,33 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     throw new Error('confirmed.json kept changing: try again');
   }
 
-  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm };
+  // running.json: the one Release all running across the team ({ by, beat, id, wave, waves, status, detail, merged })
+  const RUNNING = 'running.json';
+  async function readRunning() {
+    const r = await ghJson(['api', `repos/${repoOf()}/contents/${RUNNING}?ref=main`]);
+    if (apiErr(r)) return /404|empty/i.test(apiErr(r)) ? { sha: null, data: null } : { error: apiErr(r) };
+    try { return { sha: r.data.sha, data: JSON.parse(Buffer.from(r.data.content, 'base64').toString('utf8')) }; } catch { return { sha: r.data.sha, data: null }; }
+  }
+  async function running() {
+    if (!repoOf()) return null;
+    const r = await readRunning();
+    return r.error ? null : r.data;
+  }
+  // data null = done: the file goes
+  async function setRunning(data) {
+    if (!repoOf()) return;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const cur = await readRunning();
+      if (cur.error) return;
+      if (!data && !cur.sha) return;
+      const r = data
+        ? await ghJson(['api', '-X', 'PUT', `repos/${repoOf()}/contents/${RUNNING}`, '--input', writeTmp({ message: `release all: @${data.by} · wave ${data.wave}/${data.waves} ${data.status}`,
+            branch: 'main', ...(cur.sha ? { sha: cur.sha } : {}), content: Buffer.from(JSON.stringify(data, null, 2) + '\n').toString('base64') })])
+        : await ghJson(['api', '-X', 'DELETE', `repos/${repoOf()}/contents/${RUNNING}`, '--input', writeTmp({ message: 'release all: finished', branch: 'main', sha: cur.sha })]);
+      const e = apiErr(r);
+      if (!e || !/409|422|does not match/i.test(e)) return;
+    }
+  }
+
+  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning };
 };

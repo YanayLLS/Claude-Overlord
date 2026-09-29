@@ -8,7 +8,7 @@ const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
 const { runRelease, prHealth, rowStatus } = require('./release-run');
 const createHistory = require('./release-history');
-const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_RE } = require('./signoff-core');
+const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
@@ -38,6 +38,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
   let state = { source: saved.source || DEFAULT_SOURCE, ...(saved.cache || {}), loading: false };
   if (state.releaseRun && (state.releaseRun.running || Date.now() - state.releaseRun.startedAt > RUN_TTL_MS)) state.releaseRun = null;
+  // Overlord quit mid Release all: say so, offer Resume (it picks up with what's still open)
+  if (state.releaseAll && state.releaseAll.running) state.releaseAll = { ...state.releaseAll, running: false, status: 'interrupted', detail: 'Overlord closed mid-release', manualWave: null };
+  state.teamRun = null;
   let timer = null, inFlight = false;
 
   function persist() {
@@ -299,7 +302,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const man = res.data.manifests && res.data.manifests.ref && res.data.manifests.ref.target.oid;
     const manChanged = man && lastManifests && man !== lastManifests;
     lastManifests = man || lastManifests;
-    if (manChanged) await Promise.all([history.load(), refreshRun()]).catch(() => {});
+    if (manChanged) await Promise.all([history.load(), refreshRun(), loadTeamRun()]).catch(() => {});
     if (key !== lastPing || manChanged) { lastPing = key; await checkToSign(); }
   }
   const pingTimer = setInterval(() => signPing().catch(() => {}), SIGN_PING_MS);
@@ -437,7 +440,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         const s = await signoffOf(p.repo, pr.number);
         if (s.error) continue;
         all.push({ label: p.label, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s });
-        if (hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) continue;
+        if (hasSigned(s, who.github)) continue; // (a PR I opened counts until new commits land on it)
         found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url, head: s.pr.head.sha, commits: s.pr.commits || null, author: s.pr.user.login,
           release: all[all.length - 1].release, signers: s.signers.map(x => x.login), count: s.count, need: s.need });
       }
@@ -463,6 +466,18 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (found.length) { toSignTimer = setTimeout(() => checkToSign().catch(() => {}), TO_SIGN_POLL_MS); if (toSignTimer.unref) toSignTimer.unref(); }
   }
 
+  // My opener signature on a PR I opened, stamped with its head commit now (new commits void it;
+  // GitHub won't let me approve my own PR, so this line is how I sign it). false: not mine / unreadable.
+  async function stampOpener(repo, n, who) {
+    const cur = await ghJson(['api', `repos/${repo}/pulls/${n}`]);
+    const p = cur.data;
+    if (apiErr(cur) || !p || !p.user || !p.head || p.user.login.toLowerCase() !== String(who.github).toLowerCase()) return false;
+    const body = p.body || '', mark = openerMark(who.github, who.clickup, p.head.sha);
+    if (body.includes(mark)) return true;
+    const next = OPENER_LINE_RE.test(body) ? body.replace(OPENER_LINE_RE, () => mark) : body + '\n\n' + mark;
+    return !apiErr(await ghJson(['api', '-X', 'PATCH', `repos/${repo}/pulls/${n}`, '--input', writeTmp({ body: next })]));
+  }
+
   // Sign: approve every open prod release PR waiting on me — from the last run here, and any found
   // by checkToSign (a release someone else opened).
   async function signRelease() {
@@ -479,7 +494,11 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     await Promise.all([...targets.values()].map(async (t) => {
       const s = await signoffOf(t.repo, t.number);
       if (s.error) return failed.push(`${t.label} #${t.number}: ${s.error}`);
-      if (hasSigned(s, who.github) || s.pr.user.login.toLowerCase() === who.github.toLowerCase()) return done.push(t); // opener signed by opening it
+      if (hasSigned(s, who.github)) return done.push(t);
+      if (s.pr.user.login.toLowerCase() === who.github.toLowerCase()) { // mine: re-stamp my opener line on the new head
+        if (!(await stampOpener(t.repo, t.number, who))) return failed.push(`${t.label}: couldn't update my signature line`);
+        return done.push(t);
+      }
       const res = await ghJson(['api', '-X', 'POST', `repos/${t.repo}/pulls/${t.number}/reviews`, '--input',
         writeTmp({ event: 'APPROVE', commit_id: s.pr.head.sha, body: reviewMark(who.clickup) })]);
       if (apiErr(res)) return failed.push(`${t.label}: ${apiErr(res)}`);
@@ -524,7 +543,47 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // last run here (any env) and/or a pending release from the history.
   const DEPLOY_WAIT_MS = 30 * 60 * 1000, DEPLOY_POLL_MS = 20 * 1000;
   let releaseAllStop = false;
-  const progress = (p) => push({ releaseAll: p ? { ...(state.releaseAll || {}), ...p, at: Date.now() } : null });
+  const progress = (p) => { push({ releaseAll: p ? { ...(state.releaseAll || {}), ...p, at: Date.now() } : null }); persist(); shareRun(); };
+  // The team sees one Release all at a time: running.json in release-manifests says who runs it and
+  // how far it got (written on each step, plus a heartbeat); nobody else can start one while it's fresh.
+  const LOCK_STALE_MS = 10 * 60 * 1000, BEAT_MS = 4 * 60 * 1000;
+  let shareTimer = null, beatTimer = null;
+  function shareRun() {
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(async () => {
+      const p = state.releaseAll, who = await whoAmI();
+      if (p && p.running) await history.setRunning({ by: who.github, beat: new Date().toISOString(), id: p.id || null,
+        wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] }).catch(() => {});
+    }, 1500);
+  }
+  const fresh = (r) => r && Date.now() - Date.parse(r.beat) < LOCK_STALE_MS;
+  async function loadTeamRun() {
+    const r = await history.running().catch(() => null);
+    const who = await whoAmI();
+    push({ teamRun: fresh(r) && String(r.by).toLowerCase() !== String(who.github).toLowerCase() ? r : null });
+  }
+  // after a deploy that merged minutes ago (Release all resumed mid deploy-wait): same wait as a wave's
+  async function waitDeploys(list) {
+    const until = Date.now() + DEPLOY_WAIT_MS;
+    let pending = list;
+    while (pending.length) {
+      if (releaseAllStop) return { detail: 'Stopped by you' };
+      if (Date.now() > until) return { detail: `Deploys still running after 30 min: ${pending.map(x => x.label).join(', ')}` };
+      await new Promise(r => setTimeout(r, DEPLOY_POLL_MS));
+      const still = [];
+      for (const x of pending) {
+        const runs = await ghJson(['api', '-X', 'GET', `repos/${x.repo}/actions/workflows/${x.deploy}/runs`, '-f', `head_sha=${x.sha}`, '-f', 'per_page=5']);
+        const done = ((runs.data && runs.data.workflow_runs) || []).find(r => r.status === 'completed');
+        if (!done) { still.push(x); continue; }
+        if (done.conclusion !== 'success') {
+          if (notify) notify(`❌ Release stopped · ${x.label} deploy failed`, 'Later waves were not merged', done.html_url);
+          return { detail: `${x.label} deploy failed — later waves not merged`, url: done.html_url };
+        }
+      }
+      pending = still;
+    }
+    return null;
+  }
 
   function releaseItems(id) {
     if (id) {
@@ -574,7 +633,20 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   async function releaseAll(id) {
     if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is already running' });
     if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
-    const items = releaseItems(id);
+    const lock = await history.running().catch(() => null), me = (await whoAmI()).github;
+    if (fresh(lock) && String(lock.by).toLowerCase() !== String(me).toLowerCase()) {
+      return send({ type: 'toast', text: `Release all is running on @${lock.by}'s Overlord (wave ${lock.wave}/${lock.waves}) — one at a time` });
+    }
+    // what's really still open (a resume, or PRs merged elsewhere): merged ones drop out, and one that
+    // merged in the last hour gets its deploy waited on before anything else merges
+    const listed = releaseItems(id);
+    const live = await Promise.all(listed.map(it => ghJson(['api', `repos/${it.repo}/pulls/${it.pr.number}`])));
+    const items = [], justMerged = [];
+    listed.forEach((it, i) => {
+      const p = live[i].data;
+      if (p && p.merged) { if (Date.now() - Date.parse(p.merged_at) < 3600e3 && it.deploy && it.deploy !== 'manual') justMerged.push({ ...it, sha: p.merge_commit_sha }); }
+      else if (!(p && p.state === 'closed')) items.push(it);
+    });
     if (!items.length) return send({ type: 'toast', text: 'Nothing open to release' });
     // an open back-merge must go first — and merging it changes the release PR, so re-sign after
     const backs = [];
@@ -600,8 +672,14 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const waves = releaseWaves(state.config, go.concat(handWaves));
     releaseAllStop = false; manualDone = false;
     const shipped = [];
-    progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '' });
+    progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '', url: null });
+    clearInterval(beatTimer); beatTimer = setInterval(shareRun, BEAT_MS);
     try {
+      if (justMerged.length) {
+        progress({ status: 'deploying', detail: justMerged.map(x => x.label).join(', ') });
+        const bad = await waitDeploys(justMerged);
+        if (bad) return progress({ running: false, status: 'stopped', ...bad });
+      }
       for (let w = 0; w < waves.length; w++) {
         if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
         const wave = waves[w];
@@ -626,24 +704,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         const waitOn = merged.filter(x => x.deploy && x.deploy !== 'manual' && x.sha);
         if (!waitOn.length || w === waves.length - 1) continue; // the last wave needn't hold anything back
         progress({ status: 'deploying', detail: waitOn.map(x => x.label).join(', ') });
-        const until = Date.now() + DEPLOY_WAIT_MS;
-        let pending = waitOn;
-        while (pending.length) {
-          if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
-          if (Date.now() > until) return progress({ running: false, status: 'stopped', detail: `Deploys still running after 30 min: ${pending.map(x => x.label).join(', ')}` });
-          await new Promise(r => setTimeout(r, DEPLOY_POLL_MS));
-          const still = [];
-          for (const x of pending) {
-            const runs = await ghJson(['api', '-X', 'GET', `repos/${x.repo}/actions/workflows/${x.deploy}/runs`, '-f', `head_sha=${x.sha}`, '-f', 'per_page=5']);
-            const done = ((runs.data && runs.data.workflow_runs) || []).find(r => r.status === 'completed');
-            if (!done) { still.push(x); continue; }
-            if (done.conclusion !== 'success') {
-              if (notify) notify(`❌ Release stopped · ${x.label} deploy failed`, 'Later waves were not merged', done.html_url);
-              return progress({ running: false, status: 'stopped', detail: `${x.label} deploy failed — later waves not merged`, url: done.html_url });
-            }
-          }
-          pending = still;
-        }
+        const bad = await waitDeploys(waitOn);
+        if (bad) return progress({ running: false, status: 'stopped', ...bad });
       }
       // what's still on people: hand-deployed repos behind, and merged PRs whose target has no CI deploy
       const left = manualLeft(state.config, shipped, handLater, state.results && state.results.lives);
@@ -651,6 +713,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       send({ type: 'toast', text: 'Release all: every wave merged ✓' + skippedNote });
     } finally {
       if (state.releaseAll && state.releaseAll.running) progress({ running: false });
+      clearInterval(beatTimer); clearTimeout(shareTimer);
+      history.setRunning(null).catch(() => {});
       reconcileHistory().catch(() => {});
       refresh();
     }
@@ -722,12 +786,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const others = members.filter(m => m.toLowerCase() !== String(who.github).toLowerCase());
     if (others.length) await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed).map(r =>
       ghJson(['api', '-X', 'POST', `repos/${r.repo}/pulls/${r.pr.number}/requested_reviewers`, '--input', writeJson({ reviewers: others })])));
-    await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && r.reused && !r.merged && !r.closed).map(async (r) => {
-      const cur = await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
-      const p = cur.data;
-      if (apiErr(cur) || !p || !p.user || p.user.login.toLowerCase() !== String(who.github).toLowerCase() || OPENER_RE.test(p.body || '')) return;
-      await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeJson({ body: (p.body || '') + '\n\n' + openerMark(who.github, who.clickup) })]);
-    }));
+    await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed).map(r => stampOpener(r.repo, r.pr.number, who)));
     run.running = false;
     for (const r of run.rows) delete r.body; // only needed for that patch
     push({ releaseRun: { ...stampSignoff(run) } });
@@ -810,6 +869,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesOpen':
         send({ type: 'releases', state });
         loadApprovers().then(refreshRun).catch(() => {});
+        loadTeamRun().catch(() => {});
         // reopened within a minute: what's on screen is fresh enough, the timer takes it from here
         if (!state.updatedAt || Date.now() - state.updatedAt > 60000) refresh();
         return true;
