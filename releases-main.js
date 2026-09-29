@@ -23,6 +23,7 @@ const RECHECK_FOR_MS = 30 * 60 * 1000;  // …for this long after a run, until t
 const SIGN_POLL_MS = 30 * 1000;         // while a prod release waits for its 2nd signature, look this often…
 const SIGN_WATCH_MS = 24 * 3600 * 1000; // …for up to a day
 const TO_SIGN_POLL_MS = 60 * 1000;      // an approver with a release waiting on them re-checks this often
+const SIGN_PING_MS = 20 * 1000;         // approvers look for a new review request on a release this often (1 search)
 const PENDING_SHOWN = 10;
 const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
@@ -265,6 +266,22 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
 
   // Polls even while the modal is closed: the footer badge says when a deploy is failing.
   // Starts late so it stays out of the app's startup rush.
+  // Near-instant "a release needs you": every SIGN_PING_MS, one GitHub search for open PRs that
+  // ask ME for review (a release asks every other approver). When that set changes, run the full checkToSign (which
+  // notifies). Cheap: a single search call, only on approvers' machines.
+  let lastPing = null;
+  async function signPing() {
+    const org = approversOrg();
+    if (!org || !state.config || !state.approvers || !state.approvers.isApprover) return;
+    const q = `is:pr is:open archived:false org:${org} user-review-requested:@me`;
+    const res = await ghGraphql(`query { search(query: ${JSON.stringify(q)}, type: ISSUE, first: 50) { nodes { ... on PullRequest { number repository { nameWithOwner } } } } }`);
+    if (!res.data) return;
+    const key = res.data.search.nodes.map(n => n.repository.nameWithOwner + '#' + n.number).sort().join(',');
+    if (key !== lastPing) { lastPing = key; await checkToSign(); }
+  }
+  const pingTimer = setInterval(() => signPing().catch(() => {}), SIGN_PING_MS);
+  if (pingTimer.unref) pingTimer.unref();
+
   setTimeout(() => {
     refresh(); timer = setInterval(refresh, REFRESH_MS); timer.unref?.();
     // Overlord restarted while a recent run was still settling: keep watching its PRs
@@ -481,6 +498,12 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     }
     // a prod release PR I opened elsewhere (or before sign-off existed) gets my opener line now,
     // so it carries my signature's ClickUp id like one Overlord opened
+    // ask the other approvers to review every open prod release PR: GitHub notifies them right away
+    // (mail, mobile), and each one's Overlord sees the request within SIGN_PING_MS. People, not the
+    // team: requesting a team needs the team to have access to every repo, people already do.
+    const others = members.filter(m => m.toLowerCase() !== String(who.github).toLowerCase());
+    if (others.length) await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed).map(r =>
+      ghJson(['api', '-X', 'POST', `repos/${r.repo}/pulls/${r.pr.number}/requested_reviewers`, '--input', writeJson({ reviewers: others })])));
     await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && r.reused && !r.merged && !r.closed).map(async (r) => {
       const cur = await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
       const p = cur.data;
