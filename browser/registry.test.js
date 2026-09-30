@@ -15,6 +15,7 @@ function harness(opts = {}) {
       partition, visible: null, bounds: null, destroyed: false, calls,
       setVisible(v) { this.visible = v; calls.push(['setVisible', v]); },
       setBounds(b) { this.bounds = b; calls.push(['setBounds', b]); },
+      getBounds() { return this.bounds; },
       webContents: {
         url: 'about:blank',
         reloads: 0,
@@ -74,19 +75,48 @@ test('a new view starts attached but invisible', () => {
 test('a new view is given a real default viewport, not left at 0x0', () => {
   const { registry, made } = harness();
   registry.ensure(1);
-  assert.deepStrictEqual(made[0].bounds, { x: 0, y: 0, width: DEFAULT_VIEW_WIDTH, height: DEFAULT_VIEW_HEIGHT });
+  assert.strictEqual(made[0].bounds.width, DEFAULT_VIEW_WIDTH);
+  assert.strictEqual(made[0].bounds.height, DEFAULT_VIEW_HEIGHT);
   assert.ok(DEFAULT_VIEW_WIDTH > 0 && DEFAULT_VIEW_HEIGHT > 0);
 });
 
 // The viewport only materialises once the view is attached AND has been visible
 // at least once; it then survives being hidden. Both hide and show must happen
-// in the same tick so no frame is ever presented to the user.
-test('the viewport handshake is attach, bounds, visible, hide — in that order', () => {
+// in the same tick so no frame is ever presented to the user. The view must be
+// over the window while visible: measured on Electron 33, one made visible out
+// where hidden views are parked gets a 0x0 viewport.
+test('the viewport handshake is attach, bounds, visible, hide, park — in that order', () => {
   const { registry, calls } = harness();
   registry.ensure(1);
-  assert.deepStrictEqual(calls.map((c) => c[0]), ['attach', 'setBounds', 'setVisible', 'setVisible']);
+  assert.deepStrictEqual(calls.map((c) => c[0]), ['attach', 'setBounds', 'setVisible', 'setVisible', 'setBounds']);
+  assert.deepStrictEqual(calls[1][1], { x: 0, y: 0, width: DEFAULT_VIEW_WIDTH, height: DEFAULT_VIEW_HEIGHT });
   assert.strictEqual(calls[2][1], true);
   assert.strictEqual(calls[3][1], false);
+});
+
+// Regression: Electron asks every attached view, hidden or not, whether a point is a window-drag
+// area, offset only by the view's position. A hidden view left at 0,0 laid its page's own
+// drag title bar over Overlord's header: bookmarks took clicks on their bottom edge only.
+const overWindow = (b) => b.x < 10000 && b.y < 10000 && b.x + b.width > 0 && b.y + b.height > 0;
+
+test('a hidden view is parked clear of the window, keeping its size', () => {
+  const { registry, made } = harness();
+  registry.ensure(1);
+  assert.ok(!overWindow(made[0].bounds), 'new view');
+  registry.show(1, { x: 300, y: 80, width: 400, height: 300 });
+  assert.ok(overWindow(made[0].bounds), 'shown view');
+  registry.hideAll();
+  assert.ok(!overWindow(made[0].bounds), 'hidden again');
+  assert.strictEqual(made[0].bounds.width, 400);
+  assert.strictEqual(made[0].bounds.height, 300);
+});
+
+test('showing one agent parks the one shown before it', () => {
+  const { registry, made } = harness();
+  registry.show(1, { x: 300, y: 80, width: 400, height: 300 });
+  registry.show(2, { x: 300, y: 80, width: 400, height: 300 });
+  assert.ok(!overWindow(made[0].bounds));
+  assert.ok(overWindow(made[1].bounds));
 });
 
 test('partitionFor is injectable, so partitions can be keyed off a stable id', () => {

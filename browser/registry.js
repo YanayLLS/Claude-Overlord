@@ -15,19 +15,29 @@ const { createInputRebinder } = require('./input-rebind');
 const DEFAULT_VIEW_WIDTH = 1280;
 const DEFAULT_VIEW_HEIGHT = 800;
 
+// Electron asks every attached view, hidden or not, whether a point is a window-drag area, and
+// offsets the point only by the view's position. A hidden view left over the window therefore
+// lays its page's own `app-region: drag` title bar on top of Overlord: measured on Electron 33, a
+// hidden view at 0,0 turned the header's bookmarks into drag area except for a strip along their
+// bottom edge. Hidden views sit out here instead; the size, and so the viewport, is untouched.
+const PARKED = { x: 100000, y: 100000 };
+
 const defaultPartitionFor = (id) => `persist:overlord-agent-${id}`;
 
 function createRegistry({ makeView, attach, detach, onErrorCount, onNavigated = () => {}, partitionFor = defaultPartitionFor }) {
   const entries = new Map(); // agentId -> { view, errors, actions, partition }
 
+  const park = (view) => { view.setVisible(false); view.setBounds({ ...view.getBounds(), ...PARKED }); };
+
   // Order is load-bearing: bounds and visibility only take effect once the view
   // is attached to a content view, and the show/hide pair must stay in one tick
-  // so no frame is ever presented to the user.
+  // so no frame is ever presented to the user. The visible tick has to happen
+  // over the window: a view made visible out at PARKED gets a 0x0 viewport.
   function establishViewport(view) {
     attach(view);
     view.setBounds({ x: 0, y: 0, width: DEFAULT_VIEW_WIDTH, height: DEFAULT_VIEW_HEIGHT });
     view.setVisible(true);
-    view.setVisible(false);
+    park(view);
   }
 
   function ensure(id) {
@@ -64,7 +74,7 @@ function createRegistry({ makeView, attach, detach, onErrorCount, onNavigated = 
   }
 
   function hideAll() {
-    for (const { view } of entries.values()) { try { view.setVisible(false); } catch {} }
+    for (const { view } of entries.values()) { try { park(view); } catch {} }
   }
 
   function destroy(id) {
