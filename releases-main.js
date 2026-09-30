@@ -576,15 +576,24 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     clearTimeout(shareTimer);
     shareTimer = setTimeout(async () => {
       const p = state.releaseAll, who = await whoAmI();
-      if (p && p.running) await history.setRunning({ by: who.github, beat: new Date().toISOString(), id: p.id || null,
+      if (p && p.running) await history.setRunning({ running: true, by: who.github, beat: new Date().toISOString(), id: p.id || null,
         wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] }).catch(() => {});
     }, 1500);
   }
-  const fresh = (r) => r && Date.now() - Date.parse(r.beat) < LOCK_STALE_MS;
+  const fresh = (r) => r && r.running !== false && Date.now() - Date.parse(r.beat) < LOCK_STALE_MS;
+  // a teammate's Release all: live while it runs; when it ends, one notification with how it went
+  let lastTeamEnd = undefined;
   async function loadTeamRun() {
     const r = await history.running().catch(() => null);
     const who = await whoAmI();
-    push({ teamRun: fresh(r) && String(r.by).toLowerCase() !== String(who.github).toLowerCase() ? r : null });
+    const other = r && String(r.by).toLowerCase() !== String(who.github).toLowerCase();
+    push({ teamRun: fresh(r) && other ? r : null });
+    const end = r && r.running === false ? r.endedAt : null;
+    if (lastTeamEnd !== undefined && end && end !== lastTeamEnd && other && notify) {
+      notify(r.status === 'done' ? `🚀 @${r.by} released: every wave merged` : `⏸ @${r.by}'s Release all stopped`, r.detail || '', null,
+        () => send({ type: 'releases', state, open: true }));
+    }
+    lastTeamEnd = end; // the first read only learns where things stand (no notification on startup)
   }
   // after a deploy that merged minutes ago (Release all resumed mid deploy-wait): same wait as a wave's
   async function waitDeploys(list) {
@@ -738,7 +747,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     } finally {
       if (state.releaseAll && state.releaseAll.running) progress({ running: false });
       clearInterval(beatTimer); clearTimeout(shareTimer);
-      history.setRunning(null).catch(() => {});
+      whoAmI().then(who => { const p = state.releaseAll || {};
+        return history.setRunning({ running: false, by: who.github, beat: new Date().toISOString(), endedAt: new Date().toISOString(), id: p.id || null,
+          wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] }); }).catch(() => {});
       reconcileHistory().catch(() => {});
       refresh();
     }
@@ -824,6 +835,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     recheck(run);
     // the shared record: this release's manifest in <org>/release-manifests
     const lives = (state.results && state.results.lives) || {};
+    shareHealth(run);
     await history.recordRun(run, { opener: { login: who.github, clickup: who.clickup }, flags: run.flags,
       manual: run.manual.map(m => ({ ...m, live: lives[`${m.repo}|${m.env}`] && !lives[`${m.repo}|${m.env}`].error
         ? { sha: lives[`${m.repo}|${m.env}`].sha, behind: lives[`${m.repo}|${m.env}`].behind } : null })) }).catch(e => send({ type: 'toast', text: 'Release manifest: ' + e.message }));
@@ -845,6 +857,14 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     }));
     push({ releaseRun: { ...stampSignoff(cur), checkedAt: Date.now() } });
     persist();
+    shareHealth(cur);
+  }
+  // what the run found per prod PR (checks, conflicts, back-merges, dbschemas) goes into the release
+  // record, so teammates see it in History, not just the machine that clicked Release
+  let healthTimer = null;
+  function shareHealth(run) {
+    clearTimeout(healthTimer);
+    healthTimer = setTimeout(() => history.recordHealth(run.rows).catch(() => {}), 3000);
   }
   // opening Releases: the last run's rows can be hours old (PRs closed/merged/re-signed on GitHub since)
   async function refreshRun() {
@@ -852,6 +872,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (!cur || cur.running) return;
     const open = cur.rows.map((r, i) => [r, i]).filter(([r]) => r.pr && !r.merged && !r.closed);
     if (open.length) await recheckRows(cur, open);
+    const prs = state.releaseRun && state.releaseRun.rows.filter(r => r.pr);
+    if (prs && prs.length && prs.every(r => r.closed && !r.merged)) { push({ releaseRun: null }); persist(); } // called off
   }
   function recheck(run) {
     clearTimeout(recheckTimer);

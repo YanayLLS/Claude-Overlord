@@ -432,3 +432,9 @@
 .rl-sign-rel { font-size:10.5px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--dim); text-align:left; margin:0 0 6px 2px; }
 .rl-sign-row.done { opacity:.6; }
 .rl-sign-row.done span { color:var(--green); }
+/* hand-deployed and behind: deployed, but what's live is old */
+.rl-cell.st-behind { --tint:251,146,60; }
+.rl-sw.st-behind { background:rgba(251,146,60,.2); border-color:rgba(251,146,60,.55); }
+.rl-hist-health { font-size:10.5px; margin-left:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rl-hist-health .bad { color:var(--red); } .rl-hist-health .warn { color:var(--peach); }
+.rl-hist-health a { color:inherit; text-decoration:underline; }

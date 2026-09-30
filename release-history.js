@@ -279,5 +279,28 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     }
   }
 
-  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning };
+  // A run's findings per prod PR, into its pending manifest (only what changed is written)
+  async function recordHealth(rows) {
+    const key = (r) => r.repo + '#' + r.pr.number;
+    const found = new Map((rows || []).filter(r => r.env === 'prod' && r.pr && !r.running).map(r => [key(r), {
+      status: r.status || null, checks: r.checks || null, conflict: r.conflict == null ? null : r.conflict,
+      backMerge: r.backMerge && r.backMerge.number ? { number: r.backMerge.number, url: r.backMerge.url, conflict: !!r.backMerge.conflict } : null,
+      dbschemas: r.dbschemas && r.dbschemas.used && r.dbschemas.used.length ? r.dbschemas.used : null, error: r.error || null }]));
+    if (!found.size) return;
+    const loaded = await load();
+    if (!loaded) return;
+    for (const { manifest, sha } of loaded.entries) {
+      if (manifest.status !== 'pending') continue;
+      let changed = false;
+      const repos = manifest.repos.map(r => {
+        const h = found.get(key(r));
+        if (!h || JSON.stringify(h) === JSON.stringify(r.health || null)) return r;
+        changed = true;
+        return { ...r, health: h };
+      });
+      if (changed) await write({ ...manifest, repos, updatedAt: new Date().toISOString() }, sha, `release ${manifest.id}: checks`);
+    }
+  }
+
+  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, recordHealth };
 };

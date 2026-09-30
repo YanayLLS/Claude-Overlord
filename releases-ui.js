@@ -150,7 +150,7 @@
     const manual = c.deploy === 'manual' || (c.run && c.run.state === 'dead');
     if (c.live && !c.live.error) {
       const how = manual ? 'Deployed by hand · ' : '';
-      return { cls: 'ok', manual, url: c.live.behind ? c.live.compareUrl : c.live.url,
+      return { cls: manual && c.live.behind ? 'behind' : 'ok', manual, url: c.live.behind ? c.live.compareUrl : c.live.url,
         text: how + (c.live.behind ? `live: ${c.live.sha.slice(0, 7)} · ${c.live.behind} newer commit${c.live.behind === 1 ? '' : 's'} not deployed yet` : 'live: this commit') };
     }
     if (manual) return { cls: 'off', manual, text: 'Deployed by hand · no CI/CD, and nothing records which commit is live' };
@@ -227,7 +227,7 @@
   }
   // Hover card for a board cell: env + deploy-status badges and age, the commit, chips, then
   // what's waiting / what's live / what failed.
-  const CELL_BADGE = { ok: ['ok', 'Deployed'], bad: ['bad', 'Deploy failed'], part: ['part', 'Deployed · side job failed'], run: ['part', 'Deploying now'] };
+  const CELL_BADGE = { behind: ['part', 'Deployed · behind'], ok: ['ok', 'Deployed'], bad: ['bad', 'Deploy failed'], part: ['part', 'Deployed · side job failed'], run: ['part', 'Deploying now'] };
   function cellTipHtml(row, c) {
     const envBadge = `<span class="tt-env" style="--hue:${ENV_HUE[c.env.toLowerCase()] || 'var(--dim)'}">${esc(c.env)}</span>`;
     if (c.uses) {
@@ -356,6 +356,7 @@
     + '<span><i class="rl-sw st-bad"></i>deploy failed</span>'
     + '<span><i class="rl-sw st-part"></i>deployed, side job failed</span>'
     + '<span><i class="rl-sw st-run"></i>deploying</span>'
+    + '<span><i class="rl-sw st-behind"></i>deployed by hand, behind</span>'
     + '<span><svg class="rl-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>manual deploy</span>'
     + '<span><span class="rl-next"><b>12</b> → prod</span>waiting to promote</span></div>';
 
@@ -425,6 +426,16 @@
     return h + '</div>';
   }
 
+  // What the release run found for a pending PR (shared through the release record)
+  function histHealth(h) {
+    const bits = [];
+    if (h.backMerge) bits.push(`<span class="${h.backMerge.conflict ? 'bad' : 'warn'}">back-merge ${link(h.backMerge.url, '#' + h.backMerge.number)} ${h.backMerge.conflict ? 'conflicts' : 'first'}</span>`);
+    if (h.conflict) bits.push('<span class="bad">conflict</span>');
+    if (h.checks === 'fail') bits.push('<span class="bad">checks failing</span>');
+    if (h.dbschemas) bits.push(`<span class="bad" title="Uses dbschemas fields its build doesn't ship">dbschemas: ${esc(h.dbschemas.join(', '))}</span>`);
+    if (h.error) bits.push(`<span class="bad" title="${esc(h.error)}">error</span>`);
+    return bits.length ? `<span class="rl-hist-health">${bits.join(' · ')}</span>` : '';
+  }
   // The one Release all button (release results + History): ready = what merges now (any env);
   // waiting = prod PRs held back until the release is signed 2/2. Nothing ready → locked, saying who still has to sign what.
   // signoff: { count, need, signers: [login], gaps: [{ login, missing: [{ label, older }] }] }
@@ -516,6 +527,7 @@
         const dep = r.deploy ? (r.deploy.state === 'success' ? '<span class="ok">deployed</span>' : r.deploy.state === 'failure' ? '<span class="bad">deploy failed</span>' : r.mergeSha ? 'deploying…' : '') : '✋ by hand';
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
+          + (need && r.health ? histHealth(r.health) : '')
           + `<span class="rl-hist-state">${r.closed && !r.mergeSha ? 'closed' : need ? (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
       }
       h += '</div>';
