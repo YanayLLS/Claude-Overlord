@@ -5200,7 +5200,7 @@ function renderPrBadge() {
     const waiting = active.filter(prNeedsApproval).length;
     // Green = one of mine is mergeable with green checks; red = someone's waiting on my review; both = half and half.
     const ready = active.filter(p => p.mine && prApproved(p) && prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none')).length;
-    renderPrNag(waiting);
+    renderPrNag(active.filter(p => prNeedsApproval(p) && !(p.approvedBy || []).length).length); // nag only for PRs nobody has approved yet
     b.style.display = 'flex'; b.className = waiting > 0 && ready > 0 ? 'split' : waiting > 0 ? 'alert' : ready > 0 ? 'ready' : '';
     b.textContent = active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '') + (ready > 0 ? ' · ' + ready + ' to merge' : '');
     b.title = [waiting > 0 && waiting + ' PR(s) waiting for approval', ready > 0 && ready + ' of yours ready to merge'].filter(Boolean).join(' · ') || active.length + ' open PR(s)';
