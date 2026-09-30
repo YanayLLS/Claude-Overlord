@@ -563,6 +563,14 @@
   // 👥 Release approvers: the GitHub team whose members may release and sign prod. Editing is up
   // to GitHub: team maintainers can add/remove here, everyone else sees the list.
   // Why Release is off for this person, and who can change that
+  // Start release: approvers only (and a recent enough Overlord); for anyone else it stays visible, locked, saying why
+  function startBtn(s) {
+    const why = s.config && s.config.minOverlord && s.appVersion && !ReleasesCore.versionAtLeast(s.appVersion, s.config.minOverlord)
+      ? `Update Overlord to ${s.config.minOverlord} or later to release (this is ${s.appVersion}): older versions miss release rules`
+      : s.approvers && s.approvers.me && !s.approvers.isApprover ? releaseLockedTip(s.approvers) : null;
+    if (why) return `<button class="go locked" aria-disabled="true" title="${esc(why)}">🔒 Start release</button>`;
+    return `<button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release</button>`;
+  }
   function releaseLockedTip(a) {
     if (!a.exists) return 'Releasing needs a release approvers team. Open 👥 Approvers to create it.';
     const who = a.members.map(m => '@' + m.login).join(', ');
@@ -729,8 +737,8 @@
       ? `${plan.prs.length} release PR${plan.prs.length === 1 ? '' : 's'} to check and open`
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
       : 'Pick one or more environments') + '</div>'
-      + '<div class="rl-rel-note">An agent opens the PRs (plus back-merges and conflict fixes). It never merges or pushes to release branches.</div>'
-      + `<div class="rl-rel-actions"><button data-act="releaseClose">Cancel</button><button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release</button></div></div>`;
+      + '<div class="rl-rel-note">Overlord opens the release PRs (plus back-merges when needed) and checks each one. Nothing merges until 2 approvers sign and someone presses Release all.</div>'
+      + `<div class="rl-rel-actions"><button data-act="releaseClose">Cancel</button>${startBtn(s)}</div></div>`;
     return h;
   }
 
@@ -765,11 +773,8 @@
       + (s.config ? `<button class="rl-appr-btn${apprOpen ? ' on' : ''}" data-act="apprMenu" title="Release approvers: releasing and merging prod needs two of them"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
         + `<span>${s.approvers && s.approvers.members ? s.approvers.members.length : ''}</span></button>` : '')
       + (s.config && window.ReleasesCore && ReleasesCore.releaseTargets(s.config).length
-        ? (s.config.minOverlord && s.appVersion && !ReleasesCore.versionAtLeast(s.appVersion, s.config.minOverlord)
-          ? `<button class="rl-release locked" aria-disabled="true" title="Update Overlord to ${esc(s.config.minOverlord)} or later to release (this is ${esc(s.appVersion)}): older versions miss release rules">`
-          : s.approvers && s.approvers.me && !s.approvers.isApprover
-          ? `<button class="rl-release locked" aria-disabled="true" title="${esc(releaseLockedTip(s.approvers))}">`
-          : `<button class="rl-release${relOpen ? ' on' : ''}" data-act="releaseMenu" title="Open the release PRs for the envs you pick">`)
+        // everyone can open the picker (what's waiting, the PR-watch bell); only Start release is for approvers
+        ? `<button class="rl-release${relOpen ? ' on' : ''}" data-act="releaseMenu" title="What's waiting to release, per env">`
           + '<svg class="ic" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>Release</button>'
         : '')
       + `<button data-act="refresh" class="${s.loading ? 'spin' : ''}" title="Refresh"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>`

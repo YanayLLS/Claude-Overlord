@@ -438,3 +438,4 @@
 .rl-hist-health { font-size:10.5px; margin-left:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .rl-hist-health .bad { color:var(--red); } .rl-hist-health .warn { color:var(--peach); }
 .rl-hist-health a { color:inherit; text-decoration:underline; }
+.rl-rel-actions button.go.locked, .rl-rel-actions button.go.locked:hover { opacity:.5; cursor:not-allowed; filter:none; transform:none; } /* Start release: approvers only */
