@@ -5416,7 +5416,7 @@ function prDropdownHead() {
   const live = prMenuList().filter(p => !p.archived);
   const seg = (k, label, tip) => `<button class="pr-seg${prScope === k ? ' on' : ''}" title="${tip}" onclick="event.stopPropagation();setPrScope('${k}')">${label}<em>${live.filter(p => prInScope(p, k)).length}</em></button>`;
   const n = (l) => l.filter(p => !p.archived && prInScope(p)).length;
-  const who = `<span class="pr-scope"><button class="pr-seg${prShowAll ? '' : ' on'}" title="Your PRs, and others' PRs you haven't approved yet" onclick="event.stopPropagation();setPrShowAll(false)">To act on<em>${n(prState.prs)}</em></button>`
+  const who = `<span class="pr-scope"><button class="pr-seg${prShowAll ? '' : ' on'}" title="Your PRs, and others' PRs nobody has approved yet" onclick="event.stopPropagation();setPrShowAll(false)">To act on<em>${n(prState.prs)}</em></button>`
     + `<button class="pr-seg${prShowAll ? ' on' : ''}" title="Every open PR in the watched repos, including drafts and PRs you already approved" onclick="event.stopPropagation();setPrShowAll(true)">All open<em>${n(prState.prs.concat(prState.extra || []))}</em></button></span>`;
   const scope = `<span class="pr-scope">${seg('all', 'All', 'Every open PR')}${seg('dev', 'Into dev', 'Only PRs merging into dev')}${seg('norel', 'Hide releases', 'Hide PRs into alpha, staging, master, main and prod')}</span>`;
   return `<div class="pr-dhead"><span>Pull requests</span>${who}${scope}<span class="pr-dhead-btns">`
