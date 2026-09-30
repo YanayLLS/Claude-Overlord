@@ -5,7 +5,10 @@
 // Wrapped so nothing leaks into the renderer's globals (actions-core.js already owns REPO_RE there).
 (function (root) {
 
-const DEFAULT_SOURCE = 'LLSLtd/frontlineio-frontend:.overlord/releases.json@dev';
+// The team's release config lives next to the release history, so changing it is one commit there,
+// not an app PR into a protected branch. OLD_SOURCE: where it lived before (saved sources move over).
+const DEFAULT_SOURCE = 'LLSLtd/release-manifests:releases.json@main';
+const OLD_SOURCE = 'LLSLtd/frontlineio-frontend:.overlord/releases.json@dev';
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 // Everything spliced into a gh api path passes this first — ghJson goes through a
 // shell on Windows. ponytail: stricter than git's branch rules; widen if a real branch trips it.
@@ -35,6 +38,7 @@ function validateConfig(cfg) {
   }
   envs.forEach((e, i) => { if (envs.indexOf(e) !== i) out.push(`envs[${i}]: "${e}" is listed twice`); });
   if (!Array.isArray(cfg.repos)) return [...out, 'repos: must be an array'];
+  if (cfg.checkout != null && !REPO_RE.test(String(cfg.checkout))) out.push(`checkout: "${cfg.checkout}" is not owner/name (the repo whose local clone runs the flag check and Fix agents)`);
   if (cfg.releaseOrder != null && (!Array.isArray(cfg.releaseOrder) || cfg.releaseOrder.some(w => !Array.isArray(w) || w.some(x => typeof x !== 'string')))) {
     out.push('releaseOrder: must be a list of waves (lists of repo labels or names)');
   }
@@ -329,7 +333,7 @@ function manualLeft(cfg, merged, manual, lives) {
   return out;
 }
 
-const api = { manualLeft, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, SAFE_REF_RE, REPO_RE };
+const api = { manualLeft, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

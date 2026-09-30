@@ -14,7 +14,7 @@ const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's 
 const { execFile } = require('child_process');
 const os = require('os');
 const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft } = require('./releases-core');
-const { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE } = require('./releases-core');
+const { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
 const DEPLOYING_MS = 10 * 1000;       // re-read deploy runs this often while one is in flight…
@@ -36,7 +36,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
-  let state = { source: saved.source || DEFAULT_SOURCE, ...(saved.cache || {}), loading: false };
+  let state = { ...(saved.cache || {}), source: !saved.source || saved.source === OLD_SOURCE ? DEFAULT_SOURCE : saved.source, loading: false };
   if (state.releaseRun && (state.releaseRun.running || Date.now() - state.releaseRun.startedAt > RUN_TTL_MS)) state.releaseRun = null;
   // Overlord quit mid Release all: say so, offer Resume (it picks up with what's still open)
   if (state.releaseAll && state.releaseAll.running) state.releaseAll = { ...state.releaseAll, running: false, status: 'interrupted', detail: 'Overlord closed mid-release', manualWave: null };
@@ -754,6 +754,12 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // The config repo's local checkout (where the frontend's flag-gap check and a Fix agent work),
   // else the home dir.
   async function configCheckout() {
+    // the config names the app repo whose clone runs the flag check and the Fix agents
+    const home = state.config && state.config.checkout;
+    if (home && findLocal) {
+      const l = await findLocal(home, 'package.json', '');
+      if (l) return path.dirname(l.path);
+    }
     const src = parseSource(state.source);
     if (src && src.kind === 'file') return path.dirname(src.path);
     if (src && src.kind === 'gh' && findLocal) {
