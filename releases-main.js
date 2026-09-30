@@ -385,7 +385,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (!pr.data || !pr.data.base || !pr.data.head) return { ok: false, reason: "couldn't read the PR to verify its release sign-off: " + (pr.error || (pr.data && pr.data.message) || "no reply") };
     const cfgSteps = releasePlan(state.config, ['prod']).prs;
     const back = cfgSteps.find(p => p.repo.toLowerCase() === m[1].toLowerCase() && p.source === pr.data.base.ref && p.target === pr.data.head.ref);
-    if (back) return { ok: true, warn: `Back-merge into ${back.source}: the open ${back.target} release PR gets a new commit, so its approvals no longer count — it needs signing again` };
+    if (back) return { ok: true, warn: `Back-merge into ${back.source}: the open ${back.target} release PR takes these commits too` };
     if (!prodStep(m[1], pr.data.base.ref, pr.data.head.ref)) return { ok: true }; // not a prod release PR
     if (!state.approvers || !state.approvers.exists) await loadApprovers();
     const s = await releaseSignoffOf(m[1], m[2]);
@@ -678,7 +678,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       const r = await ghJson(['api', '-X', 'GET', `repos/${it.repo}/pulls`, '-f', 'state=open', '-f', `base=${it.source}`, '-f', 'per_page=100']);
       if ((Array.isArray(r.data) ? r.data : []).some(p => p.head && p.head.ref === it.target)) backs.push(it.label);
     }));
-    if (backs.length) return send({ type: 'toast', text: `Merge the back-merge PR first (${backs.join(', ')}), then have the release re-signed — its signatures cover the old commit` });
+    if (backs.length) return send({ type: 'toast', text: `Merge the back-merge PR first (${backs.join(', ')}), then Release all` });
     // set aside what can't merge yet (prod without its 2 signatures): merge the rest, report the skipped
     const skipped = [], go = [];
     for (const it of items) {

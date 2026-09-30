@@ -1,6 +1,7 @@
 // Prod release sign-off (SOC2: 2 of the approvers team). Pure: who has signed a release PR.
 // A signature is either opening the PR (the author, when on the team) or an APPROVED review
-// from another team member on the PR's CURRENT head commit — new commits need new signatures.
+// from another team member. Signatures stay valid as the release keeps taking commits (the team's
+// choice, 2026-09-30); a later "changes requested" or dismissal still withdraws one.
 // Each signature can carry the signer's ClickUp id (Overlord writes it into the PR body / the
 // review), so the release ticket can assign them without any account mapping.
 // Self-check: signoff-core.test.js
@@ -24,13 +25,11 @@ function reviewMark(clickupId) { return REVIEW_MARK + (clickupId ? ` · clickup:
 function signoff(pr, reviews, members) {
   const team = new Set((members || []).map(m => String(m).toLowerCase()));
   const author = pr && pr.user && pr.user.login;
-  const head = pr && pr.head && pr.head.sha;
   const signers = [], stale = [];
   if (author && team.has(author.toLowerCase())) {
     const m = String((pr && pr.body) || '').match(OPENER_RE);
     const mine = m && m[1].toLowerCase() === author.toLowerCase();
-    if (mine && m[3] && head && m[3] !== head) stale.push(author); // opened (signed) an older commit
-    else signers.push({ login: author, via: 'opened', clickup: mine ? m[2] || null : null });
+    signers.push({ login: author, via: 'opened', clickup: mine ? m[2] || null : null });
   }
   // each person's latest decisive review wins (a later "changes requested" or dismissal withdraws)
   const latest = new Map();
@@ -40,7 +39,8 @@ function signoff(pr, reviews, members) {
   }
   for (const [who, r] of latest) {
     if (r.state !== 'APPROVED' || !team.has(who) || (author && who === author.toLowerCase())) continue;
-    if (head && r.commit_id !== head) { stale.push(r.user.login); continue; } // signed an older commit: doesn't cover what would merge
+    // a signature stays valid while the release keeps taking commits (the team's call, 2026-09-30):
+    // GitHub still records which commit each approval was on, for the audit
     const m = String(r.body || '').match(CLICKUP_RE);
     signers.push({ login: r.user.login, via: 'approved', clickup: m ? m[1] : null });
   }

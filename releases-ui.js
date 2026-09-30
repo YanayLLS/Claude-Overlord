@@ -505,7 +505,7 @@
         + (m.imported ? '<span class="rl-rr-chip" title="Built from merged release PRs, before release manifests existed">imported</span>' : '')
         + (!m.imported && m.repos.some(r => r.unsigned) ? `<span class="rl-rr-chip bad" title="Merged with fewer than 2 approvers' signatures (e.g. on github.com): ${esc(m.repos.filter(r => r.unsigned).map(r => r.label).join(', '))}">merged unsigned ⚠</span>` : '')
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
-        + (pending ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR at its latest commit">✍ ${signers.length}/2 signed</span>` : '')
+        + (pending ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
       h += '<div class="rl-hist-repos">';
