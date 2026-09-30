@@ -2193,7 +2193,7 @@ function fetchAllPRs(repos) {
       return `r${i}: repository(owner:${JSON.stringify(owner)}, name:${JSON.stringify(name)}) { `
         // ponytail: `first:` limits set the GraphQL point cost (12/poll at these; 40 at 100/20/20/50). Raise if a repo tops 30 open PRs.
         + `pullRequests(states: OPEN, first: 30) { nodes { number title url isDraft createdAt `
-        + `author { login } reviewDecision mergeable mergeStateStatus headRefName baseRefName isCrossRepository `
+        + `author { __typename login } reviewDecision mergeable mergeStateStatus headRefName baseRefName isCrossRepository `
         + `reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 10) { nodes { author { login } state } } `
         + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state `
@@ -2235,7 +2235,7 @@ function fetchAllPRs(repos) {
           const list = pr.isDraft || (!mine && approvedByMe) ? extra : prs;
           list.push({
             key: prKey(r, pr.number), isDraft: !!pr.isDraft, approvedByMe, repo: r, number: pr.number, title: pr.title, url: pr.url,
-            author: (pr.author && pr.author.login) || '',
+            author: (pr.author && pr.author.login) || '', bot: !!pr.author && pr.author.__typename === 'Bot',
             reviewDecision: pr.reviewDecision || '', mine,
             // Per-check summary when GitHub gave us the checks; the rollup only as a fallback (it says FAILURE while a rerun is still going).
             ...(rollup && rollup.contexts && rollup.contexts.nodes && rollup.contexts.nodes.length ? checkSummary(rollup.contexts.nodes) : { checks: rollupState(rollup && rollup.state), failed: 0 }),

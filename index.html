@@ -121,8 +121,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-group-header:hover { background:var(--bg2,#1e1e2e); }
 .pr-group-header .pr-count { color:var(--dim); font-weight:400; }
 .pr-row { position:relative; padding:8px 12px 8px 20px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
-.pr-row.pr-leaving { overflow:hidden; pointer-events:none; }
-.pr-row.pr-leaving .pr-actions { display:none !important; }
+.pr-leaving { position:relative; overflow:hidden; pointer-events:none; }
+.pr-leaving .pr-actions { display:none !important; }
+.pr-leaving .pr-ghead-right, .pr-leaving .pr-main { visibility:hidden; } /* the stamp takes the action's place */
+#pr-dropdown:has(.pr-leaving) { overflow-x:hidden; } /* the slide-out mustn't add a scrollbar */
 .pr-stamp { position:absolute; right:14px; top:50%; font-size:12px; font-weight:800; letter-spacing:.3px; padding:2px 8px; border:2px solid currentColor; border-radius:6px; transform:translateY(-50%) rotate(-6deg); animation:pr-stamp-in .28s cubic-bezier(.3,1.6,.5,1) both; }
 @keyframes pr-stamp-in { from { opacity:0; transform:translateY(-50%) rotate(-6deg) scale(1.8); } }
 .pr-actions { position:absolute; right:8px; top:50%; transform:translateY(-50%); display:none; gap:6px; align-items:center; }
@@ -1105,7 +1107,7 @@ button:focus-visible { outline-offset:0; }
     <div id="pr-dropdown" style="display:none"></div>
     <div id="actions-dropdown" style="display:none"></div>
     <div id="list-foot">
-      <div id="pr-nag" style="display:none" onclick="togglePrDropdown(event)"><button onclick="snoozePrNag(event)" title="Hide for 30 min" aria-label="Hide for 30 minutes">✕</button><b>Please approve your teammates' PR!</b><span></span></div>
+      <div id="pr-nag" style="display:none" onclick="prNagClick(event)"><button onclick="snoozePrNag(event)" title="Hide for 30 min" aria-label="Hide for 30 minutes">✕</button><b>Please approve your teammates' PR!</b><span></span></div>
       <div class="foot-chips">
         <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
         <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
@@ -3947,7 +3949,8 @@ function handleAgentMsg(msg) {
     }
     case 'prActionError': {
       if (prPending.delete(msg.url)) api.send({ type: 'pollPrsNow' }); // the optimistic approve/merge didn't happen: fetch the real list back
-      alert('PR action failed: ' + (msg.error || 'unknown error'));
+      showToast('PR action failed: ' + (msg.error || 'unknown error') + ' — click to open the PR', () => openLink(msg.url));
+      { const t = document.getElementById('toast'); clearTimeout(t._timer); t._timer = setTimeout(() => { t.className = 'toast'; }, 10000); } // an error gets longer than a 4s notice
       const d = document.getElementById('pr-dropdown');
       if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml();
       if (worldView && window.World && window.World.ready) window.World.refreshSel(); // put the ship's buttons back
@@ -5166,10 +5169,12 @@ const PR_NAG_LINES = [
   "Hot PRs in your area want your approval.",
 ];
 const PR_NAG_SNOOZE_MS = 30 * 60 * 1000;
+// Worth a nag: a person's PR (not a bot's) that nobody has approved yet.
+const prNagTarget = p => prNeedsApproval(p) && !p.bot && !(p.approvedBy || []).length;
 let prNagWaiting = 0, prNagMs = 0, prNagSnoozeUntil = 0;
 // Only time with the app focused counts toward the 2 min.
 setInterval(() => {
-  if (!prNagWaiting || !document.hasFocus()) return;
+  if (!prNagWaiting || !document.hasFocus() || document.getElementById('pr-dropdown').style.display === 'block') return; // looking at the list isn't missing it
   prNagMs += 5000;
   if (prNagMs >= PR_NAG_AFTER_MS) renderPrBadge();
 }, 5000);
@@ -5181,10 +5186,22 @@ function renderPrNag(waiting) {
   // A new PR to approve ends a snooze; it gets its own 2 min before showing.
   if (waiting > prNagWaiting && Date.now() < prNagSnoozeUntil) { prNagSnoozeUntil = 0; prNagMs = 0; }
   prNagWaiting = waiting;
-  const due = waiting && prNagMs >= PR_NAG_AFTER_MS && Date.now() >= prNagSnoozeUntil;
+  const due = waiting && prNagMs >= PR_NAG_AFTER_MS && Date.now() >= prNagSnoozeUntil
+    && document.getElementById('pr-dropdown').style.display !== 'block'; // never on top of the open PR list
   // New line each time it appears, stable while it's up.
   if (due && n.style.display === 'none') n.querySelector('span').textContent = PR_NAG_LINES[Math.floor(Math.random() * PR_NAG_LINES.length)];
   n.style.display = due ? 'flex' : 'none';
+  // World mode has no PR chip in the footer: the bubble hangs under the header's PR counter instead.
+  const wc = due && worldView && document.querySelector('#world-counters .wc[onclick^="worldJumpPr"]');
+  if (wc) { const r = wc.getBoundingClientRect(); n.style.left = Math.max(8, Math.min(r.left, innerWidth - 270)) + 'px'; n.style.top = r.bottom + 10 + 'px'; }
+  else { n.style.left = n.style.top = ''; if (worldView) n.style.display = 'none'; }
+}
+function prNagClick(e) {
+  e.stopPropagation();
+  if (worldView) { prNagMs = 0; renderPrBadge(); worldJumpPr(); return; }
+  // The Into dev / Hide releases filter would open onto "N PRs hidden": show the PR it's nagging about.
+  if (!prState.prs.some(p => !prSilenced(p) && prNagTarget(p) && prInScope(p))) { prScope = 'all'; api.send({ type: 'saveSettings', settings: { prScope } }); }
+  if (document.getElementById('pr-dropdown').style.display !== 'block') togglePrDropdown();
 }
 function snoozePrNag(e) { e.stopPropagation(); prNagSnoozeUntil = Date.now() + PR_NAG_SNOOZE_MS; renderPrNag(prNagWaiting); }
 
@@ -5200,7 +5217,7 @@ function renderPrBadge() {
     const waiting = active.filter(prNeedsApproval).length;
     // Green = one of mine is mergeable with green checks; red = someone's waiting on my review; both = half and half.
     const ready = active.filter(p => p.mine && prApproved(p) && prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none')).length;
-    renderPrNag(active.filter(p => prNeedsApproval(p) && !(p.approvedBy || []).length).length); // nag only for PRs nobody has approved yet
+    renderPrNag(active.filter(prNagTarget).length);
     b.style.display = 'flex'; b.className = waiting > 0 && ready > 0 ? 'split' : waiting > 0 ? 'alert' : ready > 0 ? 'ready' : '';
     b.textContent = active.length + ' PR' + (active.length === 1 ? '' : 's') + (waiting > 0 ? ' · ' + waiting + ' to approve' : '') + (ready > 0 ? ' · ' + ready + ' to merge' : '');
     b.title = [waiting > 0 && waiting + ' PR(s) waiting for approval', ready > 0 && ready + ' of yours ready to merge'].filter(Boolean).join(' · ') || active.length + ' open PR(s)';
@@ -5632,21 +5649,27 @@ function prOptimistic(url, action) {
 // Row send-off: flash the action's colour, stamp what happened, slide out and collapse; then the list updates.
 // Acts on the row last clicked in the PR menu, so any action gets it without passing the row around.
 let prClickedRow = null;
-document.getElementById('pr-dropdown').addEventListener('pointerdown', e => { prClickedRow = { el: e.target.closest('.pr-row'), at: Date.now() }; }, true);
+document.getElementById('pr-dropdown').addEventListener('pointerdown', e => { prClickedRow = { el: e.target.closest('.pr-row, .pr-group-header'), at: Date.now() }; }, true);
 function prAnimateOut(label, color) {
-  const row = prClickedRow && Date.now() - prClickedRow.at < 30000 && prClickedRow.el;
+  const el = prClickedRow && Date.now() - prClickedRow.at < 30000 && prClickedRow.el;
   prClickedRow = null;
-  if (!row || !row.isConnected || matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
-  row.classList.add('pr-leaving');
-  row.insertAdjacentHTML('beforeend', `<span class="pr-stamp" style="color:${color}">${label}</span>`);
-  const h = row.offsetHeight + 'px', tint = `color-mix(in srgb, ${color} 20%, transparent)`;
-  const anim = row.animate([
-    { background: 'transparent', height: h, paddingTop: '8px', paddingBottom: '8px', opacity: 1, transform: 'none' },
-    { background: tint, height: h, paddingTop: '8px', paddingBottom: '8px', opacity: 1, transform: 'none', offset: .5 },
-    { background: tint, height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0, transform: 'translateX(48px)' },
-  ], { duration: 700, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
+  if (!el || !el.isConnected || matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+  // A repo header stands for its group: it takes the stamp and its rows leave with it.
+  const rows = [el];
+  if (el.classList.contains('pr-group-header')) for (let n = el.nextElementSibling; n && n.classList.contains('pr-row'); n = n.nextElementSibling) rows.push(n);
+  el.insertAdjacentHTML('beforeend', `<span class="pr-stamp" style="color:${color}">${label}</span>`);
+  const tint = `color-mix(in srgb, ${color} 20%, transparent)`;
+  const anims = rows.map(row => {
+    row.classList.add('pr-leaving');
+    const cs = getComputedStyle(row), at = { height: row.offsetHeight + 'px', paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, opacity: 1, transform: 'none' };
+    return row.animate([
+      { background: 'transparent', ...at },
+      { background: tint, ...at, offset: .5 },
+      { background: tint, height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0, transform: 'translateX(48px)' },
+    ], { duration: 700, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }).finished.catch(() => {});
+  });
   // A hidden/occluded window draws no frames, so .finished can stall: the action must land regardless.
-  return Promise.race([anim.finished.catch(() => {}), new Promise(r => setTimeout(r, 800))]);
+  return Promise.race([Promise.all(anims), new Promise(r => setTimeout(r, 800))]);
 }
 function approvePr(url) { api.send({ type: 'approvePr', url }); prAnimateOut('✓ Approved', 'var(--green)').then(() => prOptimistic(url, 'approve')); }
 function mergePr(url) { api.send({ type: 'mergePr', url }); prAnimateOut('⤵ Merged', 'var(--purple)').then(() => prOptimistic(url, 'merge')); }
