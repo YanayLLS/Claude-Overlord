@@ -122,21 +122,30 @@ function pickCheckout(repo, infos, worktreeDirs) {
 // Env branches: never pushed to directly, a fix goes in by PR (same list as the PR panel's release filter).
 const ENV_BRANCH = /^(dev|develop|alpha|staging|master|main|production|prod(-.*)?)$/i;
 
-// Plan for "Fix" on a PR with failing checks: a fix/pr-N worktree off the PR's head, and an
-// agent that loops — read the failed logs, fix or rerun, push to the PR, watch — until green.
-// Its own branch name, so a checkout already on the head branch doesn't block the worktree.
+// Plan for "Fix" on a PR with failing checks: a normal agent, no new worktree, in the checkout (or worktree)
+// already on the PR's branch — else the repo's main checkout, told to switch to it. It loops — read the
+// failed logs, fix or rerun, push to the PR, watch — until green.
 function fixPrPlan(pr, infos, worktreeDirs) {
   if (!pr || !pr.repo || !pr.number) return { error: 'No PR to fix' };
   if (pr.isCrossRepository) return { error: `#${pr.number} comes from a fork — its branch can't be pushed to` };
   if (!/^[\w./-]+$/.test(pr.headRef || '')) return { error: `Can't fix a PR from branch "${pr.headRef}"` };
-  const pick = pickCheckout(pr.repo, infos, worktreeDirs);
+  const env = ENV_BRANCH.test(pr.headRef);
+  // Already on the PR's branch (not for env branches: those get a fix branch, never a direct push)
+  const onBranch = !env && (infos || []).find(i => i.repo.toLowerCase() === pr.repo.toLowerCase() && i.branch === pr.headRef);
+  const pick = onBranch || pickCheckout(pr.repo, infos, worktreeDirs);
   if (!pick) return { error: `No local checkout of ${pr.repo} — open an agent in it once` };
   const n = pr.number, repo = pr.repo, head = pr.headRef, base = pr.baseRef || 'its base';
-  const push = ENV_BRANCH.test(head)
+  const where = onBranch ? `You are in the local checkout that is already on the PR branch ${head} - work right here, on this branch. `
+    + `It may hold uncommitted work: leave that alone, never stash, reset or discard it, and commit only your own fixes. `
+    : `You are in the local checkout of ${repo}. First git fetch origin, then `
+    + (env ? `work on a fix branch: git switch -c fix/pr-${n} origin/${head} (git switch fix/pr-${n} if it already exists). `
+      : `work on the PR branch: git switch ${head} and git pull origin ${head}. `)
+    + `If uncommitted changes block the switch, stop and say so - never stash, reset or discard them. `;
+  const push = env
     ? `${head} is an environment branch - never push to it. Push this branch and open one fix PR into it: gh pr create --repo ${repo} --base ${head}, then work on that PR's checks the same way, and keep pushing to it (no new PR per round)`
     : `push to the PR: git push origin HEAD:${head}`;
   const prompt = `PR #${n} in ${repo} (${head} into ${base}) has failing checks: ${pr.url} - get it green. `
-    + `You are in a worktree on a fix branch started from origin/${head}. Loop until every check passes: `
+    + where + `Loop until every check passes: `
     + `1. gh pr checks ${n} --repo ${repo} to see what failed, then gh run view (run id) --repo ${repo} --log-failed for each failed run, and find the root cause. `
     + `2. A flaky or infra failure (timeout, network, runner, rate limit) unrelated to the change: rerun it with gh run rerun (run id) --failed --repo ${repo}, no code change. `
     + `3. A real failure: git pull origin ${head} first (the PR may have moved), fix the root cause, run the matching tests or build locally, commit, and ${push}. `
@@ -144,7 +153,7 @@ function fixPrPlan(pr, infos, worktreeDirs) {
     + `4. Wait with gh pr checks ${n} --repo ${repo} --watch, then go back to 1. `
     + `Stop when all checks are green, or after 5 rounds with no progress - then report what blocks it. `
     + `Never merge the PR, never force push, and never skip, delete or loosen a test or check to make it pass.`;
-  return { repoDir: pick.dir, branch: `fix/pr-${n}`, base: head, startPoint: `origin/${head}`, prompt: shellSafe(prompt) };
+  return { repoDir: pick.dir, prompt: shellSafe(prompt) };
 }
 
 if (typeof module !== 'undefined' && module.exports) {

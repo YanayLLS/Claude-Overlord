@@ -2561,7 +2561,7 @@ async function fetchWorkflowRun(w) {
 // told to read the failed log and fix it. Clicking again reuses that worktree.
 async function fixActionRun(run) { return startFixAgent(fixRunPlan, run); }
 
-// "Fix" on a PR with failing checks: a fix/pr-N worktree off its head, with an agent that
+// "Fix" on a PR with failing checks: a normal agent in the repo's checkout (no worktree) that
 // pushes fixes to the PR until its checks are green (actions-core.js fixPrPlan).
 async function fixPr(pr) { return startFixAgent(fixPrPlan, pr); }
 
@@ -2571,6 +2571,7 @@ async function startFixAgent(planFor, target) {
   let plan = planFor(target, lastCheckoutInfos || [], wts);
   if (plan.error) plan = planFor(target, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
   if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
+  if (!plan.branch) { createAgent(plan.repoDir, null, plan.prompt); return; } // PR fix: no worktree
   // Reuse by folder, not by settings entry: an earlier click (or another checkout of the
   // same repo) may have made it without a matching entry, and git refuses to re-add it.
   let dir = wt.worktreePath(plan.repoDir, wt.safeBranch(plan.branch));

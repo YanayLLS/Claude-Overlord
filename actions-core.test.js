@@ -137,10 +137,14 @@ const { fixPrPlan } = require('./actions-core');
   const infos = [{ dir: 'C:/x/r-wt', repo: 'o/r', branch: 'feat' }, { dir: 'C:/x/r', repo: 'o/r', branch: 'yanay-features' }];
   const p = fixPrPlan(pr, infos, ['C:/x/r-wt']);
   assert.strictEqual(p.repoDir, 'C:/x/r');
-  // its own branch off the PR head — never collides with a checkout already on the head branch
-  assert.strictEqual(p.branch, 'fix/pr-948');
-  assert.strictEqual(p.startPoint, 'origin/yanay-features');
-  assert.strictEqual(p.base, 'yanay-features');
+  // no new worktree: a normal agent in the checkout already on the PR's branch
+  assert.strictEqual(p.branch, undefined);
+  assert.ok(!p.prompt.includes('git switch'));
+  assert.ok(/never stash/i.test(p.prompt));
+  // nothing on the PR's branch: the main checkout, told to switch to it
+  const sw = fixPrPlan(pr, [{ dir: 'C:/x/r-wt', repo: 'o/r', branch: 'feat' }, { dir: 'C:/x/r', repo: 'o/r', branch: 'dev' }], ['C:/x/r-wt']);
+  assert.strictEqual(sw.repoDir, 'C:/x/r');
+  assert.ok(sw.prompt.includes('git switch yanay-features'));
   // pushes land on the PR, and it loops on the checks until green
   assert.ok(p.prompt.includes('git push origin HEAD:yanay-features'));
   assert.ok(p.prompt.includes('gh pr checks 948 --repo o/r --watch'));
@@ -151,6 +155,12 @@ const { fixPrPlan } = require('./actions-core');
   const rel = fixPrPlan({ ...pr, headRef: 'dev', baseRef: 'alpha' }, infos, []);
   assert.ok(!rel.prompt.includes('HEAD:dev'));
   assert.ok(rel.prompt.includes('--base dev'));
+  assert.ok(rel.prompt.includes('git switch -c fix/pr-948 origin/dev'));
+  // a worktree already on the PR's branch wins over the main checkout: the agent opens there, no switch
+  const onWt = fixPrPlan(pr, [{ dir: 'C:/x/r', repo: 'o/r', branch: 'dev' }, { dir: 'C:/x/r-wt', repo: 'o/r', branch: 'yanay-features' }], ['C:/x/r-wt']);
+  assert.strictEqual(onWt.repoDir, 'C:/x/r-wt');
+  assert.ok(!onWt.prompt.includes('git switch'));
+  assert.ok(onWt.prompt.includes('git push origin HEAD:yanay-features'));
   // refused: a fork (can't push), odd branch names (reach a shell), no checkout
   assert.ok(fixPrPlan({ ...pr, isCrossRepository: true }, infos, []).error);
   assert.ok(fixPrPlan({ ...pr, headRef: 'x&calc' }, infos, []).error);
