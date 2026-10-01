@@ -1218,6 +1218,11 @@ button:focus-visible { outline-offset:0; }
         <span>PR notifications (watch GitHub repos)</span>
       </label>
       <div class="settings-hint">Polls watched repos via the <code>gh</code> CLI for open PRs.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-pr-fire" checked onchange="prFire = this.checked; applyPrHeat(); api.send({ type: 'saveSettings', settings: { prFire: this.checked } })" />
+        <span>Fire effects</span>
+      </label>
+      <div class="settings-hint">A teammate's PR left waiting for your approval sets the screen on fire: sparks, then embers, then flames that grow while you're at the PC. Off keeps just the red PR bar.</div>
       <div class="settings-field">
         <div class="field-title">Watched repos <span class="field-count" id="pr-repo-count"></span></div>
         <div class="field-row">
@@ -3845,6 +3850,7 @@ function handleAgentMsg(msg) {
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
     case 'toast': showToast(msg.text); break;
     case 'perfUsage': renderPerf(msg); break;
+    case 'sysIdle': prSysIdleMs = msg.ms; break;
     case 'ramUsage': showTopRam(msg); break;
     case 'models': setModels(msg.models || [], msg.error); break;
     case 'branchList': if (_branchCbs[msg.repo]) _branchCbs[msg.repo](msg.branches, msg.error); break;
@@ -4478,11 +4484,13 @@ function applySettings(s) {
   if (s.lastFeatureRepos) lastFeatureRepos = s.lastFeatureRepos;
   if (s.prCollapsed) prCollapsed = new Set(s.prCollapsed);
   if (s.prScope) prScope = s.prScope;
+  if ('prFire' in s) { prFire = s.prFire !== false; const c = document.getElementById('chk-pr-fire'); if (c) c.checked = prFire; applyPrHeat(); }
   if ('prShowAll' in s) prShowAll = !!s.prShowAll;
   if (s.prSettings) {
     prSettings = s.prSettings;
     selectedRepos = new Set(prSettings.repos || []);
     const c = document.getElementById('chk-pr'); if (c) c.checked = !!prSettings.enabled;
+    const fc = document.getElementById('chk-pr-fire'); if (fc) fc.disabled = !prSettings.enabled;
     const i = document.getElementById('inp-pr-interval'); if (i) i.value = prSettings.intervalSec || 60;
     renderRepoPicker();
   }
@@ -5214,9 +5222,9 @@ function snoozePrNag(e) { e.stopPropagation(); prNagSnoozeUntil = Date.now() + P
 const PR_HEAT_FULL_MS = 3 * 3600e3; // ponytail: tuning knob — stage 10 after 3h of a PR waiting while you're at Overlord (18 min a stage)
 // Heat counts only time Overlord is the focused window, per PR: a PR opened overnight (or while you're out) starts cold
 // when you come in. ponytail: in memory, so a restart cools everything — persist it if that turns out to be gamed.
-// And only while someone's actually there: a focused Overlord left on overnight has no input, so it stays cold.
-const prHeatMs = new Map(), PR_HEAT_TICK = 15e3, PR_HEAT_IDLE_MS = 10 * 60e3; let prHeatInputAt = Date.now();
-for (const ev of ['keydown', 'pointerdown', 'pointermove', 'wheel']) addEventListener(ev, () => { prHeatInputAt = Date.now(); }, { capture: true, passive: true });
+// Only while someone's at the PC (input in any app within PR_HEAT_IDLE_MS, from main's sysIdle): a PC left on overnight stays cold.
+const prHeatMs = new Map(), PR_HEAT_TICK = 15e3, PR_HEAT_IDLE_MS = 10 * 60e3; let prSysIdleMs = 0;
+let prFire = true; // Settings → Pull requests → "Fire effects"; only with PR notifications on
 let prHeatDebug = null, prFireOut = 0; // Ctrl+Shift+H slider overrides the real heat; prFireOut: dissolve timer
 function prFireEl() {
   let el = document.getElementById('pr-fire'); if (el) return el;
@@ -5228,7 +5236,7 @@ function applyPrHeat() {
   const f = document.getElementById('list-foot'); if (!f) return;
   const born = prHeatWaiting();
   const h = prHeatDebug ?? (born.length ? Math.min(1, Math.max(...born.map(p => prHeatMs.get(p.url) || 0)) / PR_HEAT_FULL_MS) : 0);
-  const stage = Math.ceil(h * 10), fire = prFireEl();
+  const stage = prHeatDebug != null || (prFire && prSettings.enabled) ? Math.ceil(h * 10) : 0, fire = prFireEl(); // the red foot stays either way
   f.style.setProperty('--heat', h.toFixed(3));
   f.classList.toggle('heat-debug', prHeatDebug != null);
   // Approved (or muted/closed) meanwhile: the fire dissolves instead of vanishing.
@@ -5249,7 +5257,7 @@ function applyPrHeat() {
 addEventListener('resize', applyPrHeat);
 function prHeatWaiting() { return prState.prs.filter(p => !prSilenced(p) && prNagTarget(p) && !prApproved(p)); }
 setInterval(() => {
-  if (document.hasFocus() && Date.now() - prHeatInputAt < PR_HEAT_IDLE_MS) for (const p of prHeatWaiting()) prHeatMs.set(p.url, (prHeatMs.get(p.url) || 0) + PR_HEAT_TICK);
+  if (prSysIdleMs < PR_HEAT_IDLE_MS) for (const p of prHeatWaiting()) prHeatMs.set(p.url, (prHeatMs.get(p.url) || 0) + PR_HEAT_TICK);
   applyPrHeat();
 }, PR_HEAT_TICK);
 addEventListener('keydown', e => {
@@ -6288,6 +6296,7 @@ function onPrSettingsChange() {
   const intervalSec = Math.max(30, Number(document.getElementById('inp-pr-interval').value) || 60);
   prSettings = { enabled: document.getElementById('chk-pr').checked, repos: [...selectedRepos], intervalSec };
   api.send({ type: 'savePrSettings', prSettings });
+  document.getElementById('chk-pr-fire').disabled = !prSettings.enabled; applyPrHeat();
   renderSettingsChips();
 }
 

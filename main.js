@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, dialog, shell, Notification, clipboard } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, dialog, shell, Notification, clipboard, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -5229,6 +5229,8 @@ function saveWindowBounds() {
 }
 
 app.whenReady().then(() => {
+  // PR heat only grows while someone's at the PC (any app): the renderer gets the system idle time.
+  setInterval(() => send({ type: 'sysIdle', ms: powerMonitor.getSystemIdleTime() * 1000 }), 15e3);
   // Windows needs an explicit AppUserModelID or toast notifications silently no-op.
   if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
   // Load settings early (fast) so window bounds are correct, but defer heavy agent restoration
