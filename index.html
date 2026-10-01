@@ -5302,8 +5302,8 @@ function renderPrBadge() {
     b.title = 'All watched PRs are muted — click to manage';
     renderPrNag(0);
   } else {
-    // Nothing open, or everything archived: nothing needs you, so no chip.
-    b.style.display = 'none';
+    // Nothing open, or everything archived: nothing needs you, so no chip — and no class, the foot's red/green keys off it.
+    b.style.display = 'none'; b.className = '';
     document.getElementById('pr-dropdown').style.display = 'none';
     renderPrNag(0);
   }
