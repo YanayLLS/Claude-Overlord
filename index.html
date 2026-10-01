@@ -5214,7 +5214,9 @@ function snoozePrNag(e) { e.stopPropagation(); prNagSnoozeUntil = Date.now() + P
 const PR_HEAT_FULL_MS = 3 * 3600e3; // ponytail: tuning knob — stage 10 after 3h of a PR waiting while you're at Overlord (18 min a stage)
 // Heat counts only time Overlord is the focused window, per PR: a PR opened overnight (or while you're out) starts cold
 // when you come in. ponytail: in memory, so a restart cools everything — persist it if that turns out to be gamed.
-const prHeatMs = new Map(); const PR_HEAT_TICK = 15e3;
+// And only while someone's actually there: a focused Overlord left on overnight has no input, so it stays cold.
+const prHeatMs = new Map(), PR_HEAT_TICK = 15e3, PR_HEAT_IDLE_MS = 10 * 60e3; let prHeatInputAt = Date.now();
+for (const ev of ['keydown', 'pointerdown', 'pointermove', 'wheel']) addEventListener(ev, () => { prHeatInputAt = Date.now(); }, { capture: true, passive: true });
 let prHeatDebug = null, prFireOut = 0; // Ctrl+Shift+H slider overrides the real heat; prFireOut: dissolve timer
 function prFireEl() {
   let el = document.getElementById('pr-fire'); if (el) return el;
@@ -5247,7 +5249,7 @@ function applyPrHeat() {
 addEventListener('resize', applyPrHeat);
 function prHeatWaiting() { return prState.prs.filter(p => !prSilenced(p) && prNagTarget(p) && !prApproved(p)); }
 setInterval(() => {
-  if (document.hasFocus()) for (const p of prHeatWaiting()) prHeatMs.set(p.url, (prHeatMs.get(p.url) || 0) + PR_HEAT_TICK);
+  if (document.hasFocus() && Date.now() - prHeatInputAt < PR_HEAT_IDLE_MS) for (const p of prHeatWaiting()) prHeatMs.set(p.url, (prHeatMs.get(p.url) || 0) + PR_HEAT_TICK);
   applyPrHeat();
 }, PR_HEAT_TICK);
 addEventListener('keydown', e => {
