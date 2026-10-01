@@ -318,5 +318,21 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     }
   }
 
-  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, recordHealth, markCancelled };
+  // Sign: record `who` on the release itself, so PRs added to it later are covered too
+  async function markSigned(ids, who) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const loaded = await load();
+      if (!loaded) return;
+      let conflict = false;
+      for (const { manifest, sha } of loaded.entries) {
+        if (!ids.includes(manifest.id) || (manifest.signedBy || []).some(x => x.login.toLowerCase() === who.login.toLowerCase())) continue;
+        const m = { ...manifest, signedBy: (manifest.signedBy || []).concat({ login: who.login, clickup: who.clickup || null, at: new Date().toISOString() }), updatedAt: new Date().toISOString() };
+        const w = await write(m, sha, `release ${m.id}: signed by @${who.login}`);
+        if (w.conflict) conflict = true;
+      }
+      if (!conflict) return load();
+    }
+  }
+
+  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, recordHealth, markCancelled, markSigned };
 };

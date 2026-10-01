@@ -512,11 +512,14 @@
     }
     const a = s.approvers || {}, meL = (a.me || '').toLowerCase();
     const toSign = new Set((s.toSign || []).map(t => t.repo + '#' + t.number));
-    for (const m of hs.items) {
+    for (let m of hs.items) {
       const [cls, label] = STATUS_CHIP[m.status] || ['', m.status];
       const pending = m.status === 'pending';
       // signed as one: while pending, a signer is someone on every still-open PR
       const openRepos = m.repos.filter(r => !r.mergeSha && !r.closed);
+      // who signed the release itself (Sign records it) counts on every PR of it, later ones too
+      const relSigned = (m.signedBy || []).map(x => x.login);
+      m = { ...m, repos: m.repos.map(r => ({ ...r, signers: [...new Set((r.signers || []).concat(relSigned))] })) };
       const anyone = [...new Set(m.repos.flatMap(r => r.signers || []))];
       const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
       h += `<div class="rl-hist-card${pending ? ' pending' : ''}"><div class="rl-hist-top">`

@@ -410,12 +410,27 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       if (o.error) return o;
       if (o.pr.state === 'open') list.push({ label: r.label, signoff: o });
     }
-    return releaseSignoff(list);
+    return releaseSignoff(withReleaseSigners(list, man));
   }
+  // Signing a release once covers it, PRs added to it later included: the approvers recorded on the
+  // release (manifest.signedBy, written by Sign) count on each of its PRs, still team members only.
+  const releaseOf = (repo, n) => ((state.history && state.history.items) || []).find(m => m.status === 'pending' && m.repos.some(r => r.repo === repo && r.pr.number === Number(n)));
+  function withReleaseSigners(list, man) {
+    const team = new Set(memberLogins().map(l => l.toLowerCase()));
+    const extra = ((man && man.signedBy) || []).filter(x => team.has(String(x.login).toLowerCase()));
+    if (!extra.length) return list;
+    return list.map(p => {
+      const have = new Set(p.signoff.signers.map(x => x.login.toLowerCase()));
+      const signers = p.signoff.signers.concat(extra.filter(x => !have.has(x.login.toLowerCase())).map(x => ({ login: x.login, via: 'release', clickup: x.clickup || null })));
+      return { ...p, signoff: { ...p.signoff, signers, count: signers.length, ok: signers.length >= p.signoff.need } };
+    });
+  }
+  const signedRelease = (man, login) => !!man && (man.signedBy || []).some(x => String(x.login).toLowerCase() === String(login).toLowerCase());
   // A run's prod PRs are one release: stamp its release-level sign-off for the UI
   function stampSignoff(run) {
     const prs = run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed && r.signoff);
-    run.signoff = prs.length ? releaseSignoff(prs) : null;
+    const man = prs.length ? releaseOf(prs[0].repo, prs[0].pr.number) : null;
+    run.signoff = prs.length ? releaseSignoff(withReleaseSigners(prs, man)) : null;
     return run;
   }
 
@@ -442,7 +457,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         const meL = String(who.github).toLowerCase();
         all.push({ label: p.label, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s, number: pr.number, url: pr.html_url,
           mine: hasSigned(s, who.github), older: (s.stale || []).some(l => l.toLowerCase() === meL) });
-        if (hasSigned(s, who.github)) continue; // (a PR I opened counts until new commits land on it)
+        if (hasSigned(s, who.github)) continue;
+        if (signedRelease(((state.history && state.history.items) || []).find(m => m.id === releaseIdOf(s.pr.body)), who.github)) continue; // signed the release once: covers PRs added since
         found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url, head: s.pr.head.sha, commits: s.pr.commits || null, author: s.pr.user.login,
           release: all[all.length - 1].release, signers: s.signers.map(x => x.login), count: s.count, need: s.need });
       }
@@ -459,7 +475,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     push({ toSign: found, toSignReleases });
     // what counts as "new" (re-notify, re-open the prompt after Later): a new release or a new PR in it —
     // not new commits, which keep a release signed (signoff-core) and land all day while it's open
-    const nkey = (f) => f.release + ':' + f.repo + '#' + f.number;
+    const nkey = (f) => f.release; // one prompt per release: "Later" holds until another release needs you
     const fresh = found.filter(f => !notifiedToSign.has(nkey(f)));
     if (fresh.length && notify) {
       const by = [...new Set(found.flatMap(f => f.signers))].map(x => '@' + x).join(', ');
@@ -543,6 +559,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     push({ toSign: (state.toSign || []).filter(t => !signedKeys.has(key(t))), ...(run ? { releaseRun: { ...stampSignoff(run) } } : {}) });
     persist();
     send({ type: 'toast', text: failed.length ? `Sign failed: ${failed.join('; ')}` : done.length ? 'Signed the release ✍' : 'Nothing left for you to sign' });
+    const ids = [...new Set(done.map(t => { const m = releaseOf(t.repo, t.number); return m && m.id; }).filter(Boolean))];
+    if (ids.length && !failed.length) await history.markSigned(ids, { login: who.github, clickup: who.clickup }).catch(() => {});
     await reconcileHistory().catch(() => {});
     checkToSign().catch(() => {});
   }
