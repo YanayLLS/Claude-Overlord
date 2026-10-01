@@ -439,3 +439,7 @@
 .rl-hist-health .bad { color:var(--red); } .rl-hist-health .warn { color:var(--peach); }
 .rl-hist-health a { color:inherit; text-decoration:underline; }
 .rl-rel-actions button.go.locked, .rl-rel-actions button.go.locked:hover { opacity:.5; cursor:not-allowed; filter:none; transform:none; } /* Start release: approvers only */
+/* ✕ Cancel release, and its armed (confirm) state */
+.rl-rr-cancel { font:inherit; font-size:12px; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
+.rl-rr-cancel:hover, .rl-hist-btn[data-act="relCancel"]:hover { color:var(--red); border-color:rgba(248,113,113,.5); }
+.armed-bad { background:rgba(248,113,113,.16) !important; border-color:rgba(248,113,113,.7) !important; color:var(--red) !important; }

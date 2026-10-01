@@ -457,14 +457,16 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const toSignReleases = [...new Set(found.map(f => f.release))].map(id => ({ id, repos: all.filter(x => x.release === id)
       .map(x => ({ label: x.label, number: x.number, url: x.url, mine: x.mine, older: x.older })).sort((a, b) => a.label.localeCompare(b.label)) }));
     push({ toSign: found, toSignReleases });
-    const nkey = (f) => f.repo + '#' + f.number + '@' + f.head; // a new commit = sign again = tell again
+    // what counts as "new" (re-notify, re-open the prompt after Later): a new release or a new PR in it —
+    // not new commits, which keep a release signed (signoff-core) and land all day while it's open
+    const nkey = (f) => f.release + ':' + f.repo + '#' + f.number;
     const fresh = found.filter(f => !notifiedToSign.has(nkey(f)));
     if (fresh.length && notify) {
       const by = [...new Set(found.flatMap(f => f.signers))].map(x => '@' + x).join(', ');
       notify(`✍ Prod release waiting for your signature`, `${found.length} PR${found.length === 1 ? '' : 's'}: ${found.map(f => f.label).join(', ')}${by ? ' · opened by ' + by : ''}`,
         found[0].url, () => send({ type: 'releases', state, open: true }));
     }
-    // the prompt's identity: a new release / a new commit = a new key = the big prompt shows again
+    // the prompt's identity: a new release / a new PR in it = a new key = the big prompt shows again
     const promptKey = found.map(nkey).sort().join(',');
     if (promptKey !== state.signPromptKey) push({ signPromptKey: promptKey });
     notifiedToSign = new Set(found.map(nkey));
@@ -661,6 +663,34 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       }) });
       await new Promise(r => setTimeout(r, DEPLOY_POLL_MS));
     }
+  }
+
+  // Call a release off: close every still-open PR of it (the History release `id`, else the last run
+  // here), each with a note. What already merged stays merged. The release then reads as abandoned.
+  async function cancelRelease(id) {
+    await loadApprovers();
+    if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can cancel a release' });
+    if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is running: stop it first' });
+    const who = await whoAmI();
+    const items = releaseItems(id || null);
+    if (!items.length) return send({ type: 'toast', text: 'Nothing open to cancel' });
+    const note = `Release${id ? ' ' + id : ''} called off by @${who.github} in Overlord: closing without merging.`;
+    const failed = [];
+    await Promise.all(items.map(async (it) => {
+      const r = await ghJson(['api', '-X', 'PATCH', `repos/${it.repo}/pulls/${it.pr.number}`, '--input', writeTmp({ state: 'closed' })]);
+      if (apiErr(r)) return failed.push(`${it.label} #${it.pr.number}: ${apiErr(r)}`);
+      await ghJson(['api', '-X', 'POST', `repos/${it.repo}/issues/${it.pr.number}/comments`, '--input', writeTmp({ body: note })]);
+    }));
+    const run = state.releaseRun;
+    if (run) {
+      const shut = new Set(items.map(it => it.repo + '#' + it.pr.number));
+      for (const r of run.rows) if (r.pr && shut.has(r.repo + '#' + r.pr.number) && !failed.some(f => f.startsWith(r.label + ' '))) r.closed = true;
+      push({ releaseRun: { ...stampSignoff(run) } });
+    }
+    send({ type: 'toast', text: failed.length ? `Cancel: couldn't close ${failed.join('; ')}` : `Release cancelled: ${items.length} PR${items.length === 1 ? '' : 's'} closed` });
+    await refreshRun().catch(() => {});
+    reconcileHistory().catch(() => {});
+    checkToSign().catch(() => {});
   }
 
   async function releaseAll(id) {
@@ -949,6 +979,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesRollback': history.rollback(msg.id, msg.skip || []).catch(e => send({ type: 'toast', text: 'Rollback failed: ' + e.message })); return true;
       case 'releasesImport': history.importPast(state.config ? releasePlan(state.config, ['prod']).prs : []).then(() => reconcileHistory()).catch(e => send({ type: 'toast', text: 'Import failed: ' + e.message })); return true;
       case 'releasesMergeRelease': releaseAll(msg.id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })); return true;
+      case 'releasesCancel': cancelRelease(msg.id).catch(e => send({ type: 'toast', text: 'Cancel failed: ' + e.message })); return true;
       case 'releasesClearRun': clearTimeout(recheckTimer); push({ releaseRun: null }); persist(); return true;
       case 'releasesSetSource': {
         const source = String(msg.source || '').trim() || DEFAULT_SOURCE;

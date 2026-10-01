@@ -37,7 +37,7 @@
       relOpen = false; apprOpen = false; render();
       return;
     }
-    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"]')) { armed = null; render(); }
+    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"]')) { armed = null; render(); }
     if (e.target === overlay) return show(false);
     const a = e.target.closest('[data-url]');
     if (a) { e.stopPropagation(); return api.send({ type: 'openUrl', url: a.dataset.url }); }
@@ -124,6 +124,8 @@
     histRollback: (el) => { rbOpen = rbOpen === el.dataset.id ? null : el.dataset.id; rbSkip = new Set(); render(); },
     histRbRepo: (el) => { const r = el.dataset.repo; rbSkip.has(r) ? rbSkip.delete(r) : rbSkip.add(r); render(); },
     histRbGo: (el) => { api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
+    // Cancel release: closes every open PR of it. Same two-click confirm as Release all
+    relCancel: (el) => { const k = 'x:' + (el.dataset.id || 'run'); if (armed !== k) return arm(k); armed = null; api.send({ type: 'releasesCancel', id: el.dataset.id || null }); render(); },
     histMerge: (el) => { if (armed !== 'h:' + el.dataset.id) return arm('h:' + el.dataset.id); armed = null; api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); render(); },
     histReload: () => { api.send({ type: 'releasesHistory' }); },
     histImport: () => { api.send({ type: 'releasesImport' }); },
@@ -444,6 +446,13 @@
     return s && s.signing ? `<button class="${cls} locked" aria-disabled="true">✍ Signing…</button>`
       : `<button class="${cls}" data-act="relSign"${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
   }
+  // ✕ Cancel release (History card: its id; results popover: the run here). First click arms it.
+  function cancelBtn(id, n, cls) {
+    const k = 'x:' + (id || 'run');
+    return armed === k
+      ? `<button class="${cls} armed-bad" data-act="relCancel"${id ? ` data-id="${esc(id)}"` : ''}>⚠ Confirm: close ${n} PR${n === 1 ? '' : 's'}</button>`
+      : `<button class="${cls}" data-act="relCancel"${id ? ` data-id="${esc(id)}"` : ''} title="Call this release off: closes its ${n} open PR${n === 1 ? '' : 's'} (with a note). Merged ones stay merged">✕ Cancel release</button>`;
+  }
   let armed = null, armTimer = null;
   const ARM_MS = 6000;
   function arm(key) {
@@ -543,6 +552,7 @@
         signoff: { count: signers.length, need: 2, signers, gaps: anyone.filter(l => !signers.includes(l))
           .map(login => ({ login, missing: openRepos.filter(r => !(r.signers || []).includes(login)).map(r => ({ label: r.label })) })) },
         attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn', armKey: 'h:' + m.id }));
+      if (pending && a.isApprover && openRepos.length && !(s.releaseAll && s.releaseAll.running)) acts.push(cancelBtn(m.id, openRepos.length, 'rl-hist-btn'));
       if (!pending && m.status !== 'abandoned' && m.repos.some(r => r.mergeSha) && a.isApprover) {
         acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}">↩ Roll back to this</button>`);
       }
@@ -685,6 +695,7 @@
       + (toSign ? signBtn(s, 'rl-rr-sign', '✍ Sign the release', `Approve every prod release PR as @${a.me}: your signature`) : '')
       + releaseAllBtn(s, { ready: readyRows, waiting: unsignedProd, signoff: run.signoff && { ...run.signoff, signers: run.signoff.signers.map(x => x.login) },
         attrs: 'class="rl-rr-merge" data-act="relMerge"', lockedCls: 'rl-rr-merge', armKey: 'run' })
+      + (open.length && (s.approvers || {}).isApprover && !(s.releaseAll && s.releaseAll.running) ? cancelBtn('', open.length, 'rl-rr-cancel') : '')
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
       // a new release only once this one's PRs are all merged or closed (Release again just reuses open PRs anyway)
       + (run.running || open.length ? '' : '<button data-act="relNew">New release</button>')
