@@ -5197,6 +5197,11 @@ function renderPrNag(waiting) {
 function prNagClick(e) {
   e.stopPropagation();
   if (worldView) { prNagMs = 0; renderPrBadge(); worldJumpPr(); return; }
+  prFireClick(e);
+}
+// The fire's button always opens the PR list (in World view too: flying to the island would land under the flames).
+function prFireClick(e) {
+  e.stopPropagation(); prNagMs = 0;
   // The Into dev / Hide releases filter would open onto "N PRs hidden": show the PR it's nagging about.
   if (!prState.prs.some(p => !prSilenced(p) && prNagTarget(p) && prInScope(p))) { prScope = 'all'; api.send({ type: 'saveSettings', settings: { prScope } }); }
   if (document.getElementById('pr-dropdown').style.display !== 'block') togglePrDropdown();
@@ -5210,7 +5215,7 @@ let prHeatDebug = null, prFireOut = 0; // Ctrl+Shift+H slider overrides the real
 function prFireEl() {
   let el = document.getElementById('pr-fire'); if (el) return el;
   el = document.createElement('div'); el.id = 'pr-fire'; el.setAttribute('aria-hidden', 'true');
-  el.innerHTML = '<div class="fl">' + '<i></i>'.repeat(28) + '</div>'
+  el.innerHTML = '<div class="fl">' + '<i></i>'.repeat(28) + '</div><button class="pr-fire-cta" onclick="prFireClick(event)"></button>'
     + Array.from({ length: 30 }, (_, i) => `<b style="left:${(i * 37) % 100}%;animation-delay:-${((i * 0.23) % 2.4).toFixed(2)}s;--dx:${(i % 7 - 3) * 7}px"></b>`).join('');
   document.body.appendChild(el); return el;
 }
@@ -5228,6 +5233,8 @@ function applyPrHeat() {
   }
   clearTimeout(prFireOut); prFireOut = 0; fire.classList.remove('dissolve');
   fire.dataset.stage = stage;
+  // From stage 5 the flames cover the PR chip, so the fire carries its own way out.
+  fire.querySelector('.pr-fire-cta').textContent = '🔥 ' + (born.length > 1 ? born.length + " teammates' PRs wait" : "A teammate's PR waits") + ' for your approval — Approve';
   // Up to stage 7 the fire sits on the foot's top edge; from 8 it spans the window's bottom.
   if (stage && stage < 8) { const r = f.getBoundingClientRect(); fire.style.cssText = `left:${r.left}px;width:${r.width}px;bottom:${innerHeight - r.top}px`; }
   else fire.style.cssText = '';

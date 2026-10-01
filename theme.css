@@ -296,13 +296,24 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-fire[data-stage="10"]::before { background: radial-gradient(ellipse 100% 90% at 50% 105%, rgba(255,70,20,.6), rgba(255,30,20,.22) 60%, rgba(120,0,0,.15)); }
 #pr-fire[data-stage="9"] .fl i, #pr-fire[data-stage="10"] .fl i { animation-duration: .45s; }
 @keyframes pr-fire-glow { to { opacity: .7; } }
+/* The way out rides on top of the flames: stage 5-7 just above the foot, 8-10 big in the window's lower middle */
+#pr-fire .pr-fire-cta { display: none; position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 2; pointer-events: auto; cursor: pointer; white-space: nowrap;
+  padding: 6px 12px; border: 2px solid #fff; border-radius: 999px; background: #ff2d2d; color: #fff; font-family: inherit; font-size: 12px; font-weight: 700; line-height: 1.2;
+  box-shadow: 0 0 0 3px rgba(0,0,0,.55), 0 0 22px 6px rgba(255,200,60,.85); animation: pr-cta-pulse 1s ease-in-out infinite alternate; }
+#pr-fire .pr-fire-cta:hover { background: #fff; color: #d11; }
+#pr-fire:is([data-stage="5"], [data-stage="6"], [data-stage="7"]) .pr-fire-cta { display: block; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+#pr-fire:is([data-stage="8"], [data-stage="9"], [data-stage="10"]) .pr-fire-cta { display: block; bottom: 18vh; padding: 14px 28px; font-size: 20px; border-width: 3px; }
+@keyframes pr-cta-pulse { to { transform: translateX(-50%) scale(1.06); } }
+/* PR list open: the fire backs off so the list (and its Approve buttons) can be read */
+body:has(#pr-dropdown[style*="block"]) #pr-fire { opacity: .12; transition: opacity .3s; }
+body:has(#pr-dropdown[style*="block"]) #pr-fire .pr-fire-cta { display: none; }
 #pr-fire.dissolve { opacity: 0; filter: blur(8px); transition: opacity 1.5s ease-out, filter 1.5s ease-out; }
 #pr-fire.dissolve .fl { transform: scaleY(0); transform-origin: 50% 100%; transition: transform 1.5s ease-in; }
 #pr-heat-debug { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 100001; display: flex; align-items: center; gap: 8px; padding: 6px 12px;
   border-radius: 8px; background: var(--surface0); border: 1px solid var(--border); color: var(--text); font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 #pr-heat-debug input { width: 220px; }
 #pr-heat-debug b { font-weight: 600; min-width: 160px; font-variant-numeric: tabular-nums; }
-@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge, #pr-fire .fl i, #pr-fire::before { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge, #pr-fire .fl i, #pr-fire::before, #pr-fire .pr-fire-cta { animation: none !important; } }
 #list-foot { position: relative; }
 #pr-nag { position: absolute; left: 10px; bottom: calc(100% + 8px); z-index: 50; max-width: min(260px, calc(100% - 20px)); flex-direction: column; gap: 2px;
   padding: 8px 12px; border-radius: 10px; background: var(--red); color: #11111b; font-size: 11.5px; cursor: pointer;
