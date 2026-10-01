@@ -5211,7 +5211,10 @@ function snoozePrNag(e) { e.stopPropagation(); prNagSnoozeUntil = Date.now() + P
 
 // Heat: the longer a teammate's PR waits for approval, the hotter the foot. 10 stages: 1-2 sparks, 3-4 embers,
 // 5-7 flames off the foot, 8-10 a fire across the bottom of the whole window that gets in the way of work.
-const PR_HEAT_FULL_MS = 3 * 3600e3; // ponytail: tuning knob — stage 10 after 3h of the oldest PR waiting (18 min a stage)
+const PR_HEAT_FULL_MS = 3 * 3600e3; // ponytail: tuning knob — stage 10 after 3h of a PR waiting while you're at Overlord (18 min a stage)
+// Heat counts only time Overlord is the focused window, per PR: a PR opened overnight (or while you're out) starts cold
+// when you come in. ponytail: in memory, so a restart cools everything — persist it if that turns out to be gamed.
+const prHeatMs = new Map(); const PR_HEAT_TICK = 15e3;
 let prHeatDebug = null, prFireOut = 0; // Ctrl+Shift+H slider overrides the real heat; prFireOut: dissolve timer
 function prFireEl() {
   let el = document.getElementById('pr-fire'); if (el) return el;
@@ -5221,8 +5224,8 @@ function prFireEl() {
 }
 function applyPrHeat() {
   const f = document.getElementById('list-foot'); if (!f) return;
-  const born = prState.prs.filter(p => !prSilenced(p) && prNagTarget(p) && !prApproved(p)).map(p => Date.parse(p.createdAt)).filter(Boolean);
-  const h = prHeatDebug ?? (born.length ? Math.min(1, (Date.now() - Math.min(...born)) / PR_HEAT_FULL_MS) : 0);
+  const born = prHeatWaiting();
+  const h = prHeatDebug ?? (born.length ? Math.min(1, Math.max(...born.map(p => prHeatMs.get(p.url) || 0)) / PR_HEAT_FULL_MS) : 0);
   const stage = Math.ceil(h * 10), fire = prFireEl();
   f.style.setProperty('--heat', h.toFixed(3));
   f.classList.toggle('heat-debug', prHeatDebug != null);
@@ -5242,7 +5245,11 @@ function applyPrHeat() {
   if (window.PrFire) PrFire.set(stage, r);
 }
 addEventListener('resize', applyPrHeat);
-setInterval(applyPrHeat, 60e3);
+function prHeatWaiting() { return prState.prs.filter(p => !prSilenced(p) && prNagTarget(p) && !prApproved(p)); }
+setInterval(() => {
+  if (document.hasFocus()) for (const p of prHeatWaiting()) prHeatMs.set(p.url, (prHeatMs.get(p.url) || 0) + PR_HEAT_TICK);
+  applyPrHeat();
+}, PR_HEAT_TICK);
 addEventListener('keydown', e => {
   if (!(e.ctrlKey && e.shiftKey && e.code === 'KeyH')) return;
   e.preventDefault(); e.stopPropagation();
