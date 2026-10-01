@@ -287,6 +287,8 @@ body:has(#pr-dropdown[style*="block"]) #pr-fire .pr-fire-cta { display: none; }
 #pr-heat-debug { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 100001; display: flex; align-items: center; gap: 8px; padding: 6px 12px;
   border-radius: 8px; background: var(--surface0); border: 1px solid var(--border); color: var(--text); font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 #pr-heat-debug input { width: 220px; }
+#pr-heat-debug button { border: 0; background: none; color: var(--subtext); cursor: pointer; font-size: 12px; padding: 0 2px; }
+#pr-heat-debug button:hover { color: var(--text); }
 #pr-heat-debug b { font-weight: 600; min-width: 160px; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge, #pr-fire::before, #pr-fire .pr-fire-cta { animation: none !important; } }
 #list-foot { position: relative; }

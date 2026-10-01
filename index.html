@@ -5238,7 +5238,7 @@ function applyPrHeat() {
   const h = prHeatDebug ?? (born.length ? Math.min(1, Math.max(...born.map(p => prHeatMs.get(p.url) || 0)) / PR_HEAT_FULL_MS) : 0);
   const stage = prHeatDebug != null || (prFire && prSettings.enabled) ? Math.ceil(h * 10) : 0, fire = prFireEl(); // the red foot stays either way
   f.style.setProperty('--heat', h.toFixed(3));
-  f.classList.toggle('heat-debug', prHeatDebug != null);
+  f.classList.toggle('heat-debug', prHeatDebug > 0); // slider at 0 shows the real state
   // Approved (or muted/closed) meanwhile: the fire dissolves instead of vanishing.
   if (!stage && +fire.dataset.stage && prHeatDebug == null) {
     if (window.PrFire) PrFire.set(0); // stop feeding it: what's lit burns out
@@ -5266,7 +5266,8 @@ addEventListener('keydown', e => {
   let d = document.getElementById('pr-heat-debug');
   if (d) { d.remove(); prHeatDebug = null; return applyPrHeat(); }
   d = document.createElement('label'); d.id = 'pr-heat-debug';
-  d.innerHTML = 'PR heat <input type="range" min="0" max="1" step="0.01" value="0"><b></b>';
+  d.innerHTML = 'PR heat <input type="range" min="0" max="1" step="0.01" value="0"><b></b><button title="Close (Ctrl+Shift+H)" aria-label="Close">✕</button>';
+  d.querySelector('button').onclick = () => { d.remove(); prHeatDebug = null; applyPrHeat(); };
   const show = () => { const m = Math.round(prHeatDebug * PR_HEAT_FULL_MS / 60e3); d.querySelector('b').textContent = Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0') + ' waiting · stage ' + Math.ceil(prHeatDebug * 10) + '/10'; applyPrHeat(); };
   d.querySelector('input').oninput = ev => { prHeatDebug = +ev.target.value; show(); };
   document.body.appendChild(d); prHeatDebug = 0; show();
