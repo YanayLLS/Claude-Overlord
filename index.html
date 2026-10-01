@@ -1108,6 +1108,7 @@ button:focus-visible { outline-offset:0; }
     <div id="pr-dropdown" style="display:none"></div>
     <div id="actions-dropdown" style="display:none"></div>
     <div id="list-foot">
+      <div id="pr-flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <div id="pr-nag" style="display:none" onclick="prNagClick(event)"><button onclick="snoozePrNag(event)" title="Hide for 30 min" aria-label="Hide for 30 minutes">✕</button><b>Please approve your teammates' PR!</b><span></span></div>
       <div class="foot-chips">
         <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
@@ -5203,9 +5204,34 @@ function prNagClick(e) {
 }
 function snoozePrNag(e) { e.stopPropagation(); prNagSnoozeUntil = Date.now() + PR_NAG_SNOOZE_MS; renderPrNag(prNagWaiting); }
 
+// Heat: the longer a teammate's PR waits for approval, the redder the foot gets; flames from PR_HEAT_FLAMES on.
+const PR_HEAT_FULL_MS = 3 * 3600e3, PR_HEAT_FLAMES = 0.4; // ponytail: tuning knobs — full heat after 3h of the oldest PR waiting
+let prHeatDebug = null; // Ctrl+Shift+H slider overrides the real heat
+function applyPrHeat() {
+  const f = document.getElementById('list-foot'); if (!f) return;
+  const born = prState.prs.filter(p => !prSilenced(p) && prNagTarget(p)).map(p => Date.parse(p.createdAt)).filter(Boolean);
+  const h = prHeatDebug ?? (born.length ? Math.min(1, (Date.now() - Math.min(...born)) / PR_HEAT_FULL_MS) : 0);
+  f.style.setProperty('--heat', h.toFixed(3));
+  f.classList.toggle('on-fire', h >= PR_HEAT_FLAMES);
+  f.classList.toggle('heat-debug', prHeatDebug != null);
+}
+setInterval(applyPrHeat, 60e3);
+addEventListener('keydown', e => {
+  if (!(e.ctrlKey && e.shiftKey && e.code === 'KeyH')) return;
+  e.preventDefault(); e.stopPropagation();
+  let d = document.getElementById('pr-heat-debug');
+  if (d) { d.remove(); prHeatDebug = null; return applyPrHeat(); }
+  d = document.createElement('label'); d.id = 'pr-heat-debug';
+  d.innerHTML = 'PR heat <input type="range" min="0" max="1" step="0.01" value="0"><b></b>';
+  const show = () => { const m = Math.round(prHeatDebug * PR_HEAT_FULL_MS / 60e3); d.querySelector('b').textContent = Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0') + ' waiting'; applyPrHeat(); };
+  d.querySelector('input').oninput = ev => { prHeatDebug = +ev.target.value; show(); };
+  document.body.appendChild(d); prHeatDebug = 0; show();
+}, true);
+
 function renderPrBadge() {
   const b = document.getElementById('pr-badge');
   if (!b) return;
+  applyPrHeat();
   if (prState.error) {
     b.style.display = 'flex'; b.className = 'err'; b.textContent = '⬢ PRs — check failed';
     b.title = 'PR check failed — ' + prState.error;

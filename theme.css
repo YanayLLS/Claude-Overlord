@@ -253,9 +253,9 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-badge::before, #actions-badge:not(.running)::before { width: 13px; height: 13px; }
 #pr-badge.alert, #actions-badge.alert { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
 /* Footer takes the PR state's colour and breathes softly: red = teammates' PRs to approve, green = mine approved, waiting for my merge */
-#list-foot:has(#pr-badge.alert, #pr-badge.split) { --pf: 255,77,77; --pa: .26; --pg: .55; border-top-width: 2px; }
+#list-foot:has(#pr-badge.alert, #pr-badge.split), #list-foot.heat-debug { --pf: 255,77,77; --pa: calc(.26 + var(--heat, 0) * .5); --pg: calc(.55 + var(--heat, 0) * .4); border-top-width: 2px; }
 #list-foot:has(#pr-badge.ready) { --pf: 74,222,128; }
-#list-foot:has(#pr-badge.alert, #pr-badge.split, #pr-badge.ready) { background: rgba(var(--pf),var(--pa,.09)); border-top-color: rgba(var(--pf),.75); animation: pr-foot-glow 2.6s ease-in-out infinite; }
+#list-foot:has(#pr-badge.alert, #pr-badge.split, #pr-badge.ready), #list-foot.heat-debug { background: rgba(var(--pf),var(--pa,.09)); border-top-color: rgba(var(--pf),.75); animation: pr-foot-glow 2.6s ease-in-out infinite; }
 #pr-badge.alert, #pr-badge.ready, #pr-badge.split { color: #fff; border-color: transparent; font-weight: 600; animation: pr-chip-glow 2.6s ease-in-out infinite; }
 #pr-badge.alert, #pr-badge.alert:hover { background: #ff3b3b; }
 #pr-badge.ready, #pr-badge.ready:hover { background: #3fae68; }
@@ -263,7 +263,21 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-badge.alert:hover, #pr-badge.ready:hover, #pr-badge.split:hover { color: #fff; filter: brightness(1.1); }
 @keyframes pr-foot-glow { 50% { box-shadow: inset 0 0 18px rgba(var(--pf),var(--pg,.22)); } }
 @keyframes pr-chip-glow { 50% { box-shadow: 0 0 12px 1px rgba(var(--pf),.8); } }
-@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge { animation: none !important; } }
+/* Heat: flames rise off the foot's top edge, taller as the wait grows */
+#pr-flames { display: none; position: absolute; left: 0; right: 0; bottom: 100%; z-index: 5; height: calc(var(--heat, 0) * 70px); pointer-events: none;
+  justify-content: space-around; align-items: flex-end; filter: blur(.6px); opacity: calc(.5 + var(--heat, 0) * .5); }
+#list-foot.on-fire #pr-flames { display: flex; }
+#pr-flames i { width: 22px; height: 100%; margin: 0 -4px; border-radius: 50% 50% 40% 40% / 75% 75% 25% 25%; transform-origin: 50% 100%; mix-blend-mode: screen;
+  background: radial-gradient(ellipse 50% 100% at 50% 100%, #fff4b8 0%, #ffb02e 28%, #ff3b1f 58%, rgba(255,40,20,0) 75%); animation: pr-flame .8s ease-in-out infinite alternate; }
+#pr-flames i:nth-child(odd) { height: 72%; animation-duration: .62s; }
+#pr-flames i:nth-child(3n) { height: 88%; animation-delay: -.3s; }
+#pr-flames i:nth-child(4n) { height: 58%; animation-delay: -.5s; animation-duration: .7s; }
+@keyframes pr-flame { from { transform: scale(1, .82) skewX(-5deg); } to { transform: scale(.82, 1.12) skewX(6deg); opacity: .75; } }
+#pr-heat-debug { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 100001; display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  border-radius: 8px; background: var(--surface0); border: 1px solid var(--border); color: var(--text); font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+#pr-heat-debug input { width: 220px; }
+#pr-heat-debug b { font-weight: 600; min-width: 90px; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge, #pr-flames i { animation: none !important; } }
 #list-foot { position: relative; }
 #pr-nag { position: absolute; left: 10px; bottom: calc(100% + 8px); z-index: 50; max-width: min(260px, calc(100% - 20px)); flex-direction: column; gap: 2px;
   padding: 8px 12px; border-radius: 10px; background: var(--red); color: #11111b; font-size: 11.5px; cursor: pointer;
