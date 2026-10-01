@@ -6690,9 +6690,9 @@ function worldGithubChips(s) {
   const prs = s.prs || [], runs = s.runs || [], toApprove = prs.filter(p => p.needsApproval).length, changes = prs.filter(p => p.mine && p.state === 'changes').length, ready = prs.filter(p => p.mine && p.state === 'ready').length;
   const running = runs.filter(r => r.state === 'running').length, failed = runs.filter(r => r.state === 'failure').length;
   let pr;
-  if (toApprove) pr = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpPr()" title="Pull requests waiting for your review — click to fly to the first"><i></i><b>${toApprove}</b>to approve<em>${prs.length} open</em></span>`;
+  if (toApprove) pr = `<span class="wc wc-alert red wc-approve" style="--c:var(--red)" onclick="worldJumpPr()" title="Pull requests waiting for your review — click to fly to the first"><i></i><b>${toApprove}</b>to approve<em>${prs.length} open</em></span>`;
   else if (changes) pr = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpPr()" title="Changes requested on your pull requests — click to fly there"><i></i><b>${changes}</b>changes asked<em>${prs.length} open</em></span>`;
-  else if (ready) pr = `<span class="wc" style="--c:var(--green)" onclick="worldJumpPr()" title="Your pull requests ready to merge — click to fly there"><i></i><b>${ready}</b>ready to merge<em>${prs.length} open</em></span>`;
+  else if (ready) pr = `<span class="wc wc-alert wc-approve" style="--c:var(--green)" onclick="worldJumpPr()" title="Your pull requests ready to merge — click to fly there"><i></i><b>${ready}</b>ready to merge<em>${prs.length} open</em></span>`;
   else pr = `<span class="wc wc-quiet" style="--c:#94e2d5" onclick="worldJumpPr()" title="Open pull requests on the watched repos — click to fly to the harbour"><i></i><b>${prs.length}</b>PRs</span>`;
   let run;
   if (running) run = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpRun()" title="Deployments in progress — click to fly to the first"><i class="spin"></i><b>${running}</b>deploying${failed ? '<em>' + failed + ' failed</em>' : ''}</span>`;

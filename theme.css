@@ -252,8 +252,18 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-badge:hover, #actions-badge:hover { background: var(--surface1); color: var(--text); }
 #pr-badge::before, #actions-badge:not(.running)::before { width: 13px; height: 13px; }
 #pr-badge.alert, #actions-badge.alert { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
-#pr-badge.ready { background: rgba(74,222,128,.12); color: var(--green); border-color: rgba(74,222,128,.3); box-shadow: none; }
-#pr-badge.split { box-shadow: none; border-color: var(--border-hi); }
+/* Footer takes the PR state's colour and breathes softly: red = teammates' PRs to approve, green = mine approved, waiting for my merge */
+#list-foot:has(#pr-badge.alert, #pr-badge.split) { --pf: 248,113,113; }
+#list-foot:has(#pr-badge.ready) { --pf: 74,222,128; }
+#list-foot:has(#pr-badge.alert, #pr-badge.split, #pr-badge.ready) { background: rgba(var(--pf),.09); border-top-color: rgba(var(--pf),.55); animation: pr-foot-glow 2.6s ease-in-out infinite; }
+#pr-badge.alert, #pr-badge.ready, #pr-badge.split { color: #fff; border-color: transparent; font-weight: 600; animation: pr-chip-glow 2.6s ease-in-out infinite; }
+#pr-badge.alert, #pr-badge.alert:hover { background: #e05d5d; }
+#pr-badge.ready, #pr-badge.ready:hover { background: #3fae68; }
+#pr-badge.split, #pr-badge.split:hover { background: linear-gradient(90deg, #e05d5d 50%, #3fae68 50%); }
+#pr-badge.alert:hover, #pr-badge.ready:hover, #pr-badge.split:hover { color: #fff; filter: brightness(1.1); }
+@keyframes pr-foot-glow { 50% { box-shadow: inset 0 0 14px rgba(var(--pf),.22); } }
+@keyframes pr-chip-glow { 50% { box-shadow: 0 0 10px rgba(var(--pf),.55); } }
+@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge { animation: none !important; } }
 #list-foot { position: relative; }
 #pr-nag { position: absolute; left: 10px; bottom: calc(100% + 8px); z-index: 50; max-width: min(260px, calc(100% - 20px)); flex-direction: column; gap: 2px;
   padding: 8px 12px; border-radius: 10px; background: var(--red); color: #11111b; font-size: 11.5px; cursor: pointer;
