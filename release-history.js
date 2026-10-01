@@ -104,7 +104,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       const h = getState().history;
       if (h && h.items) push({ history: { ...h, items: h.items.map(x => x.id === m.id ? m : x) } });
     };
-    const wrote = await Promise.all(loaded.entries.filter(e => ['pending', 'merged'].includes(e.manifest.status)).map(async ({ manifest, sha }) => {
+    const wrote = await Promise.all(loaded.entries.filter(e => ['pending', 'merged', 'partial'].includes(e.manifest.status)).map(async ({ manifest, sha }) => {
       const seen = await Promise.all(manifest.repos.map(async (r) => {
         const out = { r };
         if (!r.mergeSha && !r.closed) out.s = await signoffOf(r.repo, r.pr.number);
@@ -302,5 +302,21 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     }
   }
 
-  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, recordHealth };
+  // Cancel: mark the pending release(s) holding these PRs ('repo#n') as called off by `by`
+  async function markCancelled(prKeys, by) {
+    const keys = new Set(prKeys);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const loaded = await load();
+      if (!loaded) return;
+      let conflict = false;
+      for (const { manifest, sha } of loaded.entries) {
+        if (manifest.status !== 'pending' || !manifest.repos.some(r => keys.has(r.repo + '#' + r.pr.number))) continue;
+        const w = await write(M.cancel(manifest, by), sha, `release ${manifest.id}: cancelled by @${by}`);
+        if (w.conflict) conflict = true;
+      }
+      if (!conflict) return load();
+    }
+  }
+
+  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, recordHealth, markCancelled };
 };

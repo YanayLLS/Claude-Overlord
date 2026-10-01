@@ -39,6 +39,17 @@ let a = M.newManifest({ id: 'x', rows: rows.slice(0, 1) });
 [a] = M.applyPr(a, 'o/front', { number: 9, closed: true });
 assert.strictEqual(a.status, 'abandoned');
 
+// called off: cancelled; partial when part of it had already merged; who and what never shipped are kept
+{
+  const two = M.newManifest({ id: 'c', rows });
+  const none = M.cancel(two, 'alice');
+  assert.deepStrictEqual([none.status, none.cancelled.by, none.cancelled.never.length], ['cancelled', 'alice', two.repos.length]);
+  let half; [half] = M.applyPr(two, two.repos[0].repo, { number: two.repos[0].pr.number, mergeSha: 'm1' });
+  const p = M.cancel(half, 'bob');
+  assert.strictEqual(p.status, 'partial');
+  assert.ok(!p.cancelled.never.includes(two.repos[0].label), 'the merged repo shipped');
+}
+
 // rollback plan: restore each merged repo's merge commit; noop when already there; skips honoured
 const plan = M.rollbackPlan(m, { 'o/front': 'm9', 'o/id': 'm2' });
 assert.deepStrictEqual(plan.map(p => `${p.repo}:${p.toSha}:${p.noop}`), ['o/front:m1:false', 'o/id:m2:true']);

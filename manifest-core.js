@@ -43,13 +43,15 @@ function newManifest({ id, kind = 'release', rollbackOf = null, rows, opener, ma
 }
 
 // Overall status from the repos: pending (a PR still open) → merged (all merged) → deployed /
-// deploy-failed (every CI deploy finished); abandoned when every PR closed unmerged.
+// deploy-failed (every CI deploy finished); abandoned when every PR closed unmerged. A release someone
+// called off (m.cancelled) reads as cancelled, or partial when some of it had already merged.
 function deriveStatus(m) {
   const repos = m.repos || [];
   if (!repos.length) return m.status;
   const open = repos.filter(r => !r.mergeSha && !r.closed);
   if (open.length) return 'pending';
   const merged = repos.filter(r => r.mergeSha);
+  if (m.cancelled) return merged.length ? 'partial' : 'cancelled';
   if (!merged.length) return 'abandoned';
   const deploys = merged.filter(r => r.deploy).map(r => r.deploy.state);
   if (deploys.some(s => s === 'failure')) return 'deploy-failed';
@@ -135,7 +137,16 @@ function groupPast(prs, { gapMs = 3 * 3600e3, max = 30 } = {}) {
 // The manifest id a release PR belongs to (written into its body by Overlord).
 function releaseIdOf(body) { const m = String(body || '').match(RELEASE_ID_RE); return m ? m[1] : null; }
 
-const api = { SCHEMA, DIR, MANIFESTS_REPO, manifestPath, releaseIdMark, nextId, newManifest, deriveStatus, groupPast, applyPr, applyDeploy, rollbackPlan, releaseIdOf };
+// Record that `by` called the release off; the repos it closed are the ones that never shipped.
+function cancel(m, by, now = Date.now()) {
+  const repos = m.repos.map(r => (!r.mergeSha && !r.closed ? { ...r, closed: true } : r));
+  const next = { ...m, repos, cancelled: { by, at: new Date(now).toISOString(), never: repos.filter(r => !r.mergeSha).map(r => r.label) } };
+  next.status = deriveStatus(next);
+  next.updatedAt = next.cancelled.at;
+  return next;
+}
+
+const api = { cancel, SCHEMA, DIR, MANIFESTS_REPO, manifestPath, releaseIdMark, nextId, newManifest, deriveStatus, groupPast, applyPr, applyDeploy, rollbackPlan, releaseIdOf };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ManifestCore = api;
 })(this);

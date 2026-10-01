@@ -671,6 +671,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     await loadApprovers();
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can cancel a release' });
     if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is running: stop it first' });
+    await loadTeamRun().catch(() => {}); // a teammate's Release all would hit closed PRs mid-wave
+    if (state.teamRun) return send({ type: 'toast', text: `@${state.teamRun.by} is running Release all (wave ${state.teamRun.wave}/${state.teamRun.waves}): ask them to stop it first` });
     const who = await whoAmI();
     const items = releaseItems(id || null);
     if (!items.length) return send({ type: 'toast', text: 'Nothing open to cancel' });
@@ -687,6 +689,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       for (const r of run.rows) if (r.pr && shut.has(r.repo + '#' + r.pr.number) && !failed.some(f => f.startsWith(r.label + ' '))) r.closed = true;
       push({ releaseRun: { ...stampSignoff(run) } });
     }
+    // the release record says who called it off and what never shipped (SOC2 trail)
+    const closedKeys = items.filter(it => !failed.some(f => f.startsWith(it.label + ' '))).map(it => it.repo + '#' + it.pr.number);
+    await history.markCancelled(closedKeys, who.github).catch(e => send({ type: 'toast', text: 'Release record: ' + e.message }));
     send({ type: 'toast', text: failed.length ? `Cancel: couldn't close ${failed.join('; ')}` : `Release cancelled: ${items.length} PR${items.length === 1 ? '' : 's'} closed` });
     await refreshRun().catch(() => {});
     reconcileHistory().catch(() => {});

@@ -497,7 +497,7 @@
 
   // ── History: every prod release from <org>/release-manifests, the pending one first ──
   const STATUS_CHIP = { pending: ['warn', 'pending'], merged: ['', 'merged · deploying'], deployed: ['ok', 'deployed ✓'],
-    'deploy-failed': ['bad', 'deploy failed'], abandoned: ['', 'abandoned'] };
+    'deploy-failed': ['bad', 'deploy failed'], abandoned: ['', 'abandoned'], cancelled: ['', 'cancelled'], partial: ['bad', 'partial · cancelled'] };
   const shortSha = (x) => x ? esc(x.slice(0, 7)) : '—';
   function historyHtml(s) {
     const hs = s.history;
@@ -553,7 +553,9 @@
           .map(login => ({ login, missing: openRepos.filter(r => !(r.signers || []).includes(login)).map(r => ({ label: r.label })) })) },
         attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn', armKey: 'h:' + m.id }));
       if (pending && a.isApprover && openRepos.length && !(s.releaseAll && s.releaseAll.running)) acts.push(cancelBtn(m.id, openRepos.length, 'rl-hist-btn'));
-      if (!pending && m.status !== 'abandoned' && m.repos.some(r => r.mergeSha) && a.isApprover) {
+      if (m.cancelled) h += `<div class="rl-hist-man${m.status === 'partial' ? ' bad' : ''}">✕ Cancelled by @${esc(m.cancelled.by || '?')} · ${esc(age(m.cancelled.at))} ago`
+        + (m.cancelled.never && m.cancelled.never.length ? ` · never shipped: ${esc(m.cancelled.never.join(', '))}` : '') + (m.status === 'partial' ? ' · the rest is live in prod' : '') + '</div>';
+      if (!pending && !['abandoned', 'cancelled'].includes(m.status) && m.repos.some(r => r.mergeSha) && a.isApprover) {
         acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}">↩ Roll back to this</button>`);
       }
       if (acts.length) h += '<div class="rl-hist-acts">' + acts.join('') + '</div>';
