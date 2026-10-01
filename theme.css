@@ -296,6 +296,8 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-fire[data-stage="10"]::before { background: radial-gradient(ellipse 100% 90% at 50% 105%, rgba(255,70,20,.6), rgba(255,30,20,.22) 60%, rgba(120,0,0,.15)); }
 #pr-fire[data-stage="9"] .fl i, #pr-fire[data-stage="10"] .fl i { animation-duration: .45s; }
 @keyframes pr-fire-glow { to { opacity: .7; } }
+#pr-fire.dissolve { opacity: 0; filter: blur(8px); transition: opacity 1.5s ease-out, filter 1.5s ease-out; }
+#pr-fire.dissolve .fl { transform: scaleY(0); transform-origin: 50% 100%; transition: transform 1.5s ease-in; }
 #pr-heat-debug { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 100001; display: flex; align-items: center; gap: 8px; padding: 6px 12px;
   border-radius: 8px; background: var(--surface0); border: 1px solid var(--border); color: var(--text); font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 #pr-heat-debug input { width: 220px; }

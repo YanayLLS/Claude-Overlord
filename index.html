@@ -5206,7 +5206,7 @@ function snoozePrNag(e) { e.stopPropagation(); prNagSnoozeUntil = Date.now() + P
 // Heat: the longer a teammate's PR waits for approval, the hotter the foot. 10 stages: 1-2 sparks, 3-4 embers,
 // 5-7 flames off the foot, 8-10 a fire across the bottom of the whole window that gets in the way of work.
 const PR_HEAT_FULL_MS = 3 * 3600e3; // ponytail: tuning knob — stage 10 after 3h of the oldest PR waiting (18 min a stage)
-let prHeatDebug = null; // Ctrl+Shift+H slider overrides the real heat
+let prHeatDebug = null, prFireOut = 0; // Ctrl+Shift+H slider overrides the real heat; prFireOut: dissolve timer
 function prFireEl() {
   let el = document.getElementById('pr-fire'); if (el) return el;
   el = document.createElement('div'); el.id = 'pr-fire'; el.setAttribute('aria-hidden', 'true');
@@ -5216,11 +5216,17 @@ function prFireEl() {
 }
 function applyPrHeat() {
   const f = document.getElementById('list-foot'); if (!f) return;
-  const born = prState.prs.filter(p => !prSilenced(p) && prNagTarget(p)).map(p => Date.parse(p.createdAt)).filter(Boolean);
+  const born = prState.prs.filter(p => !prSilenced(p) && prNagTarget(p) && !prApproved(p)).map(p => Date.parse(p.createdAt)).filter(Boolean);
   const h = prHeatDebug ?? (born.length ? Math.min(1, (Date.now() - Math.min(...born)) / PR_HEAT_FULL_MS) : 0);
   const stage = Math.ceil(h * 10), fire = prFireEl();
   f.style.setProperty('--heat', h.toFixed(3));
   f.classList.toggle('heat-debug', prHeatDebug != null);
+  // Approved (or muted/closed) meanwhile: the fire dissolves instead of vanishing.
+  if (!stage && +fire.dataset.stage && prHeatDebug == null) {
+    if (!prFireOut) { fire.classList.add('dissolve'); prFireOut = setTimeout(() => { prFireOut = 0; fire.classList.remove('dissolve'); fire.dataset.stage = 0; }, 1600); }
+    return;
+  }
+  clearTimeout(prFireOut); prFireOut = 0; fire.classList.remove('dissolve');
   fire.dataset.stage = stage;
   // Up to stage 7 the fire sits on the foot's top edge; from 8 it spans the window's bottom.
   if (stage && stage < 8) { const r = f.getBoundingClientRect(); fire.style.cssText = `left:${r.left}px;width:${r.width}px;bottom:${innerHeight - r.top}px`; }
