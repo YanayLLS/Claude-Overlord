@@ -263,21 +263,44 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-badge.alert:hover, #pr-badge.ready:hover, #pr-badge.split:hover { color: #fff; filter: brightness(1.1); }
 @keyframes pr-foot-glow { 50% { box-shadow: inset 0 0 18px rgba(var(--pf),var(--pg,.22)); } }
 @keyframes pr-chip-glow { 50% { box-shadow: 0 0 12px 1px rgba(var(--pf),.8); } }
-/* Heat: flames rise off the foot's top edge, taller as the wait grows */
-#pr-flames { display: none; position: absolute; left: 0; right: 0; bottom: 100%; z-index: 5; height: calc(var(--heat, 0) * 70px); pointer-events: none;
-  justify-content: space-around; align-items: flex-end; filter: blur(.6px); opacity: calc(.5 + var(--heat, 0) * .5); }
-#list-foot.on-fire #pr-flames { display: flex; }
-#pr-flames i { width: 22px; height: 100%; margin: 0 -4px; border-radius: 50% 50% 40% 40% / 75% 75% 25% 25%; transform-origin: 50% 100%; mix-blend-mode: screen;
+/* Heat stages (applyPrHeat): sparks → embers → flames on the foot → a fire over the bottom of the window */
+#pr-fire { display: none; position: fixed; left: 0; bottom: 0; width: 100vw; height: 0; z-index: 9000; pointer-events: none; --fh: 0px; --sh: 40px; }
+#pr-fire:not([data-stage="0"]) { display: block; }
+#pr-fire[data-stage="2"] { --sh: 60px; }
+#pr-fire[data-stage="3"] { --fh: 6px; --sh: 80px; }
+#pr-fire[data-stage="4"] { --fh: 14px; --sh: 110px; }
+#pr-fire[data-stage="5"] { --fh: 30px; --sh: 140px; }
+#pr-fire[data-stage="6"] { --fh: 55px; --sh: 180px; }
+#pr-fire[data-stage="7"] { --fh: 95px; --sh: 230px; }
+#pr-fire[data-stage="8"] { --fh: 28vh; --sh: 40vh; }
+#pr-fire[data-stage="9"] { --fh: 50vh; --sh: 65vh; }
+#pr-fire[data-stage="10"] { --fh: 78vh; --sh: 92vh; }
+#pr-fire .fl { position: absolute; left: 0; right: 0; bottom: 0; height: var(--fh); display: flex; align-items: flex-end; justify-content: space-around; filter: blur(.6px); }
+#pr-fire .fl i { flex: 1 1 0; height: 100%; margin: 0 -1.4%; border-radius: 50% 50% 40% 40% / 75% 75% 25% 25%; transform-origin: 50% 100%; mix-blend-mode: screen;
   background: radial-gradient(ellipse 50% 100% at 50% 100%, #fff4b8 0%, #ffb02e 28%, #ff3b1f 58%, rgba(255,40,20,0) 75%); animation: pr-flame .8s ease-in-out infinite alternate; }
-#pr-flames i:nth-child(odd) { height: 72%; animation-duration: .62s; }
-#pr-flames i:nth-child(3n) { height: 88%; animation-delay: -.3s; }
-#pr-flames i:nth-child(4n) { height: 58%; animation-delay: -.5s; animation-duration: .7s; }
-@keyframes pr-flame { from { transform: scale(1, .82) skewX(-5deg); } to { transform: scale(.82, 1.12) skewX(6deg); opacity: .75; } }
+#pr-fire .fl i:nth-child(odd) { height: 72%; animation-duration: .62s; }
+#pr-fire .fl i:nth-child(3n) { height: 90%; animation-delay: -.3s; }
+#pr-fire .fl i:nth-child(4n) { height: 58%; animation-delay: -.5s; animation-duration: .7s; }
+#pr-fire .fl i:nth-child(5n+2) { height: 100%; animation-duration: .55s; }
+@keyframes pr-flame { from { transform: scale(1, .8) skewX(-6deg); } to { transform: scale(.8, 1.14) skewX(7deg); opacity: .75; } }
+/* Sparks: tiny and few at 1, more at 2; embers (3-4) are bigger, redder and slower; from 5 they fly off the flames */
+#pr-fire b { position: absolute; bottom: calc(var(--fh) * .6); width: 3px; height: 3px; border-radius: 50%; background: #ffe48a; box-shadow: 0 0 6px 2px rgba(255,170,40,.8);
+  opacity: 0; animation: pr-spark 2.4s linear infinite; }
+#pr-fire[data-stage="1"] b:nth-child(n+8), #pr-fire[data-stage="2"] b:nth-child(n+16), #pr-fire[data-stage="3"] b:nth-child(n+22) { display: none; }
+#pr-fire[data-stage="3"] b, #pr-fire[data-stage="4"] b { width: 5px; height: 5px; background: #ff7a2e; box-shadow: 0 0 10px 3px rgba(255,80,20,.85); animation-duration: 3.2s; }
+#pr-fire[data-stage="8"] b, #pr-fire[data-stage="9"] b, #pr-fire[data-stage="10"] b { width: 6px; height: 6px; animation-duration: 1.8s; }
+@keyframes pr-spark { 0% { transform: translate(0, 0); opacity: 0; } 10% { opacity: 1; } 100% { transform: translate(var(--dx), calc(-1 * var(--sh))); opacity: 0; } }
+/* Raging (8-10): the whole window glows from below, faster flicker */
+#pr-fire[data-stage="8"]::before, #pr-fire[data-stage="9"]::before, #pr-fire[data-stage="10"]::before { content: ''; position: fixed; inset: 0;
+  background: radial-gradient(ellipse 90% 70% at 50% 110%, rgba(255,60,20,.45), rgba(255,40,20,.12) 55%, transparent 80%); animation: pr-fire-glow 1.2s ease-in-out infinite alternate; }
+#pr-fire[data-stage="10"]::before { background: radial-gradient(ellipse 100% 90% at 50% 105%, rgba(255,70,20,.6), rgba(255,30,20,.22) 60%, rgba(120,0,0,.15)); }
+#pr-fire[data-stage="9"] .fl i, #pr-fire[data-stage="10"] .fl i { animation-duration: .45s; }
+@keyframes pr-fire-glow { to { opacity: .7; } }
 #pr-heat-debug { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 100001; display: flex; align-items: center; gap: 8px; padding: 6px 12px;
   border-radius: 8px; background: var(--surface0); border: 1px solid var(--border); color: var(--text); font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 #pr-heat-debug input { width: 220px; }
-#pr-heat-debug b { font-weight: 600; min-width: 90px; font-variant-numeric: tabular-nums; }
-@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge, #pr-flames i { animation: none !important; } }
+#pr-heat-debug b { font-weight: 600; min-width: 160px; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge, #pr-fire .fl i, #pr-fire::before { animation: none !important; } }
 #list-foot { position: relative; }
 #pr-nag { position: absolute; left: 10px; bottom: calc(100% + 8px); z-index: 50; max-width: min(260px, calc(100% - 20px)); flex-direction: column; gap: 2px;
   padding: 8px 12px; border-radius: 10px; background: var(--red); color: #11111b; font-size: 11.5px; cursor: pointer;
