@@ -5193,10 +5193,6 @@ function renderPrNag(waiting) {
   // New line each time it appears, stable while it's up.
   if (due && n.style.display === 'none') n.querySelector('span').textContent = PR_NAG_LINES[Math.floor(Math.random() * PR_NAG_LINES.length)];
   n.style.display = due ? 'flex' : 'none';
-  // World mode has no PR chip in the footer: the bubble hangs under the header's PR counter instead.
-  const wc = due && worldView && document.querySelector('#world-counters .wc[onclick^="worldJumpPr"]');
-  if (wc) { const r = wc.getBoundingClientRect(); n.style.left = Math.max(8, Math.min(r.left, innerWidth - 270)) + 'px'; n.style.top = r.bottom + 10 + 'px'; }
-  else { n.style.left = n.style.top = ''; if (worldView) n.style.display = 'none'; }
 }
 function prNagClick(e) {
   e.stopPropagation();
@@ -6687,19 +6683,14 @@ function renderQuestIdle() {
 }
 function worldGithubChips(s) {
   if (!s.github) return '';
-  const prs = s.prs || [], runs = s.runs || [], toApprove = prs.filter(p => p.needsApproval).length, changes = prs.filter(p => p.mine && p.state === 'changes').length, ready = prs.filter(p => p.mine && p.state === 'ready').length;
+  const runs = s.runs || [];
   const running = runs.filter(r => r.state === 'running').length, failed = runs.filter(r => r.state === 'failure').length;
-  let pr;
-  if (toApprove) pr = `<span class="wc wc-alert red wc-approve" style="--c:var(--red)" onclick="worldJumpPr()" title="Pull requests waiting for your review — click to fly to the first"><i></i><b>${toApprove}</b>to approve<em>${prs.length} open</em></span>`;
-  else if (changes) pr = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpPr()" title="Changes requested on your pull requests — click to fly there"><i></i><b>${changes}</b>changes asked<em>${prs.length} open</em></span>`;
-  else if (ready) pr = `<span class="wc wc-alert wc-approve" style="--c:var(--green)" onclick="worldJumpPr()" title="Your pull requests ready to merge — click to fly there"><i></i><b>${ready}</b>ready to merge<em>${prs.length} open</em></span>`;
-  else pr = `<span class="wc wc-quiet" style="--c:#94e2d5" onclick="worldJumpPr()" title="Open pull requests on the watched repos — click to fly to the harbour"><i></i><b>${prs.length}</b>PRs</span>`;
   let run;
   if (running) run = `<span class="wc wc-alert" style="--c:var(--yellow)" onclick="worldJumpRun()" title="Deployments in progress — click to fly to the first"><i class="spin"></i><b>${running}</b>deploying${failed ? '<em>' + failed + ' failed</em>' : ''}</span>`;
   else if (failed) run = `<span class="wc wc-alert red" style="--c:var(--red)" onclick="worldJumpRun()" title="Failed deployments — click to fly to the first"><i></i><b>${failed}</b>deploy${failed === 1 ? '' : 's'} failed</span>`;
   else if (runs.length) run = `<span class="wc wc-quiet" style="--c:var(--green)" onclick="worldJumpRun()" title="Tracked workflows, all passing — click to fly to the harbour"><i></i><b>${runs.length}</b>deploy${runs.length === 1 ? '' : 's'} ok</span>`;
   else run = '';
-  return pr + run;
+  return run; // PRs live in the left menu's foot chip, same as outside World view
 }
 function worldJumpPr() { const prs = worldSnapshot().prs, p = prs.find(x => x.needsApproval) || prs.find(x => x.mine && x.state === 'changes') || prs.find(x => x.mine && x.state === 'ready') || prs[0]; if (!window.World) return; if (p) World.focusKey('pr', p.key); else World.focusKey('site', 'github'); }
 function worldJumpRun() { const runs = worldSnapshot().runs, r = runs.find(x => x.state === 'running') || runs.find(x => x.state === 'failure') || runs[0]; if (!window.World) return; if (r) World.focusKey('run', r.key); else World.focusKey('site', 'github'); }
