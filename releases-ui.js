@@ -72,12 +72,12 @@
       if (relOpen || apprOpen) return;
       relOpen = true; relShown = false;
       // your last choice sticks (a hover-close + reopen must never re-tick an env you unticked);
-      // only the very first time does it start with every env picked
+      // only the very first time does it start with every env but alpha (a new key, so everyone starts there once)
       if (state && state.config) {
         const targets = ReleasesCore.releaseTargets(state.config);
         let saved = null;
-        try { saved = JSON.parse(localStorage.getItem('rl-release-envs') || 'null'); } catch {}
-        relSel = new Set(Array.isArray(saved) ? saved.filter(e => targets.includes(e)) : targets);
+        try { saved = JSON.parse(localStorage.getItem('rl-release-envs2') || 'null'); } catch {}
+        relSel = new Set(Array.isArray(saved) ? saved.filter(e => targets.includes(e)) : targets.filter(e => e !== 'alpha')); // first time: everything but alpha
       }
       render();
     },
@@ -105,7 +105,7 @@
     },
     relToggle: (el) => {
       const e = el.dataset.env; relSel.has(e) ? relSel.delete(e) : relSel.add(e);
-      try { localStorage.setItem('rl-release-envs', JSON.stringify([...relSel])); } catch {}
+      try { localStorage.setItem('rl-release-envs2', JSON.stringify([...relSel])); } catch {}
       render();
     },
     releaseGo: () => {
