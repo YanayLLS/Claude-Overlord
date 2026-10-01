@@ -1447,6 +1447,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./prompt-copy.js"></script>
 <script src="./prompt-nav.js"></script>
 <script src="./tooltip.js"></script>
+<script src="./pr-fire.js"></script>
 <script src="./theme-core.js"></script>
 <script src="./term-size-core.js"></script>
 <script src="./shift-select-core.js"></script>
@@ -5215,8 +5216,7 @@ let prHeatDebug = null, prFireOut = 0; // Ctrl+Shift+H slider overrides the real
 function prFireEl() {
   let el = document.getElementById('pr-fire'); if (el) return el;
   el = document.createElement('div'); el.id = 'pr-fire'; el.setAttribute('aria-hidden', 'true');
-  el.innerHTML = '<div class="fl">' + '<i></i>'.repeat(28) + '</div><button class="pr-fire-cta" onclick="prFireClick(event)"></button>'
-    + Array.from({ length: 30 }, (_, i) => `<b style="left:${(i * 37) % 100}%;animation-delay:-${((i * 0.23) % 2.4).toFixed(2)}s;--dx:${(i % 7 - 3) * 7}px"></b>`).join('');
+  el.innerHTML = '<button class="pr-fire-cta" onclick="prFireClick(event)"></button>'; // the flames themselves: pr-fire.js's canvas
   document.body.appendChild(el); return el;
 }
 function applyPrHeat() {
@@ -5228,6 +5228,7 @@ function applyPrHeat() {
   f.classList.toggle('heat-debug', prHeatDebug != null);
   // Approved (or muted/closed) meanwhile: the fire dissolves instead of vanishing.
   if (!stage && +fire.dataset.stage && prHeatDebug == null) {
+    if (window.PrFire) PrFire.set(0); // stop feeding it: what's lit burns out
     if (!prFireOut) { fire.classList.add('dissolve'); prFireOut = setTimeout(() => { prFireOut = 0; fire.classList.remove('dissolve'); fire.dataset.stage = 0; }, 1600); }
     return;
   }
@@ -5235,9 +5236,10 @@ function applyPrHeat() {
   fire.dataset.stage = stage;
   // From stage 5 the flames cover the PR chip, so the fire carries its own way out.
   fire.querySelector('.pr-fire-cta').textContent = '🔥 ' + (born.length > 1 ? born.length + " teammates' PRs wait" : "A teammate's PR waits") + ' for your approval — Approve';
-  // Up to stage 7 the fire sits on the foot's top edge; from 8 it spans the window's bottom.
-  if (stage && stage < 8) { const r = f.getBoundingClientRect(); fire.style.cssText = `left:${r.left}px;width:${r.width}px;bottom:${innerHeight - r.top}px`; }
-  else fire.style.cssText = '';
+  // Up to stage 7 the fire burns off the foot's top edge (the button sits there too); from 8 it spans the window's bottom.
+  const r = f.getBoundingClientRect();
+  fire.style.cssText = `--foot-x:${r.left + r.width / 2}px;--foot-w:${r.width}px;--foot-b:${innerHeight - r.top}px`;
+  if (window.PrFire) PrFire.set(stage, r);
 }
 addEventListener('resize', applyPrHeat);
 setInterval(applyPrHeat, 60e3);
