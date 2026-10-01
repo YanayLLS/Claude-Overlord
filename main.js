@@ -3818,6 +3818,7 @@ function handleIpc(msg) {
     }
     case 'pollActionsNow': armActionsTimer(); break;
     case 'perfSample': samplePerf(); break;
+    case 'ramSample': send({ type: 'ramUsage', total: os.totalmem(), free: os.freemem() }); break;
     case 'fixActionRun': fixActionRun(msg.run || {}).catch(e => { flog('fixActionRun failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
     case 'fixPr': fixPr(msg.pr || {}).catch(e => { flog('fixPr failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
     case 'saveClickupSettings': {

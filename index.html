@@ -1080,6 +1080,7 @@ button:focus-visible { outline-offset:0; }
     <div id="bookmarks"></div>
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
 
+    <button class="hdr-btn" id="perf-top" onclick="togglePerfMenu(event)" aria-haspopup="dialog" aria-expanded="false" title="Performance: RAM in use on this PC"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span id="perf-top-ram"></span></button>
     <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="hdr-btn" id="update-btn" style="display:none;background:#a6e3a1;color:#11111b;font-weight:600" onclick="window.api.send({type:'installUpdate'})" title="Restart and install the downloaded update">&#x2B07; Update</button>
@@ -3843,6 +3844,7 @@ function handleAgentMsg(msg) {
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
     case 'toast': showToast(msg.text); break;
     case 'perfUsage': renderPerf(msg); break;
+    case 'ramUsage': showTopRam(msg); break;
     case 'models': setModels(msg.models || [], msg.error); break;
     case 'branchList': if (_branchCbs[msg.repo]) _branchCbs[msg.repo](msg.branches, msg.error); break;
     case 'featureRepoAdded':
@@ -6401,15 +6403,20 @@ function togglePerfMenu(e) {
   perfTimer = setInterval(() => api.send({ type: 'perfSample' }), PERF_POLL_MS);
   setTimeout(() => document.addEventListener('mousedown', closePerfMenuOutside));
 }
-function closePerfMenuOutside(ev) { if (!ev.target.closest('#perf-menu, #perf-btn')) closePerfMenu(); }
+function closePerfMenuOutside(ev) { if (!ev.target.closest('#perf-menu, #perf-btn, #perf-top')) closePerfMenu(); }
 function closePerfMenu() {
   clearInterval(perfTimer); perfTimer = null;
   clearTimeout(perfWait); perfWait = null;
   document.getElementById('perf-menu')?.remove();
-  document.getElementById('perf-btn')?.setAttribute('aria-expanded', 'false');
+  for (const id of ['perf-btn', 'perf-top']) document.getElementById(id)?.setAttribute('aria-expanded', 'false');
   document.removeEventListener('mousedown', closePerfMenuOutside);
 }
+// Header RAM readout (World view off only — with World view on the button lives in the ⋯ menu instead).
+function showTopRam(m) { const el = document.getElementById('perf-top-ram'); if (el) el.textContent = fmtMem(m.total - m.free); }
+setInterval(() => { if (!worldView && !document.hidden) api.send({ type: 'ramSample' }); }, PERF_POLL_MS);
+api.send({ type: 'ramSample' });
 function renderPerf(msg) {
+  if (msg.total) showTopRam(msg);
   const body = document.querySelector('#perf-menu .pf-body');
   if (!body) return;
   clearTimeout(perfWait); perfWait = null;
