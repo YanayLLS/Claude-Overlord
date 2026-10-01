@@ -144,15 +144,18 @@ function fixPrPlan(pr, infos, worktreeDirs) {
   const push = env
     ? `${head} is an environment branch - never push to it. Push this branch and open one fix PR into it: gh pr create --repo ${repo} --base ${head}, then work on that PR's checks the same way, and keep pushing to it (no new PR per round)`
     : `push to the PR: git push origin HEAD:${head}`;
+  const skill = /(^|\/)frontlineio-frontend$/i.test(repo)
+    ? `This repo has a pr-green skill with the CI and BDD diagnosis steps - invoke it first and follow it (a BDD container that exits early hides its real error in the run log in S3, the skill says where). ` : '';
   const prompt = `PR #${n} in ${repo} (${head} into ${base}) has failing checks: ${pr.url} - get it green. `
-    + where + `Loop until every check passes: `
-    + `1. gh pr checks ${n} --repo ${repo} to see what failed, then gh run view (run id) --repo ${repo} --log-failed for each failed run, and find the root cause. `
+    + where + skill + `Loop until every check passes: `
+    + `1. gh pr checks ${n} --repo ${repo} to see what failed. Handle every check that is already red, not just the first. Find each root cause in its job log: gh api repos/${repo}/actions/jobs/(job id)/logs - gh run view --log-failed refuses while the run is still in progress, the job log works for a finished job inside a running run. `
     + `2. A flaky or infra failure (timeout, network, runner, rate limit) unrelated to the change: rerun it with gh run rerun (run id) --failed --repo ${repo}, no code change. `
     + `3. A real failure: git pull origin ${head} first (the PR may have moved), fix the root cause, run the matching tests or build locally, commit, and ${push}. `
     + `If the failure comes from being behind ${base}, merge origin/${base} in and resolve the conflicts. `
-    + `4. Wait with gh pr checks ${n} --repo ${repo} --watch, then go back to 1. `
+    + `4. Do not wait for the whole run - a slow job (BDD can take an hour) must not hold up a red one. Start a background loop that runs gh pr checks ${n} --repo ${repo} every 60 to 90 seconds and exits as soon as any check is fail or nothing is pending any more. `
+    + `When it exits on a fail, investigate that red at once while the other checks keep running, then go back to 1. `
     + `Stop when all checks are green, or after 5 rounds with no progress - then report what blocks it. `
-    + `Never merge the PR, never force push, and never skip, delete or loosen a test or check to make it pass.`;
+    + `Never merge the PR, never force push, never stash or reset, and never skip, delete or loosen a test or check to make it pass.`;
   return { repoDir: pick.dir, prompt: shellSafe(prompt) };
 }
 

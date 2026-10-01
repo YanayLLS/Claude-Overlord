@@ -147,8 +147,14 @@ const { fixPrPlan } = require('./actions-core');
   assert.ok(sw.prompt.includes('git switch yanay-features'));
   // pushes land on the PR, and it loops on the checks until green
   assert.ok(p.prompt.includes('git push origin HEAD:yanay-features'));
-  assert.ok(p.prompt.includes('gh pr checks 948 --repo o/r --watch'));
-  assert.ok(p.prompt.includes('--log-failed'));
+  // reacts to the first red, not the end of the run: a polling loop, per-job logs (--log-failed refuses mid-run)
+  assert.ok(!p.prompt.includes('--watch'));
+  assert.ok(/every 60 to 90 seconds/.test(p.prompt) && /any check is fail/.test(p.prompt));
+  assert.ok(p.prompt.includes('gh api repos/o/r/actions/jobs/(job id)/logs'));
+  assert.ok(/every check that is already red/.test(p.prompt));
+  // the pr-green skill only exists in the frontend repo
+  assert.ok(!p.prompt.includes('pr-green'));
+  assert.ok(fixPrPlan({ ...pr, repo: 'LLSLtd/frontlineio-frontend' }, [{ dir: 'C:/x/f', repo: 'LLSLtd/frontlineio-frontend', branch: 'yanay-features' }], []).prompt.includes('pr-green skill'));
   assert.ok(/never merge/i.test(p.prompt));
   assert.ok(!/["&|<>^%!$`\;\n]/.test(fixPrPlan({ ...pr, url: 'x"&$(rm)`;|<>' }, infos, []).prompt));
   // a release PR's head is an env branch: no direct push, a fix PR into it instead
