@@ -710,6 +710,23 @@
 
   // Repos in the release config the PRs panel doesn't watch yet; null when that panel is off.
   // prSettings is index.html's (a shared global), refreshed whenever main echoes the settings.
+  // The repos the release map promotes: every teammate watches at least these for PRs.
+  function releaseRepos() {
+    return state && state.config && Array.isArray(state.config.repos) ? [...new Set(state.config.repos.filter(r => r.branches).map(r => r.repo))] : [];
+  }
+  // Missing release repos are added (and PR notifications turned on) as soon as both the release config and the
+  // PR settings have loaded — prSettingsLoaded guards against overwriting repos with the empty startup default.
+  function enforcePrWatch() {
+    if (typeof prSettingsLoaded === 'undefined' || !prSettingsLoaded) return;
+    const rel = releaseRepos(); if (!rel.length) return;
+    const have = new Set((prSettings.repos || []).map(r => r.toLowerCase()));
+    const missing = rel.filter(r => !have.has(r.toLowerCase()));
+    if (!missing.length && prSettings.enabled) return;
+    prSettings = { ...prSettings, enabled: true, repos: [...(prSettings.repos || []), ...missing] };
+    selectedRepos = new Set(prSettings.repos);
+    api.send({ type: 'savePrSettings', prSettings });
+    if (typeof showToast === 'function') showToast(missing.length ? `Watching PRs on the ${missing.length} release repo${missing.length === 1 ? '' : 's'} you weren't watching` : 'PR notifications are on: the team watches the release repos');
+  }
   function prsUnwatched() {
     if (typeof prSettings === 'undefined' || !prSettings.enabled || !state || !state.config) return null;
     const have = new Set((prSettings.repos || []).map(r => r.toLowerCase()));
@@ -933,5 +950,5 @@
     manualOverlay.classList.add('open');
   }
 
-  window.releasesUi = { onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; renderBadge(); renderSignPrompt(); renderManualLeft(); if (msg.open && !open) show(true); render(); } };
+  window.releasesUi = { releaseRepos, enforcePrWatch, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (msg.open && !open) show(true); render(); } };
 })();

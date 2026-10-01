@@ -4494,6 +4494,8 @@ function applySettings(s) {
     const i = document.getElementById('inp-pr-interval'); if (i) i.value = prSettings.intervalSec || 60;
     renderRepoPicker();
   }
+  // Any settings message is the real state (a new teammate's has no prSettings yet): release repos can be enforced now.
+  if (!prSettingsLoaded) { prSettingsLoaded = true; if (window.releasesUi) releasesUi.enforcePrWatch(); }
   if (s.actionsSettings) {
     actionsSettings = s.actionsSettings;
     const c = document.getElementById('chk-actions'); if (c) c.checked = !!actionsSettings.enabled;
@@ -5136,7 +5138,9 @@ function createGroupFromModal() {
 
 // ── PR notifications ───────────────────────────────────
 let prState = { prs: [], error: null, errorCode: null };
-let prSettings = { enabled: false, repos: [], intervalSec: 60 };
+let prSettings = { enabled: false, repos: [], intervalSec: 60 }, prSettingsLoaded = false; // loaded: the real settings arrived (releases-ui's enforcePrWatch waits for it)
+// Release-map repos (releases-ui): always watched, can't be unticked.
+const prLockedRepos = () => new Set(((window.releasesUi && releasesUi.releaseRepos()) || []).map(r => r.toLowerCase()));
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function prNeedsApproval(p) { return !p.mine && p.reviewDecision !== 'CHANGES_REQUESTED'; }
@@ -6292,7 +6296,10 @@ document.addEventListener('click', (e) => {
 let allRepos = [];
 let selectedRepos = new Set();
 
-function onPrEnableChange(val) { prSettings.enabled = val; onPrSettingsChange(); }
+function onPrEnableChange(val) {
+  if (!val && prLockedRepos().size) { document.getElementById('chk-pr').checked = true; showToast('PR notifications stay on: the team watches the release repos'); return; }
+  prSettings.enabled = val; onPrSettingsChange();
+}
 function onPrSettingsChange() {
   const intervalSec = Math.max(30, Number(document.getElementById('inp-pr-interval').value) || 60);
   prSettings = { enabled: document.getElementById('chk-pr').checked, repos: [...selectedRepos], intervalSec };
@@ -6346,16 +6353,18 @@ function renderRepoPicker() {
   const list = pool.filter(r => r.toLowerCase().includes(q)).sort(byRecent
     ? (a, b) => ((repoLastPr[b] || 0) - (repoLastPr[a] || 0)) || a.localeCompare(b)
     : (a, b) => (selectedRepos.has(b) - selectedRepos.has(a)) || a.localeCompare(b));
+  const locked = prLockedRepos();
   box.innerHTML = list.slice(0, 500).map(r => {
-    const [owner, name] = r.split('/');
-    return `<label class="pick-row${selectedRepos.has(r) ? ' on' : ''}">`
-    + `<input type="checkbox" ${selectedRepos.has(r) ? 'checked' : ''} onchange="toggleRepo('${r.replace(/'/g, "\\'")}',this.checked)">`
+    const [owner, name] = r.split('/'), lock = locked.has(r.toLowerCase());
+    return `<label class="pick-row${selectedRepos.has(r) ? ' on' : ''}"${lock ? ' title="A release repo: the whole team watches it"' : ''}>`
+    + `<input type="checkbox" ${selectedRepos.has(r) ? 'checked' : ''}${lock ? ' disabled' : ''} onchange="toggleRepo('${r.replace(/'/g, "\\'")}',this.checked)">`
     + `<span class="pick-name">${escapeHtml(name || r)}</span><span class="pick-sub">${escapeHtml(owner)}`
     + (repoLastPr[r] ? ` · <span title="Newest PR opened ${escAttr(new Date(repoLastPr[r]).toLocaleDateString())}">${agoShort(repoLastPr[r])}</span>` : r in repoLastPr ? ' · no PRs' : '') + `</span></label>`;
   }).join('') || '<div class="pick-empty">No repo matches “' + escapeHtml(q) + '”.</div>';
 }
 
 function toggleRepo(repo, on) {
+  if (!on && prLockedRepos().has(repo.toLowerCase())) return renderRepoPicker();
   if (on) selectedRepos.add(repo); else selectedRepos.delete(repo);
   onPrSettingsChange();
   renderRepoPicker(); // re-sort and recount
