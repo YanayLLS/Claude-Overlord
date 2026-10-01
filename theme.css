@@ -292,8 +292,6 @@ body.world-mode #pr-nag::after { top: auto; bottom: 100%; border-top-color: tran
 .um-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width .4s; }
 .um-fill.warn { background: var(--yellow); } .um-fill.danger { background: var(--red); }
 .usage-empty { font-size: 11px; color: var(--dim); padding: 2px 4px; }
-/* World mode lays these out itself (flex order on the list column) */
-body.world-mode #list-foot, body.world-mode .foot-chips { display: contents; }
 
 /* ── App tooltip (tooltip.js): dark bubble, arrow pointing at the element ── */
 #app-tip { position: fixed; z-index: 100000; max-width: 320px; padding: 6px 10px; border-radius: 8px;

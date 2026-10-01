@@ -15,8 +15,8 @@ body.world-mode { --w-roster: 300px; }
 body.world-mode #list-col { flex: none; width: var(--w-roster); position: relative; border-right: 1px solid var(--border); transition: width .32s cubic-bezier(.4,0,.2,1), transform .32s cubic-bezier(.4,0,.2,1), opacity .25s; }
 body.world-mode.roster-resizing #list-col { transition: none; }
 body.world-mode.roster-hidden #list-col { transform: translateX(-100%); opacity: 0; pointer-events: none; border-right: 0; }
-/* Only the agent list lives in the column: usage is the power plant, PRs / runs / peers are in the world. */
-body.world-mode #summary-bar, body.world-mode #world-attn, body.world-mode #world-extra, body.world-mode #pr-badge, body.world-mode #actions-badge { display: none !important; }
+/* The column's foot is the same as outside World view (PRs, Releases, usage), at the bottom of the left menu. */
+body.world-mode #world-attn, body.world-mode #world-extra { display: none !important; }
 #world-roster-grip, #world-roster-hide, #world-roster-tab { display: none; }
 body.world-mode #world-roster-grip { display: block; position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 6; }
 body.world-mode #world-roster-grip:hover, body.world-mode.roster-resizing #world-roster-grip { background: linear-gradient(90deg, transparent 2px, var(--w-gold) 2px, var(--w-gold) 5px, transparent 5px); }
@@ -140,11 +140,7 @@ body.world-mode #filter-bar { background: var(--w-panel-2); border-bottom-color:
 body.world-mode #filter-input { border-radius: 0; clip-path: var(--w-hexw); border-color: transparent; background: #0a0f15; padding-left: 14px; }
 body.world-mode #filter-input:focus { box-shadow: none; }
 body.world-mode .empty-title { font-family: var(--w-display); font-size: 15px; letter-spacing: .12em; text-transform: uppercase; }
-body.world-mode #pr-badge, body.world-mode #actions-badge { border-radius: 0; clip-path: var(--w-hexw); }
 
-/* Supply: the summary bar's usage rows, with the number written on the bar */
-body.world-mode #summary-bar { background: var(--w-panel-2); border-top-color: var(--w-line); padding: 8px 12px 9px; gap: 4px; letter-spacing: 0; }
-body.world-mode #summary-bar::before { content: 'Supply · usage'; font-family: var(--w-display); font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--w-gold); margin-bottom: 2px; }
 body.world-mode #ctx-warning { clip-path: none; border-bottom-color: rgba(243,139,168,.3); }
 
 /* Terminal pane header */
@@ -199,14 +195,14 @@ body.world-mode #filter-bar { display: flex; }
 /* ── World palette and layout: the artifact's navy ground, roster order, two-line rows ── */
 body.world-mode { --bg: #0b1118; --bg2: #0e161f; --bg3: #172230; --border: #223140; --border-hi: #34465a; --title-bg: #121b26; --panel-bg: #0e161f; --editor-bg: #0e161f; --card: #0e161f; --shadow: #05080c; --tab-active-bg: #121b26; --tab-inactive-bg: #0e161f; --surface0: #223140; --surface1: #34465a; --surface2: #46596f; }
 body.world-mode #hdr-world::after { content: ' World'; font-family: var(--w-display); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
-/* Roster column order: warning, Supply, filter, Needs you, list, extras, badges, map */
+/* Roster column order: warning, filter, Needs you, list, extras, dropdowns, then the foot (PRs, Releases, usage) */
 body.world-mode #ctx-warning { order: -4; }
-body.world-mode #summary-bar { order: -3; border-top: 0; border-bottom: 1px solid var(--w-line); }
 body.world-mode #filter-bar { order: -2; }
 body.world-mode #world-attn { order: -1; }
 body.world-mode #list { order: 0; }
 body.world-mode #world-extra { order: 1; }
-body.world-mode #pr-dropdown, body.world-mode #pr-badge, body.world-mode #actions-dropdown, body.world-mode #actions-badge { order: 2; }
+body.world-mode #pr-dropdown, body.world-mode #actions-dropdown { order: 2; }
+body.world-mode #list-foot { order: 3; }
 /* Agent cards become two-line roster rows: name, then what the agent is doing (the card's own status text). */
 body.world-mode .agent { display: grid; grid-template-columns: 14px 1fr auto; grid-template-rows: auto auto; column-gap: 8px; row-gap: 1px; height: auto; padding: 6px 10px 6px 12px; align-items: center; }
 body.world-mode .agent-dot { grid-row: 1 / span 2; grid-column: 1; justify-self: center; }
