@@ -47,6 +47,8 @@ assert.strictEqual(find('command', 'release').desc, 'Cut a release', 'no frontma
 // shadowing: repo wins over pc for same type+name
 assert.strictEqual(find('skill', 'run', 'repo').shadowed, undefined);
 assert.strictEqual(find('skill', 'run', 'pc').shadowed, 'repo');
+assert.strictEqual(find('skill', 'run', 'repo').overrides, 'pc');
+assert.strictEqual(find('skill', 'storify').overrides, undefined);
 
 // plugins: enabled only, namespaced with plugin name, group = plugin · marketplace
 const bs = find('skill', 'sp:brainstorming');

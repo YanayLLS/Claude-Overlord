@@ -25,6 +25,9 @@ const r = pickItems(items, null, 'bug');
 assert.strictEqual(r[0].name, 'fix-bug');
 assert.ok(r.some(i => i.name === 'systematic-debugging'));
 assert.ok(!r.some(i => i.name === 'release'));
+// description matches are literal words, not scattered letters — fuzzy over long text matches everything
+assert.ok(!pickItems(items, null, 'rcb').some(i => i.name === 'fix-bug'), 'no fuzzy over description');
+assert.ok(pickItems(items, null, 'clickup').some(i => i.name === 'fix-bug'), 'word in description matches');
 // empty query keeps origin order: repo, pc, plugin, builtin
 assert.deepStrictEqual(pickItems(items, null, '').map(i => i.origin), ['repo', 'pc', 'plugin', 'builtin']);
 

@@ -17,6 +17,7 @@ const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
 const { createPtyClient, pipePathFor, hostLauncher } = require('./pty-client');
 const { agentShell } = require('./shell-core');
+const { scanCatalog } = require('./catalog-core');
 
 
 // ── Constants ──────────────────────────────────────────
@@ -3905,6 +3906,7 @@ function handleIpc(msg) {
       // Keep the badge — the dev server watcher should auto-restart it
       break;
     }
+    case 'catalog': { const cwd = typeof msg.cwd === 'string' ? msg.cwd : ''; send({ type: 'catalog', cwd, items: scanCatalog(cwd || os.homedir(), os.homedir()) }); break; }
     case 'openFolder': { const p = msg.path; if (typeof p === 'string' && fs.existsSync(p)) shell.openPath(p).catch(() => {}); break; }
     case 'openBookmark': {
       const p = msg.path;

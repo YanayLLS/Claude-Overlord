@@ -24,9 +24,10 @@ function pickItems(items, type, q) {
   for (const it of items) {
     if (type && it.type !== type) continue;
     const n = fuzzyScore(q, it.name);
-    const d = n ? null : (q && it.desc ? fuzzyScore(q, it.desc) : null);
+    // ponytail: description needs every word literally — fuzzy over a sentence matches nearly anything
+    const d = !n && q && it.desc && q.toLowerCase().split(/\s+/).every(w => it.desc.toLowerCase().includes(w));
     if (!n && !d) continue;
-    out.push({ ...it, score: n ? n.score + 1000 : d.score, pos: n ? n.pos : [] });
+    out.push({ ...it, score: n ? n.score + 1000 : 0, pos: n ? n.pos : [] });
   }
   return out.sort((a, b) => (q ? b.score - a.score : 0) || ORIGIN_RANK[a.origin] - ORIGIN_RANK[b.origin]);
 }
