@@ -147,6 +147,12 @@ const { fixPrPlan } = require('./actions-core');
   assert.ok(sw.prompt.includes('git switch yanay-features'));
   // pushes land on the PR, and it loops on the checks until green
   assert.ok(p.prompt.includes('git push origin HEAD:yanay-features'));
+  // pushes without asking, local commits already on the branch go along; a rejected push pulls and retries
+  assert.ok(/without asking/i.test(p.prompt));
+  assert.ok(/already committed/i.test(p.prompt));
+  assert.ok(/rejected/i.test(p.prompt));
+  // never ends while checks are still running
+  assert.ok(/never end your turn/i.test(p.prompt));
   // reacts to the first red, not the end of the run: a polling loop, per-job logs (--log-failed refuses mid-run)
   assert.ok(!p.prompt.includes('--watch'));
   assert.ok(/every 60 to 90 seconds/.test(p.prompt) && /any check is fail/.test(p.prompt));

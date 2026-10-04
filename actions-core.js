@@ -136,18 +136,22 @@ function fixPrPlan(pr, infos, worktreeDirs) {
   if (!pick) return { error: `No local checkout of ${pr.repo} — open an agent in it once` };
   const n = pr.number, repo = pr.repo, head = pr.headRef, base = pr.baseRef || 'its base';
   const where = onBranch ? `You are in the local checkout that is already on the PR branch ${head} - work right here, on this branch. `
-    + `It may hold uncommitted work: leave that alone, never stash, reset or discard it, and commit only your own fixes. `
+    + `It may hold uncommitted work: leave that alone, never stash, reset or discard it, and stage only your own fixes. `
+    + `Commits already committed on this branch but not yet pushed belong to the PR - pushing them along with your fix is expected. `
     : `You are in the local checkout of ${repo}. First git fetch origin, then `
     + (env ? `work on a fix branch: git switch -c fix/pr-${n} origin/${head} (git switch fix/pr-${n} if it already exists). `
       : `work on the PR branch: git switch ${head} and git pull origin ${head}. `)
     + `If uncommitted changes block the switch, stop and say so - never stash, reset or discard them. `;
   const push = env
     ? `${head} is an environment branch - never push to it. Push this branch and open one fix PR into it: gh pr create --repo ${repo} --base ${head}, then work on that PR's checks the same way, and keep pushing to it (no new PR per round)`
-    : `push to the PR: git push origin HEAD:${head}`;
+    : `push to the PR: git push origin HEAD:${head}. If the push is rejected, git pull --no-rebase origin ${head}, resolve any conflicts, and push again`;
   const skill = /(^|\/)frontlineio-frontend$/i.test(repo)
     ? `This repo has a pr-green skill with the CI and BDD diagnosis steps - invoke it first and follow it (a BDD container that exits early hides its real error in the run log in S3, the skill says where). ` : '';
   const prompt = `PR #${n} in ${repo} (${head} into ${base}) has failing checks: ${pr.url} - get it green. `
-    + where + skill + `Loop until every check passes: `
+    + where + skill
+    + `You are authorized to commit and push fixes without asking - do not stop to ask for confirmation, a fix that is not pushed does not count. `
+    + `Never end your turn while any check is still pending or red - keep a background watcher running and act on what it reports. `
+    + `Loop until every check passes: `
     + `1. gh pr checks ${n} --repo ${repo} to see what failed. Handle every check that is already red, not just the first. Find each root cause in its job log: gh api repos/${repo}/actions/jobs/(job id)/logs - gh run view --log-failed refuses while the run is still in progress, the job log works for a finished job inside a running run. `
     + `2. A flaky or infra failure (timeout, network, runner, rate limit) unrelated to the change: rerun it with gh run rerun (run id) --failed --repo ${repo}, no code change. `
     + `3. A real failure: git pull origin ${head} first (the PR may have moved), fix the root cause, run the matching tests or build locally, commit, and ${push}. `
