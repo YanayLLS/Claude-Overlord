@@ -650,7 +650,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   function releaseItems(id) {
     if (id) {
       const m = ((state.history && state.history.items) || []).find(x => x.id === id);
-      return m ? m.repos.filter(r => !r.mergeSha && !r.closed).map(r => ({ repo: r.repo, label: r.label, env: 'prod', source: r.source, target: r.target,
+      return m ? m.repos.filter(r => !r.mergeSha && !r.closed).map(r => ({ repo: r.repo, label: r.label, env: m.env || 'prod', source: r.source, target: r.target,
         pr: r.pr, deploy: r.deploy && r.deploy.workflow })) : [];
     }
     return ((state.releaseRun && state.releaseRun.rows) || []).filter(r => r.pr && !r.merged && !r.closed)
@@ -833,7 +833,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     // hand-deployed repos named in releaseOrder are waves too: Release all pauses there until they're live
     // (seen through their `live` pin) or someone says they're deployed; the rest go in the end popup
     const man = (id ? (((state.history && state.history.items) || []).find(x => x.id === id) || {}).manual || [] : (state.releaseRun && state.releaseRun.manual) || [])
-      .map(m => ({ env: 'prod', ...m, manual: true }));
+      .map(x => ({ env: (id && ((((state.history && state.history.items) || []).find(y => y.id === id) || {}).env)) || 'prod', ...x, manual: true }));
     const inOrder = (m) => (state.config.releaseOrder || []).some(w => w.some(x => x === m.label || x.toLowerCase() === m.repo.toLowerCase()));
     const handWaves = man.filter(inOrder), handLater = man.filter(m => !inOrder(m));
     const waves = releaseWaves(state.config, go.concat(handWaves));

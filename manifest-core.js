@@ -27,9 +27,9 @@ function nextId(existing, now = new Date()) {
 
 // A new pending manifest from a release run's prod rows (the ones with a PR).
 // kind 'rollback' carries rollbackOf = the release it restores.
-function newManifest({ id, kind = 'release', rollbackOf = null, rows, opener, manual = [], flags = null, now = Date.now() }) {
+function newManifest({ id, kind = 'release', rollbackOf = null, env = 'prod', rows, opener, manual = [], flags = null, now = Date.now() }) {
   return {
-    schema: SCHEMA, id, kind, rollbackOf, env: 'prod', status: 'pending',
+    schema: SCHEMA, id, kind, rollbackOf, env, status: 'pending',
     openedAt: new Date(now).toISOString(), openedBy: opener || null, updatedAt: new Date(now).toISOString(),
     repos: (rows || []).filter(r => r.pr).map(r => ({
       repo: r.repo, label: r.label, source: r.source, target: r.target,
@@ -71,7 +71,7 @@ function applyPr(m, repo, pr) {
     if (pr.signers && JSON.stringify(pr.signers) !== JSON.stringify(next.signers)) next.signers = pr.signers;
     if (pr.signedSha && !next.mergeSha && next.signedSha !== pr.signedSha) next.signedSha = pr.signedSha;
     // merged without two approvers' signatures (e.g. on github.com): the audit exception
-    if (next.mergeSha) next.unsigned = (next.signers || []).length < SIGNATURES_NEEDED;
+    if (next.mergeSha && (m.env || 'prod') === 'prod') next.unsigned = (next.signers || []).length < SIGNATURES_NEEDED; // only prod is signed
     if (JSON.stringify(next) !== JSON.stringify(r)) changed = true;
     return next;
   });

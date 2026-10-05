@@ -60,28 +60,38 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     return { files, entries };
   }
 
-  // After a release run: record it. A still-pending manifest that already holds one of these PRs
-  // is the same release (re-run to add repos / refresh) — update it; else a new one.
+  // After a release run: record it, one release per env (prod is the signed one; alpha / staging get their
+  // own records so anyone can follow and manage them too). A still-pending record of that env that already
+  // holds one of these PRs is the same release (re-run to add repos / refresh) — update it; else a new one.
   async function recordRun(run, { opener, manual, flags }) {
     if (!repoOf()) return null;
-    const rows = run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed);
+    const envs = [...new Set(run.rows.filter(r => r.pr && !r.merged && !r.closed).map(r => r.env))];
+    let prodId = null;
+    for (const env of envs) {
+      const id = await recordEnv(run, env, { opener, manual: (manual || []).filter(m => (m.env || 'prod') === env), flags: env === 'prod' ? flags : null });
+      if (env === 'prod') prodId = id;
+    }
+    return prodId;
+  }
+  async function recordEnv(run, env, { opener, manual, flags }) {
+    const rows = run.rows.filter(r => r.env === env && r.pr && !r.merged && !r.closed);
     if (!rows.length) return null;
     const loaded = await load();
     if (!loaded) return null;
     const key = (r) => r.repo + '#' + r.pr.number;
     const mine = new Set(rows.map(key));
-    const existing = loaded.entries.find(e => e.manifest.status === 'pending' && e.manifest.repos.some(r => mine.has(key(r))));
+    const existing = loaded.entries.find(e => e.manifest.status === 'pending' && (e.manifest.env || 'prod') === env && e.manifest.repos.some(r => mine.has(key(r))));
     for (let attempt = 0; attempt < 4; attempt++) {
       let m, sha = null;
       if (existing) {
         m = existing.manifest; sha = existing.sha;
         const have = new Set(m.repos.map(key));
-        const add = M.newManifest({ id: m.id, rows: rows.filter(r => !have.has(key(r))) }).repos;
+        const add = M.newManifest({ id: m.id, env, rows: rows.filter(r => !have.has(key(r))) }).repos;
         m = { ...m, repos: m.repos.concat(add), manual, flags: flags && flags.missing ? { missing: flags.missing } : m.flags, updatedAt: new Date().toISOString() };
       } else {
-        m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name).concat(attempt ? [M.nextId(loaded.files.map(f => f.name))] : [])), rows, opener, manual, flags });
+        m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name).concat(attempt ? [M.nextId(loaded.files.map(f => f.name))] : [])), env, rows, opener, manual, flags });
       }
-      const w = await write(m, sha, existing ? `release ${m.id}: updated` : `release ${m.id}: opened by @${opener && opener.login}`);
+      const w = await write(m, sha, existing ? `release ${m.id}: updated` : `release ${m.id} (${env}): opened by @${opener && opener.login}`);
       if (w.conflict) { await load(); continue; }
       if (w.error) { send({ type: 'toast', text: 'Release manifest: ' + w.error }); return null; }
       // tag every PR with its release id, so anyone's Overlord can tell which release it's in
@@ -302,7 +312,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
   // A run's findings per prod PR, into its pending manifest (only what changed is written)
   async function recordHealth(rows) {
     const key = (r) => r.repo + '#' + r.pr.number;
-    const found = new Map((rows || []).filter(r => r.env === 'prod' && r.pr && !r.running).map(r => [key(r), {
+    const found = new Map((rows || []).filter(r => r.pr && !r.running).map(r => [key(r), {
       status: r.status || null, checks: r.checks || null, conflict: r.conflict == null ? null : r.conflict,
       backMerge: r.backMerge && r.backMerge.number ? { number: r.backMerge.number, url: r.backMerge.url, conflict: !!r.backMerge.conflict } : null,
       dbschemas: r.dbschemas && r.dbschemas.used && r.dbschemas.used.length ? r.dbschemas.used : null, error: r.error || null }]));

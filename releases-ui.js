@@ -569,16 +569,18 @@
       m = { ...m, repos: m.repos.map(r => ({ ...r, signers: [...new Set((r.signers || []).concat(relSigned))] })) };
       const anyone = [...new Set(m.repos.flatMap(r => r.signers || []))];
       const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
+      const env = m.env || 'prod', signs = env === 'prod'; // only prod is signed (SOC2); alpha / staging just merge
       h += `<div class="rl-hist-card${pending ? ' pending' : ''}"><div class="rl-hist-top">`
         + `<b>${m.kind === 'rollback' ? '↩ Rollback' : 'Release'} ${esc(m.id)}</b>`
         + (m.kind === 'rollback' ? `<span class="rl-rr-chip">restores ${esc(m.rollbackOf)}</span>` : '')
         + (m.imported ? '<span class="rl-rr-chip" title="Built from merged release PRs, before release manifests existed">imported</span>' : '')
         + (!m.imported && m.repos.some(r => r.unsigned) ? `<span class="rl-rr-chip bad" title="Merged with fewer than 2 approvers' signatures (e.g. on github.com): ${esc(m.repos.filter(r => r.unsigned).map(r => r.label).join(', '))}">merged unsigned ⚠</span>` : '')
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
-        + (pending ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
+        + (env !== 'prod' ? `<span class="rl-env" style="--hue:${ENV_HUE[env.toLowerCase()] || 'var(--dim)'}">${esc(env)}</span>` : '')
+        + (pending && signs ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
         + (m.ticket ? `<a class="rl-hist-ticket" data-url="${esc(m.ticket.url)}" title="${esc(m.ticket.name)}">ClickUp ticket ↗</a>` : '')
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
-        + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
+        + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signs && signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
       // the release at a glance: how many repos are where
       if (pending || m.status === 'merged' || m.status === 'partial') {
         const cnt = {};
@@ -617,7 +619,7 @@
         const dep = relItemHtml({ s: stOf(r) || 'merged-hand' });
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
-          + `<span class="rl-hist-state">${rowActs(r, need, notDeployed)}${need && r.signedSha && r.headSha && r.signedSha !== r.headSha ? `<a class="rl-unsigned-new" data-url="${esc(`https://github.com/${r.repo}/compare/${r.signedSha}...${r.headSha}`)}" title="Commits that landed after the last signature: they ship without anyone signing them">+ since signed ↗</a>` : ''}${r.mergeSha ? (liveItems && liveItems[r.label] && ['deploying', 'deployed', 'failed'].includes(liveItems[r.label].s) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-state">${rowActs(r, need, notDeployed)}${need && r.signedSha && r.headSha && r.signedSha !== r.headSha ? `<a class="rl-unsigned-new" data-url="${esc(`https://github.com/${r.repo}/compare/${r.signedSha}...${r.headSha}`)}" title="Commits that landed after the last signature: they ship without anyone signing them">+ since signed ↗</a>` : ''}${r.mergeSha ? (liveItems && liveItems[r.label] && ['deploying', 'deployed', 'failed'].includes(liveItems[r.label].s) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (!signs ? '' : (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })()) + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
       }
       notDeployed = notDeployed.concat(wave.filter(r => !r.hand && !DONE.has(stOf(r))).map(r => r.label));
       h += '</div>';
@@ -629,13 +631,13 @@
       if (m.flags && m.flags.missing && m.flags.missing.length) h += `<div class="rl-hist-man bad">Flags to seed: ${esc(m.flags.missing.join(', '))}</div>`;
       // actions
       const acts = [];
-      if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push(signBtn(s, 'rl-hist-btn go', '✍ Sign'));
+      if (signs && pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push(signBtn(s, 'rl-hist-btn go', '✍ Sign'));
       // (an open back-merge doesn't hold a repo: Release all merges it first)
       // (failing checks don't hold a repo either: GitHub's branch protection decides; only a conflict does)
       const held = (r) => r.health && (r.health.backMerge && r.health.backMerge.conflict ? `its back-merge #${r.health.backMerge.number} conflicts` : r.health.conflict ? 'conflicts with its target' : null);
       if (pending && a.isApprover) acts.push(releaseAllBtn(s, {
-        ready: signers.length >= 2 ? openRepos.filter(r => !held(r)) : [],
-        waiting: signers.length >= 2 ? [] : openRepos, held: openRepos.filter(held).map(r => ({ label: r.label, why: held(r) })),
+        ready: !signs || signers.length >= 2 ? openRepos.filter(r => !held(r)) : [],
+        waiting: !signs || signers.length >= 2 ? [] : openRepos, held: openRepos.filter(held).map(r => ({ label: r.label, why: held(r) })),
         signoff: { count: signers.length, need: 2, signers, gaps: anyone.filter(l => !signers.includes(l))
           .map(login => ({ login, missing: openRepos.filter(r => !(r.signers || []).includes(login)).map(r => ({ label: r.label })) })) },
         attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn', armKey: 'h:' + m.id }));
@@ -907,7 +909,7 @@
       // Header and footer stay put; only the board scrolls. The clicked cell's detail is a
       // drawer over the board's bottom edge, so opening it never resizes the modal.
       h += (tab === 'history' && s.config ? historyHtml(s) + '</div><div class="rl-foot">'
-        + `<div class="rl-legend"><span>Prod releases, recorded in ${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
+        + `<div class="rl-legend"><span>Releases, recorded in ${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
         : tab === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
         + (s.localOnly ? `<div class="rl-local" title="It isn't on GitHub yet, so teammates can't see this board. Commit and push it to share.">Local config, not pushed yet · <code>${esc(s.localOnly)}</code></div>` : '');
     }
