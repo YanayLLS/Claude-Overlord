@@ -70,7 +70,7 @@
     // opens (hover or click) with every env picked; slides in once, then re-renders keep it still
     releaseMenu: () => {
       if (relOpen || apprOpen) return;
-      relOpen = true; relShown = false;
+      relOpen = true; relShown = false; relSkip = new Set();
       // your last choice sticks (a hover-close + reopen must never re-tick an env you unticked);
       // only the very first time does it start with every env but alpha (a new key, so everyone starts there once)
       if (state && state.config) {
@@ -110,9 +110,14 @@
     },
     releaseGo: () => {
       if (!relSel.size) return;
-      // runs in main without an agent; the panel turns into its live results
-      api.send({ type: 'releasesRelease', envs: [...relSel] });
+      // runs in main without an agent; the panel turns into its live results. Unticked repos stay out
+      const all = [...new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo))];
+      const repos = relSkip.size ? all.filter(r => !relSkip.has(r)) : null;
+      if (repos && !repos.length) return;
+      api.send({ type: 'releasesRelease', envs: [...relSel], repos });
     },
+    relRepo: (el) => { const r = el.dataset.repo; relSkip.has(r) ? relSkip.delete(r) : relSkip.add(r); render(); },
+    relReposAll: (el) => { if (el.dataset.on === '1') relSkip = new Set(); else relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo)); render(); },
     // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
     // one agent for every blocked row — leave the modal to land on it
     fixDeploy: (el) => { api.send({ type: 'releasesFixDeploy', key: el.dataset.key }); show(false); },
@@ -550,6 +555,7 @@
   // optimistic: the progress line shows right on the confirming click; main's first update replaces it
   function startingAll() { if (state) state = { ...state, releaseAll: { running: true, status: 'checking', detail: 'starting', wave: 0, waves: 0, merged: [] } }; }
   let armed = null, armTimer = null;
+  let relSkip = new Set(); // release picker: repos left out (all in by default, every time it opens)
   const openChanges = new Set(); // History rows whose "N changes" list is open
   const ARM_MS = 6000;
   function arm(key) {
@@ -924,7 +930,14 @@
     for (const row of (s.grid && s.grid.rows) || []) for (const c of row.cells || []) for (const n of (c && c.nexts) || []) {
       if (n.ahead) waiting[n.to] = (waiting[n.to] || 0) + n.ahead;
     }
-    const plan = ReleasesCore.releasePlan(cfg, [...relSel]);
+    const fullPlan = ReleasesCore.releasePlan(cfg, [...relSel]);
+    // the repos it would release: each one's waiting commits for the picked envs; untick to leave it out
+    const repoWait = {};
+    for (const row of (s.grid && s.grid.rows) || []) for (const c of row.cells || []) for (const n of (c && c.nexts) || []) {
+      if (n.ahead && relSel.has(n.to)) repoWait[row.repo] = (repoWait[row.repo] || 0) + n.ahead;
+    }
+    const planRepos = [...new Map(fullPlan.prs.map(p => [p.repo, p])).values()].filter(p => repoWait[p.repo]);
+    const plan = { prs: fullPlan.prs.filter(p => !relSkip.has(p.repo) && repoWait[p.repo]), manual: relSkip.size ? [] : fullPlan.manual }; // releasing some repos: the hand-deployed ones aren't part of it
     const unwatched = prsUnwatched();
     const bell = !unwatched ? ''
       : `<button class="rl-rel-bell${unwatched.length ? '' : ' done'}" data-act="relWatch" title="${unwatched.length
@@ -939,7 +952,14 @@
         + `<span class="rl-env" style="--hue:${ENV_HUE[e.toLowerCase()] || 'var(--dim)'}">${esc(e)}</span>`
         + `<span class="rl-rel-wait">${waiting[e] ? `<b>${waiting[e]}</b> waiting` : 'up to date'}</span></button>`;
     }
-    h += '</div><div class="rl-rel-sum">' + (relSel.size
+    h += '</div>';
+    if (relSel.size && planRepos.length) {
+      const allOn = !planRepos.some(p => relSkip.has(p.repo));
+      h += `<div class="rl-rel-head rl-rel-repos-head"><span>Repos</span><button class="rl-rel-all" data-act="relReposAll" data-on="${allOn ? 0 : 1}">${allOn ? 'None' : 'All'}</button></div><div class="rl-rel-repos">`
+        + planRepos.map(p => `<button class="rl-rel-repo${relSkip.has(p.repo) ? '' : ' on'}" data-act="relRepo" data-repo="${esc(p.repo)}" title="${relSkip.has(p.repo) ? 'Left out of this release' : 'In this release'}">`
+          + `<i></i><b>${esc(p.label)}</b><span>${repoWait[p.repo]} waiting</span></button>`).join('') + '</div>';
+    }
+    h += '<div class="rl-rel-sum">' + (relSel.size
       ? `${plan.prs.length} release PR${plan.prs.length === 1 ? '' : 's'} to check and open`
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
       : 'Pick one or more environments') + '</div>'

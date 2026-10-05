@@ -996,7 +996,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // Release button, deterministic: every PR of the plan opened/reused + back-merges + mergeable
   // and checks state, streamed into state.releaseRun row by row. No agent unless a row is
   // blocked and someone presses its Fix.
-  async function release(envs) {
+  // repos: only these (owner/name) — releasing one repo, e.g. a hotfix; none = every repo with changes
+  async function release(envs, repos) {
     const cfg = state.config;
     const targets = cfg ? releaseTargets(cfg) : [];
     envs = (Array.isArray(envs) ? envs : []).filter(e => targets.includes(e));
@@ -1006,6 +1007,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (!state.approvers.isApprover) { send({ type: 'toast', text: 'Only release approvers can release — see 👥 Approvers' }); return; }
     if (!versionOk()) { send({ type: 'toast', text: outdatedMsg() }); return; }
     const plan = releasePlan(cfg, envs);
+    if (Array.isArray(repos) && repos.length) {
+      const only = new Set(repos.map(r => String(r).toLowerCase()));
+      plan.prs = plan.prs.filter(p => only.has(p.repo.toLowerCase()));
+      plan.manual = plan.manual.filter(p => only.has(p.repo.toLowerCase()));
+      if (!plan.prs.length) { send({ type: 'toast', text: 'None of the picked repos has a release PR to open for those environments' }); return; }
+    }
     const run = { envs, startedAt: Date.now(), running: true, rows: plan.prs.map(p => ({ ...p, running: true })), manual: plan.manual, flags: null };
     push({ releaseRun: run });
     const cwd = await configCheckout();
@@ -1151,7 +1158,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         return true;
       }
       case 'releasesRefresh': refresh(); return true;
-      case 'releasesRelease': release(msg.envs).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
+      case 'releasesRelease': release(msg.envs, msg.repos).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
       case 'releasesApprovers': loadApprovers().catch(() => {}); return true;
       case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;
