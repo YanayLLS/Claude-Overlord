@@ -2544,6 +2544,15 @@ const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir:
   startAgent: (cwd, prompt) => createAgent(cwd, null, prompt),
   fixRun: (run) => fixActionRun(run),
   fixPr: (pr) => fixPr(pr),
+  // the ClickUp release ticket whose name ends with `suffix`, in list `listId` (this user's ClickUp token)
+  clickupFindTask: async (listId, suffix) => {
+    if (!settings.clickupToken || !/^\d+$/.test(String(listId))) return null;
+    const r = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&order_by=created&reverse=false&page=0`, { headers: { Authorization: settings.clickupToken } }).catch(() => null);
+    if (!r || !r.ok) return null;
+    const j = await r.json().catch(() => ({}));
+    const t = (j.tasks || []).find(x => String(x.name || '').endsWith(suffix));
+    return t ? { url: t.url, name: t.name } : null;
+  },
   notify: (title, body, url, onClick) => {
     if (!Notification.isSupported()) return;
     const n = new Notification({ title, body, silent: true });

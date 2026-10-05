@@ -11,7 +11,7 @@ const HISTORY_SHOWN = 30;
 // Files whose effects live in the database, not the code: a rollback can't undo them
 const DATA_CHANGE = /(^|\/)(migrations?|migrate)\/|\.sql$|(^|\/)(schema|schemas)\//i;
 
-module.exports = function createHistory({ ghJson, writeTmp, push, getState, org, signoffOf, requestReviews, whoAmI, send, teamKnown = () => true }) {
+module.exports = function createHistory({ ghJson, writeTmp, push, getState, org, signoffOf, requestReviews, whoAmI, send, teamKnown = () => true, findTicket = async () => null, ticketRepo = () => null }) {
   const repoOf = () => org() && `${org()}/${M.MANIFESTS_REPO}`;
   const apiErr = (r) => r.error || (r.data && !Array.isArray(r.data) && r.data.message && r.data.status ? `${r.data.message} (${r.data.status})` : null);
   const cache = new Map(); // path → { sha, manifest }
@@ -112,7 +112,10 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       const h = getState().history;
       if (h && h.items) push({ history: { ...h, items: h.items.map(x => x.id === m.id ? m : x) } });
     };
-    const wrote = await Promise.all(loaded.entries.filter(e => ['pending', 'merged', 'partial'].includes(e.manifest.status)).map(async ({ manifest, sha }) => {
+    // the ClickUp release ticket: the ticket repo merged in a release from the last 3 days, and no link yet
+    const tr = ticketRepo();
+    const wantsTicket = (m) => tr && !m.ticket && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 3 * 86400e3 && m.repos.some(r => r.repo === tr && r.mergeSha);
+    const wrote = await Promise.all(loaded.entries.filter(e => ['pending', 'merged', 'partial'].includes(e.manifest.status) || wantsTicket(e.manifest)).map(async ({ manifest, sha }) => {
       const seen = await Promise.all(manifest.repos.map(async (r) => {
         const out = { r };
         if (!r.mergeSha && !r.closed) out.s = await signoffOf(r.repo, r.pr.number);
@@ -139,6 +142,10 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         if (!done) continue;
         [m, c] = M.applyDeploy(m, r.repo, { state: done.conclusion === 'success' ? 'success' : 'failure', url: done.html_url, at: done.updated_at });
         changed = changed || c;
+      }
+      if (wantsTicket(m)) {
+        const t = await findTicket(m.repos.find(r => r.repo === tr).mergeSha).catch(() => null);
+        if (t) { m = { ...m, ticket: t }; changed = true; }
       }
       if (!changed) return false;
       show(m);

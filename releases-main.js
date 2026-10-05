@@ -32,7 +32,7 @@ const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
-module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr }) {
+module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask }) {
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
@@ -578,6 +578,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (others.length) await ghJson(['api', '-X', 'POST', `repos/${repo}/pulls/${n}/requested_reviewers`, '--input', writeTmp({ reviewers: others })]);
   };
   const history = createHistory({ ghJson, writeTmp: (p) => writeTmp(p), push, getState: () => state, org: () => approversOrg(), teamKnown: () => memberLogins().length > 0,
+    // the release's ClickUp ticket (config releaseTicket: { list, repo }): named after that repo's deployed merge commit
+    findTicket: (sha) => { const t = state.config && state.config.releaseTicket; return t && clickupFindTask ? clickupFindTask(t.list, `(${sha.slice(0, 8)})`) : Promise.resolve(null); },
+    ticketRepo: () => state.config && state.config.releaseTicket && state.config.releaseTicket.repo,
     signoffOf, requestReviews, whoAmI, send });
   // one at a time; a call during a run queues exactly one more (a sign mid-reconcile must still land)
   let reconciling = null, again = false;

@@ -38,6 +38,7 @@ function validateConfig(cfg) {
   }
   envs.forEach((e, i) => { if (envs.indexOf(e) !== i) out.push(`envs[${i}]: "${e}" is listed twice`); });
   if (!Array.isArray(cfg.repos)) return [...out, 'repos: must be an array'];
+  if (cfg.releaseTicket != null && (typeof cfg.releaseTicket !== 'object' || !/^\d+$/.test(String(cfg.releaseTicket.list)) || !REPO_RE.test(String(cfg.releaseTicket.repo)))) out.push('releaseTicket: must be { list: "<ClickUp list id>", repo: "owner/name" } (the repo whose prod deploy opens the ticket)');
   if (cfg.checkout != null && !REPO_RE.test(String(cfg.checkout))) out.push(`checkout: "${cfg.checkout}" is not owner/name (the repo whose local clone runs the flag check and Fix agents)`);
   if (cfg.releaseOrder != null && (!Array.isArray(cfg.releaseOrder) || cfg.releaseOrder.some(w => !Array.isArray(w) || w.some(x => typeof x !== 'string')))) {
     out.push('releaseOrder: must be a list of waves (lists of repo labels or names)');

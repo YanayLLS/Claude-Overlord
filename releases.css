@@ -497,3 +497,5 @@
 .rl-row-btn.armed.risky { border-color:rgba(248,113,113,.7); background:rgba(248,113,113,.16); color:var(--red); }
 .rl-unsigned-new { font-size:10.5px; color:var(--peach); cursor:pointer; white-space:nowrap; text-decoration:none; }
 .rl-unsigned-new:hover { text-decoration:underline; }
+.rl-hist-ticket { font-size:11px; color:var(--accent); cursor:pointer; white-space:nowrap; }
+.rl-hist-ticket:hover { text-decoration:underline; }
