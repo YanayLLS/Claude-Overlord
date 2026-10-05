@@ -450,6 +450,14 @@
     if (r.mergeSha && r.deploy && r.deploy.state === 'failure') return `<button class="rl-row-btn" data-act="rowRerun" ${d} title="Re-run the failed jobs of its deploy">↻ Re-run deploy</button>`;
     return '';
   }
+  // a release whose ticket repo deployed 15+ min ago but no ClickUp ticket turned up: say so (the ticket step
+  // can't fail the deploy, so nothing else would). Returns the explanation, or ''.
+  function ticketLate(st, m) {
+    const t = st.config && st.config.releaseTicket;
+    const r = t && m.repos.find(x => x.repo === t.repo && x.deploy && x.deploy.state === 'success');
+    if (!r || Date.now() - Date.parse(r.deploy.at || 0) < 15 * 60 * 1000) return '';
+    return `${r.label} deployed ${age(r.deploy.at)} ago but no ClickUp release ticket was found for it (its deploy's "Open the ClickUp release ticket" step probably failed: check that run). Or you're not connected to ClickUp in Overlord's Settings, so Overlord can't look it up.`;
+  }
   // the Board's pinned line for the release in flight
   function activeStrip(st) {
     const m = activeRelease(st);
@@ -643,6 +651,7 @@
         + (env !== 'prod' ? `<span class="rl-env" style="--hue:${ENV_HUE[env.toLowerCase()] || 'var(--dim)'}">${esc(env)}</span>` : '')
         + (pending && signs ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
         + (m.version ? `<span class="rl-rr-chip" title="Frontend version this release shipped">v${esc(m.version)}</span>` : '')
+        + (!m.ticket && ticketLate(s, m) ? `<span class="rl-rr-chip warn" title="${esc(ticketLate(s, m))}">⚠ no ClickUp ticket</span>` : '')
         + (m.ticket ? `<a class="rl-hist-ticket" data-url="${esc(m.ticket.url)}" title="${esc(m.ticket.name)}">ClickUp ticket ↗</a>` : '')
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signs && signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
