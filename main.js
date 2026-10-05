@@ -2451,10 +2451,10 @@ function notifyPrDecision(pr, kind) {
 // a new PR — and polls at once, so the panel updates within seconds instead of at the next interval. A second check per
 // repo ("owner/name#runs") watches its pull_request Actions runs, since checks finishing don't touch the PR itself; and
 // every PR_CHECK_WATCH_MS each open PR's head commit ("owner/name@sha#checks" / "#status") catches CI from outside Actions.
-// ponytail: unchanged answers are free, a change costs one request + one full poll (coalesced while one runs). Sized for
-// ~400 PR updates a day across the team; if GitHub's secondary limit ever bites, slow PR_CHECK_WATCH_MS first.
+// ponytail: unchanged answers are free; a change costs one request, and the full poll it triggers is budgeted below.
+// If GitHub's secondary (per-minute) limit ever bites, slow PR_CHECK_WATCH_MS first.
 const PR_WATCH_MS = 10e3, PR_CHECK_WATCH_MS = 30e3;
-let ghToken = null, prWatchTimer = null, prCheckWatchTimer = null, prWatchPolling = false;
+let ghToken = null, prWatchTimer = null, prCheckWatchTimer = null;
 const ghTokenGet = () => ghToken ? Promise.resolve(ghToken) : new Promise((res, rej) =>
   exec('gh auth token', { windowsHide: true, timeout: 10000 }, (err, out) => { const t = (out || '').trim(); if (err || !t) return rej(err || new Error('no token')); res(ghToken = t); }));
 const prWatchGet = async (key, etag) => {
@@ -2469,12 +2469,24 @@ const prWatchGet = async (key, etag) => {
   if (r.status === 401) ghToken = null; // rotated by gh auth: fetch it again next tick
   return { status: r.status, etag: r.headers.get('etag') };
 };
-// A change seen mid-poll may have landed after that poll read GitHub: run once more when it ends.
-let prWatchAgain = false;
-const prWatchPoll = async () => {
-  if (prWatchPolling) { prWatchAgain = true; return; }
-  prWatchPolling = true;
-  try { do { prWatchAgain = false; await pollPRs(); } while (prWatchAgain); } finally { prWatchPolling = false; }
+// Triggered polls spend GraphQL points (~12+ each), so they're budgeted: at most one per PR_WATCH_GAP_MS (changes in the
+// gap share it), and only while over PR_WATCH_RESERVE of the hourly GraphQL limit is left — /rate_limit is free to ask.
+// Below that, only the regular interval poll runs. (Every-10s triggered polls during busy CI used to drain the limit.)
+const PR_WATCH_GAP_MS = 20e3, PR_WATCH_RESERVE = 0.5;
+let prWatchLastPoll = 0, prWatchPending = null;
+async function graphqlLeft() {
+  const r = await fetch('https://api.github.com/rate_limit', { headers: { Authorization: `Bearer ${await ghTokenGet()}` }, signal: AbortSignal.timeout(8000) });
+  return (await r.json()).resources.graphql;
+}
+const prWatchPoll = () => {
+  if (prWatchPending) return;
+  prWatchPending = setTimeout(async () => {
+    prWatchPending = null;
+    const g = await graphqlLeft().catch(() => null);
+    if (!g || g.remaining < g.limit * PR_WATCH_RESERVE) return;
+    prWatchLastPoll = Date.now();
+    pollPRs();
+  }, Math.max(0, prWatchLastPoll + PR_WATCH_GAP_MS - Date.now()));
 };
 const prWatch = require('./pr-watch').createPrWatch({ get: prWatchGet, onChange: prWatchPoll });
 const prCheckWatch = require('./pr-watch').createPrWatch({ get: prWatchGet, onChange: prWatchPoll });
