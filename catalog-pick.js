@@ -44,4 +44,13 @@ function makeSlashGate({ send, open, ms = 250, timer = { set: (fn, t) => setTime
   };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate };
+// Viewport row of the ─── divider on top of Claude's input ("> " / "❯ "), or -1.
+// The popover opens above it so the prompt stays visible. Requiring the divider
+// keeps a quoted "> " line in the transcript from counting.
+function promptTop(lines) {
+  for (let i = lines.length - 1; i > 0; i--)
+    if (/^\s*(?:>|❯)(\s|$)/.test(lines[i]) && /[─━]{3}/.test(lines[i - 1])) return i - 1;
+  return -1;
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate, promptTop };

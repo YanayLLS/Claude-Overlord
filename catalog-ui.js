@@ -51,11 +51,23 @@
     isOpen = false; pop.hidden = true;
     if (refocus) xterms.get(selectedId)?.terminal?.focus();
   }
+  // Screen y of the top of Claude's prompt box, or null (no prompt in view, or scrolled up).
+  function promptY() {
+    const x = xterms.get(selectedId), t = x?.terminal, b = t?.buffer.active, screen = x?.el.querySelector('.xterm-screen');
+    if (!screen || b.viewportY !== b.baseY) return null;
+    const lines = [];
+    for (let i = 0; i < t.rows; i++) lines.push(b.getLine(b.viewportY + i)?.translateToString() || '');
+    const row = promptTop(lines);
+    if (row < 0) return null;
+    const r = screen.getBoundingClientRect();
+    return r.top + row * (r.height / t.rows);
+  }
   function place() {
     const r = btn.getBoundingClientRect();
+    const y = promptY() ?? r.top; // above the prompt box so it stays readable; else above the + button
     pop.style.left = Math.max(8, r.left) + 'px';
-    pop.style.bottom = Math.max(8, innerHeight - r.top + 6) + 'px'; // opens upward from the corner button
-    pop.style.maxHeight = Math.min(560, r.top - 14) + 'px';
+    pop.style.bottom = Math.max(8, innerHeight - y + 6) + 'px';
+    pop.style.maxHeight = Math.min(560, y - 14) + 'px';
   }
 
   function onMsg(msg) {
