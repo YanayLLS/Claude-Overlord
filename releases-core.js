@@ -81,6 +81,10 @@ function validateConfig(cfg) {
         if (!hasCaptureGroup(l && l.match)) out.push(`${at}.live.${env}.match: must be a regex with one (capture group) for the sha`);
       }
     }
+    if (r.health != null) {
+      if (typeof r.health !== 'object' || Array.isArray(r.health)) out.push(`${at}.health: must be an object`);
+      else for (const [env, url] of Object.entries(r.health)) if (!/^https:\/\//.test(String(url))) out.push(`${at}.health.${env}: must be an https:// URL that answers 2xx when healthy`);
+    }
     if (r.deployUrl != null) {
       if (typeof r.deployUrl !== 'object' || Array.isArray(r.deployUrl)) out.push(`${at}.deployUrl: must be an object`);
       else for (const [env, url] of Object.entries(r.deployUrl)) {

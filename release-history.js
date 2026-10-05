@@ -166,16 +166,24 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       }
       const deploys = await Promise.all(m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state)).map(async (r) => {
         const runs = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', `head_sha=${r.mergeSha}`, '-f', 'per_page=5']);
-        return [r, ((runs.data && runs.data.workflow_runs) || []).find(x => x.status === 'completed')];
+        const list = (runs.data && runs.data.workflow_runs) || [];
+        return [r, list.find(x => x.status === 'completed'), list.find(x => x.status !== 'completed')];
       }));
-      for (const [r, done] of deploys) {
+      for (const [r, done, live] of deploys) {
+        // still running: where to watch it, since when, and how long it usually takes (its last good runs)
+        if (!done && live && (!r.deploy.runUrl || r.deploy.runUrl !== live.html_url)) {
+          const ok = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', 'status=success', '-f', 'per_page=5']);
+          const durs = ((ok.data && ok.data.workflow_runs) || []).map(x => Date.parse(x.updated_at) - Date.parse(x.run_started_at || x.created_at)).filter(x => x > 0).sort((a, b) => a - b);
+          m = { ...m, repos: m.repos.map(x => x.repo === r.repo && x.pr.number === r.pr.number ? { ...x, deploy: { ...x.deploy, runUrl: live.html_url, startedAt: live.run_started_at || live.created_at, typicalMs: durs.length ? durs[Math.floor(durs.length / 2)] : null } } : x) };
+          changed = true;
+        }
         if (!done) continue;
         [m, c] = M.applyDeploy(m, r.repo, { state: done.conclusion === 'success' ? 'success' : 'failure', url: done.html_url, at: done.updated_at });
         changed = changed || c;
       }
       if (wantsTicket(m)) {
         const t = await findTicket(m.repos.find(r => r.repo === tr).mergeSha).catch(() => null);
-        if (t) { m = { ...m, ticket: t }; changed = true; }
+        if (t) { const v = String(t.name).match(/\bv(\d[\w.]*)/); m = { ...m, ticket: t, ...(v ? { version: v[1] } : {}) }; changed = true; }
       }
       if (!changed) return false;
       show(m);

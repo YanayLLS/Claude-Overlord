@@ -315,7 +315,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const man = res.data.manifests && res.data.manifests.ref && res.data.manifests.ref.target.oid;
     const manChanged = man && lastManifests && man !== lastManifests;
     lastManifests = man || lastManifests;
-    if (manChanged) await Promise.all([history.load(), refreshRun(), loadTeamRun()]).catch(() => {});
+    if (manChanged) { await Promise.all([history.load(), refreshRun(), loadTeamRun()]).catch(() => {}); notifyTransitions(); checkHealth().catch(() => {}); }
     if (key !== lastPing || manChanged) { lastPing = key; await checkToSign(); }
   }
   // every SIGN_PING_MS while a release is in flight; every other tick (10s) when none is
@@ -605,7 +605,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     signoffOf, requestReviews, whoAmI, send });
   // one at a time; a call during a run queues exactly one more (a sign mid-reconcile must still land)
   let reconciling = null, again = false;
-  const reconcileHistory = async () => {
+  const reconcileHistory = async () => { const r = await reconcileOnce(); notifyTransitions(); checkHealth().catch(() => {}); return r; };
+  const reconcileOnce = async () => {
     if (reconciling) { again = true; return reconciling; }
     reconciling = (async () => { try { do { again = false; await history.reconcile(); } while (again); } finally { reconciling = null; } })();
     return reconciling;
@@ -755,6 +756,43 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       if (r && r.health) return { checks: r.health.checks, conflict: r.health.conflict === true };
     }
     return null;
+  }
+
+  // ── "Released" means verified: each repo with a health URL (config repos[].health.<env>) is checked
+  // after its deploy succeeds; the result shows on the card. No URL = nothing to verify beyond the deploy.
+  const healthSeen = new Map(); // repo|sha → { ok, status, at }
+  async function checkHealth() {
+    const out = {};
+    for (const m of ((state.history && state.history.items) || []).slice(0, 3)) {
+      for (const r of m.repos) {
+        const cfg = (state.config.repos || []).find(x => x.repo === r.repo);
+        const url = cfg && cfg.health && cfg.health[m.env || 'prod'];
+        if (!url || !r.mergeSha || !r.deploy || r.deploy.state !== 'success') continue;
+        const k = r.repo + '|' + r.mergeSha;
+        if (!healthSeen.has(k) || (!healthSeen.get(k).ok && Date.now() - healthSeen.get(k).at > 60000)) {
+          const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) }).catch(e => ({ ok: false, status: e.name === 'TimeoutError' ? 'timeout' : 'unreachable' }));
+          healthSeen.set(k, { ok: !!res.ok, status: res.status, at: Date.now(), url });
+        }
+        out[k] = healthSeen.get(k);
+      }
+    }
+    push({ health: out });
+  }
+  // the moments that matter, as notifications: a release becomes signed (ready), and fully deployed
+  const relSeen = new Map(); // id → { ready, status }
+  function notifyTransitions() {
+    const team = memberLogins().map(l => l.toLowerCase());
+    for (const m of ((state.history && state.history.items) || []).slice(0, 5)) {
+      const open = m.repos.filter(r => !r.mergeSha && !r.closed);
+      const signed = open.length ? [...new Set(m.repos.flatMap(r => r.signers || []).concat((m.signedBy || []).map(x => x.login)))].filter(l => team.includes(String(l).toLowerCase()) && open.every(r => (r.signers || []).includes(l) || (m.signedBy || []).some(x => x.login === l))).length : 0;
+      const now = { ready: m.status === 'pending' && (m.env || 'prod') === 'prod' && signed >= 2, status: m.status };
+      const was = relSeen.get(m.id);
+      relSeen.set(m.id, now);
+      if (!was || !notify) continue; // first look only learns where things stand
+      if (now.ready && !was.ready) notify(`✍ Release ${m.id} signed 2/2`, 'Ready to release: open it and press Release all', null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
+      if (now.status === 'deployed' && was.status !== 'deployed') notify(`🚀 Release ${m.id} deployed`, `${m.repos.filter(r => r.mergeSha).length} repos live`, null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
+      if (now.status === 'deploy-failed' && was.status !== 'deploy-failed') notify(`❌ Release ${m.id}: a deploy failed`, m.repos.filter(r => r.deploy && r.deploy.state === 'failure').map(r => r.label).join(', '), null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
+    }
   }
 
   // ── Managing a release in flight, one repo at a time (History card row actions) ──
