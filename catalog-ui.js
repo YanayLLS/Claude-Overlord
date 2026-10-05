@@ -124,7 +124,7 @@
       rows = TYPES;
       sel = Math.min(sel, rows.length - 1);
       list.innerHTML = TYPES.map((x, i) => { const n = count(x.type);
-        return `<div class="cg-row cg-type${i === sel ? ' sel' : ''}${n ? '' : ' empty'}" data-i="${i}"><span class="cg-icon">${icon(x.type)}</span>`
+        return `<div class="cg-row cg-type${i === sel ? ' sel' : ''}${n ? '' : ' cg-none'}" data-i="${i}"><span class="cg-icon">${icon(x.type)}</span>`
           + `<span class="cg-name">${x.label}</span><span class="cg-count">${n}</span><kbd>${i + 1}</kbd></div>`; }).join('');
       renderDetail();
       foot.innerHTML = kbd('1–4', 'pick') + kbd('↵', 'open') + kbd('Esc', 'close');
