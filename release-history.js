@@ -138,8 +138,10 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     };
     // the ClickUp release ticket: the ticket repo merged in a release from the last 3 days, and no link yet
     const tr = ticketRepo();
-    const wantsTicket = (m) => tr && !m.ticket && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 3 * 86400e3 && m.repos.some(r => r.repo === tr && r.mergeSha);
-    const wrote = await Promise.all(loaded.entries.filter(e => ['pending', 'merged', 'partial'].includes(e.manifest.status) || wantsTicket(e.manifest)).map(async ({ manifest, sha }) => {
+    const wantsTicket = (m) => tr && !m.ticket && m.kind !== 'rollback' && !m.imported && Date.now() - Date.parse(m.openedAt) < 21 * 86400e3 && m.repos.some(r => r.repo === tr && r.mergeSha);
+    // in flight only: an old or imported record stuck at 'merged' (no deploy result) isn't re-read every cycle
+    const settling = (m) => m.status === 'pending' || (['merged', 'partial'].includes(m.status) && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
+    const wrote = await Promise.all(loaded.entries.filter(e => settling(e.manifest) || wantsTicket(e.manifest)).map(async ({ manifest, sha }) => {
       const seen = await Promise.all(manifest.repos.map(async (r) => {
         const out = { r };
         if (!r.mergeSha && !r.closed) out.s = await signoffOf(r.repo, r.pr.number);
@@ -182,7 +184,12 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         changed = changed || c;
       }
       if (wantsTicket(m)) {
-        const t = await findTicket(m.repos.find(r => r.repo === tr).mergeSha).catch(() => null);
+        // the ticket workflow comments its link on the release PR (no ClickUp connection needed to see it);
+        // else this user's ClickUp, by the deployed commit
+        const rr = m.repos.find(r => r.repo === tr);
+        const cs = await ghJson(['api', '-X', 'GET', `repos/${tr}/issues/${rr.pr.number}/comments`, '-f', 'per_page=100']);
+        const hit = (Array.isArray(cs.data) ? cs.data : []).map(c => String(c.body || '').match(/ClickUp release ticket: (?:\[([^\]]+)\]\()?(https:\/\/app\.clickup\.com\/t\/\w+)/)).find(Boolean);
+        const t = hit ? { url: hit[2], name: hit[1] || 'ClickUp release ticket' } : await findTicket(rr.mergeSha).catch(() => null);
         if (t) { const v = String(t.name).match(/\bv(\d[\w.]*)/); m = { ...m, ticket: t, ...(v ? { version: v[1] } : {}) }; changed = true; }
       }
       if (!changed) return false;

@@ -318,11 +318,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (manChanged) { await Promise.all([history.load(), refreshRun(), loadTeamRun()]).catch(() => {}); notifyTransitions(); checkHealth().catch(() => {}); }
     if (key !== lastPing || manChanged) { lastPing = key; await checkToSign(); }
   }
+  // a release in flight: open PRs, or merged in the last 2 days and still settling (an old or imported record
+  // stuck at 'merged', its deploy result never recorded, doesn't count)
+  const inFlightRel = (m) => m.status === 'pending' || (['merged', 'partial'].includes(m.status) && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
   // every SIGN_PING_MS while a release is in flight; every other tick (10s) when none is
   let pingTick = 0;
   const pingTimer = setInterval(() => {
     if (limited()) return;
-    const inFlight = ((state.history && state.history.items) || []).some(m => ['pending', 'merged', 'partial'].includes(m.status)) || (state.releaseAll && state.releaseAll.running);
+    const inFlight = ((state.history && state.history.items) || []).some(inFlightRel) || (state.releaseAll && state.releaseAll.running);
     if (!inFlight && (pingTick++ % 2)) return;
     signPing().catch(() => {});
   }, SIGN_PING_MS);
@@ -1130,7 +1133,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         send({ type: 'releases', state });
         // while it's open and a release is in flight, keep it current (merges/deploys made anywhere)
         modalOpen = true; clearInterval(liveTimer);
-        liveTimer = setInterval(() => { if (!limited() && modalOpen && ((state.history && state.history.items) || []).some(m => ['pending', 'merged', 'partial'].includes(m.status))) reconcileHistory().catch(() => {}); }, LIVE_MS);
+        liveTimer = setInterval(() => { if (!limited() && modalOpen && ((state.history && state.history.items) || []).some(inFlightRel)) reconcileHistory().catch(() => {}); }, LIVE_MS);
         if (liveTimer.unref) liveTimer.unref();
         loadApprovers().then(refreshRun).catch(() => {});
         loadTeamRun().catch(() => {});
