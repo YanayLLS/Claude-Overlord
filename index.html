@@ -4094,7 +4094,7 @@ function handleAgentMsg(msg) {
       break;
     }
     case 'updateDownloaded':
-      setUpdateBtn({ label: 'Update', ver: 'v' + msg.version, title: 'Restart and install v' + msg.version,
+      setUpdateBtn({ label: 'Update', ver: 'v' + msg.version, title: updTitle('Restart and install v' + msg.version, msg.changes),
         onclick: () => { setUpdateBtn({ label: 'Restarting…', busy: true }); api.send({ type: 'installUpdate' }); } });
       break;
     // Source checkouts (start.bat) update by pulling master. The two update
@@ -4104,7 +4104,7 @@ function handleAgentMsg(msg) {
       if (!b) break;
       if (!updateLabel(msg.behind)) { b.style.display = 'none'; updBtnArgs = null; break; } // update-core.js
       setUpdateBtn({ label: 'Update', ver: msg.behind + (msg.behind === 1 ? ' commit' : ' commits'),
-        title: 'Pull ' + msg.behind + ' new commit(s) from master and restart',
+        title: updTitle('Pull ' + msg.behind + ' new commit(s) from master and restart', msg.changes),
         onclick: () => { setUpdateBtn({ label: 'Updating…', busy: true }); api.send({ type: 'gitPull' }); } });
       break;
     }
@@ -5728,6 +5728,11 @@ function closeSnooze() { const p = document.getElementById('pr-snooze-pop'); if 
 // Busy states (restarting, pulling) swap the arrow for a spinner and lock the click.
 const UPD_ICON = '<svg class="ic upd-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
 let updBtnArgs = null; // the last idle state, restored after a failed pull
+// Hover text: the action, then what's new (newest first), each subject cut short — they run long.
+function updTitle(head, changes) {
+  if (!changes || !changes.length) return head;
+  return head + '\n\nWhat changed:\n' + changes.map(c => '• ' + (c.length > 140 ? c.slice(0, 139) + '…' : c)).join('\n');
+}
 function setUpdateBtn(args) {
   const b = document.getElementById('update-btn');
   if (!b) return;

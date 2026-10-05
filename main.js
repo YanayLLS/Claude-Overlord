@@ -72,10 +72,21 @@ autoUpdater.on('update-available', info => {
   send({ type: 'updateAvailable', version: info.version });
 });
 
-autoUpdater.on('update-downloaded', info => {
+autoUpdater.on('update-downloaded', async info => {
   logToRenderer(`Update downloaded: v${info.version} — ready to install`);
-  send({ type: 'updateDownloaded', version: info.version });
+  send({ type: 'updateDownloaded', version: info.version, changes: await releaseChanges(app.getVersion(), info.version) });
 });
+
+// Commit subjects between two release tags, for the update button's hover. Release
+// bodies are empty, so ask GitHub's compare API (public repo, no auth); [] on any failure.
+async function releaseChanges(from, to) {
+  try {
+    const r = await fetch(`https://api.github.com/repos/YanayLLS/Claude-Overlord/compare/v${from}...v${to}`);
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j.commits || []).map(c => c.commit.message.split('\n')[0]).reverse();
+  } catch { return []; }
+}
 
 autoUpdater.on('error', err => {
   logToRenderer(`Auto-updater error: ${err.message}`);
@@ -126,10 +137,12 @@ async function checkGitUpdate() {
   const behind = await gitCmd(['rev-list', '--count', 'HEAD..origin/master']);
   const ahead = await gitCmd(['rev-list', '--count', 'origin/master..HEAD']);
   if (!behind.ok || !ahead.ok) return;
+  const log = await gitCmd(['log', '--format=%s', '-n', '30', 'HEAD..origin/master']);
   send({
     type: 'gitUpdate',
     behind: Number(behind.out) || 0,
     ahead: Number(ahead.out) || 0,
+    changes: log.ok && log.out ? log.out.split('\n') : [],
   });
 }
 
