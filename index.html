@@ -651,31 +651,53 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #catalog-btn { position:absolute; left:8px; bottom:8px; z-index:11; width:22px; height:22px; padding:0; border-radius:6px; border:1px solid var(--border-hi);
   background:var(--pop); color:var(--dim); font-size:15px; line-height:19px; cursor:pointer; opacity:.75; }
 #catalog-btn:hover { opacity:1; color:var(--accent); border-color:var(--accent); }
-#catalog-pop { position:fixed; z-index:200; width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 560px, calc(100vh - 80px)); display:flex; flex-direction:column;
+#catalog-pop { position:fixed; z-index:200; width:min(540px, calc(100vw - 32px)); display:flex; flex-direction:column;
   background:var(--pop); border-radius:var(--r-lg); box-shadow:var(--pop-shadow); overflow:hidden; font-size:12.5px; color:var(--text); }
-#catalog-pop[hidden] { display:none; }
-#catalog-pop.cg-narrow { width:260px; }
-#catalog-pop .cg-head { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--border); }
-#catalog-pop .cg-scope { color:var(--accent); white-space:nowrap; }
-#catalog-pop .cg-q { flex:1; min-width:0; background:transparent; border:0; outline:none; color:var(--text); font:inherit; font-size:13px; }
+#catalog-pop[hidden], #catalog-pop [hidden] { display:none !important; }
+#catalog-pop.cg-narrow { width:280px; }
+#catalog-pop kbd { font:inherit; font-size:10px; line-height:15px; min-width:16px; text-align:center; color:var(--dim); border:1px solid var(--border-hi); border-bottom-width:2px; border-radius:4px; padding:0 4px; }
+#catalog-pop .ic { width:14px; height:14px; }
+#catalog-pop .cg-head { display:flex; align-items:center; gap:9px; padding:11px 12px 10px 14px; }
+#catalog-pop .cg-scope { color:var(--accent); display:flex; }
+#catalog-pop .cg-q { flex:1; min-width:0; background:transparent; border:0; outline:none; color:var(--text); font:inherit; font-size:13.5px; }
 #catalog-pop .cg-q::placeholder { color:var(--dim); }
-#catalog-pop .cg-list { overflow-y:auto; padding:4px 0; }
-#catalog-pop .cg-group { display:flex; gap:6px; padding:8px 12px 3px; color:var(--dim); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; }
-#catalog-pop .cg-row { display:flex; align-items:baseline; gap:8px; padding:5px 12px; cursor:pointer; white-space:nowrap; }
+#catalog-pop .cg-tabs { display:flex; gap:2px; padding:0 10px 8px; border-bottom:1px solid var(--border); }
+#catalog-pop .cg-tab { font:inherit; font-size:11.5px; color:var(--subtext); background:transparent; border:0; border-radius:var(--r-sm); padding:3px 9px; cursor:pointer; display:flex; gap:6px; align-items:baseline; }
+#catalog-pop .cg-tab span { color:var(--dim); font-size:10.5px; font-variant-numeric:tabular-nums; }
+#catalog-pop .cg-tab:hover { background:var(--hover); color:var(--text); }
+#catalog-pop .cg-tab.on { background:var(--accent-soft); color:var(--accent); }
+#catalog-pop .cg-tab.on span { color:var(--accent); opacity:.7; }
+#catalog-pop.cg-narrow .cg-head { border-bottom:1px solid var(--border); }
+#catalog-pop .cg-list { overflow-y:auto; padding:4px 6px; height:320px; min-height:120px; flex:0 1 auto; } /* fixed: the card doesn't jump as results change */
+#catalog-pop.cg-narrow .cg-list { height:auto; min-height:0; }
+#catalog-pop .cg-group { display:flex; align-items:baseline; gap:7px; padding:10px 8px 4px; font-size:11px; font-weight:600; color:var(--subtext); }
+#catalog-pop .cg-group:first-child { padding-top:4px; }
+#catalog-pop .cg-sub { font-weight:400; color:var(--dim); }
+#catalog-pop .cg-row { display:flex; align-items:center; gap:9px; height:28px; padding:0 8px; border-radius:var(--r-sm); cursor:pointer; white-space:nowrap; }
 #catalog-pop .cg-row.sel { background:var(--accent-soft); }
 #catalog-pop .cg-row.shadowed { opacity:.45; }
-#catalog-pop .cg-key { color:var(--dim); border:1px solid var(--border-hi); border-radius:4px; padding:0 5px; font-size:10.5px; }
-#catalog-pop .cg-icon { width:16px; text-align:center; flex:none; }
-#catalog-pop .cg-name { flex:none; }
+#catalog-pop .cg-row.empty { opacity:.4; }
+#catalog-pop .cg-icon { display:flex; color:var(--dim); flex:none; }
+#catalog-pop .cg-row.sel .cg-icon { color:var(--accent); }
+#catalog-pop .cg-name { flex:none; max-width:55%; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
 #catalog-pop .cg-name b { color:var(--accent); font-weight:600; }
-#catalog-pop .cg-hint { color:var(--dim); flex:none; }
-#catalog-pop .cg-badge { flex:none; font-size:10px; color:var(--yellow); border:1px solid currentColor; border-radius:4px; padding:0 4px; }
+#catalog-pop .cg-pfx { color:var(--dim); }
+#catalog-pop .grouped .cg-pfx { display:none; }
+#catalog-pop .cg-dot { width:6px; height:6px; border-radius:50%; background:var(--yellow); flex:none; }
+#catalog-pop .cg-desc { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--dim); font-size:12px; }
+#catalog-pop .cg-src { flex:none; color:var(--dim); font-size:11px; }
+#catalog-pop .cg-count { margin-left:auto; color:var(--dim); font-size:11px; font-weight:400; font-variant-numeric:tabular-nums; }
+#catalog-pop .cg-type .cg-count { margin-right:4px; }
+#catalog-pop .cg-empty { padding:18px 10px; color:var(--dim); text-align:center; }
+#catalog-pop .cg-detail { flex:none; padding:10px 14px 11px; border-top:1px solid var(--border); background:rgba(var(--ink),.02); }
+#catalog-pop .cg-d-title { display:flex; align-items:baseline; gap:8px; font-family:var(--mono, ui-monospace, Consolas, monospace); font-size:12px; color:var(--text); }
+#catalog-pop .cg-hint { color:var(--dim); }
+#catalog-pop .cg-badge { margin-left:auto; font-family:system-ui, sans-serif; font-size:10.5px; color:var(--yellow); }
 #catalog-pop .cg-badge.dim { color:var(--dim); }
-#catalog-pop .cg-desc { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--subtext); }
-#catalog-pop .cg-where { flex:none; color:var(--dim); font-size:11px; }
-#catalog-pop .cg-count { margin-left:auto; color:var(--dim); }
-#catalog-pop .cg-empty { padding:14px 12px; color:var(--dim); }
-#catalog-pop .cg-foot { padding:6px 12px; border-top:1px solid var(--border); color:var(--dim); font-size:11px; }
+#catalog-pop .cg-d-desc { margin-top:5px; color:var(--subtext); line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+#catalog-pop .cg-d-path { margin-top:6px; font-size:11px; color:var(--dim); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; direction:rtl; text-align:left; }
+#catalog-pop .cg-foot { flex:none; display:flex; gap:14px; padding:7px 14px; border-top:1px solid var(--border); color:var(--dim); font-size:11px; }
+#catalog-pop .cg-k { display:flex; align-items:center; gap:5px; }
 /* Always-visible scroll/prompt nav stack: prev prompt, top, bottom, next prompt */
 #term-scroll-nav {
   display:none; position:absolute; top:50%; transform:translateY(-50%); right:20px; z-index:10;
@@ -1205,6 +1227,15 @@ button:focus-visible { outline-offset:0; }
         <span>Prompt autocomplete (ghost text)</span>
       </label>
       <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-catalog" checked onchange="saveCatalogSettings()" />
+        <span>Skills picker (+ button and hotkey)</span>
+      </label>
+      <div class="settings-field" id="catalog-hotkey-field">
+        <div class="field-title">Hotkey</div>
+        <div class="field-row"><input class="settings-input" id="inp-catalog-hotkey" readonly placeholder="Press a shortcut or type two characters" onkeydown="recordCatalogHotkey(event)" onblur="catalogTyped = ''; this.value = this.dataset.saved || '//'" style="flex:1;" /><button class="settings-btn" type="button" onclick="setCatalogHotkey('//')">Reset</button></div>
+      </div>
+      <div class="settings-hint">Lists the skills, commands and agents an agent can use — from this repo, ~/.claude and your plugins. Opens from the + in the terminal's corner or the hotkey: two characters typed in a row (default <code>//</code>), or a shortcut like <code>Ctrl+K</code>.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -2980,8 +3011,8 @@ function createXterm(id) {
     showImagePop(src, ev, { left: r.left + m.index * cw, top: r.top + row * ch, width: m[0].length * cw, height: ch });
   }, true); // capture: with mouse reporting on (Claude's prompt), xterm stops the event before it bubbles here
   el.addEventListener('mouseleave', hideImagePop);
-  // A typed "//" opens the skills popover instead of reaching the pty (catalog-pick.js holds a lone "/" 250 ms).
-  const slashGate = makeSlashGate({ send: (data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); }, open: () => catalogUi.open() });
+  // The picker's typed hotkey (default "//") opens it instead of reaching the pty (catalog-pick.js holds the first char 250 ms).
+  const slashGate = makeSlashGate({ send: (data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); }, open: () => catalogUi.open(), seq: () => catalogUi.seq() });
   terminal.onData(slashGate);
   terminal.onScroll(() => {
     ghostClear();
@@ -3246,6 +3277,28 @@ function ghostAccept() {
   api.send({ type: 'termInput', id: selectedId, data: ghost.text });
   ghostClear();
   return true;
+}
+// Settings → Skills picker (catalog-ui.js). The hotkey field records a chord, or the last two characters typed.
+let catalogTyped = '';
+function syncCatalogSettings(s) {
+  const on = s.catalogEnabled !== false, chk = document.getElementById('chk-catalog'), inp = document.getElementById('inp-catalog-hotkey');
+  if (chk) chk.checked = on;
+  if (inp) { inp.value = inp.dataset.saved = s.catalogHotkey || '//'; inp.disabled = !on; }
+}
+function saveCatalogSettings(extra = {}) {
+  const settings = { catalogEnabled: document.getElementById('chk-catalog').checked, catalogHotkey: document.getElementById('inp-catalog-hotkey').value || '//', ...extra };
+  api.send({ type: 'saveSettings', settings }); catalogUi.setConfig(settings); syncCatalogSettings(settings);
+}
+function setCatalogHotkey(hk) { catalogTyped = ''; saveCatalogSettings({ catalogHotkey: hk }); }
+function recordCatalogHotkey(e) {
+  if (e.key === 'Tab' || e.key === 'Escape') { catalogTyped = ''; return; }
+  e.preventDefault();
+  const chord = hotkeyFromEvent(e);
+  if (chord) return setCatalogHotkey(chord);
+  if (e.key.length !== 1 || e.key === ' ') return;
+  catalogTyped = (catalogTyped + e.key).slice(-2);
+  e.target.value = catalogTyped;
+  if (catalogTyped.length === 2) setCatalogHotkey(catalogTyped);
 }
 function onGhostChange(on) { ghostEnabled = !!on; localStorage.setItem('ghostEnabled', on ? '1' : '0'); if (!on) ghostClear(); }
 
@@ -4518,6 +4571,7 @@ function applySettings(s) {
   if (s.lastFeatureRepos) lastFeatureRepos = s.lastFeatureRepos;
   if (s.prCollapsed) prCollapsed = new Set(s.prCollapsed);
   if (s.prScope) prScope = s.prScope;
+  catalogUi.setConfig(s); syncCatalogSettings(s);
   if ('prFire' in s) { prFire = s.prFire !== false; const c = document.getElementById('chk-pr-fire'); if (c) c.checked = prFire; applyPrHeat(); }
   if ('prShowAll' in s) prShowAll = !!s.prShowAll;
   if (s.prSettings) {

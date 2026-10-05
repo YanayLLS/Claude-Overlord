@@ -1,6 +1,6 @@
 // Run: node catalog-pick.test.js
 const assert = require('assert');
-const { fuzzyScore, pickItems, makeSlashGate, promptTop } = require('./catalog-pick');
+const { fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent } = require('./catalog-pick');
 
 // fuzzy: subsequence required, case-insensitive, match positions returned
 assert.strictEqual(fuzzyScore('xyz', 'fix-bug'), null);
@@ -54,4 +54,31 @@ assert.strictEqual(promptTop(['$ ls', 'a b']), -1);
   global.setTimeout = function (fn, ms) { if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation'); return real(fn, ms); };
   try { const g = makeSlashGate({ send: () => {}, open: () => {} }); g('/'); g('/'); } finally { global.setTimeout = real; }
 }
+// configurable sequence: seq() picks the two typed chars; '' turns the gate off (everything passes)
+{
+  let sent = [], opened = 0, timers = [], cur = ';;';
+  const t = { set: (fn) => { timers.push(fn); return timers.length; }, clear: (h) => { timers[h - 1] = null; } };
+  const g = makeSlashGate({ send: d => sent.push(d), open: () => opened++, timer: t, seq: () => cur });
+  g('/'); assert.deepStrictEqual(sent, ['/'], '/ passes untouched when the hotkey is ;;');
+  g(';'); g(';'); assert.strictEqual(opened, 1);
+  g(';'); g('x'); assert.deepStrictEqual(sent, ['/', ';', 'x']);
+  cur = ''; sent = []; g('/'); g('/'); assert.deepStrictEqual(sent, ['/', '/'], 'disabled: nothing held');
+  cur = 'Ctrl+K'; sent = []; g('/'); assert.deepStrictEqual(sent, ['/'], 'chord hotkey: typing is never held');
+}
+
+// hotkeys: two typed chars, or a modifier chord
+assert.deepStrictEqual(parseHotkey('//'), { seq: '//' });
+assert.deepStrictEqual(parseHotkey('ctrl+k'), { chord: { ctrl: true, alt: false, shift: false, meta: false, key: 'k' } });
+assert.deepStrictEqual(parseHotkey('Ctrl+Shift+Space').chord.key, ' ');
+assert.strictEqual(parseHotkey(''), null);
+assert.strictEqual(parseHotkey('abc'), null, 'three plain chars is not a hotkey');
+assert.strictEqual(parseHotkey('K'), null, 'a plain key alone would eat typing');
+const ev = (o) => ({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...o });
+assert.ok(chordMatch(ev({ key: 'K', ctrlKey: true }), parseHotkey('Ctrl+K')), 'case-insensitive key');
+assert.ok(!chordMatch(ev({ key: 'k', ctrlKey: true, shiftKey: true }), parseHotkey('Ctrl+K')), 'extra modifier → no');
+assert.ok(!chordMatch(ev({ key: 'k', ctrlKey: true }), parseHotkey('//')));
+assert.strictEqual(hotkeyFromEvent(ev({ key: 'p', altKey: true })), 'Alt+P');
+assert.strictEqual(hotkeyFromEvent(ev({ key: ' ', ctrlKey: true, shiftKey: true })), 'Ctrl+Shift+Space');
+assert.strictEqual(hotkeyFromEvent(ev({ key: 'Control', ctrlKey: true })), null, 'modifier alone');
+assert.strictEqual(hotkeyFromEvent(ev({ key: 'a' })), null, 'no modifier');
 console.log('catalog-pick ok');

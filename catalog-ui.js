@@ -3,23 +3,35 @@
 // filtering is catalog-pick.js (loaded first; its functions are page globals). index.html loads this file and forwards
 // { type: 'catalog' } messages to catalogUi.onMsg.
 (function () {
+  // Lucide-style strokes, matching the app's other .ic icons.
+  const SVG = {
+    skill: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    command: '<path d="m16 4-8 16"/>',
+    agent: '<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 13v2M15 13v2"/>',
+    builtin: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
+  };
+  const icon = (type) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${SVG[type] || ''}</svg>`;
   const TYPES = [
-    { type: 'skill', icon: '⚡', label: 'Skills' },
-    { type: 'command', icon: '⌘', label: 'Commands' },
-    { type: 'agent', icon: '🤖', label: 'Agents' },
-    { type: 'builtin', icon: '⚙', label: 'Built-in' },
+    { type: 'skill', label: 'Skills' },
+    { type: 'command', label: 'Commands' },
+    { type: 'agent', label: 'Agents' },
+    { type: 'builtin', label: 'Built-in' },
   ];
-  const ICON = Object.fromEntries(TYPES.map(t => [t.type, t.icon]));
-  const ORIGIN = { repo: '📁', pc: '💻', plugin: '🧩', builtin: '⚙' };
   const cache = new Map(); // cwd -> items
+  let config = { enabled: true, hotkey: '//' }; // Settings → Skills picker
   let isOpen = false, stage = 'types', type = null, sel = 0, rows = [], cwd = '';
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const mark = (s, pos) => { const p = new Set(pos); return [...s].map((c, i) => p.has(i) ? `<b>${esc(c)}</b>` : esc(c)).join(''); };
+  const mark = (s, pos, from = 0, to = s.length) => { const p = new Set(pos); let o = ''; for (let i = from; i < to; i++) o += p.has(i) ? `<b>${esc(s[i])}</b>` : esc(s[i]); return o; };
+  // Plugin items are "plugin:name"; the plugin part is dimmed, and hidden under its own group header.
+  const nameHtml = (it) => { const k = it.origin === 'plugin' ? it.name.indexOf(':') + 1 : 0;
+    return (k ? `<span class="cg-pfx">${mark(it.name, it.pos, 0, k)}</span>` : '') + mark(it.name, it.pos, k); };
+  const tilde = (p) => String(p || '').replace(/^[A-Z]:[\\/]Users[\\/][^\\/]+/i, '~').replace(/\\/g, '/');
+  const kbd = (k, label) => `<span class="cg-k"><kbd>${k}</kbd>${label}</span>`;
 
   const btn = document.createElement('button');
   btn.id = 'catalog-btn';
-  btn.title = 'Skills, commands and agents (type // in the terminal)';
+  btn.title = 'Skills, commands and agents (//)';
   btn.textContent = '+';
   btn.onmousedown = (e) => e.stopPropagation(); // else the outside-click close fires first and this reopens it
   btn.onclick = () => { isOpen ? close() : open(); };
@@ -30,10 +42,11 @@
   const pop = document.createElement('div');
   pop.id = 'catalog-pop';
   pop.hidden = true;
-  pop.innerHTML = '<div class="cg-head"><span class="cg-scope"></span><input class="cg-q" spellcheck="false" placeholder="type to search everything"></div>'
-    + '<div class="cg-list"></div><div class="cg-foot"></div>';
+  pop.innerHTML = '<div class="cg-head"><span class="cg-scope"></span><input class="cg-q" spellcheck="false"><kbd class="cg-esc">Esc</kbd></div>'
+    + '<div class="cg-tabs"></div><div class="cg-list"></div><div class="cg-detail"></div><div class="cg-foot"></div>';
   document.body.appendChild(pop);
-  const q = pop.querySelector('.cg-q'), list = pop.querySelector('.cg-list'), foot = pop.querySelector('.cg-foot'), scope = pop.querySelector('.cg-scope');
+  const $ = (c) => pop.querySelector(c);
+  const q = $('.cg-q'), list = $('.cg-list'), foot = $('.cg-foot'), scope = $('.cg-scope'), tabs = $('.cg-tabs'), detail = $('.cg-detail');
   pop.addEventListener('mousedown', (e) => e.stopPropagation());
   document.addEventListener('mousedown', () => { if (isOpen) close(); });
 
@@ -64,7 +77,9 @@
   }
   function place() {
     const r = btn.getBoundingClientRect();
-    const y = promptY() ?? r.top; // above the prompt box so it stays readable; else above the + button
+    const py = promptY(), top = container.getBoundingClientRect().top;
+    // Above the prompt box so what you're typing stays readable — unless that leaves too little room; then above the + button.
+    const y = py != null && py - top >= 340 ? py : r.top;
     pop.style.left = Math.max(8, r.left) + 'px';
     pop.style.bottom = Math.max(8, innerHeight - y + 6) + 'px';
     pop.style.maxHeight = Math.min(560, y - 14) + 'px';
@@ -75,42 +90,69 @@
     if (isOpen && msg.cwd === cwd) render();
   }
 
+  function groupHead(it, n) {
+    const [name, market] = it.group.split(' · ');
+    const sub = it.origin === 'repo' ? esc(cwd.split(/[\\/]/).pop()) : it.origin === 'pc' ? '~/.claude'
+      : it.origin === 'plugin' ? 'plugin · ' + esc(market || '') : '';
+    return `<div class="cg-group"><span>${esc(name)}</span><span class="cg-sub">${sub}</span><span class="cg-count">${n}</span></div>`;
+  }
+
+  function renderDetail() {
+    const it = stage === 'list' && rows[sel];
+    detail.hidden = !it;
+    if (!it) return;
+    const where = it.origin === 'builtin' ? 'Built into Claude Code' : tilde(it.path);
+    const note = it.overrides ? '<span class="cg-badge">overrides ~/.claude</span>'
+      : it.shadowed ? '<span class="cg-badge dim">hidden by this repo’s copy</span>' : '';
+    detail.innerHTML = `<div class="cg-d-title"><span>${esc(it.insert.trim())}</span>${it.hint ? `<span class="cg-hint">${esc(it.hint)}</span>` : ''}${note}</div>`
+      + `<div class="cg-d-desc">${esc(it.desc || 'No description.')}</div><div class="cg-d-path" title="${esc(it.path || '')}"><bdi>${esc(where)}</bdi></div>`;
+  }
+
   function render() {
     const items = cache.get(cwd);
     const query = q.value.trim();
     if (stage === 'types' && query) { stage = 'list'; type = null; sel = 0; }
     const t = TYPES.find(x => x.type === type);
-    scope.innerHTML = stage === 'list' && t ? `${t.icon} ${t.label} ›` : '›';
-    q.placeholder = stage === 'types' ? 'type to search everything' : `search ${t ? t.label.toLowerCase() : 'everything'}`;
-    if (!items) { list.innerHTML = '<div class="cg-empty">Loading…</div>'; rows = []; return; }
+    pop.classList.toggle('cg-narrow', stage === 'types'); // the type menu is short; the list needs room
+    scope.innerHTML = t && stage === 'list' ? icon(t.type) : '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+    q.placeholder = stage === 'types' ? 'Search everything…' : `Search ${t ? t.label.toLowerCase() : 'everything'}…`;
+    if (!items) { tabs.hidden = true; list.innerHTML = '<div class="cg-empty">Loading…</div>'; rows = []; renderDetail(); foot.innerHTML = ''; return; }
+    const count = (ty) => items.filter(it => it.type === ty).length;
 
-    pop.classList.toggle('cg-narrow', stage === 'types'); // type menu is short; the list needs room for descriptions
     if (stage === 'types') {
+      tabs.hidden = true;
       rows = TYPES;
       sel = Math.min(sel, rows.length - 1);
-      list.innerHTML = TYPES.map((x, i) => `<div class="cg-row${i === sel ? ' sel' : ''}" data-i="${i}"><span class="cg-key">${i + 1}</span><span class="cg-icon">${x.icon}</span><span class="cg-name">${x.label}</span><span class="cg-count">${items.filter(it => it.type === x.type).length}</span></div>`).join('');
-      foot.textContent = '1-4 pick · type to search all';
+      list.innerHTML = TYPES.map((x, i) => { const n = count(x.type);
+        return `<div class="cg-row cg-type${i === sel ? ' sel' : ''}${n ? '' : ' empty'}" data-i="${i}"><span class="cg-icon">${icon(x.type)}</span>`
+          + `<span class="cg-name">${x.label}</span><span class="cg-count">${n}</span><kbd>${i + 1}</kbd></div>`; }).join('');
+      renderDetail();
+      foot.innerHTML = kbd('1–4', 'pick') + kbd('↵', 'open') + kbd('Esc', 'close');
       return;
     }
 
+    // Tabs: All + every type that has something. Click, or Tab / ⇧Tab, to switch.
+    tabs.hidden = false;
+    tabs.innerHTML = [{ type: null, label: 'All' }, ...TYPES].filter(x => !x.type || count(x.type))
+      .map(x => `<button class="cg-tab${x.type === type ? ' on' : ''}" data-type="${x.type || ''}">${x.label}<span>${x.type ? count(x.type) : items.length}</span></button>`).join('');
+
     rows = pickItems(items, type, query).slice(0, 200);
     sel = Math.min(sel, Math.max(0, rows.length - 1));
+    const grouped = !query;
+    list.classList.toggle('grouped', grouped);
     let html = '', group = null;
     rows.forEach((it, i) => {
-      if (!query && it.group !== group) {
-        group = it.group;
-        const n = rows.filter(r => r.group === group).length;
-        html += `<div class="cg-group">${ORIGIN[it.origin] || ''} ${esc(group)}${it.origin === 'repo' && cwd ? ' · ' + esc(cwd.split(/[\\/]/).pop()) : ''}<span class="cg-count">${n}</span></div>`;
-      }
-      const badge = it.overrides ? '<span class="cg-badge">overrides PC</span>' : it.shadowed ? '<span class="cg-badge dim">shadowed by repo</span>' : '';
-      const where = query ? `<span class="cg-where">${ORIGIN[it.origin] || ''} ${esc(it.group)}</span>` : '';
-      html += `<div class="cg-row${i === sel ? ' sel' : ''}${it.shadowed ? ' shadowed' : ''}" data-i="${i}" title="${esc(it.path || '/' + it.name)}">`
-        + `<span class="cg-icon">${ICON[it.type] || ''}</span><span class="cg-name">${mark(it.name, it.pos)}</span>`
-        + (it.hint ? `<span class="cg-hint">${esc(it.hint)}</span>` : '') + badge
-        + `<span class="cg-desc">${esc(it.desc || '')}</span>${where}</div>`;
+      if (grouped && it.group !== group) { group = it.group; html += groupHead(it, rows.filter(r => r.group === group).length); }
+      const src = grouped ? '' : `<span class="cg-src">${esc(it.group.split(' · ')[0])}</span>`;
+      html += `<div class="cg-row${i === sel ? ' sel' : ''}${it.shadowed ? ' shadowed' : ''}" data-i="${i}">`
+        + (type ? '' : `<span class="cg-icon">${icon(it.type)}</span>`)
+        + `<span class="cg-name">${nameHtml(it)}</span>`
+        + (it.overrides ? '<span class="cg-dot" title="Overrides ~/.claude"></span>' : '')
+        + `<span class="cg-desc">${esc(it.desc || '')}</span>${src}</div>`;
     });
-    list.innerHTML = html || `<div class="cg-empty">${query ? 'No match' : type === 'skill' || type === 'command' || type === 'agent' ? 'None found — .claude/' + type + 's/ is empty here and in ~/.claude' : 'Nothing here'}</div>`;
-    foot.textContent = 'Enter insert · ⇧Enter send · Tab type · ⌫ back · Ctrl+O open file · Esc';
+    list.innerHTML = html || `<div class="cg-empty">${query ? `Nothing matches “${esc(query)}”` : 'Nothing here yet'}</div>`;
+    renderDetail();
+    foot.innerHTML = kbd('↵', 'insert') + kbd('⇧↵', 'send') + kbd('Tab', 'switch type') + kbd('Ctrl O', 'open file');
     list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -141,9 +183,25 @@
     if (e.ctrlKey && k.toLowerCase() === 'o' && stage === 'list') { e.preventDefault(); const p = rows[sel]?.path; if (p) api.send({ type: 'openFile', path: p }); }
   });
   // Hover only moves the highlight; a full render here would swap the row out from under the click.
-  list.addEventListener('mousemove', (e) => { const r = e.target.closest('.cg-row'); if (!r || +r.dataset.i === sel) return; list.querySelector('.sel')?.classList.remove('sel'); r.classList.add('sel'); sel = +r.dataset.i; });
+  list.addEventListener('mousemove', (e) => { const r = e.target.closest('.cg-row'); if (!r || +r.dataset.i === sel) return; list.querySelector('.sel')?.classList.remove('sel'); r.classList.add('sel'); sel = +r.dataset.i; renderDetail(); });
+  tabs.addEventListener('click', (e) => { const b = e.target.closest('.cg-tab'); if (!b) return; type = b.dataset.type || null; stage = 'list'; sel = 0; render(); q.focus(); });
   list.addEventListener('click', (e) => { const r = e.target.closest('.cg-row'); if (r) choose(+r.dataset.i, e.shiftKey); });
   addEventListener('resize', () => { if (isOpen) place(); });
+  // A chord hotkey (Ctrl+K…) works anywhere; capture so the terminal never sees it.
+  document.addEventListener('keydown', (e) => {
+    if (!config.enabled || e.target.id === 'inp-catalog-hotkey' || !chordMatch(e, parseHotkey(config.hotkey))) return; // not while Settings records a new one
+    e.preventDefault(); e.stopPropagation();
+    isOpen ? close() : open();
+  }, true);
 
-  window.catalogUi = { open, close, onMsg, isOpen: () => isOpen };
+  function setConfig(s) {
+    config = { enabled: s.catalogEnabled !== false, hotkey: s.catalogHotkey || '//' };
+    btn.hidden = !config.enabled;
+    btn.title = `Skills, commands and agents (${config.hotkey})`;
+    if (!config.enabled) close(false);
+  }
+  // The typed sequence the terminal gate watches for; '' when off or the hotkey is a chord.
+  const seq = () => (config.enabled ? config.hotkey : '');
+
+  window.catalogUi = { open, close, onMsg, setConfig, seq, isOpen: () => isOpen };
 })();
