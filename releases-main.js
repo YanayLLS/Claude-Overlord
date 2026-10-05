@@ -261,6 +261,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       deploysChanged(prevDeploys, deploys);
       checkToSign().catch(() => {});
       reconcileHistory().catch(() => {});
+      scanStray().catch(() => {});
     } finally {
       inFlight = false;
       push({ loading: false });
@@ -395,7 +396,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   function prodStep(repo, base, head) {
     const cfg = state.config;
     if (!cfg) return null;
-    return releasePlan(cfg, ['prod']).prs.find(p => p.repo.toLowerCase() === repo.toLowerCase() && p.target === base && (p.source === head || ROLLBACK_HEAD.test(head))) || null;
+    // any PR into a prod branch: a release PR, a rollback, or one opened outside the release flow (a hotfix,
+    // an agent's PR) — every change to prod needs the approvers' signatures
+    return releasePlan(cfg, ['prod']).prs.find(p => p.repo.toLowerCase() === repo.toLowerCase() && p.target === base) || null;
   }
 
   // The gate every Overlord merge goes through: prod release PRs need two approvers' signatures.
@@ -1155,6 +1158,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         // reopened within a minute: what's on screen is fresh enough, the timer takes it from here
         if (!state.updatedAt || Date.now() - state.updatedAt > 60000) refresh();
         return true;
+      case 'releasesStrayFix': strayFix(msg.repo, msg.number, msg.how).catch(e => send({ type: 'toast', text: 'Failed: ' + e.message })); return true;
       case 'releasesClose': modalOpen = false; clearInterval(liveTimer); return true;
       case 'releasesMergeOne': mergeOne(msg.repo, msg.number).catch(e => send({ type: 'toast', text: 'Merge failed: ' + e.message })); return true;
       case 'releasesRerunDeploy': rerunDeploy(msg.repo, msg.number).catch(e => send({ type: 'toast', text: 'Re-run failed: ' + e.message })); return true;
@@ -1199,6 +1203,57 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       }
       default: return false;
     }
+  }
+
+  // ── PRs into prod opened outside the release flow (a feature branch straight into main, an agent's PR):
+  // listed on the Releases board for everyone, approvers told once, and one click puts each right ──
+  let strayTold = new Set(), straySeeded = false; // the first scan only learns what's already open
+  async function scanStray() {
+    if (!state.config || limited()) return;
+    const steps = releasePlan(state.config, ['prod']).prs;
+    const out = [], adopt = [];
+    await Promise.all(steps.map(async (p) => {
+      const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
+      for (const x of Array.isArray(r.data) ? r.data : []) {
+        if (!x.head || ROLLBACK_HEAD.test(x.head.ref)) continue; // rollbacks are Releases' own
+        if (x.head.ref === p.source) {
+          // a release PR opened outside Overlord (an agent, github.com): adopt it — record it as a release, so it gets
+          // a card, the sign prompt, Release all and the deploy watch like any other
+          if (!releaseIdOf(x.body) && state.approvers && state.approvers.isApprover) adopt.push({ ...p, env: 'prod', pr: { number: x.number, url: x.html_url }, author: x.user && x.user.login });
+          continue;
+        }
+        out.push({ repo: p.repo, label: p.label, number: x.number, url: x.html_url, title: x.title, head: x.head.ref, base: p.target, source: p.source,
+          author: x.user && x.user.login, draft: !!x.draft, createdAt: x.created_at });
+      }
+    }));
+    out.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    push({ strayPrs: out });
+    if (adopt.length) {
+      const id = await history.recordRun({ rows: adopt }, { opener: { login: adopt[0].author, clickup: null }, manual: [], flags: null }).catch(() => null);
+      if (id) send({ type: 'toast', text: `Adopted ${adopt.map(x => x.label + ' #' + x.pr.number).join(', ')} (opened outside Overlord) as release ${id}` });
+    }
+    const fresh = out.filter(x => !strayTold.has(x.repo + '#' + x.number));
+    if (straySeeded && fresh.length && notify && state.approvers && state.approvers.isApprover) {
+      notify(`⚠ PR into prod outside a release`, fresh.map(x => `${x.label} #${x.number} (${x.head} → ${x.base}) by @${x.author}`).join(', '), null, () => send({ type: 'releases', state, open: true, tab: 'board' }));
+    }
+    strayTold = new Set(out.map(x => x.repo + '#' + x.number)); straySeeded = true;
+  }
+  // Retarget a stray prod PR to the release source (feature work ships with the next release), or close it
+  async function strayFix(repo, n, how) {
+    await loadApprovers();
+    if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can do that' });
+    const x = (state.strayPrs || []).find(y => y.repo === repo && y.number === Number(n));
+    if (!x) return;
+    const who = (await whoAmI()).github;
+    const res = how === 'close'
+      ? await ghJson(['api', '-X', 'PATCH', `repos/${repo}/pulls/${n}`, '--input', writeTmp({ state: 'closed' })])
+      : await ghJson(['api', '-X', 'PATCH', `repos/${repo}/pulls/${n}`, '--input', writeTmp({ base: x.source })]);
+    if (apiErr(res)) return send({ type: 'toast', text: `${x.label} #${n}: ${apiErr(res)}` });
+    await ghJson(['api', '-X', 'POST', `repos/${repo}/issues/${n}/comments`, '--input', writeTmp({ body: how === 'close'
+      ? `Closed by @${who} in Overlord: prod (\`${x.base}\`) only takes signed releases.`
+      : `Retargeted to \`${x.source}\` by @${who} in Overlord: prod (\`${x.base}\`) only takes signed releases, and this ships with the next one.` })]);
+    send({ type: 'toast', text: how === 'close' ? `${x.label} #${n} closed` : `${x.label} #${n} now targets ${x.source}` });
+    scanStray().catch(() => {});
   }
 
   // A PR into a repo's prod branch (release config): Releases owns those — signing, waves, deploy watch —

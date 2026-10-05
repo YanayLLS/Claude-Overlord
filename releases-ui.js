@@ -130,6 +130,7 @@
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; if (tab === 'history') api.send({ type: 'releasesHistory' }); render(); },
     // history actions
     gotoRelease: () => { relOpen = false; tab = 'history'; api.send({ type: 'releasesHistory' }); render(); },
+    strayFix: (el) => { el.textContent = el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'; api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
     histChanges: (el) => { const k = el.dataset.key; openChanges.has(k) ? openChanges.delete(k) : openChanges.add(k); render(); },
     histRollback: (el) => { rbOpen = rbOpen === el.dataset.id ? null : el.dataset.id; rbSkip = new Set(); render(); },
     histRbRepo: (el) => { const r = el.dataset.repo; rbSkip.has(r) ? rbSkip.delete(r) : rbSkip.add(r); render(); },
@@ -475,13 +476,24 @@
     const m = ((st.history && st.history.items) || []).find(x => x.status === 'pending' && x.repos.some(r => r.repo === repo && !r.mergeSha && !r.closed));
     return m ? m.id : null;
   }
+  // PRs into prod opened outside the release flow: listed, with the way to put each right (approvers)
+  function strayHtml(st) {
+    const xs = st.strayPrs || [];
+    if (!xs.length) return '';
+    const ap = (st.approvers || {}).isApprover;
+    return `<div class="rl-stray"><div class="rl-stray-head">⚠ ${xs.length} PR${xs.length === 1 ? '' : 's'} into prod outside a release <span>prod only takes signed releases: retarget to ${esc(xs[0].source)} so it ships with the next one, or close it. Kept as a hotfix it needs 2 approvers' signatures to merge</span></div>`
+      + xs.map(x => `<div class="rl-stray-row"><b>${esc(x.label)}</b>${link(x.url, '#' + x.number)}<span class="rl-stray-title" title="${esc(x.title)}">${esc(x.title)}</span>`
+        + `<span class="rl-stray-br">${esc(x.head)} → ${esc(x.base)} · @${esc(x.author || '?')}</span>`
+        + (ap ? `<button class="rl-row-btn show" data-act="strayFix" data-how="retarget" data-repo="${esc(x.repo)}" data-n="${esc(x.number)}" title="Change its base to ${esc(x.source)}">↪ To ${esc(x.source)}</button>`
+          + `<button class="rl-row-btn show" data-act="strayFix" data-how="close" data-repo="${esc(x.repo)}" data-n="${esc(x.number)}">✕ Close</button>` : '') + '</div>').join('') + '</div>';
+  }
   // the Board's pinned line for the release in flight
   function activeStrip(st) {
     const m = activeRelease(st);
-    if (!m) return '';
+    if (!m) return strayHtml(st);
     const nx = releaseNext(st, m);
     return `<div class="rl-active ${nx.tone}"><span class="rl-active-id">🚀 Release ${esc(m.id)}</span><span class="rl-active-phase">${esc(nx.phase)}</span>`
-      + (nx.next ? `<span class="rl-active-next">next: ${esc(nx.next)}</span>` : '') + '<button class="rl-hist-btn" data-act="tab" data-tab="history">Open release →</button></div>';
+      + (nx.next ? `<span class="rl-active-next">next: ${esc(nx.next)}</span>` : '') + '<button class="rl-hist-btn" data-act="tab" data-tab="history">Open release →</button></div>' + strayHtml(st);
   }
   // ── The release in flight: one summary every surface reads (footer badge, board strip, card) ──
   // in flight = open PRs, or merged in the last 2 days and still settling. An old or imported record stuck
@@ -632,7 +644,7 @@
   const shortSha = (x) => x ? esc(x.slice(0, 7)) : '—';
   function historyHtml(s) {
     const hs = s.history;
-    let h = '<div class="rl-hist">' + releaseAllHtml(s);
+    let h = '<div class="rl-hist">' + strayHtml(s) + releaseAllHtml(s);
     if (!hs) return h + '<div class="rl-tl-empty">Loading release history…</div></div>';
     if (hs.error) return h + `<div class="rl-rr-flag bad">Release history: ${esc(hs.error)}</div><button class="rl-hist-btn" data-act="histReload">Retry</button></div>`;
     if (!hs.items.length) {
