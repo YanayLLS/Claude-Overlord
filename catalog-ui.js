@@ -45,11 +45,12 @@
   const pop = document.createElement('div');
   pop.id = 'catalog-pop';
   pop.hidden = true;
-  pop.innerHTML = '<div class="cg-head"><span class="cg-scope"></span><input class="cg-q" spellcheck="false"><kbd class="cg-esc">Esc</kbd></div>'
-    + '<div class="cg-tabs"></div><div class="cg-list"></div><div class="cg-detail"></div><div class="cg-foot"></div>';
+  pop.innerHTML = '<div class="cg-head"><button class="cg-back" title="Back to the menu (←)"></button><span class="cg-scope"></span>'
+    + '<input class="cg-q" spellcheck="false"><span class="cg-head-new"></span><kbd class="cg-esc">Esc</kbd></div>'
+    + '<div class="cg-list"></div><div class="cg-detail"></div><div class="cg-foot"></div>';
   document.body.appendChild(pop);
   const $ = (c) => pop.querySelector(c);
-  const q = $('.cg-q'), list = $('.cg-list'), foot = $('.cg-foot'), scope = $('.cg-scope'), tabs = $('.cg-tabs'), detail = $('.cg-detail');
+  const q = $('.cg-q'), list = $('.cg-list'), foot = $('.cg-foot'), scope = $('.cg-scope'), backBtn = $('.cg-back'), headNew = $('.cg-head-new'), detail = $('.cg-detail');
   pop.addEventListener('mousedown', (e) => e.stopPropagation());
   document.addEventListener('mousedown', () => { if (isOpen) close(); });
 
@@ -119,13 +120,18 @@
     if (stage === 'types' && query) { stage = 'list'; type = null; sel = 0; }
     const t = TYPES.find(x => x.type === type);
     pop.classList.toggle('cg-narrow', stage === 'types'); // the type menu is short; the list needs room
-    scope.innerHTML = t && stage === 'list' ? icon(t.type) : '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+    // In a list: "‹ Skills" back to the menu takes the search icon's place.
+    const inList = stage === 'list';
+    backBtn.hidden = !inList;
+    backBtn.innerHTML = `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>${t ? t.label : 'All'}`;
+    scope.hidden = inList;
+    scope.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+    headNew.innerHTML = inList && t && newItemPrompt(t.type) ? `<button class="cg-new cg-new-head" data-new="${t.type}" title="Start an agent that makes one">+ New ${t.label.toLowerCase().replace(/s$/, '')}</button>` : '';
     q.placeholder = stage === 'types' ? 'Search everything…' : `Search ${t ? t.label.toLowerCase() : 'everything'}…`;
-    if (!items) { tabs.hidden = true; list.innerHTML = '<div class="cg-empty">Loading…</div>'; rows = []; renderDetail(); foot.innerHTML = ''; return; }
+    if (!items) { list.innerHTML = '<div class="cg-empty">Loading…</div>'; rows = []; renderDetail(); foot.innerHTML = ''; return; }
     const count = (ty) => items.filter(it => it.type === ty).length;
 
     if (stage === 'types') {
-      tabs.hidden = true;
       rows = TYPES;
       sel = Math.min(sel, rows.length - 1);
       list.innerHTML = TYPES.map((x, i) => { const n = count(x.type);
@@ -135,12 +141,6 @@
       foot.innerHTML = kbd('1–5', 'pick') + kbd('↵ →', 'open') + kbd('Esc', 'close');
       return;
     }
-
-    // Tabs: All + every type that has something. Click, or Tab / ⇧Tab, to switch.
-    tabs.hidden = false;
-    tabs.innerHTML = [{ type: null, label: 'All' }, ...TYPES].filter(x => !x.type || count(x.type))
-      .map(x => `<button class="cg-tab${x.type === type ? ' on' : ''}" data-type="${x.type || ''}">${x.label}<span>${x.type ? count(x.type) : items.length}</span></button>`).join('')
-      + (t && newItemPrompt(t.type) ? `<button class="cg-new cg-new-tab" data-new="${t.type}" title="Start an agent that makes one">+ New ${t.label.toLowerCase().replace(/s$/, '')}</button>` : '');
 
     rows = pickItems(items, type, query).slice(0, 200);
     sel = Math.min(sel, Math.max(0, rows.length - 1));
@@ -158,7 +158,7 @@
     });
     list.innerHTML = html || `<div class="cg-empty">${query ? `Nothing matches “${esc(query)}”` : 'Nothing here yet'}</div>`;
     renderDetail();
-    foot.innerHTML = kbd('↵', 'insert') + kbd('⇧↵', 'send') + kbd('← →', 'switch type') + kbd('Ctrl O', 'open file');
+    foot.innerHTML = kbd('↵', 'insert') + kbd('⇧↵', 'send') + kbd('←', 'back') + kbd('Ctrl O', 'open file');
     list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -172,15 +172,6 @@
     api.send({ type: 'termInput', id, data: send ? it.insert.trimEnd() + '\r' : it.insert });
   }
 
-  // The tabs as shown: All, then each type that has something.
-  const tabOrder = () => { const items = cache.get(cwd) || []; return [null, ...TYPES.map(t => t.type).filter(ty => items.some(it => it.type === ty))]; };
-  function cycle(dir, wrap = true) {
-    const order = tabOrder(), i = order.indexOf(type) + dir;
-    if (!wrap && (i < 0 || i >= order.length)) return false;
-    type = order[(i + order.length) % order.length];
-    stage = 'list'; sel = 0; render();
-    return true;
-  }
   function back() { // to the type menu, on the type you came from
     const from = TYPES.findIndex(t => t.type === type);
     stage = 'types'; type = null; sel = Math.max(0, from); render();
@@ -192,14 +183,14 @@
     if (k === 'Escape') { e.preventDefault(); close(); return; }
     if (k === 'ArrowDown' || k === 'ArrowUp') { e.preventDefault(); if (rows.length) { sel = (sel + (k === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length; render(); } return; }
     if (k === 'Enter') { e.preventDefault(); choose(sel, e.shiftKey); return; }
-    if (k === 'Tab') { e.preventDefault(); cycle(e.shiftKey ? -1 : 1); return; }
+    if (k === 'Tab') { e.preventDefault(); return; } // keep focus in the search box
     if (stage === 'types' && /^[1-5]$/.test(k) && !q.value) { e.preventDefault(); choose(+k - 1); return; }
     if (k === 'Backspace' && !q.value && stage === 'list') { e.preventDefault(); back(); return; }
-    // ←/→ walk the menus while there's no text to move the caret through.
+    // ← / → while there's no text to move the caret through: → opens a type, ← goes back to the menu.
     if ((k === 'ArrowRight' || k === 'ArrowLeft') && !q.value) {
       e.preventDefault();
-      if (stage === 'types') { if (k === 'ArrowRight') choose(sel); return; }
-      if (!cycle(k === 'ArrowRight' ? 1 : -1, false) && k === 'ArrowLeft') back(); // ← past All: back to the type menu
+      if (k === 'ArrowRight' && stage === 'types') choose(sel);
+      if (k === 'ArrowLeft' && stage === 'list') back();
       return;
     }
     if (e.ctrlKey && k.toLowerCase() === 'o' && stage === 'list') { e.preventDefault(); const p = rows[sel]?.path; if (p) api.send({ type: 'openFile', path: p }); }
@@ -216,7 +207,7 @@
     close(false);
     api.send({ type: 'createAgent', cwd, prompt });
   }, true);
-  tabs.addEventListener('click', (e) => { const b = e.target.closest('.cg-tab'); if (!b) return; type = b.dataset.type || null; stage = 'list'; sel = 0; render(); q.focus(); });
+  backBtn.addEventListener('click', () => { q.value = ''; back(); q.focus(); });
   list.addEventListener('click', (e) => { const r = e.target.closest('.cg-row'); if (r) choose(+r.dataset.i, e.shiftKey); });
   addEventListener('resize', () => { if (isOpen) place(); });
   // A chord hotkey (Ctrl+K…) works anywhere; capture so the terminal never sees it.
