@@ -92,7 +92,8 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         m = existing.manifest; sha = existing.sha;
         const have = new Set(m.repos.map(key));
         const add = M.newManifest({ id: m.id, env, rows: rows.filter(r => !have.has(key(r))) }).repos;
-        m = { ...m, repos: m.repos.concat(add), manual, flags: flags && flags.missing ? { missing: flags.missing } : m.flags, updatedAt: new Date().toISOString() };
+        m = { ...m, repos: m.repos.concat(add), manual: (manual && manual.length) ? manual : m.manual, flags: flags && flags.missing ? { missing: flags.missing } : m.flags, updatedAt: new Date().toISOString(),
+          ...(m.scope ? { scope: { ...m.scope, repos: [...new Set(m.scope.repos.concat(add.map(r => r.label)))] } } : {}) };
       } else {
         m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name).concat(attempt ? [M.nextId(loaded.files.map(f => f.name))] : [])), kind, env, rows, opener, manual, flags, scope });
       }

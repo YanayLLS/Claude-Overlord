@@ -70,7 +70,7 @@
     // opens (hover or click) with every env picked; slides in once, then re-renders keep it still
     releaseMenu: () => {
       if (relOpen || apprOpen) return;
-      relOpen = true; relShown = false; relSkip = new Set();
+      relOpen = true; relShown = false; relSkip = new Set(); relSeparate = false;
       // your last choice sticks (a hover-close + reopen must never re-tick an env you unticked);
       // only the very first time does it start with every env but alpha (a new key, so everyone starts there once)
       if (state && state.config) {
@@ -114,11 +114,14 @@
       const all = [...new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo))];
       const repos = relSkip.size ? all.filter(r => !relSkip.has(r)) : null;
       if (repos && !repos.length) return;
-      api.send({ type: 'releasesRelease', envs: [...relSel], repos, of: all.length });
+      api.send({ type: 'releasesRelease', envs: [...relSel], repos, of: all.length, separate: relSeparate });
     },
     relOnly: (el) => { relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); render(); },
     // the Board cell's "Release just this": the picker set to this repo and env
     relJust: (el) => { relSel = new Set([el.dataset.env]); relSkip = new Set(ReleasesCore.releasePlan(state.config, [el.dataset.env]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); relOpen = true; relShown = false; render(); },
+    relSep: () => { relSeparate = !relSeparate; render(); },
+    // a pending release's "Add repos": the picker, adding to it
+    relAddTo: (el) => { relSel = new Set([el.dataset.env || 'prod']); relSkip = new Set(); relSeparate = false; relOpen = true; relShown = false; render(); },
     relRepo: (el) => { const r = el.dataset.repo; relSkip.has(r) ? relSkip.delete(r) : relSkip.add(r); render(); },
     relReposAll: (el) => { if (el.dataset.on === '1') relSkip = new Set(); else relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo)); render(); },
     // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
@@ -583,6 +586,7 @@
   function startingAll() { if (state) state = { ...state, releaseAll: { running: true, status: 'checking', detail: 'starting', wave: 0, waves: 0, merged: [] } }; }
   let armed = null, armTimer = null;
   let relSkip = new Set(); // release picker: repos left out (all in by default, every time it opens)
+  let relSeparate = false; // release picker: start a release of its own instead of adding to the pending one
   const openChanges = new Set(); // History rows whose "N changes" list is open
   const ARM_MS = 6000;
   function arm(key) {
@@ -763,6 +767,7 @@
         signoff: { count: signers.length, need: 2, signers, gaps: anyone.filter(l => !signers.includes(l))
           .map(login => ({ login, missing: openRepos.filter(r => !(r.signers || []).includes(login)).map(r => ({ label: r.label })) })) },
         attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn', armKey: 'h:' + m.id }));
+      if (pending && a.isApprover && (m.kind || 'release') === 'release' && !(s.releaseAll && s.releaseAll.running)) acts.push(`<button class="rl-hist-btn" data-act="relAddTo" data-env="${esc(m.env || 'prod')}" title="Open the release picker to add repos to this release">➕ Add repos</button>`);
       if (pending && a.isApprover && openRepos.length && !(s.releaseAll && s.releaseAll.running)) acts.push(cancelBtn(m.id, openRepos.length, 'rl-hist-btn'));
       if (m.cancelled) h += `<div class="rl-hist-man${m.status === 'partial' ? ' bad' : ''}">✕ Cancelled by @${esc(m.cancelled.by || '?')} · ${esc(age(m.cancelled.at))} ago`
         + (m.cancelled.never && m.cancelled.never.length ? ` · never shipped: ${esc(m.cancelled.never.join(', '))}` : '') + (m.status === 'partial' ? ' · the rest is live in prod' : '') + '</div>';
@@ -1002,6 +1007,11 @@
         if (before.length) h += `<div class="rl-rr-flag warn" title="Release order puts them first: what's picked may rely on their unreleased changes">⚠ Left out, but earlier in the release order: ${before.map(p => `${esc(p.label)} (${repoWait[p.repo]} waiting)`).join(', ')}. ${esc(picked.filter(p => waveOf(p) === lastPicked).map(p => p.label).join(', '))} may need them.</div>`;
       }
     }
+    // a pending release of a picked env: what's picked joins it (or, on request, a release of its own)
+    const pend = ((s.history && s.history.items) || []).find(m => m.status === 'pending' && relSel.has(m.env || 'prod') && (m.kind || 'release') === 'release');
+    if (pend && relSel.size) h += `<div class="rl-rel-join${relSeparate ? ' off' : ''}">${relSeparate
+      ? `Starts a <b>separate</b> release (release ${esc(pend.id)} is pending) <button data-act="relSep">add to it instead</button>`
+      : `➕ Adds to pending release <b>${esc(pend.id)}</b> (${pend.repos.filter(r => !r.mergeSha && !r.closed).length} open) <button data-act="relSep">start a separate one</button>`}</div>`;
     h += '<div class="rl-rel-sum">' + (relSel.size
       ? `${plan.prs.length} release PR${plan.prs.length === 1 ? '' : 's'} to check and open${relSkip.size && plan.prs.length ? ': ' + esc([...new Set(plan.prs.map(p => p.label))].join(', ')) : ''}`
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')

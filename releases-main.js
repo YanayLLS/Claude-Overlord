@@ -805,10 +805,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     for (const m of ((state.history && state.history.items) || []).slice(0, 5)) {
       const open = m.repos.filter(r => !r.mergeSha && !r.closed);
       const signed = open.length ? [...new Set(m.repos.flatMap(r => r.signers || []).concat((m.signedBy || []).map(x => x.login)))].filter(l => team.includes(String(l).toLowerCase()) && open.every(r => (r.signers || []).includes(l) || (m.signedBy || []).some(x => x.login === l))).length : 0;
-      const now = { ready: m.status === 'pending' && (m.env || 'prod') === 'prod' && signed >= 2, status: m.status };
+      const now = { ready: m.status === 'pending' && (m.env || 'prod') === 'prod' && signed >= 2, status: m.status, repos: m.repos.map(r => r.label) };
       const was = relSeen.get(m.id);
       relSeen.set(m.id, now);
       if (!was || !notify) continue; // first look only learns where things stand
+      const added = now.repos.filter(l => !(was.repos || []).includes(l));
+      if (added.length && m.status === 'pending' && (was.repos || []).length) notify(`➕ Added to release ${m.id}`, `${added.join(', ')}${(m.env || 'prod') === 'prod' ? ' — covered by the signatures already given' : ''}`, null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
       if (now.ready && !was.ready) notify(`✍ Release ${m.id} signed 2/2`, 'Ready to release: open it and press Release all', null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
       if (now.status === 'deployed' && was.status !== 'deployed') notify(`🚀 Release ${m.id} deployed`, `${m.repos.filter(r => r.mergeSha).length} repos live`, null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
       if (now.status === 'deploy-failed' && was.status !== 'deploy-failed') notify(`❌ Release ${m.id}: a deploy failed`, m.repos.filter(r => r.deploy && r.deploy.state === 'failure').map(r => r.label).join(', '), null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
@@ -1014,7 +1016,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // and checks state, streamed into state.releaseRun row by row. No agent unless a row is
   // blocked and someone presses its Fix.
   // repos: only these (owner/name) — releasing one repo, e.g. a hotfix; none = every repo with changes
-  async function release(envs, repos, of) {
+  // separate: start a release of its own even when one is pending (default: what's picked joins the pending one)
+  async function release(envs, repos, of, separate = false) {
     const cfg = state.config;
     const targets = cfg ? releaseTargets(cfg) : [];
     envs = (Array.isArray(envs) ? envs : []).filter(e => targets.includes(e));
@@ -1029,10 +1032,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       plan.prs = plan.prs.filter(p => only.has(p.repo.toLowerCase()));
       plan.manual = plan.manual.filter(p => only.has(p.repo.toLowerCase()));
       if (!plan.prs.length) { send({ type: 'toast', text: 'None of the picked repos has a release PR to open for those environments' }); return; }
-      // a picked repo already in a pending release (with others) would only join that release: ship it from there
+      // a separate release can't take a repo whose release PR already sits in a pending release (it would just join it)
       const inOther = [];
       for (const m of (state.history && state.history.items) || []) {
-        if (m.status !== 'pending' || !envs.includes(m.env || 'prod')) continue;
+        if (!separate || m.status !== 'pending' || !envs.includes(m.env || 'prod')) continue;
         const open = m.repos.filter(r => !r.mergeSha && !r.closed);
         for (const r of open) if (only.has(r.repo.toLowerCase()) && open.some(x => !only.has(x.repo.toLowerCase()))) inOther.push(`${r.label} (release ${m.id})`);
       }
@@ -1079,7 +1082,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     // the shared record: this release's manifest in <org>/release-manifests
     const lives = (state.results && state.results.lives) || {};
     shareHealth(run);
-    await history.recordRun(run, { opener: { login: who.github, clickup: who.clickup }, flags: run.flags,
+    await history.recordRun(run, { joinPending: !separate, opener: { login: who.github, clickup: who.clickup }, flags: run.flags,
       manual: run.manual.map(m => ({ ...m, live: lives[`${m.repo}|${m.env}`] && !lives[`${m.repo}|${m.env}`].error
         ? { sha: lives[`${m.repo}|${m.env}`].sha, behind: lives[`${m.repo}|${m.env}`].behind } : null })) }).catch(e => send({ type: 'toast', text: 'Release manifest: ' + e.message }));
     const blocked = run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
@@ -1184,7 +1187,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         return true;
       }
       case 'releasesRefresh': refresh(); return true;
-      case 'releasesRelease': release(msg.envs, msg.repos, msg.of).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
+      case 'releasesRelease': release(msg.envs, msg.repos, msg.of, !!msg.separate).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
       case 'releasesApprovers': loadApprovers().catch(() => {}); return true;
       case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;

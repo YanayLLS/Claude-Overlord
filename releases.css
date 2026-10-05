@@ -543,3 +543,7 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-stray-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
 .rl-stray-br { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); white-space:nowrap; }
 .rl-row-btn.show { opacity:1; }
+.rl-rel-join { margin-top:8px; padding:6px 10px; border-radius:var(--r-sm); background:var(--accent-soft); border:1px solid var(--accent); font-size:11.5px; color:var(--text); }
+.rl-rel-join.off { background:var(--surface0); border-color:var(--border); }
+.rl-rel-join button { font:inherit; font-size:10.5px; margin-left:6px; padding:0 8px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
+.rl-rel-join button:hover { color:var(--text); background:var(--surface1); }
