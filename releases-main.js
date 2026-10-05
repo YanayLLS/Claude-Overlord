@@ -762,22 +762,23 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     await Promise.all(items.map(async (it) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${it.repo}/pulls`, '-f', 'state=open', '-f', `base=${it.source}`, '-f', 'per_page=100']);
       const back = (Array.isArray(r.data) ? r.data : []).find(p => p.head && p.head.ref === it.target);
-      const h = healthOf(it);
-      if (h && h.checks === 'fail') return skipped.push({ ...it, why: 'checks failing' });
-      if (h && h.conflict) return skipped.push({ ...it, why: 'conflicts with its target' });
+      // failing checks don't hold a repo back: GitHub's branch protection decides what may merge, and a
+      // merge it refuses (a required check, a conflict) skips just that repo below
       const gate = await mergeGate(it.pr.url, memo);
       if (!gate.ok) return skipped.push({ ...it, why: gate.reason });
       go.push(it);
       if (back) backs.push({ it, back });
     }));
-    // back-merges first (target → source); one that won't merge holds just its repo back
+    // a blocked repo blocks the release: it doesn't start until every repo can go
+    if (skipped.length) return refuse(`Can't release yet: ${skipped.map(x => `${x.label}${x.env !== 'prod' ? ' ' + x.env : ''}: ${x.why}`).join(' · ')}`);
+    if (!go.length) return refuse('Nothing open to release');
+    // back-merges first (target → source); one that won't merge stops the release
     for (const { it, back } of backs) {
       progress({ detail: `merging the back-merge ${it.label} #${back.number}` });
       const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${back.number}/merge`, '-f', 'merge_method=merge']);
-      if (apiErr(res)) { go.splice(go.indexOf(it), 1); skipped.push({ ...it, why: `its back-merge #${back.number} didn't merge (${apiErr(res)})` }); }
+      if (apiErr(res)) return refuse(`${it.label}: its back-merge #${back.number} didn't merge (${apiErr(res)}) — nothing else was merged`);
     }
-    if (!go.length) return refuse(`Nothing can merge yet: ${skipped.map(x => `${x.label}${x.env !== 'prod' ? ' ' + x.env : ''}: ${x.why}`).join(' · ')}`);
-    const skippedNote = skipped.length ? ` · not merged: ${skipped.map(x => `${x.label} (${x.why})`).join(', ')}` : '';
+    const skippedNote = () => skipped.length ? ` · not merged: ${skipped.map(x => `${x.label} (${x.why})`).join(', ')}` : ''; // (skips found mid-run count too)
     // hand-deployed repos named in releaseOrder are waves too: Release all pauses there until they're live
     // (seen through their `live` pin) or someone says they're deployed; the rest go in the end popup
     const man = (id ? (((state.history && state.history.items) || []).find(x => x.id === id) || {}).manual || [] : (state.releaseRun && state.releaseRun.manual) || [])
@@ -821,7 +822,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
           if (!gate.ok) { mark([it.label], { s: 'held', why: gate.reason }); return progress({ running: false, status: 'stopped', detail: `${it.label}: ${gate.reason}` }); }
           mark([it.label], { s: 'merging' });
           const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
-          if (apiErr(res)) { mark([it.label], { s: 'held', why: apiErr(res) }); return progress({ running: false, status: 'stopped', detail: `Merge ${it.label}: ${apiErr(res)}` }); }
+          // blocked = the release stops here: later waves depend on this one
+          if (apiErr(res)) { mark([it.label], { s: 'held', why: `GitHub refused the merge: ${apiErr(res)}` }); return progress({ running: false, status: 'stopped', detail: `${it.label}: GitHub refused the merge (${apiErr(res)}) — nothing after it was merged` }); }
           mark([it.label], { s: it.deploy && it.deploy !== 'manual' ? 'merged' : 'merged-hand' });
           merged.push({ ...it, sha: res.data && res.data.sha });
           shipped.push(it);
@@ -838,8 +840,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       }
       // what's still on people: hand-deployed repos behind, and merged PRs whose target has no CI deploy
       const left = manualLeft(state.config, shipped, handLater, state.results && state.results.lives);
-      progress({ running: false, status: 'done', detail: 'Every wave merged' + skippedNote, manualLeft: left, doneAt: Date.now() });
-      send({ type: 'toast', text: 'Release all: every wave merged ✓' + skippedNote });
+      progress({ running: false, status: 'done', detail: 'Every wave merged' + skippedNote(), manualLeft: left, doneAt: Date.now() });
+      send({ type: 'toast', text: 'Release all: every wave merged ✓' + skippedNote() });
     } finally {
       if (state.releaseAll && state.releaseAll.running) progress({ running: false });
       clearInterval(beatTimer); clearTimeout(shareTimer);

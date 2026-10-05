@@ -594,7 +594,8 @@
       const acts = [];
       if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push(signBtn(s, 'rl-hist-btn go', '✍ Sign'));
       // (an open back-merge doesn't hold a repo: Release all merges it first)
-      const held = (r) => r.health && (r.health.backMerge && r.health.backMerge.conflict ? `its back-merge #${r.health.backMerge.number} conflicts` : r.health.checks === 'fail' ? 'checks failing' : r.health.conflict ? 'conflicts with its target' : null);
+      // (failing checks don't hold a repo either: GitHub's branch protection decides; only a conflict does)
+      const held = (r) => r.health && (r.health.backMerge && r.health.backMerge.conflict ? `its back-merge #${r.health.backMerge.number} conflicts` : r.health.conflict ? 'conflicts with its target' : null);
       if (pending && a.isApprover) acts.push(releaseAllBtn(s, {
         ready: signers.length >= 2 ? openRepos.filter(r => !held(r)) : [],
         waiting: signers.length >= 2 ? [] : openRepos, held: openRepos.filter(held).map(r => ({ label: r.label, why: held(r) })),
