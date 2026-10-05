@@ -520,7 +520,7 @@
     if (!p) return '';
     // a finished run's message goes stale once its release has nothing left open (merged since, by hand or on GitHub)
     const man = !p.running && p.id && ((s.history && s.history.items) || []).find(m => m.id === p.id);
-    if (man && !man.repos.some(r => !r.mergeSha && !r.closed) && p.status !== 'done') return '';
+    if (man && !man.repos.some(r => !r.mergeSha && !r.closed) && (p.status !== 'done' || /not merged/i.test(p.detail || '') || Date.now() - (p.at || 0) > 10 * 60 * 1000)) return '';
     const its = Object.values(p.items || {}).filter(x => x.s !== 'held');
     const doneN = its.filter(x => DONE.has(x.s)).length;
     const pct = its.length ? Math.round(doneN / its.length * 100) : 0;
