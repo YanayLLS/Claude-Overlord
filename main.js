@@ -5334,6 +5334,14 @@ app.whenReady().then(() => {
   };
   if (bounds.x !== undefined && bounds.y !== undefined) { opts.x = bounds.x; opts.y = bounds.y; }
   mainWindow = new BrowserWindow(opts);
+  // Show as soon as the page is painted — don't wait for agent restoration. Hooked
+  // first, so a throw in the setup below can't leave a running app with no window,
+  // and a page that never paints (GPU/driver trouble) still shows after 10s.
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) { flog('ready-to-show never fired: showing window anyway'); mainWindow.show(); }
+  }, 10000);
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc) => flog(`page failed to load: ${code} ${desc}`));
   // Windows takes the taskbar icon from the Start Menu shortcut sharing the app id (an older install's
   // icon, even when run from start.bat). Setting it on the window itself wins over that shortcut.
   if (process.platform === 'win32') mainWindow.setAppDetails({ appId: APP_ID, appIconPath: APP_ICON, appIconIndex: 0 });
@@ -5374,8 +5382,6 @@ app.whenReady().then(() => {
   });
   mainWindow.webContents.on('unresponsive', () => flog('renderer unresponsive — ' + JSON.stringify(memorySummary())));
   mainWindow.webContents.on('responsive', () => flog('renderer responsive again'));
-  // Show window as soon as the page is painted — don't wait for agent restoration
-  mainWindow.once('ready-to-show', () => mainWindow.show());
   // Restore agents after window is visible (heavy JSONL parsing + process cleanup)
   let _didRestore = false;
   mainWindow.webContents.on('did-finish-load', () => {
