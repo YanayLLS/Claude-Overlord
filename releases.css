@@ -446,3 +446,9 @@
 /* Release all starting: a small spinner before the checks finish */
 .rl-spin-dot { display:inline-block; width:10px; height:10px; margin-right:6px; vertical-align:-1px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:rl-spin .8s linear infinite; }
 @keyframes rl-spin { to { transform:rotate(360deg); } }
+/* a repo's status during Release all */
+.rl-item { font-size:11px; color:var(--subtext); white-space:nowrap; }
+.rl-item.ok { color:var(--green); } .rl-item.bad { color:var(--red); } .rl-item.warn { color:var(--peach); }
+.rl-item.run { color:var(--yellow); animation:rl-pulse 1.4s ease-in-out infinite; }
+.rl-hist-state { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
+.rl-hist-state .rl-hist-health { margin-left:0; }

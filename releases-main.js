@@ -636,7 +636,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         if (!done) { still.push(x); continue; }
         if (done.conclusion !== 'success') {
           if (notify) notify(`❌ Release stopped · ${x.label} deploy failed`, 'Later waves were not merged', done.html_url);
-          return { detail: `${x.label} deploy failed — later waves not merged`, url: done.html_url };
+          return { detail: `${x.label} deploy failed — later waves not merged`, url: done.html_url, label: x.label };
         }
       }
       pending = still;
@@ -786,14 +786,22 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const handWaves = man.filter(inOrder), handLater = man.filter(m => !inOrder(m));
     const waves = releaseWaves(state.config, go.concat(handWaves));
     releaseAllStop = false; manualDone = false;
+    // each repo's own status, for History and the results popover: queued (its wave) → merging → merged →
+    // deploying → deployed / deploy failed; held = not merged this time, and why
+    const repoState = {};
+    for (const x of skipped) repoState[x.label] = { s: 'held', why: x.why };
+    waves.forEach((w, i) => w.forEach(x => { repoState[x.label] = { s: x.manual ? 'hand' : 'queued', wave: i + 1 }; }));
+    for (const x of justMerged) repoState[x.label] = { s: 'deploying' };
+    const mark = (labels, v) => { const next = { ...((state.releaseAll && state.releaseAll.items) || {}) }; for (const l of labels) next[l] = { ...(next[l] || {}), ...v }; progress({ items: next }); };
     const shipped = [];
-    progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '', url: null });
+    progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '', url: null, items: repoState });
     clearInterval(beatTimer); beatTimer = setInterval(shareRun, BEAT_MS);
     try {
       if (justMerged.length) {
         progress({ status: 'deploying', detail: justMerged.map(x => x.label).join(', ') });
         const bad = await waitDeploys(justMerged);
-        if (bad) return progress({ running: false, status: 'stopped', ...bad });
+        if (bad) { if (bad.label) mark([bad.label], { s: 'failed' }); return progress({ running: false, status: 'stopped', ...bad }); }
+        mark(justMerged.map(x => x.label), { s: 'deployed' });
       }
       for (let w = 0; w < waves.length; w++) {
         if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
@@ -802,15 +810,19 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         const merged = [];
         const hand = wave.filter(x => x.manual);
         if (hand.length) {
+          mark(hand.map(x => x.label), { s: 'hand-wait' });
           const r = await waitManual(hand);
+          if (!r) mark(hand.map(x => x.label), { s: 'hand-done' });
           if (r) return progress({ running: false, status: 'stopped', detail: r, manualWave: null });
         }
         for (const it of wave.filter(x => !x.manual)) {
           if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
           const gate = await mergeGate(it.pr.url);
-          if (!gate.ok) return progress({ running: false, status: 'stopped', detail: `${it.label}: ${gate.reason}` });
+          if (!gate.ok) { mark([it.label], { s: 'held', why: gate.reason }); return progress({ running: false, status: 'stopped', detail: `${it.label}: ${gate.reason}` }); }
+          mark([it.label], { s: 'merging' });
           const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
-          if (apiErr(res)) return progress({ running: false, status: 'stopped', detail: `Merge ${it.label}: ${apiErr(res)}` });
+          if (apiErr(res)) { mark([it.label], { s: 'held', why: apiErr(res) }); return progress({ running: false, status: 'stopped', detail: `Merge ${it.label}: ${apiErr(res)}` }); }
+          mark([it.label], { s: it.deploy && it.deploy !== 'manual' ? 'merged' : 'merged-hand' });
           merged.push({ ...it, sha: res.data && res.data.sha });
           shipped.push(it);
           progress({ merged: (state.releaseAll.merged || []).concat(it.label + (it.env !== 'prod' ? ' ' + it.env : '')) });
@@ -819,8 +831,10 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         const waitOn = merged.filter(x => x.deploy && x.deploy !== 'manual' && x.sha);
         if (!waitOn.length || w === waves.length - 1) continue; // the last wave needn't hold anything back
         progress({ status: 'deploying', detail: waitOn.map(x => x.label).join(', ') });
+        mark(waitOn.map(x => x.label), { s: 'deploying' });
         const bad = await waitDeploys(waitOn);
-        if (bad) return progress({ running: false, status: 'stopped', ...bad });
+        if (bad) { if (bad.label) mark([bad.label], { s: 'failed' }); return progress({ running: false, status: 'stopped', ...bad }); }
+        mark(waitOn.map(x => x.label), { s: 'deployed' });
       }
       // what's still on people: hand-deployed repos behind, and merged PRs whose target has no CI deploy
       const left = manualLeft(state.config, shipped, handLater, state.results && state.results.lives);

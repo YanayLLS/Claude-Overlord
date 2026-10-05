@@ -428,6 +428,14 @@
     return h + '</div>';
   }
 
+  // A repo's status in a Release all (state.releaseAll.items[label]), as a short coloured note
+  function relItemHtml(it) {
+    if (!it) return '';
+    const t = { queued: ['', `wave ${it.wave}`], merging: ['run', 'merging…'], merged: ['ok', 'merged · deploying…'], 'merged-hand': ['ok', 'merged ✓'],
+      deploying: ['run', 'deploying…'], deployed: ['ok', 'deployed ✓'], failed: ['bad', 'deploy failed'], held: ['warn', 'waiting'],
+      hand: ['', `wave ${it.wave} · by hand`], 'hand-wait': ['warn', 'deploy by hand…'], 'hand-done': ['ok', 'deployed by hand ✓'] }[it.s] || ['', it.s];
+    return `<span class="rl-item ${t[0]}"${it.why ? ` title="${esc(it.why)}"` : ''}>${esc(t[1])}${it.why ? ': ' + esc(it.why.length > 40 ? it.why.slice(0, 40) + '…' : it.why) : ''}</span>`;
+  }
   // What the release run found for a pending PR (shared through the release record)
   function histHealth(h) {
     const bits = [];
@@ -537,6 +545,7 @@
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
       h += '<div class="rl-hist-repos">';
+      const liveItems = s.releaseAll && s.releaseAll.id === m.id && s.releaseAll.items;
       for (const r of m.repos) {
         const need = pending && !r.mergeSha && !r.closed;
         const signed = (r.signers || []).length;
@@ -544,8 +553,7 @@
         const dep = r.deploy ? (r.deploy.state === 'success' ? '<span class="ok">deployed</span>' : r.deploy.state === 'failure' ? '<span class="bad">deploy failed</span>' : r.mergeSha ? 'deploying…' : '') : '✋ by hand';
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
-          + (need && r.health ? histHealth(r.health) : '')
-          + `<span class="rl-hist-state">${r.closed && !r.mergeSha ? 'closed' : need ? (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-state">${liveItems && liveItems[r.label] && !r.mergeSha ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
       }
       h += '</div>';
       if (m.manual && m.manual.length) h += `<div class="rl-hist-man">Hand-deployed at the time: ${m.manual.map(x => esc(x.label) + (x.live && x.live.sha ? ' ' + shortSha(x.live.sha) : '')).join(' · ')}</div>`;
