@@ -1531,7 +1531,6 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+0</span><span class="help-desc">Reset zoom to 100%</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Scroll</span><span class="help-desc">Zoom in/out</span></div>
       <div class="help-row"><span class="help-key">Ctrl+U</span><span class="help-desc">Refresh usage stats</span></div>
-      <div class="help-row"><span class="help-key">Ctrl+Shift+U</span><span class="help-desc">Preview the update button</span></div>
       <div class="help-row"><span class="help-key">Esc</span><span class="help-desc">Close overlay / filter</span></div>
       <div class="help-row"><span class="help-key">?</span><span class="help-desc">Show this help</span></div>
       <div class="help-row help-world"><span class="help-key">&#x2B22;</span><span class="help-desc">World view: the roster as a 3D map (header button or Settings)</span></div>
@@ -4827,12 +4826,6 @@ document.addEventListener('keydown', (e) => {
     setUiZoom(100);
     return;
   }
-  // Ctrl+Shift+U previews the update button (and its click) without an update
-  if (e.key === 'U' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault();
-    previewUpdateBtn();
-    return;
-  }
   // Ctrl+U to refresh usage
   if (e.key === 'u' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
@@ -5733,11 +5726,11 @@ function closeSnooze() { const p = document.getElementById('pr-snooze-pop'); if 
 // The header's update button, for both update paths (installer download, git pull).
 // Busy states (restarting, pulling) swap the arrow for a spinner and lock the click.
 const UPD_ICON = '<svg class="ic upd-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
-let updBtnArgs = null; // the last idle state, restored after a failed pull or a preview
+let updBtnArgs = null; // the last idle state, restored after a failed pull
 function setUpdateBtn(args) {
   const b = document.getElementById('update-btn');
   if (!b) return;
-  if (!args.busy && !args.preview) { updBtnArgs = args; updPreview = null; } // a real update ends any preview
+  if (!args.busy) updBtnArgs = args;
   b.style.display = '';
   // Going busy keeps the width, so the header icons beside it don't shift.
   b.style.minWidth = args.busy ? (b.classList.contains('busy') ? b.style.minWidth : b.offsetWidth + 'px') : '';
@@ -5748,27 +5741,6 @@ function setUpdateBtn(args) {
   if (args.title) b.title = args.title;
   if (args.onclick) b.onclick = args.onclick;
 }
-// Ctrl+Shift+U: show the button as if an update had downloaded; its click plays the
-// Restarting… state for 3s instead of installing. Again restores whatever was there.
-let updPreview = null;
-function previewUpdateBtn() {
-  const b = document.getElementById('update-btn');
-  if (!b) return;
-  if (updPreview) {
-    const p = updPreview; updPreview = null;
-    updBtnArgs = p.args;
-    if (p.args) setUpdateBtn(p.args); else b.style.display = 'none';
-    return;
-  }
-  updPreview = { args: b.style.display === 'none' ? null : updBtnArgs };
-  // Re-insert so the pop-in plays even when the button was already showing.
-  b.style.display = 'none'; void b.offsetWidth;
-  const idle = { preview: true, label: 'Update', ver: 'v9.9.9', title: 'Preview (Ctrl+Shift+U to hide) — clicking installs nothing',
-    onclick: () => { setUpdateBtn({ label: 'Restarting…', busy: true }); setTimeout(() => { if (updPreview) setUpdateBtn(idle); }, 3000); } };
-  setUpdateBtn(idle);
-  showToast('Update button preview — Ctrl+Shift+U again to hide');
-}
-
 // First-run setup card: up while git or claude is missing, or claude was never
 // logged in. Git gates Claude (it needs Git Bash); Claude gates the login.
 // Every control answers: installs stream their current step with a timer and bar,
