@@ -27,9 +27,9 @@ function nextId(existing, now = new Date()) {
 
 // A new pending manifest from a release run's prod rows (the ones with a PR).
 // kind 'rollback' carries rollbackOf = the release it restores.
-function newManifest({ id, kind = 'release', rollbackOf = null, env = 'prod', rows, opener, manual = [], flags = null, now = Date.now() }) {
+function newManifest({ id, kind = 'release', rollbackOf = null, env = 'prod', rows, opener, manual = [], flags = null, scope = null, now = Date.now() }) {
   return {
-    schema: SCHEMA, id, kind, rollbackOf, env, status: 'pending',
+    schema: SCHEMA, id, kind, rollbackOf, env, status: 'pending', ...(scope ? { scope } : {}),
     openedAt: new Date(now).toISOString(), openedBy: opener || null, updatedAt: new Date(now).toISOString(),
     repos: (rows || []).filter(r => r.pr).map(r => ({
       repo: r.repo, label: r.label, source: r.source, target: r.target,

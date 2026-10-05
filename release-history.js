@@ -74,6 +74,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     return prodId;
   }
   async function recordEnv(run, env, { opener, manual, flags }) {
+    const scope = run.scope || null; // a release of some repos only: { repos: [labels], of: N waiting }
     const rows = run.rows.filter(r => r.env === env && r.pr && !r.merged && !r.closed);
     if (!rows.length) return null;
     const loaded = await load();
@@ -89,7 +90,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         const add = M.newManifest({ id: m.id, env, rows: rows.filter(r => !have.has(key(r))) }).repos;
         m = { ...m, repos: m.repos.concat(add), manual, flags: flags && flags.missing ? { missing: flags.missing } : m.flags, updatedAt: new Date().toISOString() };
       } else {
-        m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name).concat(attempt ? [M.nextId(loaded.files.map(f => f.name))] : [])), env, rows, opener, manual, flags });
+        m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name).concat(attempt ? [M.nextId(loaded.files.map(f => f.name))] : [])), env, rows, opener, manual, flags, scope });
       }
       const w = await write(m, sha, existing ? `release ${m.id}: updated` : `release ${m.id} (${env}): opened by @${opener && opener.login}`);
       if (w.conflict) { await load(); continue; }

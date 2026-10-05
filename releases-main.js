@@ -997,7 +997,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // and checks state, streamed into state.releaseRun row by row. No agent unless a row is
   // blocked and someone presses its Fix.
   // repos: only these (owner/name) — releasing one repo, e.g. a hotfix; none = every repo with changes
-  async function release(envs, repos) {
+  async function release(envs, repos, of) {
     const cfg = state.config;
     const targets = cfg ? releaseTargets(cfg) : [];
     envs = (Array.isArray(envs) ? envs : []).filter(e => targets.includes(e));
@@ -1012,8 +1012,16 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       plan.prs = plan.prs.filter(p => only.has(p.repo.toLowerCase()));
       plan.manual = plan.manual.filter(p => only.has(p.repo.toLowerCase()));
       if (!plan.prs.length) { send({ type: 'toast', text: 'None of the picked repos has a release PR to open for those environments' }); return; }
+      // a picked repo already in a pending release (with others) would only join that release: ship it from there
+      const inOther = [];
+      for (const m of (state.history && state.history.items) || []) {
+        if (m.status !== 'pending' || !envs.includes(m.env || 'prod')) continue;
+        const open = m.repos.filter(r => !r.mergeSha && !r.closed);
+        for (const r of open) if (only.has(r.repo.toLowerCase()) && open.some(x => !only.has(x.repo.toLowerCase()))) inOther.push(`${r.label} (release ${m.id})`);
+      }
+      if (inOther.length) { send({ type: 'toast', text: `Already in a pending release with other repos: ${inOther.join(', ')}. Ship it from that release's row (Merge), or cancel that release first` }); return; }
     }
-    const run = { envs, startedAt: Date.now(), running: true, rows: plan.prs.map(p => ({ ...p, running: true })), manual: plan.manual, flags: null };
+    const run = { ...(Array.isArray(repos) && repos.length ? { scope: { repos: plan.prs.map(p => p.label).filter((v, i, a) => a.indexOf(v) === i), of: Number(of) || null } } : {}), envs, startedAt: Date.now(), running: true, rows: plan.prs.map(p => ({ ...p, running: true })), manual: plan.manual, flags: null };
     push({ releaseRun: run });
     const cwd = await configCheckout();
     const flagScript = path.join(cwd, '.claude', 'skills', 'release', 'flag-gap.cjs');
@@ -1158,7 +1166,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         return true;
       }
       case 'releasesRefresh': refresh(); return true;
-      case 'releasesRelease': release(msg.envs, msg.repos).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
+      case 'releasesRelease': release(msg.envs, msg.repos, msg.of).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
       case 'releasesApprovers': loadApprovers().catch(() => {}); return true;
       case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;

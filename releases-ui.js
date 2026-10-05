@@ -114,8 +114,11 @@
       const all = [...new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo))];
       const repos = relSkip.size ? all.filter(r => !relSkip.has(r)) : null;
       if (repos && !repos.length) return;
-      api.send({ type: 'releasesRelease', envs: [...relSel], repos });
+      api.send({ type: 'releasesRelease', envs: [...relSel], repos, of: all.length });
     },
+    relOnly: (el) => { relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); render(); },
+    // the Board cell's "Release just this": the picker set to this repo and env
+    relJust: (el) => { relSel = new Set([el.dataset.env]); relSkip = new Set(ReleasesCore.releasePlan(state.config, [el.dataset.env]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); relOpen = true; relShown = false; render(); },
     relRepo: (el) => { const r = el.dataset.repo; relSkip.has(r) ? relSkip.delete(r) : relSkip.add(r); render(); },
     relReposAll: (el) => { if (el.dataset.on === '1') relSkip = new Set(); else relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo)); render(); },
     // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
@@ -392,9 +395,12 @@
       h += `<div>${link(c.commit.url, `<span class="rl-mono">${esc(c.commit.sha.slice(0, 7))}</span> ${esc(c.commit.title)}`)}`
         + ` — ${esc(c.commit.author)}, ${esc(age(c.commit.date))} ago</div>`;
     }
+    const relTargets = s0().config ? ReleasesCore.releaseTargets(s0().config) : [];
+    const canRel = (s0().approvers || {}).isApprover;
     for (const n of c.nexts || []) {
       if (n.loading || n.error) continue;
       if (!n.ahead) { h += `<div style="margin-top:6px">Nothing waiting for ${esc(n.to)}.</div>`; continue; }
+      if (canRel && relTargets.includes(n.to)) h += `<button class="rl-hist-btn rl-just" data-act="relJust" data-repo="${esc(row.repo)}" data-env="${esc(n.to)}" title="Open the release picker set to just ${esc(row.label)} → ${esc(n.to)}">🚀 Release just ${esc(row.label)} → ${esc(n.to)}</button>`;
       h += `<div style="margin-top:6px">${n.ahead} commit${n.ahead === 1 ? '' : 's'} not yet in ${esc(n.to)} (newest first):</div><ul>`;
       if (!n.commits) h += '<li class="rl-age">loading…</li>';
       else for (const m of n.commits) h += `<li>${link(m.url, `<span class="rl-mono">${esc(m.sha.slice(0, 7))}</span> ${esc(m.title)}`)}</li>`;
@@ -462,6 +468,12 @@
     const r = t && m.repos.find(x => x.repo === t.repo && x.deploy && x.deploy.state === 'success');
     if (!r || Date.now() - Date.parse(r.deploy.at || 0) < 15 * 60 * 1000) return '';
     return `${r.label} deployed ${age(r.deploy.at)} ago but no ClickUp release ticket was found for it (its deploy's "Open the ClickUp release ticket" step probably failed: check that run). Or you're not connected to ClickUp in Overlord's Settings, so Overlord can't look it up.`;
+  }
+  // the pending release (if any) a repo's open release PR already belongs to
+  const s0 = () => state || {};
+  function pendingWith(st, repo) {
+    const m = ((st.history && st.history.items) || []).find(x => x.status === 'pending' && x.repos.some(r => r.repo === repo && !r.mergeSha && !r.closed));
+    return m ? m.id : null;
   }
   // the Board's pinned line for the release in flight
   function activeStrip(st) {
@@ -659,6 +671,7 @@
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
         + (env !== 'prod' ? `<span class="rl-env" style="--hue:${ENV_HUE[env.toLowerCase()] || 'var(--dim)'}">${esc(env)}</span>` : '')
         + (pending && signs ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
+        + (m.scope ? `<span class="rl-rr-chip" title="A release of some repos only: ${esc((m.scope.repos || []).join(', '))}">${esc((m.scope.repos || []).length)}${m.scope.of ? ' of ' + esc(m.scope.of) : ''} repos</span>` : '')
         + (m.version ? `<span class="rl-rr-chip" title="Frontend version this release shipped">v${esc(m.version)}</span>` : '')
         + (!m.ticket && ticketLate(s, m) ? `<span class="rl-rr-chip warn" title="${esc(ticketLate(s, m))}">⚠ no ClickUp ticket</span>` : '')
         + (m.ticket ? `<a class="rl-hist-ticket" data-url="${esc(m.ticket.url)}" title="${esc(m.ticket.name)}">ClickUp ticket ↗</a>` : '')
@@ -956,11 +969,23 @@
     if (relSel.size && planRepos.length) {
       const allOn = !planRepos.some(p => relSkip.has(p.repo));
       h += `<div class="rl-rel-head rl-rel-repos-head"><span>Repos</span><button class="rl-rel-all" data-act="relReposAll" data-on="${allOn ? 0 : 1}">${allOn ? 'None' : 'All'}</button></div><div class="rl-rel-repos">`
-        + planRepos.map(p => `<button class="rl-rel-repo${relSkip.has(p.repo) ? '' : ' on'}" data-act="relRepo" data-repo="${esc(p.repo)}" title="${relSkip.has(p.repo) ? 'Left out of this release' : 'In this release'}">`
-          + `<i></i><b>${esc(p.label)}</b><span>${repoWait[p.repo]} waiting</span></button>`).join('') + '</div>';
+        + planRepos.map(p => {
+          const inRel = pendingWith(s, p.repo);
+          return `<div class="rl-rel-repo-row"><button class="rl-rel-repo${relSkip.has(p.repo) ? '' : ' on'}" data-act="relRepo" data-repo="${esc(p.repo)}" title="${relSkip.has(p.repo) ? 'Left out of this release' : 'In this release'}">`
+            + `<i></i><b>${esc(p.label)}</b><span>${inRel ? `<em title="Its release PR is already in pending release ${esc(inRel)}: picking it alone just joins that release">in ${esc(inRel.slice(5))}</em> · ` : ''}${repoWait[p.repo]} waiting</span></button>`
+            + `<button class="rl-rel-only" data-act="relOnly" data-repo="${esc(p.repo)}" title="Release just ${esc(p.label)}">only</button></div>`;
+        }).join('') + '</div>';
+      // a later-wave repo going without an earlier-wave repo that has unreleased work: it may depend on it
+      const picked = planRepos.filter(p => !relSkip.has(p.repo)), left = planRepos.filter(p => relSkip.has(p.repo));
+      if (picked.length && left.length && cfg.releaseOrder) {
+        const waveOf = (p) => cfg.releaseOrder.findIndex(w => w.some(x => x === p.label || x.toLowerCase() === p.repo.toLowerCase()));
+        const lastPicked = Math.max(...picked.map(waveOf));
+        const before = left.filter(p => { const w = waveOf(p); return w >= 0 && w < lastPicked; });
+        if (before.length) h += `<div class="rl-rr-flag warn" title="Release order puts them first: what's picked may rely on their unreleased changes">⚠ Left out, but earlier in the release order: ${before.map(p => `${esc(p.label)} (${repoWait[p.repo]} waiting)`).join(', ')}. ${esc(picked.filter(p => waveOf(p) === lastPicked).map(p => p.label).join(', '))} may need them.</div>`;
+      }
     }
     h += '<div class="rl-rel-sum">' + (relSel.size
-      ? `${plan.prs.length} release PR${plan.prs.length === 1 ? '' : 's'} to check and open`
+      ? `${plan.prs.length} release PR${plan.prs.length === 1 ? '' : 's'} to check and open${relSkip.size && plan.prs.length ? ': ' + esc([...new Set(plan.prs.map(p => p.label))].join(', ')) : ''}`
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
       : 'Pick one or more environments') + '</div>'
       + '<div class="rl-rel-note">Overlord opens the release PRs (plus back-merges when needed) and checks each one. Nothing merges until 2 approvers sign and someone presses Release all.</div>'
