@@ -229,34 +229,37 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .hdr-btn:hover { background:rgba(205,214,244,.08); color:var(--text); }
 .hdr-btn:active { background:rgba(205,214,244,.12); }
 .hdr-btn.active { background:var(--green); color:#000; border-radius:4px; }
-/* ── Update button: the one header button meant to catch the eye ──
-   Pops in, breathes a soft glow, a light sweep crosses it now and then, the arrow bobs. */
-#update-btn.update-btn { position:relative; overflow:hidden; isolation:isolate; gap:6px; padding:0 11px 0 9px; border-radius:999px;
-  color:#062b14; font-size:12px; font-weight:650; letter-spacing:.1px;
-  background:linear-gradient(135deg, #a7f3c0 0%, var(--green) 50%, #22c55e 100%);
-  box-shadow:0 0 0 1px rgba(74,222,128,.55), 0 3px 12px rgba(74,222,128,.25);
-  animation:upd-in .55s cubic-bezier(.2,1.5,.4,1) both, upd-glow 2.8s ease-in-out .6s infinite;
-  transition:transform .15s ease, filter .15s ease; }
+/* ── Update button: built like the Feature button (outline, var(--r)), so it belongs
+   to the header. Green marks it as news: the arrow, a status dot that pings like
+   the agent dots, and a faint sweep every few seconds. */
+#update-btn.update-btn { position:relative; overflow:hidden; isolation:isolate; gap:6px; padding:0 10px 0 9px;
+  border-radius:var(--r); border:1px solid var(--border-hi); background:transparent;
+  color:var(--text); font-size:12px; font-weight:600;
+  animation:upd-in .35s cubic-bezier(.2,1.3,.4,1) both;
+  transition:background .12s, border-color .12s; }
 #update-btn.update-btn::before { content:''; position:absolute; inset:0; z-index:-1; pointer-events:none;
-  background:linear-gradient(105deg, transparent 30%, rgba(255,255,255,.6) 50%, transparent 70%);
-  transform:translateX(-130%); animation:upd-shine 3.6s ease-in-out 1.2s infinite; }
-#update-btn.update-btn:hover { color:#062b14; transform:translateY(-1px); filter:brightness(1.07) saturate(1.1); }
-#update-btn.update-btn:active { transform:translateY(0) scale(.96); }
-#update-btn.update-btn:focus-visible { outline:2px solid var(--green); outline-offset:2px; }
-#update-btn .upd-ic { width:14px; height:14px; stroke-width:2.4; animation:upd-bob 2.8s ease-in-out infinite; }
-#update-btn:hover .upd-ic { animation-duration:.9s; }
-#update-btn .upd-ver { font-size:10.5px; font-weight:600; padding:1px 6px; border-radius:999px;
-  background:rgba(6,43,20,.14); font-variant-numeric:tabular-nums; }
-#update-btn.busy { cursor:progress; filter:saturate(.8); animation:upd-in .55s both; }
-#update-btn.busy::before { animation-duration:1.1s; animation-delay:0s; }
-#update-btn .setup-spin { margin-right:0; }
-@keyframes upd-in { from { opacity:0; transform:scale(.5) translateY(-6px); } }
-@keyframes upd-glow { 50% { box-shadow:0 0 0 1px rgba(74,222,128,.8), 0 0 16px 3px rgba(74,222,128,.45); } }
-@keyframes upd-shine { 0% { transform:translateX(-130%); } 40%, 100% { transform:translateX(130%); } }
-@keyframes upd-bob { 0%, 60%, 100% { transform:translateY(0); } 30% { transform:translateY(2px); } }
+  background:linear-gradient(105deg, transparent 35%, rgba(74,222,128,.16) 50%, transparent 65%);
+  transform:translateX(-130%); animation:upd-shine 5s ease-in-out 1s infinite; }
+#update-btn.update-btn:hover { background:var(--surface1); border-color:rgba(74,222,128,.45); color:var(--text); }
+#update-btn.update-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+#update-btn .upd-ic { width:14px; height:14px; stroke-width:2.2; color:var(--green); transition:transform .15s; }
+#update-btn:hover .upd-ic { transform:translateY(1.5px); }
+#update-btn .upd-ver { padding-left:2px; }
+#update-btn .upd-ver { color:var(--dim); font-weight:500; font-variant-numeric:tabular-nums; }
+#update-btn .upd-icw { position:relative; display:inline-flex; margin-right:2px; }
+#update-btn .upd-dot { position:absolute; top:-2px; right:-3px; width:5px; height:5px; border-radius:50%; background:var(--green);
+  animation:upd-ping 2.4s ease-out infinite; }
+#update-btn.busy { cursor:progress; }
+#update-btn.busy::before { animation-duration:1.4s; animation-delay:0s; }
+#update-btn.busy .upd-dot { display:none; }
+#update-btn .setup-spin { margin-right:0; color:var(--green); }
+@keyframes upd-in { from { opacity:0; transform:translateY(-4px); } }
+@keyframes upd-shine { 0% { transform:translateX(-130%); } 30%, 100% { transform:translateX(130%); } }
+@keyframes upd-ping { 0% { box-shadow:0 0 0 0 rgba(74,222,128,.6); } 70%, 100% { box-shadow:0 0 0 5px rgba(74,222,128,0); } }
 @media (prefers-reduced-motion: reduce) {
-  #update-btn.update-btn, #update-btn.update-btn::before, #update-btn .upd-ic { animation:none; }
+  #update-btn.update-btn, #update-btn.update-btn::before, #update-btn .upd-dot { animation:none; }
 }
+
 #account-btn {
   font-family:inherit; font-size:11px; padding:3px 10px; background:rgba(137,180,250,.12);
   color:var(--accent); border:1px solid rgba(137,180,250,.25); border-radius:10px; cursor:pointer;
@@ -5739,7 +5742,7 @@ function setUpdateBtn(args) {
   b.style.minWidth = args.busy ? (b.classList.contains('busy') ? b.style.minWidth : b.offsetWidth + 'px') : '';
   b.classList.toggle('busy', !!args.busy);
   b.disabled = !!args.busy;
-  b.innerHTML = (args.busy ? '<span class="setup-spin"></span>' : UPD_ICON) + '<span>' + escapeHtml(args.label) + '</span>'
+  b.innerHTML = (args.busy ? '<span class="setup-spin"></span>' : '<span class="upd-icw">' + UPD_ICON + '<span class="upd-dot"></span></span>') + '<span>' + escapeHtml(args.label) + '</span>'
     + (args.ver ? '<span class="upd-ver">' + escapeHtml(args.ver) + '</span>' : '');
   if (args.title) b.title = args.title;
   if (args.onclick) b.onclick = args.onclick;
