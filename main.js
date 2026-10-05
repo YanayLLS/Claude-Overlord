@@ -2367,7 +2367,16 @@ function applyPrFlags(prs) {
   });
 }
 
-async function pollPRs() {
+// Every caller (timers, the watch, ~15 PR actions) shares one poll: while one runs, more requests just queue a single
+// re-run after it, so a burst of clicks or overlapping timers can't stack GraphQL polls.
+let prPolling = null, prPollAgain = false;
+function pollPRs() {
+  if (prPolling) { prPollAgain = true; return prPolling; }
+  return prPolling = (async () => {
+    try { do { prPollAgain = false; await pollPRsOnce(); } while (prPollAgain); } finally { prPolling = null; }
+  })();
+}
+async function pollPRsOnce() {
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
   await fetchGhLogin();
@@ -2458,6 +2467,7 @@ let ghToken = null, prWatchTimer = null, prCheckWatchTimer = null;
 const ghTokenGet = () => ghToken ? Promise.resolve(ghToken) : new Promise((res, rej) =>
   exec('gh auth token', { windowsHide: true, timeout: 10000 }, (err, out) => { const t = (out || '').trim(); if (err || !t) return rej(err || new Error('no token')); res(ghToken = t); }));
 const prWatchGet = async (key, etag) => {
+  if (ghCache.blockedUntil()) return null; // rate limited: wait for the reset with everyone else
   const [at, what] = key.split('#'), [repo, sha] = at.split('@');
   const url = what === 'runs' ? 'actions/runs?event=pull_request&per_page=20'
     : what === 'checks' ? `commits/${sha}/check-runs?per_page=50` : what === 'status' ? `commits/${sha}/status`
@@ -2467,6 +2477,7 @@ const prWatchGet = async (key, etag) => {
     signal: AbortSignal.timeout(8000),
   });
   if (r.status === 401) ghToken = null; // rotated by gh auth: fetch it again next tick
+  ghCache.noteResponse(r);
   return { status: r.status, etag: r.headers.get('etag') };
 };
 // Triggered polls spend GraphQL points (~12+ each), so they're budgeted: at most one per PR_WATCH_GAP_MS (changes in the
@@ -2578,7 +2589,7 @@ async function listReposWithLastPr() {
   return { repos, lastPr };
 }
 
-function ghJson(args, timeout = 20000) {
+function ghJsonRaw(args, timeout = 20000) {
   return new Promise((resolve) => {
     execFile('gh', args, { timeout, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 8 * 1024 * 1024 },
       (err, stdout) => {
@@ -2612,6 +2623,9 @@ async function releasesFindLocal(repo, rel, ref) {
   }
   return found;
 }
+// Plain GETs revalidate with ETags (a 304 is free) and a rate-limited answer pauses REST until the reset: gh-cache.js.
+const ghCache = require('./gh-cache').createGhCache({ run: ghJsonRaw, fetch, token: () => ghTokenGet() });
+const ghJson = ghCache.ghJson;
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
   startAgent: (cwd, prompt) => createAgent(cwd, null, prompt),
   fixRun: (run) => fixActionRun(run),
@@ -2815,15 +2829,17 @@ function notifyActionFailed(r) {
 
 // setTimeout, not setInterval: the delay depends on what the last poll saw, so
 // a deploy in flight is picked up every 10s and an idle board every intervalSec.
+let actionsGen = 0; // re-arming bumps it, so a tick still awaiting its poll doesn't start a second chain
 function armActionsTimer() {
   if (actionsTimer) { clearTimeout(actionsTimer); actionsTimer = null; }
+  const gen = ++actionsGen;
   const cfg = settings.actionsSettings;
   if (!cfg || !cfg.enabled) return;
   const tick = async () => {
     let rows = [];
     try { rows = await pollActions(); } catch (e) { console.log('[Overlord] Actions poll error:', e.message); }
     const c = settings.actionsSettings;
-    if (!c || !c.enabled) return;
+    if (gen !== actionsGen || !c || !c.enabled) return;
     actionsTimer = setTimeout(tick, nextPollDelay(rows, c.intervalSec));
   };
   tick();
