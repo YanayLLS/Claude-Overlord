@@ -461,6 +461,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         all.push({ label: p.label, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s, number: pr.number, url: pr.html_url,
           mine: hasSigned(s, who.github), older: (s.stale || []).some(l => l.toLowerCase() === meL) });
         if (hasSigned(s, who.github)) continue;
+        // its release isn't loaded yet (history unreadable just now): don't guess, ask only when sure
+        const rid = releaseIdOf(s.pr.body);
+        if (rid && !((state.history && state.history.items) || []).some(m => m.id === rid)) continue;
         if (signedRelease(((state.history && state.history.items) || []).find(m => m.id === releaseIdOf(s.pr.body)), who.github)) continue; // signed the release once: covers PRs added since
         found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url, head: s.pr.head.sha, commits: s.pr.commits || null, author: s.pr.user.login,
           release: all[all.length - 1].release, signers: s.signers.map(x => x.login), count: s.count, need: s.need });
@@ -654,7 +657,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // A hand-deployed wave: show where to deploy each (state.releaseAll.manualWave) and wait until every
   // one is live — checked through its `live` pin each poll — or someone presses "Deployed, continue".
   // Returns null to go on, or why it stopped.
-  let manualDone = false;
+  let manualDone = false, manualWake = null;
   // "Deployed": record each branch's head as what's live now, so the next release only asks when
   // there's something new (fetchLives reads it back). Trusts the person: nothing verifies the deploy.
   async function confirmDeployed(items) {
@@ -682,7 +685,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         const l = lives && lives[`${x.repo}|${x.env}`];
         return { ...x, auto: !!(l && !l.error) };
       }) });
-      await new Promise(r => setTimeout(r, DEPLOY_POLL_MS));
+      await new Promise(r => { manualWake = r; setTimeout(r, DEPLOY_POLL_MS); });
     }
   }
 
@@ -1012,8 +1015,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;
       case 'releasesSign': signRelease().catch(e => send({ type: 'toast', text: 'Sign failed: ' + (e.message || 'error') })); return true;
       case 'releasesMerge': releaseAll(null).catch(e => send({ type: 'toast', text: 'Release all failed: ' + (e.message || 'error') })); return true;
-      case 'releasesReleaseAllStop': releaseAllStop = true; return true;
-      case 'releasesManualDone': manualDone = true; return true;
+      case 'releasesReleaseAllStop': releaseAllStop = true; if (manualWake) manualWake(); return true;
+      case 'releasesManualDone': manualDone = true; if (manualWake) manualWake(); return true;
       case 'releasesManualConfirm': { // the end popup's "Deployed"
         const left = (state.releaseAll && state.releaseAll.manualLeft) || [];
         confirmDeployed(left).then(() => progress({ manualLeft: [] })).catch(e => send({ type: 'toast', text: 'Confirm deploy: ' + e.message }));

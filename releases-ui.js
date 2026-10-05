@@ -893,9 +893,14 @@
   function renderSignPrompt() {
     const t = (state && state.toSign) || [];
     const key = state && state.signPromptKey;
-    if (!t.length || !key || key === promptDismissed) { signOverlay.classList.remove('open'); return; }
+    if (!t.length || !key || key === promptDismissed) {
+      // once up, it stays until you answer it (Sign / Later / Review): a refresh that briefly sees
+      // nothing to sign must not make it blink away and back
+      if (signOverlay.classList.contains('open') && key !== promptDismissed) return;
+      signOverlay.classList.remove('open'); return;
+    }
     const by = [...new Set(t.map(x => x.author).filter(Boolean))];
-    signOverlay.innerHTML = '<div class="rl-sign-box" role="dialog" aria-label="Sign the release">'
+    setOverlay(signOverlay, '<div class="rl-sign-box" role="dialog" aria-label="Sign the release">'
       + '<div class="rl-sign-icon">✍</div>'
       + `<h2>Prod release waiting for your signature</h2>`
       + `<div class="rl-sign-sub">${by.length ? by.map(x => '@' + esc(x)).join(', ') + ' released' : 'A release is waiting'} — prod merges only once two approvers sign. One signature covers the whole release: ${esc(t[0].count)}/${esc(t[0].need)} signed so far.</div>`
@@ -905,8 +910,7 @@
           + `<span>${x.mine ? '✓ signed' : x.older ? 'new commits since you signed' : 'needs your signature'}</span></div>`).join('') + '</div>').join('')
         : '<div class="rl-sign-list">' + t.map(x => `<div class="rl-sign-row"><b>${esc(x.label)}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a></div>`).join('') + '</div>')
       + '<div class="rl-sign-acts"><button data-sign="later">Later</button><button data-sign="review">Review first</button>'
-      + `<button class="go" data-sign="now">✍ Sign the release</button></div></div>`;
-    signOverlay.classList.add('open');
+      + `<button class="go" data-sign="now">✍ Sign the release</button></div></div>`);
   }
 
   // After Release all: a popup with what still goes out by hand — each row opens where to do it.
@@ -920,7 +924,8 @@
   manualOverlay.addEventListener('click', (e) => {
     const u = e.target.closest('[data-url]');
     if (u) return api.send({ type: 'openUrl', url: u.dataset.url });
-    if (e.target.closest('[data-manual-go]')) return api.send({ type: 'releasesManualDone' });
+    const go = e.target.closest('[data-manual-go]');
+    if (go) { go.textContent = 'Continuing…'; go.disabled = true; return api.send({ type: 'releasesManualDone' }); }
     if (e.target.closest('[data-confirm]') && !(state.releaseAll && state.releaseAll.running)) api.send({ type: 'releasesManualConfirm' });
     if (e.target.closest('[data-manual-stop]')) return api.send({ type: 'releasesReleaseAllStop' });
     if (state.releaseAll && state.releaseAll.running) return; // a paused wave stays up until it's deployed or stopped
@@ -934,27 +939,32 @@
     // Release all paused on a hand-deployed wave: the later waves wait for these
     if (p && p.running && p.manualWave && p.manualWave.length) {
       const auto = p.manualWave.some(x => x.auto);
-      manualOverlay.innerHTML = '<div class="rl-sign-box" role="dialog" aria-label="Deploy by hand">'
+      setOverlay(manualOverlay, '<div class="rl-sign-box" role="dialog" aria-label="Deploy by hand">'
         + `<div class="rl-sign-icon">✋</div><h2>Wave ${esc(p.wave)}/${esc(p.waves)}: deploy these by hand first</h2>`
         + '<div class="rl-sign-sub">The next waves depend on them. Click one to open where it is deployed.'
         + (auto ? ' Release all goes on by itself once they are live.' : '') + '</div>'
         + '<div class="rl-sign-list">' + p.manualWave.map(x => `<button class="rl-sign-row rl-manual-row" data-url="${esc(x.url)}" title="${esc(x.url)}">`
           + `<b>${esc(x.label)}</b><span class="rl-env" style="--hue:${ENV_HUE[x.env.toLowerCase()] || 'var(--dim)'}">${esc(x.env)}</span>`
           + `<span>${esc(x.why)}${x.auto ? ' · watching live' : ''} ↗</span></button>`).join('') + '</div>'
-        + '<div class="rl-sign-acts"><button data-manual-stop>Stop release</button><button class="go" data-manual-go>Deployed, continue</button></div></div>';
-      manualOverlay.classList.add('open');
+        + '<div class="rl-sign-acts"><button data-manual-stop>Stop release</button><button class="go" data-manual-go>Deployed, continue</button></div></div>');
       return;
     }
     const left = p && p.status === 'done' && p.manualLeft;
     if (!left || !left.length || String(p.doneAt) === manualSeen) { manualOverlay.classList.remove('open'); return; }
-    manualOverlay.innerHTML = '<div class="rl-sign-box" role="dialog" aria-label="Deploy by hand">'
+    setOverlay(manualOverlay, '<div class="rl-sign-box" role="dialog" aria-label="Deploy by hand">'
       + '<div class="rl-sign-icon">✋</div><h2>Released: now deploy these by hand</h2>'
       + '<div class="rl-sign-sub">Merging doesn\'t ship them: no CI deploy. Click one to open where it\'s deployed.</div>'
       + '<div class="rl-sign-list">' + left.map(x => `<button class="rl-sign-row rl-manual-row" data-url="${esc(x.url)}" title="${esc(x.url)}">`
         + `<b>${esc(x.label)}</b><span class="rl-env" style="--hue:${ENV_HUE[x.env.toLowerCase()] || 'var(--dim)'}">${esc(x.env)}</span>`
         + `<span>${esc(x.why)} ↗</span></button>`).join('') + '</div>'
-      + '<div class="rl-sign-acts"><button data-close>Later</button><button class="go" data-close data-confirm title="Records each branch as deployed: the next release only asks when there is something new">Deployed ✓</button></div></div>';
-    manualOverlay.classList.add('open');
+      + '<div class="rl-sign-acts"><button data-close>Later</button><button class="go" data-close data-confirm title="Records each branch as deployed: the next release only asks when there is something new">Deployed ✓</button></div></div>');
+  }
+
+  // Show a popup with this HTML; rebuild it only when the HTML changed (rebuilding on every state update
+  // made it flicker, and a click landing mid-rebuild hit a button that no longer existed)
+  function setOverlay(el, html) {
+    if (el._html !== html) { el.innerHTML = html; el._html = html; }
+    el.classList.add('open');
   }
 
   window.releasesUi = { releaseRepos, enforcePrWatch, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (msg.open && !open) show(true); render(); } };

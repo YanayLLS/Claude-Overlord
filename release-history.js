@@ -51,7 +51,9 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
   async function load() {
     if (!repoOf()) return;
     const files = await list();
-    if (files.error) return push({ history: { error: files.error, items: [] } });
+    // a failed read (rate limit, network) keeps what we had: an empty history would make every release
+    // look unsigned for a moment and pop the sign prompt
+    if (files.error) { const prev = getState().history; return push({ history: { ...(prev || {}), error: prev && prev.items && prev.items.length ? null : files.error, items: (prev && prev.items) || [] } }); }
     const recent = files.sort((a, b) => b.name.localeCompare(a.name)).slice(0, HISTORY_SHOWN);
     const entries = (await Promise.all(recent.map(read))).filter(Boolean);
     push({ history: { repo: repoOf(), items: entries.map(e => e.manifest), loadedAt: Date.now(), error: null } });
