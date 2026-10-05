@@ -72,11 +72,12 @@
     q.placeholder = stage === 'types' ? 'type to search everything' : `search ${t ? t.label.toLowerCase() : 'everything'}`;
     if (!items) { list.innerHTML = '<div class="cg-empty">Loading…</div>'; rows = []; return; }
 
+    pop.classList.toggle('cg-narrow', stage === 'types'); // type menu is short; the list needs room for descriptions
     if (stage === 'types') {
       rows = TYPES;
       sel = Math.min(sel, rows.length - 1);
-      list.innerHTML = TYPES.map((x, i) => `<div class="cg-row${i === sel ? ' sel' : ''}" data-i="${i}"><span class="cg-key">${i + 1}</span>${x.icon} <span class="cg-name">${x.label}</span><span class="cg-count">${items.filter(it => it.type === x.type).length}</span></div>`).join('');
-      foot.textContent = '1-4 / ↑↓ Enter pick · type to search all · Esc close';
+      list.innerHTML = TYPES.map((x, i) => `<div class="cg-row${i === sel ? ' sel' : ''}" data-i="${i}"><span class="cg-key">${i + 1}</span><span class="cg-icon">${x.icon}</span><span class="cg-name">${x.label}</span><span class="cg-count">${items.filter(it => it.type === x.type).length}</span></div>`).join('');
+      foot.textContent = '1-4 pick · type to search all';
       return;
     }
 

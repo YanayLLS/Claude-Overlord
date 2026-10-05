@@ -654,6 +654,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #catalog-pop { position:fixed; z-index:200; width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 560px, calc(100vh - 80px)); display:flex; flex-direction:column;
   background:var(--pop); border-radius:var(--r-lg); box-shadow:var(--pop-shadow); overflow:hidden; font-size:12.5px; color:var(--text); }
 #catalog-pop[hidden] { display:none; }
+#catalog-pop.cg-narrow { width:260px; }
 #catalog-pop .cg-head { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--border); }
 #catalog-pop .cg-scope { color:var(--accent); white-space:nowrap; }
 #catalog-pop .cg-q { flex:1; min-width:0; background:transparent; border:0; outline:none; color:var(--text); font:inherit; font-size:13px; }
