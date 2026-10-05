@@ -417,7 +417,8 @@ function markSessionSwitch(id, line) {
 }
 // Follow the prompt: remember what was submitted; if it doesn't show up in the agent's
 // watched transcript, followPrompts() looks for the file it did land in.
-const FOLLOW_AFTER_MS = 4000, FOLLOW_GIVE_UP_MS = 60000, FOLLOW_TAIL_BYTES = 64 * 1024;
+// 2 MB: hooks can inject 100+ KB of context right after a prompt; only user records are parsed.
+const FOLLOW_AFTER_MS = 4000, FOLLOW_GIVE_UP_MS = 60000, FOLLOW_TAIL_BYTES = 2 * 1024 * 1024;
 function notePrompt(id, text) {
   const a = agents.get(id), key = promptKey(text);
   if (a && key) a.pendingPrompt = { key, at: Date.now() };
@@ -432,18 +433,39 @@ function readTail(file, bytes) {
 }
 // ponytail: only files touched since the submit are read, only their last 64 KB, and only
 // for a prompt still missing after 4 s — the normal case costs nothing.
+// Files in the agent's project dir touched since `since`, other than its own.
+function touchedSince(a, since) {
+  const dir = path.dirname(a.jsonlFile), out = [];
+  let names = []; try { names = fs.readdirSync(dir); } catch { return out; }
+  for (const f of names) {
+    if (!f.endsWith('.jsonl')) continue;
+    const file = path.join(dir, f);
+    if (file === a.jsonlFile) continue;
+    try { if (fs.statSync(file).mtimeMs >= since - 2000) out.push(file); } catch {}
+  }
+  return out;
+}
 function followPrompts() {
   const now = Date.now();
   for (const [id, a] of agents) {
+    // Its watched transcript doesn't exist (a fresh agent that /resumed another chat, before or
+    // across an app restart): Claude stamps every record it writes with the process's own
+    // session_id — the id Overlord launched it with — so the file carrying it is the agent's.
+    if (!a.archived && !fs.existsSync(a.jsonlFile) && (!a._sidScanAt || now - a._sidScanAt > 15000)) {
+      a._sidScanAt = now;
+      const stamp = `"session_id":"${a.sessionId}"`;
+      const hit = touchedSince(a, a.createdAt || 0).find(file => { try { return readTail(file, 64 * 1024).text.includes(stamp); } catch { return false; } }); // the id is on nearly every record
+      if (hit) {
+        a.pendingPrompt = null;
+        console.log(`[Overlord] ${path.basename(hit)} carries agent ${id}'s session id — following it`);
+        reassignAgentToFile(id, hit, readTail(hit, 64 * 1024).start);
+        continue;
+      }
+    }
     const p = a.pendingPrompt;
     if (!p || now - p.at < FOLLOW_AFTER_MS) continue;
     if (now - p.at > FOLLOW_GIVE_UP_MS) { a.pendingPrompt = null; continue; }
-    const dir = path.dirname(a.jsonlFile);
-    let files = [];
-    try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => path.join(dir, f)); } catch { continue; }
-    for (const file of files) {
-      if (file === a.jsonlFile) continue;
-      try { if (fs.statSync(file).mtimeMs < p.at - 2000) continue; } catch { continue; }
+    for (const file of touchedSince(a, p.at)) {
       let tail; try { tail = readTail(file, FOLLOW_TAIL_BYTES); } catch { continue; }
       if (!linesHavePrompt(tail.text.split('\n'), p.key, p.at)) continue;
       a.pendingPrompt = null;
@@ -2039,9 +2061,9 @@ function scanForNewJsonlFiles() {
 // Newest chat names from a session's JSONL: user /rename (custom-title) and
 // Claude's auto-generated ai-title. '' when absent (e.g. a fresh /clear session).
 function readSessionTitle(file) {
-  let custom = '', ai = '';
-  try {
-    for (const line of fs.readFileSync(file, 'utf-8').split('\n')) {
+  const scan = (text) => {
+    let custom = '', ai = '';
+    for (const line of text.split('\n')) {
       if (!line.includes('"custom-title"') && !line.includes('"ai-title"')) continue;
       try {
         const r = JSON.parse(line);
@@ -2049,8 +2071,12 @@ function readSessionTitle(file) {
         else if (r.type === 'ai-title' && r.aiTitle) ai = r.aiTitle;
       } catch {}
     }
-  } catch {}
-  return { custom, ai };
+    return { custom, ai };
+  };
+  // Claude re-writes the names near the end on every resume/turn — the tail almost always
+  // has them, so a 100 MB transcript isn't read in full just to name the card.
+  try { const t = readTail(file, 256 * 1024); const n = scan(t.text); if (n.custom || n.ai || t.start === 0) return n; } catch {}
+  try { return scan(fs.readFileSync(file, 'utf-8')); } catch { return { custom: '', ai: '' }; }
 }
 
 function reassignAgentToFile(id, newFilePath, startAt = 0) {
@@ -4679,7 +4705,9 @@ setInterval(() => {
   for (const [id, a] of agents) {
     if (a.archived || a.isWaiting || a.crashed || a.toolIds.size > 0) continue;
     let mtimeMs;
-    try { mtimeMs = fs.statSync(a.jsonlFile).mtimeMs; } catch { continue; }
+    // No transcript yet (fresh agent, or /resume'd into another chat before its first prompt):
+    // nothing has been written since it was created — without this it stayed 'active' forever.
+    try { mtimeMs = fs.statSync(a.jsonlFile).mtimeMs; } catch { mtimeMs = a.createdAt || 0; }
     if (now - mtimeMs < STATUS_STUCK_MS) continue;
     a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers);
     send({ type: 'status', id, status: shownStatus(a) });
