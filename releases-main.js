@@ -327,7 +327,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   const pingTimer = setInterval(() => {
     if (limited()) return;
     const inFlight = ((state.history && state.history.items) || []).some(inFlightRel) || (state.releaseAll && state.releaseAll.running);
+    if (pingTick % 6 === 0) scanStray().catch(() => {});
     if (!inFlight && (pingTick++ % 2)) return;
+    if (inFlight) pingTick++;
     signPing().catch(() => {});
   }, SIGN_PING_MS);
   if (pingTimer.unref) pingTimer.unref();
@@ -479,7 +481,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const found = [], all = [];
     await Promise.all(steps.map(async (p) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
-      const prs = (Array.isArray(r.data) ? r.data : []).filter(x => x.head && (x.head.ref === p.source || ROLLBACK_HEAD.test(x.head.ref))
+      const prs = (Array.isArray(r.data) ? r.data : []).filter(x => x.head && (x.head.ref === p.source || ROLLBACK_HEAD.test(x.head.ref) || releaseIdOf(x.body))
         && (!x.head.repo || x.head.repo.full_name.toLowerCase() === p.repo.toLowerCase()));
       for (const pr of prs) {
         const s = await signoffOf(p.repo, pr.number);
@@ -1208,41 +1210,76 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // ── PRs into prod opened outside the release flow (a feature branch straight into main, an agent's PR):
   // listed on the Releases board for everyone, approvers told once, and one click puts each right ──
   let strayTold = new Set(), straySeeded = false; // the first scan only learns what's already open
+  // Every PR into prod is a release. One GraphQL call lists, per prod branch, its open PRs and the last few
+  // merged ones. An open PR with no release yet is adopted (after 2 min, so two approvers' Overlords don't both
+  // adopt it): a release PR (from the release source) joins the pending prod release or starts one; any other
+  // PR (a feature/agent branch) becomes its own 'hotfix' release that needs its own 2 signatures. A PR merged
+  // in the last day with no release is recorded after the fact. Signers learn of each through the usual sign
+  // prompt; the ones not adopted yet show on the Board meanwhile.
+  const ADOPT_AFTER_MS = 2 * 60 * 1000;
   async function scanStray() {
     if (!state.config || limited()) return;
     const steps = releasePlan(state.config, ['prod']).prs;
-    const out = [], adopt = [];
-    await Promise.all(steps.map(async (p) => {
-      const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
-      for (const x of Array.isArray(r.data) ? r.data : []) {
-        if (!x.head || ROLLBACK_HEAD.test(x.head.ref)) continue; // rollbacks are Releases' own
-        if (x.head.ref === p.source) {
-          // a release PR opened outside Overlord (an agent, github.com): adopt it — record it as a release, so it gets
-          // a card, the sign prompt, Release all and the deploy watch like any other
-          if (!releaseIdOf(x.body) && state.approvers && state.approvers.isApprover) adopt.push({ ...p, env: 'prod', pr: { number: x.number, url: x.html_url }, author: x.user && x.user.login });
-          continue;
-        }
-        out.push({ repo: p.repo, label: p.label, number: x.number, url: x.html_url, title: x.title, head: x.head.ref, base: p.target, source: p.source,
-          author: x.user && x.user.login, draft: !!x.draft, createdAt: x.created_at });
+    if (!steps.length) return;
+    const q = steps.map((p, i) => { const [o, n] = p.repo.split('/'); return `s${i}: repository(owner: ${JSON.stringify(o)}, name: ${JSON.stringify(n)}) { `
+      + `open: pullRequests(baseRefName: ${JSON.stringify(p.target)}, states: OPEN, first: 30) { nodes { number url title body createdAt isDraft headRefName author { login } commits { totalCount } } } `
+      + `merged: pullRequests(baseRefName: ${JSON.stringify(p.target)}, states: MERGED, first: 5, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { number url title body mergedAt headRefName author { login } mergeCommit { oid } } } }`; }).join(' ');
+    const res = await ghGraphql(`query { ${q} }`);
+    if (!res.data) return;
+    const ap = state.approvers && state.approvers.isApprover;
+    const out = [], joinRel = [], hotfixes = [], after = [];
+    steps.forEach((p, i) => {
+      const node = res.data['s' + i];
+      if (!node) return;
+      for (const x of node.open.nodes) {
+        if (ROLLBACK_HEAD.test(x.headRefName) || releaseIdOf(x.body)) continue; // a rollback, or already a release
+        const row = { ...p, env: 'prod', pr: { number: x.number, url: x.url }, author: x.author && x.author.login, title: x.title, head: x.headRefName, commits: x.commits.totalCount };
+        out.push({ repo: p.repo, label: p.label, number: x.number, url: x.url, title: x.title, head: x.headRefName, base: p.target, source: p.source, author: row.author, createdAt: x.createdAt });
+        if (!ap || Date.now() - Date.parse(x.createdAt) < ADOPT_AFTER_MS) continue;
+        (x.headRefName === p.source ? joinRel : hotfixes).push(row);
       }
-    }));
-    out.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-    push({ strayPrs: out });
-    if (adopt.length) {
-      const id = await history.recordRun({ rows: adopt }, { opener: { login: adopt[0].author, clickup: null }, manual: [], flags: null }).catch(() => null);
-      if (id) send({ type: 'toast', text: `Adopted ${adopt.map(x => x.label + ' #' + x.pr.number).join(', ')} (opened outside Overlord) as release ${id}` });
+      for (const x of node.merged.nodes) {
+        if (!ap || !x.mergedAt || Date.now() - Date.parse(x.mergedAt) > 86400e3 || releaseIdOf(x.body) || ROLLBACK_HEAD.test(x.headRefName)) continue;
+        after.push({ ...p, env: 'prod', pr: { number: x.number, url: x.url }, mergeSha: x.mergeCommit && x.mergeCommit.oid, mergedAt: x.mergedAt, author: x.author && x.author.login, hotfix: x.headRefName !== p.source });
+      }
+    });
+    push({ strayPrs: out.filter(x => Date.now() - Date.parse(x.createdAt) < ADOPT_AFTER_MS || !ap) });
+    const told = [];
+    if (joinRel.length) {
+      const id = await history.recordRun({ rows: joinRel }, { opener: { login: joinRel[0].author, clickup: null }, manual: [], flags: null, joinPending: true }).catch(() => null);
+      if (id) told.push(`${joinRel.map(x => `${x.label} #${x.pr.number}`).join(', ')} → release ${id}`);
     }
-    const fresh = out.filter(x => !strayTold.has(x.repo + '#' + x.number));
-    if (straySeeded && fresh.length && notify && state.approvers && state.approvers.isApprover) {
-      notify(`⚠ PR into prod outside a release`, fresh.map(x => `${x.label} #${x.number} (${x.head} → ${x.base}) by @${x.author}`).join(', '), null, () => send({ type: 'releases', state, open: true, tab: 'board' }));
+    for (const h of hotfixes) {
+      // how far its branch strays from the release source: commits it would drag into dev if retargeted there
+      const cmp = await ghJson(['api', `repos/${h.repo}/compare/${h.source}...${h.head}`]).catch(() => ({}));
+      const extra = cmp.data && cmp.data.ahead_by != null ? Math.max(0, cmp.data.ahead_by - (h.commits || 0)) : null;
+      const id = await history.recordRun({ rows: [{ ...h, extraFromTarget: extra }] }, { opener: { login: h.author, clickup: null }, manual: [], flags: null, kind: 'hotfix' }).catch(() => null);
+      if (id) told.push(`hotfix ${h.label} #${h.pr.number} (${h.head} → ${h.target}) → release ${id}`);
     }
-    strayTold = new Set(out.map(x => x.repo + '#' + x.number)); straySeeded = true;
+    if (after.length) {
+      const withSigners = await Promise.all(after.map(async (r) => { const so = await signoffOf(r.repo, r.pr.number); return { ...r, signers: so.error ? [] : so.signers.map(x => x.login) }; }));
+      for (const r of withSigners) {
+        const id = await history.recordMerged([r], { login: r.author, clickup: null }).catch(() => null);
+        if (id) told.push(`${r.label} #${r.pr.number} was merged outside Overlord → recorded as release ${id}${r.signers.length < 2 ? ' (unsigned)' : ''}`);
+      }
+    }
+    if (told.length) {
+      send({ type: 'toast', text: 'Into prod: ' + told.join(' · ') });
+      if (notify) notify('🚀 A change into prod became a release', told.join('\n'), null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
+      await history.load().catch(() => {});
+      checkToSign().catch(() => {}); // the signers' prompt
+    }
   }
   // Retarget a stray prod PR to the release source (feature work ships with the next release), or close it
   async function strayFix(repo, n, how) {
     await loadApprovers();
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can do that' });
-    const x = (state.strayPrs || []).find(y => y.repo === repo && y.number === Number(n));
+    let x = (state.strayPrs || []).find(y => y.repo === repo && y.number === Number(n));
+    if (!x) {
+      const m = ((state.history && state.history.items) || []).find(mm => mm.repos.some(r => r.repo === repo && r.pr.number === Number(n)));
+      const r = m && m.repos.find(rr => rr.repo === repo && rr.pr.number === Number(n));
+      if (r) x = { repo, label: r.label, number: Number(n), base: r.target, source: r.source, release: m.id };
+    }
     if (!x) return;
     const who = (await whoAmI()).github;
     const res = how === 'close'
@@ -1252,7 +1289,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     await ghJson(['api', '-X', 'POST', `repos/${repo}/issues/${n}/comments`, '--input', writeTmp({ body: how === 'close'
       ? `Closed by @${who} in Overlord: prod (\`${x.base}\`) only takes signed releases.`
       : `Retargeted to \`${x.source}\` by @${who} in Overlord: prod (\`${x.base}\`) only takes signed releases, and this ships with the next one.` })]);
-    send({ type: 'toast', text: how === 'close' ? `${x.label} #${n} closed` : `${x.label} #${n} now targets ${x.source}` });
+    if (x.release) await history.markCancelled([repo + '#' + n], who).catch(() => {});
+    send({ type: 'toast', text: how === 'close' ? `${x.label} #${n} closed` : `${x.label} #${n} now targets ${x.source}${x.release ? ` · release ${x.release} cancelled` : ''}` });
     scanStray().catch(() => {});
   }
 

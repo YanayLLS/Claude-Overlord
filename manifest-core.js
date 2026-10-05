@@ -34,7 +34,7 @@ function newManifest({ id, kind = 'release', rollbackOf = null, env = 'prod', ro
     repos: (rows || []).filter(r => r.pr).map(r => ({
       repo: r.repo, label: r.label, source: r.source, target: r.target,
       pr: { number: r.pr.number, url: r.pr.url },
-      baseSha: r.baseSha || null, headSha: r.headSha || null, ahead: r.ahead != null ? r.ahead : null,
+      baseSha: r.baseSha || null, headSha: r.headSha || null, ahead: r.ahead != null ? r.ahead : null, ...(r.extraFromTarget != null ? { extraFromTarget: r.extraFromTarget } : {}),
       mergeSha: null, mergedAt: null, closed: false, signers: [], deploy: r.deploy ? { workflow: r.deploy, state: 'waiting', url: null, at: null } : null,
     })),
     manual: (manual || []).map(m => ({ repo: m.repo, label: m.label, branch: m.branch, live: m.live || null })),

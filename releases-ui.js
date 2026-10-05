@@ -130,6 +130,7 @@
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; if (tab === 'history') api.send({ type: 'releasesHistory' }); render(); },
     // history actions
     gotoRelease: () => { relOpen = false; tab = 'history'; api.send({ type: 'releasesHistory' }); render(); },
+    rowToDev: (el) => { el.textContent = 'Retargeting…'; api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: 'retarget' }); },
     strayFix: (el) => { el.textContent = el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'; api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
     histChanges: (el) => { const k = el.dataset.key; openChanges.has(k) ? openChanges.delete(k) : openChanges.add(k); render(); },
     histRollback: (el) => { rbOpen = rbOpen === el.dataset.id ? null : el.dataset.id; rbSkip = new Set(); render(); },
@@ -448,6 +449,7 @@
   }
 
   const DONE = new Set(['deployed', 'merged-hand', 'hand-done']);
+  const isHotfixRow = (r) => ((state && state.history && state.history.items) || []).some(m => m.kind === 'hotfix' && m.repos.includes(r));
   // Row actions for a repo of a release in flight (approvers): merge now / fix its checks / re-run its deploy
   function rowActs(r, need, notDeployed = []) {
     const st = state || {}, a = st.approvers || {};
@@ -455,7 +457,8 @@
     const d = `data-repo="${esc(r.repo)}" data-n="${esc(r.pr.number)}"`;
     if (need) {
       const k = 'm:' + r.repo + '#' + r.pr.number;
-      return (r.health && r.health.checks === 'fail' ? `<button class="rl-row-btn" data-act="rowFix" ${d} title="Start an agent that gets this PR's checks green">🔧 Fix</button>` : '')
+      const toDev = r.source && r.source !== r.target && isHotfixRow(r) ? `<button class="rl-row-btn" data-act="rowToDev" ${d} title="${esc(`Retarget to ${r.source} (it ships with the next release) and cancel this hotfix release${r.extraFromTarget ? `. ⚠ Its branch would bring ${r.extraFromTarget} commits ${r.source} doesn't have (branched off ${r.target}): close it and reopen from ${r.source} instead if that's not wanted` : ''}`)}">↪ To ${esc(r.source)}${r.extraFromTarget ? ` ⚠${r.extraFromTarget}` : ''}</button>` : '';
+      return toDev + (r.health && r.health.checks === 'fail' ? `<button class="rl-row-btn" data-act="rowFix" ${d} title="Start an agent that gets this PR's checks green">🔧 Fix</button>` : '')
         + (armed === k ? `<button class="rl-row-btn armed${notDeployed.length ? ' risky' : ''}" data-act="rowMerge" ${d}${notDeployed.length ? ` title="${esc(`Earlier waves aren't deployed yet: ${notDeployed.join(', ')}. This one may depend on them.`)}"` : ''}>${notDeployed.length ? `⚠ Merge before ${esc(notDeployed.length === 1 ? notDeployed[0] : notDeployed.length + ' earlier repos')} deploy?` : 'Confirm: merge'}</button>`
           : `<button class="rl-row-btn" data-act="rowMerge" ${d} title="Merge just this one now (needs the release signed; GitHub's own rules apply)">Merge</button>`);
     }
@@ -481,7 +484,7 @@
     const xs = st.strayPrs || [];
     if (!xs.length) return '';
     const ap = (st.approvers || {}).isApprover;
-    return `<div class="rl-stray"><div class="rl-stray-head">⚠ ${xs.length} PR${xs.length === 1 ? '' : 's'} into prod outside a release <span>prod only takes signed releases: retarget to ${esc(xs[0].source)} so it ships with the next one, or close it. Kept as a hotfix it needs 2 approvers' signatures to merge</span></div>`
+    return `<div class="rl-stray"><div class="rl-stray-head">⚠ ${xs.length} new PR${xs.length === 1 ? '' : 's'} into prod <span>Each becomes a release within ~2 min (a hotfix release if it isn't from ${esc(xs[0].source)}), so the signers see it. Or retarget it to ${esc(xs[0].source)} / close it now</span></div>`
       + xs.map(x => `<div class="rl-stray-row"><b>${esc(x.label)}</b>${link(x.url, '#' + x.number)}<span class="rl-stray-title" title="${esc(x.title)}">${esc(x.title)}</span>`
         + `<span class="rl-stray-br">${esc(x.head)} → ${esc(x.base)} · @${esc(x.author || '?')}</span>`
         + (ap ? `<button class="rl-row-btn show" data-act="strayFix" data-how="retarget" data-repo="${esc(x.repo)}" data-n="${esc(x.number)}" title="Change its base to ${esc(x.source)}">↪ To ${esc(x.source)}</button>`
@@ -683,6 +686,8 @@
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
         + (env !== 'prod' ? `<span class="rl-env" style="--hue:${ENV_HUE[env.toLowerCase()] || 'var(--dim)'}">${esc(env)}</span>` : '')
         + (pending && signs ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
+        + (m.kind === 'hotfix' ? '<span class="rl-rr-chip warn" title="A PR into prod outside the release flow: its own release, needs its own 2 signatures">🩹 hotfix</span>' : '')
+        + (m.afterTheFact ? '<span class="rl-rr-chip bad" title="Merged into prod outside Overlord, recorded after the fact">merged outside Overlord</span>' : '')
         + (m.scope ? `<span class="rl-rr-chip" title="A release of some repos only: ${esc((m.scope.repos || []).join(', '))}">${esc((m.scope.repos || []).length)}${m.scope.of ? ' of ' + esc(m.scope.of) : ''} repos</span>` : '')
         + (m.version ? `<span class="rl-rr-chip" title="Frontend version this release shipped">v${esc(m.version)}</span>` : '')
         + (!m.ticket && ticketLate(s, m) ? `<span class="rl-rr-chip warn" title="${esc(ticketLate(s, m))}">⚠ no ClickUp ticket</span>` : '')
