@@ -193,10 +193,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-empty.zero a { margin-top:6px; padding:4px 12px; border:1px solid rgba(137,180,250,.3); border-radius:999px; font-size:11px; }
 .pr-empty.zero a:hover { background:rgba(137,180,250,.1); text-decoration:none; }
 .gh-fix { display:flex; gap:6px; margin-top:8px; }
-.gh-fix button { font-family:inherit; font-size:11px; padding:4px 10px; border-radius:6px; cursor:pointer;
+.gh-fix button, .setup-card button { font-family:inherit; font-size:11px; padding:4px 10px; border-radius:6px; cursor:pointer;
   background:var(--accent); color:var(--shadow); border:1px solid var(--accent); font-weight:600; }
-.gh-fix button.alt { background:transparent; color:var(--fg,#cdd6f4); border-color:var(--border); }
-.gh-fix button:disabled { opacity:.5; cursor:default; }
+.gh-fix button.alt, .setup-card button.alt { background:transparent; color:var(--fg,#cdd6f4); border-color:var(--border); }
+.gh-fix button:disabled, .setup-card button:disabled { opacity:.5; cursor:default; }
 #header .badge {
   font-family:inherit; font-size:10px; padding:2px 7px; font-weight:500; letter-spacing:.3px;
   border:1px solid; border-radius:10px;
@@ -783,6 +783,15 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #resize::after { content:''; position:absolute; left:50%; top:0; bottom:0; transform:translateX(-50%); width:2px; background:transparent; border-radius:1px; transition:background .15s; }
 #resize:hover::after { background:var(--accent); }
 #resize.open { display:block; }
+
+/* ── First-run setup card ── */
+#setup-overlay { position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:1000;
+  display:flex; align-items:center; justify-content:center; }
+.setup-card h3 { margin:0 0 6px; font-size:15px; }
+.setup-card p { margin:0 0 12px; font-size:12px; color:var(--dim); }
+.setup-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-top:1px solid var(--border); font-size:13px; }
+.setup-ok { color:var(--green); font-size:12px; }
+.setup-foot { display:flex; justify-content:flex-end; gap:6px; margin-top:12px; }
 
 /* ── Settings overlay ── */
 #settings-overlay {
@@ -3942,6 +3951,8 @@ function handleAgentMsg(msg) {
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
     case 'toast': showToast(msg.text); break;
+    case 'setupState': setupInfo = msg; setupBusy = msg.installing; renderSetup(); break;
+    case 'setupProgress': setupBusy = msg.id; renderSetup(); break;
     case 'perfUsage': renderPerf(msg); break;
     case 'sysIdle': prSysIdleMs = msg.ms; break;
     case 'ramUsage': showTopRam(msg); break;
@@ -4065,7 +4076,7 @@ function handleAgentMsg(msg) {
     case 'usageCost': usageCost = msg.cost; scheduleRender(); renderUsageModal(); break;
     case 'usageHistory': handleUsageHistory(msg.points, msg.since); break;
     case 'accountInfo': handleAccountInfo(msg); break;
-    case 'accountLoginComplete': api.send({ type: 'saveAccount' }); break;
+    case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);
@@ -5658,6 +5669,32 @@ function applySnooze(key) {
 }
 
 function closeSnooze() { const p = document.getElementById('pr-snooze-pop'); if (p) p.remove(); }
+
+// First-run setup card: up while git or claude is missing, or claude was never
+// logged in. Git gates Claude (it needs Git Bash); Claude gates the login.
+let setupInfo = null, setupBusy = null, setupSkipped = false;
+function renderSetup() {
+  const s = setupInfo;
+  let el = document.getElementById('setup-overlay');
+  if (!s || setupSkipped || (!s.missing.length && s.loggedIn)) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'setup-overlay'; document.body.appendChild(el); }
+  const needs = id => s.missing.includes(id);
+  const install = (id, blockedBy) => setupBusy === id ? '<button disabled>Installing…</button>'
+    : '<button ' + (setupBusy || blockedBy ? 'disabled' : '') + ' onclick="setupInstall(&quot;' + id + '&quot;)">Install</button>';
+  const row = (label, ok, btn) => '<div class="setup-row"><span>' + label + '</span>'
+    + (ok ? '<span class="setup-ok">✓ Ready</span>' : btn) + '</div>';
+  el.innerHTML = '<div class="settings-modal setup-card"><h3>Set up Overlord</h3>'
+    + '<p>Overlord runs Claude Code agents in git repos. Install what is missing — a Windows permission prompt may appear for Git.</p>'
+    + row('Git', !needs('git'), install('git'))
+    + row('Claude Code', !needs('claude'), install('claude', needs('git')))
+    + row('Log in to Claude', s.loggedIn, '<button ' + (needs('claude') ? 'disabled' : '') + ' onclick="setupLogin(this)">Log in</button>')
+    + '<div class="setup-foot"><button class="alt" onclick="api.send({ type: &quot;setupRecheck&quot; })">Recheck</button>'
+    + '<button class="alt" onclick="setupSkipped = true; renderSetup()">Skip for now</button></div></div>';
+}
+function setupInstall(id) { setupBusy = id; renderSetup(); api.send({ type: 'installSetupTool', id }); }
+function setupLogin(btn) { btn.disabled = true; btn.textContent = 'Finish in the browser…'; api.send({ type: 'addAccount' }); }
+// Coming back from the browser login or a manual install: re-probe while the card is up.
+window.addEventListener('focus', () => { if (document.getElementById('setup-overlay')) api.send({ type: 'setupRecheck' }); });
 
 // One-click fixes for the two gh failures the user can't be expected to debug.
 // Any other error has no button — it needs reading, not a click.

@@ -2133,6 +2133,41 @@ function repairGhPath() {
 }
 repairGhPath();
 
+// ── First-run setup: git + Claude Code ─────────────────
+// A fresh PC may have neither, and every agent is a `claude` session in a git repo.
+// Same stale-PATH problem as gh, so a tool on disk gets prepended, not reinstalled.
+const { SETUP_TOOLS, findTool, missingTools } = require('./setup-core');
+function setupState() {
+  // ponytail: Windows only — mac/linux install from the docs; add a probe if asked
+  if (process.platform !== 'win32') return { type: 'setupState', missing: [], loggedIn: true };
+  for (const t of SETUP_TOOLS) {
+    const dir = findTool(t, process.env, fs.existsSync);
+    if (dir && dir !== 'path') process.env.PATH = dir + ';' + process.env.PATH;
+  }
+  return { type: 'setupState', missing: missingTools(process.env, fs.existsSync),
+    loggedIn: !!(getApiKey() || process.env.ANTHROPIC_API_KEY), installing: _setupInstalling };
+}
+let _setupInstalling = null; // tool id while its installer runs
+function installSetupTool(id) {
+  const tool = SETUP_TOOLS.find(t => t.id === id);
+  if (!tool || _setupInstalling) return;
+  _setupInstalling = id;
+  send({ type: 'setupProgress', id });
+  // Both installers run silent; Git's UAC prompt still shows with the console hidden.
+  exec(tool.cmd, { timeout: 600000, windowsHide: true }, (err) => {
+    _setupInstalling = null;
+    const st = setupState();
+    if (st.missing.includes(id)) {
+      flog(`setup: ${id} install failed: ${err ? err.message : 'not found after install'}`);
+      send({ type: 'toast', text: `${tool.label} install failed — opening download page` });
+      shell.openExternal(tool.url).catch(() => {});
+    } else {
+      _authStatusChecked = false; // claude just appeared — let the account probe retry
+    }
+    send(st);
+  });
+}
+
 // cmd.exe reports a missing binary as "is not recognized"; a direct spawn reports
 // ENOENT. Both mean gh is absent, which is not the auth failure we used to claim.
 // The code drives which one-click fix the renderer offers.
@@ -4202,6 +4237,8 @@ function handleIpc(msg) {
     }
     case 'pollPrsNow': pollPRs(); break;
     case 'getModels': fetchModels(); break;
+    case 'installSetupTool': installSetupTool(msg.id); break;
+    case 'setupRecheck': send(setupState()); break;
     case 'installGh': {
       if (process.platform !== 'win32') { shell.openExternal('https://cli.github.com').catch(() => {}); break; }
       send({ type: 'toast', text: 'Installing GitHub CLI…' });
@@ -5350,6 +5387,7 @@ app.whenReady().then(() => {
     // Runs on every load incl. renderer reload — repaints from in-memory state
     // so a reload (to pick up index.html changes) keeps all live sessions.
     sendFullState();
+    send(setupState()); // a missing git/claude shows the setup card before anything else
     if (recoveryNote) { send({ type: 'toast', text: recoveryNote }); recoveryNote = null; }
   });
   mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); });
