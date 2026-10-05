@@ -2571,6 +2571,9 @@ async function startFixAgent(planFor, target) {
   const wts = (settings.worktrees || []).map(w => w.path);
   let plan = planFor(target, lastCheckoutInfos || [], wts);
   if (plan.error) plan = planFor(target, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
+  if (plan.error && target && target.repo && await findOrCloneCheckout(target.repo)) {
+    plan = planFor(target, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
+  }
   if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
   if (!plan.branch) { createAgent(plan.repoDir, null, plan.prompt); return; } // PR fix: no worktree
   // Reuse by folder, not by settings entry: an earlier click (or another checkout of the
@@ -2594,7 +2597,38 @@ function localCheckoutDirs() {
   const dirs = new Set();
   for (const a of agents.values()) if (a.cwd) dirs.add(a.cwd);
   for (const w of settings.worktrees || []) if (w.path) dirs.add(w.path);
+  for (const d of settings.knownProjects || []) dirs.add(d);
   return [...dirs].filter(d => fs.existsSync(d));
+}
+
+// A repo Overlord has no project for: look for it beside the ones it knows (C:\Work\*),
+// else clone it there. Either way it becomes a project in the sidebar. Returns its dir or null.
+async function findOrCloneCheckout(repo) {
+  if (!WF_REPO_RE.test(repo)) return null;
+  const roots = [...new Set(localCheckoutDirs().filter(d => !findWorktree(d)).map(d => path.dirname(d)))];
+  let found = null;
+  for (const root of roots) {
+    let names = [];
+    try { names = fs.readdirSync(root, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name); } catch { continue; }
+    const infos = await Promise.all(names.map(n => checkoutInfo(path.join(root, n))));
+    const hit = infos.find(i => i && i.repo.toLowerCase() === repo.toLowerCase() && !findWorktree(i.dir));
+    if (hit) { found = hit.dir; break; }
+  }
+  if (!found) {
+    const root = roots[0] || os.homedir();
+    const dest = path.join(root, repo.split('/')[1]);
+    if (fs.existsSync(dest)) return null; // a different folder already has that name — don't touch it
+    send({ type: 'toast', text: `Cloning ${repo} into ${dest}…` });
+    if (await gitIn(root, ['clone', `https://github.com/${repo}.git`, dest], 10 * 60 * 1000) === null || !fs.existsSync(dest)) {
+      send({ type: 'toast', text: `Couldn't clone ${repo}` });
+      return null;
+    }
+    found = dest;
+  }
+  settings.knownProjects = [...new Set([...(settings.knownProjects || []), found])];
+  saveState();
+  send({ type: 'settings', settings: publicSettings() });
+  return found;
 }
 
 // Hang an { count, title } badge on each row: how far your local branches run
