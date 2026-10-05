@@ -686,8 +686,9 @@
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
         + (env !== 'prod' ? `<span class="rl-env" style="--hue:${ENV_HUE[env.toLowerCase()] || 'var(--dim)'}">${esc(env)}</span>` : '')
         + (pending && signs ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
+        + (m.kind === 'standalone' ? '<span class="rl-rr-chip" title="A side product shipped on its own: approved by a teammate, not a signed release">standalone deploy</span>' : '')
         + (m.kind === 'hotfix' ? '<span class="rl-rr-chip warn" title="A PR into prod outside the release flow: its own release, needs its own 2 signatures">🩹 hotfix</span>' : '')
-        + (m.afterTheFact ? '<span class="rl-rr-chip bad" title="Merged into prod outside Overlord, recorded after the fact">merged outside Overlord</span>' : '')
+        + (m.afterTheFact && m.kind !== 'standalone' ? '<span class="rl-rr-chip bad" title="Merged into prod outside Overlord, recorded after the fact">merged outside Overlord</span>' : '')
         + (m.scope ? `<span class="rl-rr-chip" title="A release of some repos only: ${esc((m.scope.repos || []).join(', '))}">${esc((m.scope.repos || []).length)}${m.scope.of ? ' of ' + esc(m.scope.of) : ''} repos</span>` : '')
         + (m.version ? `<span class="rl-rr-chip" title="Frontend version this release shipped">v${esc(m.version)}</span>` : '')
         + (!m.ticket && ticketLate(s, m) ? `<span class="rl-rr-chip warn" title="${esc(ticketLate(s, m))}">⚠ no ClickUp ticket</span>` : '')

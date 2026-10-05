@@ -71,7 +71,7 @@ function applyPr(m, repo, pr) {
     if (pr.signers && JSON.stringify(pr.signers) !== JSON.stringify(next.signers)) next.signers = pr.signers;
     if (pr.signedSha && !next.mergeSha && next.signedSha !== pr.signedSha) next.signedSha = pr.signedSha;
     // merged without two approvers' signatures (e.g. on github.com): the audit exception
-    if (next.mergeSha && (m.env || 'prod') === 'prod') next.unsigned = (next.signers || []).length < SIGNATURES_NEEDED; // only prod is signed
+    if (next.mergeSha && (m.env || 'prod') === 'prod' && m.kind !== 'standalone') next.unsigned = (next.signers || []).length < SIGNATURES_NEEDED; // only prod is signed
     if (JSON.stringify(next) !== JSON.stringify(r)) changed = true;
     return next;
   });

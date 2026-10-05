@@ -120,7 +120,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     for (let attempt = 0; attempt < 3; attempt++) {
       const loaded = await load();
       if (!loaded) return null;
-      let m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name)), kind: rows.some(r => r.hotfix) ? 'hotfix' : 'release', env: 'prod', rows, opener });
+      let m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name)), kind: rows.some(r => r.standalone) ? 'standalone' : rows.some(r => r.hotfix) ? 'hotfix' : 'release', env: 'prod', rows, opener });
       for (const r of rows) [m] = M.applyPr(m, r.repo, { number: r.pr.number, mergeSha: r.mergeSha, mergedAt: r.mergedAt, signers: r.signers || [] });
       m = { ...m, afterTheFact: true };
       const w = await write(m, null, `release ${m.id}: recorded after the fact (merged outside Overlord)`);

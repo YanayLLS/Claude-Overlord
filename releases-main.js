@@ -416,6 +416,16 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const back = cfgSteps.find(p => p.repo.toLowerCase() === m[1].toLowerCase() && p.source === pr.data.base.ref && p.target === pr.data.head.ref);
     if (back) return { ok: true, warn: `Back-merge into ${back.source}: the open ${back.target} release PR takes these commits too` };
     if (!prodStep(m[1], pr.data.base.ref, pr.data.head.ref)) return { ok: true }; // not a prod release PR
+    // a standalone repo (a side product: back-office): its own PRs into prod need one teammate's approval, not a
+    // signed release; as part of a product release (it carries a release id) the release's signatures apply
+    if (standaloneRepo(m[1]) && !releaseIdOf(pr.data.body)) {
+      const rv = await ghJson(['api', '-X', 'GET', `repos/${m[1]}/pulls/${m[2]}/reviews`, '-f', 'per_page=100']);
+      const author = pr.data.user && pr.data.user.login;
+      const latest = new Map();
+      for (const r of (Array.isArray(rv.data) ? rv.data : []).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at))) if (r.user && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) latest.set(r.user.login, r.state);
+      const ok = [...latest].some(([l, st]) => st === 'APPROVED' && l !== author);
+      return ok ? { ok: true } : { ok: false, reason: `needs a teammate's approval first (${m[1].split('/')[1]} ships on its own: no release signatures, but someone other than the author approves)` };
+    }
     if (!state.approvers || !state.approvers.exists) await loadApprovers();
     const s = await releaseSignoffOf(m[1], m[2], memo);
     if (s.error) return { ok: false, reason: s.error };
@@ -479,11 +489,13 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (!state.approvers.isApprover || !who.github) { if ((state.toSign || []).length) push({ toSign: [] }); return; }
     const steps = releasePlan(cfg, ['prod']).prs;
     const found = [], all = [];
+    const soloOwn = (repo, body) => standaloneRepo(repo) && !releaseIdOf(body); // a standalone repo's own PR: no signatures
     await Promise.all(steps.map(async (p) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
       const prs = (Array.isArray(r.data) ? r.data : []).filter(x => x.head && (x.head.ref === p.source || ROLLBACK_HEAD.test(x.head.ref) || releaseIdOf(x.body))
         && (!x.head.repo || x.head.repo.full_name.toLowerCase() === p.repo.toLowerCase()));
       for (const pr of prs) {
+        if (soloOwn(p.repo, pr.body)) continue;
         const s = await signoffOf(p.repo, pr.number);
         if (s.error) continue;
         const meL = String(who.github).toLowerCase();
@@ -1207,6 +1219,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }
   }
 
+  const standaloneRepo = (repo) => !!(state.config && (state.config.repos || []).find(x => x.repo.toLowerCase() === String(repo).toLowerCase() && x.standalone));
   // ── PRs into prod opened outside the release flow (a feature branch straight into main, an agent's PR):
   // listed on the Releases board for everyone, approvers told once, and one click puts each right ──
   let strayTold = new Set(), straySeeded = false; // the first scan only learns what's already open
@@ -1231,8 +1244,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     steps.forEach((p, i) => {
       const node = res.data['s' + i];
       if (!node) return;
+      const solo = standaloneRepo(p.repo);
       for (const x of node.open.nodes) {
-        if (ROLLBACK_HEAD.test(x.headRefName) || releaseIdOf(x.body)) continue; // a rollback, or already a release
+        if (solo || ROLLBACK_HEAD.test(x.headRefName) || releaseIdOf(x.body)) continue; // standalone (its own review flow), a rollback, or already a release
         const row = { ...p, env: 'prod', pr: { number: x.number, url: x.url }, author: x.author && x.author.login, title: x.title, head: x.headRefName, commits: x.commits.totalCount };
         out.push({ repo: p.repo, label: p.label, number: x.number, url: x.url, title: x.title, head: x.headRefName, base: p.target, source: p.source, author: row.author, createdAt: x.createdAt });
         if (!ap || Date.now() - Date.parse(x.createdAt) < ADOPT_AFTER_MS) continue;
@@ -1240,7 +1254,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       }
       for (const x of node.merged.nodes) {
         if (!ap || !x.mergedAt || Date.now() - Date.parse(x.mergedAt) > 86400e3 || releaseIdOf(x.body) || ROLLBACK_HEAD.test(x.headRefName)) continue;
-        after.push({ ...p, env: 'prod', pr: { number: x.number, url: x.url }, mergeSha: x.mergeCommit && x.mergeCommit.oid, mergedAt: x.mergedAt, author: x.author && x.author.login, hotfix: x.headRefName !== p.source });
+        after.push({ ...p, env: 'prod', pr: { number: x.number, url: x.url }, mergeSha: x.mergeCommit && x.mergeCommit.oid, mergedAt: x.mergedAt, author: x.author && x.author.login, hotfix: x.headRefName !== p.source, standalone: solo });
       }
     });
     push({ strayPrs: out.filter(x => Date.now() - Date.parse(x.createdAt) < ADOPT_AFTER_MS || !ap) });
@@ -1260,7 +1274,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const withSigners = await Promise.all(after.map(async (r) => { const so = await signoffOf(r.repo, r.pr.number); return { ...r, signers: so.error ? [] : so.signers.map(x => x.login) }; }));
       for (const r of withSigners) {
         const id = await history.recordMerged([r], { login: r.author, clickup: null }).catch(() => null);
-        if (id) told.push(`${r.label} #${r.pr.number} was merged outside Overlord → recorded as release ${id}${r.signers.length < 2 ? ' (unsigned)' : ''}`);
+        if (id && !r.standalone) told.push(`${r.label} #${r.pr.number} was merged outside Overlord → recorded as release ${id}${r.signers.length < 2 ? ' (unsigned)' : ''}`);
       }
     }
     if (told.length) {
@@ -1298,7 +1312,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // so the PRs panel leaves them out
   function isProdPr(repo, base) {
     const r = state.config && (state.config.repos || []).find(x => x.repo.toLowerCase() === String(repo).toLowerCase());
-    return !!(r && r.branches && r.branches.prod && r.branches.prod === base);
+    return !!(r && !r.standalone && r.branches && r.branches.prod && r.branches.prod === base); // standalone repos' prod PRs stay in the panel
   }
 
   return { handle, mergeGate, isProdPr };

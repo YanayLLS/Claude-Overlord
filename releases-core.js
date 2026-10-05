@@ -81,6 +81,7 @@ function validateConfig(cfg) {
         if (!hasCaptureGroup(l && l.match)) out.push(`${at}.live.${env}.match: must be a regex with one (capture group) for the sha`);
       }
     }
+    if (r.standalone != null && typeof r.standalone !== 'boolean') out.push(`${at}.standalone: must be true or false (true = its own PRs into prod need one teammate's approval, not a signed release)`);
     if (r.health != null) {
       if (typeof r.health !== 'object' || Array.isArray(r.health)) out.push(`${at}.health: must be an object`);
       else for (const [env, url] of Object.entries(r.health)) if (!/^https:\/\//.test(String(url))) out.push(`${at}.health.${env}: must be an https:// URL that answers 2xx when healthy`);
