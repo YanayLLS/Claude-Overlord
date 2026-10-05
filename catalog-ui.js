@@ -52,7 +52,8 @@
   document.body.appendChild(pop);
   const $ = (c) => pop.querySelector(c);
   const q = $('.cg-q'), list = $('.cg-list'), foot = $('.cg-foot'), scope = $('.cg-scope'), backBtn = $('.cg-back'), headNew = $('.cg-head-new'), detail = $('.cg-detail');
-  pop.addEventListener('mousedown', (e) => e.stopPropagation());
+  // Clicks inside keep focus in the search box, where the keys are handled (buttons and rows still get their click).
+  pop.addEventListener('mousedown', (e) => { e.stopPropagation(); if (e.target !== q) e.preventDefault(); });
   document.addEventListener('mousedown', () => { if (isOpen) close(); });
 
   const agentCwd = () => agents.get(selectedId)?.cwd || '';
