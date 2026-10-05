@@ -2447,13 +2447,33 @@ function notifyPrDecision(pr, kind) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
 }
 
+// Between full polls, a free ETag check every PR_WATCH_MS (pr-watch.js) notices any PR change — an approval, a merge,
+// a new PR — and polls at once, so the panel updates within seconds instead of at the next interval.
+const PR_WATCH_MS = 10e3;
+let ghToken = null, prWatchTimer = null;
+const ghTokenGet = () => ghToken ? Promise.resolve(ghToken) : new Promise((res, rej) =>
+  exec('gh auth token', { windowsHide: true, timeout: 10000 }, (err, out) => { const t = (out || '').trim(); if (err || !t) return rej(err || new Error('no token')); res(ghToken = t); }));
+const prWatch = require('./pr-watch').createPrWatch({
+  get: async (repo, etag) => {
+    const r = await fetch(`https://api.github.com/repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=1`, {
+      headers: { Authorization: `Bearer ${await ghTokenGet()}`, Accept: 'application/vnd.github+json', ...(etag ? { 'If-None-Match': etag } : {}) },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (r.status === 401) ghToken = null; // rotated by gh auth: fetch it again next tick
+    return { status: r.status, etag: r.headers.get('etag') };
+  },
+  onChange: () => pollPRs(),
+});
+
 function armPrTimer() {
   if (prTimer) { clearInterval(prTimer); prTimer = null; }
+  if (prWatchTimer) { clearInterval(prWatchTimer); prWatchTimer = null; }
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled) return;
   const sec = Math.max(30, Number(cfg.intervalSec) || 60);
   pollPRs();
   prTimer = setInterval(pollPRs, sec * 1000);
+  prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r))); }, PR_WATCH_MS);
 }
 
 // ── GitHub Actions tracking ───────────────────────────
