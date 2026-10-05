@@ -37,7 +37,8 @@
   btn.title = 'Skills, commands and agents (//)';
   btn.textContent = '+';
   btn.onmousedown = (e) => e.stopPropagation(); // else the outside-click close fires first and this reopens it
-  btn.onclick = () => { isOpen ? close() : open(); };
+  // stopPropagation: #term-container's click handler refocuses the terminal, stealing focus from the search box.
+  btn.onclick = (e) => { e.stopPropagation(); isOpen ? close() : open(); };
   const container = document.getElementById('term-container');
   container?.appendChild(btn);
 
