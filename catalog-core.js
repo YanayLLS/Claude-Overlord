@@ -8,7 +8,7 @@ const path = require('path');
 // ponytail: hand-picked, not read from Claude — add new built-ins as Claude ships them
 const BUILTINS = [
   ['clear', 'Clear the conversation'], ['compact', 'Summarise the conversation to free context', '[instructions]'],
-  ['context', 'Show context usage'], ['diff', 'Uncommitted changes in a pane beside the transcript'], ['cost', 'Show token usage and cost'], ['model', 'Switch model', '[model]'],
+  ['context', 'Show context usage'], ['cost', 'Show token usage and cost'], ['model', 'Switch model', '[model]'],
   ['review', 'Review a pull request', '[pr]'], ['init', 'Write a CLAUDE.md for this repo'],
   ['memory', 'Edit memory files'], ['config', 'Open settings'], ['mcp', 'Manage MCP servers'],
   ['agents', 'Manage subagents'], ['permissions', 'Manage tool permissions'], ['hooks', 'Manage hooks'],
@@ -19,6 +19,13 @@ const BUILTINS = [
   ['bashes', 'List background shells'], ['statusline', 'Set up the status line'],
   ['security-review', 'Security review of pending changes'], ['output-style', 'Switch output style'],
 ].map(([name, desc, hint]) => ({ type: 'builtin', name, desc, hint, origin: 'builtin', group: 'Built-in', insert: `/${name} ` }));
+
+// Mods that ship inside Claude Code (its claude-code-plugins marketplace has their source).
+// ponytail: sec-default and telemetry are left out — one only runs on managed machines, the other is invisible
+const BUILTIN_MODS = [
+  { name: 'diff', desc: "The session's uncommitted changes in a pane beside the transcript, file by file with their hunks, refreshed as Claude edits.", insert: '/diff ' },
+  { name: 'agents-md', desc: "Reads AGENTS.md as project instructions where the project has no CLAUDE.md of its own.", insert: '' },
+].map(m => ({ ...m, type: 'mod', origin: 'builtin', group: 'Built-in' }));
 
 const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } };
 const dirs = (p) => { try { return fs.readdirSync(p, { withFileTypes: true }); } catch { return []; } };
@@ -102,7 +109,14 @@ function scanPlugins(cwd, home) {
     const [plugin, market] = key.split('@');
     const inst = (installs || []).find(i => !i.projectPath || path.resolve(i.projectPath) === path.resolve(cwd)) || (installs || [])[0];
     if (!inst?.installPath) continue;
-    for (const e of scanRoot(inst.installPath, { origin: 'plugin', group: `${plugin} · ${market}` })) out.push({ ...e, name: `${plugin}:${e.name}` });
+    const base = { origin: 'plugin', group: `${plugin} · ${market}` };
+    for (const e of scanRoot(inst.installPath, base)) out.push({ ...e, name: `${plugin}:${e.name}` });
+    // A mod is a plugin whose hooks.json names code modules (a classic one lists command hooks).
+    const hooks = json(path.join(inst.installPath, 'hooks', 'hooks.json'));
+    if (Array.isArray(hooks?.modules)) {
+      const manifest = path.join(inst.installPath, '.claude-plugin', 'plugin.json');
+      out.push({ ...base, type: 'mod', name: plugin, desc: json(manifest)?.description || hooks.description || '', path: manifest, insert: '' });
+    }
   }
   return out;
 }
@@ -116,7 +130,7 @@ function scanCatalog(cwd, home) {
   const inPc = new Set(pc.map(i => i.type + ':' + i.name));
   for (const i of pc) if (inRepo.has(i.type + ':' + i.name)) i.shadowed = 'repo';
   for (const i of repo) if (inPc.has(i.type + ':' + i.name)) i.overrides = 'pc';
-  return [...repo, ...pc, ...scanPlugins(cwd, home), ...BUILTINS].map(i => ({ ...i, insert: i.insert || insertFor(i) }));
+  return [...repo, ...pc, ...scanPlugins(cwd, home), ...BUILTINS, ...BUILTIN_MODS].map(i => ({ ...i, insert: i.insert ?? insertFor(i) }));
 }
 
 module.exports = { frontmatter, scanCatalog, BUILTINS };

@@ -74,6 +74,16 @@ function hotkeyFromEvent(e) {
   return [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta', key].filter(Boolean).join('+');
 }
 
+// The prompt a "+ new" in the picker starts a fresh agent with. null = can't be made (built-ins).
+const WHERE = 'this repo (shared with the team) or ~/.claude (all my projects)';
+const NEW_ITEM = {
+  skill: `I want a new Claude Code skill. Ask me what it should do and whether it belongs in ${WHERE}, then write .claude/skills/<name>/SKILL.md with name and description frontmatter. Use the skill-creator skill if you have it.`,
+  command: `I want a new Claude Code slash command. Ask me what it should do and whether it belongs in ${WHERE}, then write .claude/commands/<name>.md with a description (and argument-hint if it takes arguments) in the frontmatter.`,
+  agent: `I want a new Claude Code subagent. Ask me what it should be good at and whether it belongs in ${WHERE}, then write .claude/agents/<name>.md with name, description and tools in the frontmatter.`,
+  mod: 'I want a new Claude Code mod. Use the plugin-authoring skill. Ask me what it should do before writing anything.',
+};
+const newItemPrompt = (type) => NEW_ITEM[type] || null;
+
 // Viewport row of the ─── divider on top of Claude's input ("> " / "❯ "), or -1.
 // The popover opens above it so the prompt stays visible. Requiring the divider
 // keeps a quoted "> " line in the transcript from counting.
@@ -83,4 +93,4 @@ function promptTop(lines) {
   return -1;
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent };
+if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent, newItemPrompt };

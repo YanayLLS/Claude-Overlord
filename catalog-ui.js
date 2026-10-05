@@ -8,6 +8,7 @@
     skill: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
     command: '<path d="m16 4-8 16"/>',
     agent: '<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 13v2M15 13v2"/>',
+    mod: '<path d="M12 2v4M12 18v4M4 12H2M22 12h-2"/><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 10h4v4h-4z"/>',
     builtin: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   };
   const icon = (type) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${SVG[type] || ''}</svg>`;
@@ -15,6 +16,7 @@
     { type: 'skill', label: 'Skills' },
     { type: 'command', label: 'Commands' },
     { type: 'agent', label: 'Agents' },
+    { type: 'mod', label: 'Mods' },
     { type: 'builtin', label: 'Built-in' },
   ];
   const cache = new Map(); // cwd -> items
@@ -27,6 +29,7 @@
   const nameHtml = (it) => { const k = it.origin === 'plugin' ? it.name.indexOf(':') + 1 : 0;
     return (k ? `<span class="cg-pfx">${mark(it.name, it.pos, 0, k)}</span>` : '') + mark(it.name, it.pos, k); };
   const tilde = (p) => String(p || '').replace(/^[A-Z]:[\\/]Users[\\/][^\\/]+/i, '~').replace(/\\/g, '/');
+  const plus = (type, label) => newItemPrompt(type) ? `<button class="cg-new" data-new="${type}" title="Start an agent that makes a new ${label}">+</button>` : '';
   const kbd = (k, label) => `<span class="cg-k"><kbd>${k}</kbd>${label}</span>`;
 
   const btn = document.createElement('button');
@@ -104,7 +107,8 @@
     const where = it.origin === 'builtin' ? 'Built into Claude Code' : tilde(it.path);
     const note = it.overrides ? '<span class="cg-badge">overrides ~/.claude</span>'
       : it.shadowed ? '<span class="cg-badge dim">hidden by this repo’s copy</span>' : '';
-    detail.innerHTML = `<div class="cg-d-title"><span>${esc(it.insert.trim())}</span>${it.hint ? `<span class="cg-hint">${esc(it.hint)}</span>` : ''}${note}</div>`
+    const runs = !it.insert ? '<span class="cg-badge dim">runs on its own — nothing to insert</span>' : '';
+    detail.innerHTML = `<div class="cg-d-title"><span>${esc(it.insert.trim() || it.name)}</span>${it.hint ? `<span class="cg-hint">${esc(it.hint)}</span>` : ''}${note || runs}</div>`
       + `<div class="cg-d-desc">${esc(it.desc || 'No description.')}</div><div class="cg-d-path" title="${esc(it.path || '')}"><bdi>${esc(where)}</bdi></div>`;
   }
 
@@ -125,16 +129,17 @@
       sel = Math.min(sel, rows.length - 1);
       list.innerHTML = TYPES.map((x, i) => { const n = count(x.type);
         return `<div class="cg-row cg-type${i === sel ? ' sel' : ''}${n ? '' : ' cg-none'}" data-i="${i}"><span class="cg-icon">${icon(x.type)}</span>`
-          + `<span class="cg-name">${x.label}</span><span class="cg-count">${n}</span><kbd>${i + 1}</kbd></div>`; }).join('');
+          + `<span class="cg-name">${x.label}</span><span class="cg-count">${n}</span>${plus(x.type, x.label.toLowerCase().replace(/s$/, ''))}<kbd>${i + 1}</kbd></div>`; }).join('');
       renderDetail();
-      foot.innerHTML = kbd('1–4', 'pick') + kbd('↵', 'open') + kbd('Esc', 'close');
+      foot.innerHTML = kbd('1–5', 'pick') + kbd('↵', 'open') + kbd('Esc', 'close');
       return;
     }
 
     // Tabs: All + every type that has something. Click, or Tab / ⇧Tab, to switch.
     tabs.hidden = false;
     tabs.innerHTML = [{ type: null, label: 'All' }, ...TYPES].filter(x => !x.type || count(x.type))
-      .map(x => `<button class="cg-tab${x.type === type ? ' on' : ''}" data-type="${x.type || ''}">${x.label}<span>${x.type ? count(x.type) : items.length}</span></button>`).join('');
+      .map(x => `<button class="cg-tab${x.type === type ? ' on' : ''}" data-type="${x.type || ''}">${x.label}<span>${x.type ? count(x.type) : items.length}</span></button>`).join('')
+      + (t && newItemPrompt(t.type) ? `<button class="cg-new cg-new-tab" data-new="${t.type}" title="Start an agent that makes one">+ New ${t.label.toLowerCase().replace(/s$/, '')}</button>` : '');
 
     rows = pickItems(items, type, query).slice(0, 200);
     sel = Math.min(sel, Math.max(0, rows.length - 1));
@@ -160,6 +165,7 @@
     const it = rows[i];
     if (!it) return;
     if (stage === 'types') { stage = 'list'; type = it.type; sel = 0; q.value = ''; render(); return; }
+    if (!it.insert) return; // a mod with no command — the detail pane says it runs on its own
     const id = selectedId;
     close();
     api.send({ type: 'termInput', id, data: send ? it.insert.trimEnd() + '\r' : it.insert });
@@ -178,12 +184,22 @@
     if (k === 'ArrowDown' || k === 'ArrowUp') { e.preventDefault(); if (rows.length) { sel = (sel + (k === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length; render(); } return; }
     if (k === 'Enter') { e.preventDefault(); choose(sel, e.shiftKey); return; }
     if (k === 'Tab') { e.preventDefault(); cycle(e.shiftKey ? -1 : 1); return; }
-    if (stage === 'types' && /^[1-4]$/.test(k) && !q.value) { e.preventDefault(); choose(+k - 1); return; }
+    if (stage === 'types' && /^[1-5]$/.test(k) && !q.value) { e.preventDefault(); choose(+k - 1); return; }
     if (k === 'Backspace' && !q.value && stage === 'list') { e.preventDefault(); stage = 'types'; type = null; sel = 0; render(); return; }
     if (e.ctrlKey && k.toLowerCase() === 'o' && stage === 'list') { e.preventDefault(); const p = rows[sel]?.path; if (p) api.send({ type: 'openFile', path: p }); }
   });
   // Hover only moves the highlight; a full render here would swap the row out from under the click.
   list.addEventListener('mousemove', (e) => { const r = e.target.closest('.cg-row'); if (!r || +r.dataset.i === sel) return; list.querySelector('.sel')?.classList.remove('sel'); r.classList.add('sel'); sel = +r.dataset.i; renderDetail(); });
+  // "+" on a type: a fresh agent in this project, primed to make a new one of that type.
+  pop.addEventListener('click', (e) => {
+    const b = e.target.closest('.cg-new');
+    if (!b) return;
+    e.stopPropagation();
+    const prompt = newItemPrompt(b.dataset.new);
+    if (!prompt || !cwd) return;
+    close(false);
+    api.send({ type: 'createAgent', cwd, prompt });
+  }, true);
   tabs.addEventListener('click', (e) => { const b = e.target.closest('.cg-tab'); if (!b) return; type = b.dataset.type || null; stage = 'list'; sel = 0; render(); q.focus(); });
   list.addEventListener('click', (e) => { const r = e.target.closest('.cg-row'); if (r) choose(+r.dataset.i, e.shiftKey); });
   addEventListener('resize', () => { if (isOpen) place(); });

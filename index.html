@@ -698,6 +698,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #catalog-pop .cg-d-path { margin-top:6px; font-size:11px; color:var(--dim); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; direction:rtl; text-align:left; }
 #catalog-pop .cg-foot { flex:none; display:flex; gap:14px; padding:7px 14px; border-top:1px solid var(--border); color:var(--dim); font-size:11px; }
 #catalog-pop .cg-k { display:flex; align-items:center; gap:5px; }
+#catalog-pop .cg-new { font:inherit; font-size:14px; line-height:1; width:20px; height:20px; padding:0; border:1px solid transparent; border-radius:5px; background:transparent; color:var(--dim); cursor:pointer; visibility:hidden; flex:none; }
+#catalog-pop .cg-row:hover .cg-new, #catalog-pop .cg-row.sel .cg-new { visibility:visible; }
+#catalog-pop .cg-new:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+#catalog-pop .cg-new-tab { visibility:visible; width:auto; height:auto; margin-left:auto; padding:3px 8px; font-size:11.5px; color:var(--subtext); }
 /* Always-visible scroll/prompt nav stack: prev prompt, top, bottom, next prompt */
 #term-scroll-nav {
   display:none; position:absolute; top:50%; transform:translateY(-50%); right:20px; z-index:10;

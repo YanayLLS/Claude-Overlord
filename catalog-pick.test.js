@@ -1,6 +1,6 @@
 // Run: node catalog-pick.test.js
 const assert = require('assert');
-const { fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent } = require('./catalog-pick');
+const { fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent, newItemPrompt } = require('./catalog-pick');
 
 // fuzzy: subsequence required, case-insensitive, match positions returned
 assert.strictEqual(fuzzyScore('xyz', 'fix-bug'), null);
@@ -81,4 +81,11 @@ assert.strictEqual(hotkeyFromEvent(ev({ key: 'p', altKey: true })), 'Alt+P');
 assert.strictEqual(hotkeyFromEvent(ev({ key: ' ', ctrlKey: true, shiftKey: true })), 'Ctrl+Shift+Space');
 assert.strictEqual(hotkeyFromEvent(ev({ key: 'Control', ctrlKey: true })), null, 'modifier alone');
 assert.strictEqual(hotkeyFromEvent(ev({ key: 'a' })), null, 'no modifier');
+// "+ new" prompts: one per creatable type, naming where the files go; built-ins can't be made
+assert.match(newItemPrompt('skill'), /\.claude\/skills\/.*SKILL\.md/);
+assert.match(newItemPrompt('command'), /\.claude\/commands\//);
+assert.match(newItemPrompt('agent'), /\.claude\/agents\//);
+assert.match(newItemPrompt('mod'), /plugin-authoring/);
+for (const t of ['skill', 'command', 'agent', 'mod']) assert.match(newItemPrompt(t), /[Aa]sk me/, t + ' asks before writing');
+assert.strictEqual(newItemPrompt('builtin'), null);
 console.log('catalog-pick ok');

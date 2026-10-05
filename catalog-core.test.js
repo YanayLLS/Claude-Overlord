@@ -23,13 +23,20 @@ w('home/.claude/commands/fl/review.md', md('', 'namespaced')); // → fl:review
 w('home/.claude/agents/reviewer.md', md('code-reviewer', 'reviews diffs'));
 w('repo/.claude/skills/run/SKILL.md', md('run', 'repo run'));
 w('repo/.claude/commands/release.md', '# Cut a release\nmore text');
-w('home/.claude/settings.json', JSON.stringify({ enabledPlugins: { 'sp@mk': true, 'off@mk': false } }));
+w('home/.claude/settings.json', JSON.stringify({ enabledPlugins: { 'sp@mk': true, 'off@mk': false, 'pane@mk': true } }));
 w('plug/sp/skills/brainstorming/SKILL.md', md('brainstorming', 'design first'));
 w('plug/sp/commands/go.md', md('go', 'go'));
 w('plug/off/skills/hidden/SKILL.md', md('hidden', 'disabled plugin'));
+// a mod (hooks.json lists modules) and a classic hooks plugin (hooks.json lists hooks)
+w('plug/sp/.claude-plugin/plugin.json', JSON.stringify({ name: 'sp', description: 'not a mod' }));
+w('plug/sp/hooks/hooks.json', JSON.stringify({ hooks: { SessionStart: [] } }));
+w('plug/pane/.claude-plugin/plugin.json', JSON.stringify({ name: 'pane', description: 'A live pane' }));
+w('plug/pane/hooks/hooks.json', JSON.stringify({ description: 'short', modules: ['./register.ts'] }));
+w('plug/pane/skills/draw/SKILL.md', md('draw', 'draw it'));
 w('home/.claude/plugins/installed_plugins.json', JSON.stringify({ plugins: {
   'sp@mk': [{ installPath: path.join(tmp, 'plug/sp') }],
   'off@mk': [{ installPath: path.join(tmp, 'plug/off') }],
+  'pane@mk': [{ installPath: path.join(tmp, 'plug/pane') }],
 } }));
 
 const items = scanCatalog(path.join(tmp, 'repo'), path.join(tmp, 'home'));
@@ -60,9 +67,18 @@ assert.ok(!items.some(i => /hidden/.test(i.name)), 'disabled plugin skipped');
 // built-ins present, insert text is "/name "
 assert.ok(BUILTINS.length > 5);
 assert.ok(find('builtin', 'compact'));
-assert.ok(find('builtin', 'diff'), 'the built-in diff mod adds /diff');
 assert.strictEqual(find('command', 'fix-bug').insert, '/fix-bug ');
 assert.strictEqual(find('agent', 'code-reviewer').insert, 'Use the code-reviewer agent to ');
+
+// mods: plugins whose hooks.json has modules; built-in ones listed, /diff the only insertable one
+const pane = find('mod', 'pane');
+assert.strictEqual(pane.desc, 'A live pane', 'plugin.json description wins');
+assert.strictEqual(pane.group, 'pane · mk');
+assert.strictEqual(pane.insert, '', 'a mod with no command inserts nothing');
+assert.ok(find('skill', 'pane:draw'), "a mod's file skills still list as skills");
+assert.ok(!find('mod', 'sp'), 'classic hooks plugin is not a mod');
+assert.strictEqual(find('mod', 'diff', 'builtin').insert, '/diff ');
+assert.ok(find('mod', 'agents-md', 'builtin'));
 
 // missing dirs don't throw
 assert.ok(Array.isArray(scanCatalog(path.join(tmp, 'nope'), path.join(tmp, 'nohome'))));
