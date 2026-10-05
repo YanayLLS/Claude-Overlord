@@ -84,17 +84,18 @@
     releaseClose: () => { relOpen = false; render(); },
     apprMenu: () => { apprOpen = !apprOpen; relOpen = false; if (apprOpen) api.send({ type: 'releasesApprovers' }); render(); },
     apprAdd: () => {
+      localBusy.set('appr', { label: 'Adding…', at: Date.now() });
       const inp = modal.querySelector('#rl-appr-add');
       const login = inp && inp.value.trim().replace(/^@/, '');
       if (login) api.send({ type: 'releasesApproversEdit', kind: 'add', login });
     },
-    apprRemove: (el) => { api.send({ type: 'releasesApproversEdit', kind: 'remove', login: el.dataset.login }); },
-    apprCreate: () => { api.send({ type: 'releasesApproversEdit', kind: 'create' }); },
+    apprRemove: (el) => { markBusy(el, 'Removing…'); render(); api.send({ type: 'releasesApproversEdit', kind: 'remove', login: el.dataset.login }); },
+    apprCreate: (el) => { markBusy(el, 'Creating the team…'); render(); api.send({ type: 'releasesApproversEdit', kind: 'create' }); },
     relSign: () => { api.send({ type: 'releasesSign' }); },
     // Release all merges to prod: the first click arms it (the button asks to confirm), a second within ARM_MS starts it
     relMerge: () => { if (armed !== 'run') return arm('run'); armed = null; startingAll(); api.send({ type: 'releasesMerge' }); render(); },
-    relAllStop: () => { api.send({ type: 'releasesReleaseAllStop' }); },
-    relAllResume: (el) => { api.send(el.dataset.id ? { type: 'releasesMergeRelease', id: el.dataset.id } : { type: 'releasesMerge' }); },
+    relAllStop: (el) => { if (state && state.releaseAll) state = { ...state, releaseAll: { ...state.releaseAll, stopping: true } }; render(); api.send({ type: 'releasesReleaseAllStop' }); },
+    relAllResume: (el) => { startingAll(); render(); api.send(el.dataset.id ? { type: 'releasesMergeRelease', id: el.dataset.id } : { type: 'releasesMerge' }); },
     // bell: add every repo of the release config the PRs panel isn't watching yet
     relWatch: () => {
       const missing = prsUnwatched();
@@ -114,6 +115,8 @@
       const all = [...new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo))];
       const repos = relSkip.size ? all.filter(r => !relSkip.has(r)) : null;
       if (repos && !repos.length) return;
+      if (busyLabel('release')) return;
+      localBusy.set('release', { label: 'Starting…', at: Date.now() }); render();
       api.send({ type: 'releasesRelease', envs: [...relSel], repos, of: all.length, separate: relSeparate });
     },
     relOnly: (el) => { relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); render(); },
@@ -126,29 +129,30 @@
     relReposAll: (el) => { if (el.dataset.on === '1') relSkip = new Set(); else relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo)); render(); },
     // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
     // one agent for every blocked row — leave the modal to land on it
-    fixDeploy: (el) => { api.send({ type: 'releasesFixDeploy', key: el.dataset.key }); show(false); },
+    fixDeploy: (el) => { showToastSafe('Starting a fix agent for that deploy…'); api.send({ type: 'releasesFixDeploy', key: el.dataset.key }); show(false); },
     // el.dataset.i = one row's Fix; none = Fix all
     relFix: (el) => { const i = el && el.dataset.i != null ? +el.dataset.i : undefined; api.send({ type: 'releasesFix', i }); relOpen = false; show(false); },
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; if (tab === 'history') api.send({ type: 'releasesHistory' }); render(); },
     // history actions
     gotoRelease: () => { relOpen = false; tab = 'history'; api.send({ type: 'releasesHistory' }); render(); },
-    rowToDev: (el) => { el.textContent = 'Retargeting…'; api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: 'retarget' }); },
-    strayFix: (el) => { el.textContent = el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'; api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
+    rowToDev: (el) => { markBusy(el, 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: 'retarget' }); },
+    strayFix: (el) => { markBusy(el, el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
     histChanges: (el) => { const k = el.dataset.key; openChanges.has(k) ? openChanges.delete(k) : openChanges.add(k); render(); },
     histRollback: (el) => { rbOpen = rbOpen === el.dataset.id ? null : el.dataset.id; rbSkip = new Set(); render(); },
     histRbRepo: (el) => { const r = el.dataset.repo; rbSkip.has(r) ? rbSkip.delete(r) : rbSkip.add(r); render(); },
-    histRbGo: (el) => { api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
+    histRbGo: (el) => { markBusy(el, 'Opening rollback PRs…'); api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
     // Cancel release: closes every open PR of it. Same two-click confirm as Release all
     // a repo of the release in flight: merge it now (two clicks), re-run its deploy, fix its checks, confirm a hand deploy
-    rowMerge: (el) => { const k = 'm:' + el.dataset.repo + '#' + el.dataset.n; if (armed !== k) return arm(k); armed = null; el.textContent = 'Merging…'; api.send({ type: 'releasesMergeOne', repo: el.dataset.repo, number: +el.dataset.n }); },
-    rowRerun: (el) => { el.textContent = 'Re-running…'; api.send({ type: 'releasesRerunDeploy', repo: el.dataset.repo, number: +el.dataset.n }); },
-    rowFix: (el) => { api.send({ type: 'releasesFixPr', repo: el.dataset.repo, number: +el.dataset.n }); show(false); },
-    rowHand: (el) => { const k = 'h:' + el.dataset.repo; if (armed !== k) return arm(k); armed = null; el.textContent = 'Recording…'; api.send({ type: 'releasesConfirmHand', repo: el.dataset.repo, env: 'prod', label: el.dataset.label }); },
+    busy: () => {},
+    rowMerge: (el) => { const k = 'm:' + el.dataset.repo + '#' + el.dataset.n; if (armed !== k) return arm(k); armed = null; clearTimeout(armTimer); markBusy(el, 'Merging…'); render(); api.send({ type: 'releasesMergeOne', repo: el.dataset.repo, number: +el.dataset.n }); },
+    rowRerun: (el) => { markBusy(el, 'Re-running…'); render(); api.send({ type: 'releasesRerunDeploy', repo: el.dataset.repo, number: +el.dataset.n }); },
+    rowFix: (el) => { showToastSafe('Starting a fix agent…'); api.send({ type: 'releasesFixPr', repo: el.dataset.repo, number: +el.dataset.n }); show(false); },
+    rowHand: (el) => { const k = 'h:' + el.dataset.repo; if (armed !== k) return arm(k); armed = null; clearTimeout(armTimer); markBusy(el, 'Recording…'); render(); api.send({ type: 'releasesConfirmHand', repo: el.dataset.repo, env: 'prod', label: el.dataset.label }); },
     relCancel: (el) => { const k = 'x:' + (el.dataset.id || 'run'); if (armed !== k) return arm(k); armed = null; if (state) state = { ...state, cancelling: el.dataset.id || 'run' }; api.send({ type: 'releasesCancel', id: el.dataset.id || null }); render(); },
     histMerge: (el) => { if (armed !== 'h:' + el.dataset.id) return arm('h:' + el.dataset.id); armed = null; startingAll(); api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); render(); },
-    histReload: () => { api.send({ type: 'releasesHistory' }); },
-    histImport: () => { api.send({ type: 'releasesImport' }); },
+    histReload: () => { if (state) state = { ...state, history: null }; render(); api.send({ type: 'releasesHistory' }); },
+    histImport: (el) => { markBusy(el, 'Importing past releases…'); render(); api.send({ type: 'releasesImport' }); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
     cancelSource: () => { state = { ...(state || {}), editing: false }; render(); },
   };
@@ -586,6 +590,41 @@
   // optimistic: the progress line shows right on the confirming click; main's first update replaces it
   function startingAll() { if (state) state = { ...state, releaseAll: { running: true, status: 'checking', detail: 'starting', wave: 0, waves: 0, merged: [] } }; }
   let armed = null, armTimer = null;
+  // ── Busy buttons: main marks a slow action busy (state.busy[key]); the click marks it locally at once to
+  // bridge the round trip. After every render, a busy button shows a spinner + its label and is locked. ──
+  const showToastSafe = (t) => { try { if (typeof showToast === 'function') showToast(t); } catch {} };
+  const localBusy = new Map(); // key → { label, at }
+  function keyOf(el) {
+    const d = el.dataset, a = d.act;
+    if (a === 'rowMerge') return `merge:${d.repo}#${d.n}`;
+    if (a === 'rowRerun') return `rerun:${d.repo}#${d.n}`;
+    if (a === 'rowToDev' || a === 'strayFix') return `stray:${d.repo}#${d.n}`;
+    if (a === 'rowHand') return 'hand:' + d.repo;
+    if (a === 'histRollback' || a === 'histRbGo') return 'rollback:' + d.id;
+    if (a === 'histImport') return 'import';
+    if (a === 'apprAdd' || a === 'apprRemove' || a === 'apprCreate') return 'appr';
+    if (a === 'releaseGo') return 'release';
+    if (a === 'relAllStop') return 'stop';
+    return null;
+  }
+  function markBusy(el, label) { const k = keyOf(el); if (k) localBusy.set(k, { label, at: Date.now() }); }
+  function busyLabel(k) {
+    const st = state || {};
+    if (st.busy && st.busy[k]) return st.busy[k];
+    if (k === 'stop' && st.releaseAll && st.releaseAll.stopping && st.releaseAll.running) return 'Stopping…';
+    const l = localBusy.get(k);
+    if (l && Date.now() - l.at < 4000) return l.label; // until main's own busy flag arrives
+    localBusy.delete(k);
+    return null;
+  }
+  function applyBusy(root) {
+    for (const el of root.querySelectorAll('[data-act]')) {
+      const k = keyOf(el), label = k && busyLabel(k);
+      if (!label) continue;
+      el.innerHTML = '<span class="rl-spin-dot"></span>' + esc(label);
+      el.classList.add('locked', 'show'); el.setAttribute('aria-disabled', 'true'); el.dataset.act = 'busy';
+    }
+  }
   let relSkip = new Set(); // release picker: repos left out (all in by default, every time it opens)
   let relSeparate = false; // release picker: start a release of its own instead of adding to the pending one
   const openChanges = new Set(); // History rows whose "N changes" list is open
@@ -1040,7 +1079,8 @@
     relLeave = setTimeout(() => { if (relOpen) actions.releaseClose(); }, 400);
   });
 
-  function render() {
+  function render() { renderNow(); if (open) applyBusy(modal); }
+  function renderNow() {
     tlTip.classList.remove('show');
     if (!open) return;
     const s = state || { source: '', loading: true };
@@ -1129,13 +1169,26 @@
     if (u) { e.stopPropagation(); return api.send({ type: 'openUrl', url: u.dataset.url }); }
     if (!a && e.target !== signOverlay) return;
     const act = a ? a.dataset.sign : 'later';
-    if (act === 'now') api.send({ type: 'releasesSign' });
+    if (act === 'now') {
+      // stays up showing "Signing…" until it's done; dismissed only if it worked (a failure brings it back)
+      api.send({ type: 'releasesSign' });
+      const btn = a.closest('button'); if (btn) { btn.innerHTML = '<span class="rl-spin-dot"></span>Signing…'; btn.disabled = true; }
+      signWaiting = state && state.signPromptKey;
+      return;
+    }
     if (act === 'review') { relOpen = true; relShown = false; show(true); }
     promptDismissed = state && state.signPromptKey; // any choice closes it until something new arrives
     try { localStorage.setItem('rl-sign-dismissed', promptDismissed || ''); } catch {}
     signOverlay.classList.remove('open');
   });
+  let signWaiting = null; // the prompt's key while its "Sign" runs
   function renderSignPrompt() {
+    if (signWaiting) {
+      if (state && state.signing) return; // still signing: leave the prompt as it is
+      const left = (state && state.toSign) || [];
+      if (!left.length) { promptDismissed = signWaiting; try { localStorage.setItem('rl-sign-dismissed', promptDismissed || ''); } catch {} signOverlay.classList.remove('open'); }
+      signWaiting = null;
+    }
     const t = (state && state.toSign) || [];
     const key = state && state.signPromptKey;
     if (!t.length || !key || key === promptDismissed) {
@@ -1171,8 +1224,9 @@
     if (u) return api.send({ type: 'openUrl', url: u.dataset.url });
     const go = e.target.closest('[data-manual-go]');
     if (go) { go.textContent = 'Continuing…'; go.disabled = true; return api.send({ type: 'releasesManualDone' }); }
-    if (e.target.closest('[data-confirm]') && !(state.releaseAll && state.releaseAll.running)) api.send({ type: 'releasesManualConfirm' });
-    if (e.target.closest('[data-manual-stop]')) return api.send({ type: 'releasesReleaseAllStop' });
+    if (e.target.closest('[data-confirm]') && !(state.releaseAll && state.releaseAll.running)) { showToastSafe('Recording the hand deploys…'); api.send({ type: 'releasesManualConfirm' }); }
+    const stp = e.target.closest('[data-manual-stop]');
+    if (stp) { stp.innerHTML = '<span class="rl-spin-dot"></span>Stopping…'; stp.disabled = true; return api.send({ type: 'releasesReleaseAllStop' }); }
     if (state.releaseAll && state.releaseAll.running) return; // a paused wave stays up until it's deployed or stopped
     if (!e.target.closest('[data-close]') && e.target !== manualOverlay) return;
     manualSeen = String(state.releaseAll.doneAt);

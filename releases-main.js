@@ -369,7 +369,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   }
   const memberLogins = () => ((state.approvers && state.approvers.members) || []).map(m => m.login);
 
-  async function approversEdit(kind, login) {
+  async function approversEdit(kind, login) { return withBusy('appr', kind === 'add' ? 'Adding…' : kind === 'remove' ? 'Removing…' : 'Creating…', () => approversEditNow(kind, login)); }
+  async function approversEditNow(kind, login) {
     const org = approversOrg();
     if (!org) return;
     let r;
@@ -445,11 +446,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const man = id && ((state.history && state.history.items) || []).find(x => x.id === id);
     const label = (r) => (man && (man.repos.find(x => x.repo === r) || {}).label) || r.split('/')[1];
     const list = [{ label: label(repo), signoff: s }];
-    for (const r of (man ? man.repos : [])) {
-      if (r.mergeSha || r.closed || (r.repo === repo && r.pr.number === Number(n))) continue;
-      const o = await signoffOf(r.repo, r.pr.number);
-      if (o.error) return o;
-      if (o.pr.state === 'open') list.push({ label: r.label, signoff: o });
+    const sibs = (man ? man.repos : []).filter(r => !r.mergeSha && !r.closed && !(r.repo === repo && r.pr.number === Number(n)));
+    const reads = await Promise.all(sibs.map(r => signoffOf(r.repo, r.pr.number)));
+    for (let i = 0; i < sibs.length; i++) {
+      if (reads[i].error) return reads[i];
+      if (reads[i].pr.state === 'open') list.push({ label: sibs[i].label, signoff: reads[i] });
     }
     return releaseSignoff(withReleaseSigners(list, man));
   }
@@ -494,9 +495,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
       const prs = (Array.isArray(r.data) ? r.data : []).filter(x => x.head && (x.head.ref === p.source || ROLLBACK_HEAD.test(x.head.ref) || releaseIdOf(x.body))
         && (!x.head.repo || x.head.repo.full_name.toLowerCase() === p.repo.toLowerCase()));
-      for (const pr of prs) {
-        if (soloOwn(p.repo, pr.body)) continue;
-        const s = await signoffOf(p.repo, pr.number);
+      const sos = await Promise.all(prs.map(pr => soloOwn(p.repo, pr.body) ? null : signoffOf(p.repo, pr.number)));
+      for (const [pi, pr] of prs.entries()) {
+        if (!sos[pi]) continue;
+        const s = sos[pi];
         if (s.error) continue;
         const meL = String(who.github).toLowerCase();
         all.push({ label: p.label, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s, number: pr.number, url: pr.html_url,
@@ -607,7 +609,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     persist();
     send({ type: 'toast', text: failed.length ? `Sign failed: ${failed.join('; ')}` : done.length ? 'Signed the release ✍' : 'Nothing left for you to sign' });
     const ids = [...new Set(done.map(t => { const m = releaseOf(t.repo, t.number); return m && m.id; }).filter(Boolean))];
-    if (ids.length && !failed.length) await history.markSigned(ids, { login: who.github, clickup: who.clickup }).catch(() => {});
+    if (ids.length && !failed.length) await history.markSigned(ids, { login: who.github, clickup: who.clickup }).catch(e => send({ type: 'toast', text: `Signed on GitHub, but the release record didn't update (${e.message}): teammates may not see it yet` }));
     await reconcileHistory().catch(() => {});
     checkToSign().catch(() => {});
   }
@@ -705,14 +707,15 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   let manualDone = false, manualWake = null;
   // "Deployed": record each branch's head as what's live now, so the next release only asks when
   // there's something new (fetchLives reads it back). Trusts the person: nothing verifies the deploy.
-  async function confirmDeployed(items) {
+  async function confirmDeployed(items, key = 'handall') { return withBusy(key, 'Recording…', () => confirmNow(items)); }
+  async function confirmNow(items) {
     const who = await whoAmI();
     const heads = await Promise.all(items.map(async (x) => {
       const r = await ghJson(['api', `repos/${x.repo}/commits/${x.branch}`]);
       return r.data && r.data.sha ? { repo: x.repo, env: x.env, sha: r.data.sha } : null;
     }));
     const ok = heads.filter(Boolean);
-    if (ok.length) await history.confirm(ok, who.github, state.releaseAll && state.releaseAll.id).catch(e => send({ type: 'toast', text: 'Confirm deploy: ' + e.message }));
+    if (ok.length) await history.confirm(ok, who.github, state.releaseAll && state.releaseAll.id); // throws: the caller says it failed
     if (ok.length < items.length) send({ type: 'toast', text: `Couldn't read the branch of ${items.filter((x, i) => !heads[i]).map(x => x.label).join(', ')}: not recorded` });
     const lives = await fetchLives(state.config).catch(() => null);
     if (lives) push({ results: { ...(state.results || {}), lives }, grid: buildGrid(state.config, { ...(state.results || {}), lives }) });
@@ -787,22 +790,24 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // after its deploy succeeds; the result shows on the card. No URL = nothing to verify beyond the deploy.
   const healthSeen = new Map(); // repo|sha → { ok, status, at }
   async function checkHealth() {
-    const out = {};
+    const jobs = [];
     for (const m of ((state.history && state.history.items) || []).slice(0, 3)) {
       for (const r of m.repos) {
         const cfg = (state.config.repos || []).find(x => x.repo === r.repo);
         const url = cfg && cfg.health && cfg.health[m.env || 'prod'];
         if (!url || !r.mergeSha || !r.deploy || r.deploy.state !== 'success') continue;
         const k = r.repo + '|' + r.mergeSha;
-        if (!healthSeen.has(k) || (!healthSeen.get(k).ok && Date.now() - healthSeen.get(k).at > 60000)) {
-          const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) }).catch(e => ({ ok: false, status: e.name === 'TimeoutError' ? 'timeout' : 'unreachable' }));
-          healthSeen.set(k, { ok: !!res.ok, status: res.status, at: Date.now(), url });
-        }
-        out[k] = healthSeen.get(k);
+        const seen = healthSeen.get(k);
+        if (seen && (seen.ok || Date.now() - seen.at < 60000)) { jobs.push(Promise.resolve([k, seen])); continue; }
+        // all at once: one slow URL no longer holds up the rest
+        jobs.push(fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) })
+          .catch(e => ({ ok: false, status: e.name === 'TimeoutError' ? 'timeout' : 'unreachable' }))
+          .then(res => { const v = { ok: !!res.ok, status: res.status, at: Date.now(), url }; healthSeen.set(k, v); return [k, v]; }));
       }
     }
-    push({ health: out });
+    push({ health: Object.fromEntries(await Promise.all(jobs)) });
   }
+
   // the moments that matter, as notifications: a release becomes signed (ready), and fully deployed
   const relSeen = new Map(); // id → { ready, status }
   function notifyTransitions() {
@@ -822,18 +827,30 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }
   }
 
+  // ── Busy: every slow action marks itself (state.busy[key] = label) from its first moment to its last, so
+  // its button shows "Merging…" etc. through every redraw. Keys match releases-ui.js keyOf(). ──
+  async function withBusy(key, label, fn) {
+    push({ busy: { ...(state.busy || {}), [key]: label } });
+    try { return await fn(); } finally { const b = { ...(state.busy || {}) }; delete b[key]; push({ busy: b }); }
+  }
+  // the approvers team, re-read only when the cached copy is older than 5 min (re-reading first made every
+  // action wait a round trip before anything showed)
+  const ensureApprovers = async () => { if (!state.approvers || !state.approvers.loadedAt || Date.now() - state.approvers.loadedAt > 5 * 60 * 1000) await loadApprovers(); };
+
   // ── Managing a release in flight, one repo at a time (History card row actions) ──
   const LIVE_MS = 90 * 1000;
   let modalOpen = false, liveTimer = null;
   const prOf = (repo, n) => { for (const m of (state.history && state.history.items) || []) { const r = m.repos.find(x => x.repo === repo && x.pr.number === Number(n)); if (r) return { m, r }; } return null; };
   // Merge one release PR now (same gate as everything else: approvers' signatures, then GitHub's own rules)
-  async function mergeOne(repo, n) {
-    await loadApprovers();
+  async function mergeOne(repo, n) { return withBusy(`merge:${repo}#${n}`, 'Merging…', () => mergeOneNow(repo, n)); }
+  async function mergeOneNow(repo, n) {
+    await ensureApprovers();
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can merge a release PR' });
     if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
     const found = prOf(repo, n), label = found ? found.r.label : repo;
     await loadTeamRun().catch(() => {});
     if (state.teamRun) return send({ type: 'toast', text: `@${state.teamRun.by} is running Release all: let it finish (or ask them to stop it) before merging by hand` });
+    send({ type: 'toast', text: `Checking ${found ? found.r.label : repo} #${n} can merge…` });
     if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is running here: stop it first' });
     const gate = await mergeGate(`https://github.com/${repo}/pull/${n}`);
     if (!gate.ok) return send({ type: 'toast', text: `${label}: ${gate.reason}` });
@@ -851,7 +868,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }).catch(() => {});
   }
   // Re-run the failed jobs of the deploy that shipped a release PR's merge
-  async function rerunDeploy(repo, n) {
+  async function rerunDeploy(repo, n) { return withBusy(`rerun:${repo}#${n}`, 'Re-running…', () => rerunNow(repo, n)); }
+  async function rerunNow(repo, n) {
     const found = prOf(repo, n);
     const d = found && found.r.deploy, sha = found && found.r.mergeSha;
     if (!d || !d.workflow || !sha) return send({ type: 'toast', text: 'No CI deploy recorded for that merge' });
@@ -864,18 +882,22 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   }
   // The PR panel's Fix (an agent that loops on the failing checks), for a release PR
   async function fixReleasePr(repo, n) {
-    if (!fixPr) return;
+    if (!fixPr) return send({ type: 'toast', text: 'Fix agents are not available here' });
+    send({ type: 'toast', text: `Starting a fix agent for #${n}…` });
     const p = await ghJson(['api', `repos/${repo}/pulls/${n}`]);
     if (apiErr(p) || !p.data) return send({ type: 'toast', text: 'Fix: ' + (apiErr(p) || 'PR not found') });
     await fixPr({ repo, number: Number(n), url: p.data.html_url, headRef: p.data.head.ref, baseRef: p.data.base.ref, isCrossRepository: !!(p.data.head.repo && p.data.head.repo.full_name !== repo) });
   }
 
   async function releaseAll(id) {
-    if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is already running' });
-    if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
-    const lock = await history.running().catch(() => null), me = (await whoAmI()).github;
+    // a refusal before the run starts also clears the UI's optimistic "Starting…"
+    const no = (text) => { progress({ running: false, status: 'stopped', detail: text }); send({ type: 'toast', text }); };
+    if (state.releaseAll && state.releaseAll.running && state.releaseAll.status !== 'checking') return send({ type: 'toast', text: 'Release all is already running' });
+    if (!versionOk()) return no(outdatedMsg());
+    releaseAllStop = false; // reset first, so a Stop pressed during the checks below counts
+    const [lock, me] = await Promise.all([history.running().catch(() => null), whoAmI().then(w => w.github)]);
     if (fresh(lock) && String(lock.by).toLowerCase() !== String(me).toLowerCase()) {
-      return send({ type: 'toast', text: `Release all is running on @${lock.by}'s Overlord (wave ${lock.wave}/${lock.waves}) — one at a time` });
+      return no(`Release all is running on @${lock.by}'s Overlord (wave ${lock.wave}/${lock.waves}) — one at a time`);
     }
     // on screen from the first moment: the checks below read every PR and take a while
     progress({ running: true, id: id || null, status: 'checking', detail: 'reading the PRs, back-merges and signatures', wave: 0, waves: 0, merged: [], url: null, manualLeft: null });
@@ -923,7 +945,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const inOrder = (m) => (state.config.releaseOrder || []).some(w => w.some(x => x === m.label || x.toLowerCase() === m.repo.toLowerCase()));
     const handWaves = man.filter(inOrder), handLater = man.filter(m => !inOrder(m));
     const waves = releaseWaves(state.config, go.concat(handWaves));
-    releaseAllStop = false; manualDone = false;
+    if (releaseAllStop) return refuse('Stopped by you before anything merged');
+    manualDone = false;
     // each repo's own status, for History and the results popover: queued (its wave) → merging → merged →
     // deploying → deployed / deploy failed; held = not merged this time, and why
     const repoState = {};
@@ -1023,12 +1046,16 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // repos: only these (owner/name) — releasing one repo, e.g. a hotfix; none = every repo with changes
   // separate: start a release of its own even when one is pending (default: what's picked joins the pending one)
   async function release(envs, repos, of, separate = false) {
+    if (state.busy && state.busy.release) return; // a double click
+    return withBusy('release', 'Starting…', () => releaseNow(envs, repos, of, separate));
+  }
+  async function releaseNow(envs, repos, of, separate) {
     const cfg = state.config;
     const targets = cfg ? releaseTargets(cfg) : [];
     envs = (Array.isArray(envs) ? envs : []).filter(e => targets.includes(e));
     if (!cfg || !envs.length) { send({ type: 'toast', text: 'Nothing to release: pick an environment first' }); return; }
     if (state.releaseRun && state.releaseRun.running) { send({ type: 'toast', text: 'A release is already running' }); return; }
-    await loadApprovers();
+    await ensureApprovers();
     if (!state.approvers.isApprover) { send({ type: 'toast', text: 'Only release approvers can release — see 👥 Approvers' }); return; }
     if (!versionOk()) { send({ type: 'toast', text: outdatedMsg() }); return; }
     const plan = releasePlan(cfg, envs);
@@ -1160,7 +1187,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   async function fixAll(i) {
     const all = (state.releaseRun && state.releaseRun.rows) || [];
     const rows = (Number.isInteger(i) ? [all[i]] : all).filter(r => r && (r.status === 'blocked' || r.status === 'error'));
-    if (!rows.length) return;
+    if (!rows.length) return send({ type: 'toast', text: 'Nothing blocked to fix' });
+    send({ type: 'toast', text: `Starting a fix agent for ${rows.map(r => r.label).join(', ')}…` });
     const p = path.join(runsDir(), `fix-release-${stamp()}.md`);
     fs.writeFileSync(p, releaseFixBrief({ rows, configSource: state.source }));
     const prompt = `Unblock the release: ${rows.length} blocked. Read and follow ${p.replace(/\\/g, '/')} and end with its report table.`;
@@ -1187,18 +1215,19 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesFixPr': fixReleasePr(msg.repo, msg.number).catch(e => send({ type: 'toast', text: 'Fix failed: ' + e.message })); return true;
       case 'releasesConfirmHand': {
         const r = (state.config.repos || []).find(x => x.repo === msg.repo);
-        if (r && r.branches && r.branches[msg.env]) confirmDeployed([{ repo: r.repo, env: msg.env, branch: r.branches[msg.env], label: msg.label || r.repo }])
+        if (!r || !r.branches || !r.branches[msg.env]) { send({ type: 'toast', text: `${msg.label || msg.repo}: no ${msg.env} branch in the release config` }); return true; }
+        confirmDeployed([{ repo: r.repo, env: msg.env, branch: r.branches[msg.env], label: msg.label || r.repo }], 'hand:' + r.repo)
           .then(() => send({ type: 'toast', text: `${msg.label}: recorded as deployed` })).catch(e => send({ type: 'toast', text: 'Confirm failed: ' + e.message }));
         return true;
       }
       case 'releasesRefresh': refresh(); return true;
       case 'releasesRelease': release(msg.envs, msg.repos, msg.of, !!msg.separate).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
-      case 'releasesApprovers': loadApprovers().catch(() => {}); return true;
+      case 'releasesApprovers': loadApprovers().catch(e => push({ approvers: { ...(state.approvers || {}), error: e.message } })); return true;
       case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;
       case 'releasesSign': signRelease().catch(e => send({ type: 'toast', text: 'Sign failed: ' + (e.message || 'error') })); return true;
       case 'releasesMerge': releaseAll(null).catch(e => send({ type: 'toast', text: 'Release all failed: ' + (e.message || 'error') })); return true;
-      case 'releasesReleaseAllStop': releaseAllStop = true; if (manualWake) manualWake(); return true;
+      case 'releasesReleaseAllStop': releaseAllStop = true; if (manualWake) manualWake(); if (state.releaseAll && state.releaseAll.running) progress({ detail: 'stopping after the current step…', stopping: true }); return true;
       case 'releasesManualDone': manualDone = true; if (manualWake) manualWake(); return true;
       case 'releasesManualConfirm': { // the end popup's "Deployed"
         const left = (state.releaseAll && state.releaseAll.manualLeft) || [];
@@ -1211,8 +1240,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         return true;
       }
       case 'releasesHistory': history.load().then(() => reconcileHistory()).catch(e => push({ history: { error: e.message, items: [] } })); return true;
-      case 'releasesRollback': history.rollback(msg.id, msg.skip || []).catch(e => send({ type: 'toast', text: 'Rollback failed: ' + e.message })); return true;
-      case 'releasesImport': history.importPast(state.config ? releasePlan(state.config, ['prod']).prs : []).then(() => reconcileHistory()).catch(e => send({ type: 'toast', text: 'Import failed: ' + e.message })); return true;
+      case 'releasesRollback': withBusy('rollback:' + msg.id, 'Opening rollback PRs…', () => history.rollback(msg.id, msg.skip || [])).catch(e => send({ type: 'toast', text: 'Rollback failed: ' + e.message })); return true;
+      case 'releasesImport': withBusy('import', 'Importing past releases…', () => history.importPast(state.config ? releasePlan(state.config, ['prod']).prs : [])).then(() => reconcileHistory()).catch(e => send({ type: 'toast', text: 'Import failed: ' + e.message })); return true;
       case 'releasesMergeRelease': releaseAll(msg.id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })); return true;
       case 'releasesCancel': cancelRelease(msg.id).catch(e => send({ type: 'toast', text: 'Cancel failed: ' + e.message })); return true;
       case 'releasesClearRun': clearTimeout(recheckTimer); push({ releaseRun: null }); persist(); return true;
@@ -1293,8 +1322,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }
   }
   // Retarget a stray prod PR to the release source (feature work ships with the next release), or close it
-  async function strayFix(repo, n, how) {
-    await loadApprovers();
+  async function strayFix(repo, n, how) { return withBusy(`stray:${repo}#${n}`, how === 'close' ? 'Closing…' : 'Retargeting…', () => strayFixNow(repo, n, how)); }
+  async function strayFixNow(repo, n, how) {
+    await ensureApprovers();
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can do that' });
     let x = (state.strayPrs || []).find(y => y.repo === repo && y.number === Number(n));
     if (!x) {
@@ -1302,7 +1332,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const r = m && m.repos.find(rr => rr.repo === repo && rr.pr.number === Number(n));
       if (r) x = { repo, label: r.label, number: Number(n), base: r.target, source: r.source, release: m.id };
     }
-    if (!x) return;
+    if (!x) return send({ type: 'toast', text: `#${n}: not found (already handled?)` });
     const who = (await whoAmI()).github;
     const res = how === 'close'
       ? await ghJson(['api', '-X', 'PATCH', `repos/${repo}/pulls/${n}`, '--input', writeTmp({ state: 'closed' })])
@@ -1311,7 +1341,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     await ghJson(['api', '-X', 'POST', `repos/${repo}/issues/${n}/comments`, '--input', writeTmp({ body: how === 'close'
       ? `Closed by @${who} in Overlord: prod (\`${x.base}\`) only takes signed releases.`
       : `Retargeted to \`${x.source}\` by @${who} in Overlord: prod (\`${x.base}\`) only takes signed releases, and this ships with the next one.` })]);
-    if (x.release) await history.markCancelled([repo + '#' + n], who).catch(() => {});
+    if (x.release) await history.markCancelled([repo + '#' + n], who).catch(e => send({ type: 'toast', text: 'Release record: ' + e.message }));
     send({ type: 'toast', text: how === 'close' ? `${x.label} #${n} closed` : `${x.label} #${n} now targets ${x.source}${x.release ? ` · release ${x.release} cancelled` : ''}` });
     scanStray().catch(() => {});
   }
