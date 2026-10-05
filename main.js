@@ -90,6 +90,7 @@ const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./
 const { sessionSwitchKind } = require('./resume-core');
 const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
 const { applyBgRecord } = require('./bg-core');
+const { unsettledJobFor } = require('./daemon-jobs');
 const { applyAskRecord } = require('./ask-core');
 const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
@@ -598,7 +599,22 @@ function samplePerf() {
 
 function killSessionProcessesAsync(sessionId) {
   if (!sessionId) return Promise.resolve();
-  return killProcessesByCmdline([sessionId]);
+  return stopDaemonJobs([sessionId]).then(() => killProcessesByCmdline([sessionId]));
+}
+
+// Sessions Claude Code's daemon still runs as background jobs get `claude stop` before
+// Overlord runs them: killing the daemon's worker by pid just makes it respawn one, and
+// Overlord's --resume then runs alongside it (two copies, double the usage).
+const DAEMON_JOBS_DIR = path.join(os.homedir(), '.claude', 'jobs');
+function stopDaemonJobs(sessionIds) {
+  const shorts = sessionIds.map(s => unsettledJobFor(DAEMON_JOBS_DIR, s)).filter(Boolean);
+  return Promise.all(shorts.map(short => new Promise(res => {
+    flog(`[Overlord] stopping Claude Code background job ${short} so only Overlord runs that session`);
+    exec(`claude stop ${short}`, { timeout: 30000, windowsHide: true }, (err) => {
+      if (err) flog(`[Overlord] claude stop ${short} failed: ${err.message}`);
+      res();
+    });
+  })));
 }
 
 // ── Server URL detection ──────────────────────────────
@@ -1191,6 +1207,7 @@ function restoreAgents(state) {
     }
     const sweep = (async () => {
       await Promise.all(fresh.map(({ entry }) => killProcessTreeAsync(entry.pid)));
+      await stopDaemonJobs(fresh.map(({ entry }) => entry.sessionId));
       await killProcessesByCmdline(fresh.map(({ entry }) => entry.sessionId));
       // Sessions swept — spawnTerminal can skip its own kill pass for these agents.
       for (const { id } of fresh) { const ag = agents.get(id); if (ag) ag._sessionCleaned = true; }
@@ -1684,6 +1701,7 @@ function closeAgent(id) {
   pendingPeerMsgs.delete(id);
   peerApprovalQueue.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
+  stopDaemonJobs([a.sessionId]); // same as archive: don't leave it running in Claude Code's daemon
   if (preview) preview.onAgentClosed(id);
   if (browserRegistry) browserRegistry.destroy(id);
   if (mcpServer) mcpServer.revokeToken(id);
@@ -1709,6 +1727,9 @@ function archiveAgent(id) {
   bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
+  // A session handed to Claude Code's daemon outlives the pty: stop it too, or the
+  // closed agent keeps working (and billing) where nobody sees it.
+  stopDaemonJobs([a.sessionId]);
   // Archiving reclaims resources — a view is a whole renderer process. The token
   // and temp config stay: the agent can be unarchived and ensure() is lazy.
   if (preview) preview.onAgentClosed(id);
