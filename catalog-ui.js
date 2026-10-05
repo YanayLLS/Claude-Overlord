@@ -21,29 +21,11 @@
   btn.id = 'catalog-btn';
   btn.title = 'Skills, commands and agents (type // in the terminal)';
   btn.textContent = '+';
-  btn.hidden = true;
   btn.onmousedown = (e) => e.stopPropagation(); // else the outside-click close fires first and this reopens it
   btn.onclick = () => { isOpen ? close() : open(); };
   const container = document.getElementById('term-container');
   container?.appendChild(btn);
 
-  // Sit in the terminal's left gutter (createXterm pads it), level with Claude's "> " row.
-  // Screen-only: nothing is typed into the prompt, so Claude sees the same text.
-  function track() {
-    const x = xterms.get(selectedId), screen = x?.el.querySelector('.xterm-screen');
-    const t = x?.terminal, b = t?.buffer.active;
-    if (!screen || !container || b.viewportY !== b.baseY) { btn.hidden = true; return; } // scrolled up into history
-    const lines = [];
-    for (let i = 0; i < t.rows; i++) lines.push(b.getLine(b.viewportY + i)?.translateToString() || '');
-    const row = promptRow(lines);
-    if (row < 0) { btn.hidden = true; return; }
-    const r = screen.getBoundingClientRect(), c = container.getBoundingClientRect(), ch = r.height / t.rows;
-    btn.hidden = false;
-    btn.style.top = (r.top - c.top + row * ch + (ch - btn.offsetHeight) / 2) + 'px';
-    btn.style.left = (r.left - c.left - btn.offsetWidth - 6) + 'px';
-  }
-  let trackQueued = false;
-  const queueTrack = () => { if (!trackQueued) { trackQueued = true; requestAnimationFrame(() => { trackQueued = false; track(); }); } };
 
   const pop = document.createElement('div');
   pop.id = 'catalog-pop';
@@ -71,9 +53,8 @@
   }
   function place() {
     const r = btn.getBoundingClientRect();
-    if (btn.hidden) { const c = container.getBoundingClientRect(); pop.style.left = (c.left + 12) + 'px'; pop.style.bottom = (innerHeight - c.bottom + 12) + 'px'; return; }
     pop.style.left = Math.max(8, r.left) + 'px';
-    pop.style.bottom = Math.max(8, innerHeight - r.top + 6) + 'px'; // opens upward from the prompt row
+    pop.style.bottom = Math.max(8, innerHeight - r.top + 6) + 'px'; // opens upward from the corner button
     pop.style.maxHeight = Math.min(560, r.top - 14) + 'px';
   }
 
@@ -149,7 +130,7 @@
   // Hover only moves the highlight; a full render here would swap the row out from under the click.
   list.addEventListener('mousemove', (e) => { const r = e.target.closest('.cg-row'); if (!r || +r.dataset.i === sel) return; list.querySelector('.sel')?.classList.remove('sel'); r.classList.add('sel'); sel = +r.dataset.i; });
   list.addEventListener('click', (e) => { const r = e.target.closest('.cg-row'); if (r) choose(+r.dataset.i, e.shiftKey); });
-  addEventListener('resize', () => { queueTrack(); if (isOpen) place(); });
+  addEventListener('resize', () => { if (isOpen) place(); });
 
-  window.catalogUi = { open, close, onMsg, track: queueTrack, isOpen: () => isOpen };
+  window.catalogUi = { open, close, onMsg, isOpen: () => isOpen };
 })();

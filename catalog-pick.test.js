@@ -1,6 +1,6 @@
 // Run: node catalog-pick.test.js
 const assert = require('assert');
-const { fuzzyScore, pickItems, makeSlashGate, promptRow } = require('./catalog-pick');
+const { fuzzyScore, pickItems, makeSlashGate } = require('./catalog-pick');
 
 // fuzzy: subsequence required, case-insensitive, match positions returned
 assert.strictEqual(fuzzyScore('xyz', 'fix-bug'), null);
@@ -42,12 +42,6 @@ sent = [];
 gate('/'); gate('a'); assert.deepStrictEqual(sent, ['/', 'a'], 'next key flushes held slash first');
 sent = [];
 gate('https://x'); assert.deepStrictEqual(sent, ['https://x'], 'pasted text untouched');
-// promptRow: the "> " input row under Claude's ─── divider, searched bottom-up
-const screen = ['● Done.', '> an old prompt in the transcript', '', '────────────', '> fix it', '────────────', '  ⏵⏵ bypass permissions on'];
-assert.strictEqual(promptRow(screen), 4);
-assert.strictEqual(promptRow(['────', '❯ ']), 1, 'empty prompt, ❯ marker');
-assert.strictEqual(promptRow(['> quoted text', 'more output']), -1, 'no divider above → not the input');
-assert.strictEqual(promptRow(['$ ls', 'a b']), -1);
 // default timer: setTimeout must not be called as a method — browsers throw "Illegal invocation"
 {
   const real = global.setTimeout;

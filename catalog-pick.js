@@ -44,12 +44,4 @@ function makeSlashGate({ send, open, ms = 250, timer = { set: (fn, t) => setTime
   };
 }
 
-// Row of Claude's input line ("> " / "❯ ") among the rendered viewport rows, or -1.
-// It must sit right under a ─── divider so a quoted "> " in the transcript doesn't count.
-function promptRow(lines) {
-  for (let i = lines.length - 1; i > 0; i--)
-    if (/^\s*(?:>|❯)(\s|$)/.test(lines[i]) && /[─━]{3}/.test(lines[i - 1])) return i;
-  return -1;
-}
-
-if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate, promptRow };
+if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate };
