@@ -2250,7 +2250,7 @@ function fetchAllPRs(repos) {
       return `r${i}: repository(owner:${JSON.stringify(owner)}, name:${JSON.stringify(name)}) { `
         // ponytail: `first:` limits set the GraphQL point cost (12/poll at these; 40 at 100/20/20/50). Raise if a repo tops 30 open PRs.
         + `pullRequests(states: OPEN, first: 30) { nodes { number title url isDraft createdAt `
-        + `author { __typename login } reviewDecision mergeable mergeStateStatus headRefName baseRefName isCrossRepository `
+        + `author { __typename login } reviewDecision mergeable mergeStateStatus headRefName headRefOid baseRefName isCrossRepository `
         + `reviewRequests(first: 10) { nodes { requestedReviewer { __typename ... on User { login } } } } `
         + `latestReviews(first: 10) { nodes { author { login } state } } `
         + `commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state `
@@ -2299,7 +2299,7 @@ function fetchAllPRs(repos) {
             running: runningWorkflows(rollup && rollup.contexts && rollup.contexts.nodes),
             mergeable: pr.mergeable || 'UNKNOWN', mergeState: pr.mergeStateStatus || '',
             requested, createdAt: pr.createdAt || '', approvedBy, changesBy,
-            headRef: pr.headRefName || '', baseRef: pr.baseRefName || '', isCrossRepository: !!pr.isCrossRepository,
+            headRef: pr.headRefName || '', headSha: pr.headRefOid || '', baseRef: pr.baseRefName || '', isCrossRepository: !!pr.isCrossRepository,
             commitCount: (pr.commits && pr.commits.totalCount) || 0,
           });
         }
@@ -2448,32 +2448,51 @@ function notifyPrDecision(pr, kind) {
 }
 
 // Between full polls, a free ETag check every PR_WATCH_MS (pr-watch.js) notices any PR change — an approval, a merge,
-// a new PR — and polls at once, so the panel updates within seconds instead of at the next interval.
-const PR_WATCH_MS = 10e3;
-let ghToken = null, prWatchTimer = null;
+// a new PR — and polls at once, so the panel updates within seconds instead of at the next interval. A second check per
+// repo ("owner/name#runs") watches its pull_request Actions runs, since checks finishing don't touch the PR itself; and
+// every PR_CHECK_WATCH_MS each open PR's head commit ("owner/name@sha#checks" / "#status") catches CI from outside Actions.
+// ponytail: unchanged answers are free, a change costs one request + one full poll (coalesced while one runs). Sized for
+// ~400 PR updates a day across the team; if GitHub's secondary limit ever bites, slow PR_CHECK_WATCH_MS first.
+const PR_WATCH_MS = 10e3, PR_CHECK_WATCH_MS = 30e3;
+let ghToken = null, prWatchTimer = null, prCheckWatchTimer = null, prWatchPolling = false;
 const ghTokenGet = () => ghToken ? Promise.resolve(ghToken) : new Promise((res, rej) =>
   exec('gh auth token', { windowsHide: true, timeout: 10000 }, (err, out) => { const t = (out || '').trim(); if (err || !t) return rej(err || new Error('no token')); res(ghToken = t); }));
-const prWatch = require('./pr-watch').createPrWatch({
-  get: async (repo, etag) => {
-    const r = await fetch(`https://api.github.com/repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=1`, {
-      headers: { Authorization: `Bearer ${await ghTokenGet()}`, Accept: 'application/vnd.github+json', ...(etag ? { 'If-None-Match': etag } : {}) },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (r.status === 401) ghToken = null; // rotated by gh auth: fetch it again next tick
-    return { status: r.status, etag: r.headers.get('etag') };
-  },
-  onChange: () => pollPRs(),
-});
+const prWatchGet = async (key, etag) => {
+  const [at, what] = key.split('#'), [repo, sha] = at.split('@');
+  const url = what === 'runs' ? 'actions/runs?event=pull_request&per_page=20'
+    : what === 'checks' ? `commits/${sha}/check-runs?per_page=50` : what === 'status' ? `commits/${sha}/status`
+    : 'pulls?state=all&sort=updated&direction=desc&per_page=1';
+  const r = await fetch(`https://api.github.com/repos/${repo}/${url}`, {
+    headers: { Authorization: `Bearer ${await ghTokenGet()}`, Accept: 'application/vnd.github+json', ...(etag ? { 'If-None-Match': etag } : {}) },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (r.status === 401) ghToken = null; // rotated by gh auth: fetch it again next tick
+  return { status: r.status, etag: r.headers.get('etag') };
+};
+// A change seen mid-poll may have landed after that poll read GitHub: run once more when it ends.
+let prWatchAgain = false;
+const prWatchPoll = async () => {
+  if (prWatchPolling) { prWatchAgain = true; return; }
+  prWatchPolling = true;
+  try { do { prWatchAgain = false; await pollPRs(); } while (prWatchAgain); } finally { prWatchPolling = false; }
+};
+const prWatch = require('./pr-watch').createPrWatch({ get: prWatchGet, onChange: prWatchPoll });
+const prCheckWatch = require('./pr-watch').createPrWatch({ get: prWatchGet, onChange: prWatchPoll });
 
 function armPrTimer() {
   if (prTimer) { clearInterval(prTimer); prTimer = null; }
   if (prWatchTimer) { clearInterval(prWatchTimer); prWatchTimer = null; }
+  if (prCheckWatchTimer) { clearInterval(prCheckWatchTimer); prCheckWatchTimer = null; }
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled) return;
   const sec = Math.max(30, Number(cfg.intervalSec) || 60);
   pollPRs();
   prTimer = setInterval(pollPRs, sec * 1000);
-  prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r))); }, PR_WATCH_MS);
+  prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
+  prCheckWatchTimer = setInterval(() => {
+    const heads = ((settings.prCache && settings.prCache.prs) || []).filter(p => p.headSha && PR_REPO_RE.test(p.repo || ''));
+    prCheckWatch.tick(heads.flatMap(p => [`${p.repo}@${p.headSha}#checks`, `${p.repo}@${p.headSha}#status`]));
+  }, PR_CHECK_WATCH_MS);
 }
 
 // ── GitHub Actions tracking ───────────────────────────
