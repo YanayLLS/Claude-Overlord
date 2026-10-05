@@ -831,7 +831,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         }
         // wait for this wave's CI deploys (repos deployed by hand can't be waited on)
         const waitOn = merged.filter(x => x.deploy && x.deploy !== 'manual' && x.sha);
-        if (!waitOn.length || w === waves.length - 1) continue; // the last wave needn't hold anything back
+        if (!waitOn.length) continue; // (the last wave is waited on too: 'Released' means deployed)
         progress({ status: 'deploying', detail: waitOn.map(x => x.label).join(', ') });
         mark(waitOn.map(x => x.label), { s: 'deploying' });
         const bad = await waitDeploys(waitOn);
@@ -840,8 +840,8 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       }
       // what's still on people: hand-deployed repos behind, and merged PRs whose target has no CI deploy
       const left = manualLeft(state.config, shipped, handLater, state.results && state.results.lives);
-      progress({ running: false, status: 'done', detail: 'Every wave merged' + skippedNote(), manualLeft: left, doneAt: Date.now() });
-      send({ type: 'toast', text: 'Release all: every wave merged ✓' + skippedNote() });
+      progress({ running: false, status: skipped.length ? 'partial' : 'done', detail: skipped.length ? `not merged: ${skipped.map(x => `${x.label} (${x.why})`).join(', ')}` : 'every wave merged and deployed', manualLeft: left, doneAt: Date.now() });
+      send({ type: 'toast', text: skipped.length ? 'Release all: partly released' + skippedNote() : 'Release all: every wave merged and deployed ✓' });
     } finally {
       if (state.releaseAll && state.releaseAll.running) progress({ running: false });
       clearInterval(beatTimer); clearTimeout(shareTimer);

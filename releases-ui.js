@@ -504,10 +504,11 @@
     const pct = its.length ? Math.round(doneN / its.length * 100) : 0;
     const what = p.running && p.status === 'checking' ? `Starting: ${esc(p.detail || '')}…`
       : p.running ? `Wave ${p.wave} of ${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : p.status === 'manual' ? 'deploy by hand' : 'merging'}${p.detail ? `: <b>${esc(p.detail)}</b>` : ''}`
-      : p.status === 'done' ? `Released ✓ <span class="rl-relall-sub">${esc((p.detail || '').replace(/^Every wave merged/, 'every wave merged'))}</span>`
+      : p.status === 'done' ? `Released ✓ <span class="rl-relall-sub">${esc(p.detail || '')}</span>`
+      : p.status === 'partial' ? `Partly released <span class="rl-relall-sub">${esc(p.detail || '')}</span>`
       : p.status === 'interrupted' ? `Interrupted: Overlord closed at wave ${esc(p.wave)} of ${esc(p.waves)}`
       : `Stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
-    const cls = p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad';
+    const cls = p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad'; // partial = amber, like stopped
     return `<div class="rl-relall ${cls}"><div class="rl-relall-top">`
       + `<span class="rl-relall-icon">${p.running ? (p.status === 'checking' ? '<span class="rl-spin-dot"></span>' : '🚀') : p.status === 'done' ? '✓' : '⏸'}</span>`
       + `<span class="rl-relall-what">${what}</span>`
@@ -989,7 +990,7 @@
         + '<div class="rl-sign-acts"><button data-manual-stop>Stop release</button><button class="go" data-manual-go>Deployed, continue</button></div></div>');
       return;
     }
-    const left = p && p.status === 'done' && p.manualLeft;
+    const left = p && (p.status === 'done' || p.status === 'partial') && p.manualLeft;
     if (!left || !left.length || String(p.doneAt) === manualSeen) { manualOverlay.classList.remove('open'); return; }
     setOverlay(manualOverlay, '<div class="rl-sign-box" role="dialog" aria-label="Deploy by hand">'
       + '<div class="rl-sign-icon">✋</div><h2>Released: now deploy these by hand</h2>'
