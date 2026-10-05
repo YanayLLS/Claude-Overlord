@@ -1233,7 +1233,7 @@ button:focus-visible { outline-offset:0; }
     <div id="list-foot">
       <div id="pr-nag" style="display:none" onclick="prNagClick(event)"><button onclick="snoozePrNag(event)" title="Hide for 30 min" aria-label="Hide for 30 minutes">✕</button><b>Please approve your teammates' PR!</b><span></span></div>
       <div class="foot-chips">
-        <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
+        <div id="pr-badge" class="idle" style="display:flex" onclick="togglePrDropdown(event)" title="Open PRs">PRs</div>
         <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
       </div>
       <div id="summary-bar"></div>
@@ -5461,9 +5461,9 @@ function renderPrBadge() {
     b.title = 'All watched PRs are muted — click to manage';
     renderPrNag(0);
   } else {
-    // Nothing open, or everything archived: nothing needs you, so no chip — and no class, the foot's red/green keys off it.
-    b.style.display = 'none'; b.className = '';
-    document.getElementById('pr-dropdown').style.display = 'none';
+    // Nothing open, or everything archived: a quiet chip, still there to open the list — and no class, the foot's red/green keys off it.
+    b.style.display = 'flex'; b.className = 'idle';
+    b.textContent = 'PRs'; b.title = 'No open PRs need you — click to open the list';
     renderPrNag(0);
   }
 }
