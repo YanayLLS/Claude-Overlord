@@ -1,6 +1,6 @@
 // Self-check for setup-core. Run: node setup-core.test.js
 const assert = require('assert');
-const { SETUP_TOOLS, findTool, missingTools } = require('./setup-core');
+const { SETUP_TOOLS, findTool, missingTools, progressLine } = require('./setup-core');
 
 const env = { PATH: 'C:\\Windows;C:\\Tools', USERPROFILE: 'C:\\Users\\u', APPDATA: 'C:\\Users\\u\\AppData\\Roaming' };
 const has = (...files) => f => files.includes(f);
@@ -29,5 +29,18 @@ assert.deepStrictEqual(missingTools(env, has('C:\\Tools\\git.exe', 'C:\\Tools\\c
 
 // A throwing exists() (bad path chars) counts as absent, never crashes boot.
 assert.deepStrictEqual(missingTools(env, () => { throw new Error('EINVAL'); }), ['git', 'claude']);
+
+// progressLine: the installer's latest step, readable on one line of the card.
+// Real piped winget output: CRLF lines, a URL per download.
+const wg = 'Found Git [Git.Git] Version 2.55.0.5\r\nThis application is licensed to you by its owner.\r\n'
+  + 'Downloading https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-2.55.0.5-64-bit.exe\r\n';
+assert.strictEqual(progressLine(wg), 'Downloading Git-2.55.0.5-64-bit.exe'); // URL → file name
+assert.strictEqual(progressLine(wg + 'Starting package install...\r\n'), 'Starting package install...');
+// Spinner frames redrawn with \r, ANSI colour, blank tail lines → the last real text.
+assert.strictEqual(progressLine('Setting up Claude Code...\r\n  \r-\r\\\r|\r/\r\n\n'), 'Setting up Claude Code...');
+assert.strictEqual(progressLine('\x1b[32mSuccessfully installed\x1b[0m\n'), 'Successfully installed');
+// Long lines are capped so the card never grows.
+assert.ok(progressLine('x'.repeat(500)).length <= 90);
+assert.strictEqual(progressLine(''), '');
 
 console.log('setup-core ok');

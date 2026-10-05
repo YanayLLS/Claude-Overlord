@@ -43,4 +43,13 @@ function missingTools(env, exists) {
   return SETUP_TOOLS.filter(t => !findTool(t, env, exists)).map(t => t.id);
 }
 
-module.exports = { SETUP_TOOLS, findTool, missingTools };
+// The installer's latest step for the card. Piped, winget prints plain step lines
+// (no progress bar) and install.ps1 silences its own, so the step text is all there is.
+function progressLine(out) {
+  const lines = String(out).replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').split(/[\r\n]+/)
+    .map(l => l.trim()).filter(l => l.length > 1); // drops blanks and spinner frames
+  const last = lines.length ? lines[lines.length - 1] : '';
+  return last.replace(/https?:\/\/\S*\/([^\s/]+)/g, '$1').slice(0, 90);
+}
+
+module.exports = { SETUP_TOOLS, findTool, missingTools, progressLine };

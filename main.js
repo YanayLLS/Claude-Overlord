@@ -2136,7 +2136,7 @@ repairGhPath();
 // ── First-run setup: git + Claude Code ─────────────────
 // A fresh PC may have neither, and every agent is a `claude` session in a git repo.
 // Same stale-PATH problem as gh, so a tool on disk gets prepended, not reinstalled.
-const { SETUP_TOOLS, findTool, missingTools } = require('./setup-core');
+const { SETUP_TOOLS, findTool, missingTools, progressLine } = require('./setup-core');
 function setupState() {
   // ponytail: Windows only — mac/linux install from the docs; add a probe if asked
   if (process.platform !== 'win32') return { type: 'setupState', missing: [], loggedIn: true };
@@ -2145,27 +2145,49 @@ function setupState() {
     if (dir && dir !== 'path') process.env.PATH = dir + ';' + process.env.PATH;
   }
   return { type: 'setupState', missing: missingTools(process.env, fs.existsSync),
-    loggedIn: !!(getApiKey() || process.env.ANTHROPIC_API_KEY), installing: _setupInstalling };
+    loggedIn: !!(getApiKey() || process.env.ANTHROPIC_API_KEY), installing: _setupInstalling, line: _setupLine };
 }
 let _setupInstalling = null; // tool id while its installer runs
+let _setupLine = ''; // its latest output step, so a renderer reload picks it up
 function installSetupTool(id) {
   const tool = SETUP_TOOLS.find(t => t.id === id);
   if (!tool || _setupInstalling) return;
   _setupInstalling = id;
-  send({ type: 'setupProgress', id });
+  _setupLine = 'Starting installer…';
+  send({ type: 'setupProgress', id, line: _setupLine });
   // Both installers run silent; Git's UAC prompt still shows with the console hidden.
-  exec(tool.cmd, { timeout: 600000, windowsHide: true }, (err) => {
-    _setupInstalling = null;
+  // Their output is streamed to the card as the current step, at most 4×/s.
+  let out = '', sentAt = 0, done = false;
+  const proc = spawn(tool.cmd, { shell: true, windowsHide: true });
+  const onData = (d) => {
+    out = (out + d).slice(-4000);
+    const line = progressLine(out);
+    if (!line || line === _setupLine || Date.now() - sentAt < 250) return;
+    sentAt = Date.now(); _setupLine = line;
+    send({ type: 'setupProgress', id, line });
+  };
+  proc.stdout.on('data', onData);
+  proc.stderr.on('data', onData);
+  const killer = setTimeout(() => proc.kill(), 600000);
+  const finish = (why) => {
+    if (done) return; done = true;
+    clearTimeout(killer);
+    _setupInstalling = null; _setupLine = '';
     const st = setupState();
-    if (st.missing.includes(id)) {
-      flog(`setup: ${id} install failed: ${err ? err.message : 'not found after install'}`);
-      send({ type: 'toast', text: `${tool.label} install failed — opening download page` });
+    const ok = !st.missing.includes(id);
+    let error = null;
+    if (!ok) {
+      error = progressLine(out) || why || 'not found after install';
+      flog(`setup: ${id} install failed (${why || 'exit 0'}): ${out.slice(-1000)}`);
       shell.openExternal(tool.url).catch(() => {});
     } else {
       _authStatusChecked = false; // claude just appeared — let the account probe retry
     }
+    send({ type: 'setupDone', id, ok, error });
     send(st);
-  });
+  };
+  proc.on('error', (e) => finish(e.message));
+  proc.on('close', (code) => finish(code ? `installer exited with code ${code}` : null));
 }
 
 // cmd.exe reports a missing binary as "is not recognized"; a direct spawn reports

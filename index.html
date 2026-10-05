@@ -789,11 +789,32 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 /* ── First-run setup card ── */
 #setup-overlay { position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:1000;
   display:flex; align-items:center; justify-content:center; }
+.settings-modal.setup-card { width:460px; height:auto; display:block; overflow:auto; } /* not the Settings dialog's fixed 760×600 */
 .setup-card h3 { margin:0 0 6px; font-size:15px; }
 .setup-card p { margin:0 0 12px; font-size:12px; color:var(--dim); }
 .setup-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-top:1px solid var(--border); font-size:13px; }
-.setup-ok { color:var(--green); font-size:12px; }
-.setup-foot { display:flex; justify-content:flex-end; gap:6px; margin-top:12px; }
+.setup-row { gap:12px; }
+.setup-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.setup-sub { font-size:11px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:280px; }
+.setup-sub.err { color:var(--red); white-space:normal; }
+.setup-ok, .setup-done { color:var(--green); }
+.setup-ok { font-size:12px; white-space:nowrap; }
+.setup-elapsed { font-variant-numeric:tabular-nums; }
+.setup-bar { height:2px; margin:-2px 0 6px; background:var(--border); border-radius:2px; overflow:hidden; }
+.setup-bar i { display:block; width:30%; height:100%; background:var(--accent); animation:setup-slide 1.4s ease-in-out infinite; }
+@keyframes setup-slide { from { transform:translateX(-100%); } to { transform:translateX(340%); } }
+.setup-spin { display:inline-block; width:9px; height:9px; margin-right:6px; vertical-align:-1px; border:2px solid currentColor;
+  border-right-color:transparent; border-radius:50%; animation:setup-rot .7s linear infinite; }
+@keyframes setup-rot { to { transform:rotate(360deg); } }
+.setup-card button:disabled { opacity:1; background:transparent; color:var(--dim); border-color:var(--border); }
+.setup-card button.busy:disabled { color:var(--accent); border-color:var(--accent); }
+.setup-card button { white-space:nowrap; transition:filter .12s, transform .06s; }
+.setup-card button:not(:disabled):hover { filter:brightness(1.15); }
+.setup-card button:not(:disabled):active { transform:translateY(1px); }
+.setup-card button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.setup-foot { display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-top:12px; }
+.setup-note { flex:1; font-size:11px; color:var(--dim); }
+@media (prefers-reduced-motion: reduce) { .setup-bar i, .setup-spin { animation-duration:3s; } }
 
 /* ── Settings overlay ── */
 #settings-overlay {
@@ -3959,8 +3980,9 @@ function handleAgentMsg(msg) {
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
     case 'toast': showToast(msg.text); break;
-    case 'setupState': setupInfo = msg; setupBusy = msg.installing; renderSetup(); break;
-    case 'setupProgress': setupBusy = msg.id; renderSetup(); break;
+    case 'setupState': onSetupState(msg); break;
+    case 'setupProgress': su.busy = msg.id; su.line = msg.line; su.since = su.since || Date.now(); renderSetup(); break;
+    case 'setupDone': su.result[msg.id] = msg.ok ? 'ok' : (msg.error || 'unknown error'); break; // setupState follows and renders
     case 'perfUsage': renderPerf(msg); break;
     case 'sysIdle': prSysIdleMs = msg.ms; break;
     case 'ramUsage': showTopRam(msg); break;
@@ -5680,27 +5702,107 @@ function closeSnooze() { const p = document.getElementById('pr-snooze-pop'); if 
 
 // First-run setup card: up while git or claude is missing, or claude was never
 // logged in. Git gates Claude (it needs Git Bash); Claude gates the login.
-let setupInfo = null, setupBusy = null, setupSkipped = false;
+// Every control answers: installs stream their current step with a timer and bar,
+// Recheck says what it found, Log in waits visibly and times out, Skip toasts.
+const su = { info: null, busy: null, line: '', since: 0, result: {}, login: 0, loginFailed: false,
+  checkAt: 0, note: '', skipped: false, allSet: false };
+const SU_LABEL = { git: 'Git', claude: 'Claude Code' };
+const LOGIN_WAIT_MS = 120000; // main stops watching for the login after 2 minutes too
+function suElapsed(since) {
+  const s = Math.max(0, Math.round((Date.now() - since) / 1000));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
 function renderSetup() {
-  const s = setupInfo;
+  const s = su.info;
   let el = document.getElementById('setup-overlay');
-  if (!s || setupSkipped || (!s.missing.length && s.loggedIn)) { if (el) el.remove(); return; }
+  const complete = s && !s.missing.length && s.loggedIn;
+  if (!s || su.skipped || (complete && !su.allSet)) { if (el) el.remove(); return; }
   if (!el) { el = document.createElement('div'); el.id = 'setup-overlay'; document.body.appendChild(el); }
   const needs = id => s.missing.includes(id);
-  const install = (id, blockedBy) => setupBusy === id ? '<button disabled>Installing…</button>'
-    : '<button ' + (setupBusy || blockedBy ? 'disabled' : '') + ' onclick="setupInstall(&quot;' + id + '&quot;)">Install</button>';
-  const row = (label, ok, btn) => '<div class="setup-row"><span>' + label + '</span>'
-    + (ok ? '<span class="setup-ok">✓ Ready</span>' : btn) + '</div>';
-  el.innerHTML = '<div class="settings-modal setup-card"><h3>Set up Overlord</h3>'
-    + '<p>Overlord runs Claude Code agents in git repos. Install what is missing — a Windows permission prompt may appear for Git.</p>'
-    + row('Git', !needs('git'), install('git'))
-    + row('Claude Code', !needs('claude'), install('claude', needs('git')))
-    + row('Log in to Claude', s.loggedIn, '<button ' + (needs('claude') ? 'disabled' : '') + ' onclick="setupLogin(this)">Log in</button>')
-    + '<div class="setup-foot"><button class="alt" onclick="api.send({ type: &quot;setupRecheck&quot; })">Recheck</button>'
-    + '<button class="alt" onclick="setupSkipped = true; renderSetup()">Skip for now</button></div></div>';
+  const spin = '<span class="setup-spin"></span>';
+  const timer = since => '<span class="setup-elapsed" data-since="' + since + '">' + suElapsed(since) + '</span>';
+  const btn = (label, onclick, disabled) => '<button ' + (disabled ? 'disabled' : '') + ' onclick="' + onclick + '">' + label + '</button>';
+  const row = (label, sub, subCls, right, bar) => '<div class="setup-row"><div class="setup-main"><span>' + label + '</span>'
+    + '<span class="setup-sub ' + subCls + '">' + sub + '</span></div>' + right + '</div>' + (bar ? '<div class="setup-bar"><i></i></div>' : '');
+  const ready = '<span class="setup-ok">✓ Ready</span>';
+  const toolRow = (id, blockedBy) => {
+    const label = SU_LABEL[id], res = su.result[id];
+    if (!needs(id)) return row(label, res === 'ok' ? 'Installed just now' : 'Found on this PC', '', ready);
+    if (su.busy === id) return row(label, escapeHtml(su.line || 'Starting installer…') + ' · ' + timer(su.since || Date.now()),
+      '', '<button class="busy" disabled>' + spin + 'Installing…</button>', true);
+    if (blockedBy) return row(label, 'Needs ' + SU_LABEL[blockedBy] + ' first', '', btn('Install', '', true));
+    if (res && res !== 'ok') return row(label, 'Failed: ' + escapeHtml(res) + ' — download page opened', 'err',
+      btn('Retry', 'setupInstall(&quot;' + id + '&quot;)', su.busy));
+    return row(label, su.busy ? 'Waits for ' + SU_LABEL[su.busy] + ' to finish' : 'Not installed', '',
+      btn('Install', 'setupInstall(&quot;' + id + '&quot;)', su.busy));
+  };
+  const loginRow = () => {
+    if (s.loggedIn) return row('Log in to Claude', su.loginDone ? 'Logged in just now' : 'Logged in', '', ready);
+    if (needs('claude')) return row('Log in to Claude', 'Needs Claude Code first', '', btn('Log in', '', true));
+    if (su.login) return row('Log in to Claude', 'Finish signing in in your browser · ' + timer(su.login), '',
+      '<button class="busy" disabled>' + spin + 'Waiting…</button>', true);
+    if (su.loginFailed) return row('Log in to Claude', 'No login seen after 2 minutes', 'err', btn('Try again', 'setupLogin()'));
+    return row('Log in to Claude', 'Opens your browser to sign in', '', btn('Log in', 'setupLogin()'));
+  };
+  el.innerHTML = '<div class="settings-modal setup-card" role="dialog" aria-labelledby="setup-title">'
+    + (complete
+      ? '<h3 id="setup-title" class="setup-done">✓ All set — Overlord is ready</h3><p>Closing in a moment…</p>'
+      : '<h3 id="setup-title">Set up Overlord</h3><p>Overlord runs Claude Code agents in git repos. Install what is missing — Windows may ask for permission during the Git install.</p>')
+    + toolRow('git') + toolRow('claude', needs('git') && 'git') + loginRow()
+    + '<div class="setup-foot"><span class="setup-note" aria-live="polite">' + escapeHtml(su.note) + '</span>'
+    + (complete ? btn('Start', 'setupClose()')
+      : '<button class="alt' + (su.checkAt ? ' busy' : '') + '" ' + (su.checkAt ? 'disabled' : '') + ' onclick="setupRecheck()">'
+        + (su.checkAt ? spin + 'Checking…' : 'Recheck') + '</button>'
+        + '<button class="alt" onclick="setupSkip()">Skip for now</button>')
+    + '</div></div>';
 }
-function setupInstall(id) { setupBusy = id; renderSetup(); api.send({ type: 'installSetupTool', id }); }
-function setupLogin(btn) { btn.disabled = true; btn.textContent = 'Finish in the browser…'; api.send({ type: 'addAccount' }); }
+// What changed between two probes, in words — the answer to Recheck and to a refocus.
+function setupDiff(prev, next) {
+  const found = prev ? prev.missing.filter(id => !next.missing.includes(id)).map(id => SU_LABEL[id] + ' found ✓') : [];
+  if (prev && !prev.loggedIn && next.loggedIn) found.push('Logged in ✓');
+  return found.join(' · ');
+}
+function onSetupState(msg) {
+  const prev = su.info;
+  su.info = msg;
+  su.busy = msg.installing || null;
+  if (su.busy) { su.line = msg.line || su.line; su.since = su.since || Date.now(); } else su.since = 0;
+  if (msg.loggedIn && (su.login || su.loginFailed)) { su.loginDone = true; su.login = 0; su.loginFailed = false; }
+  const diff = setupDiff(prev, msg);
+  if (!su.checkAt) { if (diff) su.note = diff; return finishSetupState(msg); }
+  // Hold "Checking…" long enough to be seen: the probe itself takes a few ms.
+  setTimeout(() => {
+    su.checkAt = 0;
+    const left = msg.missing.map(id => SU_LABEL[id]).concat(msg.loggedIn ? [] : ['login']);
+    su.note = diff || (left.length ? 'Checked — still needed: ' + left.join(', ') : 'Checked — all set');
+    finishSetupState(msg);
+  }, Math.max(0, 500 - (Date.now() - su.checkAt)));
+}
+function finishSetupState(msg) {
+  const shown = !!document.getElementById('setup-overlay');
+  if (shown && !msg.missing.length && msg.loggedIn && !su.allSet) {
+    su.allSet = true; su.note = '';
+    setTimeout(setupClose, 2500);
+  }
+  renderSetup();
+}
+function setupInstall(id) {
+  su.busy = id; su.line = 'Starting installer…'; su.since = Date.now(); delete su.result[id]; su.note = '';
+  renderSetup(); api.send({ type: 'installSetupTool', id });
+}
+function setupLogin() {
+  su.login = Date.now(); su.loginFailed = false; su.note = '';
+  renderSetup(); api.send({ type: 'addAccount' });
+}
+function setupRecheck() { su.checkAt = Date.now(); su.note = ''; renderSetup(); api.send({ type: 'setupRecheck' }); }
+function setupSkip() { su.skipped = true; renderSetup(); showToast('Setup skipped — it comes back next launch'); }
+function setupClose() { su.allSet = false; su.skipped = true; renderSetup(); }
+// One ticker for the card: running timers, and the login wait running out.
+setInterval(() => {
+  if (!document.getElementById('setup-overlay')) return;
+  for (const t of document.querySelectorAll('#setup-overlay .setup-elapsed')) t.textContent = suElapsed(+t.dataset.since);
+  if (su.login && Date.now() - su.login > LOGIN_WAIT_MS) { su.login = 0; su.loginFailed = true; renderSetup(); }
+}, 1000);
 // Coming back from the browser login or a manual install: re-probe while the card is up.
 window.addEventListener('focus', () => { if (document.getElementById('setup-overlay')) api.send({ type: 'setupRecheck' }); });
 
