@@ -443,3 +443,6 @@
 .rl-rr-cancel { font:inherit; font-size:12px; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
 .rl-rr-cancel:hover, .rl-hist-btn[data-act="relCancel"]:hover { color:var(--red); border-color:rgba(248,113,113,.5); }
 .armed-bad { background:rgba(248,113,113,.16) !important; border-color:rgba(248,113,113,.7) !important; color:var(--red) !important; }
+/* Release all starting: a small spinner before the checks finish */
+.rl-spin-dot { display:inline-block; width:10px; height:10px; margin-right:6px; vertical-align:-1px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:rl-spin .8s linear infinite; }
+@keyframes rl-spin { to { transform:rotate(360deg); } }

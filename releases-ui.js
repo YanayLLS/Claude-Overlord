@@ -92,7 +92,7 @@
     apprCreate: () => { api.send({ type: 'releasesApproversEdit', kind: 'create' }); },
     relSign: () => { api.send({ type: 'releasesSign' }); },
     // Release all merges to prod: the first click arms it (the button asks to confirm), a second within ARM_MS starts it
-    relMerge: () => { if (armed !== 'run') return arm('run'); armed = null; api.send({ type: 'releasesMerge' }); render(); },
+    relMerge: () => { if (armed !== 'run') return arm('run'); armed = null; startingAll(); api.send({ type: 'releasesMerge' }); render(); },
     relAllStop: () => { api.send({ type: 'releasesReleaseAllStop' }); },
     relAllResume: (el) => { api.send(el.dataset.id ? { type: 'releasesMergeRelease', id: el.dataset.id } : { type: 'releasesMerge' }); },
     // bell: add every repo of the release config the PRs panel isn't watching yet
@@ -126,7 +126,7 @@
     histRbGo: (el) => { api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
     // Cancel release: closes every open PR of it. Same two-click confirm as Release all
     relCancel: (el) => { const k = 'x:' + (el.dataset.id || 'run'); if (armed !== k) return arm(k); armed = null; api.send({ type: 'releasesCancel', id: el.dataset.id || null }); render(); },
-    histMerge: (el) => { if (armed !== 'h:' + el.dataset.id) return arm('h:' + el.dataset.id); armed = null; api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); render(); },
+    histMerge: (el) => { if (armed !== 'h:' + el.dataset.id) return arm('h:' + el.dataset.id); armed = null; startingAll(); api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); render(); },
     histReload: () => { api.send({ type: 'releasesHistory' }); },
     histImport: () => { api.send({ type: 'releasesImport' }); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
@@ -453,6 +453,8 @@
       ? `<button class="${cls} armed-bad" data-act="relCancel"${id ? ` data-id="${esc(id)}"` : ''}>⚠ Confirm: close ${n} PR${n === 1 ? '' : 's'}</button>`
       : `<button class="${cls}" data-act="relCancel"${id ? ` data-id="${esc(id)}"` : ''} title="Call this release off: closes its ${n} open PR${n === 1 ? '' : 's'} (with a note). Merged ones stay merged">✕ Cancel release</button>`;
   }
+  // optimistic: the progress line shows right on the confirming click; main's first update replaces it
+  function startingAll() { if (state) state = { ...state, releaseAll: { running: true, status: 'checking', detail: 'starting', wave: 0, waves: 0, merged: [] } }; }
   let armed = null, armTimer = null;
   const ARM_MS = 6000;
   function arm(key) {
@@ -460,7 +462,7 @@
     armTimer = setTimeout(() => { armed = null; render(); }, ARM_MS);
     render();
   }
-  function releaseAllBtn(s, { ready, waiting, signoff, attrs, lockedCls, armKey }) {
+  function releaseAllBtn(s, { ready, waiting, signoff, attrs, lockedCls, armKey, held = [] }) {
     if (s.releaseAll && s.releaseAll.running) return '';
     // one Release all across the team: someone else's is running
     if (s.teamRun) return `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`@${s.teamRun.by} is running Release all: wave ${s.teamRun.wave}/${s.teamRun.waves}, ${s.teamRun.status}${s.teamRun.detail ? ' (' + s.teamRun.detail + ')' : ''}${(s.teamRun.merged || []).length ? '\nmerged: ' + s.teamRun.merged.join(', ') : ''}`)}">🚀 Running on @${esc(s.teamRun.by)}'s Overlord · wave ${esc(s.teamRun.wave)}/${esc(s.teamRun.waves)}</button>`;
@@ -468,12 +470,14 @@
     const signedLine = `the prod release is signed ${so.count}/${so.need}${so.signers.length ? ' (' + so.signers.map(l => '@' + l).join(', ') + ')' : ''}`;
     const gapLines = (so.gaps || []).map(g => `\n@${g.login} still to sign: ${g.missing.map(x => x.label + (x.older ? ' (new commits)' : '')).join(', ')}`).join('');
     const pr = (r) => `• ${r.label} ${r.env || 'prod'}${r.pr ? ' #' + r.pr.number : ''}`;
+    const heldLines = held.length ? `\n\nWaiting:\n${held.map(h => `• ${h.label}: ${h.why}`).join('\n')}` : '';
     if (!ready.length) return waiting.length
-      ? `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`Can't merge yet: ${signedLine}.${gapLines}`)}">🔒 Release all · needs signatures</button>` : '';
+      ? `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`Can't merge yet: ${signedLine}.${gapLines}${heldLines}`)}">🔒 Release all · needs signatures</button>`
+      : held.length ? `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`Nothing can merge yet:${heldLines}`)}">🔒 Release all · ${held.length} waiting</button>` : '';
     const byEnv = {};
     for (const r of ready) byEnv[r.env || 'prod'] = (byEnv[r.env || 'prod'] || 0) + 1;
     const tip = `${Object.entries(byEnv).map(([e, n]) => `${n} ${e}`).join(' + ')}. Merges now, in release order (services → iframes → frontend), waiting for each wave's deploys; stops on a failed deploy:\n`
-      + ready.map(pr).join('\n') + (waiting.length ? `\n\nHeld back: ${signedLine}:\n${waiting.map(pr).join('\n')}${gapLines}` : '');
+      + ready.map(pr).join('\n') + (waiting.length ? `\n\nHeld back: ${signedLine}:\n${waiting.map(pr).join('\n')}${gapLines}` : '') + heldLines;
     if (armed === armKey) {
       const waves = s.config ? ReleasesCore.releaseWaves(s.config, ready).length : 1;
       return `<button ${attrs.replace('class="', 'class="armed ')} title="${esc(tip)}">⚠ Confirm: merge ${ready.length} PR${ready.length === 1 ? '' : 's'} in ${waves} wave${waves === 1 ? '' : 's'}</button>`;
@@ -485,7 +489,8 @@
   function releaseAllHtml(s) {
     const p = s.releaseAll;
     if (!p) return '';
-    const head = p.running ? `🚀 Wave ${p.wave}/${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : p.status === 'manual' ? 'deploy by hand' : 'merging'}: ${esc(p.detail || '')}`
+    const head = p.running && p.status === 'checking' ? `<span class="rl-spin-dot"></span>🚀 Starting Release all: ${esc(p.detail || '')}…`
+      : p.running ? `🚀 Wave ${p.wave}/${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : p.status === 'manual' ? 'deploy by hand' : 'merging'}: ${esc(p.detail || '')}`
       : p.status === 'done' ? `🚀 Released: ${esc(p.detail || 'every wave merged')} ✓`
       : p.status === 'interrupted' ? `⏸ Release all interrupted: Overlord closed at wave ${esc(p.wave)}/${esc(p.waves)}`
       : `⏸ Release all stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
@@ -549,9 +554,11 @@
       // actions
       const acts = [];
       if (pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push(signBtn(s, 'rl-hist-btn go', '✍ Sign'));
+      // (an open back-merge doesn't hold a repo: Release all merges it first)
+      const held = (r) => r.health && (r.health.backMerge && r.health.backMerge.conflict ? `its back-merge #${r.health.backMerge.number} conflicts` : r.health.checks === 'fail' ? 'checks failing' : r.health.conflict ? 'conflicts with its target' : null);
       if (pending && a.isApprover) acts.push(releaseAllBtn(s, {
-        ready: signers.length >= 2 ? openRepos : [],
-        waiting: signers.length >= 2 ? [] : openRepos,
+        ready: signers.length >= 2 ? openRepos.filter(r => !held(r)) : [],
+        waiting: signers.length >= 2 ? [] : openRepos, held: openRepos.filter(held).map(r => ({ label: r.label, why: held(r) })),
         signoff: { count: signers.length, need: 2, signers, gaps: anyone.filter(l => !signers.includes(l))
           .map(login => ({ login, missing: openRepos.filter(r => !(r.signers || []).includes(login)).map(r => ({ label: r.label })) })) },
         attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn', armKey: 'h:' + m.id }));

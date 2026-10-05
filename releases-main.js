@@ -360,6 +360,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   }
 
   // Fresh sign-off of one PR (always re-read — this is what gates a merge)
+  const signoffOfPr = (repo, n) => signoffOf(repo, n);
   async function signoffOf(repo, n) {
     const [pr, rv] = await Promise.all([ghJson(['api', `repos/${repo}/pulls/${n}`]),
       ghJson(['api', '-X', 'GET', `repos/${repo}/pulls/${n}/reviews`, '-f', 'per_page=100'])]);
@@ -375,7 +376,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   }
 
   // The gate every Overlord merge goes through: prod release PRs need two approvers' signatures.
-  async function mergeGate(url) {
+  async function mergeGate(url, memo) {
     const m = String(url).match(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/);
     if (!m) return { ok: true };
     const pr = await ghJson(['api', `repos/${m[1]}/pulls/${m[2]}`]);
@@ -388,7 +389,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (back) return { ok: true, warn: `Back-merge into ${back.source}: the open ${back.target} release PR takes these commits too` };
     if (!prodStep(m[1], pr.data.base.ref, pr.data.head.ref)) return { ok: true }; // not a prod release PR
     if (!state.approvers || !state.approvers.exists) await loadApprovers();
-    const s = await releaseSignoffOf(m[1], m[2]);
+    const s = await releaseSignoffOf(m[1], m[2], memo);
     if (s.error) return { ok: false, reason: s.error };
     return s.ok ? { ok: true, signoff: s } : { ok: false, reason: `the release needs ${s.need} approvers' signatures (has ${s.count}${s.count ? ': ' + s.signers.map(x => '@' + x.login).join(', ') : ''})${gapsText(s)}` };
   }
@@ -396,7 +397,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
 
   // The release is signed as one (signoff-core releaseSignoff): this PR's sign-off together with
   // every other still-open PR of its release (the release-id its body carries → the manifest).
-  async function releaseSignoffOf(repo, n) {
+  async function releaseSignoffOf(repo, n, memo) {
+    // memo (Map): Release all checks every PR of a release; each PR's sign-off is read once, not once per sibling
+    const signoffOf = (r, k) => { if (!memo) return signoffOfPr(r, k); const key = r + '#' + k; if (!memo.has(key)) memo.set(key, signoffOfPr(r, k)); return memo.get(key); };
     const s = await signoffOf(repo, n);
     if (s.error) return s;
     const id = releaseIdOf(s.pr.body);
@@ -716,6 +719,17 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     checkToSign().catch(() => {});
   }
 
+  // what the last run found for a release PR: this machine's run row, else the release record (shared)
+  function healthOf(it) {
+    const row = ((state.releaseRun && state.releaseRun.rows) || []).find(r => r.repo === it.repo && r.pr && r.pr.number === it.pr.number);
+    if (row) return { checks: row.checks, conflict: row.conflict === true };
+    for (const m of (state.history && state.history.items) || []) {
+      const r = m.repos.find(x => x.repo === it.repo && x.pr.number === it.pr.number);
+      if (r && r.health) return { checks: r.health.checks, conflict: r.health.conflict === true };
+    }
+    return null;
+  }
+
   async function releaseAll(id) {
     if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is already running' });
     if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
@@ -723,6 +737,10 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (fresh(lock) && String(lock.by).toLowerCase() !== String(me).toLowerCase()) {
       return send({ type: 'toast', text: `Release all is running on @${lock.by}'s Overlord (wave ${lock.wave}/${lock.waves}) — one at a time` });
     }
+    // on screen from the first moment: the checks below read every PR and take a while
+    progress({ running: true, id: id || null, status: 'checking', detail: 'reading the PRs, back-merges and signatures', wave: 0, waves: 0, merged: [], url: null, manualLeft: null });
+    // a refusal stays in the progress line (not just a toast that's easy to miss)
+    const refuse = (text) => { progress({ running: false, status: 'stopped', detail: text }); send({ type: 'toast', text }); };
     // what's really still open (a resume, or PRs merged elsewhere): merged ones drop out, and one that
     // merged in the last hour gets its deploy waited on before anything else merges
     const listed = releaseItems(id);
@@ -733,22 +751,30 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
       if (p && p.merged) { if (Date.now() - Date.parse(p.merged_at) < 3600e3 && it.deploy && it.deploy !== 'manual') justMerged.push({ ...it, sha: p.merge_commit_sha }); }
       else if (!(p && p.state === 'closed')) items.push(it);
     });
-    if (!items.length) return send({ type: 'toast', text: 'Nothing open to release' });
-    // an open back-merge must go first — and merging it changes the release PR, so re-sign after
-    const backs = [];
+    if (!items.length) return refuse('Nothing open to release');
+    // set aside what can't merge yet, per repo, and merge the rest: failing checks or a conflict the last
+    // check found, or a prod release still short of 2 signatures. An open back-merge is part of the release:
+    // it merges first (below), so the release PR carries the target's hotfixes
+    const memo = new Map(), skipped = [], go = [], backs = [];
     await Promise.all(items.map(async (it) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${it.repo}/pulls`, '-f', 'state=open', '-f', `base=${it.source}`, '-f', 'per_page=100']);
-      if ((Array.isArray(r.data) ? r.data : []).some(p => p.head && p.head.ref === it.target)) backs.push(it.label);
+      const back = (Array.isArray(r.data) ? r.data : []).find(p => p.head && p.head.ref === it.target);
+      const h = healthOf(it);
+      if (h && h.checks === 'fail') return skipped.push({ ...it, why: 'checks failing' });
+      if (h && h.conflict) return skipped.push({ ...it, why: 'conflicts with its target' });
+      const gate = await mergeGate(it.pr.url, memo);
+      if (!gate.ok) return skipped.push({ ...it, why: gate.reason });
+      go.push(it);
+      if (back) backs.push({ it, back });
     }));
-    if (backs.length) return send({ type: 'toast', text: `Merge the back-merge PR first (${backs.join(', ')}), then Release all` });
-    // set aside what can't merge yet (prod without its 2 signatures): merge the rest, report the skipped
-    const skipped = [], go = [];
-    for (const it of items) {
-      const gate = await mergeGate(it.pr.url);
-      (gate.ok ? go : skipped).push(gate.ok ? it : { ...it, why: gate.reason });
+    // back-merges first (target → source); one that won't merge holds just its repo back
+    for (const { it, back } of backs) {
+      progress({ detail: `merging the back-merge ${it.label} #${back.number}` });
+      const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${back.number}/merge`, '-f', 'merge_method=merge']);
+      if (apiErr(res)) { go.splice(go.indexOf(it), 1); skipped.push({ ...it, why: `its back-merge #${back.number} didn't merge (${apiErr(res)})` }); }
     }
-    if (!go.length) return send({ type: 'toast', text: `Nothing can merge yet: ${skipped.map(x => `${x.label} ${x.env} — ${x.why}`).join('; ')}` });
-    const skippedNote = skipped.length ? ` · not merged (waiting): ${skipped.map(x => x.label + ' ' + x.env).join(', ')}` : '';
+    if (!go.length) return refuse(`Nothing can merge yet: ${skipped.map(x => `${x.label}${x.env !== 'prod' ? ' ' + x.env : ''}: ${x.why}`).join(' · ')}`);
+    const skippedNote = skipped.length ? ` · not merged: ${skipped.map(x => `${x.label} (${x.why})`).join(', ')}` : '';
     // hand-deployed repos named in releaseOrder are waves too: Release all pauses there until they're live
     // (seen through their `live` pin) or someone says they're deployed; the rest go in the end popup
     const man = (id ? (((state.history && state.history.items) || []).find(x => x.id === id) || {}).manual || [] : (state.releaseRun && state.releaseRun.manual) || [])
