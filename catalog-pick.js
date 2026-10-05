@@ -1,5 +1,5 @@
 // Filtering for the catalog popover (catalog-core.js builds the list) and the
-// "//" trigger that opens it from the terminal. Pure, so it runs in tests and the page.
+// ";;" trigger that opens it from the terminal. Pure, so it runs in tests and the page.
 
 // Subsequence match; consecutive letters and word starts score higher. null = no match.
 function fuzzyScore(q, s) {
@@ -32,10 +32,13 @@ function pickItems(items, type, q) {
   return out.sort((a, b) => (q ? b.score - a.score : 0) || ORIGIN_RANK[a.origin] - ORIGIN_RANK[b.origin]);
 }
 
-// Wraps terminal input: the first char of the hotkey sequence (seq(), default "//") is
+// Default hotkey: two quick ";". Rarely typed, unlike "/", which opens Claude's own command menu.
+const CATALOG_HOTKEY = ';;';
+
+// Wraps terminal input: the first char of the hotkey sequence (seq(), default ";;") is
 // held `ms`; the second one in that window opens the popover and neither reaches the pty.
 // Any other data flushes the held char first. A chord hotkey or '' (off) holds nothing.
-function makeSlashGate({ send, open, ms = 250, timer = { set: (fn, t) => setTimeout(fn, t), clear: (h) => clearTimeout(h) }, seq = () => '//' }) {
+function makeSlashGate({ send, open, ms = 250, timer = { set: (fn, t) => setTimeout(fn, t), clear: (h) => clearTimeout(h) }, seq = () => CATALOG_HOTKEY }) {
   let held = null, heldCh = '';
   const flush = () => { if (held) { timer.clear(held); held = null; send(heldCh); } };
   return (data) => {
@@ -93,4 +96,4 @@ function promptTop(lines) {
   return -1;
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent, newItemPrompt };
+if (typeof module !== 'undefined' && module.exports) module.exports = { CATALOG_HOTKEY, fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent, newItemPrompt };

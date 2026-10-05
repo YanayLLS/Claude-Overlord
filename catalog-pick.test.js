@@ -1,6 +1,6 @@
 // Run: node catalog-pick.test.js
 const assert = require('assert');
-const { fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent, newItemPrompt } = require('./catalog-pick');
+const { CATALOG_HOTKEY, fuzzyScore, pickItems, makeSlashGate, promptTop, parseHotkey, chordMatch, hotkeyFromEvent, newItemPrompt } = require('./catalog-pick');
 
 // fuzzy: subsequence required, case-insensitive, match positions returned
 assert.strictEqual(fuzzyScore('xyz', 'fix-bug'), null);
@@ -31,17 +31,20 @@ assert.ok(pickItems(items, null, 'clickup').some(i => i.name === 'fix-bug'), 'wo
 // empty query keeps origin order: repo, pc, plugin, builtin
 assert.deepStrictEqual(pickItems(items, null, '').map(i => i.origin), ['repo', 'pc', 'plugin', 'builtin']);
 
-// slash gate: "//" within the window opens, a lone "/" is flushed late, other data passes
+// default hotkey ";;": a lone ";" waits, "/" (Claude's own menu) is never held
+assert.strictEqual(CATALOG_HOTKEY, ';;');
 let sent = [], opened = 0, timers = [];
 const fakeTimer = { set: (fn) => { timers.push(fn); return timers.length; }, clear: (h) => { timers[h - 1] = null; } };
 const gate = makeSlashGate({ send: d => sent.push(d), open: () => opened++, timer: fakeTimer });
-gate('/'); assert.deepStrictEqual(sent, []);
-gate('/'); assert.strictEqual(opened, 1); assert.deepStrictEqual(sent, []);
-gate('/'); timers.at(-1)(); assert.deepStrictEqual(sent, ['/'], 'lone slash flushed after timeout');
+gate('/'); assert.deepStrictEqual(sent, ['/'], '/ goes straight through');
 sent = [];
-gate('/'); gate('a'); assert.deepStrictEqual(sent, ['/', 'a'], 'next key flushes held slash first');
+gate(';'); assert.deepStrictEqual(sent, []);
+gate(';'); assert.strictEqual(opened, 1); assert.deepStrictEqual(sent, []);
+gate(';'); timers.at(-1)(); assert.deepStrictEqual(sent, [';'], 'lone ; flushed after timeout');
 sent = [];
-gate('https://x'); assert.deepStrictEqual(sent, ['https://x'], 'pasted text untouched');
+gate(';'); gate('a'); assert.deepStrictEqual(sent, [';', 'a'], 'next key flushes the held ; first');
+sent = [];
+gate('a;;b'); assert.deepStrictEqual(sent, ['a;;b'], 'pasted text untouched');
 // promptTop: the ─── divider above Claude's live "> " row, searched bottom-up; -1 when there's no prompt
 const scr = ['● Done.', '> an old prompt in the transcript', '', '────────────', '> fix it', '────────────', '  ⏵⏵ bypass permissions on'];
 assert.strictEqual(promptTop(scr), 3);
@@ -52,7 +55,7 @@ assert.strictEqual(promptTop(['$ ls', 'a b']), -1);
 {
   const real = global.setTimeout;
   global.setTimeout = function (fn, ms) { if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation'); return real(fn, ms); };
-  try { const g = makeSlashGate({ send: () => {}, open: () => {} }); g('/'); g('/'); } finally { global.setTimeout = real; }
+  try { const g = makeSlashGate({ send: () => {}, open: () => {} }); g(';'); g(';'); } finally { global.setTimeout = real; }
 }
 // configurable sequence: seq() picks the two typed chars; '' turns the gate off (everything passes)
 {
