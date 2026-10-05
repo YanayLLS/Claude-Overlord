@@ -339,7 +339,7 @@
 .rl-hist-when { margin-left:auto; font-size:11px; color:var(--dim); }
 .rl-hist-who { font-size:11px; color:var(--subtext); margin:3px 0 6px; }
 .rl-hist-repos { display:flex; flex-direction:column; gap:2px; }
-.rl-hist-repo { display:grid; grid-template-columns:150px 60px 1fr auto; align-items:center; gap:8px; font-size:11.5px; padding:2px 0; }
+.rl-hist-repo { display:grid; grid-template-columns:172px 60px 1fr auto; align-items:center; gap:8px; font-size:11.5px; padding:2px 0; }
 .rl-hist-repo a { color:var(--accent); }
 .rl-hist-sha { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); }
 .rl-hist-sha a { color:var(--subtext); }
@@ -368,14 +368,22 @@
 .rl-hist-empty-note { font-size:11px; color:var(--dim); }
 
 /* Release all progress */
-.rl-relall { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin:8px 0; padding:8px 10px; border-radius:var(--r); font-size:11.5px; border:1px solid var(--border); background:var(--surface0); }
+.rl-relall { margin:8px 0 10px; padding:10px 12px; border-radius:var(--r); font-size:12px; border:1px solid var(--border); background:var(--surface0); }
 .rl-relall.running { border-color:var(--accent); background:var(--accent-soft); }
-.rl-relall.running > span:first-child { animation:rl-pulse 1.6s ease-in-out infinite; }
-.rl-relall.ok { border-color:rgba(74,222,128,.5); color:var(--green); }
-.rl-relall.bad { border-color:rgba(251,146,60,.6); color:var(--peach); }
+.rl-relall.ok { border-color:rgba(74,222,128,.5); background:rgba(74,222,128,.07); }
+.rl-relall.bad { border-color:rgba(251,146,60,.55); background:rgba(251,146,60,.07); }
+.rl-relall-top { display:flex; align-items:center; gap:10px; min-width:0; }
+.rl-relall-icon { flex-shrink:0; width:18px; text-align:center; }
+.rl-relall.ok .rl-relall-icon { color:var(--green); font-weight:700; } .rl-relall.bad .rl-relall-icon { color:var(--peach); }
+.rl-relall-what { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+.rl-relall-what b { font-weight:600; }
+.rl-relall-sub { color:var(--subtext); font-size:11px; }
 .rl-relall a { color:inherit; text-decoration:underline; }
-.rl-relall-merged { color:var(--subtext); font-size:10.5px; }
-.rl-relall .rl-hist-btn { margin-left:auto; }
+.rl-relall .rl-hist-btn { flex-shrink:0; }
+.rl-relall-prog { display:flex; align-items:center; gap:10px; margin-top:8px; padding-left:28px; font-size:10.5px; color:var(--subtext); }
+.rl-relall-bar { flex:1; height:5px; border-radius:999px; background:var(--surface1); overflow:hidden; }
+.rl-relall-bar i { display:block; height:100%; border-radius:inherit; background:var(--accent); transition:width .4s; }
+.rl-relall.ok .rl-relall-bar i { background:var(--green); }
 .rl-rel-actions .rl-rr-merge.locked { opacity:.5; cursor:not-allowed; } /* prod not signed yet: shown, explained, not clickable */
 
 /* ── the big "sign this release" prompt ── */
@@ -452,3 +460,28 @@
 .rl-item.run { color:var(--yellow); animation:rl-pulse 1.4s ease-in-out infinite; }
 .rl-hist-state { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
 .rl-hist-state .rl-hist-health { margin-left:0; }
+/* History card: repos grouped by release wave */
+.rl-hist-wave { font-size:9.5px; font-weight:600; letter-spacing:.8px; text-transform:uppercase; color:var(--dim); margin:6px 0 1px; padding-top:4px; border-top:1px dashed var(--border); }
+.rl-hist-wave:first-child { margin-top:0; padding-top:0; border-top:0; }
+.rl-hist-repo.hand b { color:var(--subtext); }
+
+/* History card as a timeline: waves are steps on a line, repos hang off them */
+.rl-tl-step { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:10.5px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--subtext); }
+.rl-tl-node { width:18px; height:18px; flex-shrink:0; display:flex; align-items:center; justify-content:center; border-radius:50%; font-style:normal; font-size:9.5px; letter-spacing:0;
+  background:var(--surface1); color:var(--subtext); border:1px solid var(--border); }
+.rl-tl-step.done .rl-tl-node { background:rgba(74,222,128,.18); border-color:rgba(74,222,128,.6); color:var(--green); }
+.rl-tl-step.active .rl-tl-node { background:var(--accent-soft); border-color:var(--accent); color:var(--text); animation:rl-pulse 1.4s ease-in-out infinite; }
+.rl-tl-step.warn .rl-tl-node { background:rgba(251,146,60,.16); border-color:rgba(251,146,60,.6); color:var(--peach); }
+.rl-tl-step.bad .rl-tl-node { background:rgba(248,113,113,.16); border-color:rgba(248,113,113,.6); color:var(--red); }
+.rl-tl-sum { font-weight:500; text-transform:none; letter-spacing:0; color:var(--dim); }
+.rl-tl-step.done .rl-tl-sum { color:var(--green); } .rl-tl-step.active .rl-tl-sum { color:var(--accent); } .rl-tl-step.warn .rl-tl-sum { color:var(--peach); }
+.rl-tl-rows { margin-left:8px; padding:2px 0 2px 17px; border-left:2px solid var(--border); }
+.rl-tl-rows.done { border-left-color:rgba(74,222,128,.45); } .rl-tl-rows.active { border-left-color:var(--accent); }
+.rl-hist-wave { display:none; }
+.rl-hand { font-family:inherit; font-size:10.5px; color:var(--subtext); white-space:nowrap; }
+/* status pills */
+.rl-item { display:inline-block; padding:1px 8px; border-radius:999px; font-size:10.5px; line-height:16px; white-space:nowrap; background:var(--surface1); color:var(--subtext); animation:none; }
+.rl-item.ok { background:rgba(74,222,128,.14); color:var(--green); }
+.rl-item.bad { background:rgba(248,113,113,.14); color:var(--red); }
+.rl-item.warn { background:rgba(251,146,60,.14); color:var(--peach); }
+.rl-item.run { background:rgba(250,204,21,.14); color:var(--yellow); animation:rl-pulse 1.4s ease-in-out infinite; }

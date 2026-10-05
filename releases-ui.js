@@ -428,13 +428,15 @@
     return h + '</div>';
   }
 
+  const DONE = new Set(['deployed', 'merged-hand', 'hand-done']);
   // A repo's status in a Release all (state.releaseAll.items[label]), as a short coloured note
   function relItemHtml(it) {
     if (!it) return '';
+    if (it.s === 'held') return `<span class="rl-item warn" title="${esc(it.why || '')}">waiting${it.why ? ': ' + esc(it.why.length > 34 ? it.why.slice(0, 34) + '…' : it.why) : ''}</span>`;
     const t = { queued: ['', `wave ${it.wave}`], merging: ['run', 'merging…'], merged: ['ok', 'merged · deploying…'], 'merged-hand': ['ok', 'merged ✓'],
       deploying: ['run', 'deploying…'], deployed: ['ok', 'deployed ✓'], failed: ['bad', 'deploy failed'], held: ['warn', 'waiting'],
       hand: ['', `wave ${it.wave} · by hand`], 'hand-wait': ['warn', 'deploy by hand…'], 'hand-done': ['ok', 'deployed by hand ✓'] }[it.s] || ['', it.s];
-    return `<span class="rl-item ${t[0]}"${it.why ? ` title="${esc(it.why)}"` : ''}>${esc(t[1])}${it.why ? ': ' + esc(it.why.length > 40 ? it.why.slice(0, 40) + '…' : it.why) : ''}</span>`;
+    return `<span class="rl-item ${t[0]}">${esc(t[1])}</span>`;
   }
   // What the release run found for a pending PR (shared through the release record)
   function histHealth(h) {
@@ -497,16 +499,25 @@
   function releaseAllHtml(s) {
     const p = s.releaseAll;
     if (!p) return '';
-    const head = p.running && p.status === 'checking' ? `<span class="rl-spin-dot"></span>🚀 Starting Release all: ${esc(p.detail || '')}…`
-      : p.running ? `🚀 Wave ${p.wave}/${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : p.status === 'manual' ? 'deploy by hand' : 'merging'}: ${esc(p.detail || '')}`
-      : p.status === 'done' ? `🚀 Released: ${esc(p.detail || 'every wave merged')} ✓`
-      : p.status === 'interrupted' ? `⏸ Release all interrupted: Overlord closed at wave ${esc(p.wave)}/${esc(p.waves)}`
-      : `⏸ Release all stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
-    return `<div class="rl-relall ${p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad'}"><span>${head}</span>`
-      + (p.merged && p.merged.length ? `<span class="rl-relall-merged">merged: ${esc(p.merged.join(', '))}</span>` : '')
+    const its = Object.values(p.items || {}).filter(x => x.s !== 'held');
+    const doneN = its.filter(x => DONE.has(x.s)).length;
+    const pct = its.length ? Math.round(doneN / its.length * 100) : 0;
+    const what = p.running && p.status === 'checking' ? `Starting: ${esc(p.detail || '')}…`
+      : p.running ? `Wave ${p.wave} of ${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : p.status === 'manual' ? 'deploy by hand' : 'merging'}${p.detail ? `: <b>${esc(p.detail)}</b>` : ''}`
+      : p.status === 'done' ? `Released ✓ <span class="rl-relall-sub">${esc((p.detail || '').replace(/^Every wave merged/, 'every wave merged'))}</span>`
+      : p.status === 'interrupted' ? `Interrupted: Overlord closed at wave ${esc(p.wave)} of ${esc(p.waves)}`
+      : `Stopped: ${p.url ? link(p.url, esc(p.detail || '')) : esc(p.detail || '')}`;
+    const cls = p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad';
+    return `<div class="rl-relall ${cls}"><div class="rl-relall-top">`
+      + `<span class="rl-relall-icon">${p.running ? (p.status === 'checking' ? '<span class="rl-spin-dot"></span>' : '🚀') : p.status === 'done' ? '✓' : '⏸'}</span>`
+      + `<span class="rl-relall-what">${what}</span>`
       + (p.status === 'interrupted' ? `<button class="rl-hist-btn go" data-act="relAllResume" data-id="${esc(p.id || '')}" title="Picks up with what is still open: merged PRs are skipped, a deploy still running is waited on first">▶ Resume</button>` : '')
-      + (p.running ? '<button class="rl-hist-btn" data-act="relAllStop" title="Stops before the next merge. What already merged stays merged">⏹ Stop</button>' : '') + '</div>';
+      + (p.running ? '<button class="rl-hist-btn" data-act="relAllStop" title="Stops before the next merge. What already merged stays merged">⏹ Stop</button>' : '')
+      + '</div>'
+      + (its.length ? `<div class="rl-relall-prog"><div class="rl-relall-bar"><i style="width:${pct}%"></i></div><span>${doneN} of ${its.length} done</span></div>` : '')
+      + '</div>';
   }
+
 
   // ── History: every prod release from <org>/release-manifests, the pending one first ──
   const STATUS_CHIP = { pending: ['warn', 'pending'], merged: ['', 'merged · deploying'], deployed: ['ok', 'deployed ✓'],
@@ -546,17 +557,37 @@
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
       h += '<div class="rl-hist-repos">';
       const liveItems = s.releaseAll && s.releaseAll.id === m.id && s.releaseAll.items;
-      for (const r of m.repos) {
+      // in release order, one group per wave (what everything depends on first, the frontend last), with
+      // the hand-deployed steps in their wave: read top to bottom, it's the release's timeline
+      const inOrderMan = (m.manual || []).filter(x => s.config && (s.config.releaseOrder || []).some(w => w.some(y => y === x.label || y.toLowerCase() === String(x.repo).toLowerCase()))).map(x => ({ ...x, hand: true }));
+      const waves = s.config && window.ReleasesCore ? ReleasesCore.releaseWaves(s.config, m.repos.concat(inOrderMan)) : [m.repos];
+      // a step's state from its repos: done / in progress / waiting / failed / not started
+      const stOf = (r) => { const it = liveItems && liveItems[r.label]; if (it) return it.s; if (r.hand) return ''; if (r.mergeSha) return r.deploy ? (r.deploy.state === 'success' ? 'deployed' : r.deploy.state === 'failure' ? 'failed' : 'deploying') : 'merged-hand'; return ''; };
+      const live = new Set(['merging', 'merged', 'deploying', 'hand-wait']);
+      waves.forEach((wave, wi) => {
+      const ss = wave.map(stOf);
+      const wst = ss.every(x => DONE.has(x)) ? 'done' : ss.some(x => x === 'failed') ? 'bad' : ss.some(x => live.has(x)) ? 'active' : ss.some(x => x === 'held') ? 'warn' : 'todo';
+      const wsum = { done: 'done', bad: 'deploy failed', active: 'in progress', warn: `${ss.filter(x => x === 'held').length} waiting`, todo: '' }[wst];
+      h += `<div class="rl-tl-step ${wst}"><i class="rl-tl-node">${wst === 'done' ? '✓' : wi + 1}</i><span class="rl-tl-name">${waves.length > 1 ? `Wave ${wi + 1}` : 'Repos'}</span>${wsum ? `<span class="rl-tl-sum">${esc(wsum)}</span>` : ''}</div><div class="rl-tl-rows ${wst}">`;
+      for (const r of wave) {
+        if (r.hand) {
+          const it = liveItems && liveItems[r.label];
+          h += `<div class="rl-hist-repo hand"><b>${esc(r.label)}</b><span></span><span class="rl-hist-sha"><span class="rl-hand">✋ by hand</span></span><span class="rl-hist-state">${it ? relItemHtml(it) : ''}</span></div>`;
+          continue;
+        }
         const need = pending && !r.mergeSha && !r.closed;
         const signed = (r.signers || []).length;
         const cmp = r.baseSha && (r.mergeSha || r.headSha) ? `https://github.com/${r.repo}/compare/${r.baseSha}...${r.mergeSha || r.headSha}` : null;
-        const dep = r.deploy ? (r.deploy.state === 'success' ? '<span class="ok">deployed</span>' : r.deploy.state === 'failure' ? '<span class="bad">deploy failed</span>' : r.mergeSha ? 'deploying…' : '') : '✋ by hand';
+        const dep = relItemHtml({ s: stOf(r) || 'merged-hand' });
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
-          + `<span class="rl-hist-state">${liveItems && liveItems[r.label] && !r.mergeSha ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-state">${liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
       }
       h += '</div>';
-      if (m.manual && m.manual.length) h += `<div class="rl-hist-man">Hand-deployed at the time: ${m.manual.map(x => esc(x.label) + (x.live && x.live.sha ? ' ' + shortSha(x.live.sha) : '')).join(' · ')}</div>`;
+      });
+      h += '</div>';
+      const manOther = (m.manual || []).filter(x => !inOrderMan.some(y => y.repo === x.repo));
+      if (manOther.length) h += `<div class="rl-hist-man">Hand-deployed at the time: ${manOther.map(x => esc(x.label) + (x.live && x.live.sha ? ' ' + shortSha(x.live.sha) : '')).join(' · ')}</div>`;
       if (m.warnings && m.warnings.length) h += `<div class="rl-hist-man bad">⚠ Not rolled back (data changes): ${m.warnings.map(w => esc(w.label) + ': ' + w.files.map(esc).join(', ')).join(' · ')}</div>`;
       if (m.flags && m.flags.missing && m.flags.missing.length) h += `<div class="rl-hist-man bad">Flags to seed: ${esc(m.flags.missing.join(', '))}</div>`;
       // actions
