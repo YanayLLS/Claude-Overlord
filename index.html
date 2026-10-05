@@ -812,6 +812,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .setup-card button:not(:disabled):hover { filter:brightness(1.15); }
 .setup-card button:not(:disabled):active { transform:translateY(1px); }
 .setup-card button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.setup-acts { display:flex; gap:6px; flex-shrink:0; }
+.setup-hint { font-size:11px; color:var(--yellow); margin:-2px 0 8px; }
+.setup-sub .setup-spin { width:7px; height:7px; border-width:1.5px; margin-right:5px; }
 .setup-foot { display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-top:12px; }
 .setup-note { flex:1; font-size:11px; color:var(--dim); }
 @media (prefers-reduced-motion: reduce) { .setup-bar i, .setup-spin { animation-duration:3s; } }
@@ -3981,8 +3984,8 @@ function handleAgentMsg(msg) {
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
     case 'toast': showToast(msg.text); break;
     case 'setupState': onSetupState(msg); break;
-    case 'setupProgress': su.busy = msg.id; su.line = msg.line; su.since = su.since || Date.now(); renderSetup(); break;
-    case 'setupDone': su.result[msg.id] = msg.ok ? 'ok' : (msg.error || 'unknown error'); break; // setupState follows and renders
+    case 'setupProgress': onSetupProgress(msg); break;
+    case 'setupDone': su.result[msg.id] = msg.ok ? 'ok' : (msg.error || 'unknown error'); su.url[msg.id] = msg.url; break; // setupState follows and renders
     case 'perfUsage': renderPerf(msg); break;
     case 'sysIdle': prSysIdleMs = msg.ms; break;
     case 'ramUsage': showTopRam(msg); break;
@@ -5704,7 +5707,7 @@ function closeSnooze() { const p = document.getElementById('pr-snooze-pop'); if 
 // logged in. Git gates Claude (it needs Git Bash); Claude gates the login.
 // Every control answers: installs stream their current step with a timer and bar,
 // Recheck says what it found, Log in waits visibly and times out, Skip toasts.
-const su = { info: null, busy: null, line: '', since: 0, result: {}, login: 0, loginFailed: false,
+const su = { info: null, busy: null, line: '', since: 0, result: {}, url: {}, login: 0, loginFailed: false,
   checkAt: 0, note: '', skipped: false, allSet: false };
 const SU_LABEL = { git: 'Git', claude: 'Claude Code' };
 const LOGIN_WAIT_MS = 120000; // main stops watching for the login after 2 minutes too
@@ -5722,32 +5725,36 @@ function renderSetup() {
   const spin = '<span class="setup-spin"></span>';
   const timer = since => '<span class="setup-elapsed" data-since="' + since + '">' + suElapsed(since) + '</span>';
   const btn = (label, onclick, disabled) => '<button ' + (disabled ? 'disabled' : '') + ' onclick="' + onclick + '">' + label + '</button>';
-  const row = (label, sub, subCls, right, bar) => '<div class="setup-row"><div class="setup-main"><span>' + label + '</span>'
-    + '<span class="setup-sub ' + subCls + '">' + sub + '</span></div>' + right + '</div>' + (bar ? '<div class="setup-bar"><i></i></div>' : '');
+  const row = (label, sub, subCls, right, bar, hint) => '<div class="setup-row"><div class="setup-main"><span>' + label + '</span>'
+    + '<span class="setup-sub ' + subCls + '">' + sub + '</span></div><div class="setup-acts">' + right + '</div></div>'
+    + (bar ? '<div class="setup-bar"><i></i></div>' : '') + (hint ? '<div class="setup-hint">' + hint + '</div>' : '');
   const ready = '<span class="setup-ok">✓ Ready</span>';
   const toolRow = (id, blockedBy) => {
     const label = SU_LABEL[id], res = su.result[id];
     if (!needs(id)) return row(label, res === 'ok' ? 'Installed just now' : 'Found on this PC', '', ready);
-    if (su.busy === id) return row(label, escapeHtml(su.line || 'Starting installer…') + ' · ' + timer(su.since || Date.now()),
-      '', '<button class="busy" disabled>' + spin + 'Installing…</button>', true);
+    if (su.busy === id) return row(label, '<span class="setup-line">' + escapeHtml(su.line || 'Starting installer…') + '</span> · '
+      + timer(su.since || Date.now()), '', '<button class="busy" disabled>' + spin + 'Installing…</button>', true,
+      // Git's installer needs admin rights; its UAC prompt can open behind this window.
+      id === 'git' ? 'Windows may ask for permission — if this stops moving, look for a prompt on the taskbar.' : '');
     if (blockedBy) return row(label, 'Needs ' + SU_LABEL[blockedBy] + ' first', '', btn('Install', '', true));
-    if (res && res !== 'ok') return row(label, 'Failed: ' + escapeHtml(res) + ' — download page opened', 'err',
-      btn('Retry', 'setupInstall(&quot;' + id + '&quot;)', su.busy));
+    if (res && res !== 'ok') return row(label, 'Failed: ' + escapeHtml(res), 'err',
+      '<button class="alt" onclick="setupDownload(&quot;' + id + '&quot;)">Download page</button>'
+      + btn('Retry', 'setupInstall(&quot;' + id + '&quot;)', su.busy));
     return row(label, su.busy ? 'Waits for ' + SU_LABEL[su.busy] + ' to finish' : 'Not installed', '',
       btn('Install', 'setupInstall(&quot;' + id + '&quot;)', su.busy));
   };
   const loginRow = () => {
     if (s.loggedIn) return row('Log in to Claude', su.loginDone ? 'Logged in just now' : 'Logged in', '', ready);
     if (needs('claude')) return row('Log in to Claude', 'Needs Claude Code first', '', btn('Log in', '', true));
-    if (su.login) return row('Log in to Claude', 'Finish signing in in your browser · ' + timer(su.login), '',
-      '<button class="busy" disabled>' + spin + 'Waiting…</button>', true);
+    if (su.login) return row('Log in to Claude', spin + 'Finish signing in in your browser · ' + timer(su.login), '',
+      '<button class="alt" onclick="setupLogin()" title="Closed the tab? Opens the sign-in again">Open again</button>', true);
     if (su.loginFailed) return row('Log in to Claude', 'No login seen after 2 minutes', 'err', btn('Try again', 'setupLogin()'));
     return row('Log in to Claude', 'Opens your browser to sign in', '', btn('Log in', 'setupLogin()'));
   };
   el.innerHTML = '<div class="settings-modal setup-card" role="dialog" aria-labelledby="setup-title">'
     + (complete
       ? '<h3 id="setup-title" class="setup-done">✓ All set — Overlord is ready</h3><p>Closing in a moment…</p>'
-      : '<h3 id="setup-title">Set up Overlord</h3><p>Overlord runs Claude Code agents in git repos. Install what is missing — Windows may ask for permission during the Git install.</p>')
+      : '<h3 id="setup-title">Set up Overlord</h3><p>Overlord runs Claude Code agents in git repos. Install what is missing below — it takes a few minutes.</p>')
     + toolRow('git') + toolRow('claude', needs('git') && 'git') + loginRow()
     + '<div class="setup-foot"><span class="setup-note" aria-live="polite">' + escapeHtml(su.note) + '</span>'
     + (complete ? btn('Start', 'setupClose()')
@@ -5755,7 +5762,14 @@ function renderSetup() {
         + (su.checkAt ? spin + 'Checking…' : 'Recheck') + '</button>'
         + '<button class="alt" onclick="setupSkip()">Skip for now</button>')
     + '</div></div>';
+  if (!el.contains(document.activeElement)) {
+    const next = el.querySelector('button:not(:disabled):not(.alt)') || el.querySelector('button:not(:disabled)');
+    if (next) next.focus({ preventScroll: true });
+  }
 }
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('setup-overlay')) { e.stopPropagation(); su.allSet ? setupClose() : setupSkip(); }
+}, true);
 // What changed between two probes, in words — the answer to Recheck and to a refocus.
 function setupDiff(prev, next) {
   const found = prev ? prev.missing.filter(id => !next.missing.includes(id)).map(id => SU_LABEL[id] + ' found ✓') : [];
@@ -5795,6 +5809,13 @@ function setupLogin() {
   renderSetup(); api.send({ type: 'addAccount' });
 }
 function setupRecheck() { su.checkAt = Date.now(); su.note = ''; renderSetup(); api.send({ type: 'setupRecheck' }); }
+function onSetupProgress(msg) {
+  const same = su.busy === msg.id;
+  su.busy = msg.id; su.line = msg.line; su.since = su.since || Date.now();
+  const span = same && document.querySelector('#setup-overlay .setup-line');
+  if (span) span.textContent = msg.line; else renderSetup();
+}
+function setupDownload(id) { api.send({ type: 'openUrl', url: su.url[id] }); }
 function setupSkip() { su.skipped = true; renderSetup(); showToast('Setup skipped — it comes back next launch'); }
 function setupClose() { su.allSet = false; su.skipped = true; renderSetup(); }
 // One ticker for the card: running timers, and the login wait running out.

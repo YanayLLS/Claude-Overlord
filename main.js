@@ -2145,7 +2145,7 @@ function setupState() {
     if (dir && dir !== 'path') process.env.PATH = dir + ';' + process.env.PATH;
   }
   return { type: 'setupState', missing: missingTools(process.env, fs.existsSync),
-    loggedIn: !!(getApiKey() || process.env.ANTHROPIC_API_KEY), installing: _setupInstalling, line: _setupLine };
+    loggedIn: !!(getApiKey() || ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX'].some(k => process.env[k])), installing: _setupInstalling, line: _setupLine };
 }
 let _setupInstalling = null; // tool id while its installer runs
 let _setupLine = ''; // its latest output step, so a renderer reload picks it up
@@ -2179,11 +2179,10 @@ function installSetupTool(id) {
     if (!ok) {
       error = progressLine(out) || why || 'not found after install';
       flog(`setup: ${id} install failed (${why || 'exit 0'}): ${out.slice(-1000)}`);
-      shell.openExternal(tool.url).catch(() => {});
     } else {
       _authStatusChecked = false; // claude just appeared — let the account probe retry
     }
-    send({ type: 'setupDone', id, ok, error });
+    send({ type: 'setupDone', id, ok, error, url: tool.url }); // the card offers the download page, never pops it
     send(st);
   };
   proc.on('error', (e) => finish(e.message));
