@@ -145,7 +145,7 @@
     rowRerun: (el) => { el.textContent = 'Re-running…'; api.send({ type: 'releasesRerunDeploy', repo: el.dataset.repo, number: +el.dataset.n }); },
     rowFix: (el) => { api.send({ type: 'releasesFixPr', repo: el.dataset.repo, number: +el.dataset.n }); show(false); },
     rowHand: (el) => { const k = 'h:' + el.dataset.repo; if (armed !== k) return arm(k); armed = null; el.textContent = 'Recording…'; api.send({ type: 'releasesConfirmHand', repo: el.dataset.repo, env: 'prod', label: el.dataset.label }); },
-    relCancel: (el) => { const k = 'x:' + (el.dataset.id || 'run'); if (armed !== k) return arm(k); armed = null; api.send({ type: 'releasesCancel', id: el.dataset.id || null }); render(); },
+    relCancel: (el) => { const k = 'x:' + (el.dataset.id || 'run'); if (armed !== k) return arm(k); armed = null; if (state) state = { ...state, cancelling: el.dataset.id || 'run' }; api.send({ type: 'releasesCancel', id: el.dataset.id || null }); render(); },
     histMerge: (el) => { if (armed !== 'h:' + el.dataset.id) return arm('h:' + el.dataset.id); armed = null; startingAll(); api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); render(); },
     histReload: () => { api.send({ type: 'releasesHistory' }); },
     histImport: () => { api.send({ type: 'releasesImport' }); },
@@ -578,6 +578,7 @@
   // ✕ Cancel release (History card: its id; results popover: the run here). First click arms it.
   function cancelBtn(id, n, cls) {
     const k = 'x:' + (id || 'run');
+    if (state && state.cancelling === (id || 'run')) return `<button class="${cls} locked" aria-disabled="true"><span class="rl-spin-dot"></span>Closing ${n} PR${n === 1 ? '' : 's'}…</button>`;
     return armed === k
       ? `<button class="${cls} armed-bad" data-act="relCancel"${id ? ` data-id="${esc(id)}"` : ''}>⚠ Confirm: close ${n} PR${n === 1 ? '' : 's'}</button>`
       : `<button class="${cls}" data-act="relCancel"${id ? ` data-id="${esc(id)}"` : ''} title="Call this release off: closes its ${n} open PR${n === 1 ? '' : 's'} (with a note). Merged ones stay merged">✕ Cancel release</button>`;
@@ -690,6 +691,7 @@
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
         + (env !== 'prod' ? `<span class="rl-env" style="--hue:${ENV_HUE[env.toLowerCase()] || 'var(--dim)'}">${esc(env)}</span>` : '')
         + (pending && signs ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
+        + (s.cancelling === m.id ? '<span class="rl-rr-chip warn"><span class="rl-spin-dot"></span>cancelling…</span>' : '')
         + (m.kind === 'standalone' ? '<span class="rl-rr-chip" title="A side product shipped on its own: approved by a teammate, not a signed release">standalone deploy</span>' : '')
         + (m.kind === 'hotfix' ? '<span class="rl-rr-chip warn" title="A PR into prod outside the release flow: its own release, needs its own 2 signatures">🩹 hotfix</span>' : '')
         + (m.afterTheFact && m.kind !== 'standalone' ? '<span class="rl-rr-chip bad" title="Merged into prod outside Overlord, recorded after the fact">merged outside Overlord</span>' : '')

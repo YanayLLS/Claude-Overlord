@@ -736,8 +736,13 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
 
   // Call a release off: close every still-open PR of it (the History release `id`, else the last run
   // here), each with a note. What already merged stays merged. The release then reads as abandoned.
+  // shows 'cancelling' at once (state.cancelling), checks, closes every PR in parallel, then records it
   async function cancelRelease(id) {
-    await loadApprovers();
+    push({ cancelling: id || 'run' });
+    try { await cancelNow(id); } finally { push({ cancelling: null }); }
+  }
+  async function cancelNow(id) {
+    if (!state.approvers || !state.approvers.loadedAt || Date.now() - state.approvers.loadedAt > 5 * 60 * 1000) await loadApprovers();
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can cancel a release' });
     if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is running: stop it first' });
     await loadTeamRun().catch(() => {}); // a teammate's Release all would hit closed PRs mid-wave
