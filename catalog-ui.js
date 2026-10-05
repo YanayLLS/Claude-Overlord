@@ -102,7 +102,8 @@
 
   function renderDetail() {
     const it = stage === 'list' && rows[sel];
-    detail.hidden = !it;
+    detail.hidden = stage !== 'list';
+    detail.style.visibility = it ? '' : 'hidden'; // no match: keep the pane's space so the card doesn't shrink
     if (!it) return;
     const where = it.origin === 'builtin' ? 'Built into Claude Code' : tilde(it.path);
     const note = it.overrides ? '<span class="cg-badge">overrides ~/.claude</span>'

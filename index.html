@@ -654,6 +654,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #catalog-pop { position:fixed; z-index:200; width:min(540px, calc(100vw - 32px)); display:flex; flex-direction:column;
   background:var(--pop); border-radius:var(--r-lg); box-shadow:var(--pop-shadow); overflow:hidden; font-size:12.5px; color:var(--text); }
 #catalog-pop[hidden], #catalog-pop [hidden] { display:none !important; }
+#catalog-pop:not([hidden]) { animation:cg-in .12s ease-out; }
+@keyframes cg-in { from { opacity:0; transform:translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { #catalog-pop:not([hidden]) { animation:none; } }
 #catalog-pop.cg-narrow { width:280px; }
 #catalog-pop kbd { font:inherit; font-size:10px; line-height:15px; min-width:16px; text-align:center; color:var(--dim); border:1px solid var(--border-hi); border-bottom-width:2px; border-radius:4px; padding:0 4px; }
 #catalog-pop .ic { width:14px; height:14px; }
@@ -673,7 +676,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #catalog-pop .cg-group { display:flex; align-items:baseline; gap:7px; padding:10px 8px 4px; font-size:11px; font-weight:600; color:var(--subtext); }
 #catalog-pop .cg-group:first-child { padding-top:4px; }
 #catalog-pop .cg-sub { font-weight:400; color:var(--dim); }
-#catalog-pop .cg-row { display:flex; align-items:center; gap:9px; height:28px; padding:0 8px; border-radius:var(--r-sm); cursor:pointer; white-space:nowrap; }
+#catalog-pop .cg-row { display:flex; align-items:center; gap:9px; height:28px; padding:0 8px; border-radius:var(--r-sm); cursor:pointer; white-space:nowrap; transition:background-color .08s; }
+#catalog-pop .cg-row:hover:not(.sel) { background:var(--hover); }
 #catalog-pop .cg-row.sel { background:var(--accent-soft); }
 #catalog-pop .cg-row.shadowed { opacity:.45; }
 #catalog-pop .cg-row.cg-none { opacity:.4; }
@@ -694,7 +698,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #catalog-pop .cg-hint { color:var(--dim); }
 #catalog-pop .cg-badge { margin-left:auto; font-family:system-ui, sans-serif; font-size:10.5px; color:var(--yellow); }
 #catalog-pop .cg-badge.dim { color:var(--dim); }
-#catalog-pop .cg-d-desc { margin-top:5px; color:var(--subtext); line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+#catalog-pop .cg-d-desc { margin-top:5px; color:var(--subtext); line-height:1.45; height:2.9em; /* always 2 lines tall, so hovering rows never resizes the card */ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 #catalog-pop .cg-d-path { margin-top:6px; font-size:11px; color:var(--dim); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; direction:rtl; text-align:left; }
 #catalog-pop .cg-foot { flex:none; display:flex; gap:14px; padding:7px 14px; border-top:1px solid var(--border); color:var(--dim); font-size:11px; }
 #catalog-pop .cg-k { display:flex; align-items:center; gap:5px; }
