@@ -571,7 +571,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     const others = memberLogins().filter(m => m.toLowerCase() !== String(who.github).toLowerCase());
     if (others.length) await ghJson(['api', '-X', 'POST', `repos/${repo}/pulls/${n}/requested_reviewers`, '--input', writeTmp({ reviewers: others })]);
   };
-  const history = createHistory({ ghJson, writeTmp: (p) => writeTmp(p), push, getState: () => state, org: () => approversOrg(),
+  const history = createHistory({ ghJson, writeTmp: (p) => writeTmp(p), push, getState: () => state, org: () => approversOrg(), teamKnown: () => memberLogins().length > 0,
     signoffOf, requestReviews, whoAmI, send });
   // one at a time; a call during a run queues exactly one more (a sign mid-reconcile must still land)
   let reconciling = null, again = false;

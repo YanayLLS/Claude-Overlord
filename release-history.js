@@ -11,7 +11,7 @@ const HISTORY_SHOWN = 30;
 // Files whose effects live in the database, not the code: a rollback can't undo them
 const DATA_CHANGE = /(^|\/)(migrations?|migrate)\/|\.sql$|(^|\/)(schema|schemas)\//i;
 
-module.exports = function createHistory({ ghJson, writeTmp, push, getState, org, signoffOf, requestReviews, whoAmI, send }) {
+module.exports = function createHistory({ ghJson, writeTmp, push, getState, org, signoffOf, requestReviews, whoAmI, send, teamKnown = () => true }) {
   const repoOf = () => org() && `${org()}/${M.MANIFESTS_REPO}`;
   const apiErr = (r) => r.error || (r.data && !Array.isArray(r.data) && r.data.message && r.data.status ? `${r.data.message} (${r.data.status})` : null);
   const cache = new Map(); // path → { sha, manifest }
@@ -114,7 +114,10 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       for (const { r, s } of seen) {
         if (!s || s.error || !s.pr) continue;
         [m, c] = M.applyPr(m, r.repo, { number: r.pr.number, mergeSha: s.pr.merged ? s.pr.merge_commit_sha : null, mergedAt: s.pr.merged_at,
-          closed: s.pr.state === 'closed', headSha: s.pr.head && s.pr.head.sha, signers: s.signers.map(x => x.login) });
+          closed: s.pr.state === 'closed', headSha: s.pr.head && s.pr.head.sha,
+          // signers only from an Overlord that knows the approvers team: one that doesn't sees nobody as
+          // signed, and would flip the record back and forth with every approver's Overlord
+          signers: teamKnown() ? s.signers.map(x => x.login) : undefined });
         changed = changed || c;
       }
       if (changed) show(m);
