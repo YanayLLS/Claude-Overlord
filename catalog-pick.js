@@ -34,7 +34,7 @@ function pickItems(items, type, q) {
 
 // Wraps terminal input: a typed "/" is held `ms`; a second "/" in that window opens
 // the popover and neither reaches the pty. Any other data flushes the held "/" first.
-function makeSlashGate({ send, open, ms = 250, timer = { set: setTimeout, clear: clearTimeout } }) {
+function makeSlashGate({ send, open, ms = 250, timer = { set: (fn, t) => setTimeout(fn, t), clear: (h) => clearTimeout(h) } }) {
   let held = null;
   const flush = () => { if (held) { timer.clear(held); held = null; send('/'); } };
   return (data) => {
@@ -44,4 +44,12 @@ function makeSlashGate({ send, open, ms = 250, timer = { set: setTimeout, clear:
   };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate };
+// Row of Claude's input line ("> " / "❯ ") among the rendered viewport rows, or -1.
+// It must sit right under a ─── divider so a quoted "> " in the transcript doesn't count.
+function promptRow(lines) {
+  for (let i = lines.length - 1; i > 0; i--)
+    if (/^\s*(?:>|❯)(\s|$)/.test(lines[i]) && /[─━]{3}/.test(lines[i - 1])) return i;
+  return -1;
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { fuzzyScore, pickItems, makeSlashGate, promptRow };

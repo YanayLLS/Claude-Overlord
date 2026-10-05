@@ -648,10 +648,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #ghost-suggest { position:fixed; z-index:50; color:#585b70; opacity:.85; white-space:pre; pointer-events:none; display:none; }
 #ghost-suggest .ghost-hint { font-size:9px; opacity:.7; margin-left:6px; border:1px solid #585b70; border-radius:3px; padding:0 3px; }
 /* "+" / "//" catalog popover (catalog-ui.js) */
-#catalog-btn { position:absolute; right:24px; bottom:14px; z-index:11; width:28px; height:28px; border-radius:50%; border:1px solid var(--border-hi);
-  background:var(--pop); color:var(--text); font-size:17px; line-height:24px; padding:0; cursor:pointer; opacity:.6; transition:opacity .15s; box-shadow:0 2px 8px rgba(0,0,0,.4); }
-#catalog-btn:hover { opacity:1; }
-#catalog-pop { position:fixed; z-index:200; width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 560px); display:flex; flex-direction:column;
+#catalog-btn { position:absolute; z-index:11; width:18px; height:18px; padding:0; border-radius:5px; border:1px solid var(--border-hi);
+  background:transparent; color:var(--dim); font-size:14px; line-height:15px; cursor:pointer; }
+#catalog-btn:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+#catalog-btn[hidden] { display:none; }
+#catalog-pop { position:fixed; z-index:200; width:min(560px, calc(100vw - 32px)); max-height:min(70vh, 560px, calc(100vh - 80px)); display:flex; flex-direction:column;
   background:var(--pop); border-radius:var(--r-lg); box-shadow:var(--pop-shadow); overflow:hidden; font-size:12.5px; color:var(--text); }
 #catalog-pop[hidden] { display:none; }
 #catalog-pop .cg-head { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--border); }
@@ -2916,7 +2917,8 @@ function createXterm(id) {
   // measure itself at open() time. Opening into a display:none element pins it to 80x24;
   // the scrollback replay then lands at 80 cols and the first fit() reflows 10k lines,
   // desyncing baseY/viewport (scroll jumps, can't reach the prompt line).
-  el.style.cssText = 'position:absolute;inset:0;padding:6px 0 6px 8px;visibility:hidden;';
+  // 32px left gutter holds the + catalog button beside Claude's prompt (catalog-ui.js).
+  el.style.cssText = 'position:absolute;inset:0;padding:6px 0 6px 32px;visibility:hidden;';
   container.appendChild(el);
   const fitAddon = new XFitAddon();
   const terminal = new XTerminal({
@@ -2982,6 +2984,7 @@ function createXterm(id) {
   // A typed "//" opens the skills popover instead of reaching the pty (catalog-pick.js holds a lone "/" 250 ms).
   const slashGate = makeSlashGate({ send: (data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); }, open: () => catalogUi.open() });
   terminal.onData(slashGate);
+  terminal.onRender(() => { if (id === selectedId) catalogUi.track(); }); // keep + level with the prompt row
   terminal.onScroll(() => {
     ghostClear();
     updateScrollBtn();
@@ -3140,7 +3143,7 @@ function showXterm(id) {
     } else {
       fitPreservingScroll(x);
     }
-    if (!_renaming) x.terminal.focus();
+    if (!_renaming) x.terminal.focus(); catalogUi.track();
     sendResize(id, x);
     updateScrollBtn();
     positionNameChip();
