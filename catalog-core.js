@@ -8,7 +8,7 @@ const path = require('path');
 // ponytail: hand-picked, not read from Claude — add new built-ins as Claude ships them
 const BUILTINS = [
   ['clear', 'Clear the conversation'], ['compact', 'Summarise the conversation to free context', '[instructions]'],
-  ['context', 'Show context usage'], ['cost', 'Show token usage and cost'], ['model', 'Switch model', '[model]'],
+  ['context', 'Show context usage'], ['diff', 'Uncommitted changes in a pane beside the transcript'], ['cost', 'Show token usage and cost'], ['model', 'Switch model', '[model]'],
   ['review', 'Review a pull request', '[pr]'], ['init', 'Write a CLAUDE.md for this repo'],
   ['memory', 'Edit memory files'], ['config', 'Open settings'], ['mcp', 'Manage MCP servers'],
   ['agents', 'Manage subagents'], ['permissions', 'Manage tool permissions'], ['hooks', 'Manage hooks'],

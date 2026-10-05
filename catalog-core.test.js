@@ -60,6 +60,7 @@ assert.ok(!items.some(i => /hidden/.test(i.name)), 'disabled plugin skipped');
 // built-ins present, insert text is "/name "
 assert.ok(BUILTINS.length > 5);
 assert.ok(find('builtin', 'compact'));
+assert.ok(find('builtin', 'diff'), 'the built-in diff mod adds /diff');
 assert.strictEqual(find('command', 'fix-bug').insert, '/fix-bug ');
 assert.strictEqual(find('agent', 'code-reviewer').insert, 'Use the code-reviewer agent to ');
 

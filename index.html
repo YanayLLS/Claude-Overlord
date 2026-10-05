@@ -3283,7 +3283,8 @@ let catalogTyped = '';
 function syncCatalogSettings(s) {
   const on = s.catalogEnabled !== false, chk = document.getElementById('chk-catalog'), inp = document.getElementById('inp-catalog-hotkey');
   if (chk) chk.checked = on;
-  if (inp) { inp.value = inp.dataset.saved = s.catalogHotkey || '//'; inp.disabled = !on; }
+  if (inp) inp.value = inp.dataset.saved = s.catalogHotkey || '//';
+  const field = document.getElementById('catalog-hotkey-field'); if (field) field.style.display = on ? '' : 'none'; // off → no hotkey to set
 }
 function saveCatalogSettings(extra = {}) {
   const settings = { catalogEnabled: document.getElementById('chk-catalog').checked, catalogHotkey: document.getElementById('inp-catalog-hotkey').value || '//', ...extra };
