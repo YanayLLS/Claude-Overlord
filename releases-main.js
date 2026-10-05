@@ -32,7 +32,7 @@ const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
-module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal, startAgent, whoami, notify, fixRun }) {
+module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr }) {
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
@@ -733,6 +733,44 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     return null;
   }
 
+  // ── Managing a release in flight, one repo at a time (History card row actions) ──
+  const LIVE_MS = 90 * 1000;
+  let modalOpen = false, liveTimer = null;
+  const prOf = (repo, n) => { for (const m of (state.history && state.history.items) || []) { const r = m.repos.find(x => x.repo === repo && x.pr.number === Number(n)); if (r) return { m, r }; } return null; };
+  // Merge one release PR now (same gate as everything else: approvers' signatures, then GitHub's own rules)
+  async function mergeOne(repo, n) {
+    await loadApprovers();
+    if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can merge a release PR' });
+    if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
+    const found = prOf(repo, n), label = found ? found.r.label : repo;
+    const gate = await mergeGate(`https://github.com/${repo}/pull/${n}`);
+    if (!gate.ok) return send({ type: 'toast', text: `${label}: ${gate.reason}` });
+    const res = await ghJson(['api', '-X', 'PUT', `repos/${repo}/pulls/${n}/merge`, '-f', 'merge_method=merge']);
+    if (apiErr(res)) return send({ type: 'toast', text: `${label}: GitHub refused the merge (${apiErr(res)})` });
+    send({ type: 'toast', text: `${label} merged — its deploy starts now` });
+    await reconcileHistory().catch(() => {});
+    refreshRun().catch(() => {});
+  }
+  // Re-run the failed jobs of the deploy that shipped a release PR's merge
+  async function rerunDeploy(repo, n) {
+    const found = prOf(repo, n);
+    const d = found && found.r.deploy, sha = found && found.r.mergeSha;
+    if (!d || !d.workflow || !sha) return send({ type: 'toast', text: 'No CI deploy recorded for that merge' });
+    const runs = await ghJson(['api', '-X', 'GET', `repos/${repo}/actions/workflows/${d.workflow}/runs`, '-f', `head_sha=${sha}`, '-f', 'per_page=1']);
+    const run = runs.data && runs.data.workflow_runs && runs.data.workflow_runs[0];
+    if (!run) return send({ type: 'toast', text: `${found.r.label}: no deploy run found for ${sha.slice(0, 7)}` });
+    const res = await ghJson(['api', '-X', 'POST', `repos/${repo}/actions/runs/${run.id}/rerun-failed-jobs`]);
+    if (apiErr(res) && !/Unexpected end|JSON/i.test(apiErr(res))) return send({ type: 'toast', text: `${found.r.label}: ${apiErr(res)}` });
+    send({ type: 'toast', text: `${found.r.label}: deploy re-running` });
+  }
+  // The PR panel's Fix (an agent that loops on the failing checks), for a release PR
+  async function fixReleasePr(repo, n) {
+    if (!fixPr) return;
+    const p = await ghJson(['api', `repos/${repo}/pulls/${n}`]);
+    if (apiErr(p) || !p.data) return send({ type: 'toast', text: 'Fix: ' + (apiErr(p) || 'PR not found') });
+    await fixPr({ repo, number: Number(n), url: p.data.html_url, headRef: p.data.head.ref, baseRef: p.data.base.ref, isCrossRepository: !!(p.data.head.repo && p.data.head.repo.full_name !== repo) });
+  }
+
   async function releaseAll(id) {
     if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is already running' });
     if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
@@ -1018,12 +1056,25 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     switch (msg && msg.type) {
       case 'releasesOpen':
         send({ type: 'releases', state });
+        // while it's open and a release is in flight, keep it current (merges/deploys made anywhere)
+        modalOpen = true; clearInterval(liveTimer);
+        liveTimer = setInterval(() => { if (modalOpen && ((state.history && state.history.items) || []).some(m => ['pending', 'merged', 'partial'].includes(m.status))) reconcileHistory().catch(() => {}); }, LIVE_MS);
+        if (liveTimer.unref) liveTimer.unref();
         loadApprovers().then(refreshRun).catch(() => {});
         loadTeamRun().catch(() => {});
         // reopened within a minute: what's on screen is fresh enough, the timer takes it from here
         if (!state.updatedAt || Date.now() - state.updatedAt > 60000) refresh();
         return true;
-      case 'releasesClose': return true;
+      case 'releasesClose': modalOpen = false; clearInterval(liveTimer); return true;
+      case 'releasesMergeOne': mergeOne(msg.repo, msg.number).catch(e => send({ type: 'toast', text: 'Merge failed: ' + e.message })); return true;
+      case 'releasesRerunDeploy': rerunDeploy(msg.repo, msg.number).catch(e => send({ type: 'toast', text: 'Re-run failed: ' + e.message })); return true;
+      case 'releasesFixPr': fixReleasePr(msg.repo, msg.number).catch(e => send({ type: 'toast', text: 'Fix failed: ' + e.message })); return true;
+      case 'releasesConfirmHand': {
+        const r = (state.config.repos || []).find(x => x.repo === msg.repo);
+        if (r && r.branches && r.branches[msg.env]) confirmDeployed([{ repo: r.repo, env: msg.env, branch: r.branches[msg.env], label: msg.label || r.repo }])
+          .then(() => send({ type: 'toast', text: `${msg.label}: recorded as deployed` })).catch(e => send({ type: 'toast', text: 'Confirm failed: ' + e.message }));
+        return true;
+      }
       case 'releasesRefresh': refresh(); return true;
       case 'releasesRelease': release(msg.envs).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;

@@ -37,7 +37,7 @@
       relOpen = false; apprOpen = false; render();
       return;
     }
-    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"]')) { armed = null; render(); }
+    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"]')) { armed = null; render(); }
     if (e.target === overlay) return show(false);
     const a = e.target.closest('[data-url]');
     if (a) { e.stopPropagation(); return api.send({ type: 'openUrl', url: a.dataset.url }); }
@@ -125,6 +125,11 @@
     histRbRepo: (el) => { const r = el.dataset.repo; rbSkip.has(r) ? rbSkip.delete(r) : rbSkip.add(r); render(); },
     histRbGo: (el) => { api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
     // Cancel release: closes every open PR of it. Same two-click confirm as Release all
+    // a repo of the release in flight: merge it now (two clicks), re-run its deploy, fix its checks, confirm a hand deploy
+    rowMerge: (el) => { const k = 'm:' + el.dataset.repo + '#' + el.dataset.n; if (armed !== k) return arm(k); armed = null; el.textContent = 'Merging…'; api.send({ type: 'releasesMergeOne', repo: el.dataset.repo, number: +el.dataset.n }); },
+    rowRerun: (el) => { el.textContent = 'Re-running…'; api.send({ type: 'releasesRerunDeploy', repo: el.dataset.repo, number: +el.dataset.n }); },
+    rowFix: (el) => { api.send({ type: 'releasesFixPr', repo: el.dataset.repo, number: +el.dataset.n }); show(false); },
+    rowHand: (el) => { const k = 'h:' + el.dataset.repo; if (armed !== k) return arm(k); armed = null; el.textContent = 'Recording…'; api.send({ type: 'releasesConfirmHand', repo: el.dataset.repo, env: 'prod', label: el.dataset.label }); },
     relCancel: (el) => { const k = 'x:' + (el.dataset.id || 'run'); if (armed !== k) return arm(k); armed = null; api.send({ type: 'releasesCancel', id: el.dataset.id || null }); render(); },
     histMerge: (el) => { if (armed !== 'h:' + el.dataset.id) return arm('h:' + el.dataset.id); armed = null; startingAll(); api.send({ type: 'releasesMergeRelease', id: el.dataset.id }); render(); },
     histReload: () => { api.send({ type: 'releasesHistory' }); },
@@ -429,6 +434,20 @@
   }
 
   const DONE = new Set(['deployed', 'merged-hand', 'hand-done']);
+  // Row actions for a repo of a release in flight (approvers): merge now / fix its checks / re-run its deploy
+  function rowActs(r, need) {
+    const st = state || {}, a = st.approvers || {};
+    if (!a.isApprover || (st.releaseAll && st.releaseAll.running)) return '';
+    const d = `data-repo="${esc(r.repo)}" data-n="${esc(r.pr.number)}"`;
+    if (need) {
+      const k = 'm:' + r.repo + '#' + r.pr.number;
+      return (r.health && r.health.checks === 'fail' ? `<button class="rl-row-btn" data-act="rowFix" ${d} title="Start an agent that gets this PR's checks green">🔧 Fix</button>` : '')
+        + (armed === k ? `<button class="rl-row-btn armed" data-act="rowMerge" ${d}>Confirm: merge</button>`
+          : `<button class="rl-row-btn" data-act="rowMerge" ${d} title="Merge just this one now (needs the release signed; GitHub's own rules apply)">Merge</button>`);
+    }
+    if (r.mergeSha && r.deploy && r.deploy.state === 'failure') return `<button class="rl-row-btn" data-act="rowRerun" ${d} title="Re-run the failed jobs of its deploy">↻ Re-run deploy</button>`;
+    return '';
+  }
   // A repo's status in a Release all (state.releaseAll.items[label]), as a short coloured note
   function relItemHtml(it) {
     if (!it) return '';
@@ -499,6 +518,9 @@
   function releaseAllHtml(s) {
     const p = s.releaseAll;
     if (!p) return '';
+    // a finished run's message goes stale once its release has nothing left open (merged since, by hand or on GitHub)
+    const man = !p.running && p.id && ((s.history && s.history.items) || []).find(m => m.id === p.id);
+    if (man && !man.repos.some(r => !r.mergeSha && !r.closed) && p.status !== 'done') return '';
     const its = Object.values(p.items || {}).filter(x => x.s !== 'held');
     const doneN = its.filter(x => DONE.has(x.s)).length;
     const pct = its.length ? Math.round(doneN / its.length * 100) : 0;
@@ -556,6 +578,13 @@
         + (pending ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
+      // the release at a glance: how many repos are where
+      if (pending || m.status === 'merged' || m.status === 'partial') {
+        const cnt = {};
+        for (const r of m.repos) { if (r.closed && !r.mergeSha) continue; const k = !r.mergeSha ? 'open' : !r.deploy ? 'merged' : r.deploy.state === 'success' ? 'deployed' : r.deploy.state === 'failure' ? 'deploy failed' : 'deploying'; cnt[k] = (cnt[k] || 0) + 1; }
+        const order = ['deployed', 'deploying', 'merged', 'deploy failed', 'open'];
+        h += `<div class="rl-hist-summary">${order.filter(k => cnt[k]).map(k => `<span class="rl-sum-${k.replace(' ', '-')}"><b>${cnt[k]}</b> ${k}</span>`).join('<i>·</i>')}</div>`;
+      }
       h += '<div class="rl-hist-repos">';
       const liveItems = s.releaseAll && s.releaseAll.id === m.id && s.releaseAll.items;
       // in release order, one group per wave (what everything depends on first, the frontend last), with
@@ -566,14 +595,18 @@
       const stOf = (r) => { const it = liveItems && liveItems[r.label]; if (it) return it.s; if (r.hand) return ''; if (r.mergeSha) return r.deploy ? (r.deploy.state === 'success' ? 'deployed' : r.deploy.state === 'failure' ? 'failed' : 'deploying') : 'merged-hand'; return ''; };
       const live = new Set(['merging', 'merged', 'deploying', 'hand-wait']);
       waves.forEach((wave, wi) => {
-      const ss = wave.map(stOf);
-      const wst = ss.every(x => DONE.has(x)) ? 'done' : ss.some(x => x === 'failed') ? 'bad' : ss.some(x => live.has(x)) ? 'active' : ss.some(x => x === 'held') ? 'warn' : 'todo';
+      // a hand-deployed step nobody confirmed this run says nothing about the wave
+      const ss = wave.filter(r => !r.hand || (liveItems && liveItems[r.label])).map(stOf);
+      const wst = !ss.length ? 'todo' : ss.every(x => DONE.has(x)) ? 'done' : ss.some(x => x === 'failed') ? 'bad' : ss.some(x => live.has(x)) ? 'active' : ss.some(x => x === 'held') ? 'warn' : 'todo';
       const wsum = { done: 'done', bad: 'deploy failed', active: 'in progress', warn: `${ss.filter(x => x === 'held').length} waiting`, todo: '' }[wst];
       h += `<div class="rl-tl-step ${wst}"><i class="rl-tl-node">${wst === 'done' ? '✓' : wi + 1}</i><span class="rl-tl-name">${waves.length > 1 ? `Wave ${wi + 1}` : 'Repos'}</span>${wsum ? `<span class="rl-tl-sum">${esc(wsum)}</span>` : ''}</div><div class="rl-tl-rows ${wst}">`;
       for (const r of wave) {
         if (r.hand) {
           const it = liveItems && liveItems[r.label];
-          h += `<div class="rl-hist-repo hand"><b>${esc(r.label)}</b><span></span><span class="rl-hist-sha"><span class="rl-hand">✋ by hand</span></span><span class="rl-hist-state">${it ? relItemHtml(it) : ''}</span></div>`;
+          const handBtn = ['pending', 'merged', 'partial'].includes(m.status) && a.isApprover && !(it && it.s === 'hand-done') ? (armed === 'h:' + r.repo
+            ? `<button class="rl-row-btn armed" data-act="rowHand" data-repo="${esc(r.repo)}" data-label="${esc(r.label)}">Confirm: deployed</button>`
+            : `<button class="rl-row-btn" data-act="rowHand" data-repo="${esc(r.repo)}" data-label="${esc(r.label)}" title="Record ${esc(r.label)} as deployed now (its branch head goes live)">✓ Deployed</button>`) : '';
+          h += `<div class="rl-hist-repo hand"><b>${esc(r.label)}</b><span></span><span class="rl-hist-sha"><span class="rl-hand">✋ by hand</span></span><span class="rl-hist-state">${handBtn}${it ? relItemHtml(it) : ''}</span></div>`;
           continue;
         }
         const need = pending && !r.mergeSha && !r.closed;
@@ -582,7 +615,7 @@
         const dep = relItemHtml({ s: stOf(r) || 'merged-hand' });
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
-          + `<span class="rl-hist-state">${liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-state">${rowActs(r, need)}${r.mergeSha ? (liveItems && liveItems[r.label] && ['deploying', 'deployed', 'failed'].includes(liveItems[r.label].s) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
       }
       h += '</div>';
       });

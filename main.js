@@ -2508,6 +2508,7 @@ async function releasesFindLocal(repo, rel, ref) {
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
   startAgent: (cwd, prompt) => createAgent(cwd, null, prompt),
   fixRun: (run) => fixActionRun(run),
+  fixPr: (pr) => fixPr(pr),
   notify: (title, body, url, onClick) => {
     if (!Notification.isSupported()) return;
     const n = new Notification({ title, body, silent: true });

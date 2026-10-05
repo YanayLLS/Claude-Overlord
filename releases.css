@@ -485,3 +485,12 @@
 .rl-item.bad { background:rgba(248,113,113,.14); color:var(--red); }
 .rl-item.warn { background:rgba(251,146,60,.14); color:var(--peach); }
 .rl-item.run { background:rgba(250,204,21,.14); color:var(--yellow); animation:rl-pulse 1.4s ease-in-out infinite; }
+/* managing a release in flight: the at-a-glance line and per-repo actions (shown on row hover) */
+.rl-hist-summary { display:flex; flex-wrap:wrap; gap:4px 8px; margin:4px 0 2px; font-size:11px; color:var(--subtext); }
+.rl-hist-summary i { font-style:normal; color:var(--dim); }
+.rl-hist-summary b { color:var(--text); }
+.rl-sum-deployed b { color:var(--green); } .rl-sum-deploying b { color:var(--yellow); } .rl-sum-deploy-failed b { color:var(--red); } .rl-sum-open b { color:var(--peach); }
+.rl-row-btn { font:inherit; font-size:10.5px; padding:1px 9px; border-radius:999px; border:1px solid var(--border); background:var(--surface0); color:var(--subtext); cursor:pointer; opacity:0; transition:opacity .12s, background .12s, color .12s; white-space:nowrap; }
+.rl-hist-repo:hover .rl-row-btn, .rl-row-btn.armed, .rl-row-btn:focus-visible { opacity:1; }
+.rl-row-btn:hover { background:var(--surface1); color:var(--text); }
+.rl-row-btn.armed { border-color:rgba(251,191,36,.7); background:rgba(251,191,36,.16); color:var(--yellow, #fbbf24); }
