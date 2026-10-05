@@ -3001,12 +3001,12 @@ function render() {
 // ── Terminal panel (real xterm.js) ──────────────────────
 const xterms = new Map(); // id -> { terminal, fitAddon, searchAddon, el }
 const container = document.getElementById('term-container');
-// One blink clock for every terminal, on an element redraws never replace. A key press shows the caret
-// and restarts the clock, so it stays solid while typing.
+// One blink clock for every terminal, on an element redraws never replace. A key press or a caret move
+// (the typed letter's echo) shows the caret and restarts the clock, so it stays solid while typing.
 const blinkCaret = (() => { let t = null; const tick = () => container.classList.toggle('caret-off');
   return () => { clearInterval(t); container.classList.remove('caret-off'); t = setInterval(tick, 530); }; })();
 blinkCaret();
-container.addEventListener('keydown', blinkCaret, true);
+document.addEventListener('keydown', (e) => { if (e.target.classList && e.target.classList.contains('xterm-helper-textarea')) blinkCaret(); }, true);
 // termData that arrived while #term was closed (container unmeasurable). Creating an xterm
 // then would pin it to 80x24 and force a scrollback reflow on first open. Held here, flushed
 // by createXterm once the terminal has been fit to real dimensions.
@@ -3100,6 +3100,7 @@ function createXterm(id) {
   // Shift(+Ctrl)+Left/Right/Home/End marks prompt text like a Windows edit box (shift-select-core.js).
   let shiftSel = null; // { anchorX, row } while a keyboard selection is live
   terminal.onCursorMove(() => {
+    if (id === selectedId) blinkCaret();
     const b = terminal.buffer.active;
     if (!shiftSel || b.baseY + b.cursorY !== shiftSel.row) return; // mid-redraw hop off the row
     const r = selRange(shiftSel.anchorX, b.cursorX);
