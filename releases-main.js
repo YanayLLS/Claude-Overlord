@@ -32,7 +32,20 @@ const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
-module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask }) {
+module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: ghGraphqlRaw, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask }) {
+  // GitHub's limit is shared by every tool and teammate on the account: when it answers "rate limit",
+  // background polling here pauses until it lifts (what you click still goes through), so we don't
+  // keep the lockout going. pausedUntil is also shown in the modal.
+  const RATE_PAUSE_MS = 10 * 60 * 1000;
+  let pausedUntil = 0;
+  const limited = () => Date.now() < pausedUntil;
+  const noteLimit = (r) => {
+    const e = r && (r.error || (r.data && !Array.isArray(r.data) && r.data.message) || (r.errors && JSON.stringify(r.errors)));
+    if (e && /rate limit|secondary rate/i.test(String(e))) { pausedUntil = Date.now() + RATE_PAUSE_MS; try { push({ rateLimitedUntil: pausedUntil }); } catch {} }
+    return r;
+  };
+  const ghJson = async (args) => noteLimit(await ghJsonRaw(args));
+  const ghGraphql = async (q) => noteLimit(await ghGraphqlRaw(q));
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
@@ -305,11 +318,18 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (manChanged) await Promise.all([history.load(), refreshRun(), loadTeamRun()]).catch(() => {});
     if (key !== lastPing || manChanged) { lastPing = key; await checkToSign(); }
   }
-  const pingTimer = setInterval(() => signPing().catch(() => {}), SIGN_PING_MS);
+  // every SIGN_PING_MS while a release is in flight; every other tick (10s) when none is
+  let pingTick = 0;
+  const pingTimer = setInterval(() => {
+    if (limited()) return;
+    const inFlight = ((state.history && state.history.items) || []).some(m => ['pending', 'merged', 'partial'].includes(m.status)) || (state.releaseAll && state.releaseAll.running);
+    if (!inFlight && (pingTick++ % 2)) return;
+    signPing().catch(() => {});
+  }, SIGN_PING_MS);
   if (pingTimer.unref) pingTimer.unref();
 
   setTimeout(() => {
-    refresh(); timer = setInterval(refresh, REFRESH_MS); timer.unref?.();
+    refresh(); timer = setInterval(() => { if (!limited()) refresh(); }, REFRESH_MS); timer.unref?.();
     // Overlord restarted while a recent run was still settling: keep watching its PRs
     const r = state.releaseRun;
     if (r && !r.running && Date.now() - r.startedAt < RECHECK_FOR_MS) recheck(r);
@@ -442,6 +462,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
   // one raises a notification; clicking it opens Releases. Re-checked every minute while any wait.
   let toSignTimer = null, notifiedToSign = new Set();
   async function checkToSign() {
+    if (limited()) return; // GitHub rate limit: wait it out
     clearTimeout(toSignTimer);
     const cfg = state.config;
     if (!cfg) return;
@@ -1071,7 +1092,7 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
         send({ type: 'releases', state });
         // while it's open and a release is in flight, keep it current (merges/deploys made anywhere)
         modalOpen = true; clearInterval(liveTimer);
-        liveTimer = setInterval(() => { if (modalOpen && ((state.history && state.history.items) || []).some(m => ['pending', 'merged', 'partial'].includes(m.status))) reconcileHistory().catch(() => {}); }, LIVE_MS);
+        liveTimer = setInterval(() => { if (!limited() && modalOpen && ((state.history && state.history.items) || []).some(m => ['pending', 'merged', 'partial'].includes(m.status))) reconcileHistory().catch(() => {}); }, LIVE_MS);
         if (liveTimer.unref) liveTimer.unref();
         loadApprovers().then(refreshRun).catch(() => {});
         loadTeamRun().catch(() => {});

@@ -115,6 +115,20 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     if (!shas.length || !s.pr || !s.pr.head) return undefined;
     return shas.includes(s.pr.head.sha) ? s.pr.head.sha : shas[shas.length - 1];
   }
+  // a release PR's merged PRs: GitHub's "Merge pull request #N from …" commits, with the PR title (its 3rd line)
+  async function changesOf(repo, n) {
+    const r = await ghJson(['api', '-X', 'GET', `repos/${repo}/pulls/${n}/commits`, '-f', 'per_page=100']);
+    if (apiErr(r) || !Array.isArray(r.data)) return null;
+    const out = [];
+    for (const c of r.data) {
+      const msg = (c.commit && c.commit.message) || '', m = msg.match(/^Merge pull request #(\d+) from \S+/);
+      if (!m) continue;
+      const title = msg.split('\n').slice(1).map(x => x.trim()).filter(Boolean)[0] || '';
+      if (/^chore\((release|merge)\)/i.test(title)) continue; // release / back-merge plumbing, not a change
+      out.push({ n: +m[1], title: title.slice(0, 140) });
+    }
+    return out.slice(-60);
+  }
   async function reconcile() {
     const loaded = await load();
     if (!loaded) return;
@@ -144,6 +158,12 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         changed = changed || c;
       }
       if (changed) show(m);
+      // what changed in each repo: the PRs its release PR brought in (merge commits' "#N title"), once, after it merges
+      const noChanges = m.repos.filter(r => r.mergeSha && !r.changes);
+      if (noChanges.length) {
+        const lists = await Promise.all(noChanges.map(r => changesOf(r.repo, r.pr.number)));
+        noChanges.forEach((r, i) => { if (lists[i]) { m = { ...m, repos: m.repos.map(x => x === r || (x.repo === r.repo && x.pr.number === r.pr.number) ? { ...x, changes: lists[i] } : x) }; changed = true; } });
+      }
       const deploys = await Promise.all(m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state)).map(async (r) => {
         const runs = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', `head_sha=${r.mergeSha}`, '-f', 'per_page=5']);
         return [r, ((runs.data && runs.data.workflow_runs) || []).find(x => x.status === 'completed')];

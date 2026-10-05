@@ -121,6 +121,7 @@
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; if (tab === 'history') api.send({ type: 'releasesHistory' }); render(); },
     // history actions
+    histChanges: (el) => { const k = el.dataset.key; openChanges.has(k) ? openChanges.delete(k) : openChanges.add(k); render(); },
     histRollback: (el) => { rbOpen = rbOpen === el.dataset.id ? null : el.dataset.id; rbSkip = new Set(); render(); },
     histRbRepo: (el) => { const r = el.dataset.repo; rbSkip.has(r) ? rbSkip.delete(r) : rbSkip.add(r); render(); },
     histRbGo: (el) => { api.send({ type: 'releasesRollback', id: el.dataset.id, skip: [...rbSkip] }); rbOpen = null; render(); },
@@ -485,6 +486,7 @@
   // optimistic: the progress line shows right on the confirming click; main's first update replaces it
   function startingAll() { if (state) state = { ...state, releaseAll: { running: true, status: 'checking', detail: 'starting', wave: 0, waves: 0, merged: [] } }; }
   let armed = null, armTimer = null;
+  const openChanges = new Set(); // History rows whose "N changes" list is open
   const ARM_MS = 6000;
   function arm(key) {
     armed = key; clearTimeout(armTimer);
@@ -559,8 +561,16 @@
     }
     const a = s.approvers || {}, meL = (a.me || '').toLowerCase();
     const toSign = new Set((s.toSign || []).map(t => t.repo + '#' + t.number));
+    // the release that's live now: the newest prod one that shipped something. Rolling back to it changes nothing,
+    // and only its hand steps can be judged against what's live today
+    const liveRel = hs.items.find(x => (x.env || 'prod') === 'prod' && x.kind !== 'rollback' && x.repos.some(r => r.mergeSha) && !['abandoned', 'cancelled'].includes(x.status));
+    const lives = (s.results && s.results.lives) || {};
     for (let m of hs.items) {
-      const [cls, label] = STATUS_CHIP[m.status] || ['', m.status];
+      // hand steps in this release's order not confirmed since it opened (nor already up to date)
+      const handOpen = m === liveRel ? (m.manual || []).filter(x => s.config && (s.config.releaseOrder || []).some(w => w.some(y => y === x.label || y.toLowerCase() === String(x.repo).toLowerCase())))
+        .filter(x => { const l = lives[`${x.repo}|${m.env || 'prod'}`]; return !(l && !l.error && (l.behind === 0 || (l.confirmed && Date.parse(l.confirmed.at) >= Date.parse(m.openedAt)))); }).map(x => x.label) : [];
+      let [cls, label] = STATUS_CHIP[m.status] || ['', m.status];
+      if (handOpen.length && ['deployed', 'merged'].includes(m.status)) { cls = 'warn'; label = `${label.replace(' ✓', '')} · ${handOpen.length} hand step${handOpen.length === 1 ? '' : 's'} to confirm`; }
       const pending = m.status === 'pending';
       // signed as one: while pending, a signer is someone on every still-open PR
       const openRepos = m.repos.filter(r => !r.mergeSha && !r.closed);
@@ -607,19 +617,22 @@
       for (const r of wave) {
         if (r.hand) {
           const it = liveItems && liveItems[r.label];
-          const handBtn = ['pending', 'merged', 'partial'].includes(m.status) && a.isApprover && !(it && it.s === 'hand-done') ? (armed === 'h:' + r.repo
+          const handDone = (it && it.s === 'hand-done') || !handOpen.includes(r.label);
+          const handBtn = (['pending', 'merged', 'partial'].includes(m.status) || handOpen.includes(r.label)) && a.isApprover && !(it && it.s === 'hand-done') && !(m === liveRel && handDone) ? (armed === 'h:' + r.repo
             ? `<button class="rl-row-btn armed" data-act="rowHand" data-repo="${esc(r.repo)}" data-label="${esc(r.label)}">Confirm: deployed</button>`
             : `<button class="rl-row-btn" data-act="rowHand" data-repo="${esc(r.repo)}" data-label="${esc(r.label)}" title="Record ${esc(r.label)} as deployed now (its branch head goes live)">✓ Deployed</button>`) : '';
-          h += `<div class="rl-hist-repo hand"><b>${esc(r.label)}</b><span></span><span class="rl-hist-sha"><span class="rl-hand">✋ by hand</span></span><span class="rl-hist-state">${handBtn}${it ? relItemHtml(it) : ''}</span></div>`;
+          h += `<div class="rl-hist-repo hand"><b>${esc(r.label)}</b><span></span><span class="rl-hist-sha"><span class="rl-hand">✋ by hand</span></span><span class="rl-hist-state">${handBtn}${it ? relItemHtml(it) : m === liveRel ? relItemHtml({ s: handDone ? 'hand-done' : 'hand-wait' }) : ''}</span></div>`;
           continue;
         }
         const need = pending && !r.mergeSha && !r.closed;
         const signed = (r.signers || []).length;
         const cmp = r.baseSha && (r.mergeSha || r.headSha) ? `https://github.com/${r.repo}/compare/${r.baseSha}...${r.mergeSha || r.headSha}` : null;
         const dep = relItemHtml({ s: stOf(r) || 'merged-hand' });
-        h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
+        const chKey = m.id + ':' + r.repo, chOpen = openChanges.has(chKey);
+        h += `<div class="rl-hist-repo"><b>${esc(r.label)}${r.changes && r.changes.length ? ` <button class="rl-ch-btn${chOpen ? ' on' : ''}" data-act="histChanges" data-key="${esc(chKey)}" title="The PRs this release brought into ${esc(r.label)}">${r.changes.length} change${r.changes.length === 1 ? '' : 's'}</button>` : ''}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
           + `<span class="rl-hist-state">${rowActs(r, need, notDeployed)}${need && r.signedSha && r.headSha && r.signedSha !== r.headSha ? `<a class="rl-unsigned-new" data-url="${esc(`https://github.com/${r.repo}/compare/${r.signedSha}...${r.headSha}`)}" title="Commits that landed after the last signature: they ship without anyone signing them">+ since signed ↗</a>` : ''}${r.mergeSha ? (liveItems && liveItems[r.label] && ['deploying', 'deployed', 'failed'].includes(liveItems[r.label].s) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (!signs ? '' : (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })()) + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+        if (chOpen && r.changes) h += `<div class="rl-ch-list">${r.changes.map(c => `<div>${link(`https://github.com/${r.repo}/pull/${c.n}`, '#' + c.n)} ${esc(c.title)}</div>`).join('')}</div>`;
       }
       notDeployed = notDeployed.concat(wave.filter(r => !r.hand && !DONE.has(stOf(r))).map(r => r.label));
       h += '</div>';
@@ -644,8 +657,8 @@
       if (pending && a.isApprover && openRepos.length && !(s.releaseAll && s.releaseAll.running)) acts.push(cancelBtn(m.id, openRepos.length, 'rl-hist-btn'));
       if (m.cancelled) h += `<div class="rl-hist-man${m.status === 'partial' ? ' bad' : ''}">✕ Cancelled by @${esc(m.cancelled.by || '?')} · ${esc(age(m.cancelled.at))} ago`
         + (m.cancelled.never && m.cancelled.never.length ? ` · never shipped: ${esc(m.cancelled.never.join(', '))}` : '') + (m.status === 'partial' ? ' · the rest is live in prod' : '') + '</div>';
-      if (!pending && !['abandoned', 'cancelled'].includes(m.status) && m.repos.some(r => r.mergeSha) && a.isApprover) {
-        acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}">↩ Roll back to this</button>`);
+      if (!pending && m !== liveRel && (m.env || 'prod') === 'prod' && !['abandoned', 'cancelled'].includes(m.status) && m.repos.some(r => r.mergeSha) && a.isApprover) {
+        acts.push(`<button class="rl-hist-btn${rbOpen === m.id ? ' on' : ''}" data-act="histRollback" data-id="${esc(m.id)}" title="Puts prod back to exactly what this release shipped (as signed rollback PRs)">↩ Roll back prod to this release</button>`);
       }
       if (acts.length) h += '<div class="rl-hist-acts">' + acts.join('') + '</div>';
       if (rbOpen === m.id) {
@@ -888,6 +901,7 @@
         + `<button data-act="tab" data-tab="timeline" class="${tab === 'timeline' ? 'on' : ''}">Timeline</button>`
         + `<button data-act="tab" data-tab="history" class="${tab === 'history' ? 'on' : ''}">History</button></div>` : '')
       + `<span class="rl-src" data-act="editSource" title="Change config source">${esc(s.source)}</span>`
+      + (s.rateLimitedUntil && s.rateLimitedUntil > Date.now() ? `<span class="rl-upd bad" title="GitHub's API limit (shared by every tool on your account) was hit: background updates pause until then. What you click still goes through.">GitHub limit: paused until ${new Date(s.rateLimitedUntil).toTimeString().slice(0, 5)}</span>` : '')
       + `<span class="rl-upd">${s.loading ? 'loading…' : esc(upd)}</span>`
       + (s.config ? `<button class="rl-appr-btn${apprOpen ? ' on' : ''}" data-act="apprMenu" title="Release approvers: releasing and merging prod needs two of them"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
         + `<span>${s.approvers && s.approvers.members ? s.approvers.members.length : ''}</span></button>` : '')
