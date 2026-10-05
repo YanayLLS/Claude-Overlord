@@ -2339,6 +2339,8 @@ function fetchAllPRs(repos) {
         const node = data['r' + i];
         if (!node) { failed.push(r); return; }
         for (const pr of (node.pullRequests && node.pullRequests.nodes) || []) {
+          // PRs into prod are the Releases board's (signatures, waves, deploys): not listed here
+          if (typeof releases !== 'undefined' && releases.isProdPr(r, pr.baseRefName)) continue;
           const mine = !!ghLogin && pr.author && pr.author.login === ghLogin;
           const rollup = pr.commits && pr.commits.nodes[0] && pr.commits.nodes[0].commit.statusCheckRollup;
           const requested = !!ghLogin && ((pr.reviewRequests && pr.reviewRequests.nodes) || [])

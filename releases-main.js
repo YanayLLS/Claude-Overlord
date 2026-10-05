@@ -1201,5 +1201,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }
   }
 
-  return { handle, mergeGate };
+  // A PR into a repo's prod branch (release config): Releases owns those — signing, waves, deploy watch —
+  // so the PRs panel leaves them out
+  function isProdPr(repo, base) {
+    const r = state.config && (state.config.repos || []).find(x => x.repo.toLowerCase() === String(repo).toLowerCase());
+    return !!(r && r.branches && r.branches.prod && r.branches.prod === base);
+  }
+
+  return { handle, mergeGate, isProdPr };
 };
