@@ -435,14 +435,14 @@
 
   const DONE = new Set(['deployed', 'merged-hand', 'hand-done']);
   // Row actions for a repo of a release in flight (approvers): merge now / fix its checks / re-run its deploy
-  function rowActs(r, need) {
+  function rowActs(r, need, notDeployed = []) {
     const st = state || {}, a = st.approvers || {};
-    if (!a.isApprover || (st.releaseAll && st.releaseAll.running)) return '';
+    if (!a.isApprover || (st.releaseAll && st.releaseAll.running) || st.teamRun) return '';
     const d = `data-repo="${esc(r.repo)}" data-n="${esc(r.pr.number)}"`;
     if (need) {
       const k = 'm:' + r.repo + '#' + r.pr.number;
       return (r.health && r.health.checks === 'fail' ? `<button class="rl-row-btn" data-act="rowFix" ${d} title="Start an agent that gets this PR's checks green">🔧 Fix</button>` : '')
-        + (armed === k ? `<button class="rl-row-btn armed" data-act="rowMerge" ${d}>Confirm: merge</button>`
+        + (armed === k ? `<button class="rl-row-btn armed${notDeployed.length ? ' risky' : ''}" data-act="rowMerge" ${d}${notDeployed.length ? ` title="${esc(`Earlier waves aren't deployed yet: ${notDeployed.join(', ')}. This one may depend on them.`)}"` : ''}>${notDeployed.length ? `⚠ Merge before ${esc(notDeployed.length === 1 ? notDeployed[0] : notDeployed.length + ' earlier repos')} deploy?` : 'Confirm: merge'}</button>`
           : `<button class="rl-row-btn" data-act="rowMerge" ${d} title="Merge just this one now (needs the release signed; GitHub's own rules apply)">Merge</button>`);
     }
     if (r.mergeSha && r.deploy && r.deploy.state === 'failure') return `<button class="rl-row-btn" data-act="rowRerun" ${d} title="Re-run the failed jobs of its deploy">↻ Re-run deploy</button>`;
@@ -594,6 +594,7 @@
       // a step's state from its repos: done / in progress / waiting / failed / not started
       const stOf = (r) => { const it = liveItems && liveItems[r.label]; if (it) return it.s; if (r.hand) return ''; if (r.mergeSha) return r.deploy ? (r.deploy.state === 'success' ? 'deployed' : r.deploy.state === 'failure' ? 'failed' : 'deploying') : 'merged-hand'; return ''; };
       const live = new Set(['merging', 'merged', 'deploying', 'hand-wait']);
+      let notDeployed = []; // earlier waves' repos not deployed yet: merging past them warns
       waves.forEach((wave, wi) => {
       // a hand-deployed step nobody confirmed this run says nothing about the wave
       const ss = wave.filter(r => !r.hand || (liveItems && liveItems[r.label])).map(stOf);
@@ -615,8 +616,9 @@
         const dep = relItemHtml({ s: stOf(r) || 'merged-hand' });
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha" title="prod before → after">${cmp ? link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha)) : ''}</span>`
-          + `<span class="rl-hist-state">${rowActs(r, need)}${r.mergeSha ? (liveItems && liveItems[r.label] && ['deploying', 'deployed', 'failed'].includes(liveItems[r.label].s) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-state">${rowActs(r, need, notDeployed)}${need && r.signedSha && r.headSha && r.signedSha !== r.headSha ? `<a class="rl-unsigned-new" data-url="${esc(`https://github.com/${r.repo}/compare/${r.signedSha}...${r.headSha}`)}" title="Commits that landed after the last signature: they ship without anyone signing them">+ since signed ↗</a>` : ''}${r.mergeSha ? (liveItems && liveItems[r.label] && ['deploying', 'deployed', 'failed'].includes(liveItems[r.label].s) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })() + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
       }
+      notDeployed = notDeployed.concat(wave.filter(r => !r.hand && !DONE.has(stOf(r))).map(r => r.label));
       h += '</div>';
       });
       h += '</div>';

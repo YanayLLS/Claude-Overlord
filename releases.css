@@ -494,3 +494,6 @@
 .rl-hist-repo:hover .rl-row-btn, .rl-row-btn.armed, .rl-row-btn:focus-visible { opacity:1; }
 .rl-row-btn:hover { background:var(--surface1); color:var(--text); }
 .rl-row-btn.armed { border-color:rgba(251,191,36,.7); background:rgba(251,191,36,.16); color:var(--yellow, #fbbf24); }
+.rl-row-btn.armed.risky { border-color:rgba(248,113,113,.7); background:rgba(248,113,113,.16); color:var(--red); }
+.rl-unsigned-new { font-size:10.5px; color:var(--peach); cursor:pointer; white-space:nowrap; text-decoration:none; }
+.rl-unsigned-new:hover { text-decoration:underline; }

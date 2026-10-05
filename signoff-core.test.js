@@ -9,7 +9,7 @@ const rev = (login, state, t, sha = 'h2', body = '') => ({ user: { login }, stat
 // opener on the team counts as signature 1, with the ClickUp id from its body mark
 {
   const s = signoff(pr('alice', 'x\n' + openerMark('alice', '111')), [], team);
-  assert.deepStrictEqual(s.signers, [{ login: 'alice', via: 'opened', clickup: '111' }]);
+  assert.deepStrictEqual(s.signers, [{ login: 'alice', via: 'opened', clickup: '111', sha: null }]);
   assert.strictEqual(s.ok, false);
 }
 // opener + one approval from another member on the current head = signed

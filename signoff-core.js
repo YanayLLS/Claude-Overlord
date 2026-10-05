@@ -29,7 +29,7 @@ function signoff(pr, reviews, members) {
   if (author && team.has(author.toLowerCase())) {
     const m = String((pr && pr.body) || '').match(OPENER_RE);
     const mine = m && m[1].toLowerCase() === author.toLowerCase();
-    signers.push({ login: author, via: 'opened', clickup: mine ? m[2] || null : null });
+    signers.push({ login: author, via: 'opened', clickup: mine ? m[2] || null : null, sha: (mine && m[3]) || null });
   }
   // each person's latest decisive review wins (a later "changes requested" or dismissal withdraws)
   const latest = new Map();
@@ -42,7 +42,7 @@ function signoff(pr, reviews, members) {
     // a signature stays valid while the release keeps taking commits (the team's call, 2026-09-30):
     // GitHub still records which commit each approval was on, for the audit
     const m = String(r.body || '').match(CLICKUP_RE);
-    signers.push({ login: r.user.login, via: 'approved', clickup: m ? m[1] : null });
+    signers.push({ login: r.user.login, via: 'approved', clickup: m ? m[1] : null, sha: r.commit_id || null });
   }
   return { signers, stale, count: signers.length, need: NEED, ok: signers.length >= NEED };
 }

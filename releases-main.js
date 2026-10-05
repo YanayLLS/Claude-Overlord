@@ -743,6 +743,9 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can merge a release PR' });
     if (!versionOk()) return send({ type: 'toast', text: outdatedMsg() });
     const found = prOf(repo, n), label = found ? found.r.label : repo;
+    await loadTeamRun().catch(() => {});
+    if (state.teamRun) return send({ type: 'toast', text: `@${state.teamRun.by} is running Release all: let it finish (or ask them to stop it) before merging by hand` });
+    if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is running here: stop it first' });
     const gate = await mergeGate(`https://github.com/${repo}/pull/${n}`);
     if (!gate.ok) return send({ type: 'toast', text: `${label}: ${gate.reason}` });
     const res = await ghJson(['api', '-X', 'PUT', `repos/${repo}/pulls/${n}/merge`, '-f', 'merge_method=merge']);
@@ -750,6 +753,13 @@ module.exports = function createReleases({ send, ghJson, ghGraphql, stateDir, fi
     send({ type: 'toast', text: `${label} merged — its deploy starts now` });
     await reconcileHistory().catch(() => {});
     refreshRun().catch(() => {});
+    // watch its deploy like Release all would, and say how it went (here, and on every approver's
+    // machine through the release record that reconcile writes)
+    const wf = found && found.r.deploy && found.r.deploy.workflow, sha = res.data && res.data.sha;
+    if (wf && sha) waitDeploys([{ repo, label, deploy: wf, sha }]).then((bad) => {
+      if (notify) notify(bad ? `❌ ${label} deploy failed` : `✅ ${label} deployed`, bad ? bad.detail : 'Merged from the release card', bad ? bad.url : null, () => send({ type: 'releases', state, open: true }));
+      reconcileHistory().catch(() => {});
+    }).catch(() => {});
   }
   // Re-run the failed jobs of the deploy that shipped a release PR's merge
   async function rerunDeploy(repo, n) {

@@ -99,6 +99,12 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
 
   // Fold what GitHub says now into every unfinished manifest; write back only what changed.
   // Every PR is read at once, and a change shows here before its write lands (writes are the slow part).
+  // of the commits signatures name, the PR's head if one covers it, else the latest signature's
+  function signedShaOf(s) {
+    const shas = (s.signers || []).map(x => x.sha).filter(Boolean);
+    if (!shas.length || !s.pr || !s.pr.head) return undefined;
+    return shas.includes(s.pr.head.sha) ? s.pr.head.sha : shas[shas.length - 1];
+  }
   async function reconcile() {
     const loaded = await load();
     if (!loaded) return;
@@ -119,7 +125,9 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
           closed: s.pr.state === 'closed', headSha: s.pr.head && s.pr.head.sha,
           // signers only from an Overlord that knows the approvers team: one that doesn't sees nobody as
           // signed, and would flip the record back and forth with every approver's Overlord
-          signers: teamKnown() ? s.signers.map(x => x.login) : undefined });
+          signers: teamKnown() ? s.signers.map(x => x.login) : undefined,
+          // the newest commit a signature covers: commits after it shipped unreviewed (shown on the card)
+          signedSha: signedShaOf(s) });
         changed = changed || c;
       }
       if (changed) show(m);

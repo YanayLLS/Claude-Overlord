@@ -69,6 +69,7 @@ function applyPr(m, repo, pr) {
     if (!pr.mergeSha && pr.closed && !next.closed) next.closed = true;
     if (pr.headSha && !next.mergeSha && next.headSha !== pr.headSha) next.headSha = pr.headSha;
     if (pr.signers && JSON.stringify(pr.signers) !== JSON.stringify(next.signers)) next.signers = pr.signers;
+    if (pr.signedSha && !next.mergeSha && next.signedSha !== pr.signedSha) next.signedSha = pr.signedSha;
     // merged without two approvers' signatures (e.g. on github.com): the audit exception
     if (next.mergeSha) next.unsigned = (next.signers || []).length < SIGNATURES_NEEDED;
     if (JSON.stringify(next) !== JSON.stringify(r)) changed = true;
