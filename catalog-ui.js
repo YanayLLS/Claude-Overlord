@@ -132,7 +132,7 @@
         return `<div class="cg-row cg-type${i === sel ? ' sel' : ''}${n ? '' : ' cg-none'}" data-i="${i}"><span class="cg-icon">${icon(x.type)}</span>`
           + `<span class="cg-name">${x.label}</span><span class="cg-count">${n}</span>${plus(x.type, x.label.toLowerCase().replace(/s$/, ''))}<kbd>${i + 1}</kbd></div>`; }).join('');
       renderDetail();
-      foot.innerHTML = kbd('1–5', 'pick') + kbd('↵', 'open') + kbd('Esc', 'close');
+      foot.innerHTML = kbd('1–5', 'pick') + kbd('↵ →', 'open') + kbd('Esc', 'close');
       return;
     }
 
@@ -158,7 +158,7 @@
     });
     list.innerHTML = html || `<div class="cg-empty">${query ? `Nothing matches “${esc(query)}”` : 'Nothing here yet'}</div>`;
     renderDetail();
-    foot.innerHTML = kbd('↵', 'insert') + kbd('⇧↵', 'send') + kbd('Tab', 'switch type') + kbd('Ctrl O', 'open file');
+    foot.innerHTML = kbd('↵', 'insert') + kbd('⇧↵', 'send') + kbd('← →', 'switch type') + kbd('Ctrl O', 'open file');
     list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -172,10 +172,18 @@
     api.send({ type: 'termInput', id, data: send ? it.insert.trimEnd() + '\r' : it.insert });
   }
 
-  function cycle(dir) {
-    const order = [null, ...TYPES.map(t => t.type)];
-    type = order[(order.indexOf(type) + dir + order.length) % order.length];
+  // The tabs as shown: All, then each type that has something.
+  const tabOrder = () => { const items = cache.get(cwd) || []; return [null, ...TYPES.map(t => t.type).filter(ty => items.some(it => it.type === ty))]; };
+  function cycle(dir, wrap = true) {
+    const order = tabOrder(), i = order.indexOf(type) + dir;
+    if (!wrap && (i < 0 || i >= order.length)) return false;
+    type = order[(i + order.length) % order.length];
     stage = 'list'; sel = 0; render();
+    return true;
+  }
+  function back() { // to the type menu, on the type you came from
+    const from = TYPES.findIndex(t => t.type === type);
+    stage = 'types'; type = null; sel = Math.max(0, from); render();
   }
 
   q.addEventListener('input', () => { sel = 0; render(); });
@@ -186,7 +194,14 @@
     if (k === 'Enter') { e.preventDefault(); choose(sel, e.shiftKey); return; }
     if (k === 'Tab') { e.preventDefault(); cycle(e.shiftKey ? -1 : 1); return; }
     if (stage === 'types' && /^[1-5]$/.test(k) && !q.value) { e.preventDefault(); choose(+k - 1); return; }
-    if (k === 'Backspace' && !q.value && stage === 'list') { e.preventDefault(); stage = 'types'; type = null; sel = 0; render(); return; }
+    if (k === 'Backspace' && !q.value && stage === 'list') { e.preventDefault(); back(); return; }
+    // ←/→ walk the menus while there's no text to move the caret through.
+    if ((k === 'ArrowRight' || k === 'ArrowLeft') && !q.value) {
+      e.preventDefault();
+      if (stage === 'types') { if (k === 'ArrowRight') choose(sel); return; }
+      if (!cycle(k === 'ArrowRight' ? 1 : -1, false) && k === 'ArrowLeft') back(); // ← past All: back to the type menu
+      return;
+    }
     if (e.ctrlKey && k.toLowerCase() === 'o' && stage === 'list') { e.preventDefault(); const p = rows[sel]?.path; if (p) api.send({ type: 'openFile', path: p }); }
   });
   // Hover only moves the highlight; a full render here would swap the row out from under the click.
