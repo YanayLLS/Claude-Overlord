@@ -607,3 +607,7 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-hist-top .rl-fold + .rl-hist-when { margin-left:8px; }
 .rl-body > .rl-hist + .rl-grid, .rl-body > .rl-hist { margin-bottom:10px; }
 .rl-rr-quiet { margin:10px 0 2px; font-size:11.5px; color:var(--subtext); line-height:1.5; }
+/* Board: equal env columns that fill the window; 'uses X' is a quiet note, not a cell */
+.rl-hist:empty { display:none; }
+.rl-uses { border-color:transparent; background:none; font-size:10.5px; color:var(--dim); opacity:.7; }
+.rl-uses:hover { border-color:transparent; background:none; opacity:1; }
