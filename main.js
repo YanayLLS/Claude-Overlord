@@ -2441,8 +2441,11 @@ function pollPRs() {
 async function pollPRsOnce() {
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
+  const paused = gqlAllow('any', await gqlBudget()).pausedUntil;
+  if (paused) { send({ type: 'prList', prs: null, error: gqlPausedText(paused), errorCode: 'ratelimit' }); return; }
   await fetchGhLogin();
   const res = await fetchAllPRs(cfg.repos);
+  if (res.error && /rate limit/i.test(res.error)) { const p = gqlAllow('any', await gqlBudget(true)).pausedUntil; if (p) res.error = gqlPausedText(p); }
   const failedRepos = res.failed || [];
   const validCount = cfg.repos.filter(r => PR_REPO_RE.test(r)).length;
   if (res.prs.length === 0 && (res.error || failedRepos.length >= validCount)) {
@@ -2542,11 +2545,18 @@ const prWatchGet = async (key, etag) => {
   ghCache.noteResponse(r);
   return { status: r.status, etag: r.headers.get('etag') };
 };
-// Triggered polls spend GraphQL points (~12+ each), so they're budgeted: at most one per PR_WATCH_GAP_MS (changes in the
-// gap share it), and only while over PR_WATCH_RESERVE of the hourly GraphQL limit is left — /rate_limit is free to ask.
-// Below that, only the regular interval poll runs. (Every-10s triggered polls during busy CI used to drain the limit.)
-const PR_WATCH_GAP_MS = 20e3, PR_WATCH_RESERVE = 0.5;
-let prWatchLastPoll = 0, prWatchPending = null;
+// Triggered polls spend GraphQL points (~20 each): at most one per PR_WATCH_GAP_MS (changes in the gap share it), and
+// only as gql-budget.js allows (70%+ of the hourly GraphQL limit left, ≤30 an hour); otherwise the regular poll covers it.
+const PR_WATCH_GAP_MS = 20e3;
+let prWatchLastPoll = 0, prWatchPending = null, prTriggeredAt = [], prRegularAt = 0;
+// The GraphQL budget (gql-budget.js): /rate_limit is free, cached for 15s so every GraphQL caller can consult it.
+const { gqlAllow } = require('./gql-budget');
+let gqlState = null, gqlStateAt = 0;
+async function gqlBudget(force) {
+  if (force || Date.now() - gqlStateAt > 15e3) { try { gqlState = await graphqlLeft(); gqlStateAt = Date.now(); } catch {} }
+  return gqlState;
+}
+const gqlPausedText = (until) => `GitHub's GraphQL limit is used up (it's shared by every gh tool on your account, agents too) — PRs resume at ${new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 async function graphqlLeft() {
   const r = await fetch('https://api.github.com/rate_limit', { headers: { Authorization: `Bearer ${await ghTokenGet()}` }, signal: AbortSignal.timeout(8000) });
   return (await r.json()).resources.graphql;
@@ -2555,9 +2565,9 @@ const prWatchPoll = () => {
   if (prWatchPending) return;
   prWatchPending = setTimeout(async () => {
     prWatchPending = null;
-    const g = await graphqlLeft().catch(() => null);
-    if (!g || g.remaining < g.limit * PR_WATCH_RESERVE) return;
+    if (!gqlAllow('triggered', await gqlBudget(), { triggeredAt: prTriggeredAt }).ok) return; // the regular poll still comes
     prWatchLastPoll = Date.now();
+    prTriggeredAt = [...prTriggeredAt.filter(t => Date.now() - t < 3600e3), Date.now()];
     pollPRs();
   }, Math.max(0, prWatchLastPoll + PR_WATCH_GAP_MS - Date.now()));
 };
@@ -2572,7 +2582,7 @@ function armPrTimer() {
   if (!cfg || !cfg.enabled) return;
   const sec = Math.max(30, Number(cfg.intervalSec) || 60);
   pollPRs();
-  prTimer = setInterval(pollPRs, sec * 1000);
+  prTimer = setInterval(async () => { if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
   prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
   prCheckWatchTimer = setInterval(() => {
     const heads = ((settings.prCache && settings.prCache.prs) || []).filter(p => p.headSha && PR_REPO_RE.test(p.repo || ''));
@@ -2606,7 +2616,12 @@ function sanitizeWorkflows(list) {
 }
 
 // One GraphQL call via stdin (no shell quoting of the query). Resolves { data } or { error, errorCode }.
-function ghGraphql(query, timeout = 30000) {
+async function ghGraphql(query, timeout = 30000) {
+  const paused = gqlAllow('other', await gqlBudget()).pausedUntil; // release board, sign ping: stop only at the floor
+  if (paused) return { error: gqlPausedText(paused), errorCode: 'ratelimit' };
+  return ghGraphqlRaw(query, timeout);
+}
+function ghGraphqlRaw(query, timeout) {
   return new Promise((resolve) => {
     let out = '', errbuf = '', proc, done = false;
     const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
