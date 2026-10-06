@@ -821,7 +821,7 @@ W.sync = function (s) {
   for (const [k, site] of sites) if (!seen.has(k)) destroySite(site);
   if (arranging) markArrange();
   syncRaids(s);
-  layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R, kind: st.kind, rot: st.rot || 0, quay: st.extra.lay ? st.extra.lay.quay : 0 })));
+  layoutTerrain(terrainSites());
   // Until the commander pans or zooms, keep the whole settlement framed.
   if (!cam.userMoved && sites.size) frameAll();
   const crashed = s.agents.filter(a => a.status === 'crashed').length; life.weather = crashed >= 2 ? 'storm' : crashed === 1 ? 'overcast' : 'clear';
@@ -878,7 +878,8 @@ function endTargeting() { if (!targeting) return; targeting = null; stage.classL
 // ── Arrange mode ──
 function groundPoint(e) { const r = canvas.getBoundingClientRect(), ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); const rc = raycaster(); rc.setFromCamera(ndc, camera); const v = new THREE.Vector3(); return rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -PLAT), v) ? v : null; }
 function siteList() { return [...sites.values()].map(st => ({ key: st.key, kind: st.kind, x: st.x, z: st.z, R: st.R })); }
-function relayout() { layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R, kind: st.kind, quay: st.extra.lay ? st.extra.lay.quay : 0 }))); }
+function terrainSites() { return [...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R, kind: st.kind, rot: st.rot || 0, quay: st.extra.lay ? st.extra.lay.quay : 0 })); } // the one place the terrain learns about sites, rotation included
+function relayout() { layoutTerrain(terrainSites()); }
 function clearTints() { for (const t of tinted) t.tint = null; tinted.length = 0; if (terrain) terrain.dirty = true; }
 // The dragged site follows the pointer; the ground under it answers in green or red; the land re-carves live.
 function moveSite(st, x, z, deferLayout) {
