@@ -191,7 +191,7 @@ function layoutTerrain(siteList) {
     let site = null;
     for (const s of siteList) { const d = Math.hypot(t.x - s.x, t.z - s.z);
       if (s.kind === 'github') { // a sand yard west of the quay, a cove east of it that opens through a channel to the sea, headlands at the east corners
-        const lx = t.x - s.x, lz = t.z - s.z, az = Math.abs(lz), R = s.R;
+        const dx = t.x - s.x, dz = t.z - s.z, cr = Math.cos(s.rot || 0), sr = Math.sin(s.rot || 0), lx = dx * cr - dz * sr, lz = dx * sr + dz * cr, az = Math.abs(lz), R = s.R; // into the harbour's frame: quay along local +x
         if (d < R + TILE * .8) { site = s; const cove = lx > s.quay && (az < .45 * R || (d < R - 4.5 && lx <= .6 * R)); biome = cove ? 'bay' : 'sand'; th = cove ? WATER : SAND; break; }
         else if (lx > s.quay && az < .45 * R && biome !== 'hidden') { biome = 'bay'; th = WATER; break; }
         else if (d < R + TILE * 2.6 && biome !== 'hidden' && biome !== 'water') { th = Math.min(th, SAND + 1.3 * (d - R - TILE * .8) / (TILE * 1.8)); if (d < R + TILE * 1.6) biome = 'sand'; }
@@ -429,11 +429,13 @@ function planSites(s, raw) {
   for (const p of plan) { const o = layoutOv[p.key]; if (o && Number.isFinite(o.x) && Number.isFinite(o.z)) { p.x = o.x; p.z = o.z; } }
   for (const p of plan) { if (!layoutOv[p.key]) continue; if (!placeOk(p, p.x, p.z, plan)) { const d = defaultSpot(plan, p); p.x = d.x; p.z = d.z; delete layoutOv[p.key]; dropped = true; } }
   if (dropped) { hooks.saveLayout && hooks.saveLayout(layoutOv); toast('A saved spot no longer fits; it went back to the layout'); }
+  for (const p of plan) if (p.kind === 'github') p.rot = dockRot(p.x, p.z);
   return plan;
 }
 // Where a site may stand: clear of every other site by its radius plus a gap (more around the portal's crag), and inside
 // the island's largest allowed outline.
 const ARR_MAX = { x: 110, z: 80 };
+function dockRot(x, z) { const ex = Math.abs(x) / ARR_MAX.x, ez = Math.abs(z) / ARR_MAX.z; if (ez > ex * 1.15) return z > 0 ? -Math.PI / 2 : Math.PI / 2; return x < 0 ? Math.PI : 0; }
 function placeOk(p, x, z, plan) {
   if (Math.abs(x) + p.R > ARR_MAX.x || Math.abs(z) + p.R > ARR_MAX.z) return false;
   for (const o of plan) { if (o === p || o.key === p.key) continue; const gap = (o.kind === 'portal' || p.kind === 'portal') ? 7 : 3; if (Math.hypot(o.x - x, o.z - z) < o.R + p.R + gap) return false; }
@@ -505,7 +507,7 @@ function lotSign(spec) {
 }
 function createSite(p) {
   const g = new THREE.Group(); g.position.set(p.x, PLAT, p.z); scene.add(g);
-  const site = { key: p.key, kind: p.kind, g, R: p.R, x: p.x, z: p.z, lots: new Map(), color: 0, el: null, plat: null, anchor: null, extra: {} };
+  const site = { key: p.key, kind: p.kind, g, R: p.R, x: p.x, z: p.z, rot: p.rot || 0, lots: new Map(), color: 0, el: null, plat: null, anchor: null, extra: {} }; g.rotation.y = site.rot;
   if (p.kind === 'feature') {
     site.color = siteColor(p.key); const { plat, anchor } = compoundWalls(g, p.R, site.color, 6); site.plat = plat; site.anchor = anchor; plat.userData.pick = { site };
     site.el = label('w-site', '', anchor, hexStr(site.color));
@@ -889,11 +891,11 @@ W.sync = function (s) {
   if (!alive) return; snap = s; economy = s.economy || null;
   const plan = planSites(s), seen = new Set();
   for (const p of plan) { seen.add(p.key); let site = sites.get(p.key); if (!site) site = createSite(p); syncSite(site, p, s); }
-  for (const p of plan) { const site = sites.get(p.key); if (arrDrag && site === arrDrag.site) continue; if (site && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); } }
+  for (const p of plan) { const site = sites.get(p.key); if (arrDrag && site === arrDrag.site) continue; if (site && (p.rot || 0) !== (site.rot || 0)) { const fr = site.rot || 0, tr = p.rot || 0; site.rot = tr; tween(700, k => { site.g.rotation.y = fr + (tr - fr) * k; }, null, easeOutCubic); } if (site && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); } }
   for (const [k, site] of sites) if (!seen.has(k)) destroySite(site);
   if (arranging) markArrange();
   syncRaids(s);
-  layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R, kind: st.kind, quay: st.extra.lay ? st.extra.lay.quay : 0 })));
+  layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R, kind: st.kind, rot: st.rot || 0, quay: st.extra.lay ? st.extra.lay.quay : 0 })));
   // Until the commander pans or zooms, keep the whole settlement framed.
   if (!cam.userMoved && sites.size) frameAll();
   const crashed = s.agents.filter(a => a.status === 'crashed').length; life.weather = crashed >= 2 ? 'storm' : crashed === 1 ? 'overcast' : 'clear';
@@ -955,6 +957,7 @@ function clearTints() { for (const t of tinted) t.tint = null; tinted.length = 0
 // The dragged site follows the pointer; the ground under it answers in green or red; the land re-carves live.
 function moveSite(st, x, z) {
   st.x = x; st.z = z; st.g.position.set(x, PLAT, z);
+  if (st.kind === 'github') { st.rot = dockRot(x, z); st.g.rotation.y = st.rot; }
   const ok = placeOk({ key: st.key, kind: st.kind, R: st.R }, x, z, siteList()); if (arrDrag) arrDrag.ok = ok;
   clearTints(); const col = new THREE.Color(ok ? 0x5fe08a : 0xf0566a);
   for (const t of terrain.tiles) if (Math.hypot(t.x - x, t.z - z) < st.R + TILE * .9) { t.tint = col; tinted.push(t); }
