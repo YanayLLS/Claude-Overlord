@@ -250,6 +250,9 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-badge, #actions-badge { height: 26px; padding: 0 10px; gap: 6px; border: 1px solid var(--border); border-top: 1px solid var(--border);
   border-radius: 999px; background: var(--surface0); font-size: 11.5px; font-weight: 500; color: var(--subtext); }
 #pr-badge:hover, #actions-badge:hover { background: var(--surface1); color: var(--text); }
+/* Nothing open: looks switched off, but still opens the PR list */
+#pr-badge.idle { opacity: .45; border-style: dashed; }
+#pr-badge.idle:hover { opacity: .8; }
 #pr-badge::before, #actions-badge:not(.running)::before { width: 13px; height: 13px; }
 #pr-badge.alert, #actions-badge.alert { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
 /* Footer takes the PR state's colour and breathes softly: red = teammates' PRs to approve, green = mine approved, waiting for my merge */

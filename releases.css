@@ -330,7 +330,7 @@
 .rl-head .rl-release.locked, .rl-head .rl-release.locked:hover { opacity:.45; cursor:not-allowed; transform:none; box-shadow:none; filter:none; }
 
 /* ── History tab: prod releases from release-manifests ── */
-.rl-hist { width:min(760px, 88vw); padding:10px 0 4px; display:flex; flex-direction:column; gap:8px; }
+.rl-hist { width:100%; padding:10px 0 4px; display:flex; flex-direction:column; gap:8px; }
 .rl-hist-card { padding:10px 12px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); transition:border-color .12s; }
 .rl-hist-card:hover { border-color:var(--border-hi); }
 .rl-hist-card.pending { border-color:var(--accent); background:var(--accent-soft); }
@@ -499,3 +499,114 @@
 .rl-unsigned-new:hover { text-decoration:underline; }
 .rl-hist-ticket { font-size:11px; color:var(--accent); cursor:pointer; white-space:nowrap; }
 .rl-hist-ticket:hover { text-decoration:underline; }
+/* a release's "N changes" toggle and list */
+.rl-ch-btn { font:inherit; font-size:10px; font-weight:500; margin-right:8px; padding:0 7px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; vertical-align:1px; }
+.rl-ch-btn:hover, .rl-ch-btn.on { background:var(--surface1); color:var(--text); }
+.rl-ch-list { margin:2px 0 6px 0; padding:6px 10px; border-radius:var(--r-sm); background:var(--surface0); font-size:11px; color:var(--subtext); display:flex; flex-direction:column; gap:2px; max-height:220px; overflow:auto; }
+.rl-ch-list a { color:var(--accent); margin-right:4px; }
+.rl-upd.bad { color:var(--peach); }
+/* the release in flight: Board strip, card "Next" line, footer badge, tab dot */
+.rl-active { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 10px; padding:8px 12px; border-radius:var(--r); border:1px solid var(--accent); background:var(--accent-soft); font-size:12px; }
+.rl-active.warn { border-color:rgba(251,146,60,.6); background:rgba(251,146,60,.08); } .rl-active.bad { border-color:rgba(248,113,113,.6); background:rgba(248,113,113,.08); } .rl-active.ok { border-color:rgba(74,222,128,.5); background:rgba(74,222,128,.07); }
+.rl-active-id { font-weight:600; color:var(--text); } .rl-active-phase { color:var(--text); } .rl-active-next { color:var(--subtext); flex:1; min-width:0; }
+.rl-active .rl-hist-btn { margin-left:auto; }
+.rl-next-line { display:flex; gap:8px; align-items:baseline; margin:4px 0 2px; font-size:11.5px; color:var(--text); }
+.rl-next-line > span { font-size:9.5px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:var(--accent); }
+.rl-next-line.warn > span { color:var(--peach); } .rl-next-line.bad > span { color:var(--red); } .rl-next-line.ok > span { color:var(--green); } .rl-next-line.run > span { color:var(--yellow); }
+#releases-badge.live { background:var(--accent-soft); border-color:var(--accent); color:var(--text); }
+.rl-live-dot { display:inline-block; width:6px; height:6px; margin-left:6px; vertical-align:2px; border-radius:50%; background:var(--accent); animation:rl-pulse 1.4s ease-in-out infinite; }
+a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:brightness(1.15); }
+/* release picker: the repos it would release, each can be left out */
+.rl-rel-repos-head { margin-top:10px; }
+.rl-rel-all { font:inherit; font-size:10.5px; padding:0 8px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; text-transform:none; letter-spacing:0; }
+.rl-rel-all:hover { color:var(--text); background:var(--surface1); }
+.rl-rel-repos { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow:auto; margin-top:4px; }
+.rl-rel-repo { display:flex; align-items:center; gap:8px; font:inherit; font-size:12px; padding:4px 8px; border-radius:var(--r-sm); border:1px solid transparent; background:none; color:var(--subtext); cursor:pointer; text-align:left; }
+.rl-rel-repo:hover { background:var(--surface0); }
+.rl-rel-repo i { width:12px; height:12px; border-radius:3px; border:1.5px solid var(--border-hi); flex-shrink:0; }
+.rl-rel-repo.on { color:var(--text); }
+.rl-rel-repo.on i { background:var(--accent); border-color:var(--accent); box-shadow:inset 0 0 0 2px var(--pop, #1e1e2e); }
+.rl-rel-repo span { margin-left:auto; font-size:10.5px; color:var(--dim); }
+.rl-rel-repo-row { display:flex; align-items:center; gap:4px; }
+.rl-rel-repo-row .rl-rel-repo { flex:1; min-width:0; }
+.rl-rel-repo em { font-style:normal; color:var(--peach); }
+.rl-rel-only { font:inherit; font-size:10px; padding:0 7px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--dim); cursor:pointer; opacity:0; transition:opacity .12s; }
+.rl-rel-repo-row:hover .rl-rel-only { opacity:1; }
+.rl-rel-only:hover { color:var(--text); background:var(--surface1); }
+.rl-just { margin:6px 0 2px; }
+/* PRs into prod outside a release */
+.rl-stray { margin:0 0 10px; padding:8px 12px; border-radius:var(--r); border:1px solid rgba(251,146,60,.55); background:rgba(251,146,60,.07); font-size:12px; }
+.rl-stray-head { color:var(--peach); font-weight:600; margin-bottom:4px; }
+.rl-stray-head span { display:block; font-weight:400; font-size:11px; color:var(--subtext); margin-top:2px; }
+.rl-stray-row { display:flex; align-items:center; gap:8px; padding:3px 0; min-width:0; }
+.rl-stray-row a { color:var(--accent); }
+.rl-stray-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+.rl-stray-br { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); white-space:nowrap; }
+.rl-row-btn.show { opacity:1; }
+.rl-rel-join { margin-top:8px; padding:6px 10px; border-radius:var(--r-sm); background:var(--accent-soft); border:1px solid var(--accent); font-size:11.5px; color:var(--text); }
+.rl-rel-join.off { background:var(--surface0); border-color:var(--border); }
+.rl-rel-join button { font:inherit; font-size:10.5px; margin-left:6px; padding:0 8px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
+.rl-rel-join button:hover { color:var(--text); background:var(--surface1); }
+.rl-hist-btn.queued { border-color:var(--accent); background:var(--accent-soft); color:var(--text); }
+/* History: finished releases collapse to one line; filters; the config gear */
+.rl-hist-card.shut { padding-top:8px; padding-bottom:8px; }
+.rl-hist-card.shut .rl-hist-who { margin-bottom:0; }
+.rl-hist-top[data-act="histCard"] { cursor:pointer; }
+.rl-hist-top[data-act="histCard"]:hover b { text-decoration:underline; text-decoration-color:var(--dim); }
+.rl-caret { font-style:normal; font-size:10px; color:var(--dim); width:10px; display:inline-block; }
+.rl-hist-who .ok { color:var(--green); } .rl-hist-who .bad { color:var(--red); }
+.rl-hist-filters { display:flex; gap:4px; margin:0 0 8px; }
+.rl-hist-filters button { font:inherit; font-size:11px; padding:2px 10px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
+.rl-hist-filters button:hover { color:var(--text); background:var(--surface0); }
+.rl-hist-filters button.on { background:var(--accent-soft); border-color:var(--accent); color:var(--text); }
+.rl-src-btn { font:inherit; font-size:13px; width:26px; height:26px; border-radius:var(--r-sm); border:1px solid transparent; background:none; color:var(--dim); cursor:pointer; }
+.rl-src-btn:hover { color:var(--text); background:var(--surface0); border-color:var(--border); }
+/* History: finished releases as a sortable table; click a row to open its card */
+.rl-hist { overflow-x:hidden; max-width:100%; box-sizing:border-box; }
+.rl-body:has(.rl-hist) { overflow-x:hidden; }
+.rl-head .rl-src-btn { margin-left:auto; } /* the config gear ends the left group: the rest sits right */
+.rl-htab { width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; font-size:12px; border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
+.rl-htab th { position:sticky; top:0; z-index:1; text-align:left; font-size:10px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--dim);
+  padding:7px 10px; background:var(--surface0); border-bottom:1px solid var(--border); white-space:nowrap; user-select:none; }
+.rl-htab th[data-act] { cursor:pointer; } .rl-htab th[data-act]:hover, .rl-htab th.on { color:var(--text); }
+.rl-htab td { padding:7px 10px; border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:middle; overflow:hidden; text-overflow:ellipsis; }
+.rl-htab .num { text-align:right; font-variant-numeric:tabular-nums; }
+.rl-hrow { cursor:pointer; transition:background .12s; }
+.rl-hrow:hover, .rl-hrow.open { background:var(--surface1); }
+.rl-hrow .rl-caret { font-style:normal; font-size:11px; color:var(--subtext); width:14px; display:inline-block; }
+.rl-hrow-time { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:11px; color:var(--subtext); }
+.rl-hrow-title b { font-weight:600; color:var(--text); }
+.rl-hrow-by { color:var(--subtext); }
+.rl-hrow .rl-env { font-size:10px; }
+.rl-hrow-warn { color:var(--peach); }
+.rl-dim { color:var(--dim); }
+.rl-hrow-st { display:inline-flex; align-items:center; gap:6px; color:var(--subtext); }
+.rl-hrow-st i { width:7px; height:7px; border-radius:50%; background:var(--dim); }
+.rl-hrow-st.ok { color:var(--green); } .rl-hrow-st.ok i { background:var(--green); }
+.rl-hrow-st.bad { color:var(--red); } .rl-hrow-st.bad i { background:var(--red); }
+.rl-hrow-st.warn { color:var(--peach); } .rl-hrow-st.warn i { background:var(--peach); }
+.rl-hrow-st.run { color:var(--yellow); } .rl-hrow-st.run i { background:var(--yellow); }
+.rl-hrow-ticket { font-size:11px; color:var(--accent); cursor:pointer; }
+.rl-hrow.small td { padding-top:5px; padding-bottom:5px; font-size:11.5px; }
+.rl-hrow.small .rl-hrow-title b { font-weight:500; }
+.rl-hrow.dead td { opacity:.5; }
+.rl-hx > td { padding:8px; overflow:visible; background:var(--surface1); white-space:normal; }
+.rl-hx .rl-hist-card { margin:0; }
+.rl-htab tbody tr:last-child td { border-bottom:none; }
+.rl-hist-id { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); }
+/* One fixed window: every view scrolls inside it, switching never resizes it */
+#rl-modal { width:min(1100px, calc(100vw - 64px)); height:calc(100vh - 64px); max-width:none; min-width:0; }
+.rl-nav { display:flex; align-items:center; gap:4px; padding:0 18px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.rl-nav > button { position:relative; display:flex; align-items:center; gap:6px; font:inherit; font-size:12.5px; font-weight:500; padding:10px 10px 9px; border:none; background:none; color:var(--subtext); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; transition:color .12s, border-color .12s; }
+.rl-nav > button:hover { color:var(--text); }
+.rl-nav > button.on { color:var(--text); border-bottom-color:var(--accent); }
+.rl-seg { margin-left:auto; display:flex; gap:2px; padding:2px; border-radius:999px; background:var(--surface0); border:1px solid var(--border); }
+.rl-seg button { font:inherit; font-size:11px; padding:2px 10px; border-radius:999px; border:none; background:none; color:var(--subtext); cursor:pointer; }
+.rl-seg button.on { background:var(--surface2); color:var(--text); }
+.rl-wait { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.rl-wait-h { font-size:10px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--dim); margin-right:4px; }
+.rl-wait-env { display:flex; align-items:center; gap:7px; font:inherit; font-size:11.5px; padding:4px 10px; border-radius:999px; border:1px solid var(--border); background:var(--surface0); color:var(--subtext); cursor:pointer; }
+.rl-wait-env b { color:var(--peach); } .rl-wait-env:hover { border-color:var(--border-hi); color:var(--text); }
+.rl-wait-env.none { opacity:.6; }
+.rl-now-empty { display:flex; flex-direction:column; align-items:center; gap:8px; padding:56px 0; color:var(--subtext); text-align:center; }
+.rl-now-empty > b { font-size:14px; color:var(--text); }

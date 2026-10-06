@@ -681,7 +681,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 /* Inline ghost-text autocomplete overlay — floats over the terminal canvas, never written to the xterm buffer */
 #ghost-suggest { position:fixed; z-index:50; color:#585b70; opacity:.85; white-space:pre; pointer-events:none; display:none; }
 #ghost-suggest .ghost-hint { font-size:9px; opacity:.7; margin-left:6px; border:1px solid #585b70; border-radius:3px; padding:0 3px; }
-/* "+" / "//" catalog popover (catalog-ui.js) */
+/* "+" / ";;" catalog popover (catalog-ui.js) */
 #catalog-btn { position:absolute; left:8px; bottom:8px; z-index:11; width:22px; height:22px; padding:0; border-radius:6px; border:1px solid var(--border-hi);
   background:var(--pop); color:var(--dim); font-size:15px; line-height:19px; cursor:pointer; opacity:.75; }
 #catalog-btn:hover { opacity:1; color:var(--accent); border-color:var(--accent); }
@@ -1233,7 +1233,7 @@ button:focus-visible { outline-offset:0; }
     <div id="list-foot">
       <div id="pr-nag" style="display:none" onclick="prNagClick(event)"><button onclick="snoozePrNag(event)" title="Hide for 30 min" aria-label="Hide for 30 minutes">✕</button><b>Please approve your teammates' PR!</b><span></span></div>
       <div class="foot-chips">
-        <div id="pr-badge" style="display:none" onclick="togglePrDropdown(event)" title="Open PRs"></div>
+        <div id="pr-badge" class="idle" style="display:flex" onclick="togglePrDropdown(event)" title="Open PRs">PRs</div>
         <div id="actions-badge" style="display:none" onclick="toggleActionsDropdown(event)" title="Tracked GitHub Actions"></div>
       </div>
       <div id="summary-bar"></div>
@@ -1305,9 +1305,9 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-field" id="catalog-hotkey-field">
         <div class="field-title">Hotkey</div>
-        <div class="field-row"><input class="settings-input" id="inp-catalog-hotkey" readonly placeholder="Press a shortcut or type two characters" onkeydown="recordCatalogHotkey(event)" onblur="catalogTyped = ''; this.value = this.dataset.saved || '//'" style="flex:1;" /><button class="settings-btn" type="button" onclick="setCatalogHotkey('//')">Reset</button></div>
+        <div class="field-row"><input class="settings-input" id="inp-catalog-hotkey" readonly placeholder="Press a shortcut or type two characters" onkeydown="recordCatalogHotkey(event)" onblur="catalogTyped = ''; this.value = this.dataset.saved || CATALOG_HOTKEY" style="flex:1;" /><button class="settings-btn" type="button" onclick="setCatalogHotkey(CATALOG_HOTKEY)">Reset</button></div>
       </div>
-      <div class="settings-hint">Lists the skills, commands and agents an agent can use — from this repo, ~/.claude and your plugins. Opens from the + in the terminal's corner or the hotkey: two characters typed in a row (default <code>//</code>), or a shortcut like <code>Ctrl+K</code>.</div>
+      <div class="settings-hint">Lists the skills, commands and agents an agent can use — from this repo, ~/.claude and your plugins. Opens from the + in the terminal's corner or the hotkey: two characters typed in a row (default <code>;;</code>), or a shortcut like <code>Ctrl+K</code>.</div>
       <label class="settings-label">
         <span>Plan budget: $</span>
         <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
@@ -3107,7 +3107,7 @@ function createXterm(id) {
     showImagePop(src, ev, { left: r.left + m.index * cw, top: r.top + row * ch, width: m[0].length * cw, height: ch });
   }, true); // capture: with mouse reporting on (Claude's prompt), xterm stops the event before it bubbles here
   el.addEventListener('mouseleave', hideImagePop);
-  // The picker's typed hotkey (default "//") opens it instead of reaching the pty (catalog-pick.js holds the first char 250 ms).
+  // The picker's typed hotkey (default ";;") opens it instead of reaching the pty (catalog-pick.js holds the first char 250 ms).
   const slashGate = makeSlashGate({ send: (data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); }, open: () => catalogUi.open(), seq: () => catalogUi.seq() });
   terminal.onData(slashGate);
   terminal.onScroll(() => {
@@ -3380,14 +3380,14 @@ let catalogTyped = '';
 function syncCatalogSettings(s) {
   const on = s.catalogEnabled !== false, chk = document.getElementById('chk-catalog'), inp = document.getElementById('inp-catalog-hotkey');
   if (chk) chk.checked = on;
-  if (inp) inp.value = inp.dataset.saved = s.catalogHotkey || '//';
+  if (inp) inp.value = inp.dataset.saved = s.catalogKey || CATALOG_HOTKEY;
   const field = document.getElementById('catalog-hotkey-field'); if (field) field.style.display = on ? '' : 'none'; // off → no hotkey to set
 }
 function saveCatalogSettings(extra = {}) {
-  const settings = { catalogEnabled: document.getElementById('chk-catalog').checked, catalogHotkey: document.getElementById('inp-catalog-hotkey').value || '//', ...extra };
+  const settings = { catalogEnabled: document.getElementById('chk-catalog').checked, catalogKey: document.getElementById('inp-catalog-hotkey').value || CATALOG_HOTKEY, ...extra };
   api.send({ type: 'saveSettings', settings }); catalogUi.setConfig(settings); syncCatalogSettings(settings);
 }
-function setCatalogHotkey(hk) { catalogTyped = ''; saveCatalogSettings({ catalogHotkey: hk }); }
+function setCatalogHotkey(hk) { catalogTyped = ''; saveCatalogSettings({ catalogKey: hk }); }
 function recordCatalogHotkey(e) {
   if (e.key === 'Tab' || e.key === 'Escape') { catalogTyped = ''; return; }
   e.preventDefault();
@@ -4118,7 +4118,7 @@ function handleAgentMsg(msg) {
       break;
     }
     case 'updateDownloaded':
-      setUpdateBtn({ label: 'Update', ver: 'v' + msg.version, title: 'Restart and install v' + msg.version,
+      setUpdateBtn({ label: 'Update', ver: 'v' + msg.version, title: updTitle('Restart and install v' + msg.version, msg.changes),
         onclick: () => { setUpdateBtn({ label: 'Restarting…', busy: true }); api.send({ type: 'installUpdate' }); } });
       break;
     // Source checkouts (start.bat) update by pulling master. The two update
@@ -4128,7 +4128,7 @@ function handleAgentMsg(msg) {
       if (!b) break;
       if (!updateLabel(msg.behind)) { b.style.display = 'none'; updBtnArgs = null; break; } // update-core.js
       setUpdateBtn({ label: 'Update', ver: msg.behind + (msg.behind === 1 ? ' commit' : ' commits'),
-        title: 'Pull ' + msg.behind + ' new commit(s) from master and restart',
+        title: updTitle('Pull ' + msg.behind + ' new commit(s) from master and restart', msg.changes),
         onclick: () => { setUpdateBtn({ label: 'Updating…', busy: true }); api.send({ type: 'gitPull' }); } });
       break;
     }
@@ -5487,9 +5487,9 @@ function renderPrBadge() {
     b.title = 'All watched PRs are muted — click to manage';
     renderPrNag(0);
   } else {
-    // Nothing open, or everything archived: nothing needs you, so no chip — and no class, the foot's red/green keys off it.
-    b.style.display = 'none'; b.className = '';
-    document.getElementById('pr-dropdown').style.display = 'none';
+    // Nothing open, or everything archived: a quiet chip, still there to open the list — and no class, the foot's red/green keys off it.
+    b.style.display = 'flex'; b.className = 'idle';
+    b.textContent = 'PRs'; b.title = 'No open PRs need you — click to open the list';
     renderPrNag(0);
   }
 }
@@ -5754,6 +5754,11 @@ function closeSnooze() { const p = document.getElementById('pr-snooze-pop'); if 
 // Busy states (restarting, pulling) swap the arrow for a spinner and lock the click.
 const UPD_ICON = '<svg class="ic upd-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
 let updBtnArgs = null; // the last idle state, restored after a failed pull
+// Hover text: the action, then what's new (newest first), each subject cut short — they run long.
+function updTitle(head, changes) {
+  if (!changes || !changes.length) return head;
+  return head + '\n\nWhat changed:\n' + changes.map(c => '• ' + (c.length > 140 ? c.slice(0, 139) + '…' : c)).join('\n');
+}
 function setUpdateBtn(args) {
   const b = document.getElementById('update-btn');
   if (!b) return;

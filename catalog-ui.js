@@ -1,4 +1,4 @@
-// The "+" / "//" popover: pick a type, fuzzy-search it, Enter types "/name " into the
+// The "+" / ";;" popover: pick a type, fuzzy-search it, Enter types "/name " into the
 // selected agent's prompt. Lists come from main (catalog-core.js, cached per cwd);
 // filtering is catalog-pick.js (loaded first; its functions are page globals). index.html loads this file and forwards
 // { type: 'catalog' } messages to catalogUi.onMsg.
@@ -20,7 +20,7 @@
     { type: 'builtin', label: 'Built-in' },
   ];
   const cache = new Map(); // cwd -> items
-  let config = { enabled: true, hotkey: '//' }; // Settings → Skills picker
+  let config = { enabled: true, hotkey: CATALOG_HOTKEY }; // Settings → Skills picker
   let isOpen = false, stage = 'types', type = null, sel = 0, rows = [], cwd = '';
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -34,7 +34,7 @@
 
   const btn = document.createElement('button');
   btn.id = 'catalog-btn';
-  btn.title = 'Skills, commands and agents (//)';
+  btn.title = `Skills, commands and agents (${CATALOG_HOTKEY})`;
   btn.textContent = '+';
   btn.onmousedown = (e) => e.stopPropagation(); // else the outside-click close fires first and this reopens it
   // stopPropagation: #term-container's click handler refocuses the terminal, stealing focus from the search box.
@@ -187,7 +187,7 @@
     if (k === 'Enter') { e.preventDefault(); choose(sel, e.shiftKey); return; }
     if (k === 'Tab') { e.preventDefault(); return; } // keep focus in the search box
     if (stage === 'types' && /^[1-5]$/.test(k) && !q.value) { e.preventDefault(); choose(+k - 1); return; }
-    if (k === 'Backspace' && !q.value && stage === 'list') { e.preventDefault(); back(); return; }
+    if (k === 'Backspace' && !q.value) { e.preventDefault(); stage === 'list' ? back() : close(); return; } // list → menu, menu → closed
     // ← / → while there's no text to move the caret through: → opens a type, ← goes back to the menu.
     if ((k === 'ArrowRight' || k === 'ArrowLeft') && !q.value) {
       e.preventDefault();
@@ -220,7 +220,7 @@
   }, true);
 
   function setConfig(s) {
-    config = { enabled: s.catalogEnabled !== false, hotkey: s.catalogHotkey || '//' };
+    config = { enabled: s.catalogEnabled !== false, hotkey: s.catalogKey || CATALOG_HOTKEY }; // catalogKey, not the old catalogHotkey: that one may hold a saved old default "//"
     btn.hidden = !config.enabled;
     btn.title = `Skills, commands and agents (${config.hotkey})`;
     if (!config.enabled) close(false);

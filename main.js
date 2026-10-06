@@ -73,10 +73,21 @@ autoUpdater.on('update-available', info => {
   send({ type: 'updateAvailable', version: info.version });
 });
 
-autoUpdater.on('update-downloaded', info => {
+autoUpdater.on('update-downloaded', async info => {
   logToRenderer(`Update downloaded: v${info.version} — ready to install`);
-  send({ type: 'updateDownloaded', version: info.version });
+  send({ type: 'updateDownloaded', version: info.version, changes: await releaseChanges(app.getVersion(), info.version) });
 });
+
+// Commit subjects between two release tags, for the update button's hover. Release
+// bodies are empty, so ask GitHub's compare API (public repo, no auth); [] on any failure.
+async function releaseChanges(from, to) {
+  try {
+    const r = await fetch(`https://api.github.com/repos/YanayLLS/Claude-Overlord/compare/v${from}...v${to}`);
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j.commits || []).map(c => c.commit.message.split('\n')[0]).reverse();
+  } catch { return []; }
+}
 
 autoUpdater.on('error', err => {
   logToRenderer(`Auto-updater error: ${err.message}`);
@@ -91,6 +102,7 @@ const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./
 const { sessionSwitchKind } = require('./resume-core');
 const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
 const { applyBgRecord } = require('./bg-core');
+const { unsettledJobFor } = require('./daemon-jobs');
 const { applyAskRecord } = require('./ask-core');
 const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
@@ -126,10 +138,12 @@ async function checkGitUpdate() {
   const behind = await gitCmd(['rev-list', '--count', 'HEAD..origin/master']);
   const ahead = await gitCmd(['rev-list', '--count', 'origin/master..HEAD']);
   if (!behind.ok || !ahead.ok) return;
+  const log = await gitCmd(['log', '--format=%s', '-n', '30', 'HEAD..origin/master']);
   send({
     type: 'gitUpdate',
     behind: Number(behind.out) || 0,
     ahead: Number(ahead.out) || 0,
+    changes: log.ok && log.out ? log.out.split('\n') : [],
   });
 }
 
@@ -431,7 +445,8 @@ function markSessionSwitch(id, line) {
 }
 // Follow the prompt: remember what was submitted; if it doesn't show up in the agent's
 // watched transcript, followPrompts() looks for the file it did land in.
-const FOLLOW_AFTER_MS = 4000, FOLLOW_GIVE_UP_MS = 60000, FOLLOW_TAIL_BYTES = 64 * 1024;
+// 2 MB: hooks can inject 100+ KB of context right after a prompt; only user records are parsed.
+const FOLLOW_AFTER_MS = 4000, FOLLOW_GIVE_UP_MS = 60000, FOLLOW_TAIL_BYTES = 2 * 1024 * 1024;
 function notePrompt(id, text) {
   const a = agents.get(id), key = promptKey(text);
   if (a && key) a.pendingPrompt = { key, at: Date.now() };
@@ -446,18 +461,39 @@ function readTail(file, bytes) {
 }
 // ponytail: only files touched since the submit are read, only their last 64 KB, and only
 // for a prompt still missing after 4 s — the normal case costs nothing.
+// Files in the agent's project dir touched since `since`, other than its own.
+function touchedSince(a, since) {
+  const dir = path.dirname(a.jsonlFile), out = [];
+  let names = []; try { names = fs.readdirSync(dir); } catch { return out; }
+  for (const f of names) {
+    if (!f.endsWith('.jsonl')) continue;
+    const file = path.join(dir, f);
+    if (file === a.jsonlFile) continue;
+    try { if (fs.statSync(file).mtimeMs >= since - 2000) out.push(file); } catch {}
+  }
+  return out;
+}
 function followPrompts() {
   const now = Date.now();
   for (const [id, a] of agents) {
+    // Its watched transcript doesn't exist (a fresh agent that /resumed another chat, before or
+    // across an app restart): Claude stamps every record it writes with the process's own
+    // session_id — the id Overlord launched it with — so the file carrying it is the agent's.
+    if (!a.archived && !fs.existsSync(a.jsonlFile) && (!a._sidScanAt || now - a._sidScanAt > 15000)) {
+      a._sidScanAt = now;
+      const stamp = `"session_id":"${a.sessionId}"`;
+      const hit = touchedSince(a, a.createdAt || 0).find(file => { try { return readTail(file, 64 * 1024).text.includes(stamp); } catch { return false; } }); // the id is on nearly every record
+      if (hit) {
+        a.pendingPrompt = null;
+        console.log(`[Overlord] ${path.basename(hit)} carries agent ${id}'s session id — following it`);
+        reassignAgentToFile(id, hit, readTail(hit, 64 * 1024).start);
+        continue;
+      }
+    }
     const p = a.pendingPrompt;
     if (!p || now - p.at < FOLLOW_AFTER_MS) continue;
     if (now - p.at > FOLLOW_GIVE_UP_MS) { a.pendingPrompt = null; continue; }
-    const dir = path.dirname(a.jsonlFile);
-    let files = [];
-    try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).map(f => path.join(dir, f)); } catch { continue; }
-    for (const file of files) {
-      if (file === a.jsonlFile) continue;
-      try { if (fs.statSync(file).mtimeMs < p.at - 2000) continue; } catch { continue; }
+    for (const file of touchedSince(a, p.at)) {
       let tail; try { tail = readTail(file, FOLLOW_TAIL_BYTES); } catch { continue; }
       if (!linesHavePrompt(tail.text.split('\n'), p.key, p.at)) continue;
       a.pendingPrompt = null;
@@ -628,7 +664,22 @@ function samplePerf() {
 
 function killSessionProcessesAsync(sessionId) {
   if (!sessionId) return Promise.resolve();
-  return killProcessesByCmdline([sessionId]);
+  return stopDaemonJobs([sessionId]).then(() => killProcessesByCmdline([sessionId]));
+}
+
+// Sessions Claude Code's daemon still runs as background jobs get `claude stop` before
+// Overlord runs them: killing the daemon's worker by pid just makes it respawn one, and
+// Overlord's --resume then runs alongside it (two copies, double the usage).
+const DAEMON_JOBS_DIR = path.join(os.homedir(), '.claude', 'jobs');
+function stopDaemonJobs(sessionIds) {
+  const shorts = sessionIds.map(s => unsettledJobFor(DAEMON_JOBS_DIR, s)).filter(Boolean);
+  return Promise.all(shorts.map(short => new Promise(res => {
+    flog(`[Overlord] stopping Claude Code background job ${short} so only Overlord runs that session`);
+    exec(`claude stop ${short}`, { timeout: 30000, windowsHide: true }, (err) => {
+      if (err) flog(`[Overlord] claude stop ${short} failed: ${err.message}`);
+      res();
+    });
+  })));
 }
 
 // ── Server URL detection ──────────────────────────────
@@ -1223,6 +1274,7 @@ function restoreAgents(state) {
     }
     const sweep = (async () => {
       await Promise.all(fresh.map(({ entry }) => killProcessTreeAsync(entry.pid)));
+      await stopDaemonJobs(fresh.map(({ entry }) => entry.sessionId));
       await killProcessesByCmdline(fresh.map(({ entry }) => entry.sessionId));
       // Sessions swept — spawnTerminal can skip its own kill pass for these agents.
       for (const { id } of fresh) { const ag = agents.get(id); if (ag) ag._sessionCleaned = true; }
@@ -1716,6 +1768,7 @@ function closeAgent(id) {
   pendingPeerMsgs.delete(id);
   peerApprovalQueue.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
+  stopDaemonJobs([a.sessionId]); // same as archive: don't leave it running in Claude Code's daemon
   if (preview) preview.onAgentClosed(id);
   if (browserRegistry) browserRegistry.destroy(id);
   if (mcpServer) mcpServer.revokeToken(id);
@@ -1741,6 +1794,9 @@ function archiveAgent(id) {
   bracketedPasteBuffers.delete(id);
   termBuffers.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
+  // A session handed to Claude Code's daemon outlives the pty: stop it too, or the
+  // closed agent keeps working (and billing) where nobody sees it.
+  stopDaemonJobs([a.sessionId]);
   // Archiving reclaims resources — a view is a whole renderer process. The token
   // and temp config stay: the agent can be unarchived and ensure() is lazy.
   if (preview) preview.onAgentClosed(id);
@@ -2037,9 +2093,9 @@ function scanForNewJsonlFiles() {
 // Newest chat names from a session's JSONL: user /rename (custom-title) and
 // Claude's auto-generated ai-title. '' when absent (e.g. a fresh /clear session).
 function readSessionTitle(file) {
-  let custom = '', ai = '';
-  try {
-    for (const line of fs.readFileSync(file, 'utf-8').split('\n')) {
+  const scan = (text) => {
+    let custom = '', ai = '';
+    for (const line of text.split('\n')) {
       if (!line.includes('"custom-title"') && !line.includes('"ai-title"')) continue;
       try {
         const r = JSON.parse(line);
@@ -2047,8 +2103,12 @@ function readSessionTitle(file) {
         else if (r.type === 'ai-title' && r.aiTitle) ai = r.aiTitle;
       } catch {}
     }
-  } catch {}
-  return { custom, ai };
+    return { custom, ai };
+  };
+  // Claude re-writes the names near the end on every resume/turn — the tail almost always
+  // has them, so a 100 MB transcript isn't read in full just to name the card.
+  try { const t = readTail(file, 256 * 1024); const n = scan(t.text); if (n.custom || n.ai || t.start === 0) return n; } catch {}
+  try { return scan(fs.readFileSync(file, 'utf-8')); } catch { return { custom: '', ai: '' }; }
 }
 
 function reassignAgentToFile(id, newFilePath, startAt = 0) {
@@ -2311,6 +2371,8 @@ function fetchAllPRs(repos) {
         const node = data['r' + i];
         if (!node) { failed.push(r); return; }
         for (const pr of (node.pullRequests && node.pullRequests.nodes) || []) {
+          // PRs into prod are the Releases board's (signatures, waves, deploys): not listed here
+          if (typeof releases !== 'undefined' && releases.isProdPr(r, pr.baseRefName)) continue;
           const mine = !!ghLogin && pr.author && pr.author.login === ghLogin;
           const rollup = pr.commits && pr.commits.nodes[0] && pr.commits.nodes[0].commit.statusCheckRollup;
           const requested = !!ghLogin && ((pr.reviewRequests && pr.reviewRequests.nodes) || [])
@@ -2411,8 +2473,11 @@ function pollPRs() {
 async function pollPRsOnce() {
   const cfg = settings.prSettings;
   if (!cfg || !cfg.enabled || !Array.isArray(cfg.repos) || cfg.repos.length === 0) return;
+  const paused = gqlAllow('any', await gqlBudget()).pausedUntil;
+  if (paused) { send({ type: 'prList', prs: null, error: gqlPausedText(paused), errorCode: 'ratelimit' }); return; }
   await fetchGhLogin();
   const res = await fetchAllPRs(cfg.repos);
+  if (res.error && /rate limit/i.test(res.error)) { const p = gqlAllow('any', await gqlBudget(true)).pausedUntil; if (p) res.error = gqlPausedText(p); }
   const failedRepos = res.failed || [];
   const validCount = cfg.repos.filter(r => PR_REPO_RE.test(r)).length;
   if (res.prs.length === 0 && (res.error || failedRepos.length >= validCount)) {
@@ -2512,11 +2577,18 @@ const prWatchGet = async (key, etag) => {
   ghCache.noteResponse(r);
   return { status: r.status, etag: r.headers.get('etag') };
 };
-// Triggered polls spend GraphQL points (~12+ each), so they're budgeted: at most one per PR_WATCH_GAP_MS (changes in the
-// gap share it), and only while over PR_WATCH_RESERVE of the hourly GraphQL limit is left — /rate_limit is free to ask.
-// Below that, only the regular interval poll runs. (Every-10s triggered polls during busy CI used to drain the limit.)
-const PR_WATCH_GAP_MS = 20e3, PR_WATCH_RESERVE = 0.5;
-let prWatchLastPoll = 0, prWatchPending = null;
+// Triggered polls spend GraphQL points (~20 each): at most one per PR_WATCH_GAP_MS (changes in the gap share it), and
+// only as gql-budget.js allows (70%+ of the hourly GraphQL limit left, ≤30 an hour); otherwise the regular poll covers it.
+const PR_WATCH_GAP_MS = 20e3;
+let prWatchLastPoll = 0, prWatchPending = null, prTriggeredAt = [], prRegularAt = 0;
+// The GraphQL budget (gql-budget.js): /rate_limit is free, cached for 15s so every GraphQL caller can consult it.
+const { gqlAllow } = require('./gql-budget');
+let gqlState = null, gqlStateAt = 0;
+async function gqlBudget(force) {
+  if (force || Date.now() - gqlStateAt > 15e3) { try { gqlState = await graphqlLeft(); gqlStateAt = Date.now(); } catch {} }
+  return gqlState;
+}
+const gqlPausedText = (until) => `GitHub's GraphQL limit is used up (it's shared by every gh tool on your account, agents too) — PRs resume at ${new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 async function graphqlLeft() {
   const r = await fetch('https://api.github.com/rate_limit', { headers: { Authorization: `Bearer ${await ghTokenGet()}` }, signal: AbortSignal.timeout(8000) });
   return (await r.json()).resources.graphql;
@@ -2525,9 +2597,9 @@ const prWatchPoll = () => {
   if (prWatchPending) return;
   prWatchPending = setTimeout(async () => {
     prWatchPending = null;
-    const g = await graphqlLeft().catch(() => null);
-    if (!g || g.remaining < g.limit * PR_WATCH_RESERVE) return;
+    if (!gqlAllow('triggered', await gqlBudget(), { triggeredAt: prTriggeredAt }).ok) return; // the regular poll still comes
     prWatchLastPoll = Date.now();
+    prTriggeredAt = [...prTriggeredAt.filter(t => Date.now() - t < 3600e3), Date.now()];
     pollPRs();
   }, Math.max(0, prWatchLastPoll + PR_WATCH_GAP_MS - Date.now()));
 };
@@ -2542,7 +2614,7 @@ function armPrTimer() {
   if (!cfg || !cfg.enabled) return;
   const sec = Math.max(30, Number(cfg.intervalSec) || 60);
   pollPRs();
-  prTimer = setInterval(pollPRs, sec * 1000);
+  prTimer = setInterval(async () => { if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
   prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
   prCheckWatchTimer = setInterval(() => {
     const heads = ((settings.prCache && settings.prCache.prs) || []).filter(p => p.headSha && PR_REPO_RE.test(p.repo || ''));
@@ -2576,7 +2648,12 @@ function sanitizeWorkflows(list) {
 }
 
 // One GraphQL call via stdin (no shell quoting of the query). Resolves { data } or { error, errorCode }.
-function ghGraphql(query, timeout = 30000) {
+async function ghGraphql(query, timeout = 30000) {
+  const paused = gqlAllow('other', await gqlBudget()).pausedUntil; // release board, sign ping: stop only at the floor
+  if (paused) return { error: gqlPausedText(paused), errorCode: 'ratelimit' };
+  return ghGraphqlRaw(query, timeout);
+}
+function ghGraphqlRaw(query, timeout) {
   return new Promise((resolve) => {
     let out = '', errbuf = '', proc, done = false;
     const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
@@ -4734,7 +4811,9 @@ setInterval(() => {
   for (const [id, a] of agents) {
     if (a.archived || a.isWaiting || a.crashed || a.toolIds.size > 0) continue;
     let mtimeMs;
-    try { mtimeMs = fs.statSync(a.jsonlFile).mtimeMs; } catch { continue; }
+    // No transcript yet (fresh agent, or /resume'd into another chat before its first prompt):
+    // nothing has been written since it was created — without this it stayed 'active' forever.
+    try { mtimeMs = fs.statSync(a.jsonlFile).mtimeMs; } catch { mtimeMs = a.createdAt || 0; }
     if (now - mtimeMs < STATUS_STUCK_MS) continue;
     a.isWaiting = true; a.permSent = false; clrTimer(id, permTimers);
     send({ type: 'status', id, status: shownStatus(a) });

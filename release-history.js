@@ -63,33 +63,39 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
   // After a release run: record it, one release per env (prod is the signed one; alpha / staging get their
   // own records so anyone can follow and manage them too). A still-pending record of that env that already
   // holds one of these PRs is the same release (re-run to add repos / refresh) — update it; else a new one.
-  async function recordRun(run, { opener, manual, flags }) {
+  // kind: 'hotfix' = a PR into prod that isn't a release PR (its own release, never joins another);
+  // joinPending: a release PR opened elsewhere joins the pending prod release when there is one
+  async function recordRun(run, { opener, manual, flags, kind = 'release', joinPending = false }) {
     if (!repoOf()) return null;
     const envs = [...new Set(run.rows.filter(r => r.pr && !r.merged && !r.closed).map(r => r.env))];
     let prodId = null;
     for (const env of envs) {
-      const id = await recordEnv(run, env, { opener, manual: (manual || []).filter(m => (m.env || 'prod') === env), flags: env === 'prod' ? flags : null });
+      const id = await recordEnv(run, env, { opener, manual: (manual || []).filter(m => (m.env || 'prod') === env), flags: env === 'prod' ? flags : null, kind, joinPending });
       if (env === 'prod') prodId = id;
     }
     return prodId;
   }
-  async function recordEnv(run, env, { opener, manual, flags }) {
+  async function recordEnv(run, env, { opener, manual, flags, kind = 'release', joinPending = false }) {
+    const scope = run.scope || null; // a release of some repos only: { repos: [labels], of: N waiting }
     const rows = run.rows.filter(r => r.env === env && r.pr && !r.merged && !r.closed);
     if (!rows.length) return null;
     const loaded = await load();
     if (!loaded) return null;
     const key = (r) => r.repo + '#' + r.pr.number;
     const mine = new Set(rows.map(key));
-    const existing = loaded.entries.find(e => e.manifest.status === 'pending' && (e.manifest.env || 'prod') === env && e.manifest.repos.some(r => mine.has(key(r))));
+    const pendingOf = (e) => e.manifest.status === 'pending' && (e.manifest.env || 'prod') === env;
+    const existing = kind === 'hotfix' ? null : loaded.entries.find(e => pendingOf(e) && e.manifest.repos.some(r => mine.has(key(r))))
+      || (joinPending ? loaded.entries.find(e => pendingOf(e) && (e.manifest.kind || 'release') === 'release') : null);
     for (let attempt = 0; attempt < 4; attempt++) {
       let m, sha = null;
       if (existing) {
         m = existing.manifest; sha = existing.sha;
         const have = new Set(m.repos.map(key));
         const add = M.newManifest({ id: m.id, env, rows: rows.filter(r => !have.has(key(r))) }).repos;
-        m = { ...m, repos: m.repos.concat(add), manual, flags: flags && flags.missing ? { missing: flags.missing } : m.flags, updatedAt: new Date().toISOString() };
+        m = { ...m, repos: m.repos.concat(add), manual: (manual && manual.length) ? manual : m.manual, flags: flags && flags.missing ? { missing: flags.missing } : m.flags, updatedAt: new Date().toISOString(),
+          ...(m.scope ? { scope: { ...m.scope, repos: [...new Set(m.scope.repos.concat(add.map(r => r.label)))] } } : {}) };
       } else {
-        m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name).concat(attempt ? [M.nextId(loaded.files.map(f => f.name))] : [])), env, rows, opener, manual, flags });
+        m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name).concat(attempt ? [M.nextId(loaded.files.map(f => f.name))] : [])), kind, env, rows, opener, manual, flags, scope });
       }
       const w = await write(m, sha, existing ? `release ${m.id}: updated` : `release ${m.id} (${env}): opened by @${opener && opener.login}`);
       if (w.conflict) { await load(); continue; }
@@ -107,6 +113,31 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     return null;
   }
 
+  // A PR merged into prod before any release recorded it (merged on github.com): recorded after the fact,
+  // its signers as GitHub has them — fewer than 2 reads "merged unsigned" on the card. rows: [{ repo, label, source,
+  // target, deploy, pr: { number, url }, mergeSha, mergedAt, signers, hotfix }]
+  async function recordMerged(rows, opener) {
+    if (!repoOf() || !rows.length) return null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const loaded = await load();
+      if (!loaded) return null;
+      let m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name)), kind: rows.some(r => r.standalone) ? 'standalone' : rows.some(r => r.hotfix) ? 'hotfix' : 'release', env: 'prod', rows, opener });
+      for (const r of rows) [m] = M.applyPr(m, r.repo, { number: r.pr.number, mergeSha: r.mergeSha, mergedAt: r.mergedAt, signers: r.signers || [] });
+      m = { ...m, afterTheFact: true };
+      const w = await write(m, null, `release ${m.id}: recorded after the fact (merged outside Overlord)`);
+      if (w.conflict) continue;
+      if (w.error) return null;
+      await Promise.all(rows.map(async (r) => {
+        const cur = await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
+        const body = (cur.data && cur.data.body) || '';
+        if (!apiErr(cur) && !M.releaseIdOf(body)) await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeTmp({ body: body + '\n' + M.releaseIdMark(m.id) })]);
+      }));
+      await load();
+      return m.id;
+    }
+    return null;
+  }
+
   // Fold what GitHub says now into every unfinished manifest; write back only what changed.
   // Every PR is read at once, and a change shows here before its write lands (writes are the slow part).
   // of the commits signatures name, the PR's head if one covers it, else the latest signature's
@@ -114,6 +145,20 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     const shas = (s.signers || []).map(x => x.sha).filter(Boolean);
     if (!shas.length || !s.pr || !s.pr.head) return undefined;
     return shas.includes(s.pr.head.sha) ? s.pr.head.sha : shas[shas.length - 1];
+  }
+  // a release PR's merged PRs: GitHub's "Merge pull request #N from …" commits, with the PR title (its 3rd line)
+  async function changesOf(repo, n) {
+    const r = await ghJson(['api', '-X', 'GET', `repos/${repo}/pulls/${n}/commits`, '-f', 'per_page=100']);
+    if (apiErr(r) || !Array.isArray(r.data)) return null;
+    const out = [];
+    for (const c of r.data) {
+      const msg = (c.commit && c.commit.message) || '', m = msg.match(/^Merge pull request #(\d+) from \S+/);
+      if (!m) continue;
+      const title = msg.split('\n').slice(1).map(x => x.trim()).filter(Boolean)[0] || '';
+      if (/^chore\((release|merge)\)/i.test(title)) continue; // release / back-merge plumbing, not a change
+      out.push({ n: +m[1], title: title.slice(0, 140) });
+    }
+    return out.slice(-60);
   }
   async function reconcile() {
     const loaded = await load();
@@ -124,8 +169,10 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     };
     // the ClickUp release ticket: the ticket repo merged in a release from the last 3 days, and no link yet
     const tr = ticketRepo();
-    const wantsTicket = (m) => tr && !m.ticket && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 3 * 86400e3 && m.repos.some(r => r.repo === tr && r.mergeSha);
-    const wrote = await Promise.all(loaded.entries.filter(e => ['pending', 'merged', 'partial'].includes(e.manifest.status) || wantsTicket(e.manifest)).map(async ({ manifest, sha }) => {
+    const wantsTicket = (m) => tr && !m.ticket && m.kind !== 'rollback' && !m.imported && Date.now() - Date.parse(m.openedAt) < 21 * 86400e3 && m.repos.some(r => r.repo === tr && r.mergeSha);
+    // in flight only: an old or imported record stuck at 'merged' (no deploy result) isn't re-read every cycle
+    const settling = (m) => m.status === 'pending' || (['merged', 'partial'].includes(m.status) && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
+    const wrote = await Promise.all(loaded.entries.filter(e => settling(e.manifest) || wantsTicket(e.manifest)).map(async ({ manifest, sha }) => {
       const seen = await Promise.all(manifest.repos.map(async (r) => {
         const out = { r };
         if (!r.mergeSha && !r.closed) out.s = await signoffOf(r.repo, r.pr.number);
@@ -144,18 +191,37 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         changed = changed || c;
       }
       if (changed) show(m);
+      // what changed in each repo: the PRs its release PR brought in (merge commits' "#N title"), once, after it merges
+      const noChanges = m.repos.filter(r => r.mergeSha && !r.changes);
+      if (noChanges.length) {
+        const lists = await Promise.all(noChanges.map(r => changesOf(r.repo, r.pr.number)));
+        noChanges.forEach((r, i) => { if (lists[i]) { m = { ...m, repos: m.repos.map(x => x === r || (x.repo === r.repo && x.pr.number === r.pr.number) ? { ...x, changes: lists[i] } : x) }; changed = true; } });
+      }
       const deploys = await Promise.all(m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state)).map(async (r) => {
         const runs = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', `head_sha=${r.mergeSha}`, '-f', 'per_page=5']);
-        return [r, ((runs.data && runs.data.workflow_runs) || []).find(x => x.status === 'completed')];
+        const list = (runs.data && runs.data.workflow_runs) || [];
+        return [r, list.find(x => x.status === 'completed'), list.find(x => x.status !== 'completed')];
       }));
-      for (const [r, done] of deploys) {
+      for (const [r, done, live] of deploys) {
+        // still running: where to watch it, since when, and how long it usually takes (its last good runs)
+        if (!done && live && (!r.deploy.runUrl || r.deploy.runUrl !== live.html_url)) {
+          const ok = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', 'status=success', '-f', 'per_page=5']);
+          const durs = ((ok.data && ok.data.workflow_runs) || []).map(x => Date.parse(x.updated_at) - Date.parse(x.run_started_at || x.created_at)).filter(x => x > 0).sort((a, b) => a - b);
+          m = { ...m, repos: m.repos.map(x => x.repo === r.repo && x.pr.number === r.pr.number ? { ...x, deploy: { ...x.deploy, runUrl: live.html_url, startedAt: live.run_started_at || live.created_at, typicalMs: durs.length ? durs[Math.floor(durs.length / 2)] : null } } : x) };
+          changed = true;
+        }
         if (!done) continue;
         [m, c] = M.applyDeploy(m, r.repo, { state: done.conclusion === 'success' ? 'success' : 'failure', url: done.html_url, at: done.updated_at });
         changed = changed || c;
       }
       if (wantsTicket(m)) {
-        const t = await findTicket(m.repos.find(r => r.repo === tr).mergeSha).catch(() => null);
-        if (t) { m = { ...m, ticket: t }; changed = true; }
+        // the ticket workflow comments its link on the release PR (no ClickUp connection needed to see it);
+        // else this user's ClickUp, by the deployed commit
+        const rr = m.repos.find(r => r.repo === tr);
+        const cs = await ghJson(['api', '-X', 'GET', `repos/${tr}/issues/${rr.pr.number}/comments`, '-f', 'per_page=100']);
+        const hit = (Array.isArray(cs.data) ? cs.data : []).map(c => String(c.body || '').match(/ClickUp release ticket: (?:\[([^\]]+)\]\()?(https:\/\/app\.clickup\.com\/t\/\w+)/)).find(Boolean);
+        const t = hit ? { url: hit[2], name: hit[1] || 'ClickUp release ticket' } : await findTicket(rr.mergeSha).catch(() => null);
+        if (t) { const v = String(t.name).match(/\bv(\d[\w.]*)/); m = { ...m, ticket: t, ...(v ? { version: v[1] } : {}) }; changed = true; }
       }
       if (!changed) return false;
       show(m);
@@ -364,5 +430,5 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     }
   }
 
-  return { load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, recordHealth, markCancelled, markSigned };
+  return { recordMerged, load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, recordHealth, markCancelled, markSigned };
 };
