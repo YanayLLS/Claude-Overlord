@@ -16,4 +16,11 @@ function applyAskRecord(asks, r) {
   return asks.size !== before;
 }
 
-module.exports = { applyAskRecord };
+// Claude Code's permission dialog on screen — also for a sub-agent's tool (it asks in the
+// parent's terminal) and for dangerous commands under bypassPermissions. Neither ever shows
+// in the parent's transcript. `text` is terminal output with escapes stripped: spaces arrive
+// as cursor moves, so the pattern tolerates them missing.
+const PERM_DIALOG_RE = /Do\s*you\s*want\s*to\s*[^?]{0,300}\?[\s\S]{0,400}?1\.\s*Yes[\s\S]{0,200}?\d\.\s*No/;
+const permDialogIn = (text) => PERM_DIALOG_RE.test(text || '');
+
+module.exports = { applyAskRecord, permDialogIn };

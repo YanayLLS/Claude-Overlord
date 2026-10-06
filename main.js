@@ -103,7 +103,7 @@ const { sessionSwitchKind } = require('./resume-core');
 const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
 const { applyBgRecord } = require('./bg-core');
 const { unsettledJobFor } = require('./daemon-jobs');
-const { applyAskRecord } = require('./ask-core');
+const { applyAskRecord, permDialogIn } = require('./ask-core');
 const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
 const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
@@ -867,6 +867,25 @@ function setPrompt(id, a, text) {
 // ── Spinner text extraction from raw PTY data ──────────
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]|\x1b[78]|\x1b\[\?[0-9;]*[hl]/g;
 const spinnerDebounce = new Map();
+// A permission dialog on the agent's screen — a sub-agent's tool, or a dangerous command
+// under bypassPermissions — never reaches the parent's transcript. Live output only (the
+// reattach replay isn't scanned). It clears when you answer in that terminal or the turn moves.
+const PTY_PERM_TOOL = 'pty-permission';
+function watchPermDialog(id, d) {
+  const a = agents.get(id); if (!a || a.ptyPerm) return;
+  a._screenTail = ((a._screenTail || '') + d.replace(ANSI_RE, '')).slice(-3000);
+  if (!permDialogIn(a._screenTail)) return;
+  a._screenTail = '';
+  a.ptyPerm = true; a.permSent = true;
+  send({ type: 'toolStart', id, toolId: PTY_PERM_TOOL, status: 'Waiting for your permission', name: 'Permission' });
+  send({ type: 'perm', id });
+  notifyPermission(id, a);
+}
+function clearPtyPerm(id, a) {
+  if (!a?.ptyPerm) return;
+  a.ptyPerm = false; a._screenTail = '';
+  send({ type: 'toolDone', id, toolId: PTY_PERM_TOOL });
+}
 function extractSpinnerText(id, data) {
   const stripped = data.replace(ANSI_RE, '');
   const parts = stripped.split(/[\r\n]/);
@@ -1533,7 +1552,7 @@ function doSpawnTerminal(id, attached) {
     }
     let resumeErrorBuf = '';
     proc.onData((d) => {
-      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
+      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); watchPermDialog(id, d); } catch {}
       // Buffer terminal output for mobile remote
       let buf = termBuffers.get(id) || '';
       buf += d;
@@ -1697,7 +1716,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
       setTimeout(() => { try { writeInitialPrompt(proc, initialPrompt); } catch {} }, 100);
     }
     const onData = (d) => {
-      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
+      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); watchPermDialog(id, d); } catch {}
       // Buffer terminal output for mobile remote
       let buf = termBuffers.get(id) || '';
       buf += d;
@@ -1857,7 +1876,7 @@ function readLines(id) {
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
     if (lines.some(l => l.trim())) a.crashed = false;
     // Only turn progress ends a pending ask/permission — queued notifications, attachments etc. do not
-    if (!a.askIds?.size && lines.some(movesTurn)) { clrTimer(id, permTimers); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
+    if (!a.askIds?.size && lines.some(movesTurn)) { clrTimer(id, permTimers); clearPtyPerm(id, a); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
     for (const line of lines) { if (line.trim()) parseLine(id, line); }
   } catch (e) { logToRenderer(`[readLines] Agent ${id} error: ${e.message} — file: ${a.jsonlFile}`); }
 }
@@ -3507,6 +3526,8 @@ function pasteTextToTerm(id, text) {
 }
 
 function handleTermInput(id, data) {
+  // Typing in the terminal answers an on-screen permission dialog (focus in/out doesn't)
+  { const a = agents.get(id); if (a?.ptyPerm && !/^\x1b\[[IO]$/.test(data)) { clearPtyPerm(id, a); a.permSent = false; send({ type: 'permClear', id }); } }
   const t = terminals.get(id);
   if (!t) {
     // PTY not yet spawned — queue input, flushed after spawn.

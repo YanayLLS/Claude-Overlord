@@ -27,3 +27,13 @@ test('turn end clears (interrupted / abandoned ask)', () => {
   applyAskRecord(s, { type: 'system', subtype: 'turn_duration' });
   assert.strictEqual(s.size, 0);
 });
+
+const { permDialogIn } = require('./ask-core');
+test('permission dialog on screen (sub-agent / dangerous command), with or without spaces', () => {
+  const screen = 'Bash command · from the fix-D agent Run shell command │ rm -f fixD/* Dangerous rm operation on statically-unresolvable target Do you want to proceed? > 1. Yes   2. No';
+  assert.ok(permDialogIn(screen));
+  assert.ok(permDialogIn(screen.replace(/ /g, '')), 'spaces drawn as cursor moves');
+  assert.ok(permDialogIn('Do you want to make this edit to main.js?\n❯ 1. Yes\n  2. Yes, allow all edits\n  3. No, and tell Claude'));
+  assert.ok(!permDialogIn('I asked: do you want to proceed with the plan? Reply yes or no.'));
+  assert.ok(!permDialogIn('Cooked for 12s · done 4:05 PM'));
+});
