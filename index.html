@@ -6347,7 +6347,7 @@ function questCommentsHtml(q) {
   else if (!cm.length) h += '<p class="q-empty">No comments yet. Yours would be the first.</p>';
   else h += cm.map(c => questCommentHtml(c, false)).join('');
   h += '<div class="q-reply">' + (q.replyTo ? '<div class="q-replyto">Replying to <b>' + esc(q.replyTo.name) + '</b> &middot; <a href="#" onclick="questReplyTo(null);return false;">write a new comment instead</a></div>' : '')
-    + '<div class="q-reply-wrap"><div id="q-reply-text" class="q-reply-box" contenteditable="true" data-placeholder="' + (q.replyTo ? 'Write your reply…' : 'Write a comment…') + ' (@ mentions someone, Ctrl+Enter sends)" onkeydown="questReplyKey(event)" oninput="mentionWatch()" onblur="setTimeout(mentionClose, 150)"></div><div id="q-mention" class="q-mention" hidden></div></div>'
+    + '<div class="q-reply-wrap"><div id="q-reply-text" class="q-reply-box" contenteditable="true" data-placeholder="' + (q.replyTo ? 'Write your reply…' : 'Write a comment…') + ' (@ mentions someone, Ctrl+Enter sends)" onkeydown="questReplyKey(event)" oninput="mentionWatch()" onblur="setTimeout(mentionClose, 150)"></div><div id="q-mention" class="q-mention-pop" hidden></div></div>'
     + '<div class="q-reply-row"><span class="q-as">posting as <b>' + esc(clickupSettings.user ? clickupSettings.user.username : 'you') + '</b></span><button class="q-btn q-main" onclick="questSendComment()">' + (q.replyTo ? 'Reply' : 'Comment') + '</button></div></div></div>';
   return h;
 }

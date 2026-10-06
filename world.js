@@ -895,44 +895,59 @@ function setArranging(on) {
   markArrange(); if (!arranging) toast('Arrangement kept'); else toast('Arrange: drag any site');
 }
 W.arrange = function (on) { setArranging(on == null ? !arranging : on); return arranging; };
-// Randomize layout: a fresh arrangement of everything, drawn from a few town plans, packed as tight as the sites
-// allow. Each plan only decides the direction a site sits in from the treasury; its distance is the nearest spot
-// that fits, so the island stays as small as it can. The harbour takes a shore and faces the sea, the portal the far side.
-const PLANS = ['ring', 'crescent', 'rows', 'spiral', 'quarters'];
+// Randomize layout, the tidy way: a structured town plan with even gaps and shared baselines. Chance picks the
+// plan, the order of the sites and the side the town faces; everything else is ruled. Rows: features in one row,
+// workshops in a parallel row, the treasury between. Plaza: features on three sides of a square, workshops in a
+// grid inside. Boulevard: a street with features alternating sides, workshops in a block at its end.
+const PLANS = ['rows', 'arc', 'plaza', 'boulevard'];
 function randomLayout() {
-  if (!snap) return;
-  const base = planSitesRaw({ ...snap, layout: {} }); if (!base.length) return;
-  const rnd = (a, b) => a + Math.random() * (b - a), pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-  const plan = pick(PLANS), dirA = rnd(0, Math.PI * 2); // the harbour's shore; the portal goes opposite
-  const features = base.filter(p => p.kind === 'feature').sort((a, b) => b.R - a.R), shops = base.filter(p => p.kind === 'workshop');
+  if (!snap) return null;
+  const base = planSitesRaw({ ...snap, layout: {} }); if (!base.length) return null;
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)], shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const GAP = 8, SNAP = 2, snapTo = v => Math.round(v / SNAP) * SNAP;
+  const plan = pick(PLANS), face = pick([0, 1, 2, 3]); // the harbour's side: east, south, west, north
+  const features = shuffle(base.filter(p => p.kind === 'feature')), shops = shuffle(base.filter(p => p.kind === 'workshop'));
   const harbour = base.find(p => p.kind === 'github'), portal = base.find(p => p.kind === 'portal'), plant = base.find(p => p.kind === 'plant'), treasury = base.find(p => p.kind === 'treasury'), allies = base.find(p => p.kind === 'allies');
+  const want = []; // [site, x, z]
+  const row = (list, z, x0) => { let x = x0 == null ? -(list.reduce((s, p) => s + 2 * p.R, 0) + GAP * Math.max(0, list.length - 1)) / 2 : x0; for (const p of list) { x += p.R; want.push([p, x, z]); x += p.R + GAP; } return x; };
+  const maxR = list => list.reduce((m, p) => Math.max(m, p.R), 0);
+  const fR = maxR(features), wR = maxR(shops), tR = treasury ? treasury.R : 0;
+  if (plan === 'rows' || plan === 'arc') {
+    const zF = -(fR + GAP + tR), zW = wR + GAP + tR; row(features, zF); row(shops, zW); if (treasury) want.push([treasury, 0, 0]);
+    if (plan === 'arc') { const half = Math.max(1, ...want.map(w => Math.abs(w[1]))); for (const w of want) if (w[0].kind !== 'treasury') w[2] += (w[1] / half) ** 2 * 10 * (w[2] < 0 ? -1 : 1); } // rows bow gently away from the middle
+  } else if (plan === 'plaza') {
+    const cols = Math.max(1, Math.ceil(Math.sqrt(shops.length + (treasury ? 1 : 0)))), cell = 2 * wR + GAP, rows = Math.ceil((shops.length + (treasury ? 1 : 0)) / cols);
+    const cells = []; for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells.push([(c - (cols - 1) / 2) * cell, (r - (rows - 1) / 2) * cell]);
+    const mid = cells.slice().sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]))[0];
+    if (treasury) want.push([treasury, mid[0], mid[1]]); let k = 0; for (const c of cells) { if (c === mid) continue; const w = shops[k++]; if (w) want.push([w, c[0], c[1]]); }
+    const hw = cols * cell / 2, hd = rows * cell / 2, north = features.slice(0, Math.ceil(features.length / 2)), sides = features.slice(north.length);
+    row(north, -(hd + GAP + fR));
+    sides.forEach((f, i) => { const side = i % 2 ? 1 : -1, slot = Math.floor(i / 2); want.push([f, side * (hw + GAP + fR), -hd + fR + slot * (2 * fR + GAP)]); });
+  } else { // boulevard
+    let xN = 0, xS = 0; const street = GAP; // a street two gaps wide: room for the square at its head
+    features.forEach((f, i) => { const north = i % 2 === 0; if (north) { xN += f.R; want.push([f, xN, -(f.R + street)]); xN += f.R + GAP; } else { xS += f.R; want.push([f, xS, f.R + street]); xS += f.R + GAP; } });
+    const end = Math.max(xN, xS) + GAP, cols = Math.max(1, Math.ceil(Math.sqrt(shops.length))), cell = 2 * wR + GAP, rows = Math.ceil(shops.length / cols);
+    shops.forEach((w, i) => { const c = i % cols, r = Math.floor(i / cols); want.push([w, end + wR + c * cell, (r - (rows - 1) / 2) * cell]); });
+    if (treasury) want.push([treasury, -(tR + GAP * 1.5), 0]); // the square at the head of the street, in line with it
+    const cx = (Math.min(...want.map(w => w[1] - w[0].R)) + Math.max(...want.map(w => w[1] + w[0].R))) / 2; for (const w of want) w[1] -= cx; // centre the town
+  }
+  // Seat everything: the planned spot if it fits, otherwise the nearest spot outward from the town's centre.
   const placed = [], out = {};
-  // The nearest spot that fits along a direction from the centre: march outward, then nudge sideways if needed.
-  const seat = (p, a, az = .8) => { for (let r = 0; r < 240; r += 1.5) for (const da of [0, .12, -.12, .25, -.25, .4, -.4]) { const x = Math.cos(a + da) * r, z = Math.sin(a + da) * r * az; if (placeOk(p, x, z, placed)) { placed.push({ ...p, x, z }); out[p.key] = { x: +x.toFixed(2), z: +z.toFixed(2) }; return [x, z]; } } return null; };
-  if (treasury) seat(treasury, 0);
-  const n = Math.max(1, features.length), m = Math.max(1, shops.length);
-  // Features set the town's shape; workshops take the angles between or beside them. Biggest first, so they pack tight.
-  const fa = i => plan === 'ring' ? i / n * Math.PI * 2 + rnd(-.15, .15)
-    : plan === 'crescent' ? dirA + Math.PI + (i - (n - 1) / 2) / n * Math.PI * 1.3
-    : plan === 'rows' ? -Math.PI / 2 + (i - (n - 1) / 2) / n * Math.PI * .9
-    : plan === 'spiral' ? dirA + i * 2.39996
-    : (i % 2 ? -Math.PI / 4 : -3 * Math.PI / 4) + Math.floor(i / 2) * .5 * (i % 2 ? 1 : -1);
-  const wa = i => plan === 'ring' ? (i + .5) / m * Math.PI * 2
-    : plan === 'crescent' ? dirA + Math.PI + (i - (m - 1) / 2) / m * Math.PI * .9
-    : plan === 'rows' ? Math.PI / 2 + (i - (m - 1) / 2) / m * Math.PI * .9
-    : plan === 'spiral' ? dirA + (i + n) * 2.39996
-    : Math.PI / 2 + (i - (m - 1) / 2) / m * Math.PI * .8;
-  features.forEach((f, i) => seat(f, fa(i)));
-  shops.forEach((w, i) => seat(w, wa(i)));
-  // Shore sites: the harbour toward dirA, facing out; the portal and the plant on the far side; the allied camp beside the harbour.
-  if (harbour) { const at = seat(harbour, dirA); if (at) { const [x, z] = at, ex = Math.abs(x), ez = Math.abs(z) / .8; out[harbour.key].rot = ez > ex * 1.15 ? (z > 0 ? -Math.PI / 2 : Math.PI / 2) : (x < 0 ? Math.PI : 0); } }
-  if (portal) seat(portal, dirA + Math.PI + rnd(-.4, .4));
-  if (plant) seat(plant, dirA + Math.PI + rnd(.7, 1.1) * (Math.random() < .5 ? 1 : -1));
-  if (allies) seat(allies, dirA + rnd(.9, 1.4) * (Math.random() < .5 ? 1 : -1));
+  const seat = (p, x, z) => { for (let k = 0; k < 120; k++) { const d = Math.hypot(x, z) || 1, step = k * 2, sx = snapTo(x + x / d * step), sz = snapTo(z + z / d * step); if (placeOk(p, sx, sz, placed)) { placed.push({ ...p, x: sx, z: sz }); out[p.key] = { x: sx, z: sz }; return [sx, sz]; } } return null; };
+  for (const [p, x, z] of want) seat(p, x, z);
+  // Shore sites, by the chosen side: the harbour centred on it facing out, the allied camp at its corner;
+  // the portal at the opposite corner, the plant beside it.
+  const bb = () => placed.reduce((b, p) => ({ x0: Math.min(b.x0, p.x - p.R), x1: Math.max(b.x1, p.x + p.R), z0: Math.min(b.z0, p.z - p.R), z1: Math.max(b.z1, p.z + p.R) }), { x0: 0, x1: 0, z0: 0, z1: 0 });
+  const sideSpot = (side, R, along = 0) => { const b = bb(); return side === 0 ? [b.x1 + GAP + R, along] : side === 2 ? [b.x0 - GAP - R, along] : side === 1 ? [along, b.z1 + GAP + R] : [along, b.z0 - GAP - R]; };
+  if (harbour) { const [x, z] = sideSpot(face, harbour.R); const at = seat(harbour, x, z); if (at) out[harbour.key].rot = [0, -Math.PI / 2, Math.PI, Math.PI / 2][face]; }
+  const far = (face + 2) % 4, b0 = bb(), cornerAlong = (side, sgn) => side % 2 === 0 ? sgn * ((b0.z1 - b0.z0) / 2) : sgn * ((b0.x1 - b0.x0) / 2);
+  if (portal) { const [x, z] = sideSpot(far, portal.R, cornerAlong(far, 1)); seat(portal, x, z); }
+  if (plant) { const [x, z] = sideSpot(far, plant.R, cornerAlong(far, -1)); seat(plant, x, z); }
+  if (allies) { const [x, z] = sideSpot(face, allies.R, cornerAlong(face, -1)); seat(allies, x, z); }
   layoutOv = out; hooks.saveLayout && hooks.saveLayout(layoutOv); snap.layout = layoutOv; W.sync(snap); frameAll(true);
-  toast({ ring: 'A ring town, the treasury at its heart', crescent: 'A crescent around the bay', rows: 'Features north, workshops south, in rows', spiral: 'A spiral out from the square', quarters: 'Quarters: features in two wards, workshops below' }[plan]);
+  toast({ rows: 'Two rows, the treasury between them', arc: 'Two rows, bowed into an arc', plaza: 'A plaza: features around, workshops within', boulevard: 'A boulevard: features along it, workshops at its end' }[plan] + ' · harbour ' + ['east', 'south', 'west', 'north'][face]);
   const xs = placed.map(p => [p.x - p.R, p.x + p.R]).flat(), zs = placed.map(p => [p.z - p.R, p.z + p.R]).flat();
-  return { plan, placed: placed.length, of: base.length, w: Math.round(Math.max(...xs) - Math.min(...xs)), h: Math.round(Math.max(...zs) - Math.min(...zs)) };
+  return { plan, face, placed: placed.length, of: base.length, w: Math.round(Math.max(...xs) - Math.min(...xs)), h: Math.round(Math.max(...zs) - Math.min(...zs)) };
 }
 W.randomizeLayout = function () { return alive ? randomLayout() : null; };
 W.resetLayout = function () { layoutOv = {}; hooks.saveLayout && hooks.saveLayout({}); if (snap) { snap.layout = {}; W.sync(snap); } toast('Back to the procedural layout'); };
