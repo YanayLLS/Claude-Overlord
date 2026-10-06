@@ -2528,6 +2528,10 @@ function notifyPrDecision(pr, kind) {
 // ponytail: unchanged answers are free; a change costs one request, and the full poll it triggers is budgeted below.
 // If GitHub's secondary (per-minute) limit ever bites, slow PR_CHECK_WATCH_MS first.
 const PR_WATCH_MS = 10e3, PR_CHECK_WATCH_MS = 30e3;
+// Nobody at the PC for AWAY_S (system idle, any app): background GitHub polling rests — PR timers and watch here,
+// the Releases board's loops via away. The first tick after you're back catches up.
+const AWAY_S = 15 * 60;
+const userAway = () => { try { return powerMonitor.getSystemIdleTime() > AWAY_S; } catch { return false; } };
 let ghToken = null, prWatchTimer = null, prCheckWatchTimer = null;
 const ghTokenGet = () => ghToken ? Promise.resolve(ghToken) : new Promise((res, rej) =>
   exec('gh auth token', { windowsHide: true, timeout: 10000 }, (err, out) => { const t = (out || '').trim(); if (err || !t) return rej(err || new Error('no token')); res(ghToken = t); }));
@@ -2582,9 +2586,10 @@ function armPrTimer() {
   if (!cfg || !cfg.enabled) return;
   const sec = Math.max(30, Number(cfg.intervalSec) || 60);
   pollPRs();
-  prTimer = setInterval(async () => { if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
-  prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
+  prTimer = setInterval(async () => { if (userAway()) return; if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
+  prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled && !userAway()) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
   prCheckWatchTimer = setInterval(() => {
+    if (userAway()) return;
     const heads = ((settings.prCache && settings.prCache.prs) || []).filter(p => p.headSha && PR_REPO_RE.test(p.repo || ''));
     prCheckWatch.tick(heads.flatMap(p => [`${p.repo}@${p.headSha}#checks`, `${p.repo}@${p.headSha}#status`]));
   }, PR_CHECK_WATCH_MS);
@@ -2704,6 +2709,7 @@ async function releasesFindLocal(repo, rel, ref) {
 const ghCache = require('./gh-cache').createGhCache({ run: ghJsonRaw, fetch, token: () => ghTokenGet() });
 const ghJson = ghCache.ghJson;
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
+  away: userAway,
   startAgent: (cwd, prompt) => createAgent(cwd, null, prompt),
   fixRun: (run) => fixActionRun(run),
   fixPr: (pr) => fixPr(pr),
@@ -5552,6 +5558,7 @@ app.whenReady().then(() => {
   // Restore agents after window is visible (heavy JSONL parsing + process cleanup)
   let _didRestore = false;
   mainWindow.webContents.on('did-finish-load', () => {
+    releases.handle({ type: 'releasesClose' }); // a reloaded page has no Releases modal open: stop its live polling
     if (!_didRestore) {
       _didRestore = true;
       // PR and Actions checks go first: their gh calls are async, so they run while the

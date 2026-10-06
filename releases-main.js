@@ -32,13 +32,14 @@ const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
-module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: ghGraphqlRaw, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask }) {
+module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: ghGraphqlRaw, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask, away = () => false }) {
   // GitHub's limit is shared by every tool and teammate on the account: when it answers "rate limit",
   // background polling here pauses until it lifts (what you click still goes through), so we don't
   // keep the lockout going. pausedUntil is also shown in the modal.
   const RATE_PAUSE_MS = 10 * 60 * 1000;
   let pausedUntil = 0;
-  const limited = () => Date.now() < pausedUntil;
+  // away(): nobody at the PC (main's system idle time) — the background loops rest too; a running Release all doesn't use this.
+  const limited = () => Date.now() < pausedUntil || away();
   const noteLimit = (r) => {
     const e = r && (r.error || (r.data && !Array.isArray(r.data) && r.data.message) || (r.errors && JSON.stringify(r.errors)));
     if (e && /rate limit|secondary rate/i.test(String(e))) { pausedUntil = Date.now() + RATE_PAUSE_MS; try { push({ rateLimitedUntil: pausedUntil }); } catch {} }
@@ -285,7 +286,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     clearTimeout(deployTimer);
     deployTimer = setTimeout(async () => {
       const cfg = state.config;
-      if (!cfg || inFlight || !state.results) return armDeploys(DEPLOY_IDLE_MS); // a full refresh is on it
+      if (!cfg || inFlight || !state.results || limited()) return armDeploys(DEPLOY_IDLE_MS); // a full refresh is on it, or we're resting
       const prevDeploys = state.results.deploys, deploys = await fetchDeploys(cfg, prevDeploys);
       if (state.config !== cfg || inFlight) return armDeploys(DEPLOY_IDLE_MS);
       const results = { ...state.results, deploys };
@@ -535,6 +536,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const promptKey = found.map(nkey).sort().join(',');
     if (promptKey !== state.signPromptKey) push({ signPromptKey: promptKey });
     notifiedToSign = new Set(found.map(nkey));
+    clearTimeout(toSignTimer); // overlapping calls (ping, refresh, its own timer) each end here: keep one loop
     if (found.length) { toSignTimer = setTimeout(() => checkToSign().catch(() => {}), TO_SIGN_POLL_MS); if (toSignTimer.unref) toSignTimer.unref(); }
   }
 
@@ -644,13 +646,19 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // The team sees one Release all at a time: running.json in release-manifests says who runs it and
   // how far it got (written on each step, plus a heartbeat); nobody else can start one while it's fresh.
   const LOCK_STALE_MS = 10 * 60 * 1000, BEAT_MS = 4 * 60 * 1000;
-  let shareTimer = null, beatTimer = null;
-  function shareRun() {
+  // Each write is a commit every approver's Overlord reacts to (a reload), so only a real change is written —
+  // progress() repeating the same step every DEPLOY_POLL_MS isn't one; the heartbeat (force) still is.
+  let shareTimer = null, beatTimer = null, lastShared = '';
+  function shareRun(force) {
     clearTimeout(shareTimer);
     shareTimer = setTimeout(async () => {
       const p = state.releaseAll, who = await whoAmI();
-      if (p && p.running) await history.setRunning({ running: true, by: who.github, beat: new Date().toISOString(), id: p.id || null,
-        wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] }).catch(() => {});
+      if (!p || !p.running) return;
+      const body = { running: true, by: who.github, id: p.id || null, wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] };
+      const key = JSON.stringify(body);
+      if (key === lastShared && force !== true) return;
+      lastShared = key;
+      await history.setRunning({ ...body, beat: new Date().toISOString() }).catch(() => { lastShared = ''; });
     }, 1500);
   }
   const fresh = (r) => r && r.running !== false && Date.now() - Date.parse(r.beat) < LOCK_STALE_MS;
@@ -956,7 +964,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const mark = (labels, v) => { const next = { ...((state.releaseAll && state.releaseAll.items) || {}) }; for (const l of labels) next[l] = { ...(next[l] || {}), ...v }; progress({ items: next }); };
     const shipped = [];
     progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '', url: null, items: repoState });
-    clearInterval(beatTimer); beatTimer = setInterval(shareRun, BEAT_MS);
+    clearInterval(beatTimer); beatTimer = setInterval(() => shareRun(true), BEAT_MS);
     try {
       if (justMerged.length) {
         progress({ status: 'deploying', detail: justMerged.map(x => x.label).join(', ') });

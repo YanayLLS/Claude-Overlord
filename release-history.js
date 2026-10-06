@@ -197,7 +197,9 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         const lists = await Promise.all(noChanges.map(r => changesOf(r.repo, r.pr.number)));
         noChanges.forEach((r, i) => { if (lists[i]) { m = { ...m, repos: m.repos.map(x => x === r || (x.repo === r.repo && x.pr.number === r.pr.number) ? { ...x, changes: lists[i] } : x) }; changed = true; } });
       }
-      const deploys = await Promise.all(m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state)).map(async (r) => {
+      // a deploy whose result never got recorded stops being looked up a day after the merge (old records re-asked forever)
+      const settling = (r) => { const t = Date.parse(r.mergedAt); return !t || Date.now() - t < 86400e3; }; // unknown time: still settling
+      const deploys = await Promise.all(m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state) && settling(r)).map(async (r) => {
         const runs = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', `head_sha=${r.mergeSha}`, '-f', 'per_page=5']);
         const list = (runs.data && runs.data.workflow_runs) || [];
         return [r, list.find(x => x.status === 'completed'), list.find(x => x.status !== 'completed')];
