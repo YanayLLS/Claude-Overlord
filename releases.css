@@ -330,7 +330,7 @@
 .rl-head .rl-release.locked, .rl-head .rl-release.locked:hover { opacity:.45; cursor:not-allowed; transform:none; box-shadow:none; filter:none; }
 
 /* ── History tab: prod releases from release-manifests ── */
-.rl-hist { width:min(1000px, calc(100vw - 140px)); padding:10px 0 4px; display:flex; flex-direction:column; gap:8px; }
+.rl-hist { width:100%; padding:10px 0 4px; display:flex; flex-direction:column; gap:8px; }
 .rl-hist-card { padding:10px 12px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); transition:border-color .12s; }
 .rl-hist-card:hover { border-color:var(--border-hi); }
 .rl-hist-card.pending { border-color:var(--accent); background:var(--accent-soft); }
@@ -594,3 +594,19 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-hx .rl-hist-card { margin:0; }
 .rl-htab tbody tr:last-child td { border-bottom:none; }
 .rl-hist-id { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); }
+/* One fixed window: every view scrolls inside it, switching never resizes it */
+#rl-modal { width:min(1100px, calc(100vw - 64px)); height:calc(100vh - 64px); max-width:none; min-width:0; }
+.rl-nav { display:flex; align-items:center; gap:4px; padding:0 18px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.rl-nav > button { position:relative; display:flex; align-items:center; gap:6px; font:inherit; font-size:12.5px; font-weight:500; padding:10px 10px 9px; border:none; background:none; color:var(--subtext); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; transition:color .12s, border-color .12s; }
+.rl-nav > button:hover { color:var(--text); }
+.rl-nav > button.on { color:var(--text); border-bottom-color:var(--accent); }
+.rl-seg { margin-left:auto; display:flex; gap:2px; padding:2px; border-radius:999px; background:var(--surface0); border:1px solid var(--border); }
+.rl-seg button { font:inherit; font-size:11px; padding:2px 10px; border-radius:999px; border:none; background:none; color:var(--subtext); cursor:pointer; }
+.rl-seg button.on { background:var(--surface2); color:var(--text); }
+.rl-wait { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.rl-wait-h { font-size:10px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--dim); margin-right:4px; }
+.rl-wait-env { display:flex; align-items:center; gap:7px; font:inherit; font-size:11.5px; padding:4px 10px; border-radius:999px; border:1px solid var(--border); background:var(--surface0); color:var(--subtext); cursor:pointer; }
+.rl-wait-env b { color:var(--peach); } .rl-wait-env:hover { border-color:var(--border-hi); color:var(--text); }
+.rl-wait-env.none { opacity:.6; }
+.rl-now-empty { display:flex; flex-direction:column; align-items:center; gap:8px; padding:56px 0; color:var(--subtext); text-align:center; }
+.rl-now-empty > b { font-size:14px; color:var(--text); }
