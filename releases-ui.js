@@ -31,12 +31,18 @@
   overlay.innerHTML = '<div id="rl-modal" role="dialog" aria-label="Releases"></div>';
   document.body.appendChild(overlay);
   const modal = overlay.firstChild;
+  // a redraw between mouse-down and mouse-up replaces the button and the browser drops the click:
+  // background updates wait while a button is held, then draw right after the click lands
+  let ptrDown = false, drawLater = false;
+  overlay.addEventListener('pointerdown', () => { ptrDown = true; });
+  const ptrUp = () => { if (!ptrDown) return; ptrDown = false; if (drawLater) { drawLater = false; setTimeout(render, 0); } };
+  window.addEventListener('pointerup', ptrUp, true); window.addEventListener('pointercancel', ptrUp, true);
 
   overlay.addEventListener('click', (e) => {
     // a click outside an open popover (release picker/results, approvers) closes just the popover
     if ((relOpen || apprOpen) && !e.target.closest('.rl-rel-pop, .rl-release, .rl-appr-btn')) {
-      relOpen = false; apprOpen = false; render();
-      return;
+      relOpen = false; apprOpen = false;
+      if (!e.target.closest('.rl-nav')) { render(); return; } // a tab click closes it and switches in one go
     }
     if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"]')) { armed = null; render(); }
     if (e.target === overlay) return show(false);
@@ -1191,7 +1197,7 @@
     relLeave = setTimeout(() => { if (relOpen) actions.releaseClose(); }, 400);
   });
 
-  function render() { renderNow(); if (open) applyBusy(modal); }
+  function render() { if (ptrDown) { drawLater = true; return; } renderNow(); if (open) applyBusy(modal); }
   function renderNow() {
     tlTip.classList.remove('show');
     if (!open) return;
