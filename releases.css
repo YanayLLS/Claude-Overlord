@@ -562,7 +562,8 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-src-btn { font:inherit; font-size:13px; width:26px; height:26px; border-radius:var(--r-sm); border:1px solid transparent; background:none; color:var(--dim); cursor:pointer; }
 .rl-src-btn:hover { color:var(--text); background:var(--surface0); border-color:var(--border); }
 /* History: finished releases as a sortable table; click a row to open its card */
-.rl-hist { overflow-x:hidden; }
+.rl-hist { overflow-x:hidden; max-width:100%; box-sizing:border-box; }
+.rl-body:has(> .rl-hist) { overflow-x:hidden; }
 .rl-htab { width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; font-size:12px; border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
 .rl-htab th { position:sticky; top:0; z-index:1; text-align:left; font-size:10px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--dim);
   padding:7px 10px; background:var(--surface0); border-bottom:1px solid var(--border); white-space:nowrap; user-select:none; }

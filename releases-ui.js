@@ -139,7 +139,7 @@
     gotoRelease: () => { relOpen = false; tab = 'history'; api.send({ type: 'releasesHistory' }); render(); },
     rowToDev: (el) => { markBusy(el, 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: 'retarget' }); },
     strayFix: (el) => { markBusy(el, el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
-    histCard: (el) => { const id = el.dataset.id; openCards.has(id) ? openCards.delete(id) : openCards.add(id); render(); },
+    histCard: (el) => { const id = el.dataset.id; if (el.classList.contains('open')) { openCards.delete(id); shutCards.add(id); } else { shutCards.delete(id); openCards.add(id); } render(); },
     histSort: (el) => { const k = el.dataset.k; histSort = { k, dir: histSort.k === k ? -histSort.dir : (k === 'release' || k === 'env' ? 1 : -1) }; try { localStorage.setItem('rl-hist-sort', JSON.stringify(histSort)); } catch {} render(); },
     histFilter: (el) => { histFilter = el.dataset.f; try { localStorage.setItem('rl-hist-filter', histFilter); } catch {} render(); },
     histChanges: (el) => { const k = el.dataset.key; openChanges.has(k) ? openChanges.delete(k) : openChanges.add(k); render(); },
@@ -633,6 +633,7 @@
   let relSkip = new Set(); // release picker: repos left out (all in by default, every time it opens)
   let relSeparate = false; // release picker: start a release of its own instead of adding to the pending one
   const openChanges = new Set(); // History rows whose "N changes" list is open
+  const shutCards = new Set(); // releases that open by themselves (a hand step to confirm), closed by hand
   const openCards = new Set(); // finished releases opened (they show as one line by default)
   // what a person scans for: the env (or hotfix), the version, when — the id is for the tooltip
   function relTitle(m) {
@@ -674,7 +675,7 @@
   const sortHist = (items) => { const f = SORTS[histSort.k] || SORTS.when; return items.sort((x, y) => { const a = f(x), b = f(y); return (a < b ? -1 : a > b ? 1 : 0) * histSort.dir || (SORTS.when(y) - SORTS.when(x)); }); };
   function histHead() {
     const th = (k, t, cls = '') => `<th class="${cls}${k && histSort.k === k ? ' on' : ''}"${k ? ` data-act="histSort" data-k="${k}" title="Sort by ${t.toLowerCase()}"` : ''}>${t}${k && histSort.k === k ? (histSort.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`;
-    return '<table class="rl-htab"><colgroup><col style="width:150px"><col><col style="width:84px"><col style="width:60px"><col style="width:200px"><col style="width:120px"><col style="width:80px"></colgroup><thead><tr>' + th('when', 'When') + th('release', 'Release') + th('env', 'Env') + th('repos', 'Repos', 'num')
+    return '<table class="rl-htab"><colgroup><col style="width:176px"><col><col style="width:84px"><col style="width:60px"><col style="width:200px"><col style="width:120px"><col style="width:80px"></colgroup><thead><tr>' + th('when', 'When') + th('release', 'Release') + th('env', 'Env') + th('repos', 'Repos', 'num')
       + th('signed', 'Signed by') + th('status', 'Status') + th('', 'Ticket') + '</tr></thead><tbody>';
   }
   // the Release cell: what it is at a glance — the version (or the hotfix PR) and which repos
@@ -815,7 +816,8 @@
       const anyone = [...new Set(m.repos.flatMap(r => r.signers || []))];
       const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
       const env = m.env || 'prod', signs = env === 'prod'; // only prod is signed (SOC2); alpha / staging just merge
-      const cardOpen = flight(m) || handOpen.length || m.status === 'deploy-failed' || openCards.has(m.id) || rbOpen === m.id;
+      const needsEye = handOpen.length || (m.status === 'deploy-failed' && liveRel && m.id === liveRel.id); // old failures stay folded
+      const cardOpen = flight(m) || rbOpen === m.id || (needsEye ? !shutCards.has(m.id) : openCards.has(m.id));
       if (histFilter !== 'all' && !(histFilter === 'hotfix' ? ['hotfix', 'standalone'].includes(m.kind) : (m.env || 'prod') === histFilter && !['hotfix', 'standalone'].includes(m.kind))) continue;
       if (!flight(m)) {
         if (!inTable) { inTable = true; h += histHead(); }
