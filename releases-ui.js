@@ -135,6 +135,7 @@
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'timeline'; if (tab === 'history') api.send({ type: 'releasesHistory' }); render(); },
     // history actions
+    queueAll: (el) => { api.send({ type: 'releasesQueueAll', id: el.dataset.id }); },
     gotoRelease: () => { relOpen = false; tab = 'history'; api.send({ type: 'releasesHistory' }); render(); },
     rowToDev: (el) => { markBusy(el, 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: 'retarget' }); },
     strayFix: (el) => { markBusy(el, el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
@@ -635,6 +636,16 @@
     render();
   }
   function releaseAllBtn(s, { ready, waiting, signoff, attrs, lockedCls, armKey, held = [] }) {
+    // another release's Release all is running (one at a time): say so, and offer to queue this one behind it
+    const runId = s.releaseAll && s.releaseAll.running ? s.releaseAll.id : undefined;
+    const myId = (attrs.match(/data-id="([^"]+)"/) || [])[1];
+    if (runId !== undefined && myId && runId !== myId && ready.length) {
+      const other = ((s.history && s.history.items) || []).find(m => m.id === runId);
+      const what = other ? `the ${other.env || 'prod'} release` : 'the running release';
+      return s.releaseAllQueue === myId
+        ? `<button class="${lockedCls} queued" data-act="queueAll" data-id="${esc(myId)}" title="Starts by itself when ${esc(what)} finishes cleanly. Click to unqueue">⏳ Queued after ${esc(what)}</button>`
+        : `<button class="${lockedCls}" data-act="queueAll" data-id="${esc(myId)}" title="Release all runs one release at a time: ${esc(what)} is running now. Queue this one to start right after it">🚀 Release all · after ${esc(what)}</button>`;
+    }
     if (s.releaseAll && s.releaseAll.running) return '';
     // one Release all across the team: someone else's is running
     if (s.teamRun) return `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`@${s.teamRun.by} is running Release all: wave ${s.teamRun.wave}/${s.teamRun.waves}, ${s.teamRun.status}${s.teamRun.detail ? ' (' + s.teamRun.detail + ')' : ''}${(s.teamRun.merged || []).length ? '\nmerged: ' + s.teamRun.merged.join(', ') : ''}`)}">🚀 Running on @${esc(s.teamRun.by)}'s Overlord · wave ${esc(s.teamRun.wave)}/${esc(s.teamRun.waves)}</button>`;

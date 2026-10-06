@@ -547,3 +547,4 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-rel-join.off { background:var(--surface0); border-color:var(--border); }
 .rl-rel-join button { font:inherit; font-size:10.5px; margin-left:6px; padding:0 8px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
 .rl-rel-join button:hover { color:var(--text); background:var(--surface1); }
+.rl-hist-btn.queued { border-color:var(--accent); background:var(--accent-soft); color:var(--text); }

@@ -1010,6 +1010,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
           wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] }); }).catch(() => {});
       reconcileHistory().catch(() => {});
       refresh();
+      // a release queued behind this run starts now, if this one finished cleanly
+      const q = state.releaseAllQueue;
+      if (q && q !== id) {
+        push({ releaseAllQueue: null });
+        const p = state.releaseAll || {};
+        if (p.status === 'done') { send({ type: 'toast', text: `Starting the queued Release all: release ${q}` }); setTimeout(() => releaseAll(q).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })), 1500); }
+        else if (notify) notify(`⏸ Queued release ${q} didn't start`, `The release before it ended "${p.status}": ${p.detail || ''}. Start it from its card when ready.`, null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
+      }
     }
   }
 
@@ -1242,6 +1250,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesHistory': history.load().then(() => reconcileHistory()).catch(e => push({ history: { error: e.message, items: [] } })); return true;
       case 'releasesRollback': withBusy('rollback:' + msg.id, 'Opening rollback PRs…', () => history.rollback(msg.id, msg.skip || [])).catch(e => send({ type: 'toast', text: 'Rollback failed: ' + e.message })); return true;
       case 'releasesImport': withBusy('import', 'Importing past releases…', () => history.importPast(state.config ? releasePlan(state.config, ['prod']).prs : [])).then(() => reconcileHistory()).catch(e => send({ type: 'toast', text: 'Import failed: ' + e.message })); return true;
+      // Release all for a release while another release's run is going: queued, it starts when that one is done
+      case 'releasesQueueAll':
+        if (state.releaseAll && state.releaseAll.running) { push({ releaseAllQueue: state.releaseAllQueue === msg.id ? null : msg.id }); send({ type: 'toast', text: state.releaseAllQueue ? `Release ${msg.id} queued: it starts when the running release is done` : 'Queue cleared' }); }
+        else releaseAll(msg.id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message }));
+        return true;
       case 'releasesMergeRelease': releaseAll(msg.id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })); return true;
       case 'releasesCancel': cancelRelease(msg.id).catch(e => send({ type: 'toast', text: 'Cancel failed: ' + e.message })); return true;
       case 'releasesClearRun': clearTimeout(recheckTimer); push({ releaseRun: null }); persist(); return true;
