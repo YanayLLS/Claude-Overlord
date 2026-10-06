@@ -178,12 +178,15 @@ function buildTerrain() {
 }
 // Give every tile a target height and colour from the island shape and the sites on it.
 function layoutTerrain(siteList) {
-  const T = terrain; let rx = 44, rz = 34;
-  for (const s of siteList) { const edge = s.kind === 'portal'; rx = Math.max(rx, Math.abs(s.x) + s.R + (edge ? 2 : 16)); rz = Math.max(rz, Math.abs(s.z) + s.R + (edge ? 2 : 14)); }
-  T.rx = rx; T.rz = rz;
+  const T = terrain; let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const s of siteList) { const mx = s.kind === 'portal' ? 2 : 16, mz = s.kind === 'portal' ? 2 : 14; minX = Math.min(minX, s.x - s.R - mx); maxX = Math.max(maxX, s.x + s.R + mx); minZ = Math.min(minZ, s.z - s.R - mz); maxZ = Math.max(maxZ, s.z + s.R + mz); }
+  if (!siteList.length) { minX = -44; maxX = 44; minZ = -34; maxZ = 34; }
+  // The outline hugs the sites: centred on their footprint, each side reaching only as far as the nearest site there.
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, rx = Math.max(44, (maxX - minX) / 2), rz = Math.max(34, (maxZ - minZ) / 2);
+  T.rx = rx; T.rz = rz; T.cx = cx; T.cz = cz;
   const grass = [new THREE.Color(0x6fae5a), new THREE.Color(0x7dba62), new THREE.Color(0x63a052)], forest = new THREE.Color(0x4f8f48), sand = new THREE.Color(0xd9c58f), rock = new THREE.Color(0x8d8a84), snow = new THREE.Color(0xd8dde0), ash = new THREE.Color(0x2f2b36), ashCol = new THREE.Color(0x1d1a22), crag = new THREE.Color(0x4a454f), plot = new THREE.Color(0x3c4a52), earth = new THREE.Color(0x6b5a44), deep = new THREE.Color(0x1f6f8c), water = new THREE.Color(0x2c86a8);
   for (const t of T.tiles) {
-    const e = (t.x / rx) ** 2 + (t.z / rz) ** 2;
+    const e = ((t.x - cx) / rx) ** 2 + ((t.z - cz) / rz) ** 2;
     let biome = 'hidden', th = 0;
     if (e < 1) { th = 1.2 + t.n * 1.6 + Math.max(0, .78 - e) * .6; biome = t.n2 > .62 && t.n > .45 ? 'forest' : 'grass'; if (t.n > .8) { biome = 'rock'; th += 1.4; } if (e > .86) { biome = 'sand'; th = Math.min(th, 1.1); } }
     else if (e < 1.35) { th = .55; biome = 'water'; }
@@ -209,7 +212,7 @@ function layoutTerrain(siteList) {
   T.dirty = true; if (life.flies.length) pickFlyHomes();
 }
 function updateTerrain(dt) {
-  const T = terrain; let any = false; const k = reduceMotion() ? 1 : Math.min(1, dt * 4.2);
+  const T = terrain; let any = false; const k = reduceMotion() ? 1 : Math.min(1, dt * (arrDrag ? 14 : 8)); // quick to settle: a moved site's plateau and the new shore land within a moment
   T.tiles.forEach((t, i) => {
     if (Math.abs(t.h - t.th) > .004) { t.h += (t.th - t.h) * k; any = true; } else if (t.h !== t.th) { t.h = t.th; any = true; }
     if (!any && !T.dirty) return;
@@ -357,7 +360,7 @@ function planSites(s, raw) {
 // Where a site may stand: clear of every other site by its radius plus a gap (more around the portal's crag), and inside
 // the island's largest allowed outline.
 const ARR_MAX = { x: 200, z: 135 }; // the tile grid reaches ±250 by ±153; the island outline follows the sites, so a big harbour fits on any shore
-function dockRot(x, z) { const ex = Math.abs(x) / ARR_MAX.x, ez = Math.abs(z) / ARR_MAX.z; if (ez > ex * 1.15) return z > 0 ? -Math.PI / 2 : Math.PI / 2; return x < 0 ? Math.PI : 0; }
+function dockRot(x, z) { const cx = terrain ? terrain.cx || 0 : 0, cz = terrain ? terrain.cz || 0 : 0, rx = terrain ? terrain.rx : 60, rz = terrain ? terrain.rz : 40; const ex = Math.abs(x - cx) / rx, ez = Math.abs(z - cz) / rz; /* which shore of the island, measured from the island's own centre */ if (ez > ex * 1.15) return z > cz ? -Math.PI / 2 : Math.PI / 2; return x < cx ? Math.PI : 0; }
 function placeOk(p, x, z, plan) {
   if (Math.abs(x) + p.R > ARR_MAX.x || Math.abs(z) + p.R > ARR_MAX.z) return false;
   for (const o of plan) { if (o === p || o.key === p.key) continue; const gap = (o.kind === 'portal' || p.kind === 'portal') ? 7 : 3; if (Math.hypot(o.x - x, o.z - z) < o.R + p.R + gap) return false; }
@@ -875,14 +878,14 @@ function siteList() { return [...sites.values()].map(st => ({ key: st.key, kind:
 function relayout() { layoutTerrain([...sites.values()].map(st => ({ x: st.x, z: st.z, R: st.R, kind: st.kind, quay: st.extra.lay ? st.extra.lay.quay : 0 }))); }
 function clearTints() { for (const t of tinted) t.tint = null; tinted.length = 0; if (terrain) terrain.dirty = true; }
 // The dragged site follows the pointer; the ground under it answers in green or red; the land re-carves live.
-function moveSite(st, x, z) {
+function moveSite(st, x, z, deferLayout) {
   st.x = x; st.z = z; st.g.position.set(x, PLAT, z);
   if (st.kind === 'github') { st.rot = dockRot(x, z); st.g.rotation.y = st.rot; }
   const ok = placeOk({ key: st.key, kind: st.kind, R: st.R }, x, z, siteList()); if (arrDrag) arrDrag.ok = ok;
   clearTints(); const col = new THREE.Color(ok ? 0x5fe08a : 0xf0566a);
   for (const t of terrain.tiles) if (Math.hypot(t.x - x, t.z - z) < st.R + TILE * .9) { t.tint = col; tinted.push(t); }
   if (st.arrRing) st.arrRing.material.color.setHex(ok ? 0x5fe08a : 0xf0566a);
-  relayout();
+  if (deferLayout) { if (arrDrag) arrDrag.dirty = true; } else relayout();
 }
 function markArrange() {
   for (const m of arrMarks) disposeObj(m); arrMarks.length = 0; if (!arranging) return;
@@ -909,7 +912,7 @@ function bindInput() {
     if (arranging && e.button === 0) { const r = pick(e); const site = r.site || (r.lot && r.lot.site) || (r.unit && r.unit.lot && r.unit.lot.site); if (site) { const gp = groundPoint(e); if (gp) { arrDrag = { site, sx: site.x, sz: site.z, ox: gp.x - site.x, oz: gp.z - site.z, ok: true, moved: false }; canvas.setPointerCapture(e.pointerId); stage.classList.add('grabbing'); return; } } }
     drag = { x: e.clientX, y: e.clientY, moved: false, btn: e.button }; canvas.setPointerCapture(e.pointerId); });
   canvas.addEventListener('pointermove', e => {
-    if (arrDrag) { const gp = groundPoint(e); if (!gp) return; const st = arrDrag.site, x = gp.x - arrDrag.ox, z = gp.z - arrDrag.oz; if (Math.hypot(x - st.x, z - st.z) < .01) return; arrDrag.moved = true; moveSite(st, x, z); return; }
+    if (arrDrag) { const gp = groundPoint(e); if (!gp) return; const st = arrDrag.site, x = gp.x - arrDrag.ox, z = gp.z - arrDrag.oz; if (Math.hypot(x - st.x, z - st.z) < .01) return; arrDrag.moved = true; moveSite(st, x, z, true); return; }
     if (drag) { const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
       if (drag.moved) { stage.classList.add('grabbing'); cam.userMoved = true; const k = .034 * cam.zoom, s = Math.sin(cam.yaw), c = Math.cos(cam.yaw); cam.target.x -= (dx * c + dy * s) * k; cam.target.z -= (dy * c - dx * s) * k; drag.x = e.clientX; drag.y = e.clientY; } return; }
     const r = pick(e); hovered = r.unit || null; hoveredLot = r.lot || null; hoveredSite = r.site || null; canvas.style.cursor = targeting ? ((r.unit && !r.unit.mini) || r.lot || (r.site && r.site.lots && r.site.lots.size) ? 'crosshair' : 'not-allowed') : Object.keys(r).length ? 'pointer' : 'default';
@@ -939,7 +942,7 @@ function bindInput() {
   const onKey = e => { if (!cam.hover || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.ctrlKey || e.metaKey || e.altKey) return; const k = e.key.toLowerCase(); touched(); if ('wasdqe'.includes(k) || k.startsWith('arrow')) { keys.add(k); cam.userMoved = true; } else if (k === 'f' || k === 'home') frameAll(true); else if (k === 'l') setArranging(!arranging); };
   addEventListener('keydown', e => { if (e.key === 'Escape' && targeting) { endTargeting(); toast('Attack called off'); } else if (e.key === 'Escape' && arranging && !arrDrag) setArranging(false); });
   addEventListener('keydown', onKey); addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
-  miniEl.addEventListener('pointerdown', e => { cam.userMoved = true; const r = miniEl.getBoundingClientRect(); cam.target.x = ((e.clientX - r.left) / r.width - .5) * terrain.rx * 2.3; cam.target.z = ((e.clientY - r.top) / r.height - .5) * terrain.rz * 2.3; });
+  miniEl.addEventListener('pointerdown', e => { cam.userMoved = true; const r = miniEl.getBoundingClientRect(); cam.target.x = (terrain.cx || 0) + ((e.clientX - r.left) / r.width - .5) * terrain.rx * 2.3; cam.target.z = (terrain.cz || 0) + ((e.clientY - r.top) / r.height - .5) * terrain.rz * 2.3; });
   cam.keys = keys;
 }
 // The frame that shows every site; used at start, on F, and as the war-room orbit's anchor.
@@ -956,8 +959,8 @@ function updateCamera(dt) {
   if (keys.has('w') || keys.has('arrowup')) mz -= 1; if (keys.has('s') || keys.has('arrowdown')) mz += 1; if (keys.has('a') || keys.has('arrowleft')) mx -= 1; if (keys.has('d') || keys.has('arrowright')) mx += 1;
   cam.target.x += (mx * c + mz * s) * sp; cam.target.z += (mz * c - mx * s) * sp;
   if (keys.has('q')) cam.yaw += dt * 1.4; if (keys.has('e')) cam.yaw -= dt * 1.4;
-  const lim = terrain ? { x: terrain.rx * 1.1, z: terrain.rz * 1.1 } : { x: 60, z: 40 };
-  cam.target.x = Math.max(-lim.x, Math.min(lim.x, cam.target.x)); cam.target.z = Math.max(-lim.z, Math.min(lim.z, cam.target.z)); cam.target.y = PLAT;
+  const lim = terrain ? { x: terrain.rx * 1.1, z: terrain.rz * 1.1 } : { x: 60, z: 40 }, ccx = terrain ? terrain.cx || 0 : 0, ccz = terrain ? terrain.cz || 0 : 0;
+  cam.target.x = Math.max(ccx - lim.x, Math.min(ccx + lim.x, cam.target.x)); cam.target.z = Math.max(ccz - lim.z, Math.min(ccz + lim.z, cam.target.z)); cam.target.y = PLAT;
   const off = cam.base.clone().multiplyScalar(cam.zoom).applyAxisAngle(new THREE.Vector3(0, 1, 0), cam.yaw);
   camera.position.copy(cam.target).add(off); camera.lookAt(cam.target);
   if (cam.shake && now < cam.shake.until && !reduceMotion()) { const a = cam.shake.amp * Math.min(1, (cam.shake.until - now) * 2); camera.position.x += (Math.random() - .5) * a; camera.position.y += (Math.random() - .5) * a; camera.position.z += (Math.random() - .5) * a; }
@@ -1194,7 +1197,7 @@ function updateLabels() {
 }
 const a_ctx = u => '|' + u.a.ctxPct + '|' + u.a.costStr + '|' + (u.a.verb || '');
 function drawMinimap() {
-  const mg = miniEl.getContext('2d'), Wm = miniEl.width, Hm = miniEl.height, rx = terrain.rx * 1.15, rz = terrain.rz * 1.15, X = x => (x / rx / 2 + .5) * Wm, Z = z => (z / rz / 2 + .5) * Hm, p = v3();
+  const mg = miniEl.getContext('2d'), Wm = miniEl.width, Hm = miniEl.height, rx = terrain.rx * 1.15, rz = terrain.rz * 1.15, X = x => ((x - (terrain.cx || 0)) / rx / 2 + .5) * Wm, Z = z => ((z - (terrain.cz || 0)) / rz / 2 + .5) * Hm, p = v3();
   mg.fillStyle = '#0d1a2a'; mg.fillRect(0, 0, Wm, Hm);
   mg.fillStyle = '#2b5b3e'; mg.beginPath(); mg.ellipse(Wm / 2, Hm / 2, Wm / 2 / 1.15, Hm / 2 / 1.15, 0, 0, Math.PI * 2); mg.fill();
   const hexPath = (cx, cy, r) => { mg.beginPath(); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; k ? mg.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)) : mg.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)); } mg.closePath(); };
@@ -1217,6 +1220,7 @@ function tick(now) {
   runTweens(now); updateCamera(dt); updateTerrain(dt); runPuffs(dt); updateFx(now / 1000, dt);
   for (const u of units.values()) if (u.p) animateUnit(u, t, dt);
   for (const rd of raiders.values()) animateRaider(rd, t, dt);
+  if (arrDrag && arrDrag.dirty) { arrDrag.dirty = false; relayout(); }
   updateLinks(); for (const m of targetMarks) { m.rotation.z = t * .8; m.material.opacity = .4 + .3 * Math.sin(t * 5); }
   if (!reduceMotion()) {
     flags.forEach((f, i) => { f.rotation.y = Math.sin(t * 2.2 + i) * .18; }); for (const b of beacons) b.material.emissiveIntensity = 1 + (b.userData.nightBoost || 0) + Math.sin(t * 3) * .7;
