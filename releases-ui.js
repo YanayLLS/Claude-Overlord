@@ -36,7 +36,7 @@
   let ptrDown = false, drawLater = false;
   overlay.addEventListener('pointerdown', () => { ptrDown = true; });
   const ptrUp = () => { if (!ptrDown) return; ptrDown = false; if (drawLater) { drawLater = false; setTimeout(render, 0); } };
-  window.addEventListener('pointerup', ptrUp, true); window.addEventListener('pointercancel', ptrUp, true);
+  window.addEventListener('pointerup', ptrUp, true); window.addEventListener('pointercancel', ptrUp, true); window.addEventListener('blur', ptrUp);
 
   overlay.addEventListener('click', (e) => {
     // a click outside an open popover (release picker/results, approvers) closes just the popover
@@ -812,7 +812,7 @@
     const lives = (s.results && s.results.lives) || {};
     let inTable = false;
     // the release in flight first (as a card), then the table of the rest
-    for (let m of hs.items.filter(flight).concat(sortHist(hs.items.filter(x => !flight(x))))) {
+    for (let m of now ? hs.items : sortHist([...hs.items])) {
       // hand steps in this release's order not confirmed since it opened (nor already up to date)
       const handOpen = (liveRel && m.id === liveRel.id) ? (m.manual || []).filter(x => s.config && (s.config.releaseOrder || []).some(w => w.some(y => y === x.label || y.toLowerCase() === String(x.repo).toLowerCase())))
         .filter(x => { const l = lives[`${x.repo}|${m.env || 'prod'}`]; return !(l && !l.error && (l.behind === 0 || (l.confirmed && Date.parse(l.confirmed.at) >= Date.parse(m.openedAt)))); }).map(x => x.label) : [];
@@ -829,7 +829,13 @@
       const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
       const env = m.env || 'prod', signs = env === 'prod'; // only prod is signed (SOC2); alpha / staging just merge
       const needsEye = handOpen.length || (m.status === 'deploy-failed' && liveRel && m.id === liveRel.id); // old failures stay folded
-      if (now ? !(flight(m) || needsEye) : flight(m)) continue; // Now: what needs eyes; History: the rest
+      if (now && !(flight(m) || needsEye)) continue; // above the board: what needs eyes; History: every release
+      if (now && nowFold) { // folded: one line per release, its phase and next step
+        const nx = handOpen.length && !flight(m) && m.status !== 'deploy-failed' ? { phase: `${handOpen.length} hand step${handOpen.length === 1 ? '' : 's'} to confirm`, next: `deploy ${handOpen.join(', ')}, then ✓ Deployed`, tone: 'warn' } : releaseNext(s, m);
+        h += `<div class="rl-active ${nx.tone}"><span class="rl-active-id">🚀 ${esc(relTitle(m))}</span><span class="rl-active-phase">${esc(nx.phase)}</span>`
+          + (nx.next ? `<span class="rl-active-next">next: ${esc(nx.next)}</span>` : '') + '<button class="rl-hist-btn" data-act="nowFold">Show release ▾</button></div>';
+        continue;
+      }
       const cardOpen = now || rbOpen === m.id || openCards.has(m.id); // History: folded rows, open on click
       if (histFilter !== 'all' && !(histFilter === 'hotfix' ? ['hotfix', 'standalone'].includes(m.kind) : (m.env || 'prod') === histFilter && !['hotfix', 'standalone'].includes(m.kind))) continue;
       if (!now) {
@@ -865,7 +871,7 @@
         h += `<div class="rl-hist-summary">${order.filter(k => cnt[k]).map(k => `<span class="rl-sum-${k.replace(' ', '-')}"><b>${cnt[k]}</b> ${k}</span>`).join('<i>·</i>')}</div>`;
       }
       if (flight(m) || (m.status === 'deploy-failed' && (liveRel && m.id === liveRel.id)) || handOpen.length) {
-        const nx = releaseNext(s, m);
+        const nx = handOpen.length && !flight(m) && m.status !== 'deploy-failed' ? { phase: `${handOpen.length} hand step${handOpen.length === 1 ? '' : 's'} to confirm`, next: `deploy ${handOpen.join(', ')}, then ✓ Deployed`, tone: 'warn' } : releaseNext(s, m);
         const nextTxt = handOpen.length && !nx.next ? `confirm the hand step${handOpen.length === 1 ? '' : 's'}: ${handOpen.join(', ')} (✓ Deployed on the row)` : nx.next;
         if (nextTxt) h += `<div class="rl-next-line ${nx.tone}"><span>Next</span>${esc(nextTxt)}</div>`;
       }
@@ -1234,7 +1240,7 @@
       // drawer over the board's bottom edge, so opening it never resizes the modal.
       h += (tab === 'history' && s.config ? historyHtml(s) + '</div><div class="rl-foot">'
         + `<div class="rl-legend"><span>Releases, recorded in ${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
-        : envView === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : (nowFold || !s.config ? activeStrip(s) : historyHtml(s, 'now')) + gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
+        : envView === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : (!s.config ? activeStrip(s) : historyHtml(s, 'now')) + gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
         + (s.localOnly ? `<div class="rl-local" title="It isn't on GitHub yet, so teammates can't see this board. Commit and push it to share.">Local config, not pushed yet · <code>${esc(s.localOnly)}</code></div>` : '');
     }
     const prev = modal.querySelector('.rl-body'), top = prev ? prev.scrollTop : 0, left = prev ? prev.scrollLeft : 0;
