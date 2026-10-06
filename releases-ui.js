@@ -139,6 +139,8 @@
     gotoRelease: () => { relOpen = false; tab = 'history'; api.send({ type: 'releasesHistory' }); render(); },
     rowToDev: (el) => { markBusy(el, 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: 'retarget' }); },
     strayFix: (el) => { markBusy(el, el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
+    histCard: (el) => { const id = el.dataset.id; openCards.has(id) ? openCards.delete(id) : openCards.add(id); render(); },
+    histFilter: (el) => { histFilter = el.dataset.f; try { localStorage.setItem('rl-hist-filter', histFilter); } catch {} render(); },
     histChanges: (el) => { const k = el.dataset.key; openChanges.has(k) ? openChanges.delete(k) : openChanges.add(k); render(); },
     histRollback: (el) => { rbOpen = rbOpen === el.dataset.id ? null : el.dataset.id; rbSkip = new Set(); render(); },
     histRbRepo: (el) => { const r = el.dataset.repo; rbSkip.has(r) ? rbSkip.delete(r) : rbSkip.add(r); render(); },
@@ -477,6 +479,7 @@
   // can't fail the deploy, so nothing else would). Returns the explanation, or ''.
   function ticketLate(st, m) {
     const t = st.config && st.config.releaseTicket;
+    if ((m.env || 'prod') !== 'prod' || m.kind === 'standalone') return ''; // tickets come from prod deploys only
     const r = t && m.repos.find(x => x.repo === t.repo && x.deploy && x.deploy.state === 'success');
     if (!r || Date.now() - Date.parse(r.deploy.at || 0) < 15 * 60 * 1000) return '';
     return `${r.label} deployed ${age(r.deploy.at)} ago but no ClickUp release ticket was found for it (its deploy's "Open the ClickUp release ticket" step probably failed: check that run). Or you're not connected to ClickUp in Overlord's Settings, so Overlord can't look it up.`;
@@ -629,6 +632,16 @@
   let relSkip = new Set(); // release picker: repos left out (all in by default, every time it opens)
   let relSeparate = false; // release picker: start a release of its own instead of adding to the pending one
   const openChanges = new Set(); // History rows whose "N changes" list is open
+  const openCards = new Set(); // finished releases opened (they show as one line by default)
+  let histFilter = 'all'; try { histFilter = localStorage.getItem('rl-hist-filter') || 'all'; } catch {}
+  // a finished release in one line: where its repos ended up
+  function oneLine(m) {
+    const live = m.repos.filter(r => r.mergeSha), failed = live.filter(r => r.deploy && r.deploy.state === 'failure');
+    if (m.status === 'cancelled') return 'cancelled, nothing shipped';
+    if (m.status === 'abandoned') return 'closed, nothing shipped';
+    if (failed.length) return `<span class="bad">${failed.length} deploy failed</span> · ${live.length - failed.length} deployed`;
+    return `<span class="ok">${live.length} repo${live.length === 1 ? '' : 's'} deployed ✓</span>`;
+  }
   const ARM_MS = 6000;
   function arm(key) {
     armed = key; clearTimeout(armTimer);
@@ -703,6 +716,11 @@
   function historyHtml(s) {
     const hs = s.history;
     let h = '<div class="rl-hist">' + strayHtml(s) + releaseAllHtml(s);
+    if (hs && hs.items && hs.items.length) {
+      const has = (k) => hs.items.some(m => k === 'hotfix' ? ['hotfix', 'standalone'].includes(m.kind) : (m.env || 'prod') === k && !['hotfix', 'standalone'].includes(m.kind));
+      h += '<div class="rl-hist-filters">' + ['all', 'prod', 'alpha', 'staging', 'hotfix'].filter(k => k === 'all' || has(k))
+        .map(k => `<button class="${histFilter === k ? 'on' : ''}" data-act="histFilter" data-f="${k}">${k === 'all' ? 'All' : k === 'hotfix' ? 'Hotfixes' : k[0].toUpperCase() + k.slice(1)}</button>`).join('') + '</div>';
+    }
     if (!hs) return h + '<div class="rl-tl-empty">Loading release history…</div></div>';
     if (hs.error) return h + `<div class="rl-rr-flag bad">Release history: ${esc(hs.error)}</div><button class="rl-hist-btn" data-act="histReload">Retry</button></div>`;
     if (!hs.items.length) {
@@ -717,7 +735,8 @@
     // and only its hand steps can be judged against what's live today
     const liveRel = hs.items.find(x => (x.env || 'prod') === 'prod' && x.kind !== 'rollback' && x.repos.some(r => r.mergeSha) && !['abandoned', 'cancelled'].includes(x.status));
     const lives = (s.results && s.results.lives) || {};
-    for (let m of hs.items) {
+    // the release in flight first, then newest first
+    for (let m of [...hs.items].sort((x, y) => (flight(y) ? 1 : 0) - (flight(x) ? 1 : 0))) {
       // hand steps in this release's order not confirmed since it opened (nor already up to date)
       const handOpen = (liveRel && m.id === liveRel.id) ? (m.manual || []).filter(x => s.config && (s.config.releaseOrder || []).some(w => w.some(y => y === x.label || y.toLowerCase() === String(x.repo).toLowerCase())))
         .filter(x => { const l = lives[`${x.repo}|${m.env || 'prod'}`]; return !(l && !l.error && (l.behind === 0 || (l.confirmed && Date.parse(l.confirmed.at) >= Date.parse(m.openedAt)))); }).map(x => x.label) : [];
@@ -733,7 +752,10 @@
       const anyone = [...new Set(m.repos.flatMap(r => r.signers || []))];
       const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
       const env = m.env || 'prod', signs = env === 'prod'; // only prod is signed (SOC2); alpha / staging just merge
-      h += `<div class="rl-hist-card${pending ? ' pending' : ''}"><div class="rl-hist-top">`
+      const cardOpen = flight(m) || handOpen.length || m.status === 'deploy-failed' || openCards.has(m.id) || rbOpen === m.id;
+      if (histFilter !== 'all' && !(histFilter === 'hotfix' ? ['hotfix', 'standalone'].includes(m.kind) : (m.env || 'prod') === histFilter && !['hotfix', 'standalone'].includes(m.kind))) continue;
+      h += `<div class="rl-hist-card${pending ? ' pending' : ''}${cardOpen ? '' : ' shut'}"><div class="rl-hist-top"${flight(m) ? '' : ` data-act="histCard" data-id="${esc(m.id)}" title="${cardOpen ? 'Collapse' : 'Show the repos'}"`}>`
+        + (flight(m) ? '' : `<i class="rl-caret">${cardOpen ? '▾' : '▸'}</i>`)
         + `<b>${m.kind === 'rollback' ? '↩ Rollback' : 'Release'} ${esc(m.id)}</b>`
         + (m.kind === 'rollback' ? `<span class="rl-rr-chip">restores ${esc(m.rollbackOf)}</span>` : '')
         + (m.imported ? '<span class="rl-rr-chip" title="Built from merged release PRs, before release manifests existed">imported</span>' : '')
@@ -750,7 +772,9 @@
         + (!m.ticket && ticketLate(s, m) ? `<span class="rl-rr-chip warn" title="${esc(ticketLate(s, m))}">⚠ no ClickUp ticket</span>` : '')
         + (m.ticket ? `<a class="rl-hist-ticket" data-url="${esc(m.ticket.url)}" title="${esc(m.ticket.name)}">ClickUp ticket ↗</a>` : '')
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
-        + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signs && signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
+        + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signs && signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}`
+        + (cardOpen ? '' : ` · ${oneLine(m)}`) + '</div>';
+      if (!cardOpen) { h += '</div>'; continue; }
       // the release at a glance: how many repos are where
       if (pending || m.status === 'merged' || m.status === 'partial') {
         const cnt = {};
@@ -777,7 +801,7 @@
       // a hand-deployed step nobody confirmed this run says nothing about the wave
       const ss = wave.filter(r => !r.hand || (liveItems && liveItems[r.label])).map(stOf);
       const wst = !ss.length ? 'todo' : ss.every(x => DONE.has(x)) ? 'done' : ss.some(x => x === 'failed') ? 'bad' : ss.some(x => live.has(x)) ? 'active' : ss.some(x => x === 'held') ? 'warn' : 'todo';
-      const wsum = { done: 'done', bad: 'deploy failed', active: 'in progress', warn: `${ss.filter(x => x === 'held').length} waiting`, todo: '' }[wst];
+      const wsum = { done: flight(m) ? 'done' : '', bad: 'deploy failed', active: 'in progress', warn: `${ss.filter(x => x === 'held').length} waiting`, todo: '' }[wst];
       h += `<div class="rl-tl-step ${wst}"><i class="rl-tl-node">${wst === 'done' ? '✓' : wi + 1}</i><span class="rl-tl-name">${waves.length > 1 ? `Wave ${wi + 1}` : 'Repos'}</span>${wsum ? `<span class="rl-tl-sum">${esc(wsum)}</span>` : ''}</div><div class="rl-tl-rows ${wst}">`;
       for (const r of wave) {
         if (r.hand) {
@@ -795,8 +819,8 @@
         const dep = deployPill(r, s);
         const chKey = m.id + ':' + r.repo, chOpen = openChanges.has(chKey);
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
-          + `<span class="rl-hist-sha">${r.changes && r.changes.length ? `<button class="rl-ch-btn${chOpen ? ' on' : ''}" data-act="histChanges" data-key="${esc(chKey)}" title="The PRs this release brought into ${esc(r.label)}">${r.changes.length} change${r.changes.length === 1 ? '' : 's'}</button>` : ''}${cmp ? `<span title="prod before → after">${link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha))}</span>` : ''}</span>`
-          + `<span class="rl-hist-state">${rowActs(r, need, notDeployed)}${need && r.signedSha && r.headSha && r.signedSha !== r.headSha ? `<a class="rl-unsigned-new" data-url="${esc(`https://github.com/${r.repo}/compare/${r.signedSha}...${r.headSha}`)}" title="Commits that landed after the last signature: they ship without anyone signing them">+ since signed ↗</a>` : ''}${r.mergeSha ? (liveItems && liveItems[r.label] && ['deploying', 'deployed', 'failed'].includes(liveItems[r.label].s) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (!signs ? '' : (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })()) + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-sha">${r.changes && r.changes.length ? `<button class="rl-ch-btn${chOpen ? ' on' : ''}" data-act="histChanges" data-key="${esc(chKey)}" title="The PRs this release brought into ${esc(r.label)}">${r.changes.length} change${r.changes.length === 1 ? '' : 's'} ${chOpen ? '▴' : '▾'}</button>` : ''}${cmp ? `<span title="prod before → after">${link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha))}</span>` : ''}</span>`
+          + `<span class="rl-hist-state">${rowActs(r, need, notDeployed)}${need && r.signedSha && r.headSha && r.signedSha !== r.headSha ? `<a class="rl-unsigned-new" data-url="${esc(`https://github.com/${r.repo}/compare/${r.signedSha}...${r.headSha}`)}" title="Commits that landed after the last signature: they ship without anyone signing them">+ since signed ↗</a>` : ''}${r.mergeSha ? (liveItems && liveItems[r.label] && liveItems[r.label].s === 'deploying' && !(r.deploy && ['success', 'failure'].includes(r.deploy.state)) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (!signs ? '' : (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })()) + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
         if (chOpen && r.changes) h += `<div class="rl-ch-list">${r.changes.map(c => `<div>${link(`https://github.com/${r.repo}/pull/${c.n}`, '#' + c.n)} ${esc(c.title)}</div>`).join('')}</div>`;
       }
       notDeployed = notDeployed.concat(wave.filter(r => !r.hand && !DONE.has(stOf(r))).map(r => r.label));
@@ -804,7 +828,7 @@
       });
       h += '</div>';
       const manOther = (m.manual || []).filter(x => !inOrderMan.some(y => y.repo === x.repo));
-      if (manOther.length) h += `<div class="rl-hist-man">Hand-deployed at the time: ${manOther.map(x => esc(x.label) + (x.live && x.live.sha ? ' ' + shortSha(x.live.sha) : '')).join(' · ')}</div>`;
+      if (manOther.length) h += `<div class="rl-hist-man" title="${esc(manOther.map(x => x.label + (x.live && x.live.sha ? ': live ' + x.live.sha.slice(0, 7) : '')).join(' · '))}">Not in this release (deployed by hand): ${manOther.map(x => esc(x.label)).join(', ')}</div>`;
       if (m.warnings && m.warnings.length) h += `<div class="rl-hist-man bad">⚠ Not rolled back (data changes): ${m.warnings.map(w => esc(w.label) + ': ' + w.files.map(esc).join(', ')).join(' · ')}</div>`;
       if (m.flags && m.flags.missing && m.flags.missing.length) h += `<div class="rl-hist-man bad">Flags to seed: ${esc(m.flags.missing.join(', '))}</div>`;
       // actions
@@ -1100,7 +1124,7 @@
       + (s.grid ? `<div class="rl-tabs"><button data-act="tab" data-tab="board" class="${tab === 'board' ? 'on' : ''}">Board</button>`
         + `<button data-act="tab" data-tab="timeline" class="${tab === 'timeline' ? 'on' : ''}">Timeline</button>`
         + `<button data-act="tab" data-tab="history" class="${tab === 'history' ? 'on' : ''}" title="The release in flight and every past one">Releases${activeRelease(s) ? '<i class="rl-live-dot"></i>' : ''}</button></div>` : '')
-      + `<span class="rl-src" data-act="editSource" title="Change config source">${esc(s.source)}</span>`
+      + `<button class="rl-src-btn" data-act="editSource" title="Release config: ${esc(s.source)} (click to change)">⚙</button>`
       + (s.rateLimitedUntil && s.rateLimitedUntil > Date.now() ? `<span class="rl-upd bad" title="GitHub's API limit (shared by every tool on your account) was hit: background updates pause until then. What you click still goes through.">GitHub limit: paused until ${new Date(s.rateLimitedUntil).toTimeString().slice(0, 5)}</span>` : '')
       + `<span class="rl-upd">${s.loading ? 'loading…' : esc(upd)}</span>`
       + (s.config ? `<button class="rl-appr-btn${apprOpen ? ' on' : ''}" data-act="apprMenu" title="Release approvers: releasing and merging prod needs two of them"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`

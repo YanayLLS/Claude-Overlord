@@ -548,3 +548,16 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-rel-join button { font:inherit; font-size:10.5px; margin-left:6px; padding:0 8px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
 .rl-rel-join button:hover { color:var(--text); background:var(--surface1); }
 .rl-hist-btn.queued { border-color:var(--accent); background:var(--accent-soft); color:var(--text); }
+/* History: finished releases collapse to one line; filters; the config gear */
+.rl-hist-card.shut { padding-top:8px; padding-bottom:8px; }
+.rl-hist-card.shut .rl-hist-who { margin-bottom:0; }
+.rl-hist-top[data-act="histCard"] { cursor:pointer; }
+.rl-hist-top[data-act="histCard"]:hover b { text-decoration:underline; text-decoration-color:var(--dim); }
+.rl-caret { font-style:normal; font-size:10px; color:var(--dim); width:10px; display:inline-block; }
+.rl-hist-who .ok { color:var(--green); } .rl-hist-who .bad { color:var(--red); }
+.rl-hist-filters { display:flex; gap:4px; margin:0 0 8px; }
+.rl-hist-filters button { font:inherit; font-size:11px; padding:2px 10px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
+.rl-hist-filters button:hover { color:var(--text); background:var(--surface0); }
+.rl-hist-filters button.on { background:var(--accent-soft); border-color:var(--accent); color:var(--text); }
+.rl-src-btn { font:inherit; font-size:13px; width:26px; height:26px; border-radius:var(--r-sm); border:1px solid transparent; background:none; color:var(--dim); cursor:pointer; }
+.rl-src-btn:hover { color:var(--text); background:var(--surface0); border-color:var(--border); }
