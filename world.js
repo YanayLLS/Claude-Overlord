@@ -35,6 +35,7 @@ const PLAT = 2.4;           // plateau height every site sits on
 const SAND = 1.1, WATER = .55; // beach and sea level (the harbour sits on the beach, its ships on the water)
 const SHIP_Y = WATER - SAND + .35; // a ship's group height inside the harbour: hull settles to the waterline
 const TILE = 2.6;           // hex tile radius
+const TCOLS = 72, TROWS = 56; // half-extent of the tile grid in columns and rows (±281 by ±252 units): room for a big harbour on any shore
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ────────────────────────── Module state ────────────────────────── */
@@ -154,7 +155,7 @@ function resize() { if (!renderer) return; const w = stage.clientWidth, h = stag
 
 /* ────────────────────────── Terrain: hex-tile island ────────────────────────── */
 function buildTerrain() {
-  const cols = 64, rows = 34, tiles = [];
+  const cols = TCOLS, rows = TROWS, tiles = [];
   const capGeo = new THREE.CylinderGeometry(TILE * .97, TILE * .97, .3, 6); capGeo.translate(0, .15, 0);
   const colGeo = new THREE.CylinderGeometry(TILE * .97, TILE * .97, 1, 6); colGeo.translate(0, .5, 0);
   for (let i = -cols; i <= cols; i++) for (let j = -rows; j <= rows; j++) {
@@ -354,18 +355,20 @@ function planSites(s, raw) {
   for (const p of plan) { const o = layoutOv[p.key]; if (o && Number.isFinite(o.x) && Number.isFinite(o.z)) { p.x = o.x; p.z = o.z; } }
   for (const p of plan) { if (!layoutOv[p.key]) continue; if (!placeOk(p, p.x, p.z, plan)) { const d = defaultSpot(plan, p); p.x = d.x; p.z = d.z; delete layoutOv[p.key]; dropped = true; } }
   if (dropped) { hooks.saveLayout && hooks.saveLayout(layoutOv); toast('A saved spot no longer fits; it went back to the layout'); }
-  for (const p of plan) if (p.kind === 'github') p.rot = dockRot(p.x, p.z);
+  for (const p of plan) if (p.kind === 'github') { const o = layoutOv[p.key]; if (o && !Number.isFinite(o.rot)) { o.rot = dockRot(o.x, o.z); hooks.saveLayout && hooks.saveLayout(layoutOv); } /* a spot saved before facing was stored gets one now */ p.rot = o && Number.isFinite(o.rot) ? o.rot : 0; } // facing is part of the saved spot; the procedural spot faces east
   return plan;
 }
 // Where a site may stand: clear of every other site by its radius plus a gap (more around the portal's crag), and inside
 // the island's largest allowed outline.
-const ARR_MAX = { x: 200, z: 135 }; // the tile grid reaches ±250 by ±153; the island outline follows the sites, so a big harbour fits on any shore
+const ARR_MAX = { x: TCOLS * 1.5 * TILE - 22, z: TROWS * Math.sqrt(3) * TILE - 20 }; // as far as the tile grid goes, less the island's skirt
 function dockRot(x, z) { const cx = terrain ? terrain.cx || 0 : 0, cz = terrain ? terrain.cz || 0 : 0, rx = terrain ? terrain.rx : 60, rz = terrain ? terrain.rz : 40; const ex = Math.abs(x - cx) / rx, ez = Math.abs(z - cz) / rz; /* which shore of the island, measured from the island's own centre */ if (ez > ex * 1.15) return z > cz ? -Math.PI / 2 : Math.PI / 2; return x < cx ? Math.PI : 0; }
+let placeWhy = ''; // why the last check said no, for the hint
 function placeOk(p, x, z, plan) {
-  if (Math.abs(x) + p.R > ARR_MAX.x || Math.abs(z) + p.R > ARR_MAX.z) return false;
-  for (const o of plan) { if (o === p || o.key === p.key) continue; const gap = (o.kind === 'portal' || p.kind === 'portal') ? 7 : 3; if (Math.hypot(o.x - x, o.z - z) < o.R + p.R + gap) return false; }
-  return true;
+  if (Math.abs(x) + p.R > ARR_MAX.x || Math.abs(z) + p.R > ARR_MAX.z) { placeWhy = 'off the edge of the world'; return false; }
+  for (const o of plan) { if (o === p || o.key === p.key) continue; const gap = (o.kind === 'portal' || p.kind === 'portal') ? 7 : 3; if (Math.hypot(o.x - x, o.z - z) < o.R + p.R + gap) { placeWhy = 'too close to ' + siteName(o); return false; } }
+  placeWhy = ''; return true;
 }
+function siteName(o) { const k = String(o.key || ''); return k.startsWith('f:') ? 'feature ' + k.slice(2) : k.startsWith('w:') ? k.slice(2).split(/[\/]/).pop() : { github: 'the harbour', treasury: 'the treasury', plant: 'the power plant', allies: 'the allied camp', portal: 'the dark portal' }[k] || k; }
 function defaultSpot(plan, p) { const probe = { ...snap, layout: {} }; const saved = layoutOv; layoutOv = {}; let d = { x: p.x, z: p.z }; try { const fresh = planSitesRaw(probe); const q = fresh.find(f => f.key === p.key); if (q) d = { x: q.x, z: q.z }; } catch {} layoutOv = saved; return d; }
 
 /* ────────────────────────── Sites ────────────────────────── */
@@ -814,7 +817,7 @@ W.sync = function (s) {
   if (!alive) return; snap = s; economy = s.economy || null;
   const plan = planSites(s), seen = new Set();
   for (const p of plan) { seen.add(p.key); let site = sites.get(p.key); if (!site) site = createSite(p); syncSite(site, p, s); }
-  for (const p of plan) { const site = sites.get(p.key); if (arrDrag && site === arrDrag.site) continue; if (site && (p.rot || 0) !== (site.rot || 0)) { const fr = site.rot || 0, tr = p.rot || 0; site.rot = tr; tween(700, k => { site.g.rotation.y = fr + (tr - fr) * k; }, null, easeOutCubic); } if (site && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); } }
+  for (const p of plan) { const site = sites.get(p.key); if (arrDrag && site === arrDrag.site) continue; if (site && (p.rot || 0) !== (site.rot || 0)) { const fr = site.rot || 0, tr = p.rot || 0; site.rot = tr; tween(350, k => { site.g.rotation.y = fr + (tr - fr) * k; }, null, easeOutCubic); } if (site && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); } }
   for (const [k, site] of sites) if (!seen.has(k)) destroySite(site);
   if (arranging) markArrange();
   syncRaids(s);
@@ -885,16 +888,18 @@ function moveSite(st, x, z, deferLayout) {
   clearTints(); const col = new THREE.Color(ok ? 0x5fe08a : 0xf0566a);
   for (const t of terrain.tiles) if (Math.hypot(t.x - x, t.z - z) < st.R + TILE * .9) { t.tint = col; tinted.push(t); }
   if (st.arrRing) st.arrRing.material.color.setHex(ok ? 0x5fe08a : 0xf0566a);
+  if (hintEl && arranging) hintEl.innerHTML = ok ? '<b>Arrange:</b> drop it here' : '<b>No room:</b> ' + esc(placeWhy);
   if (deferLayout) { if (arrDrag) arrDrag.dirty = true; } else relayout();
 }
 function markArrange() {
   for (const m of arrMarks) disposeObj(m); arrMarks.length = 0; if (!arranging) return;
   for (const st of sites.values()) { const m = new THREE.Mesh(new THREE.RingGeometry(st.R + .6, st.R + 1.1, 48), new THREE.MeshBasicMaterial({ color: 0xf9e2af, transparent: true, opacity: .5, depthWrite: false, side: THREE.DoubleSide })); m.rotation.x = -Math.PI / 2; m.position.y = .62; st.g.add(m); st.arrRing = m; /* just above the plate, so the plate does not swallow it */ arrMarks.push(m); }
 }
+const arrangeHint = () => `<b>Arrange:</b> drag a site to move it &middot; green ground = it fits, red = no room &middot; <a href="#" onclick="World.resetLayout();return false;">reset layout</a> &middot; <kbd>L</kbd> or <kbd>Esc</kbd> done`;
 function setArranging(on) {
   arranging = !!on; if (!arranging && arrDrag) { arrDrag = null; clearTints(); }
   stage.classList.toggle('arranging', arranging); const b = stage.querySelector('#world-arrange'); if (b) b.classList.toggle('on', arranging);
-  if (hintEl) hintEl.innerHTML = arranging ? `<b>Arrange:</b> drag a site to move it &middot; green ground = it fits, red = no room &middot; <a href="#" onclick="World.resetLayout();return false;">reset layout</a> &middot; <kbd>L</kbd> or <kbd>Esc</kbd> done` : hintHome;
+  if (hintEl) hintEl.innerHTML = arranging ? arrangeHint() : hintHome;
   markArrange(); if (!arranging) toast('Arrangement kept'); else toast('Arrange: drag any site');
 }
 W.arrange = function (on) { setArranging(on == null ? !arranging : on); return arranging; };
@@ -921,9 +926,9 @@ function bindInput() {
   canvas.addEventListener('pointerup', e => {
     if (arrDrag) { const a = arrDrag; arrDrag = null; stage.classList.remove('grabbing'); clearTints();
       if (!a.moved) return;
-      if (a.ok) { layoutOv[a.site.key] = { x: +a.site.x.toFixed(2), z: +a.site.z.toFixed(2) }; hooks.saveLayout && hooks.saveLayout(layoutOv); toast('Placed. The land settles around it'); }
-      else { const fx = a.site.x, fz = a.site.z, st = a.site; st.x = a.sx; st.z = a.sz; tween(500, k => st.g.position.set(fx + (a.sx - fx) * k, st.g.position.y, fz + (a.sz - fz) * k), null, easeOutCubic); toast('No room there'); relayout(); }
-      markArrange(); return; }
+      if (a.ok) { layoutOv[a.site.key] = { x: +a.site.x.toFixed(2), z: +a.site.z.toFixed(2), ...(a.site.kind === 'github' ? { rot: a.site.rot || 0 } : {}) }; hooks.saveLayout && hooks.saveLayout(layoutOv); toast('Placed. The land settles around it'); }
+      else { const fx = a.site.x, fz = a.site.z, st = a.site; st.x = a.sx; st.z = a.sz; tween(500, k => st.g.position.set(fx + (a.sx - fx) * k, st.g.position.y, fz + (a.sz - fz) * k), null, easeOutCubic); toast('No room there: ' + placeWhy); relayout(); }
+      markArrange(); if (hintEl) hintEl.innerHTML = arrangeHint(); return; }
     const d = drag; drag = null; stage.classList.remove('grabbing'); if (!d || d.moved) return;
     const r = pick(e);
     if (targeting) { if (d.btn !== 0) { endTargeting(); toast('Attack called off'); return; } const t = targeting.task;
@@ -1530,7 +1535,7 @@ function syncPortal(site, s) {
   setLabel(site.el, `<div class="w-eyebrow">ClickUp</div><b>Dark portal</b><span class="w-cnt">${n ? n + ' raid' + (n === 1 ? '' : 's') + ' afield' + (fight ? ' · ' + fight + ' under fire' : '') : 'all quiet'}</span>`);
 }
 // Ground height under a world point, from the nearest hex tile (a site plateau counts as its floor).
-function groundY(x, z) { const T = terrain; if (!T) return PLAT; const NI = 64, NJ = 34; const i = Math.round(x / (1.5 * TILE)), zo = (i & 1) ? Math.sqrt(3) / 2 * TILE : 0, j = Math.round((z - zo) / (Math.sqrt(3) * TILE)); if (Math.abs(i) > NI || Math.abs(j) > NJ) return PLAT; const t = T.tiles[(i + NI) * (2 * NJ + 1) + (j + NJ)]; return t && t.th > 0 ? t.th + .56 : PLAT + .56; }
+function groundY(x, z) { const T = terrain; if (!T) return PLAT; const NI = TCOLS, NJ = TROWS; const i = Math.round(x / (1.5 * TILE)), zo = (i & 1) ? Math.sqrt(3) / 2 * TILE : 0, j = Math.round((z - zo) / (Math.sqrt(3) * TILE)); if (Math.abs(i) > NI || Math.abs(j) > NJ) return PLAT; const t = T.tiles[(i + NI) * (2 * NJ + 1) + (j + NJ)]; return t && t.th > 0 ? t.th + .56 : PLAT + .56; }
 function allLots() { const out = []; for (const st of sites.values()) for (const lot of st.lots.values()) out.push(lot); return out; }
 // Where a raid stands: at the foot of its base's plateau, on the side nearest the lot it is after (or a stable random side).
 function raidTarget(r) {
