@@ -374,7 +374,7 @@
     + '<span>colour = env</span></div>';
 
   function gridHtml(g) {
-    let h = `<div class="rl-grid" style="grid-template-columns:max-content repeat(${g.envs.length}, minmax(108px, max-content))">`
+    let h = `<div class="rl-grid" style="grid-template-columns:max-content repeat(${g.envs.length}, minmax(150px, 1fr))">`
       + '<div class="rl-colhead"></div>'
       + g.envs.map((e, i) => `<div class="rl-colhead"><span class="rl-env" style="--hue:${ENV_HUE[e.toLowerCase()] || HUES[i % HUES.length]}">${esc(e)}</span></div>`).join('');
     let group = null;
@@ -789,6 +789,7 @@
       h += '<div class="rl-hist-filters">' + ['all', 'prod', 'alpha', 'staging', 'hotfix'].filter(k => k === 'all' || has(k))
         .map(k => `<button class="${histFilter === k ? 'on' : ''}" data-act="histFilter" data-f="${k}">${k === 'all' ? 'All' : k === 'hotfix' ? 'Hotfixes' : k[0].toUpperCase() + k.slice(1)}</button>`).join('') + '</div>';
     }
+    if (now && (!hs || hs.error || !hs.items.length)) return h + '</div>'; // above the board: only a release in flight, never history's own states
     if (!hs) return h + '<div class="rl-tl-empty">Loading release history…</div></div>';
     if (hs.error) return h + `<div class="rl-rr-flag bad">Release history: ${esc(hs.error)}</div><button class="rl-hist-btn" data-act="histReload">Retry</button></div>`;
     if (!hs.items.length) {
