@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 const { spawn, exec, execSync } = require('child_process');
+const net = require('net');
 const { autoUpdater } = require('electron-updater');
 const pty = require('node-pty');
 const wt = require('./worktree');
@@ -382,6 +383,33 @@ const watchers = new Map();
 const polls = new Map();
 const permTimers = new Map();
 const serverPorts = new Map(); // agentId -> Map(port -> url)
+const serverPortAt = new Map(); // 'agentId:port' -> when it was announced; a probe leaves a port alone for its first 30 s
+const externalServers = new Map(); // worktree path -> { port, url }: something listens on its port without a pty of ours (started outside, or outlived a restart)
+function portListening(port) { return new Promise(res => { let done = false; const fin = v => { if (done) return; done = true; try { sock.destroy(); } catch {} res(v); }; const sock = net.connect({ port, host: '127.0.0.1' }); sock.setTimeout(800); sock.once('connect', () => fin(true)); sock.once('error', () => fin(false)); sock.once('timeout', () => fin(false)); }); }
+// The truth check, every 20 s: a worktree port that answers shows as running, one that goes quiet shows as not running;
+// an agent's remembered port that no longer answers is dropped from the roster and the island.
+let probeBusy = false;
+async function probeServers() {
+  if (probeBusy) return; probeBusy = true;
+  try {
+    for (const w of settings.worktrees || []) {
+      if (!w.path || !w.port || devServers.has(w.path)) continue;
+      const up = await portListening(w.port), known = externalServers.get(w.path);
+      if (up && !known) { const cfg = projectConfig(w.repo); const url = fillPort((cfg && cfg.urlTemplate) || 'http://localhost:{port}', w.port); externalServers.set(w.path, { port: w.port, url }); send({ type: 'wtServer', path: w.path, running: true, port: w.port, url }); }
+      else if (!up && known) { externalServers.delete(w.path); send({ type: 'wtServer', path: w.path, running: false }); }
+    }
+    for (const [id, ports] of [...serverPorts]) {
+      for (const port of [...ports.keys()]) {
+        if (Date.now() - (serverPortAt.get(id + ':' + port) || 0) < 30000) continue;
+        if (await portListening(port)) continue;
+        ports.delete(port); serverPortAt.delete(id + ':' + port); send({ type: 'serverRemoved', id, port });
+      }
+      if (!ports.size) serverPorts.delete(id);
+    }
+  } catch {}
+  probeBusy = false;
+}
+setTimeout(probeServers, 6000); setInterval(probeServers, 20000);
 const teams = new Map(); // teamName -> { name, leadAgentId, leadSessionId, members[], tasks[] }
 const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
@@ -467,6 +495,8 @@ function titleBarOverlay(theme) { return { ...titleBarColors(theme), height: Mat
 function publicSettings() { const { clickupToken, prCache, actionsCache, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken }; }
 function sendFullState() {
   send({ type: 'settings', settings: publicSettings() });
+  for (const [p, sv] of devServers) send({ type: 'wtServer', path: p, running: true, port: sv.port, url: sv.url });
+  for (const [p, sv] of externalServers) send({ type: 'wtServer', path: p, running: true, port: sv.port, url: sv.url });
   if (lastClickup.fetchedAt || lastClickup.error) send({ type: 'clickupList', ...lastClickup }); // a reloaded renderer gets the raids back at once
   // Last good PR / Actions lists (persisted), so the badges paint at once on launch or reload instead of after the next poll.
   if (settings.prCache) send({ type: 'prList', ...settings.prCache, error: null });
@@ -615,7 +645,7 @@ function scanForServers(id, text) {
     if (!ports) { ports = new Map(); serverPorts.set(id, ports); }
     if (!ports.has(port)) {
       const normalUrl = `http://localhost:${port}`;
-      ports.set(port, normalUrl);
+      ports.set(port, normalUrl); serverPortAt.set(id + ':' + port, Date.now());
       console.log(`[Overlord] Server detected for agent ${id}: ${normalUrl}`);
       send({ type: 'serverDetected', id, port, url: normalUrl });
       // Point this agent's own browser at its dev server, whether or not anyone is watching.
@@ -993,7 +1023,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null });
+    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null, servers: [...(serverPorts.get(a.id) || [])] });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -1162,6 +1192,8 @@ function restoreAgents(state) {
       const proc = await ptyHost.attach(entry.ptyKey);
       const ag = agents.get(id);
       if (!proc || !ag) continue;
+      // Its servers came through the restart with it; the first probe drops any that did not.
+      if (Array.isArray(entry.servers) && entry.servers.length) serverPorts.set(id, new Map(entry.servers.filter(x => Array.isArray(x) && x.length === 2 && Number.isFinite(x[0]))));
       try { ag.fileOffset = fs.statSync(ag.jsonlFile).size; } catch {} // doSpawnTerminal starts the watcher: don't re-read the whole transcript
       // Same Claude process: its background shells/agents are still running — rebuild the
       // ledger from this process's records only (earlier processes' tasks died unreported).
@@ -1610,7 +1642,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
     // probe below never sees a fresh prompt paint, so send the prompt now.
     if (initialPrompt && warm && Date.now() - warm.bornAt > 3000) {
       promptSent = true;
-      setTimeout(() => { try { proc.write(initialPrompt + '\r'); } catch {} }, 100);
+      setTimeout(() => { try { writeInitialPrompt(proc, initialPrompt); } catch {} }, 100);
     }
     const onData = (d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); } catch {}
@@ -1640,7 +1672,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
         const clean = d.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
         if (/>\s*$/.test(clean)) {
           promptSent = true;
-          setTimeout(() => { try { proc.write(initialPrompt + '\r'); } catch {} }, 100);
+          setTimeout(() => { try { writeInitialPrompt(proc, initialPrompt); } catch {} }, 100);
         }
       }
     };
@@ -1649,7 +1681,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
     proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
     // Fallback: send prompt after timeout if ready-detection didn't fire
     if (initialPrompt) {
-      setTimeout(() => { if (!promptSent) { promptSent = true; try { proc.write(initialPrompt + '\r'); } catch {} } }, 8000);
+      setTimeout(() => { if (!promptSent) { promptSent = true; try { writeInitialPrompt(proc, initialPrompt); } catch {} } }, 8000);
     }
   } catch (e) {
     console.log(`[Overlord] Failed to spawn agent ${id}:`, e.message);
@@ -2909,6 +2941,8 @@ let usageInFlight = false;
 const cu = require('./clickup-core');
 const CLICKUP_API = 'https://api.clickup.com/api/v2';
 const CLICKUP_TIMEOUT_MS = 20000;
+// --mock-clickup: a fake workspace for demos and tests (clickup-mock.js); no network, no token, nothing real is touched.
+const MOCK_CLICKUP = process.argv.includes('--mock-clickup');
 let clickupTimer = null, clickupInFlight = false, clickupSeeded = false, clickupErrorLogged = false;
 let lastClickup = { tasks: [], error: null, fetchedAt: 0 };
 
@@ -2920,10 +2954,13 @@ function clickupCfg() {
     intervalSec: Math.max(30, Number(c.intervalSec) || 60), onlyMine: c.onlyMine !== false, user: c.user && c.user.id ? c.user : null, platformField: String(c.platformField || 'platform') };
 }
 // One JSON GET. Resolves { status, json } or rejects with a message fit for the settings panel.
-function clickupGet(path, token) {
+function clickupGet(path, token) { return clickupReq('GET', path, token); }
+function clickupReq(method, path, token, body) {
+  if (MOCK_CLICKUP) return require('./clickup-mock').request(method, path, body, clickupCfg().user);
   return new Promise((resolve, reject) => {
     const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), CLICKUP_TIMEOUT_MS);
-    fetch(CLICKUP_API + path, { headers: { authorization: token, accept: 'application/json' }, signal: ctl.signal })
+    const headers = { authorization: token, accept: 'application/json' }; if (body !== undefined) headers['content-type'] = 'application/json';
+    fetch(CLICKUP_API + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: ctl.signal })
       .then(async (r) => { clearTimeout(to); let json = null; try { json = await r.json(); } catch {} if (r.status === 401) return reject(new Error('Token rejected (401)')); if (r.status === 429) return reject(new Error('Rate limited (429) — try again in a minute')); if (r.status >= 400) return reject(new Error((json && (json.err || json.error)) || ('HTTP ' + r.status))); resolve({ status: r.status, json }); })
       .catch((e) => { clearTimeout(to); reject(new Error(e && e.name === 'AbortError' ? 'Timed out' : (e && e.message) || 'Network error')); });
   });
@@ -2960,7 +2997,8 @@ function notifyRaid(t) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
 }
 async function pollClickup() {
-  const cfg = clickupCfg(), token = settings.clickupToken;
+  const cfg = clickupCfg(), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+  if (MOCK_CLICKUP) { const mb = require('./clickup-mock').board; cfg.enabled = !!settings.worldEnabled; cfg.teamId = cfg.teamId || '9000000001'; cfg.user = cfg.user || { id: '1', username: 'you' }; cfg.lists = [{ id: mb.id, name: mb.name }]; }
   if (clickupInFlight || !cfg.enabled || !token || !cfg.teamId || !cfg.user || !cfg.lists.length) return;
   clickupInFlight = true;
   try {
@@ -3374,6 +3412,15 @@ function savePasteToFile(content) {
 // Clipboard text delivered as a real bracketed paste: multi-line content has to
 // land as one prompt rather than submitting a line at a time, and going through
 // handleTermInput keeps the >500-char temp-file path applying to it too.
+// A quest's ticket into a Claude terminal: the whole text as one paste straight to the pty, and Enter only after
+// the last chunk has landed. An Enter in the same write as the paste end is swallowed by the TUI, and the human
+// paste path would spill a long ticket into a temp file the agent then has to read.
+function sendPromptToTerm(t, text) {
+  const paste = '\x1b[200~' + String(text).replace(/\r\n?/g, '\n') + '\x1b[201~';
+  writePtyChunked(t, paste);
+  setTimeout(() => { try { t.write('\r'); } catch {} }, Math.ceil(paste.length / 1024) * 8 + 120);
+}
+function writeInitialPrompt(proc, p) { if (p.includes('\x1b[200~')) sendPromptToTerm(proc, p.replace(/\x1b\[20[01]~/g, '')); else proc.write(p + '\r'); }
 function pasteTextToTerm(id, text) {
   handleTermInput(id, '\x1b[200~' + normalizePasteText(text) + '\x1b[201~');
 }
@@ -3697,6 +3744,7 @@ function startDevServer(p) {
 function stopDevServer(p) {
   const s = devServers.get(p);
   if (s) { killPty(s.proc); killPortProcess(s.port); devServers.delete(p); }
+  const ext = externalServers.get(p); if (ext) { killPortProcess(ext.port); externalServers.delete(p); } // stop also covers a server we only found listening
   send({ type: 'wtServer', path: p, running: false });
 }
 
@@ -3862,7 +3910,7 @@ function handleIpc(msg) {
     case 'closeAgent': closeAgent(msg.id); break;
     case 'archiveAgent': archiveAgent(msg.id); break;
     case 'unarchiveAgent': unarchiveAgent(msg.id); break;
-    case 'renameAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); if (t) t.write(`/rename ${msg.name}\r`); } break; }
+    case 'renameAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a) { a.title = msg.name; a.customName = true; send({ type: 'title', id: msg.id, text: msg.name, customName: true }); saveState(); if (t && !msg.quiet) t.write(`/rename ${msg.name}\r`); } break; } // quiet: Overlord-side name only, no /rename typed into the terminal
     case 'clearCustomName': { const a = agents.get(msg.id); if (a) { a.customName = false; a.title = a.aiTitle || ''; send({ type: 'title', id: msg.id, text: a.title, customName: false }); saveState(); } break; }
     // Resume the SAME session after a crash — spawnTerminal re-attaches with
     // `claude --resume <sessionId>`, keeping the conversation. restartAgent (below)
@@ -4041,7 +4089,7 @@ function handleIpc(msg) {
     }
     case 'clickupTask': {
       // The quest scroll: the ticket's body, fetched only when asked for.
-      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = settings.clickupToken;
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
       if (!id || !token) { send({ type: 'clickupTask', id, task: null, error: 'Not signed in' }); break; }
       clickupGet(`/task/${encodeURIComponent(id)}?include_markdown_description=true`, token).then(({ json }) => {
         const t = cu.normalizeTask(json, { platformField: clickupCfg().platformField }); if (!t) throw new Error('No task in reply');
@@ -4051,7 +4099,48 @@ function handleIpc(msg) {
       }).catch(e => send({ type: 'clickupTask', id, task: null, error: e.message || String(e) }));
       break;
     }
+    case 'clickupComments': {
+      // The quest's conversation: top-level comments, and the replies of any thread that has them.
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      if (!id || !token) { send({ type: 'clickupComments', id, comments: null, error: 'Not signed in' }); break; }
+      (async () => {
+        try {
+          const norm = (c) => { const parts = []; for (const b of Array.isArray(c.comment) ? c.comment : []) { if (!b) continue; const at = b.attachment || (b.type === 'attachment' && b.attributes && b.attributes.attachment); if (at && typeof at.url === 'string') { parts.push({ t: 'file', url: at.url, title: String(at.title || ''), mime: String(at.mimetype || ''), ext: String(at.extension || '').toLowerCase(), thumb: [at.thumbnail_medium, at.thumbnail_small].find(u => typeof u === 'string') || '' }); continue; } if (b.type === 'tag' || b.type === 'user_mention' || (b.text && /^@/.test(b.text) && b.attributes && b.attributes.link)) { parts.push({ t: 'mention', text: String(b.text || (b.user && '@' + b.user.username) || '@') }); continue; } if (typeof b.text === 'string') parts.push({ t: 'text', text: b.text, bold: !!(b.attributes && b.attributes.bold), code: !!(b.attributes && b.attributes.code), link: b.attributes && typeof b.attributes.link === 'string' ? b.attributes.link : '' }); }
+            return { id: String(c.id), text: String(c.comment_text || ''), parts, user: c.user ? { id: String(c.user.id || ''), name: c.user.username || c.user.email || '?', color: c.user.color || '', pic: c.user.profilePicture || '' } : { id: '', name: '?', color: '', pic: '' }, date: Number(c.date) || 0, replyCount: Number(c.reply_count) || 0, resolved: !!c.resolved, replies: [] }; };
+          const { json } = await clickupGet(`/task/${encodeURIComponent(id)}/comment`, token);
+          const comments = ((json && json.comments) || []).map(norm).sort((a, b) => a.date - b.date);
+          for (const c of comments.slice(0, 40)) if (c.replyCount > 0) { try { const r = await clickupGet(`/comment/${encodeURIComponent(c.id)}/reply`, token); c.replies = ((r.json && r.json.comments) || []).map(norm).sort((a, b) => a.date - b.date); } catch (e) { c.replies = []; c.replyError = e.message; } }
+          send({ type: 'clickupComments', id, comments, error: null });
+        } catch (e) { send({ type: 'clickupComments', id, comments: null, error: e.message || String(e) }); }
+      })();
+      break;
+    }
+    case 'clickupComment': {
+      // A new comment on the task, or a reply inside a thread, posted as the signed-in user.
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), replyTo = String(msg.replyTo || '').replace(/[^\w-]/g, ''), text = String(msg.text || '').trim().slice(0, 20000), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      if (!id || !token || !text) { send({ type: 'clickupCommentPosted', id, error: !text ? 'Nothing to send' : 'Not signed in' }); break; }
+      const path = replyTo ? `/comment/${encodeURIComponent(replyTo)}/reply` : `/task/${encodeURIComponent(id)}/comment`;
+      clickupReq('POST', path, token, { comment_text: text, notify_all: true }).then(() => { send({ type: 'clickupCommentPosted', id, error: null }); handleIpc({ type: 'clickupComments', id }); })
+        .catch(e => send({ type: 'clickupCommentPosted', id, error: e.message || String(e) }));
+      break;
+    }
+    case 'clickupStatuses': {
+      // The statuses a ticket may take come from its own board; every board defines its own set.
+      const listId = String(msg.listId || '').replace(/\D/g, ''), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      if (!listId || !token) { send({ type: 'clickupStatuses', listId, statuses: null, error: 'Not signed in' }); break; }
+      clickupGet(`/list/${encodeURIComponent(listId)}`, token).then(({ json }) => send({ type: 'clickupStatuses', listId, statuses: ((json && json.statuses) || []).map(st => ({ status: String(st.status || ''), color: String(st.color || ''), type: String(st.type || ''), order: Number(st.orderindex) || 0 })).filter(st => st.status).sort((a, b) => a.order - b.order), error: null }))
+        .catch(e => send({ type: 'clickupStatuses', listId, statuses: null, error: e.message || String(e) }));
+      break;
+    }
+    case 'clickupSetStatus': {
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), status = String(msg.status || '').slice(0, 100), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      if (!id || !token || !status) { send({ type: 'clickupStatusSet', id, status, error: 'Not signed in' }); break; }
+      clickupReq('PUT', `/task/${encodeURIComponent(id)}`, token, { status }).then(() => { send({ type: 'clickupStatusSet', id, status, error: null }); setTimeout(() => pollClickup(), 800); /* the raid follows the ticket */ })
+        .catch(e => send({ type: 'clickupStatusSet', id, status, error: e.message || String(e) }));
+      break;
+    }
     case 'pollClickupNow': armClickupTimer(); break;
+    case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;

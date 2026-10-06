@@ -11,6 +11,9 @@
 }
 #world-stage { display: none; position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); cursor: default; }
 body.world-mode #world-stage { display: block; }
+/* Depth from the compositor: a vignette at the edges and a faint sky gradient at the top, over the canvas only. */
+#world-stage::after { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(ellipse at 50% 42%, transparent 52%, rgba(0, 0, 0, .38) 100%), linear-gradient(180deg, rgba(130, 170, 230, .09), transparent 34%); }
+#world-stage > :not(canvas) { z-index: 2; }
 body.world-mode { --w-roster: 300px; }
 body.world-mode #list-col { flex: none; width: var(--w-roster); position: relative; border-right: 1px solid var(--border); transition: width .32s cubic-bezier(.4,0,.2,1), transform .32s cubic-bezier(.4,0,.2,1), opacity .25s; }
 body.world-mode.roster-resizing #list-col { transition: none; }
@@ -43,13 +46,37 @@ body:not(.world-on) #hdr-world, body:not(.world-on) .help-world { display: none 
 .w-site .w-prog { width: 120px; height: 4px; margin: 4px auto 0; background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.18); }
 .w-site .w-prog i { display: block; height: 100%; background: var(--c); transition: width .6s; }
 .w-site .w-cnt { display: block; margin-top: 2px; font-family: var(--w-mono); font-size: 10px; color: #cfd7e2; text-shadow: 0 1px 2px #000; }
-.w-lot { font-family: var(--w-display); font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #dfe5ee; text-shadow: 0 1px 2px #000, 0 0 6px #000; }
-.w-lot i { display: inline-block; width: 7px; height: 8px; clip-path: var(--w-hex); background: var(--w-done); margin-left: 5px; vertical-align: middle; }
+/* A building's signboard: kind glyph, name, and the branch and port it serves; it reads at every zoom. */
+.w-lot { display: inline-grid; grid-template-columns: auto auto auto auto; align-items: center; column-gap: 5px; padding: 2px 8px 2px 6px; background: rgba(8,12,18,.86); border-left: 3px solid var(--c, #c9d1d9); font-family: var(--w-display); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #eef2f7; text-shadow: 0 1px 2px #000; }
+.w-lot b { font-weight: 700; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* a long name ends in an ellipsis; the card carries the whole of it */ .w-lot i.k { font-size: 11px; color: var(--c, #c9d1d9); font-style: normal; }
+/* Port chips: the state is the dot's colour; chips take the pointer so a click opens the server and a right-click its menu. */
+.w-lot .srvs { display: inline-flex; gap: 3px; margin-left: 2px; }
+.w-lot .srv { pointer-events: auto; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 0 5px; border-radius: 3px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); font-family: var(--w-mono); font-size: 10px; font-weight: 600; letter-spacing: 0; text-transform: none; color: #dfe5ee; }
+.w-lot .srv:hover { background: rgba(255,255,255,.18); }
+.w-lot .srv i, .w-card .w-srv i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #6c7086; flex: none; }
+.s-running i { background: var(--w-done) !important; box-shadow: 0 0 6px var(--w-done); animation: w-srv-blink 1.6s ease-in-out infinite; }
+.s-setup i { background: var(--w-gold) !important; } .s-failed i { background: var(--w-crashed) !important; } .s-off i { background: #6c7086 !important; } .s-off { opacity: .8; }
+@keyframes w-srv-blink { 50% { opacity: .35; } }
+.w-card .w-srvs { margin-top: 4px; } .w-card .w-srv { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--dim); } .w-card .w-srv b { color: #eef2f7; font-family: var(--w-mono); } .w-card .w-srv span { font-family: var(--w-mono); opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .w-card .w-srv.s-none { opacity: .6; }
+.w-lot small { grid-column: 1 / 5; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--w-mono); font-size: 9.5px; font-weight: 400; letter-spacing: .02em; text-transform: none; color: #b9c3d0; }
+#world-labels.far .w-lot { font-size: 10px; padding: 1px 6px 1px 5px; } #world-labels.vfar .w-lot small { display: none; } #world-labels.vfar .w-lot { font-size: 9px; }
 .w-obj { font-family: var(--w-mono); font-size: 10.5px; color: var(--c); background: rgba(8,12,18,.75); padding: 1px 9px; clip-path: var(--w-hexw); }
 .w-obj.sel { background: rgba(214,165,69,.35); color: #fff; }
 .w-pill { font-size: 10px; color: #e3e9f1; background: rgba(8,12,18,.7); padding: 1px 9px; clip-path: var(--w-hexw); max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
-#world-labels.far .w-lot, #world-labels.far .w-obj, #world-labels.far .w-pill { opacity: 0 !important; }
+#world-labels.far .w-obj, #world-labels.far .w-pill { opacity: 0 !important; }
 #world-labels:not(.near) .w-pill { opacity: 0 !important; }
+/* A working unit's name stays up at every zoom, lit in the working colour. */
+#world-labels .w-pill.work { opacity: 1 !important; color: #fff; background: rgba(137,180,250,.3); border: 1px solid rgba(137,180,250,.7); box-shadow: 0 0 10px rgba(137,180,250,.5); }
+#world-labels.far .w-pill.work { font-size: 9px; max-width: 90px; }
+/* A building's hover card carries its path; while a quest looks for a target, the card says what a click does. */
+.w-card.w-card-lot .w-path { margin-top: 4px; font-family: var(--w-mono); font-size: 9.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.w-card .w-hint-go { margin-top: 4px; font-family: var(--w-display); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--w-gold); }
+/* Monsters tied to the selected agent, and the target-picking mode. */
+.w-obj.w-raid.linked { opacity: 1 !important; box-shadow: 0 0 0 1px var(--w-gold), 0 0 14px rgba(249,226,175,.6); }
+.w-obj.w-raid.linked .w-who, .w-obj.w-raid.linked small { display: inline; } .w-obj.w-raid.linked small { display: block; }
+#world-stage.targeting canvas.gl { cursor: crosshair; }
+#world-stage.targeting #world-hint { color: #fff; background: rgba(249,226,175,.18); border: 1px solid var(--w-gold); padding: 6px 12px; font-size: 12px; left: 50%; right: auto; bottom: 14px; transform: translateX(-50%); clip-path: var(--w-cham); pointer-events: none; }
+#world-stage.targeting #world-hint b { color: var(--w-gold); }
 .w-card { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); width: 200px; text-align: left; background: rgba(8,12,18,.93); border: 1px solid var(--border-hi); border-left: 3px solid var(--c); padding: 6px 9px 7px; clip-path: var(--w-cham); will-change: transform; font-family: 'Segoe UI', system-ui, sans-serif; }
 .w-card.sel { border-color: var(--w-gold); border-left-color: var(--c); }
 .w-card b { display: block; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fff; }
@@ -58,6 +85,12 @@ body:not(.world-on) #hdr-world, body:not(.world-on) .help-world { display: none 
 .w-card .w-bar { flex: 1; height: 4px; background: rgba(255,255,255,.08); }
 .w-card .w-bar i { display: block; height: 100%; background: var(--w-done); }
 .w-card .w-bar.warn i { background: var(--w-perm); } .w-card .w-bar.danger i { background: var(--w-crashed); }
+/* Arrange mode: the button, the mode's hint, and the grab cursor. */
+#world-arrange { position: absolute; left: 12px; bottom: 10px; z-index: 2; font-family: var(--w-display); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); background: rgba(10,14,20,.7); border: 1px solid rgba(255,255,255,.14); padding: 4px 10px; cursor: pointer; clip-path: var(--w-cham); }
+#world-arrange:hover { color: #fff; border-color: rgba(255,255,255,.3); } #world-arrange.on { color: #111; background: var(--w-gold); border-color: var(--w-gold); }
+#world-stage.arranging canvas.gl { cursor: grab; } #world-stage.arranging.grabbing canvas.gl { cursor: grabbing; }
+#world-stage.arranging #world-hint { color: #fff; background: rgba(249,226,175,.18); border: 1px solid var(--w-gold); padding: 6px 12px; font-size: 12px; left: 50%; right: auto; bottom: 14px; transform: translateX(-50%); clip-path: var(--w-cham); pointer-events: auto; }
+#world-stage.arranging #world-hint b { color: var(--w-gold); } #world-stage.arranging #world-hint a { color: var(--w-gold); }
 #world-hint { position: absolute; right: 12px; bottom: 10px; font-size: 10.5px; color: var(--dim); text-shadow: 0 1px 2px #000; pointer-events: none; }
 #world-hint kbd { font-family: var(--w-mono); color: var(--text); }
 
@@ -416,6 +449,27 @@ body.world-mode #quest-log.open { transform: translate(-50%, -50%); opacity: 1; 
 #quest-view .qv-prev { left: 18px; } #quest-view .qv-next { right: 18px; } #quest-view .qv-nav[hidden] { display: none; }
 #quest-view .qv-close { position: absolute; top: 14px; right: 18px; width: 40px; height: 40px; border: 0; background: rgba(255,255,255,.1); color: #fff; font-size: 24px; cursor: pointer; clip-path: var(--w-hex); }
 #quest-view-cap { position: absolute; left: 0; right: 0; bottom: 16px; text-align: center; font-size: 12px; color: #cfd7e2; text-shadow: 0 1px 3px #000; } #quest-view-cap span { color: var(--dim); margin: 0 8px; } #quest-view-cap a { color: var(--w-gold); }
+#quest-scroll .q-chip-status select { font-family: inherit; font-size: 12px; font-weight: 600; color: #2a2016; background: transparent; border: 0; padding: 0; outline: none; cursor: pointer; } #quest-scroll .q-chip-status select:disabled { cursor: progress; }
+#quest-scroll .q-thumb.broken img { display: none; } #quest-scroll .q-thumb.broken::after { content: 'cannot show · click to open'; display: grid; place-items: center; height: 100%; font-size: 11px; color: #efe3c8; padding: 0 8px; text-align: center; }
+#quest-scroll .q-thumb-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 6px; font-size: 10px; color: #efe3c8; background: rgba(0,0,0,.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#quest-scroll img.q-inline.broken { display: none; }
+#quest-scroll .q-comments { margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(60,40,20,.25); }
+#quest-scroll .q-ch { font-family: var(--w-display); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: #7a5a3a; margin-bottom: 8px; } #quest-scroll .q-ch em { font-style: normal; font-family: var(--w-mono); color: #3a2416; margin-left: 4px; }
+#quest-scroll .q-c { padding: 8px 10px; margin-bottom: 6px; background: rgba(255,255,255,.35); border: 1px solid rgba(60,40,20,.18); }
+#quest-scroll .q-c.q-c-mine { background: rgba(139,30,63,.07); border-color: rgba(139,30,63,.25); }
+#quest-scroll .q-c-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 12px; } #quest-scroll .q-c-head b { color: #1f160f; } #quest-scroll .q-c-head small { color: #7a5a3a; }
+#quest-scroll .q-c-reply-btn { margin-left: auto; font-size: 11px; color: #8b1e3f; text-decoration: none; opacity: .75; } #quest-scroll .q-c-reply-btn:hover { opacity: 1; text-decoration: underline; }
+#quest-scroll .q-av { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 700; color: #fff; background: #8b1e3f; background-size: cover; flex: none; }
+#quest-scroll .q-c-body { font-size: 13px; line-height: 1.5; color: #2a2016; word-break: break-word; } #quest-scroll .q-c-body code { font-family: var(--w-mono); font-size: 12px; background: rgba(60,40,20,.12); padding: 0 4px; }
+#quest-scroll .q-mention { color: #8b1e3f; font-weight: 600; }
+#quest-scroll .q-cimg { display: inline-block; max-width: 220px; max-height: 160px; margin: 4px 6px 4px 0; vertical-align: top; }
+#quest-scroll .q-cvid { display: inline-block; width: 160px; height: 100px; margin: 4px 6px 4px 0; vertical-align: top; }
+#quest-scroll .q-c-thread { margin: 6px 0 0 22px; padding-left: 10px; border-left: 2px solid rgba(139,30,63,.3); } #quest-scroll .q-c-reply { background: rgba(255,255,255,.25); }
+#quest-scroll .q-reply { margin-top: 10px; } #quest-scroll .q-replyto { font-size: 11.5px; color: #7a5a3a; margin-bottom: 4px; } #quest-scroll .q-replyto a { color: #8b1e3f; }
+#quest-scroll .q-reply textarea { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 13px; padding: 8px 10px; color: #2a2016; background: rgba(255,255,255,.55); border: 1px solid rgba(60,40,20,.35); resize: vertical; outline: none; } #quest-scroll .q-reply textarea:focus { border-color: #8b1e3f; }
+#quest-scroll .q-reply-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; } #quest-scroll .q-as { font-size: 11px; color: #7a5a3a; margin-right: auto; }
+#quest-scroll .q-attack { background: #3b0a16; color: #fff; border-color: #3b0a16; font-weight: 700; } #quest-scroll .q-attack:hover { background: #6b0f24; }
+#quest-view .qv-fail { max-width: 420px; padding: 18px 22px; background: rgba(255,255,255,.08); color: #cfd7e2; font-size: 13px; text-align: center; } #quest-view .qv-fail a { color: var(--w-gold); }
 #quest-scroll .q-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(60,40,20,.25); }
 #quest-scroll .q-btn { font-family: inherit; font-size: 12px; padding: 7px 12px; border: 1px solid rgba(60,40,20,.35); background: rgba(255,255,255,.35); color: #2a2016; cursor: pointer; clip-path: var(--w-hexw); }
 #quest-scroll .q-btn:hover { background: rgba(255,255,255,.7); } #quest-scroll .q-main { background: #8b1e3f; color: #fff; border-color: #8b1e3f; } #quest-scroll .q-main:hover { background: #a62a4f; } #quest-scroll .q-close { margin-left: auto; }
@@ -442,16 +496,21 @@ body.world-mode #quest-log.open { transform: translate(-50%, -50%); opacity: 1; 
 #world-labels.far .w-obj.w-repo.w-row { opacity: 1 !important; }
 
 /* Power plant: the supply gauge is an always-visible card with one bar per cap and the number written large */
-.w-lab.w-plant { background: rgba(8,12,18,.86); border: 1px solid rgba(137,220,235,.4); padding: 6px 12px 8px; min-width: 300px; text-align: left; }
-.w-plant .w-eyebrow { font-family: var(--w-display); font-size: 9px; letter-spacing: .3em; text-transform: uppercase; color: var(--c); }
-.w-plant > b { display: block; font-family: var(--w-display); font-size: 15px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #fff; margin-bottom: 3px; }
-.w-pbar { display: grid; grid-template-columns: 96px 1fr 52px; column-gap: 8px; align-items: center; font-family: var(--w-mono); font-size: 10.5px; color: #dfe5ee; margin-top: 4px; }
+.w-lab.w-plant { background: rgba(8,12,18,.86); border: 1px solid rgba(137,220,235,.4); padding: 4px 9px 5px; min-width: 212px; text-align: left; } /* compact: it is always up, so it takes little room */
+.w-plant .w-eyebrow { font-family: var(--w-display); font-size: 8px; letter-spacing: .3em; text-transform: uppercase; color: var(--c); }
+.w-plant > b { display: block; font-family: var(--w-display); font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #fff; margin-bottom: 1px; }
+.w-pbar { display: grid; grid-template-columns: 72px 1fr 38px; column-gap: 6px; align-items: center; font-family: var(--w-mono); font-size: 9.5px; color: #dfe5ee; margin-top: 2px; }
 .w-pbar span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.w-pbar i { display: block; height: 9px; background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.2); }
+.w-pbar i { display: block; height: 6px; background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.2); }
 .w-pbar i b { display: block; height: 100%; background: var(--c); box-shadow: 0 0 8px var(--c); transition: width .8s; }
-.w-pbar em { font-style: normal; font-weight: 700; font-size: 12px; text-align: right; color: #fff; }
-.w-pbar small { grid-column: 2 / 4; font-size: 9px; color: var(--dim); margin-top: -1px; }
+.w-pbar em { font-style: normal; font-weight: 700; font-size: 10px; text-align: right; color: #fff; }
+.w-pbar small { grid-column: 2 / 4; font-size: 8px; color: var(--dim); margin-top: -2px; }
 .w-pbar.w-pnone { display: block; color: var(--dim); }
-.w-plant .w-cnt { display: block; margin-top: 5px; font-family: var(--w-display); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+.w-plant .w-cnt { display: block; margin-top: 3px; font-family: var(--w-display); font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase; }
 .w-pace.ok { color: var(--w-done); } .w-pace.warn { color: var(--w-perm); } .w-pace.over { color: var(--w-crashed); }
 #world-labels.far .w-plant .w-pbar small { display: none; }
+/* Server actions in the building card take the pointer, so the card can be used, not only read. */
+.w-card .w-srv { flex-wrap: wrap; } .w-card .w-act { flex-basis: 100%; display: flex; gap: 4px; margin: 2px 0 3px 11px; pointer-events: auto; }
+.w-card .w-act button { font: inherit; font-size: 9.5px; padding: 1px 6px; color: #eef2f7; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); border-radius: 3px; cursor: pointer; }
+.w-card .w-act button:hover { background: rgba(255,255,255,.22); }
+#world-labels .w-card { pointer-events: none; } #world-labels .w-card .w-act { pointer-events: auto; }
