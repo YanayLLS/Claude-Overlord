@@ -648,7 +648,7 @@
     if (d.toDateString() === y.toDateString()) return 'Yesterday';
     return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   }
-  const hhmm = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const hhmm = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   // one status per release: a dot and a word
   function relStatus(m) {
     const live = m.repos.filter(r => r.mergeSha), failed = live.filter(r => r.deploy && r.deploy.state === 'failure');
