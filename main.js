@@ -3022,6 +3022,8 @@ let usageInFlight = false;
 // login: it identifies the user (GET /user) and authorises the polls. Everything the world
 // needs is normalised by clickup-core; this section only does the I/O.
 const cu = require('./clickup-core');
+const mc = require('./mention-core');
+let clickupMembersCache = null; // { at, members } for @-mentions
 const CLICKUP_API = 'https://api.clickup.com/api/v2';
 const CLICKUP_TIMEOUT_MS = 20000;
 let clickupTimer = null, clickupInFlight = false, clickupSeeded = false, clickupErrorLogged = false;
@@ -4194,12 +4196,27 @@ function handleIpc(msg) {
       })();
       break;
     }
+    case 'clickupMembers': {
+      // Who can be @-mentioned: the members of the signed-in workspace, cached a while.
+      const token = settings.clickupToken, cfg = clickupCfg();
+      if (!token || !cfg.teamId) { send({ type: 'clickupMembers', members: [], error: 'Not signed in' }); break; }
+      if (clickupMembersCache && Date.now() - clickupMembersCache.at < 600000) { send({ type: 'clickupMembers', members: clickupMembersCache.members, error: null }); break; }
+      clickupGet('/team', token).then(({ json }) => { const team = ((json && json.teams) || []).find(t => String(t.id) === cfg.teamId) || ((json && json.teams) || [])[0]; const members = mc.normalizeMembers(team); clickupMembersCache = { at: Date.now(), members }; send({ type: 'clickupMembers', members, error: null }); })
+        .catch(e => send({ type: 'clickupMembers', members: [], error: e.message || String(e) }));
+      break;
+    }
     case 'clickupComment': {
-      // A new comment on the task, or a reply inside a thread, posted as the signed-in user.
-      const id = String(msg.id || '').replace(/[^\w-]/g, ''), replyTo = String(msg.replyTo || '').replace(/[^\w-]/g, ''), text = String(msg.text || '').trim().slice(0, 20000), token = settings.clickupToken;
+      // A new comment on the task, or a reply inside a thread, posted as the signed-in user. With mentions it goes
+      // up as blocks (text and tag blocks with user ids), so ClickUp renders and notifies them; if the API will
+      // not take blocks, the plain text goes instead, mentions as @names.
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), replyTo = String(msg.replyTo || '').replace(/[^\w-]/g, ''), token = settings.clickupToken;
+      const parts = Array.isArray(msg.parts) ? msg.parts.slice(0, 200) : null, built = parts ? mc.toBlocks(parts) : null;
+      const text = (built ? built.text : String(msg.text || '')).trim().slice(0, 20000);
       if (!id || !token || !text) { send({ type: 'clickupCommentPosted', id, error: !text ? 'Nothing to send' : 'Not signed in' }); break; }
       const path = replyTo ? `/comment/${encodeURIComponent(replyTo)}/reply` : `/task/${encodeURIComponent(id)}/comment`;
-      clickupReq('POST', path, token, { comment_text: text, notify_all: true }).then(() => { send({ type: 'clickupCommentPosted', id, error: null }); handleIpc({ type: 'clickupComments', id }); })
+      const plain = () => clickupReq('POST', path, token, { comment_text: text, notify_all: true });
+      const rich = built && built.hasMention ? clickupReq('POST', path, token, { comment: built.blocks, comment_text: text, notify_all: true }).then(r => { if (!r.json || (!r.json.id && !r.json.hist_id)) throw new Error('no comment in reply'); return r; }).catch(() => plain()) : plain();
+      rich.then(() => { send({ type: 'clickupCommentPosted', id, error: null }); handleIpc({ type: 'clickupComments', id }); })
         .catch(e => send({ type: 'clickupCommentPosted', id, error: e.message || String(e) }));
       break;
     }

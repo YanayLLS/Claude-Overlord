@@ -356,7 +356,7 @@ function planSites(s, raw) {
 }
 // Where a site may stand: clear of every other site by its radius plus a gap (more around the portal's crag), and inside
 // the island's largest allowed outline.
-const ARR_MAX = { x: 110, z: 80 };
+const ARR_MAX = { x: 200, z: 135 }; // the tile grid reaches ±250 by ±153; the island outline follows the sites, so a big harbour fits on any shore
 function dockRot(x, z) { const ex = Math.abs(x) / ARR_MAX.x, ez = Math.abs(z) / ARR_MAX.z; if (ez > ex * 1.15) return z > 0 ? -Math.PI / 2 : Math.PI / 2; return x < 0 ? Math.PI : 0; }
 function placeOk(p, x, z, plan) {
   if (Math.abs(x) + p.R > ARR_MAX.x || Math.abs(z) + p.R > ARR_MAX.z) return false;
@@ -453,7 +453,7 @@ function destroySite(site) {
   const g = site.g, y0 = g.position.y; tween(800, k => { g.position.y = y0 - 12 * k; }, () => disposeObj(g), easeInCubic);
 }
 function syncSite(site, p, s) {
-  if (site.x !== p.x || site.z !== p.z) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); }
+  if (!(arrDrag && arrDrag.site === site) && (site.x !== p.x || site.z !== p.z)) { const fx = site.x, fz = site.z; site.x = p.x; site.z = p.z; /* a sync mid-drag leaves the dragged site under the pointer */ tween(700, k => site.g.position.set(fx + (p.x - fx) * k, site.g.position.y, fz + (p.z - fz) * k)); }
   if (p.kind === 'feature' || p.kind === 'workshop') {
     const repos = p.kind === 'feature' ? p.repos : [p.project], pos = p.kind === 'feature' ? LOT_POS(repos.length) : [[0, 0]], R = p.kind === 'feature' ? 9.5 : p.R;
     const seen = new Set();
