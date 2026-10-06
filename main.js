@@ -4215,7 +4215,7 @@ function handleIpc(msg) {
       if (!id || !token || !text) { send({ type: 'clickupCommentPosted', id, error: !text ? 'Nothing to send' : 'Not signed in' }); break; }
       const path = replyTo ? `/comment/${encodeURIComponent(replyTo)}/reply` : `/task/${encodeURIComponent(id)}/comment`;
       const plain = () => clickupReq('POST', path, token, { comment_text: text, notify_all: true });
-      const rich = built && built.hasMention ? clickupReq('POST', path, token, { comment: built.blocks, comment_text: text, notify_all: true }).then(r => { if (!r.json || (!r.json.id && !r.json.hist_id)) throw new Error('no comment in reply'); return r; }).catch(() => plain()) : plain();
+      const rich = built && built.hasMention ? clickupReq('POST', path, token, { comment: built.blocks, notify_all: true }) /* blocks only: sent with comment_text too, ClickUp appends the plain copy after the rich one */.then(r => { if (!r.json || (!r.json.id && !r.json.hist_id)) throw new Error('no comment in reply'); return r; }).catch(() => plain()) : plain();
       rich.then(() => { send({ type: 'clickupCommentPosted', id, error: null }); handleIpc({ type: 'clickupComments', id }); })
         .catch(e => send({ type: 'clickupCommentPosted', id, error: e.message || String(e) }));
       break;

@@ -4844,7 +4844,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   // / to open filter (when not in an input)
-  if (e.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
+  if (e.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName) && !document.activeElement?.isContentEditable) {
     e.preventDefault();
     openFilter();
     return;
@@ -4883,7 +4883,7 @@ document.addEventListener('keydown', (e) => {
     if (cycleAgent(e.key === 'PageUp' ? -1 : 1)) { e.preventDefault(); return; }
   }
   // ? to show help (when not in an input)
-  if (e.key === '?' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) {
+  if (e.key === '?' && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName) && !document.activeElement?.isContentEditable) { // the quest reply box is an editable div, so a '?' typed there is text, not the shortcut
     e.preventDefault();
     toggleHelp();
     return;
