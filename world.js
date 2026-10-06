@@ -414,15 +414,6 @@ function srvChips(spec) {
   if (!spec.servers.length) return '';
   return '<span class="srvs">' + spec.servers.map(s => `<span class="srv s-${s.state}" data-url="${esc(s.url)}" data-cwd="${esc(spec.cwd)}" title="${esc(s.url)} · ${SRV_WORD[s.state] || s.state}${s.kind === 'agent' ? ' · opened by an agent' : ''}" onclick="World.srvOpen(this, event)" oncontextmenu="World.srvMenu(this, event)"><i></i>:${esc(String(s.port))}</span>`).join('') + '</span>';
 }
-// A server line in the building card: state, URL, and the same actions the roster offers for it.
-function srvLine(spec, s) {
-  const b = (act, label, port) => `<button data-act="${act}" data-cwd="${esc(spec.cwd)}" data-port="${port || ''}" data-url="${esc(s.url)}" onclick="World.srvAct(this, event)" onpointerdown="event.stopPropagation()">${label}</button>`;
-  const acts = s.kind === 'agent' ? [b('open', '&#x2197; Open'), b('restartPort', '&#x21BB; Restart', s.port), b('kill', '&#x2716; Remove', s.port)]
-    : s.state === 'running' ? [b('open', '&#x2197; Open'), b('restart', '&#x21BB; Restart'), b('stop', '&#x25A0; Stop'), b('log', 'Log')]
-    : s.state === 'off' ? [b('start', '&#x25B6; Start server'), b('log', 'Log')] : [b('log', 'Log')];
-  return `<div class="w-srv s-${s.state}"><i></i><b>:${esc(String(s.port))}</b> ${SRV_WORD[s.state] || s.state}${s.kind === 'agent' ? ' (agent)' : ''} <span>${esc(s.url)}</span><div class="w-act">${acts.join('')}</div></div>`;
-}
-W.srvAct = function (el, e) { e.stopPropagation(); e.preventDefault(); hooks.serverAction && hooks.serverAction(el.dataset.act, el.dataset.cwd, Number(el.dataset.port) || 0, el.dataset.url); };
 W.srvOpen = function (el, e) { e.stopPropagation(); e.preventDefault(); const s = allLots().find(l => l.spec.cwd === el.dataset.cwd); const srv = s && s.spec.servers.find(x => x.url === el.dataset.url); if (srv && srv.state !== 'running') { hooks.serversMenu && hooks.serversMenu(e, s.spec.cwd, s.spec.servers); return; } hooks.openUrl && hooks.openUrl(el.dataset.url); };
 W.srvMenu = function (el, e) { e.stopPropagation(); e.preventDefault(); const s = allLots().find(l => l.spec.cwd === el.dataset.cwd); if (s && hooks.serversMenu) hooks.serversMenu(e, s.spec.cwd, s.spec.servers); };
 // The signboard over a building: what kind of place it is, its name, and the branch and port it serves.
@@ -896,7 +887,7 @@ function markArrange() {
   for (const m of arrMarks) disposeObj(m); arrMarks.length = 0; if (!arranging) return;
   for (const st of sites.values()) { const m = new THREE.Mesh(new THREE.RingGeometry(st.R + .6, st.R + 1.1, 48), new THREE.MeshBasicMaterial({ color: 0xf9e2af, transparent: true, opacity: .5, depthWrite: false, side: THREE.DoubleSide })); m.rotation.x = -Math.PI / 2; m.position.y = .62; st.g.add(m); st.arrRing = m; /* just above the plate, so the plate does not swallow it */ arrMarks.push(m); }
 }
-const arrangeHint = () => `<b>Arrange:</b> drag a site to move it &middot; green ground = it fits, red = no room &middot; <a href="#" onclick="World.resetLayout();return false;">reset layout</a> &middot; <kbd>L</kbd> or <kbd>Esc</kbd> done`;
+const arrangeHint = () => `<b>Arrange:</b> drag a site to move it &middot; green ground = it fits, red = no room &middot; <a href="#" onclick="World.randomizeLayout();return false;">randomize</a> &middot; <a href="#" onclick="World.resetLayout();return false;">reset layout</a> &middot; <kbd>L</kbd> or <kbd>Esc</kbd> done`;
 function setArranging(on) {
   arranging = !!on; if (!arranging && arrDrag) { arrDrag = null; clearTints(); }
   stage.classList.toggle('arranging', arranging); const b = stage.querySelector('#world-arrange'); if (b) b.classList.toggle('on', arranging);
@@ -904,6 +895,46 @@ function setArranging(on) {
   markArrange(); if (!arranging) toast('Arrangement kept'); else toast('Arrange: drag any site');
 }
 W.arrange = function (on) { setArranging(on == null ? !arranging : on); return arranging; };
+// Randomize layout: a fresh arrangement of everything, drawn from a few town plans, packed as tight as the sites
+// allow. Each plan only decides the direction a site sits in from the treasury; its distance is the nearest spot
+// that fits, so the island stays as small as it can. The harbour takes a shore and faces the sea, the portal the far side.
+const PLANS = ['ring', 'crescent', 'rows', 'spiral', 'quarters'];
+function randomLayout() {
+  if (!snap) return;
+  const base = planSitesRaw({ ...snap, layout: {} }); if (!base.length) return;
+  const rnd = (a, b) => a + Math.random() * (b - a), pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const plan = pick(PLANS), dirA = rnd(0, Math.PI * 2); // the harbour's shore; the portal goes opposite
+  const features = base.filter(p => p.kind === 'feature').sort((a, b) => b.R - a.R), shops = base.filter(p => p.kind === 'workshop');
+  const harbour = base.find(p => p.kind === 'github'), portal = base.find(p => p.kind === 'portal'), plant = base.find(p => p.kind === 'plant'), treasury = base.find(p => p.kind === 'treasury'), allies = base.find(p => p.kind === 'allies');
+  const placed = [], out = {};
+  // The nearest spot that fits along a direction from the centre: march outward, then nudge sideways if needed.
+  const seat = (p, a, az = .8) => { for (let r = 0; r < 240; r += 1.5) for (const da of [0, .12, -.12, .25, -.25, .4, -.4]) { const x = Math.cos(a + da) * r, z = Math.sin(a + da) * r * az; if (placeOk(p, x, z, placed)) { placed.push({ ...p, x, z }); out[p.key] = { x: +x.toFixed(2), z: +z.toFixed(2) }; return [x, z]; } } return null; };
+  if (treasury) seat(treasury, 0);
+  const n = Math.max(1, features.length), m = Math.max(1, shops.length);
+  // Features set the town's shape; workshops take the angles between or beside them. Biggest first, so they pack tight.
+  const fa = i => plan === 'ring' ? i / n * Math.PI * 2 + rnd(-.15, .15)
+    : plan === 'crescent' ? dirA + Math.PI + (i - (n - 1) / 2) / n * Math.PI * 1.3
+    : plan === 'rows' ? -Math.PI / 2 + (i - (n - 1) / 2) / n * Math.PI * .9
+    : plan === 'spiral' ? dirA + i * 2.39996
+    : (i % 2 ? -Math.PI / 4 : -3 * Math.PI / 4) + Math.floor(i / 2) * .5 * (i % 2 ? 1 : -1);
+  const wa = i => plan === 'ring' ? (i + .5) / m * Math.PI * 2
+    : plan === 'crescent' ? dirA + Math.PI + (i - (m - 1) / 2) / m * Math.PI * .9
+    : plan === 'rows' ? Math.PI / 2 + (i - (m - 1) / 2) / m * Math.PI * .9
+    : plan === 'spiral' ? dirA + (i + n) * 2.39996
+    : Math.PI / 2 + (i - (m - 1) / 2) / m * Math.PI * .8;
+  features.forEach((f, i) => seat(f, fa(i)));
+  shops.forEach((w, i) => seat(w, wa(i)));
+  // Shore sites: the harbour toward dirA, facing out; the portal and the plant on the far side; the allied camp beside the harbour.
+  if (harbour) { const at = seat(harbour, dirA); if (at) { const [x, z] = at, ex = Math.abs(x), ez = Math.abs(z) / .8; out[harbour.key].rot = ez > ex * 1.15 ? (z > 0 ? -Math.PI / 2 : Math.PI / 2) : (x < 0 ? Math.PI : 0); } }
+  if (portal) seat(portal, dirA + Math.PI + rnd(-.4, .4));
+  if (plant) seat(plant, dirA + Math.PI + rnd(.7, 1.1) * (Math.random() < .5 ? 1 : -1));
+  if (allies) seat(allies, dirA + rnd(.9, 1.4) * (Math.random() < .5 ? 1 : -1));
+  layoutOv = out; hooks.saveLayout && hooks.saveLayout(layoutOv); snap.layout = layoutOv; W.sync(snap); frameAll(true);
+  toast({ ring: 'A ring town, the treasury at its heart', crescent: 'A crescent around the bay', rows: 'Features north, workshops south, in rows', spiral: 'A spiral out from the square', quarters: 'Quarters: features in two wards, workshops below' }[plan]);
+  const xs = placed.map(p => [p.x - p.R, p.x + p.R]).flat(), zs = placed.map(p => [p.z - p.R, p.z + p.R]).flat();
+  return { plan, placed: placed.length, of: base.length, w: Math.round(Math.max(...xs) - Math.min(...xs)), h: Math.round(Math.max(...zs) - Math.min(...zs)) };
+}
+W.randomizeLayout = function () { return alive ? randomLayout() : null; };
 W.resetLayout = function () { layoutOv = {}; hooks.saveLayout && hooks.saveLayout({}); if (snap) { snap.layout = {}; W.sync(snap); } toast('Back to the procedural layout'); };
 W.beginTargeting = function (task) { if (alive) beginTargeting(task); };
 W.endTargeting = function () { endTargeting(); };
@@ -1194,9 +1225,6 @@ function updateLabels() {
   };
   for (const a of anchors) { if (!a.obj) continue; a.obj.getWorldPosition(p); p.y += a.dy || 0; p.project(camera); place(a.el, p); }
   const u = selected.unit || hovered;
-  if (!u && hoveredLot && hoveredLot.el && hoveredLot.el.obj) { const L = hoveredLot, sp = L.spec, n = [...L.units.values()].filter(x => !x.mini).length, work = [...L.units.values()].filter(x => !x.mini && (x.a.status === 'active' || x.a.status === 'settling')).length;
-    if (cardFor !== L) { cardFor = L; card._lx = null; card._spot = 0; card.hidden = false; card.style.setProperty('--c', hexStr(sp.color)); card.className = 'w-lab w-card w-card-lot'; card.innerHTML = `<b>${esc(sp.title)}</b><small>${sp.kind === 'feature' ? 'Feature directory' : 'Workshop'}${sp.branch ? ' · ⑂ ' + esc(sp.branch) : ''}</small><div class="w-meta"><span>${n} agent${n === 1 ? '' : 's'}${work ? ', ' + work + ' working' : ''}</span></div><div class="w-srvs">${sp.servers.length ? sp.servers.map(s => srvLine(sp, s)).join('') : '<div class="w-srv s-none"><i></i>no server</div>'}</div><div class="w-path">${esc(sp.cwd)}</div>${targeting ? '<div class="w-hint-go">click to raise an agent here</div>' : ''}`; }
-    L.el.obj.getWorldPosition(p); p.y += 1.5; p.project(camera); placeCard(card, p, null); return; }
   if (u !== cardFor) { cardFor = u; card._lx = null; card._spot = 0; card.hidden = !u; if (u) { const a = u.a, st = STATUS[a.status]; card.style.setProperty('--c', `var(${st.css})`); card.className = 'w-lab w-card' + (u === selected.unit ? ' sel' : ''); card.innerHTML = `<b>${esc(a.title)}</b><small>${st.sym} ${esc(activity(a))}</small>${u.mini ? '' : `<div class="w-meta"><span title="${a.turns || 0} turns served">${rankOf(a.turns).name}</span><span>ctx ${a.ctxPct}%</span><div class="w-bar ${ctxCls(a.ctxPct)}"><i style="width:${a.ctxPct}%"></i></div><span>${esc(a.model || '')}</span><span style="color:var(--w-gold)">${esc(a.costStr || '')}</span></div>`}`; } }
   else if (u && card.dataset.k !== u.key + a_ctx(u)) { /* cheap refresh when the same unit changes */ cardFor = null; }
   if (u) { u.g.getWorldPosition(p); p.y += (u.p.bubble ? 3.1 : 2.4) * u.scale; p.project(camera); placeCard(card, p, u); u.pill.el.style.opacity = 0; card.dataset.k = u.key + a_ctx(u); }

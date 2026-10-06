@@ -53,11 +53,10 @@ body:not(.world-on) #hdr-world, body:not(.world-on) .help-world { display: none 
 .w-lot .srvs { display: inline-flex; gap: 3px; margin-left: 2px; }
 .w-lot .srv { pointer-events: auto; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 0 5px; border-radius: 3px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); font-family: var(--w-mono); font-size: 10px; font-weight: 600; letter-spacing: 0; text-transform: none; color: #dfe5ee; }
 .w-lot .srv:hover { background: rgba(255,255,255,.18); }
-.w-lot .srv i, .w-card .w-srv i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #6c7086; flex: none; }
+.w-lot .srv i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #6c7086; flex: none; }
 .s-running i { background: var(--w-done) !important; box-shadow: 0 0 6px var(--w-done); animation: w-srv-blink 1.6s ease-in-out infinite; }
 .s-setup i { background: var(--w-gold) !important; } .s-failed i { background: var(--w-crashed) !important; } .s-off i { background: #6c7086 !important; } .s-off { opacity: .8; }
 @keyframes w-srv-blink { 50% { opacity: .35; } }
-.w-card .w-srvs { margin-top: 4px; } .w-card .w-srv { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--dim); } .w-card .w-srv b { color: #eef2f7; font-family: var(--w-mono); } .w-card .w-srv span { font-family: var(--w-mono); opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .w-card .w-srv.s-none { opacity: .6; }
 .w-lot small { grid-column: 1 / 5; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--w-mono); font-size: 9.5px; font-weight: 400; letter-spacing: .02em; text-transform: none; color: #b9c3d0; }
 #world-labels.far .w-lot { font-size: 10px; padding: 1px 6px 1px 5px; } #world-labels.vfar .w-lot small { display: none; } #world-labels.vfar .w-lot { font-size: 9px; }
 .w-obj { font-family: var(--w-mono); font-size: 10.5px; color: var(--c); background: rgba(8,12,18,.75); padding: 1px 9px; clip-path: var(--w-hexw); }
@@ -68,9 +67,6 @@ body:not(.world-on) #hdr-world, body:not(.world-on) .help-world { display: none 
 /* A working unit's name stays up at every zoom, lit in the working colour. */
 #world-labels .w-pill.work { opacity: 1 !important; color: #fff; background: rgba(137,180,250,.3); border: 1px solid rgba(137,180,250,.7); box-shadow: 0 0 10px rgba(137,180,250,.5); }
 #world-labels.far .w-pill.work { font-size: 9px; max-width: 90px; }
-/* A building's hover card carries its path; while a quest looks for a target, the card says what a click does. */
-.w-card.w-card-lot .w-path { margin-top: 4px; font-family: var(--w-mono); font-size: 9.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
-.w-card .w-hint-go { margin-top: 4px; font-family: var(--w-display); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--w-gold); }
 /* Monsters tied to the selected agent, and the target-picking mode. */
 .w-obj.w-raid.linked { opacity: 1 !important; box-shadow: 0 0 0 1px var(--w-gold), 0 0 14px rgba(249,226,175,.6); }
 .w-obj.w-raid.linked .w-who, .w-obj.w-raid.linked small { display: inline; } .w-obj.w-raid.linked small { display: block; }
@@ -515,8 +511,3 @@ body.world-mode #quest-log.open { transform: translate(-50%, -50%); opacity: 1; 
 .w-plant .w-cnt { display: block; margin-top: 3px; font-family: var(--w-display); font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase; }
 .w-pace.ok { color: var(--w-done); } .w-pace.warn { color: var(--w-perm); } .w-pace.over { color: var(--w-crashed); }
 #world-labels.far .w-plant .w-pbar small { display: none; }
-/* Server actions in the building card take the pointer, so the card can be used, not only read. */
-.w-card .w-srv { flex-wrap: wrap; } .w-card .w-act { flex-basis: 100%; display: flex; gap: 4px; margin: 2px 0 3px 11px; pointer-events: auto; }
-.w-card .w-act button { font: inherit; font-size: 9.5px; padding: 1px 6px; color: #eef2f7; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); border-radius: 3px; cursor: pointer; }
-.w-card .w-act button:hover { background: rgba(255,255,255,.22); }
-#world-labels .w-card { pointer-events: none; } #world-labels .w-card .w-act { pointer-events: auto; }
