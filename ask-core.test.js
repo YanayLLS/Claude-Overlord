@@ -37,3 +37,12 @@ test('permission dialog on screen (sub-agent / dangerous command), with or witho
   assert.ok(!permDialogIn('I asked: do you want to proceed with the plan? Reply yes or no.'));
   assert.ok(!permDialogIn('Cooked for 12s · done 4:05 PM'));
 });
+
+const { liveTurnIn } = require('./ask-core');
+test('live turn timer vs finished-turn line', () => {
+  assert.ok(liveTurnIn('Sublimating… (10m 17s · ↓ 61.7k tokens)'));
+  assert.ok(liveTurnIn('Pouncing…(14m14s·↓5.4ktokens)'), 'spaces drawn as cursor moves');
+  assert.ok(liveTurnIn('Thinking… (8s · esc to interrupt)'));
+  assert.ok(!liveTurnIn('Cooked for 2m 44s · done 4:05 PM'));
+  assert.ok(!liveTurnIn('Churned for 1h 51m 41s · done 4:07 PM · 1 shell still running'));
+});

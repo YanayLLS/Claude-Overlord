@@ -23,4 +23,9 @@ function applyAskRecord(asks, r) {
 const PERM_DIALOG_RE = /Do\s*you\s*want\s*to\s*[^?]{0,300}\?[\s\S]{0,400}?1\.\s*Yes[\s\S]{0,200}?\d\.\s*No/;
 const permDialogIn = (text) => PERM_DIALOG_RE.test(text || '');
 
-module.exports = { applyAskRecord, permDialogIn };
+// Claude's live turn timer — "Sublimating… (10m 17s · ↓ 61.7k tokens)" — is on screen only while a
+// turn runs (finished turns read "Cooked for 2m · done", no parenthesis). Spaces may be missing.
+const LIVE_TURN_RE = /\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\s*·/;
+const liveTurnIn = (text) => LIVE_TURN_RE.test(text || '');
+
+module.exports = { applyAskRecord, permDialogIn, liveTurnIn };

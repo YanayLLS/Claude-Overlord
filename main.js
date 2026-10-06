@@ -103,7 +103,7 @@ const { sessionSwitchKind } = require('./resume-core');
 const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
 const { applyBgRecord } = require('./bg-core');
 const { unsettledJobFor } = require('./daemon-jobs');
-const { applyAskRecord, permDialogIn } = require('./ask-core');
+const { applyAskRecord, permDialogIn, liveTurnIn } = require('./ask-core');
 const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
 const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
@@ -871,9 +871,14 @@ const spinnerDebounce = new Map();
 // under bypassPermissions — never reaches the parent's transcript. Live output only (the
 // reattach replay isn't scanned). It clears when you answer in that terminal or the turn moves.
 const PTY_PERM_TOOL = 'pty-permission';
-function watchPermDialog(id, d) {
-  const a = agents.get(id); if (!a || a.ptyPerm) return;
-  a._screenTail = ((a._screenTail || '') + d.replace(ANSI_RE, '')).slice(-3000);
+function watchScreen(id, d) {
+  const a = agents.get(id); if (!a) return;
+  const text = d.replace(ANSI_RE, '');
+  // Live turn timer on screen: the turn is running even if the transcript is quiet (a long
+  // tool call is written only once the model finishes generating it) — the watchdog waits.
+  if (liveTurnIn(text)) a.liveTurnAt = Date.now();
+  if (a.ptyPerm) return;
+  a._screenTail = ((a._screenTail || '') + text).slice(-3000);
   if (!permDialogIn(a._screenTail)) return;
   a._screenTail = '';
   a.ptyPerm = true; a.permSent = true;
@@ -1552,7 +1557,7 @@ function doSpawnTerminal(id, attached) {
     }
     let resumeErrorBuf = '';
     proc.onData((d) => {
-      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); watchPermDialog(id, d); } catch {}
+      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); watchScreen(id, d); } catch {}
       // Buffer terminal output for mobile remote
       let buf = termBuffers.get(id) || '';
       buf += d;
@@ -1716,7 +1721,7 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
       setTimeout(() => { try { writeInitialPrompt(proc, initialPrompt); } catch {} }, 100);
     }
     const onData = (d) => {
-      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); watchPermDialog(id, d); } catch {}
+      try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); watchScreen(id, d); } catch {}
       // Buffer terminal output for mobile remote
       let buf = termBuffers.get(id) || '';
       buf += d;
@@ -4850,6 +4855,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [id, a] of agents) {
     if (a.archived || a.isWaiting || a.crashed || a.toolIds.size > 0) continue;
+    if (now - (a.liveTurnAt || 0) < 30000) continue; // Claude's turn timer is still ticking on screen
     let mtimeMs;
     // No transcript yet (fresh agent, or /resume'd into another chat before its first prompt):
     // nothing has been written since it was created — without this it stayed 'active' forever.
