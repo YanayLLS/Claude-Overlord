@@ -70,3 +70,11 @@ test('teammate: spawn → working, idle notice → done, lead message → workin
   assert.deepStrictEqual([...t], ['tm:fix-colour']);
 });
 
+
+test('background Workflow run: launch by taskId, finish by task notification', () => {
+  const t = new Set();
+  applyBgRecord(t, { type: 'user', toolUseResult: { status: 'async_launched', taskId: 'wp5zjn879', taskType: 'local_workflow', runId: 'wf_4daed8c3-621' } });
+  assert.deepStrictEqual([...t], ['wp5zjn879']);
+  applyBgRecord(t, { type: 'queue-operation', content: note('wp5zjn879', 'completed') });
+  assert.strictEqual(t.size, 0);
+});

@@ -18,7 +18,8 @@ function applyBgRecord(tasks, r) {
   const tur = r.toolUseResult;
   if (tur && typeof tur === 'object') {
     if (tur.backgroundTaskId) tasks.add(tur.backgroundTaskId);
-    if (tur.status === 'async_launched' && tur.agentId) tasks.add(tur.agentId);
+    // async Agent → agentId; a background Workflow run → taskId
+    if (tur.status === 'async_launched' && (tur.agentId || tur.taskId)) tasks.add(tur.agentId || tur.taskId);
     if (tur.resumedAgentId) tasks.add(tur.resumedAgentId); // SendMessage woke a finished agent
     // Agent-team teammate: working from spawn, and again whenever the lead messages it
     if (tur.status === 'teammate_spawned' && tur.name) tasks.add('tm:' + tur.name);
