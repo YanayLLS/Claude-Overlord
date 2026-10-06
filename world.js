@@ -226,7 +226,7 @@ function updateTerrain(dt) {
 
 /* ────────────────────────── Buildings ────────────────────────── */
 /* ────────────────────────── Economy: tiers and prices (cosmetic only) ────────────────────────── */
-const FORT_TIERS = ['Outpost', 'Barracks', 'Keep', 'Castle', 'Citadel', 'Wonder'], CAMP_TIERS = ['Mill', 'Lumber camp', 'Blacksmith', 'Market', 'University', 'Monastery'];
+const FORT_TIERS = ['Outpost', 'Barracks', 'Keep', 'Castle', 'Citadel', 'Wonder'], CAMP_TIERS = ['Mill', 'Lumber camp', 'Blacksmith', 'Market', 'University', 'Monastery']; // the settlement tiers' names
 const TOWER_TIERS = ['Stone tower', 'Timber keep', 'Marble keep', 'Grand citadel', 'Crystal spire', 'Sky citadel'], HALL_TIERS = ['Hut', 'Hall', 'Guild house', 'Manufactory', 'Foundry', 'Arcology dome'], DOCK_TIERS = ['Pier', 'Harbour & lighthouse', 'Crane docks', 'Shipyard', 'Grand port'];
 const TIER_COST = [0, 200, 600, 1500, 3500, 8000], DOCK_COST = [0, 400, 1200, 3000, 7000];
 const DECOS = { fountain: { name: 'Fountain', cost: 150 }, statue: { name: 'Statue of the Overlord', cost: 300 }, lanterns: { name: 'Lanterns', cost: 120 }, gardens: { name: 'Gardens', cost: 100 } };
@@ -360,16 +360,6 @@ function camp(parent, x, z, built, color, active, prev, tier = 1) {
   if (built < 1) { const k0 = prev == null ? built : prev; body.scale.y = Math.max(.05, k0); if (prev != null && prev < built) tween(700, k => { body.scale.y = Math.max(.05, k0 + (built - k0) * k); }, null, easeOutCubic); scaffoldBox(g, 7.4, topY, 5.6, 0, topY / 2, 0); if (active) craneAt(g, color, 4.2, 0, -2.8); }
   g.userData.topY = topY; return g;
 }
-// The gallery: every tier of both kinds in two rows, with the camera on them. For design review only.
-let galleryG = null;
-W.gallery = function (style) {
-  if (style) BUILD_STYLE = style;
-  if (galleryG) { disposeObj(galleryG); galleryG = null; }
-  galleryG = new THREE.Group(); galleryG.position.set(0, PLAT, 36); scene.add(galleryG); // on the island's south shore: inside the pan limits, clear of the fog
-  for (let t = 1; t <= 6; t++) for (const [kind, zz] of [['feature', -10], ['workshop', 10]]) { const px = (t - 3.5) * 19; const plat = hexPrism(8.7, .5, BUILD_STYLE === 'aoe' ? [mats.yardDirt, mats.yardDirt, mats.yardCobble, mats.yardCobble, mats.yardPale, mats.yardMarble][t - 1] : mats.plot); plat.position.set(px, .25, zz); galleryG.add(plat); const c = [0x89b4fa, 0xf38ba8, 0xa6e3a1, 0xf9e2af, 0xcba6f7, 0x94e2d5][t - 1]; (kind === 'feature' ? (BUILD_STYLE === 'aoe' ? fort : tower) : (BUILD_STYLE === 'aoe' ? camp : hall))(galleryG, px, zz, 1, c, false, null, t); const lab = label('w-lot', (BUILD_STYLE === 'aoe' ? (kind === 'feature' ? FORT_TIERS : CAMP_TIERS) : kind === 'feature' ? TOWER_TIERS : HALL_TIERS)[t - 1], null, hexStr(c)); lab.obj = new THREE.Object3D(); lab.obj.position.set(px, 0, zz + 8.5); galleryG.add(lab.obj); }
-  cam.target.set(0, PLAT, 36); cam.zoom = 3.6; cam.yaw = 0; cam.userMoved = true;
-  return 'gallery ' + BUILD_STYLE;
-};
 W.buildStyle = function (style) { BUILD_STYLE = style; for (const lot of allLots()) lot.key = null; if (snap) W.sync(snap); return BUILD_STYLE; };
 
 function banner(parent, x, y, z, color) {

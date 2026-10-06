@@ -3018,8 +3018,6 @@ let usageInFlight = false;
 const cu = require('./clickup-core');
 const CLICKUP_API = 'https://api.clickup.com/api/v2';
 const CLICKUP_TIMEOUT_MS = 20000;
-// --mock-clickup: a fake workspace for demos and tests (clickup-mock.js); no network, no token, nothing real is touched.
-const MOCK_CLICKUP = process.argv.includes('--mock-clickup');
 let clickupTimer = null, clickupInFlight = false, clickupSeeded = false, clickupErrorLogged = false;
 let lastClickup = { tasks: [], error: null, fetchedAt: 0 };
 
@@ -3033,7 +3031,6 @@ function clickupCfg() {
 // One JSON GET. Resolves { status, json } or rejects with a message fit for the settings panel.
 function clickupGet(path, token) { return clickupReq('GET', path, token); }
 function clickupReq(method, path, token, body) {
-  if (MOCK_CLICKUP) return require('./clickup-mock').request(method, path, body, clickupCfg().user);
   return new Promise((resolve, reject) => {
     const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), CLICKUP_TIMEOUT_MS);
     const headers = { authorization: token, accept: 'application/json' }; if (body !== undefined) headers['content-type'] = 'application/json';
@@ -3074,8 +3071,7 @@ function notifyRaid(t) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
 }
 async function pollClickup() {
-  const cfg = clickupCfg(), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
-  if (MOCK_CLICKUP) { const mb = require('./clickup-mock').board; cfg.enabled = !!settings.worldEnabled; cfg.teamId = cfg.teamId || '9000000001'; cfg.user = cfg.user || { id: '1', username: 'you' }; cfg.lists = [{ id: mb.id, name: mb.name }]; }
+  const cfg = clickupCfg(), token = settings.clickupToken;
   if (clickupInFlight || !cfg.enabled || !token || !cfg.teamId || !cfg.user || !cfg.lists.length) return;
   clickupInFlight = true;
   try {
@@ -4166,7 +4162,7 @@ function handleIpc(msg) {
     }
     case 'clickupTask': {
       // The quest scroll: the ticket's body, fetched only when asked for.
-      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = settings.clickupToken;
       if (!id || !token) { send({ type: 'clickupTask', id, task: null, error: 'Not signed in' }); break; }
       clickupGet(`/task/${encodeURIComponent(id)}?include_markdown_description=true`, token).then(({ json }) => {
         const t = cu.normalizeTask(json, { platformField: clickupCfg().platformField }); if (!t) throw new Error('No task in reply');
@@ -4178,7 +4174,7 @@ function handleIpc(msg) {
     }
     case 'clickupComments': {
       // The quest's conversation: top-level comments, and the replies of any thread that has them.
-      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), token = settings.clickupToken;
       if (!id || !token) { send({ type: 'clickupComments', id, comments: null, error: 'Not signed in' }); break; }
       (async () => {
         try {
@@ -4194,7 +4190,7 @@ function handleIpc(msg) {
     }
     case 'clickupComment': {
       // A new comment on the task, or a reply inside a thread, posted as the signed-in user.
-      const id = String(msg.id || '').replace(/[^\w-]/g, ''), replyTo = String(msg.replyTo || '').replace(/[^\w-]/g, ''), text = String(msg.text || '').trim().slice(0, 20000), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), replyTo = String(msg.replyTo || '').replace(/[^\w-]/g, ''), text = String(msg.text || '').trim().slice(0, 20000), token = settings.clickupToken;
       if (!id || !token || !text) { send({ type: 'clickupCommentPosted', id, error: !text ? 'Nothing to send' : 'Not signed in' }); break; }
       const path = replyTo ? `/comment/${encodeURIComponent(replyTo)}/reply` : `/task/${encodeURIComponent(id)}/comment`;
       clickupReq('POST', path, token, { comment_text: text, notify_all: true }).then(() => { send({ type: 'clickupCommentPosted', id, error: null }); handleIpc({ type: 'clickupComments', id }); })
@@ -4203,14 +4199,14 @@ function handleIpc(msg) {
     }
     case 'clickupStatuses': {
       // The statuses a ticket may take come from its own board; every board defines its own set.
-      const listId = String(msg.listId || '').replace(/\D/g, ''), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      const listId = String(msg.listId || '').replace(/\D/g, ''), token = settings.clickupToken;
       if (!listId || !token) { send({ type: 'clickupStatuses', listId, statuses: null, error: 'Not signed in' }); break; }
       clickupGet(`/list/${encodeURIComponent(listId)}`, token).then(({ json }) => send({ type: 'clickupStatuses', listId, statuses: ((json && json.statuses) || []).map(st => ({ status: String(st.status || ''), color: String(st.color || ''), type: String(st.type || ''), order: Number(st.orderindex) || 0 })).filter(st => st.status).sort((a, b) => a.order - b.order), error: null }))
         .catch(e => send({ type: 'clickupStatuses', listId, statuses: null, error: e.message || String(e) }));
       break;
     }
     case 'clickupSetStatus': {
-      const id = String(msg.id || '').replace(/[^\w-]/g, ''), status = String(msg.status || '').slice(0, 100), token = MOCK_CLICKUP ? 'mock' : settings.clickupToken;
+      const id = String(msg.id || '').replace(/[^\w-]/g, ''), status = String(msg.status || '').slice(0, 100), token = settings.clickupToken;
       if (!id || !token || !status) { send({ type: 'clickupStatusSet', id, status, error: 'Not signed in' }); break; }
       clickupReq('PUT', `/task/${encodeURIComponent(id)}`, token, { status }).then(() => { send({ type: 'clickupStatusSet', id, status, error: null }); setTimeout(() => pollClickup(), 800); /* the raid follows the ticket */ })
         .catch(e => send({ type: 'clickupStatusSet', id, status, error: e.message || String(e) }));
