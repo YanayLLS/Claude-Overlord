@@ -1,6 +1,6 @@
 // Run: node release-run.test.js
 const assert = require('assert');
-const { hotfixTitles, releaseBody, checksState, rowStatus, runRelease } = require('./release-run');
+const { isHotfix, hotfixTitles, releaseBody, checksState, rowStatus, runRelease } = require('./release-run');
 
 // ── hotfixTitles: single-parent commits, deploy-bot commits dropped ──
 const c = (msg, parents = 1) => ({ commit: { message: msg }, parents: Array(parents).fill({}) });
@@ -130,3 +130,7 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
   assert.strictEqual(buildCoverage([{ name: 'Semgrep', status: 'completed', conclusion: 'success' }]), 'none');
   console.log('release-run: all passed');
 })().catch(e => { console.error(e); process.exit(1); });
+// the board's "↩ N from prod" and the back-merge share one rule: merges and CI deploy markers aren't hotfixes
+assert.strictEqual(isHotfix(2, 'Merge pull request #1063 from LLSLtd/dev'), false);
+assert.strictEqual(isHotfix(1, 'ci(deploy): staging abc123'), false);
+assert.strictEqual(isHotfix(1, 'fix: prod-only hotfix'), true);

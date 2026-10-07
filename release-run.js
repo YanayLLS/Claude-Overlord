@@ -10,9 +10,11 @@ const firstLine = (m) => String(m || '').split('\n')[0];
 const MAX_TOP_AREAS = 8;
 
 // Real commits the target has and the source doesn't: single-parent, minus deploy-bot commits.
+// a commit the target has and the source lacks counts as a hotfix unless it's a merge (the release's own) or a CI deploy marker
+const isHotfix = (parents, title) => parents === 1 && !CI_DEPLOY.test(title || '');
 function hotfixTitles(compareCommits) {
-  return (compareCommits || []).filter(c => (c.parents || []).length === 1)
-    .map(c => firstLine(c.commit && c.commit.message)).filter(t => !CI_DEPLOY.test(t));
+  return (compareCommits || []).map(c => [(c.parents || []).length, firstLine(c.commit && c.commit.message)])
+    .filter(([n, t]) => isHotfix(n, t)).map(([, t]) => t);
 }
 
 // The release PR body: what merging deploys, how much, by type, by area.
@@ -285,5 +287,5 @@ async function runRelease(gh, prs, { writeJson, onRow, wait }) {
   return rows;
 }
 
-module.exports = { hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
+module.exports = { isHotfix, hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
   addedSchemaFields, fieldsUsed, shippedVersion, dbschemasCheck, buildCoverage };

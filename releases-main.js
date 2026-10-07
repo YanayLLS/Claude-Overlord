@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
-const { runRelease, prHealth, rowStatus } = require('./release-run');
+const { runRelease, prHealth, rowStatus, isHotfix } = require('./release-run');
 const createHistory = require('./release-history');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
@@ -111,7 +111,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         ? `h${j}: ref(qualifiedName: ${q('refs/heads/' + c.branch)}) { target { ... on Commit { history(first: ${HISTORY_SCAN}) { nodes { oid messageHeadline messageBody committedDate url parents(first: 1) { nodes { oid } } } } } } }`
         : `t${j}: ref(qualifiedName: ${q('refs/heads/' + c.branch)}) { target { ... on Commit { oid messageHeadline messageBody committedDate url author { name user { login } } } } }`);
       const cmps = compares.filter(c => c.repo === repo).map((c, j) =>
-        `c${j}: ref(qualifiedName: ${q('refs/heads/' + c.base)}) { compare(headRef: ${q(c.head)}) { aheadBy behindBy${lists ? ` commits(last: ${PENDING_SHOWN}) { nodes { oid messageHeadline messageBody url } }` : ''} } }`);
+        `c${j}: ref(qualifiedName: ${q('refs/heads/' + c.base)}) { compare(headRef: ${q(c.head)}) { aheadBy${lists ? ` commits(last: ${PENDING_SHOWN}) { nodes { oid messageHeadline messageBody url } }` : ''} } }`
+        // ponytail: the reverse side, first 100 commits — enough to say "the target has hotfixes"
+        + ` b${j}: ref(qualifiedName: ${q('refs/heads/' + c.head)}) { compare(headRef: ${q(c.base)}) { commits(first: 100) { nodes { messageHeadline parents { totalCount } } } } }`);
       return `r${i}: repository(owner: ${q(owner)}, name: ${q(name)}) { ${[...tips, ...cmps].join(' ')} }`;
     });
     const res = await ghGraphql(`query { ${parts.join(' ')} }`);
@@ -139,7 +141,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         out.compares[key] = !cmp ? { to: c.to, error: 'Could not compare these branches', url } : {
           to: c.to, ahead: cmp.aheadBy, url,
           // the target carries commits the source lacks (a hotfix never merged back): the release will need a back-merge
-          behind: cmp.behindBy, backUrl: `https://github.com/${repo}/compare/${encodeURIComponent(c.head)}...${encodeURIComponent(c.base)}`,
+          behind: ((node[`b${j}`] && node[`b${j}`].compare && node[`b${j}`].compare.commits.nodes) || []).filter(n => isHotfix(n.parents.totalCount, n.messageHeadline)).length, backUrl: `https://github.com/${repo}/compare/${encodeURIComponent(c.head)}...${encodeURIComponent(c.base)}`,
           commits: lists ? cmp.commits.nodes.slice().reverse().map(n => ({ sha: n.oid, title: commitTitle(n.messageHeadline, n.messageBody), url: n.url })) : null,
         };
       });
