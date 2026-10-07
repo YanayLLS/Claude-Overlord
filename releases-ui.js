@@ -229,8 +229,9 @@
       const lead = k ? ' rl-next-more' : '';
       if (n.loading) return `<span class="rl-next zero${lead}">… ${esc(n.to)}</span>`;
       if (n.error) return `<span class="rl-next rl-bad${lead}">? ${esc(n.to)}</span>`;
-      if (!n.ahead) return `<span class="rl-next zero${lead}">✓ ${esc(n.to)}</span>`;
-      return `<span class="rl-next${lead}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>`;
+      const back = n.behind ? `<span class="rl-next rl-back${n.ahead ? ' rl-next-more' : lead}" title="${esc(n.to)} has ${n.behind} commit${n.behind === 1 ? '' : 's'} this branch lacks — the release opens a back-merge first">${link(n.backUrl, `↩ <b>${n.behind}</b> from ${esc(n.to)}`)}</span>` : '';
+      if (!n.ahead) return back || `<span class="rl-next zero${lead}">✓ ${esc(n.to)}</span>`;
+      return `<span class="rl-next${lead}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>` + back;
     }).join('');
     const hand = d.manual ? '<svg class="rl-hand" viewBox="0 0 24 24" aria-label="manual deploy"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>' : '';
     const isSel = sel && sel[0] === r && sel[1] === i;
@@ -400,7 +401,8 @@
     + '<span><i class="rl-sw st-run"></i>deploying</span>'
     + '<span><i class="rl-sw st-behind"></i>deployed by hand, behind</span>'
     + '<span><svg class="rl-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>manual deploy</span>'
-    + '<span><span class="rl-next"><b>12</b> → prod</span>waiting to promote</span></div>';
+    + '<span><span class="rl-next"><b>12</b> → prod</span>waiting to promote</span>'
+    + '<span><span class="rl-next rl-back">↩ <b>3</b> from prod</span>needs a back-merge</span></div>';
 
   function detailHtml(grid) {
     const row = sel && grid.rows[sel[0]];

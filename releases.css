@@ -611,3 +611,4 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-hist:empty { display:none; }
 .rl-uses { border-color:transparent; background:none; font-size:10.5px; color:var(--dim); opacity:.7; }
 .rl-uses:hover { border-color:transparent; background:none; opacity:1; }
+.rl-next.rl-back, .rl-next.rl-back b { color:var(--yellow); }
