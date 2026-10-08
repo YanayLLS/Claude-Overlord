@@ -17,6 +17,7 @@ const { writeAgentConfig, settingsFlags, removeAgentConfig } = require('./mcp/ag
 const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
 const { createPtyClient, pipePathFor, hostLauncher } = require('./pty-client');
+const { startKillGuard } = require('./kill-guard');
 const { agentShell } = require('./shell-core');
 const { scanCatalog } = require('./catalog-core');
 
@@ -5667,6 +5668,7 @@ app.whenReady().then(() => {
   mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
+  _ptyHostReady.then(() => startKillGuard({ getChildPids: () => app.getAppMetrics().map(m => m.pid), log: flog }));
   preview = createPreviewController({ window: mainWindow, registry: browserRegistry, send, writeToAgent: (id, text) => handleTermInput(id, text) });
   if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
