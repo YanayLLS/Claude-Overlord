@@ -6,13 +6,14 @@ const createHistory = require('./release-history');
   const files = new Map(); // path → { sha, content(base64) }
   const prs = { 'o/front#9': { number: 9, state: 'open', merged: false, body: 'b', head: { sha: 'h1' }, user: { login: 'alice' } } };
   const toasts = [], calls = [];
-  let n = 0, state = {};
+  let n = 0, state = {}, onPut = null;
   const fs = require('fs'), os = require('os'), path = require('path');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rh-'));
   const writeTmp = (p) => { const f = path.join(tmp, `${n++}.json`); fs.writeFileSync(f, JSON.stringify(p)); return f; };
   const input = (args) => JSON.parse(fs.readFileSync(args[args.indexOf('--input') + 1], 'utf8'));
   const gh = async (args) => {
     const a = args.join(' '); calls.push(a);
+    if (onPut && a.startsWith('api -X PUT repos/LLSLtd/release-manifests')) { const f = onPut; onPut = null; f(); }
     let m;
     if ((m = a.match(/^api repos\/LLSLtd\/release-manifests\/contents\/releases\?ref=main$/))) {
       if (!files.size) return { data: { message: 'This repository is empty.', status: '404' } };
@@ -27,6 +28,7 @@ const createHistory = require('./release-history');
       if (!cur && body.sha) return { data: { message: 'Not Found', status: '404' } };
       const sha = 's' + n++; files.set(m[1], { sha, content: body.content }); return { data: { content: { sha } } };
     }
+    if ((m = a.match(/^api -X DELETE repos\/LLSLtd\/release-manifests\/contents\/(releases\/[\d-]+\.json)/))) { files.delete(m[1]); return { data: {} }; }
     if ((m = a.match(/^api repos\/(o\/front)\/pulls\/(\d+)$/))) return { data: prs[m[1] + '#' + m[2]] };
     if (a.includes('-X PATCH') && a.includes('pulls/9')) { prs['o/front#9'].body = input(args).body; return { data: {} }; }
     if (a.includes('actions/workflows/d.yml/runs')) return { data: { workflow_runs: [{ status: 'completed', conclusion: 'success', html_url: 'run1', updated_at: 't' }] } };
@@ -68,5 +70,14 @@ const createHistory = require('./release-history');
   assert.ok(toasts.some(t => /Rollback to .*1 PR opened.*data changes in frontend/.test(t)), toasts.join(' | '));
   const rb = state.history.items.find(x => x.kind === 'rollback');
   assert.deepStrictEqual([rb.rollbackOf, rb.status, rb.repos[0].pr.number], [id, 'pending', 77]);
+  // merged outside Overlord, seen by two approvers at once: one record, not two
+  const row = (n) => ({ repo: 'o/back', label: 'back', source: 'dev', target: 'master', deploy: null, pr: { number: n, url: 'u' }, mergeSha: 'x', mergedAt: 't', signers: [], standalone: true });
+  const before = files.size;
+  assert.strictEqual(await h.recordMerged([{ ...row(9), repo: 'o/front' }], { login: 'a' }), id, 'a PR already in a release is not recorded again');
+  // both wrote anyway: the higher id removes itself
+  const theirs = { schema: 1, id: '2000-01-01-01', kind: 'standalone', env: 'prod', status: 'merged', repos: [{ repo: 'o/back', label: 'back', pr: { number: 50, url: 'u' } }] };
+  onPut = () => files.set('releases/2000-01-01-01.json', { sha: 'z', content: Buffer.from(JSON.stringify(theirs)).toString('base64') });
+  assert.strictEqual(await h.recordMerged([row(50)], { login: 'a' }), '2000-01-01-01');
+  assert.strictEqual(files.size, before + 1, 'only their record is left');
   console.log('release-history: all passed');
 })().catch(e => { console.error(e); process.exit(1); });

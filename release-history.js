@@ -116,17 +116,28 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
   // A PR merged into prod before any release recorded it (merged on github.com): recorded after the fact,
   // its signers as GitHub has them — fewer than 2 reads "merged unsigned" on the card. rows: [{ repo, label, source,
   // target, deploy, pr: { number, url }, mergeSha, mergedAt, signers, hotfix }]
+  // Two approvers' Overlords see the same merge within seconds and both record it: whoever finds the PR
+  // already in a manifest stops; when both wrote anyway, the higher id deletes itself (each side checks after writing).
+  const holds = (e, rows) => e.manifest.repos.some(x => x.pr && rows.some(r => r.repo === x.repo && r.pr.number === x.pr.number));
   async function recordMerged(rows, opener) {
     if (!repoOf() || !rows.length) return null;
     for (let attempt = 0; attempt < 3; attempt++) {
       const loaded = await load();
       if (!loaded) return null;
+      const had = loaded.entries.find(e => holds(e, rows));
+      if (had) return had.manifest.id;
       let m = M.newManifest({ id: M.nextId(loaded.files.map(f => f.name)), kind: rows.some(r => r.standalone) ? 'standalone' : rows.some(r => r.hotfix) ? 'hotfix' : 'release', env: 'prod', rows, opener });
       for (const r of rows) [m] = M.applyPr(m, r.repo, { number: r.pr.number, mergeSha: r.mergeSha, mergedAt: r.mergedAt, signers: r.signers || [] });
       m = { ...m, afterTheFact: true };
       const w = await write(m, null, `release ${m.id}: recorded after the fact (merged outside Overlord)`);
       if (w.conflict) continue;
       if (w.error) return null;
+      const again = await load(), first = again && again.entries && again.entries.filter(e => holds(e, rows)).map(e => e.manifest.id).sort()[0];
+      if (first && first < m.id) {
+        await ghJson(['api', '-X', 'DELETE', `repos/${repoOf()}/contents/${M.manifestPath(m.id)}`, '--input', writeTmp({ message: `release ${m.id}: duplicate of ${first}, removed`, branch: 'main', sha: w.sha })]);
+        cache.delete(M.manifestPath(m.id)); await load();
+        return first;
+      }
       await Promise.all(rows.map(async (r) => {
         const cur = await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
         const body = (cur.data && cur.data.body) || '';

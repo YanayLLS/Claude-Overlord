@@ -685,7 +685,7 @@
   const unsignedOf = (m) => m.repos.some(r => r.unsigned) && !m.imported;
   const SORTS = {
     when: (m) => Date.parse(m.openedAt) || 0,
-    release: (m) => relTitle(m).toLowerCase(),
+    release: (m) => relCell(m).replace(/<[^>]*>/g, '').toLowerCase(), // what the column shows
     env: (m) => ['hotfix', 'standalone'].includes(m.kind) ? 'zz' + m.kind : (m.env || 'prod'),
     repos: (m) => m.repos.filter(r => r.mergeSha).length,
     signed: (m) => unsignedOf(m) ? -1 : signersOf(m).length,
