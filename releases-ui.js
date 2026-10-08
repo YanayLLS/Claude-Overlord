@@ -57,6 +57,12 @@
       render();
     }
   });
+  // double-click a cell: its deploy run on GitHub (hand-deployed: the live commit)
+  overlay.addEventListener('dblclick', (e) => {
+    const cell = e.target.closest('.rl-cell[data-r]'), row = cell && state && state.grid && state.grid.rows[cell.dataset.r], c = row && row.cells && row.cells[cell.dataset.c];
+    const url = c && ((c.run && c.run.url) || deployInfo(c).url || (c.commit && c.commit.url));
+    if (url) { getSelection().removeAllRanges(); api.send({ type: 'openUrl', url }); }
+  });
   // Esc closes the detail drawer first, then the modal
   document.addEventListener('keydown', (e) => {
     if (!open || e.key !== 'Escape') return;
@@ -303,7 +309,7 @@
     if (c.live && c.live.from) lines.push(`pinned in <span class="mono">${esc(c.live.from.split(':')[1] || c.live.from)}</span>`);
     if (c.live && c.live.confirmed) lines.push(`deployed by hand, confirmed by @${esc(c.live.confirmed.by || '?')} ${esc(age(c.live.confirmed.at))} ago`);
     if (lines.length) h += '<div class="tt-lines">' + lines.map(l => `<div>${l}</div>`).join('') + '</div>';
-    return h + '<div class="tt-foot">Click for details</div>';
+    return h + '<div class="tt-foot">Click for details · double-click opens the run</div>';
   }
 
   overlay.addEventListener('mouseover', (ev) => {
