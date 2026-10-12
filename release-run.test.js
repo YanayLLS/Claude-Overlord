@@ -121,10 +121,16 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
     { filename: 'Procedure.js', patch: '@@\n+    coverImgIsCustom: Boolean,\n     title: String,\n+    DeletedBy: UserRefType,' },
     { filename: 'Room.test.js', patch: '+    testOnly: 1,' }, { filename: 'package.json', patch: '+  "version": "1",' },
   ]), ['coverImgIsCustom', 'DeletedBy']);
-  assert.deepStrictEqual(fieldsUsed(['coverImgIsCustom', 'DeletedBy'], [{ patch: '+ if (p.coverImgIsCustom) x()\n- DeletedBy old' }]), ['coverImgIsCustom']);
+  assert.deepStrictEqual(fieldsUsed(['coverImgIsCustom', 'DeletedBy'], [{ filename: 'a.js', patch: '+ if (p.coverImgIsCustom) x()\n- DeletedBy old' }]), ['coverImgIsCustom']);
   // a bare word isn't a use; a key or a quoted name is; schema keywords never count as fields
-  assert.deepStrictEqual(fieldsUsed(['Draft', 'Label', 'Note'], [{ patch: "+ // Draft mode\n+ { Label: x }\n+ get('Note')" }]), ['Label', 'Note']);
+  assert.deepStrictEqual(fieldsUsed(['Draft', 'Label', 'Note'], [{ filename: 'a.ts', patch: "+ // Draft mode\n+ { Label: x }\n+ get('Note')" }]), ['Label', 'Note']);
   assert.deepStrictEqual(addedSchemaFields([{ filename: 'A.js', patch: '+    type: String,\n+    required: true,\n+    IsSoloAllowed: Boolean,' }]), ['IsSoloAllowed']);
+  // keys whose value is code are not fields; a field the shipped package already declares is not new
+  assert.deepStrictEqual(addedSchemaFields([{ filename: 'writer.js', patch: '+    updateOne: {\n+        filter: keyOf(ref),\n+        update: {$set: x},\n+        upsert: true,\n+    connection: this.model.db,\n+    isEnabled: () => true,' }]), []);
+  assert.deepStrictEqual(addedSchemaFields([{ filename: 'PartLens.js', patch: '+    Name: String,\n+    Tags: [String],\n+    At: {type: Date},\n+    Kind: Number, // the kind' }], new Set(['Name'])), ['Tags', 'Kind']);
+  assert.deepStrictEqual(addedSchemaFields([{ filename: 'Procedure.js', patch: '+    ProcedureType: {\n+        type: Number,\n+    },\n+    updateOne: {\n+        filter: x,' }]), ['ProcedureType']);
+  // only source files count as a use: a workflow's `--query '{State:State}'` is not
+  assert.deepStrictEqual(fieldsUsed(['State'], [{ filename: '.github/workflows/deploy.yml', patch: "+ --query '{State:State}'" }]), []);
   const lock = { packages: { 'node_modules/@llsltd/dbschemas': { version: '26.3.77' } } };
   const pkgJ = { dependencies: { '@llsltd/dbschemas': '^26.3.77' } };
   assert.deepStrictEqual(shippedVersion({ pkg: pkgJ, lock, dockerfile: 'RUN npm ci', latest: '26.3.95' }), { version: '26.3.77', via: 'lock' });
@@ -135,11 +141,13 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
     if (a.includes('package.json')) return { data: pkgJ };
     if (a.includes('package-lock.json')) return { data: lock };
     if (a.includes('Dockerfile')) return { data: { content: Buffer.from('RUN npm ci').toString('base64') } };
+    if (a.includes('dbschemas/git/trees/26.3.77')) return { data: { tree: [{ type: 'blob', path: 'Procedure.js' }, { type: 'blob', path: 'Procedure.test.js' }] } };
+    if (a.includes('dbschemas/contents/Procedure.js?ref=26.3.77')) return { data: { content: Buffer.from('    title: String,\n').toString('base64') } };
     if (a.includes('dbschemas/compare/26.3.77...26.3.95')) return { data: {
       commits: [{ commit: { message: 'feat(procedure): cover' } }, { commit: { message: 'bump package version to 26.3.95 [skip ci]' } }],
-      files: [{ filename: 'Procedure.js', patch: '+    coverImgIsCustom: Boolean,' }] } };
+      files: [{ filename: 'Procedure.js', patch: '+    coverImgIsCustom: Boolean,\n+    title: String,' }] } };
     return { error: 'unexpected ' + a };
-  }, 'o/id', 'dev', [{ patch: '+ doc.coverImgIsCustom = true' }], '26.3.95');
+  }, 'o/id', 'dev', [{ filename: 'src/a.js', patch: '+ doc.coverImgIsCustom = true\n+ doc.title = x' }], '26.3.95');
   assert.deepStrictEqual({ shipped: dbs.shipped, behind: dbs.behind, used: dbs.used }, { shipped: '26.3.77', behind: 1, used: ['coverImgIsCustom'] });
   assert.strictEqual(rowStatus({ pr: {}, checks: 'pass', dbschemas: dbs }), 'blocked');
   assert.strictEqual(buildCoverage([{ name: 'Production Build', status: 'completed', conclusion: 'success' }]), 'pass');

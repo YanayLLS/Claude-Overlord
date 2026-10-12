@@ -211,24 +211,50 @@ const DBS_REPO = 'LLSLtd/dbschemas';
 const SCHEMA_KEYWORDS = new Set(['type', 'required', 'default', 'ref', 'enum', 'index', 'unique', 'sparse', 'min', 'max',
   'minlength', 'maxlength', 'trim', 'lowercase', 'uppercase', 'select', 'validate', 'immutable', 'alias', 'get', 'set', 'timestamps', 'versionKey', 'strict', 'collection']);
 
-// Field names a dbschemas diff adds: `+  fieldName: Type` lines in schema files (tests, package.json out).
-function addedSchemaFields(files) {
+const isSchemaSource = (filename) => /\.js$/.test(filename) && !/\.test\.js$|package/.test(filename);
+const isCodeSource = (filename) => /\.(c|m)?[jt]sx?$/.test(filename);
+
+// A schema field declaration: `Name: String`, `Ref: UserRefType`, `Tags: [String]`, `At: {type: Date}`.
+// A key whose value is code (`filter: keyOf(x)`, `isEnabled: () => true`, `updateOne: {`) is not a field.
+const SCHEMA_FIELD_LINE = /^\s*['"]?([A-Za-z_][A-Za-z0-9_]{3,})['"]?\s*:\s*(?:[A-Z][\w.]*\s*[,}\]]?\s*(?:\/\/.*)?$|\[|\{\s*type\s*:)/;
+
+const OPENED_OBJECT_LINE = /^\s*['"]?([A-Za-z_][A-Za-z0-9_]{3,})['"]?\s*:\s*\{\s*$/;
+
+function schemaFieldsIn(lines) {
+  const out = new Set();
+  lines.forEach((line, i) => {
+    const m = line.match(SCHEMA_FIELD_LINE) || (/^\s*type\s*:/.test(lines[i + 1] || '') && line.match(OPENED_OBJECT_LINE));
+    if (m && !SCHEMA_KEYWORDS.has(m[1])) out.add(m[1]);
+  });
+  return out;
+}
+
+// Field names a dbschemas diff adds that the shipped package declares nowhere.
+function addedSchemaFields(files, shippedFields = new Set()) {
   const out = new Set();
   for (const f of files || []) {
-    if (!/\.js$/.test(f.filename) || /\.test\.js$|package/.test(f.filename)) continue;
-    for (const line of String(f.patch || '').split('\n')) {
-      const m = line.match(/^\+\s*['"]?([A-Za-z_][A-Za-z0-9_]{3,})['"]?\s*:/);
-      if (m && !SCHEMA_KEYWORDS.has(m[1])) out.add(m[1]);
-    }
+    if (!isSchemaSource(f.filename)) continue;
+    const added = String(f.patch || '').split('\n').filter(l => l.startsWith('+')).map(l => l.slice(1));
+    for (const name of schemaFieldsIn(added)) if (!shippedFields.has(name)) out.add(name);
   }
   return [...out];
 }
 
-// Which of those fields the release's own changes use as a property: `.Name`, `Name:`, `'Name'`,
-// `"Name"` on added lines. A bare word ("Draft" in a comment) isn't a use.
+// Which of those fields the release's own source changes use as a property: `.Name`, `Name:`,
+// `'Name'`, `"Name"` on added lines. A bare word ("Draft" in a comment) isn't a use.
 function fieldsUsed(fields, releaseFiles) {
-  const added = (releaseFiles || []).map(f => String(f.patch || '').split('\n').filter(l => l.startsWith('+')).join('\n')).join('\n');
+  const added = (releaseFiles || []).filter(f => isCodeSource(f.filename || ''))
+    .map(f => String(f.patch || '').split('\n').filter(l => l.startsWith('+')).join('\n')).join('\n');
   return fields.filter(n => new RegExp('(\\.' + n + '\\b|\\b' + n + '\\s*:|[\'"`]' + n + '[\'"`])').test(added));
+}
+
+async function shippedSchemaFields(gh, version) {
+  const tree = await gh(['api', `repos/${DBS_REPO}/git/trees/${version}?recursive=1`]);
+  if (tree.error || !tree.data) return null;
+  const paths = (tree.data.tree || []).filter(t => t.type === 'blob' && isSchemaSource(t.path)).map(t => t.path);
+  const files = await Promise.all(paths.map(p => gh(['api', `repos/${DBS_REPO}/contents/${p}?ref=${version}`])));
+  if (files.some(f => f.error || !f.data)) return null;
+  return schemaFieldsIn(files.flatMap(f => Buffer.from(f.data.content || '', 'base64').toString('utf8').split('\n')));
 }
 
 // The dbschemas version a source branch's image build really installs: @latest when its
@@ -252,10 +278,12 @@ async function dbschemasCheck(gh, repo, source, releaseFiles, latest) {
   const res = { shipped: shipped.version, via: shipped.via, latest, newFields: [], used: [] };
   if (shipped.version === latest) return res;
   if (shipped.version.split('.')[0] !== latest.split('.')[0]) return { ...res, otherLine: true }; // e.g. 23.x vs 26.x: diverged lines, no field diff
-  const cmp = await gh(['api', `repos/${DBS_REPO}/compare/${shipped.version}...${latest}`]);
+  const [cmp, shippedFields] = await Promise.all([gh(['api', `repos/${DBS_REPO}/compare/${shipped.version}...${latest}`]),
+    shippedSchemaFields(gh, shipped.version)]);
   if (cmp.error || !cmp.data) return { ...res, error: 'could not diff dbschemas ' + shipped.version + '...' + latest };
+  if (!shippedFields) return { ...res, error: 'could not read dbschemas ' + shipped.version };
   res.behind = (cmp.data.commits || []).filter(c => !/^bump package version/i.test(firstLine(c.commit && c.commit.message))).length;
-  res.newFields = addedSchemaFields(cmp.data.files);
+  res.newFields = addedSchemaFields(cmp.data.files, shippedFields);
   res.used = fieldsUsed(res.newFields, releaseFiles);
   return res;
 }
