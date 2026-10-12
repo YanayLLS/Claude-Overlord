@@ -74,6 +74,22 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
   assert.ok(payloads[1].body.includes('fix: hotfix on master'));
   assert.ok(front.body && front.body.includes('Promotes'), 'opened PRs carry their body for later patches');
 
+  // re-check after a fix: the back-merge is merged (no hotfixes left) and checks are green → no longer blocked, nothing opened
+  const { recheckRelease } = require('./release-run');
+  const posted = [];
+  const fixed = await recheckRelease(async (args) => {
+    const a = args.join(' ');
+    if (a.includes('-X POST')) { posted.push(a); return { error: 'must not open anything' }; }
+    if (a.includes('compare/master...dev')) return { data: { ahead_by: 2, files: [{}], commits: [c('fix(x): one')] } };
+    if (a.includes('compare/dev...master')) return { data: { commits: [c('Merge pull request #11', 2)] } };
+    if (a.includes('-f state=open') && a.includes('base=master')) return { data: [{ number: 10, html_url: 'u10', head: { ref: 'dev', repo: { full_name: 'o/f' } } }] };
+    if (/repos\/o\/f\/pulls\/10$/.test(a)) return { data: { mergeable: true, head: { sha: 'new' } } };
+    if (a.includes('check-runs')) return { data: { check_runs: [{ name: 'ci', status: 'completed', conclusion: 'success' }] } };
+    if (a.includes('/status')) return { data: { state: 'success', total_count: 0 } };
+    return { data: null };
+  }, [{ ...front }], { writeJson: () => 'f.json', wait: async () => {} });
+  assert.deepStrictEqual([fixed[0].status, fixed[0].backMerge, fixed[0].checks, posted.length], ['ok', null, 'pass', 0]);
+
   // prHealth: GitHub never decides mergeability → conflict is null (unknown), not false
   const { prHealth } = require('./release-run');
   const h = await prHealth(async (args) => {

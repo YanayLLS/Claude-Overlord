@@ -149,6 +149,7 @@
     // el.dataset.i = one row's Fix; none = Fix all
     relFix: (el) => { const i = el && el.dataset.i != null ? +el.dataset.i : undefined; api.send({ type: 'releasesFix', i }); relOpen = false; show(false); },
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
+    recheck: (el) => api.send({ type: 'releasesRecheck', id: el.dataset.id || null }),
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'envs' && envView === 'timeline'; api.send({ type: 'releasesHistory' }); render(); },
     nowFold: () => { nowFold = !nowFold; render(); },
     envView: (el) => { envView = el.dataset.v; sel = null; toToday = envView === 'timeline'; render(); },
@@ -604,6 +605,7 @@
     return s && s.signing ? `<button class="${cls} locked" aria-disabled="true">✍ Signing…</button>`
       : `<button class="${cls}" data-act="relSign"${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
   }
+  const RECHECK_BTN = (id, cls) => `<button class="${cls}" data-act="recheck"${id ? ` data-id="${esc(id)}"` : ''} title="Read every open PR again: conflicts, back-merges, dbschemas, checks. Runs by itself when a blocked PR's branch moves">↻ Re-check</button>`;
   // ✕ Cancel release (History card: its id; results popover: the run here). First click arms it.
   function cancelBtn(id, n, cls) {
     const k = 'x:' + (id || 'run');
@@ -630,6 +632,7 @@
     if (a === 'apprAdd' || a === 'apprRemove' || a === 'apprCreate') return 'appr';
     if (a === 'releaseGo') return 'release';
     if (a === 'relAllStop') return 'stop';
+    if (a === 'recheck') return 'recheck';
     return null;
   }
   function markBusy(el, label) { const k = keyOf(el); if (k) localBusy.set(k, { label, at: Date.now() }); }
@@ -940,6 +943,7 @@
           .map(login => ({ login, missing: openRepos.filter(r => !(r.signers || []).includes(login)).map(r => ({ label: r.label })) })) },
         attrs: `class="rl-hist-btn" data-act="histMerge" data-id="${esc(m.id)}"`, lockedCls: 'rl-hist-btn', armKey: 'h:' + m.id }));
       if (pending && a.isApprover && (m.kind || 'release') === 'release' && !(s.releaseAll && s.releaseAll.running)) acts.push(`<button class="rl-hist-btn" data-act="relAddTo" data-env="${esc(m.env || 'prod')}" title="Open the release picker to add repos to this release">➕ Add repos</button>`);
+      if (pending && openRepos.length) acts.push(RECHECK_BTN(m.id, 'rl-hist-btn'));
       if (pending && a.isApprover && openRepos.length && !(s.releaseAll && s.releaseAll.running)) acts.push(cancelBtn(m.id, openRepos.length, 'rl-hist-btn'));
       if (m.cancelled) h += `<div class="rl-hist-man${m.status === 'partial' ? ' bad' : ''}">✕ Cancelled by @${esc(m.cancelled.by || '?')} · ${esc(age(m.cancelled.at))} ago`
         + (m.cancelled.never && m.cancelled.never.length ? ` · never shipped: ${esc(m.cancelled.never.join(', '))}` : '') + (m.status === 'partial' ? ' · the rest is live in prod' : '') + '</div>';
@@ -1090,6 +1094,7 @@
         attrs: 'class="rl-rr-merge" data-act="relMerge"', lockedCls: 'rl-rr-merge', armKey: 'run' })
       + (open.length && (s.approvers || {}).isApprover && !(s.releaseAll && s.releaseAll.running) ? cancelBtn('', open.length, 'rl-rr-cancel') : ''))
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
+      + (open.length ? RECHECK_BTN('', 'rl-rr-fix') : '')
       // a new release only once this one's PRs are all merged or closed (Release again just reuses open PRs anyway)
       + (run.running || open.length ? '' : '<button data-act="relNew">New release</button>')
       + '<button data-act="releaseClose">Close</button></div></div>';

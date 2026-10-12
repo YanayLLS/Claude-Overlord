@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
-const { runRelease, prHealth, rowStatus, isHotfix } = require('./release-run');
+const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix } = require('./release-run');
 const createHistory = require('./release-history');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
@@ -1146,13 +1146,18 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // each minute until nothing is pending or unknown (or half an hour passes, or a new run starts).
   let recheckTimer = null;
   // re-read these [row, index] pairs of a run (state, checks, sign-off) and publish
-  async function recheckRows(cur, pairs) {
-    await Promise.all(pairs.map(async ([r, i]) => {
-      const h = await prHealth(ghJson, r.repo, r.pr.number, r.target, undefined, r.env === 'prod' ? memberLogins() : null);
+  // full: back-merge and dbschemas too (a button press, or the source branch moved under a blocked row)
+  async function recheckRows(cur, pairs, full = false) {
+    const members = (r) => r.env === 'prod' ? memberLogins() : null;
+    const light = await Promise.all(pairs.map(async ([r, i]) => {
+      const h = await prHealth(ghJson, r.repo, r.pr.number, r.target, undefined, members(r));
       const row = { ...r, ...h };
       row.status = rowStatus(row);
       cur.rows[i] = row;
+      return full || (row.status === 'blocked' && !row.closed && h.headSha && r.headSha && h.headSha !== r.headSha) ? [row, i] : null;
     }));
+    const deep = light.filter(Boolean);
+    if (deep.length) (await recheckRelease(ghJson, deep.map(([r]) => ({ ...r, members: members(r) })), { writeJson: writeTmp })).forEach((row, k) => { cur.rows[deep[k][1]] = row; });
     push({ releaseRun: { ...stampSignoff(cur), checkedAt: Date.now() } });
     persist();
     shareHealth(cur);
@@ -1173,10 +1178,23 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const prs = state.releaseRun && state.releaseRun.rows.filter(r => r.pr);
     if (prs && prs.length && prs.every(r => r.closed && !r.merged)) { push({ releaseRun: null }); persist(); } // called off
   }
+  // Re-check button: this machine's run if it has one, else the release's record (any teammate can press it)
+  async function recheckAll(id) {
+    const cur = state.releaseRun;
+    const open = cur && !cur.running ? cur.rows.map((r, i) => [r, i]).filter(([r]) => r.pr && !r.merged && !r.closed) : [];
+    if (open.length) { await recheckRows(cur, open, true); recheck(state.releaseRun); return; }
+    const m = id && state.history && (state.history.items || []).find(x => x.id === id);
+    if (!m) return;
+    const env = m.env || 'prod', members = env === 'prod' ? memberLogins() : null;
+    const rows = m.repos.filter(r => r.pr && !r.mergeSha && !r.closed)
+      .map(r => ({ repo: r.repo, label: r.label, source: r.source, target: r.target, env, deploy: r.deploy && r.deploy.workflow, pr: r.pr, members }));
+    if (rows.length) { await history.recordHealth(await recheckRelease(ghJson, rows, { writeJson: writeTmp })); await history.load(); }
+  }
   function recheck(run) {
     clearTimeout(recheckTimer);
     const unsigned = (r) => { const s = (state.releaseRun || run).signoff; return r.env === 'prod' && s && !s.ok; };
-    const settled = (r) => !r.pr || r.merged || r.closed || (r.checks !== 'pending' && r.checks !== 'none' && r.conflict !== null && !unsigned(r));
+    // a blocked row stays watched: a fix pushed to its source branch re-checks it in full
+    const settled = (r) => !r.pr || r.merged || r.closed || (r.checks !== 'pending' && r.checks !== 'none' && r.conflict !== null && !unsigned(r) && r.status !== 'blocked');
     const tick = async () => {
       if (state.releaseRun !== run && (!state.releaseRun || state.releaseRun.startedAt !== run.startedAt)) return;
       const cur = state.releaseRun;
@@ -1269,6 +1287,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         return true;
       case 'releasesMergeRelease': releaseAll(msg.id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })); return true;
       case 'releasesCancel': cancelRelease(msg.id).catch(e => send({ type: 'toast', text: 'Cancel failed: ' + e.message })); return true;
+      case 'releasesRecheck': withBusy('recheck', 'Re-checking…', () => recheckAll(msg.id)); return true;
       case 'releasesClearRun': clearTimeout(recheckTimer); push({ releaseRun: null }); persist(); return true;
       case 'releasesSetSource': {
         const source = String(msg.source || '').trim() || DEFAULT_SOURCE;

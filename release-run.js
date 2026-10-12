@@ -134,7 +134,7 @@ async function prHealth(gh, repo, n, target, wait = sleep, members = null) {
     const rv = await api('-X', 'GET', `repos/${repo}/pulls/${n}/reviews`, '-f', 'per_page=100');
     sign = signoff(st, rv.data || [], members);
   }
-  return { conflict, checks, knownFailing, advisory, builds, signoff: sign };
+  return { conflict, checks, knownFailing, advisory, builds, signoff: sign, headSha: sha || null };
 }
 
 // One (repo, env, source → target) row. update(patch) streams progress to the UI.
@@ -271,10 +271,29 @@ function buildCoverage(checkRuns) {
   return 'pass';
 }
 
+const dbschemasLatestOf = async (gh) => { // what dbschemas' dev last published
+  const pkg = await gh(['api', '-H', 'Accept:application/vnd.github.raw', `repos/${DBS_REPO}/contents/package.json?ref=dev`]);
+  return (pkg.data && pkg.data.version) || null;
+};
+
+// Re-check open rows in full — back-merge, dbschemas, conflicts, checks — after a fix lands on the source
+// branch. Reuses the open PRs; opens a back-merge only when the target still has hotfixes and none is open.
+async function recheckRelease(gh, rows, { writeJson, wait }) {
+  const dbschemasLatest = await dbschemasLatestOf(gh);
+  return Promise.all(rows.map(async (r) => {
+    let res;
+    try { res = await releaseRow(gh, { ...r, dbschemasLatest }, { writeJson, update: () => {}, wait }); } catch (e) { res = { error: e.message || String(e) }; }
+    if (res.nothing) res = await prHealth(gh, r.repo, r.pr.number, r.target, wait, r.members || null); // merged since: source == target
+    const row = { ...r, backMerge: null, dbschemas: null, error: null, ...res, running: false };
+    delete row.body; delete row.nothing;
+    row.status = rowStatus(row);
+    return row;
+  }));
+}
+
 // Every row in parallel; onRow(i, row) after each change.
 async function runRelease(gh, prs, { writeJson, onRow, wait }) {
-  const pkg = await gh(['api', '-H', 'Accept:application/vnd.github.raw', `repos/${DBS_REPO}/contents/package.json?ref=dev`]);
-  const dbschemasLatest = (pkg.data && pkg.data.version) || null; // what dbschemas' dev last published
+  const dbschemasLatest = await dbschemasLatestOf(gh);
   const rows = prs.map(p => ({ ...p, running: true, dbschemasLatest }));
   await Promise.all(rows.map(async (row, i) => {
     const update = (patch) => { Object.assign(row, patch); onRow(i, row); };
@@ -287,5 +306,5 @@ async function runRelease(gh, prs, { writeJson, onRow, wait }) {
   return rows;
 }
 
-module.exports = { isHotfix, hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
+module.exports = { recheckRelease, isHotfix, hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
   addedSchemaFields, fieldsUsed, shippedVersion, dbschemasCheck, buildCoverage };
