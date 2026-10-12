@@ -848,7 +848,7 @@
         continue;
       }
       const cardOpen = now || rbOpen === m.id || openCards.has(m.id); // History: folded rows, open on click
-      if (histFilter !== 'all' && !(histFilter === 'hotfix' ? ['hotfix', 'standalone'].includes(m.kind) : (m.env || 'prod') === histFilter && !['hotfix', 'standalone'].includes(m.kind))) continue;
+      if (!now && histFilter !== 'all' && !(histFilter === 'hotfix' ? ['hotfix', 'standalone'].includes(m.kind) : (m.env || 'prod') === histFilter && !['hotfix', 'standalone'].includes(m.kind))) continue;
       if (!now) {
         if (!inTable) { inTable = true; h += histHead(); }
         h += relRow(s, m, signers, cardOpen);
