@@ -15,7 +15,7 @@ function fuzzyScore(q, s) {
   return { score: score - (t.length - q.length) * 0.01, pos }; // shorter names win ties
 }
 
-const ORIGIN_RANK = { repo: 0, pc: 1, plugin: 2, builtin: 3 };
+const ORIGIN_RANK = { overlord: -1, repo: 0, pc: 1, plugin: 2, builtin: 3 };
 
 // type null = every type. Empty query keeps origin order; otherwise best match first.
 // A name match always beats a description-only match.

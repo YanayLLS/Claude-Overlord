@@ -38,5 +38,31 @@ function normalizeMembers(team) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-if (typeof module !== 'undefined') module.exports = { mentionQuery, rankMembers, toBlocks, normalizeMembers };
-if (typeof window !== 'undefined') window.mentionCore = { mentionQuery, rankMembers, toBlocks, normalizeMembers };
+// @AgentName runs in a terminal line, for known agent names only (case-insensitive): [{ start, len }].
+function agentMentions(line, names) {
+  const set = new Set((names || []).map(n => String(n).toLowerCase()));
+  const out = [];
+  for (const m of String(line || '').matchAll(/(^|[^\w@])@([A-Za-z][A-Za-z0-9]*)/g)) {
+    if (set.has(m[2].toLowerCase())) out.push({ start: m.index + m[1].length, len: m[2].length + 1 });
+  }
+  return out;
+}
+
+// A prompt that STARTS with @Name(s) is addressed to those agents: "@Pike @Rio why is it empty?" →
+// { names: ['Pike', 'Rio'], unknown: [], body: 'why is it empty?' }. Null when it doesn't start with a known agent
+// or there is nothing to send. A @Name mid-sentence is not addressing anyone (context for this agent instead).
+function leadingAgentMentions(text, names) {
+  const m = /^\s*((?:@[A-Za-z][A-Za-z0-9]*[\s,]*)+)([\s\S]*)$/.exec(String(text || ''));
+  if (!m) return null;
+  const byLower = new Map((names || []).map(n => [String(n).toLowerCase(), n]));
+  const found = [], unknown = [];
+  for (const [, n] of m[1].matchAll(/@([A-Za-z][A-Za-z0-9]*)/g)) {
+    const real = byLower.get(n.toLowerCase());
+    if (!real) unknown.push(n); else if (!found.includes(real)) found.push(real);
+  }
+  const body = m[2].trim();
+  return found.length && body ? { names: found, unknown, body } : null;
+}
+
+if (typeof module !== 'undefined') module.exports = { mentionQuery, rankMembers, toBlocks, normalizeMembers, agentMentions, leadingAgentMentions };
+if (typeof window !== 'undefined') window.mentionCore = { mentionQuery, rankMembers, toBlocks, normalizeMembers, agentMentions, leadingAgentMentions };

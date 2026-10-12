@@ -776,6 +776,14 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   border-left:2px solid var(--blue); background:rgba(30,30,46,.82); color:var(--dim);
 }
 #term-name-chip.visible { display:block; }
+/* the agent's @name, for WHEN-DONE / PEER-SEND targets */
+.term-mentions { position:absolute; inset:0; pointer-events:none; z-index:5; }
+.term-mentions i { position:absolute; display:flex; font-style:normal; white-space:pre; }
+.term-mentions b { display:inline-block; text-align:center; font-weight:normal; color:#cba6f7; animation:mention-rainbow 1.8s linear infinite; }
+@keyframes mention-rainbow { 0%,100% { color:#f38ba8; } 17% { color:#fab387; } 33% { color:#f9e2af; } 50% { color:#a6e3a1; } 67% { color:#89b4fa; } 83% { color:#cba6f7; } }
+@media (prefers-reduced-motion: reduce) { .term-mentions b { animation:none; } }
+#term-agent-name { position:absolute; bottom:6px; right:22px; z-index:9; pointer-events:none; font-size:11px; color:var(--dim); opacity:.7; }
+#term-agent-name:empty { display:none; }
 /* bottom offset is set from terminal row height in positionNameChip() */
 #term-dead {
   display:none; position:absolute; left:0; right:0; bottom:0; z-index:11;
@@ -1266,7 +1274,7 @@ button:focus-visible { outline-offset:0; }
       <button onclick="termSearchNext()" title="Next (Enter)">&#x25BC;</button>
       <button onclick="closeTermSearch()" title="Close (Esc)">&times;</button>
     </div>
-    <div id="term-container"><span id="term-name-chip"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button><button id="term-shell-btn" onclick="shellSelected()" title="Open a plain shell here, without Claude">&gt;_ Continue in CLI</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 7v14"/></svg></button><div id="prompt-rail"><div class="pr-dashes"></div><div class="pr-pop"></div></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg></button></div></div>
+    <div id="term-container"><span id="term-name-chip"></span><span id="term-agent-name"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button><button id="term-shell-btn" onclick="shellSelected()" title="Open a plain shell here, without Claude">&gt;_ Continue in CLI</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 7v14"/></svg></button><div id="prompt-rail"><div class="pr-dashes"></div><div class="pr-pop"></div></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg></button></div></div>
     <div id="conversation"></div>
     <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
   </div>
@@ -3093,6 +3101,34 @@ function createXterm(id) {
       callback(links.length ? links : undefined);
     }
   });
+  // @AgentName in the terminal: redrawn on top, one cell per letter, each letter cycling the rainbow a step behind the
+  // previous one (the /ultrathink look). The box takes the terminal background so it hides the plain glyphs beneath.
+  // ponytail: string index = cell column, off by one per wide char before the name; viewport rows only, max 40;
+  // a caret moved inside the name is hidden under it.
+  const mentionLayer = document.createElement('div'); mentionLayer.className = 'term-mentions'; el.appendChild(mentionLayer);
+  let mentionRaf = 0, mentionKey = '';
+  terminal.onRender(() => { if (!mentionRaf) mentionRaf = requestAnimationFrame(() => {
+    mentionRaf = 0;
+    const scr = el.querySelector('.xterm-screen'), r = scr && scr.getBoundingClientRect(), er = el.getBoundingClientRect();
+    const names = [...agents.values()].map(a => a.agentName).filter(Boolean);
+    const hits = [];
+    if (r && r.width && names.length) {
+      const b = terminal.buffer.active;
+      for (let row = 0; row < terminal.rows && hits.length < 40; row++) {
+        const line = b.getLine(b.viewportY + row)?.translateToString() || '';
+        for (const m of mentionCore.agentMentions(line, names)) hits.push({ row, col: m.start, text: line.substr(m.start, m.len) });
+      }
+    }
+    const key = `${r && r.width},${r && r.height},${hits.map(h => h.row + ':' + h.col + h.text).join()}`;
+    if (key === mentionKey) return;
+    mentionKey = key;
+    if (!hits.length) { mentionLayer.innerHTML = ''; return; }
+    const cw = r.width / terminal.cols, ch = r.height / terminal.rows, o = terminal.options;
+    const phase = performance.now() % 1800; // keeps the wave continuous across redraws
+    mentionLayer.style.cssText = `font-family:${o.fontFamily.replace(/"/g, "'")};font-size:${o.fontSize}px;line-height:${ch}px;background:transparent`;
+    mentionLayer.innerHTML = hits.slice(0, 40).map(h => `<i style="left:${r.left - er.left + h.col * cw}px;top:${r.top - er.top + h.row * ch}px;height:${ch}px;background:${(o.theme && o.theme.background) || '#000'}">`
+      + [...h.text].map((c, i) => `<b style="width:${cw}px;animation-delay:-${phase + (h.text.length - i) * 150}ms">${c}</b>`).join('') + '</i>').join('');
+  }); });
   // [Image #N] tags: hover shows the pasted image and tints the tag.
   // Plain mousemove, not a link provider: Claude redraws the prompt rows constantly, and xterm drops link hover on every redraw.
   el.addEventListener('mousemove', (ev) => {
@@ -3109,7 +3145,7 @@ function createXterm(id) {
   }, true); // capture: with mouse reporting on (Claude's prompt), xterm stops the event before it bubbles here
   el.addEventListener('mouseleave', hideImagePop);
   // The picker's typed hotkey (default ";;") opens it instead of reaching the pty (catalog-pick.js holds the first char 250 ms).
-  const slashGate = makeSlashGate({ send: (data) => { api.send({ type: 'termInput', id, data }); if (id === selectedId) ghostOnInput(); }, open: () => catalogUi.open(), seq: () => catalogUi.seq() });
+  const slashGate = makeSlashGate({ send: (data) => { api.send({ type: 'termInput', id, data, ...(data === '\r' && { prompt: readPromptBox(terminal) }) }); if (id === selectedId) ghostOnInput(); }, open: () => catalogUi.open(), seq: () => catalogUi.seq() });
   terminal.onData(slashGate);
   terminal.onScroll(() => {
     ghostClear();
@@ -3420,6 +3456,7 @@ function openTerm(id) {
   const namePrefix = a.agentName ? a.agentName + ' \u2014 ' : '';
   document.getElementById('term-title').textContent = namePrefix + title + ' \u2014 ' + pathLabel(a.cwd || '');
   document.getElementById('term-name-chip').textContent = title; // no agentName prefix
+  document.getElementById('term-agent-name').textContent = a.agentName ? '@' + a.agentName : '';
   if (!xterms.has(id)) createXterm(id);
   if (termTab === 'terminal') showXterm(id);
   // Update prompt nav after xterm exists and buffer has time to populate
@@ -4030,7 +4067,7 @@ function handleAgentMsg(msg) {
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = -1; /* -1 = at bottom; the buffer scan owns the real range */ if (selectedId === msg.id) updatePromptNav(); } break; }
     case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
-    case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; scheduleRender(); } break; }
+    case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = '@' + msg.agentName; scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { if (msg.stats.effort !== a.stats?.effort) agentEffort.delete(msg.id); a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
     case 'focused': selectedId = msg.id; scheduleRender(); break;

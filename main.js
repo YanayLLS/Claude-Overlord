@@ -11,6 +11,7 @@ const { autoUpdater } = require('electron-updater');
 const pty = require('node-pty');
 const wt = require('./worktree');
 const pc = require('./peer-core');
+const wc = require('./watch-core');
 const { createRegistry } = require('./browser/registry');
 const { createMcpServer } = require('./mcp/server');
 const { writeAgentConfig, settingsFlags, removeAgentConfig } = require('./mcp/agent-config');
@@ -1926,7 +1927,7 @@ function parseLine(id, line) {
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       const blocks = r.message.content;
-      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); scanPeerReply(id, a, b.text); scanPeerSend(id, a, b.text); } }
+      for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); a.fullText = b.text; scanPeerReply(id, a, b.text); scanPeerSend(id, a, b.text); scanWhenDone(id, a, b.text); } }
       if (blocks.some(b => b.type === 'tool_use')) {
         a.isWaiting = false; a.hadTools = true;
         send({ type: 'status', id, status: 'active' });
@@ -2006,6 +2007,7 @@ function parseLine(id, line) {
       }
       send({ type: 'status', id, status: shownStatus(a) });
       flushPeerMsgs(id);
+      fireWatches(id, a);
     } else if (r.type === 'progress') {
       const ptid = r.parentToolUseID, d = r.data;
       if (ptid && d) {
@@ -3498,6 +3500,22 @@ function buildMentionContext(mentions) {
   return blocks.join('\n\n');
 }
 
+function sendLeadMention(id, { names, unknown, body }) {
+  const a = agents.get(id);
+  let user = ''; try { user = os.userInfo().username; } catch {}
+  const sent = [];
+  for (const name of names) {
+    const target = findLocalAgentByName(name);
+    if (target === null || target === id) continue;
+    const env = pc.buildEnvelope({ toAgent: name, fromAgent: settings.peersEnabled ? (a && a.agentName) || '' : '', fromPeer: myPeerName(), fromUser: user, text: body, hop: 0 });
+    flog(`@mention: agent ${id} → @${name} (agent ${target})`);
+    queuePeerInjection(target, env);
+    sent.push('@' + name);
+  }
+  const miss = unknown.length ? ` · no agent named ${unknown.map(n => '@' + n).join(', ')}` : '';
+  send({ type: 'toast', text: sent.length ? `✉ Sent to ${sent.join(', ')}${miss}` : `✕ Not sent — that is this agent${miss}` });
+}
+
 function writePtyChunked(proc, data, chunkSize = 1024) {
   if (data.length <= chunkSize) { proc.write(data); return; }
   let offset = 0;
@@ -3531,7 +3549,7 @@ function pasteTextToTerm(id, text) {
   handleTermInput(id, '\x1b[200~' + normalizePasteText(text) + '\x1b[201~');
 }
 
-function handleTermInput(id, data) {
+function handleTermInput(id, data, shown) {
   // Typing in the terminal answers an on-screen permission dialog (focus in/out doesn't)
   { const a = agents.get(id); if (a?.ptyPerm && !/^\x1b\[[IO]$/.test(data)) { clearPtyPerm(id, a); a.permSent = false; send({ type: 'permClear', id }); } }
   const t = terminals.get(id);
@@ -3628,6 +3646,9 @@ function handleTermInput(id, data) {
 
   // Single-char handling
   if (data === '\r') {
+    // What is really in the prompt box (sent by the renderer on Enter) beats the typed-key buffer, which misses
+    // word deletes, selection erases and Esc-clears — a deleted @Name used to still attach its context.
+    if (typeof shown === 'string') buf = shown;
     // Detect /clear or /resume — both move the agent to a different JSONL file
     markSessionSwitch(id, buf);
     notePrompt(id, buf);
@@ -3644,11 +3665,14 @@ function handleTermInput(id, data) {
       return;
     }
     { const ag = agents.get(id); if (ag) ag.peerHopBase = 0; } // human prompt resets the agent-chain budget
+    // A prompt that starts with @Name(s) is addressed to those agents: it goes straight to them (the human typed
+    // it, so no approval step) and never reaches this one.
+    const lead = mc.leadingAgentMentions(buf, [...agents.values()].filter(x => x.agentName && !x.archived).map(x => x.agentName));
+    if (lead) { sendLeadMention(id, lead); t.write('\x15'); inputBuffers.set(id, ''); return; }
     const mentions = findMentions(buf);
     if (mentions.length > 0) {
       const ctx = buildMentionContext(mentions);
-      t.write('\x15'); // Ctrl+U to clear readline
-      t.write(buf + '\n\n' + ctx + '\r');
+      sendPromptToTerm(t, '\n\n' + ctx); // appended at the caret, then Enter in its own write — the TUI swallows an Enter written with the text
     } else {
       t.write('\r');
     }
@@ -3898,6 +3922,9 @@ function featureAgentArgs(cwd) {
     + 'end your reply with a line: PEER-SEND AgentName@target: followed by the message you compose (it may continue to the end of your reply). '
     + 'Use target me for an agent in this same Overlord, or the peer machine name for an agent on a teammates machine. '
     + 'Only do this when the user asks you to message another agent. Never use SendMessage or teammate mentions for cross-Overlord messaging.');
+  notes.push('Overlord agent watch: when the user asks you to do something once another agent in this Overlord is done, '
+    + 'end your reply with a line: WHEN-DONE @AgentName: followed by what to do then (it may continue to the end of your reply). '
+    + 'Overlord sends it back to you, with the final message of that agent, when its turn ends. One-shot: write it again to keep watching.');
   const note = notes.join(' ').replace(/"/g, "'").replace(/[\r\n]+/g, ' ').replace(/%/g, 'pct');
   return { flags: `${addDirs}${note ? ` --append-system-prompt "${note}"` : ''}`, env };
 }
@@ -4070,7 +4097,7 @@ function handleIpc(msg) {
     case 'previewSetDevice': if (preview) preview.setDevice(msg.device); break;
     case 'previewSendErrors': if (preview) preview.sendErrors(msg.id); break;
     case 'previewClearErrors': if (preview) preview.clearErrors(msg.id); break;
-    case 'termInput': handleTermInput(msg.id, msg.data); break;
+    case 'termInput': handleTermInput(msg.id, msg.data, msg.prompt); break;
     case 'ghostComplete': ghostComplete(msg.id, msg.reqId, msg.prefix, msg.context); break;
     case 'stopLoop': { const a = agents.get(msg.id); if (a) { a.cronCount = 0; send({ type: 'looping', id: msg.id, active: false, count: 0 }); } const t = terminals.get(msg.id); if (t) t.write('\x03'); break; }
     case 'compactAgent': { const a = agents.get(msg.id); const t = terminals.get(msg.id); if (a && t && a.isWaiting) { a.compacting = true; send({ type: 'compacting', id: msg.id, active: true }); t.write('/compact\r'); } break; }
@@ -5170,7 +5197,7 @@ function injectPeerMessage(agentId, env) {
   // @mention would bounce a duplicate send on the injected Enter. Always paste
   // the actual text (no temp-file spillover — that mechanism is for human
   // pastes); the TUI collapses a long paste visually but submits it in full.
-  const text = pc.buildPeerHeader(env);
+  const text = env.header || pc.buildPeerHeader(env);
   const paste = '\x1b[200~' + text + '\x1b[201~';
   writePtyChunked(t, paste);
   const settleMs = Math.ceil(paste.length / 1024) * 8 + 80; // after the last chunk lands
@@ -5201,7 +5228,7 @@ function injectPeerMessage(agentId, env) {
 
 // Transcript confirmed the injected message arrived as a real prompt.
 function confirmPeerInjection(a, txt) {
-  if (a && a._injectVerify && typeof txt === 'string' && txt.startsWith('[Peer message from')) {
+  if (a && a._injectVerify && typeof txt === 'string' && (txt.startsWith('[Peer message from') || txt.startsWith(wc.HEADER))) {
     clearTimeout(a._injectVerify.timer);
     a._injectVerify = null;
   }
@@ -5272,6 +5299,36 @@ function scanPeerSend(id, a, text) {
   if (!conn) { send({ type: 'toast', text: `✕ ${a.agentName || 'Agent'} tried to message ${p.target} — not connected` }); return; }
   sendPeerEnvelope(conn, env, conn.name);
   send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} sent a message to @${p.agentName} on ${conn.name}` });
+}
+
+// WHEN-DONE watches: one-shot, in memory (lost on Overlord restart).
+// ponytail: no persistence/UI; add when watches need to survive restarts or be cancelled.
+let watches = []; // { watcherId, targetId, task }
+
+function scanWhenDone(id, a, text) {
+  const p = wc.parseWhenDone(text);
+  if (!p) return;
+  const targetId = findLocalAgentByName(p.agentName);
+  if (targetId === null || targetId === id) { send({ type: 'toast', text: `✕ ${a.agentName || 'Agent'} can't watch @${p.agentName} — ${targetId === null ? 'no such agent' : 'that is itself'}` }); return; }
+  const t = agents.get(targetId);
+  flog(`agent ${id} WHEN-DONE → @${p.agentName} (agent ${targetId})`);
+  if (t.isWaiting && wc.turnIsDone(t.fullText)) { injectWatch(id, t, p.task, true); return; }
+  watches.push({ watcherId: id, targetId, task: p.task });
+  send({ type: 'toast', text: `👁 ${a.agentName || 'Agent'} is waiting for @${p.agentName} to finish` });
+}
+
+function fireWatches(targetId, t) {
+  if (!wc.turnIsDone(t.fullText)) return;
+  const due = watches.filter(w => w.targetId === targetId);
+  if (!due.length) return;
+  watches = watches.filter(w => w.targetId !== targetId);
+  for (const w of due) if (agents.has(w.watcherId)) injectWatch(w.watcherId, t, w.task, false);
+}
+
+function injectWatch(watcherId, t, task, alreadyIdle) {
+  const name = t.agentName || 'agent';
+  queuePeerInjection(watcherId, { id: 'watch-' + Date.now(), hop: 0, header: wc.buildWatchMessage(name, task, t.fullText, alreadyIdle) });
+  send({ type: 'toast', text: `👁 @${name} is done — handed off to ${(agents.get(watcherId) || {}).agentName || 'its watcher'}` });
 }
 
 function flushPeerMsgs(id) {

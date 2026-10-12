@@ -108,7 +108,7 @@
     detail.hidden = stage !== 'list';
     detail.style.visibility = it ? '' : 'hidden'; // no match: keep the pane's space so the card doesn't shrink
     if (!it) return;
-    const where = it.origin === 'builtin' ? 'Built into Claude Code' : tilde(it.path);
+    const where = it.origin === 'builtin' ? 'Built into Claude Code' : it.origin === 'overlord' ? 'Overlord agent · ' + tilde(it.path) : tilde(it.path);
     const note = it.overrides ? '<span class="cg-badge">overrides ~/.claude</span>'
       : it.shadowed ? '<span class="cg-badge dim">hidden by this repo’s copy</span>' : '';
     const runs = !it.insert ? '<span class="cg-badge dim">runs on its own — nothing to insert</span>' : '';
@@ -116,8 +116,12 @@
       + `<div class="cg-d-desc">${esc(it.desc || 'No description.')}</div><div class="cg-d-path" title="${esc(it.path || '')}"><bdi>${esc(where)}</bdi></div>`;
   }
 
+  // The other agents running in this Overlord, under Agents: picking one types "@Name " (a line that starts with it is sent to that agent).
+  const liveAgents = () => [...agents].filter(([id, a]) => a.agentName && !a.archived && id !== selectedId)
+    .map(([, a]) => ({ type: 'agent', origin: 'overlord', group: 'Running in Overlord', name: a.agentName, desc: a.title || '', insert: '@' + a.agentName + ' ', path: a.cwd, hint: agentStatus(a) }));
+
   function render() {
-    const items = cache.get(cwd);
+    const cached = cache.get(cwd), items = cached && [...liveAgents(), ...cached];
     const query = q.value.trim();
     if (stage === 'types' && query) { stage = 'list'; type = null; sel = 0; }
     const t = TYPES.find(x => x.type === type);

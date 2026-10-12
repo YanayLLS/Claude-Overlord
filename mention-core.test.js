@@ -31,3 +31,20 @@ test('members normalise from the team payload', () => {
   const ms = normalizeMembers({ members: [{ user: { id: 7, username: 'Zed', email: 'z@x', color: '#f00', profilePicture: null, initials: 'ZD' } }, { user: { id: 3, username: 'Amy' } }, { user: null }] });
   assert.deepStrictEqual(ms.map(m => [m.id, m.name, m.initials]), [['3', 'Amy', 'AM'], ['7', 'Zed', 'ZD']]);
 });
+
+test('agent @names in a terminal line', () => {
+  const { agentMentions } = require('./mention-core');
+  assert.deepStrictEqual(agentMentions('> tell @Zephyr and @nova, not @Bob or a@Zephyr', ['Zephyr', 'Nova']), [{ start: 7, len: 7 }, { start: 19, len: 5 }]);
+  assert.deepStrictEqual(agentMentions('@Zephyr@me hi', ['Zephyr']), [{ start: 0, len: 7 }]);
+  assert.deepStrictEqual(agentMentions('@Zephyrs', ['Zephyr']), []);
+});
+
+test('a prompt that starts with @Name is addressed to those agents', () => {
+  const { leadingAgentMentions: lead } = require('./mention-core');
+  const names = ['Pike', 'Rio'];
+  assert.deepStrictEqual(lead('@mijnvais @pike what is agents?', names), { names: ['Pike'], unknown: ['mijnvais'], body: 'what is agents?' });
+  assert.deepStrictEqual(lead('  @Pike, @Rio, @pike hi\nthere', names), { names: ['Pike', 'Rio'], unknown: [], body: 'hi\nthere' });
+  assert.strictEqual(lead('when @Pike is done, review it', names), null);
+  assert.strictEqual(lead('@Pike   ', names), null);
+  assert.strictEqual(lead('@Bob hi', names), null);
+});
