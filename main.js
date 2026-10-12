@@ -540,7 +540,7 @@ function sendFullState() {
   if (settings.prCache) send({ type: 'prList', ...settings.prCache, error: null });
   if (settings.actionsCache) send({ type: 'actionsList', runs: settings.actionsCache, error: null });
   for (const [id, a] of agents) {
-    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false });
+    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, account: a.account || null });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
@@ -1100,7 +1100,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null, servers: [...(serverPorts.get(a.id) || [])] });
+    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, account: a.account || null, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null, servers: [...(serverPorts.get(a.id) || [])] });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -1224,7 +1224,7 @@ function restoreAgents(state) {
       lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', aiTitle: entry.aiTitle || '', customName: customName || false,
       promptHistory: entry.promptHistory || [], titlePending: false, createdAt: createdAt || Date.now(),
       crashCount: 0, cronCount: entry.cronCount || 0, compacting: false, orphanAlive: false, agentName: agentName, spinnerText: '',
-      archived: entry.archived || false,
+      archived: entry.archived || false, account: entry.account || null,
       stats: savedStats,
     };
     // ponytail: one sync JSONL read per agent, only until aiTitle is in saved state
@@ -1421,6 +1421,7 @@ function handleTermExit(id, exitCode) {
   if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
   // If we're retrying due to --resume failure, don't treat as crash or send termExit
   if (a._resumeFailed && a._resumeRetrying) { a._resumeRetrying = false; return; }
+  if (a._accountRespawn) { a._accountRespawn = false; spawnTerminal(id); return; } // pinned to another login: resume on it
   // Archiving kills the pty on purpose. Without this, the non-zero exit reads as a crash
   // and auto-resume would respawn the terminal for the agent that was just archived.
   if (a.archived) return;
@@ -1530,8 +1531,10 @@ function doSpawnTerminal(id, attached) {
   // /c, not /k: /k left cmd.exe alive after Claude died, so the pty never exited and
   // crashes went unnoticed (no auto-resume). /c exits with Claude's own exit code.
   const args = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
+  const acctEnv = attached ? {} : agentAccountEnv(a);
+  if (!acctEnv) return spawnAfterAgentLogin(id);
   try {
-    const proc = attached || agentPty().spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env }) });
+    const proc = attached || agentPty().spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env, ...acctEnv }) });
     terminals.set(id, proc);
     // ponytail: an adopted pty's Remote Control state is unknown; assume the setting. Toggling off/on fixes a stray one.
     if (!attached || a.rc === undefined) a.rc = settings.remoteControl !== false;
@@ -3253,6 +3256,64 @@ function getCurrentAccountInfo() {
   };
 }
 
+// ── Agents pinned to another saved login (account-core.js) ──
+const acctCore = require('./account-core');
+const findAccount = (data, label) => data.accounts.find(x => x.label === label);
+// Env for an agent's claude: {} = Overlord's own login, null = pinned but no token yet.
+function agentAccountEnv(a) {
+  if (!a.account) return {};
+  const t = acctCore.validToken(findAccount(loadAccounts(), a.account)?.agentToken, Date.now());
+  return t ? { CLAUDE_CODE_OAUTH_TOKEN: t } : null;
+}
+// The browser sign-in `claude setup-token` does, minting a 1-year token for that login.
+let _agentLogin = null; // one at a time
+function loginAgentToken(label) {
+  if (_agentLogin) return _agentLogin;
+  const acct = findAccount(loadAccounts(), label);
+  if (!acct) return Promise.resolve(false);
+  _agentLogin = new Promise((resolve) => {
+    let login = null;
+    const finish = (ok) => { clearTimeout(timer); server.close(); _agentLogin = null; resolve(ok); };
+    const server = http.createServer(async (req, res) => {
+      const u = new URL(req.url, 'http://localhost');
+      if (u.pathname !== '/callback') { res.writeHead(404); return res.end(); }
+      const code = u.searchParams.get('code');
+      if (!login || u.searchParams.get('state') !== login.state || !code) { res.writeHead(400); res.end('Sign-in failed. Try again from Overlord.'); return finish(false); }
+      try {
+        const tok = await acctCore.exchangeCode(login, code);
+        const data = loadAccounts(), cur = findAccount(data, label);
+        if (cur) { cur.agentToken = tok; saveAccountsFile(data); }
+        res.writeHead(302, { location: acctCore.SUCCESS_URL }); res.end();
+        finish(true);
+      } catch (e) { flog('agent token exchange failed:', e); res.writeHead(500); res.end('Sign-in failed: ' + e.message); finish(false); }
+    });
+    const timer = setTimeout(() => finish(false), 5 * 60000);
+    server.listen(0, '127.0.0.1', () => { login = acctCore.newLogin(server.address().port, acct.email); shell.openExternal(login.url).catch(() => finish(false)); });
+  });
+  return _agentLogin;
+}
+function spawnAfterAgentLogin(id) {
+  const a = agents.get(id);
+  send({ type: 'termData', id, data: `\x1b[33m[Sign in as ${a.account} in the browser to run this agent on that account\u2026]\x1b[0m\r\n` });
+  loginAgentToken(a.account).then((ok) => {
+    if (!agents.has(id) || terminals.has(id)) return;
+    if (!ok) { // back to the main login rather than looping on the browser
+      a.account = null; saveState();
+      send({ type: 'agentAccount', id, account: null });
+      send({ type: 'termData', id, data: '\x1b[31m[Sign-in failed \u2014 running on the main account]\x1b[0m\r\n' });
+    }
+    doSpawnTerminal(id);
+  });
+}
+// Another login's usage, read with an 8h token from its saved refresh token.
+async function accountUsage(label) {
+  const data = loadAccounts(), acct = findAccount(data, label);
+  if (!acct) return null;
+  let t = acctCore.validToken(acct.usageToken, Date.now());
+  if (!t) { t = await acctCore.mintUsageToken(acct); saveAccountsFile(data); }
+  return requestOauthUsage(t);
+}
+
 // Usage comes from the OAuth usage endpoint first (one GET, every bucket incl. per-model caps,
 // no tokens spent — what Claude Code's /usage screen reads). It is undocumented, so any failure
 // falls back to the 1-token header probe below, which only sees the buckets of the model it calls.
@@ -3265,34 +3326,40 @@ function fetchUsage() {
     return;
   }
   usageInFlight = true;
-  let settled = false; // destroy() on timeout also raises 'error': fall back exactly once
-  const fallback = (why) => { if (settled) return; settled = true; if (!usageEndpointFailed) { usageEndpointFailed = true; console.log('[Overlord] Usage endpoint ' + why + ' — falling back to the header probe'); } fetchUsageFromHeaders(apiKey); };
-  const req = https.request({
-    hostname: 'api.anthropic.com',
-    path: '/api/oauth/usage',
-    method: 'GET',
-    headers: { 'authorization': `Bearer ${apiKey}`, 'anthropic-beta': 'oauth-2025-04-20', 'accept': 'application/json' },
-    timeout: USAGE_TIMEOUT_MS,
-  }, (res) => {
-    let data = '';
-    res.on('data', (chunk) => { data += chunk; });
-    res.on('end', () => {
-      let usage = null;
-      if (res.statusCode === 200) { try { usage = parseOauthUsage(JSON.parse(data)); } catch (e) { usage = null; } }
-      if (usage) {
-        settled = true;
-        usageInFlight = false;
-        usage.fetchedAt = Date.now();
-        lastUsage = usage;
-        recordUsage(usage);
-        send({ type: 'usage', usage });
-        console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
-      } else fallback('gave ' + res.statusCode);
-    });
+  requestOauthUsage(apiKey).then((usage) => {
+    usageInFlight = false;
+    usage.fetchedAt = Date.now();
+    lastUsage = usage;
+    recordUsage(usage);
+    send({ type: 'usage', usage });
+    console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
+  }, (e) => {
+    if (!usageEndpointFailed) { usageEndpointFailed = true; console.log('[Overlord] Usage endpoint ' + e.message + ' — falling back to the header probe'); }
+    fetchUsageFromHeaders(apiKey);
   });
-  req.on('error', (e) => fallback('error: ' + e.message));
-  req.on('timeout', () => { req.destroy(); fallback('timed out'); });
-  req.end();
+}
+// One GET of the usage endpoint; rejects on anything but a parsed 200.
+function requestOauthUsage(token) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/api/oauth/usage',
+      method: 'GET',
+      headers: { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'accept': 'application/json' },
+      timeout: USAGE_TIMEOUT_MS,
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        let usage = null;
+        if (res.statusCode === 200) { try { usage = parseOauthUsage(JSON.parse(data)); } catch {} }
+        if (usage) resolve(usage); else reject(new Error('gave ' + res.statusCode));
+      });
+    });
+    req.on('error', (e) => reject(new Error('error: ' + e.message)));
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.end();
+  });
 }
 // The original probe: a 1-token Haiku call whose rate-limit response headers carry the unified buckets.
 function fetchUsageFromHeaders(apiKey) {
@@ -4716,6 +4783,21 @@ function handleIpc(msg) {
       send({ type: 'usageHistory', since, points: (loadUsageHistory()[usageAccountKey()] || []).filter(p => p.t >= since) });
       break;
     }
+    case 'setAgentAccount': { // pin an agent to another saved login; the active login = unpin
+      const a = agents.get(msg.id);
+      if (!a) break;
+      const data = loadAccounts();
+      const label = msg.label && msg.label !== data.activeLabel && findAccount(data, msg.label) ? msg.label : null;
+      if ((a.account || null) === label) break;
+      a.account = label; saveState();
+      send({ type: 'agentAccount', id: a.id, account: label });
+      const t = terminals.get(a.id);
+      if (t) { a._crashNudge = !a.isWaiting; a._accountRespawn = true; killPty(t); } // resume the same chat on the new login
+      break;
+    }
+    case 'fetchAccountUsage':
+      accountUsage(msg.label).then(usage => send({ type: 'accountUsage', label: msg.label, usage }), (e) => { flog('account usage failed:', e); send({ type: 'accountUsage', label: msg.label, usage: null }); });
+      break;
     case 'getAccountInfo': send({ type: 'accountInfo', ...getCurrentAccountInfo() }); break;
     case 'saveAccount': {
       const data = loadAccounts();
@@ -4726,7 +4808,7 @@ function handleIpc(msg) {
       const label = msg.label || email || `Account ${data.accounts.length + 1}`;
       const entry = { label, email, meta, credentials: creds };
       const idx = data.accounts.findIndex(a => (email && a.email === email) || a.label === label);
-      if (idx >= 0) data.accounts[idx] = entry;
+      if (idx >= 0) data.accounts[idx] = { ...data.accounts[idx], ...entry }; // keeps its agent/usage tokens
       else data.accounts.push(entry);
       data.activeLabel = label;
       saveAccountsFile(data);

@@ -585,6 +585,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   background:var(--title-bg); font-size:11px; color:var(--dim); gap:3px; letter-spacing:.3px; cursor:pointer;
 }
 #summary-bar.show { display:flex; }
+.usage-accts { display:flex; gap:10px; font-size:10px; }
+.usage-accts span { opacity:.55; }
+.usage-accts span:hover { opacity:.85; }
+.usage-accts span.on { opacity:1; color:var(--accent); }
 #summary-bar .pace-ok { color:var(--green); }
 #summary-bar .pace-warn { color:var(--yellow); }
 #summary-bar .pace-over { color:var(--red); }
@@ -2373,6 +2377,14 @@ function clearCustomName(id) {
   api.send({ type: 'clearCustomName', id });
   scheduleRender();
 }
+// "Run as <login>" for every other saved login; shown only with more than one. The active login is the main one.
+function runAsItems(a, id) {
+  const info = _accountInfo || {}, accts = info.accounts || [];
+  if (!a || accts.length < 2) return [];
+  const cur = a.account || info.activeLabel;
+  return accts.filter(x => x.label !== cur).map(x => ({ label: 'Run as ' + (x.email || x.label) + (x.label === info.activeLabel ? ' (main)' : ''), action: () => api.send({ type: 'setAgentAccount', id, label: x.label }) }));
+}
+function termAgentLabel(a) { return [a.agentName ? '@' + a.agentName : '', a.account ? 'as ' + a.account : ''].filter(Boolean).join(' · '); }
 function showAgentMenu(e, id) {
   const old = document.getElementById('agent-ctx-menu');
   if (old) old.remove();
@@ -2388,6 +2400,7 @@ function showAgentMenu(e, id) {
     { label: 'Duplicate', action: () => duplicateAgent(id) },
     { label: 'Export transcript', action: () => exportAgent(id) },
     ...((peersState.peers || []).some(p => p.connected) ? [{ label: 'Message a peer agent…', action: () => openPeerMsgModal(id) }] : []),
+    ...runAsItems(a, id),
     { sep: true },
     { label: 'Archive', action: () => archiveAgent(id) },
     { label: 'Close', action: () => closeAgent(id), cls: 'ctx-danger' },
@@ -2981,46 +2994,50 @@ function render() {
   // One compact meter per cap: label + % on top, a hairline bar below; reset time lives in the tooltip.
   function usageMeterHTML(label, pct, resetTs, includeDate, extra = '', key = '') {
     const cls = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
-    return `<div class="usage-meter" data-meter="${escAttr(key)}">
+    return `<div class="usage-meter"${key ? ` data-meter="${escAttr(key)}"` : ''}>
       <div class="um-top"><span class="um-label">${label}${extra}</span><span class="um-pct ${cls}">${Math.round(pct)}%</span></div>
       <div class="um-track"><div class="um-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
     </div>`;
   }
 
-  let barHtml = '';
+  const accts = (_accountInfo && _accountInfo.accounts) || [], mainLabel = _accountInfo && _accountInfo.activeLabel;
+  if (usageView && (usageView === mainLabel || !accts.some(x => x.label === usageView))) usageView = null;
+  const u = usageView ? otherUsage[usageView] : currentUsage;
+  let barHtml = accts.length > 1 ? '<div class="usage-accts">' + accts.map(x => { const main = x.label === mainLabel, on = main ? !usageView : usageView === x.label;
+    return `<span class="${on ? 'on' : ''}" data-acct="${escAttr(main ? '' : x.label)}" title="${escAttr((x.email || x.label) + (main ? ' (main)' : ''))}">${esc((x.email || x.label).split('@')[0])}</span>`; }).join('') + '</div>' : '';
   const tip = [];
-  if (currentUsage && (currentUsage.hourly != null || currentUsage.weekly != null)) {
+  if (u && (u.hourly != null || u.weekly != null)) {
     let pace = '';
-    if (currentUsage.weekly != null && currentUsage.weeklyReset) {
-      const daysLeft = (currentUsage.weeklyReset - Date.now()) / 86400000;
+    if (u.weekly != null && u.weeklyReset) {
+      const daysLeft = (u.weeklyReset - Date.now()) / 86400000;
       const daysElapsed = 7 - daysLeft;
       if (daysElapsed > 0.01 && daysLeft > 0) {
         const expectedPct = (daysElapsed / 7) * 100;
-        const actual = currentUsage.weekly;
+        const actual = u.weekly;
         const paceClass = actual <= expectedPct * 0.85 ? 'pace-ok' : actual <= expectedPct * 1.1 ? 'pace-warn' : 'pace-over';
         pace = `<span class="um-pace ${paceClass}">${actual <= expectedPct * 1.1 ? 'on track' : 'too fast'}</span>`;
         tip.push(`Week: ${actual.toFixed(1)}% used, ${expectedPct.toFixed(1)}% expected by now`);
       }
     }
-    if (currentUsage.hourly != null) barHtml += usageMeterHTML('Session', currentUsage.hourly, currentUsage.hourlyReset, false, '', 'h');
-    if (currentUsage.weekly != null) barHtml += usageMeterHTML('Week', currentUsage.weekly, currentUsage.weeklyReset, true, pace, 'w');
+    if (u.hourly != null) barHtml += usageMeterHTML('Session', u.hourly, u.hourlyReset, false, '', usageView ? '' : 'h');
+    if (u.weekly != null) barHtml += usageMeterHTML('Week', u.weekly, u.weeklyReset, true, pace, usageView ? '' : 'w');
     // Per-model weekly caps (Fable, Opus, …) get their own meter.
-    for (const m of currentUsage.modelWeekly || []) {
-      barHtml += usageMeterHTML(modelLabel(m.model), m.pct, m.reset || currentUsage.weeklyReset, true, '', 'm:' + m.model);
+    for (const m of u.modelWeekly || []) {
+      barHtml += usageMeterHTML(modelLabel(m.model), m.pct, m.reset || u.weeklyReset, true, '', usageView ? '' : 'm:' + m.model);
     }
-    if (currentUsage.fetchedAt) {
-      const ago = Math.round((Date.now() - currentUsage.fetchedAt) / 1000);
+    if (u.fetchedAt) {
+      const ago = Math.round((Date.now() - u.fetchedAt) / 1000);
       tip.push('Updated ' + (ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`));
     }
   } else {
-    barHtml = `<div class="usage-empty">Usage: click to fetch</div>`;
+    barHtml += `<div class="usage-empty">${usageView && otherUsage[usageView] === null ? 'Usage unavailable — click to retry' : usageView && !(usageView in otherUsage) ? 'Loading usage…' : 'Usage: click to fetch'}</div>`;
   }
   tip.push(`${agentCount} agent${agentCount !== 1 ? 's' : ''}${activeCount > 0 ? `, ${activeCount} active` : ''}`, 'Click to refresh');
   // With meters, each has its own chart tooltip; the bar-wide one would stack on top of it.
   // tooltip.js moves title into data-tip, so both go.
-  if (currentUsage) { bar.removeAttribute('title'); delete bar.dataset.tip; } else bar.title = tip.join('\n');
+  if (u) { bar.removeAttribute('title'); delete bar.dataset.tip; } else bar.title = tip.join('\n');
   bar.innerHTML = barHtml;
-  bar.onclick = (e) => { const m = e.target.closest('[data-meter]'); if (m) openUsageModal(m.dataset.meter); else refreshUsage(); };
+  bar.onclick = (e) => { const s = e.target.closest('[data-acct]'); if (s) return setUsageView(s.dataset.acct || null); const m = e.target.closest('[data-meter]'); if (m) openUsageModal(m.dataset.meter); else if (usageView) setUsageView(usageView); else refreshUsage(); };
   bar.classList.add('show');
   if (worldView) worldSync();
 }
@@ -3456,7 +3473,7 @@ function openTerm(id) {
   const namePrefix = a.agentName ? a.agentName + ' \u2014 ' : '';
   document.getElementById('term-title').textContent = namePrefix + title + ' \u2014 ' + pathLabel(a.cwd || '');
   document.getElementById('term-name-chip').textContent = title; // no agentName prefix
-  document.getElementById('term-agent-name').textContent = a.agentName ? '@' + a.agentName : '';
+  document.getElementById('term-agent-name').textContent = termAgentLabel(a);
   if (!xterms.has(id)) createXterm(id);
   if (termTab === 'terminal') showXterm(id);
   // Update prompt nav after xterm exists and buffer has time to populate
@@ -3952,7 +3969,7 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', archived: msg.archived || false });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', archived: msg.archived || false, account: msg.account || null });
       if (msg.cwd) addKnownProject(msg.cwd);
       // An agent born from a quest's Attack on a building: the ticket is its from the first prompt.
       if (isNew && pendingAssign && pendingAssign.cwd === msg.cwd && Date.now() - pendingAssign.at < 20000) { const pt = clickupState.tasks.find(x => x.id === pendingAssign.taskId); assignTicket(pendingAssign.taskId, msg.id, msg.cwd); if (pt) setTimeout(() => api.send({ type: 'renameAgent', id: msg.id, name: '⚔ ' + pt.name.slice(0, 48), quiet: true }), 2000); pendingAssign = null; }
@@ -4067,7 +4084,7 @@ function handleAgentMsg(msg) {
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = -1; /* -1 = at bottom; the buffer scan owns the real range */ if (selectedId === msg.id) updatePromptNav(); } break; }
     case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
-    case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = '@' + msg.agentName; scheduleRender(); } break; }
+    case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = termAgentLabel(a); scheduleRender(); } break; }
     case 'stats': { const a = agents.get(msg.id); if (a) { if (msg.stats.effort !== a.stats?.effort) agentEffort.delete(msg.id); a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
     case 'focused': selectedId = msg.id; scheduleRender(); break;
@@ -4193,6 +4210,8 @@ function handleAgentMsg(msg) {
     case 'usageCost': usageCost = msg.cost; scheduleRender(); renderUsageModal(); break;
     case 'usageHistory': handleUsageHistory(msg.points, msg.since); break;
     case 'accountInfo': handleAccountInfo(msg); break;
+    case 'agentAccount': { const a = agents.get(msg.id); if (a) { a.account = msg.account; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = termAgentLabel(a); } break; }
+    case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
@@ -4290,6 +4309,7 @@ function handleAccountInfo(msg) {
     btn.classList.add('no-account');
     btn.title = 'No credentials — run claude in a terminal to login';
   }
+  scheduleRender(); // the usage bar's login switcher
 }
 
 function showAccountMenu(e) {
@@ -4394,6 +4414,9 @@ function handleUsage(usage) {
   scheduleRender();
 }
 function refreshUsage() { api.send({ type: 'fetchUsage' }); }
+// The usage bar can show another saved login's usage without switching Overlord's login.
+let usageView = null; const otherUsage = {}; // label -> usage, null = failed
+function setUsageView(label) { usageView = label; if (label) { delete otherUsage[label]; api.send({ type: 'fetchAccountUsage', label }); } scheduleRender(); }
 
 // ── Usage charts: hover a meter for its chart, click for a bigger one. History is per account, kept by main.
 let usageHist = [];
