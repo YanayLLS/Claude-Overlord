@@ -134,6 +134,13 @@
       render();
     },
     releaseGo: () => {
+      if (relHot) {
+        const picked = prodPlan().filter(p => !relSkip.has(p.repo));
+        if (!picked.length || picked.some(p => !relSrc.get(`${p.repo}|prod`)) || busyLabel('release')) return;
+        localBusy.set('release', { label: 'Starting…', at: Date.now() }); render();
+        return api.send({ type: 'releasesRelease', envs: ['prod'], repos: picked.map(p => p.repo), of: picked.length, separate: true, hotfix: true,
+          sources: Object.fromEntries(picked.map(p => [`${p.repo}|prod`, relSrc.get(`${p.repo}|prod`)])) });
+      }
       if (!relSel.size) return;
       // runs in main without an agent; the panel turns into its live results. Unticked repos stay out
       const all = [...new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo))];
@@ -149,6 +156,13 @@
     // the Board cell's "Release just this": the picker set to this repo and env
     relJust: (el) => { relSel = new Set([el.dataset.env]); relSkip = new Set(ReleasesCore.releasePlan(state.config, [el.dataset.env]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); relOpen = true; tab = 'release'; sel = null; render(); },
     relSep: () => { relSeparate = !relSeparate; render(); },
+    // 🩹 Hotfix: the picker switches to prod only, nothing ticked; back to the full release restores your envs
+    relHot: () => {
+      relHot = !relHot;
+      if (relHot) { relSkip = new Set(prodPlan().map(p => p.repo)); askBranches(prodPlan()); }
+      else { relSkip = new Set(); openPicker(); }
+      render();
+    },
     relAdv: () => {
       relAdv = !relAdv;
       try { localStorage.setItem('rl-rel-adv', relAdv ? '1' : '0'); } catch {}
@@ -677,6 +691,9 @@
   // Advanced mode: every repo of the picked envs (not only those with work waiting), each from a branch you pick
   let relAdv = false; try { relAdv = localStorage.getItem('rl-rel-adv') === '1'; } catch {}
   const relSrc = new Map(); // 'owner/repo|env' → source branch typed or picked (absent = its usual source)
+  // Hotfix mode: prod only, just the repos you tick, each from the branch with the fix; its own hotfix release
+  let relHot = false;
+  const prodPlan = () => ReleasesCore.releasePlan(state.config, ['prod']).prs;
   const asked = new Set(); // repos whose branches were asked for (once a session; main caches them)
   const askBranches = (prs) => { for (const r of new Set(prs.map(p => p.repo))) if (!asked.has(r)) { asked.add(r); api.send({ type: 'releasesBranches', repo: r }); } };
   const openChanges = new Set(); // History rows whose "N changes" list is open
@@ -992,11 +1009,12 @@
   // to GitHub: team maintainers can add/remove here, everyone else sees the list.
   // Why Release is off for this person, and who can change that
   // Start release: approvers only (and a recent enough Overlord); for anyone else it stays visible, locked, saying why
-  function startBtn(s) {
+  function startBtn(s, { hot = false, ok = true } = {}) {
     const why = s.config && s.config.minOverlord && s.appVersion && !ReleasesCore.versionAtLeast(s.appVersion, s.config.minOverlord)
       ? `Update Overlord to ${s.config.minOverlord} or later to release (this is ${s.appVersion}): older versions miss release rules`
       : s.approvers && s.approvers.me && !s.approvers.isApprover ? releaseLockedTip(s.approvers) : null;
-    if (why) return `<button class="go locked" aria-disabled="true" title="${esc(why)}">🔒 Start release</button>`;
+    if (why) return `<button class="go locked" aria-disabled="true" title="${esc(why)}">🔒 Start ${hot ? 'hotfix' : 'release'}</button>`;
+    if (hot) return `<button class="go" data-act="releaseGo"${ok ? '' : ' disabled'}>🩹 Start hotfix</button>`;
     return `<button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release</button>`;
   }
   function releaseLockedTip(a) {
@@ -1154,7 +1172,29 @@
 
   // Release picker: one toggle per env the config promotes into, with what's waiting for it;
   // the footer says what the agent will do (PRs to open, hand-deployed envs to report).
+  // the picker in Hotfix mode
+  function hotfixPickerHtml(s) {
+    const prs = prodPlan(), brs = s.branches || {};
+    const picked = prs.filter(p => !relSkip.has(p.repo)), missing = picked.filter(p => !relSrc.get(`${p.repo}|prod`));
+    const fromDev = picked.filter(p => relSrc.get(`${p.repo}|prod`) === p.source);
+    let h = '<div class="rl-rel-pop still"><div class="rl-rel-head"><span>🩹 Hotfix → <span class="rl-env" style="--hue:' + (ENV_HUE.prod || 'var(--dim)') + '">prod</span></span></div>'
+      + '<div class="rl-rel-note">Ships just the repos you tick, each from the branch with the fix (usually one branched off prod). Its own release: it never joins the pending one, and needs its own 2 signatures.</div>'
+      + '<div class="rl-rel-head rl-rel-repos-head"><span>Repos · fix branch</span></div><div class="rl-rel-repos">'
+      + prs.map((p, i) => {
+        const k = `${p.repo}|prod`, v = relSrc.get(k) || '', on = !relSkip.has(p.repo);
+        return `<div class="rl-rel-repo-row adv"><button class="rl-rel-repo${on ? ' on' : ''}" data-act="relRepo" data-repo="${esc(p.repo)}"><i></i><b>${esc(p.label)}</b><span>${esc(p.target)}</span></button>`
+          + `<input class="rl-rel-src${on && !v ? ' need' : v ? ' custom' : ''}" data-src="${esc(k)}" list="rl-hb-${i}" value="${esc(v)}" placeholder="branch with the fix" spellcheck="false" title="${esc(`The branch ${p.label}'s fix is on: its PR goes into ${p.target}`)}">`
+          + `<datalist id="rl-hb-${i}">${(brs[p.repo] || []).filter(b => b !== p.target).map(b => `<option value="${esc(b)}">`).join('')}</datalist><span></span></div>`;
+      }).join('') + '</div>';
+    if (fromDev.length) h += `<div class="rl-rr-flag warn">⚠ ${fromDev.map(p => esc(p.label)).join(', ')} from ${esc(fromDev[0].source)}: that ships everything waiting there, not just a fix. A full release does that.</div>`;
+    const why = !picked.length ? 'Tick the repos the fix is in' : missing.length ? `Pick the fix branch for ${missing.map(p => p.label).join(', ')}` : '';
+    h += `<div class="rl-rel-sum">${why ? esc(why) : `${picked.length} hotfix PR${picked.length === 1 ? '' : 's'} into prod: ${esc(picked.map(p => `${p.label} (${relSrc.get(`${p.repo}|prod`)})`).join(', '))}`}</div>`
+      + `<div class="rl-rel-actions"><button data-act="relHot">← Full release</button>${startBtn(s, { hot: true, ok: !why })}</div></div>`;
+    return h;
+  }
+
   function releasePickerHtml(s) {
+    if (relHot) return hotfixPickerHtml(s);
     const cfg = s.config, targets = ReleasesCore.releaseTargets(cfg);
     const waiting = {};
     for (const row of (s.grid && s.grid.rows) || []) for (const c of row.cells || []) for (const n of (c && c.nexts) || []) {
@@ -1227,7 +1267,7 @@
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
       : 'Pick one or more environments') + '</div>'
       + '<div class="rl-rel-note">Overlord opens the release PRs (plus back-merges when needed) and checks each one. Nothing merges until 2 approvers sign and someone presses Release all.</div>'
-      + `<div class="rl-rel-actions">${activeRelease(s) || s.releaseRun ? '<button data-act="releaseClose">Cancel</button>' : ''}${startBtn(s)}</div></div>`;
+      + `<div class="rl-rel-actions">${activeRelease(s) || s.releaseRun ? '<button data-act="releaseClose">Cancel</button>' : ''}<button data-act="relHot" title="Patch prod with just a fix: pick the repos and the branch each fix is on">🩹 Hotfix</button>${startBtn(s)}</div></div>`;
     return h;
   }
 
@@ -1239,7 +1279,7 @@
     const recorded = (r) => items.some(m => m.repos.some(x => x.repo === r.repo && x.pr && r.pr && x.pr.number === r.pr.number));
     const showRun = run && (run.running || run.rows.some(r => (r.pr && !r.merged && !r.closed && !recorded(r)) || r.status === 'blocked' || r.status === 'error'));
     const active = activeRelease(s);
-    if (run && run.running) relOpen = false; // a run just started: its results take the picker's place
+    if (run && run.running) { relOpen = false; relHot = false; } // a run just started: its results take the picker's place
     if (!active && !showRun && !relOpen) openPicker();
     let h = '<div class="rl-reltab">' + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
     if (relOpen) h += releasePickerHtml(s);

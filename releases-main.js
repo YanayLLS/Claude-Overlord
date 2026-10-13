@@ -1128,13 +1128,19 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const names = r.data && r.data.repository ? r.data.repository.refs.nodes.map(n => n.name) : [];
     push({ branches: { ...(state.branches || {}), [repo]: names } });
   }
-  async function release(envs, repos, of, separate = false, sources = null) {
+  async function release(envs, repos, of, separate = false, sources = null, hotfix = false) {
     if (state.busy && state.busy.release) return; // a double click
-    return withBusy('release', 'Starting…', () => releaseNow(envs, repos, of, separate, sources));
+    return withBusy('release', 'Starting…', () => releaseNow(envs, repos, of, separate, sources, hotfix));
   }
   // sources (the picker's Advanced mode): { 'owner/repo|env': branch } — release that repo into that env from
   // this branch instead of its usual source (a fix branched off prod, a branch someone prepared)
-  async function releaseNow(envs, repos, of, separate, sources) {
+  // hotfix (the picker's Hotfix mode): prod only, every repo from its own fix branch, recorded as its own hotfix release
+  async function releaseNow(envs, repos, of, separate, sources, hotfix = false) {
+    if (hotfix) {
+      envs = ['prod']; separate = true;
+      const need = (Array.isArray(repos) ? repos : []).filter(r => !(sources && sources[`${r}|prod`]));
+      if (!repos || !repos.length || need.length) { send({ type: 'toast', text: need.length ? `A hotfix needs the fix branch of: ${need.join(', ')}` : 'Pick the repos the hotfix is in' }); return; }
+    }
     const cfg = state.config;
     const targets = cfg ? releaseTargets(cfg) : [];
     envs = (Array.isArray(envs) ? envs : []).filter(e => targets.includes(e));
@@ -1152,7 +1158,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       // a separate release can't take a repo whose release PR already sits in a pending release (it would just join it)
       const inOther = [];
       for (const m of (state.history && state.history.items) || []) {
-        if (!separate || m.status !== 'pending' || !envs.includes(m.env || 'prod')) continue;
+        if (!separate || hotfix || m.status !== 'pending' || !envs.includes(m.env || 'prod')) continue; // a hotfix PR comes from its own branch: no clash
         const open = m.repos.filter(r => !r.mergeSha && !r.closed);
         for (const r of open) if (only.has(r.repo.toLowerCase()) && open.some(x => !only.has(x.repo.toLowerCase()))) inOther.push(`${r.label} (release ${m.id})`);
       }
@@ -1206,7 +1212,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     // the shared record: this release's manifest in <org>/release-manifests
     const lives = (state.results && state.results.lives) || {};
     shareHealth(run);
-    await history.recordRun(run, { joinPending: !separate, opener: { login: who.github, clickup: who.clickup }, flags: run.flags,
+    await history.recordRun(run, { joinPending: !separate, kind: hotfix ? 'hotfix' : 'release', opener: { login: who.github, clickup: who.clickup }, flags: run.flags,
       manual: run.manual.map(m => ({ ...m, live: lives[`${m.repo}|${m.env}`] && !lives[`${m.repo}|${m.env}`].error
         ? { sha: lives[`${m.repo}|${m.env}`].sha, behind: lives[`${m.repo}|${m.env}`].behind } : null })) }).catch(e => send({ type: 'toast', text: 'Release manifest: ' + e.message }));
     const blocked = run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
@@ -1334,7 +1340,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesRefresh': refresh(); return true;
       // Advanced mode's branch boxes: a repo's branches (one call, cached for the session; ponytail: first 100 — any name can still be typed)
       case 'releasesBranches': branchesOf(msg.repo).catch(() => {}); return true;
-      case 'releasesRelease': release(msg.envs, msg.repos, msg.of, !!msg.separate, msg.sources || null).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
+      case 'releasesRelease': release(msg.envs, msg.repos, msg.of, !!msg.separate, msg.sources || null, !!msg.hotfix).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
       case 'releasesApprovers': loadApprovers().catch(e => push({ approvers: { ...(state.approvers || {}), error: e.message } })); return true;
       case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;

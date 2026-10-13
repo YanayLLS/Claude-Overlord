@@ -605,3 +605,4 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-rel-src { font:inherit; font-size:12px; padding:4px 8px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); color:var(--text); min-width:0; }
 .rl-rel-src::placeholder { color:var(--dim); } .rl-rel-src.custom { border-color:var(--yellow); }
 .rl-rel-to { font-size:11px; color:var(--dim); white-space:nowrap; }
+.rl-rel-src.need { border-color:var(--peach); }
