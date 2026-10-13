@@ -94,7 +94,8 @@
       : head + hits.slice(0, 80).map((b, i) => `<div class="rl-br-row rl-br-opt${i === brHi ? ' hi' : ''}" data-br="${esc(b.name)}" title="${esc(b.name + (b.at ? `\nlast commit ${new Date(b.at).toLocaleString()} by ${b.by}` : '') + (b.pr ? `\nopen PR #${b.pr.n} → ${b.pr.base}` : ''))}">`
           + `<span class="rl-br-name">${brMark(b.name, q)}</span><span class="rl-br-at">${b.at ? esc(age(b.at)) : ''}</span><span class="rl-br-by">${brMark(b.by, q)}</span>`
           + `<span class="rl-br-pr">${b.pr ? `#${b.pr.n} <i>→ ${esc(b.pr.base)}</i>` : ''}</span></div>`).join('')
-        + (hits.length > 80 ? `<div class="rl-br-empty">${hits.length - 80} more · type to narrow</div>` : '');
+        + (hits.length > 80 ? `<div class="rl-br-empty">${hits.length - 80} more · type to narrow</div>` : '')
+        + (state.branchesMore && state.branchesMore[repo] ? `<div class="rl-br-empty"><span class="rl-spin-dot"></span>Loading more branches… (${all.length} so far)</div>` : '');
     const r = inp.getBoundingClientRect(), w = Math.min(560, window.innerWidth - 24);
     brMenu.style.left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12)) + 'px'; brMenu.style.top = (r.bottom + 4) + 'px'; brMenu.style.width = w + 'px';
     brMenu.classList.add('open');

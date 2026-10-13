@@ -56,10 +56,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // Overlord quit mid Release all: say so, offer Resume (it picks up with what's still open)
   if (state.releaseAll && state.releaseAll.running) state.releaseAll = { ...state.releaseAll, running: false, status: 'interrupted', detail: 'Overlord closed mid-release', manualWave: null };
   state.teamRun = null;
+  delete state.branches; delete state.deployEta; // an older Overlord saved these; fetched fresh instead
   let timer = null, inFlight = false;
 
   function persist() {
-    const { loading, branches, deployEta, ...cache } = state; // fetched fresh each session, not worth saving
+    const { loading, branches, branchesMore, deployEta, ...cache } = state; // fetched fresh each session, not worth saving
     try { fs.writeFileSync(file, JSON.stringify({ source: state.source, cache }, null, 2)); } catch {}
   }
   function push(patch) {
@@ -1127,19 +1128,24 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   async function branchesOf(repo) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(String(repo)) || Date.now() - (branchesAt.get(repo) || 0) < 10 * 60 * 1000) return;
     branchesAt.set(repo, Date.now());
-    const names = [];
+    const names = [], [owner, name] = repo.split('/').map(x => JSON.stringify(x));
+    // open PRs in one call (a per-branch associatedPullRequests made every page ~2.5s instead of ~1s)
+    const pr = await ghGraphql(`query { repository(owner: ${owner}, name: ${name}) { pullRequests(states: OPEN, first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { number headRefName baseRefName } } } }`);
+    const prOf = new Map(((pr.data && pr.data.repository && pr.data.repository.pullRequests.nodes) || []).map(n => [n.headRefName, { n: n.number, base: n.baseRefName }]));
     let after = null;
     for (let page = 0; page < 10; page++) { // ponytail: up to 1000 branches; the box still takes any typed name
-      const r = await ghGraphql(`query { repository(owner: ${JSON.stringify(repo.split('/')[0])}, name: ${JSON.stringify(repo.split('/')[1])}) { refs(refPrefix: "refs/heads/", first: 100${after ? `, after: ${JSON.stringify(after)}` : ''}, orderBy: { field: ALPHABETICAL, direction: ASC }) { nodes { name target { ... on Commit { committedDate author { name user { login } } } } associatedPullRequests(first: 1, states: OPEN) { nodes { number baseRefName } } } pageInfo { hasNextPage endCursor } } } }`);
+      const r = await ghGraphql(`query { repository(owner: ${JSON.stringify(repo.split('/')[0])}, name: ${JSON.stringify(repo.split('/')[1])}) { refs(refPrefix: "refs/heads/", first: 100${after ? `, after: ${JSON.stringify(after)}` : ''}, orderBy: { field: ALPHABETICAL, direction: ASC }) { nodes { name target { ... on Commit { committedDate author { name user { login } } } } } pageInfo { hasNextPage endCursor } } } }`);
       const refs = r.data && r.data.repository && r.data.repository.refs;
-      if (!refs) break;
+      if (!refs) { if (!names.length) branchesAt.delete(repo); break; } // failed: the next open retries
       // each with its last commit (when, by whom) and its open PR, for the picker's sortable branch table (1 point a page)
-      names.push(...refs.nodes.map(n => { const c = n.target || {}, a = c.author || {}, pr = n.associatedPullRequests && n.associatedPullRequests.nodes[0];
-        return { name: n.name, at: c.committedDate || null, by: (a.user && a.user.login) || a.name || '', pr: pr ? { n: pr.number, base: pr.baseRefName } : null }; }));
+      names.push(...refs.nodes.map(n => { const c = n.target || {}, a = c.author || {};
+        return { name: n.name, at: c.committedDate || null, by: (a.user && a.user.login) || a.name || '', pr: prOf.get(n.name) || null }; }));
+      // each page shows as it lands; the table says more are coming
+      push({ branches: { ...(state.branches || {}), [repo]: names.slice() }, branchesMore: { ...(state.branchesMore || {}), [repo]: refs.pageInfo.hasNextPage } });
       if (!refs.pageInfo.hasNextPage) break;
       after = refs.pageInfo.endCursor;
     }
-    push({ branches: { ...(state.branches || {}), [repo]: names } });
+    push({ branches: { ...(state.branches || {}), [repo]: names }, branchesMore: { ...(state.branchesMore || {}), [repo]: false } });
   }
   async function release(envs, repos, of, separate = false, sources = null, hotfix = false) {
     if (state.busy && state.busy.release) return; // a double click
