@@ -699,15 +699,15 @@
     return m.version ? `<b>v${esc(m.version)}</b> <span class="rl-dim">${names}</span>` : `<span>${names}</span>`;
   }
   const whenLabel = (iso) => { const d = dayLabel(iso); return `${d === 'Today' || d === 'Yesterday' ? d : d.replace(/,/g, '')} ${hhmm(iso)}`; };
-  function relRow(st, m, signers, open) {
+  function relRow(st, m, signers, open, live) {
     const [tone, word] = relStatus(m), env = m.env || 'prod';
     const small = ['hotfix', 'standalone'].includes(m.kind), dead = tone === 'off';
     const shipped = m.repos.filter(r => r.mergeSha).length;
     const signed = unsignedOf(m)
       ? `<span class="rl-hrow-warn" title="Merged with fewer than 2 approvers' signatures${m.afterTheFact ? ', on GitHub (outside Overlord)' : ''}">⚠ unsigned${m.afterTheFact ? ' (GitHub)' : ''}</span>`
       : env === 'prod' && m.kind !== 'standalone' && signers.length ? signers.map(x => '@' + esc(x)).join(', ') : '<span class="rl-dim">—</span>';
-    return `<tr class="rl-hrow${small ? ' small' : ''}${dead ? ' dead' : ''}${open ? ' open' : ''}" data-act="histCard" data-id="${esc(m.id)}" title="Release ${esc(m.id)} · click to ${open ? 'close' : 'open'}">`
-      + `<td class="rl-hrow-time" title="${esc(m.openedAt)}"><i class="rl-caret">${open ? '▾' : '▸'}</i>${esc(whenLabel(m.openedAt))}</td>`
+    return `<tr class="rl-hrow${small ? ' small' : ''}${dead ? ' dead' : ''}${open ? ' open' : ''}" data-act="${live ? 'gotoRelease' : 'histCard'}" data-id="${esc(m.id)}" title="Release ${esc(m.id)} · ${live ? 'in flight: click to open it on the Release tab' : `click to ${open ? 'close' : 'open'}`}">`
+      + `<td class="rl-hrow-time" title="${esc(m.openedAt)}"><i class="rl-caret">${live ? '→' : open ? '▾' : '▸'}</i>${esc(whenLabel(m.openedAt))}</td>`
       + `<td class="rl-hrow-title" title="${esc(relTitle(m) + (small ? ' by @' + ((m.openedBy && m.openedBy.login) || '?') : '') + ' — ' + m.repos.map(r => r.label).join(', '))}">${relCell(m)}</td>`
       + `<td>${small ? `<span class="rl-dim">${m.kind}</span>` : `<span class="rl-env" style="--hue:${ENV_HUE[env.toLowerCase()] || 'var(--dim)'}">${esc(env)}</span>`}</td>`
       + `<td class="num" title="${esc(m.repos.map(r => r.label + (r.mergeSha ? '' : ' (not shipped)')).join(', '))}">${dead ? '<span class="rl-dim">—</span>' : shipped}</td>`
@@ -831,13 +831,14 @@
       const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
       const env = m.env || 'prod', signs = env === 'prod'; // only prod is signed (SOC2); alpha / staging just merge
       const needsEye = handOpen.length || (m.status === 'deploy-failed' && liveRel && m.id === liveRel.id); // old failures stay folded
-      if (now !== !!(flight(m) || needsEye)) continue; // the Release tab: what needs eyes; History: the rest
+      const inFlight = !!(flight(m) || needsEye);
+      if (now && !inFlight) continue; // the Release tab: what needs eyes; History: every release, in-flight ones as a row that opens the Release tab
       const cardOpen = now || rbOpen === m.id || openCards.has(m.id); // History: folded rows, open on click
       if (!now && histFilter !== 'all' && !(histFilter === 'hotfix' ? ['hotfix', 'standalone'].includes(m.kind) : (m.env || 'prod') === histFilter && !['hotfix', 'standalone'].includes(m.kind))) continue;
       if (!now) {
         if (!inTable) { inTable = true; h += histHead(); }
-        h += relRow(s, m, signers, cardOpen);
-        if (!cardOpen) continue;
+        h += relRow(s, m, signers, cardOpen && !inFlight, inFlight);
+        if (!cardOpen || inFlight) continue;
         h += '<tr class="rl-hx"><td colspan="7">';
       }
       h += `<div class="rl-hist-card${pending ? ' pending' : ''}"><div class="rl-hist-top">`
