@@ -66,7 +66,7 @@
   document.addEventListener('keydown', (e) => {
     if (!open || e.key !== 'Escape') return;
     e.stopPropagation();
-    if (apprOpen) { apprOpen = false; render(); } else if (relOpen) { relOpen = false; render(); } else if (sel) { sel = null; render(); } else show(false);
+    if (apprOpen) { apprOpen = false; render(); } else if (relOpen && tab === 'release' && (activeRelease(state) || (state && state.releaseRun))) { relOpen = false; render(); } else if (sel) { sel = null; render(); } else show(false);
   }, true);
 
   const actions = {
@@ -1000,8 +1000,11 @@
       + '</div><div class="rl-rr-rows">';
     // compact: closed PRs and repos with nothing to release collapse into one line at the end
     const quiet = run.running ? [] : run.rows.filter(r => r.closed || r.status === 'nothing');
+    // a row that became a release PR is on its release card below: only what didn't (blocked, error) stays here
+    const items = (s.history && s.history.items) || [];
+    const onCard = (r) => !run.running && r.pr && items.some(m => m.repos.some(x => x.repo === r.repo && x.pr && x.pr.number === r.pr.number));
     run.rows.forEach((r, i) => {
-      if (quiet.includes(r)) return;
+      if (quiet.includes(r) || onCard(r)) return;
       const env = `<span class="rl-env" style="--hue:${ENV_HUE[r.env.toLowerCase()] || 'var(--dim)'}">${esc(r.env)}</span>`;
       const bits = [];
       if (r.running && !r.pr) bits.push('<span class="rl-rr-chip">checking…</span>');
