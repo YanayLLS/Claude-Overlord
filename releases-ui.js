@@ -4,10 +4,9 @@
 (function () {
   let state = null, open = false, sel = null; // sel = [rowIdx, cellIdx]
   let rbOpen = null, rbSkip = new Set(); // History: the release whose Rollback confirm is open, repos unticked
-  let apprOpen = false; // 👥 approvers panel
-  let relOpen = false, relSel = new Set(), relShown = false; // Release picker: open?, chosen envs, already animated in?
-  let tab = 'envs', envView = 'board', tlEnv = '', toToday = false; // tab: 'envs' | 'history'; envView: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
-  let nowFold = false; // the release in flight sits open above the board; folded to its one-line strip on request
+  let apprOpen = false, apprShown = false; // 👥 approvers panel: open?, already animated in?
+  let relOpen = false, relSel = new Set(); // Release tab's picker: open?, chosen envs
+  let tab = 'envs', envView = 'board', tlEnv = '', toToday = false; // tab: 'release' | 'envs' | 'history'; envView: 'board' | 'timeline'; tlEnv: timeline env filter, '' = all
 
   const core = document.createElement('script');
   core.src = './releases-core.js';
@@ -22,7 +21,7 @@
   badge.id = 'releases-badge';
   badge.title = "Releases — what's merged in each environment of each repo";
   badge.textContent = 'Releases';
-  badge.onclick = (e) => { e.stopPropagation(); if (activeRelease(state)) { tab = 'envs'; envView = 'board'; nowFold = false; api.send({ type: 'releasesHistory' }); } show(true); };
+  badge.onclick = (e) => { e.stopPropagation(); if (activeRelease(state)) { tab = 'release'; api.send({ type: 'releasesHistory' }); } show(true); };
   const chips = document.querySelector('.foot-chips');
   if (chips) chips.appendChild(badge);
 
@@ -39,9 +38,9 @@
   window.addEventListener('pointerup', ptrUp, true); window.addEventListener('pointercancel', ptrUp, true); window.addEventListener('blur', ptrUp);
 
   overlay.addEventListener('click', (e) => {
-    // a click outside an open popover (release picker/results, approvers) closes just the popover
-    if ((relOpen || apprOpen) && !e.target.closest('.rl-rel-pop, .rl-release, .rl-appr-btn')) {
-      relOpen = false; apprOpen = false;
+    // a click outside the approvers popover closes just the popover
+    if (apprOpen && !e.target.closest('.rl-rel-pop, .rl-appr-btn')) {
+      apprOpen = false;
       if (!e.target.closest('.rl-nav')) { render(); return; } // a tab click closes it and switches in one go
     }
     if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"]')) { armed = null; render(); }
@@ -80,25 +79,26 @@
       api.send({ type: 'releasesSetSource', source: v });
     },
     deselect: () => { sel = null; render(); },
-    // opens (hover or click) with every env picked; slides in once, then re-renders keep it still
-    releaseMenu: () => {
-      if (relOpen || apprOpen) return;
-      relOpen = true; relShown = false; relSkip = new Set(); relSeparate = false;
-      // a finished run (nothing left open) is history, not what Release opens on: start fresh
-      const run = state && state.releaseRun;
-      if (run && !run.running && !run.rows.some(r => r.pr && !r.merged && !r.closed)) { state = { ...state, releaseRun: null }; api.send({ type: 'releasesClearRun' }); }
-      // your last choice sticks (a hover-close + reopen must never re-tick an env you unticked);
-      // only the very first time does it start with every env but alpha (a new key, so everyone starts there once)
-      if (state && state.config) {
-        const targets = ReleasesCore.releaseTargets(state.config);
-        let saved = null;
-        try { saved = JSON.parse(localStorage.getItem('rl-release-envs2') || 'null'); } catch {}
-        relSel = new Set(Array.isArray(saved) ? saved.filter(e => targets.includes(e)) : targets.filter(e => e !== 'alpha')); // first time: everything but alpha
-      }
-      render();
-    },
+    // the Release tab's picker ("start another release")
+    releaseMenu: () => { tab = 'release'; apprOpen = false; if (!relOpen) openPicker(); render(); },
     releaseClose: () => { relOpen = false; render(); },
-    apprMenu: () => { apprOpen = !apprOpen; relOpen = false; if (apprOpen) api.send({ type: 'releasesApprovers' }); render(); },
+  };
+  // opens with your last env choice; a finished run (nothing left open) is history, not what it opens on: start fresh
+  function openPicker() {
+    relOpen = true; relSkip = new Set(); relSeparate = false;
+    const run = state && state.releaseRun;
+    if (run && !run.running && !run.rows.some(r => r.pr && !r.merged && !r.closed)) { state = { ...state, releaseRun: null }; api.send({ type: 'releasesClearRun' }); }
+    // your last choice sticks (a close + reopen must never re-tick an env you unticked);
+    // only the very first time does it start with every env but alpha (a new key, so everyone starts there once)
+    if (state && state.config) {
+      const targets = ReleasesCore.releaseTargets(state.config);
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem('rl-release-envs2') || 'null'); } catch {}
+      relSel = new Set(Array.isArray(saved) ? saved.filter(e => targets.includes(e)) : targets.filter(e => e !== 'alpha')); // first time: everything but alpha
+    }
+  }
+  Object.assign(actions, {
+    apprMenu: () => { apprOpen = !apprOpen; apprShown = false; if (apprOpen) api.send({ type: 'releasesApprovers' }); render(); },
     apprAdd: () => {
       localBusy.set('appr', { label: 'Adding…', at: Date.now() });
       const inp = modal.querySelector('#rl-appr-add');
@@ -137,10 +137,10 @@
     },
     relOnly: (el) => { relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); render(); },
     // the Board cell's "Release just this": the picker set to this repo and env
-    relJust: (el) => { relSel = new Set([el.dataset.env]); relSkip = new Set(ReleasesCore.releasePlan(state.config, [el.dataset.env]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); relOpen = true; relShown = false; render(); },
+    relJust: (el) => { relSel = new Set([el.dataset.env]); relSkip = new Set(ReleasesCore.releasePlan(state.config, [el.dataset.env]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); relOpen = true; tab = 'release'; sel = null; render(); },
     relSep: () => { relSeparate = !relSeparate; render(); },
     // a pending release's "Add repos": the picker, adding to it
-    relAddTo: (el) => { relSel = new Set([el.dataset.env || 'prod']); relSkip = new Set(); relSeparate = false; relOpen = true; relShown = false; render(); },
+    relAddTo: (el) => { relSel = new Set([el.dataset.env || 'prod']); relSkip = new Set(); relSeparate = false; relOpen = true; tab = 'release'; render(); },
     relRepo: (el) => { const r = el.dataset.repo; relSkip.has(r) ? relSkip.delete(r) : relSkip.add(r); render(); },
     relReposAll: (el) => { if (el.dataset.on === '1') relSkip = new Set(); else relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo)); render(); },
     // Fix on a blocked row: an agent for that repo only — leave the modal to land on it
@@ -151,11 +151,10 @@
     relNew: () => { api.send({ type: 'releasesClearRun' }); },
     recheck: (el) => api.send({ type: 'releasesRecheck', id: el.dataset.id || null }),
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'envs' && envView === 'timeline'; api.send({ type: 'releasesHistory' }); render(); },
-    nowFold: () => { nowFold = !nowFold; render(); },
     envView: (el) => { envView = el.dataset.v; sel = null; toToday = envView === 'timeline'; render(); },
     // history actions
     queueAll: (el) => { api.send({ type: 'releasesQueueAll', id: el.dataset.id }); },
-    gotoRelease: () => { relOpen = false; tab = 'envs'; envView = 'board'; nowFold = false; api.send({ type: 'releasesHistory' }); render(); },
+    gotoRelease: () => { relOpen = false; tab = 'release'; api.send({ type: 'releasesHistory' }); render(); },
     rowToDev: (el) => { markBusy(el, 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: 'retarget' }); },
     strayFix: (el) => { markBusy(el, el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
     histCard: (el) => { const id = el.dataset.id; openCards.has(id) ? openCards.delete(id) : openCards.add(id); render(); },
@@ -178,7 +177,7 @@
     histImport: (el) => { markBusy(el, 'Importing past releases…'); render(); api.send({ type: 'releasesImport' }); },
     tlEnv: (el) => { tlEnv = el.dataset.env; render(); },
     cancelSource: () => { state = { ...(state || {}), editing: false }; render(); },
-  };
+  });
 
   function show(on) {
     open = on;
@@ -523,15 +522,7 @@
         + (ap ? `<button class="rl-row-btn show" data-act="strayFix" data-how="retarget" data-repo="${esc(x.repo)}" data-n="${esc(x.number)}" title="Change its base to ${esc(x.source)}">↪ To ${esc(x.source)}</button>`
           + `<button class="rl-row-btn show" data-act="strayFix" data-how="close" data-repo="${esc(x.repo)}" data-n="${esc(x.number)}">✕ Close</button>` : '') + '</div>').join('') + '</div>';
   }
-  // the Board's pinned line for the release in flight
-  function activeStrip(st) {
-    const m = activeRelease(st);
-    if (!m) return strayHtml(st);
-    const nx = releaseNext(st, m);
-    return `<div class="rl-active ${nx.tone}"><span class="rl-active-id">🚀 Release ${esc(m.id)}</span><span class="rl-active-phase">${esc(nx.phase)}</span>`
-      + (nx.next ? `<span class="rl-active-next">next: ${esc(nx.next)}</span>` : '') + '<button class="rl-hist-btn" data-act="nowFold">Show release ▾</button></div>' + strayHtml(st);
-  }
-  // ── The release in flight: one summary every surface reads (footer badge, board strip, card) ──
+  // ── The release in flight: one summary every surface reads (footer badge, Release tab card) ──
   // in flight = open PRs, or merged in the last 2 days and still settling. An old or imported record stuck
   // at 'merged' (its deploy result was never recorded) isn't a release in flight
   const flight = (m) => m.status === 'pending' || (['merged', 'partial'].includes(m.status) && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
@@ -806,7 +797,7 @@
       h += '<div class="rl-hist-filters">' + ['all', 'prod', 'alpha', 'staging', 'hotfix'].filter(k => k === 'all' || has(k))
         .map(k => `<button class="${histFilter === k ? 'on' : ''}" data-act="histFilter" data-f="${k}">${k === 'all' ? 'All' : k === 'hotfix' ? 'Hotfixes' : k[0].toUpperCase() + k.slice(1)}</button>`).join('') + '</div>';
     }
-    if (now && (!hs || hs.error || !hs.items.length)) return h + '</div>'; // above the board: only a release in flight, never history's own states
+    if (now && (!hs || hs.error || !hs.items.length)) return h + '</div>'; // the Release tab: only a release in flight, never history's own states
     if (!hs) return h + '<div class="rl-tl-empty">Loading release history…</div></div>';
     if (hs.error) return h + `<div class="rl-rr-flag bad">Release history: ${esc(hs.error)}</div><button class="rl-hist-btn" data-act="histReload">Retry</button></div>`;
     if (!hs.items.length) {
@@ -840,13 +831,7 @@
       const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
       const env = m.env || 'prod', signs = env === 'prod'; // only prod is signed (SOC2); alpha / staging just merge
       const needsEye = handOpen.length || (m.status === 'deploy-failed' && liveRel && m.id === liveRel.id); // old failures stay folded
-      if (now && !(flight(m) || needsEye)) continue; // above the board: what needs eyes; History: every release
-      if (now && nowFold) { // folded: one line per release, its phase and next step
-        const nx = handOpen.length && !flight(m) && m.status !== 'deploy-failed' ? { phase: `${handOpen.length} hand step${handOpen.length === 1 ? '' : 's'} to confirm`, next: `deploy ${handOpen.join(', ')}, then ✓ Deployed`, tone: 'warn' } : releaseNext(s, m);
-        h += `<div class="rl-active ${nx.tone}"><span class="rl-active-id">🚀 ${esc(relTitle(m))}</span><span class="rl-active-phase">${esc(nx.phase)}</span>`
-          + (nx.next ? `<span class="rl-active-next">next: ${esc(nx.next)}</span>` : '') + '<button class="rl-hist-btn" data-act="nowFold">Show release ▾</button></div>';
-        continue;
-      }
+      if (now !== !!(flight(m) || needsEye)) continue; // the Release tab: what needs eyes; History: the rest
       const cardOpen = now || rbOpen === m.id || openCards.has(m.id); // History: folded rows, open on click
       if (!now && histFilter !== 'all' && !(histFilter === 'hotfix' ? ['hotfix', 'standalone'].includes(m.kind) : (m.env || 'prod') === histFilter && !['hotfix', 'standalone'].includes(m.kind))) continue;
       if (!now) {
@@ -871,7 +856,6 @@
         + (m.version ? `<span class="rl-rr-chip" title="Frontend version this release shipped">v${esc(m.version)}</span>` : '')
         + (!m.ticket && ticketLate(s, m) ? `<span class="rl-rr-chip warn" title="${esc(ticketLate(s, m))}">⚠ no ClickUp ticket</span>` : '')
         + (m.ticket ? `<a class="rl-hist-ticket" data-url="${esc(m.ticket.url)}" title="${esc(m.ticket.name)}">ClickUp ticket ↗</a>` : '')
-        + (now ? '<button class="rl-hist-btn rl-fold" data-act="nowFold" title="Fold to one line above the board">▴ Collapse</button>' : '')
         + `<span class="rl-hist-when" title="${esc(m.openedAt)}">${age(m.openedAt) === 'now' ? 'just now' : esc(age(m.openedAt)) + ' ago'}</span></div>`
         + `<div class="rl-hist-who">Opened by ${m.openedBy ? '@' + esc(m.openedBy.login) : '?'}${signs && signers.length ? ' · signed by ' + signers.map(x => '@' + esc(x)).join(', ') : ''}</div>`;
       // the release at a glance: how many repos are where
@@ -984,8 +968,8 @@
 
   function approversHtml(s) {
     const a = s.approvers || {};
-    let h = `<div class="rl-rel-pop rl-appr${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release approvers</span></div>`;
-    relShown = true;
+    let h = `<div class="rl-rel-pop rl-appr${apprShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release approvers</span></div>`;
+    apprShown = true;
     h += `<div class="rl-appr-note">Prod releases need <b>2</b> of these people: whoever opens the release, plus one approval (✍ Sign). Overlord won't merge a prod release PR before that.</div>`;
     if (!a.org) h += '<div class="rl-rr-flag">Loading…</div>';
     else if (a.error) h += `<div class="rl-rr-flag bad">${esc(a.error)}</div>`;
@@ -1011,10 +995,9 @@
     const run = s.releaseRun;
     const prLink = (p, label) => p && p.url ? link(p.url, label) : '';
     const pending = !run.running && run.rows.some(r => r.pr && !r.merged && !r.closed && (r.checks === 'pending' || r.checks === 'none' || r.conflict === null));
-    let h = `<div class="rl-rel-pop rl-rr${relShown ? ' still' : ''}"><div class="rl-rel-head"><span>Release ${esc(run.envs.join(' + '))} · ${esc(age(new Date(run.startedAt).toISOString()))} ago</span>`
+    let h = `<div class="rl-rel-pop rl-rr still"><div class="rl-rel-head"><span>Release ${esc(run.envs.join(' + '))} · ${esc(age(new Date(run.startedAt).toISOString()))} ago</span>`
       + (run.running ? '<span class="rl-rr-spin">running…</span>' : pending ? '<span class="rl-rr-spin" title="Re-checking open PRs every minute">watching checks…</span>' : '')
       + '</div><div class="rl-rr-rows">';
-    relShown = true;
     // compact: closed PRs and repos with nothing to release collapse into one line at the end
     const quiet = run.running ? [] : run.rows.filter(r => r.closed || r.status === 'nothing');
     run.rows.forEach((r, i) => {
@@ -1088,8 +1071,9 @@
     if (run.signoff) h += `<div class="rl-rr-flag${run.signoff.ok ? '' : ' bad'}">✍ Prod release signed ${run.signoff.count}/${run.signoff.need}${run.signoff.count ? ' · ' + run.signoff.signers.map(x => '@' + esc(x.login)).join(', ') : ''}</div>`;
     // once the run is recorded as a release, it's managed in one place: the release card (shared with the team)
     const recorded = open.length && ((s.history && s.history.items) || []).some(m => m.repos.some(x => open.some(r => r.repo === x.repo && r.pr.number === x.pr.number)));
-    h += (recorded ? '' : releaseAllHtml(s)) + '<div class="rl-rel-actions">'
-      + (recorded ? '<button class="rl-rr-merge" data-act="gotoRelease" title="Sign, release, merge one, fix and watch it there: the team sees the same card">Manage this release →</button>' : (toSign ? signBtn(s, 'rl-rr-sign', '✍ Sign the release', `Approve every prod release PR as @${a.me}: your signature`) : '')
+    // once the run is recorded as a release, the card below it signs, releases and cancels (shared with the team)
+    h += '<div class="rl-rel-actions">'
+      + (recorded ? '' : (toSign ? signBtn(s, 'rl-rr-sign', '✍ Sign the release', `Approve every prod release PR as @${a.me}: your signature`) : '')
       + releaseAllBtn(s, { ready: readyRows, waiting: unsignedProd, signoff: run.signoff && { ...run.signoff, signers: run.signoff.signers.map(x => x.login) },
         attrs: 'class="rl-rr-merge" data-act="relMerge"', lockedCls: 'rl-rr-merge', armKey: 'run' })
       + (open.length && (s.approvers || {}).isApprover && !(s.releaseAll && s.releaseAll.running) ? cancelBtn('', open.length, 'rl-rr-cancel') : ''))
@@ -1097,7 +1081,7 @@
       + (open.length ? RECHECK_BTN('', 'rl-rr-fix') : '')
       // a new release only once this one's PRs are all merged or closed (Release again just reuses open PRs anyway)
       + (run.running || open.length ? '' : '<button data-act="relNew">New release</button>')
-      + '<button data-act="releaseClose">Close</button></div></div>';
+      + '</div></div>';
     return h;
   }
 
@@ -1128,16 +1112,6 @@
 
   // Release picker: one toggle per env the config promotes into, with what's waiting for it;
   // the footer says what the agent will do (PRs to open, hand-deployed envs to report).
-  function toSignHtml(s) {
-    const t = s.toSign || [];
-    if (!t.length) return '';
-    const by = [...new Set(t.flatMap(x => x.signers))].map(x => '@' + esc(x)).join(', ');
-    return '<div class="rl-tosign"><div class="rl-tosign-head">✍ Waiting for your signature</div>'
-      + t.map(x => `<div class="rl-tosign-row"><b>${esc(x.label)}</b>${link(x.url, '#' + x.number)}</div>`).join('')
-      + `<div class="rl-tosign-by">${by ? 'Opened by ' + by + '. ' : ''}One signature covers the whole release: ${t[0].count}/${t[0].need} signed so far.</div>`
-      + signBtn(s, 'rl-rr-sign', '✍ Sign the release') + '</div>';
-  }
-
   function releasePickerHtml(s) {
     const cfg = s.config, targets = ReleasesCore.releaseTargets(cfg);
     const waiting = {};
@@ -1159,8 +1133,7 @@
         : 'Every release repo is already in the PRs panel'}"${unwatched.length ? '' : ' disabled'}>`
         + '<svg class="ic" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'
         + (unwatched.length ? `<i>${unwatched.length}</i>` : '') + '</button>';
-    let h = `<div class="rl-rel-pop${relShown ? ' still' : ''}">${toSignHtml(s)}<div class="rl-rel-head"><span>Release to</span>${bell}</div><div class="rl-rel-envs">`;
-    relShown = true;
+    let h = `<div class="rl-rel-pop still"><div class="rl-rel-head"><span>Release to</span>${bell}</div><div class="rl-rel-envs">`;
     for (const e of targets) {
       h += `<button class="rl-rel-env${relSel.has(e) ? ' on' : ''}" data-act="relToggle" data-env="${esc(e)}">`
         + `<span class="rl-env" style="--hue:${ENV_HUE[e.toLowerCase()] || 'var(--dim)'}">${esc(e)}</span>`
@@ -1195,26 +1168,25 @@
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
       : 'Pick one or more environments') + '</div>'
       + '<div class="rl-rel-note">Overlord opens the release PRs (plus back-merges when needed) and checks each one. Nothing merges until 2 approvers sign and someone presses Release all.</div>'
-      + `<div class="rl-rel-actions"><button data-act="releaseClose">Cancel</button>${startBtn(s)}</div></div>`;
+      + `<div class="rl-rel-actions">${activeRelease(s) || s.releaseRun ? '<button data-act="releaseClose">Cancel</button>' : ''}${startBtn(s)}</div></div>`;
     return h;
   }
 
-  // Hovering Release opens the picker; leaving both the button and the picker closes it after a
-  // beat (long enough to cross the gap between them).
-  const REL_ZONE = '.rl-release:not(.locked), .rl-rel-pop:not(.rl-appr)'; // the approvers panel isn't part of the Release hover
-  let relLeave = null;
-  overlay.addEventListener('mouseover', (ev) => {
-    if (!ev.target.closest || !ev.target.closest(REL_ZONE)) return;
-    clearTimeout(relLeave);
-    actions.releaseMenu();
-  });
-  overlay.addEventListener('mouseout', (ev) => {
-    if (!ev.target.closest || !ev.target.closest(REL_ZONE)) return;
-    if (ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest(REL_ZONE)) return;
-    if (state && state.releaseRun) return;
-    clearTimeout(relLeave);
-    relLeave = setTimeout(() => { if (relOpen) actions.releaseClose(); }, 400);
-  });
+  // ── The Release tab: everything about the release in flight, in one place. A run in progress (or one
+  // with rows that never became a release PR), then each release in flight as its card; the picker when
+  // nothing is in flight, or on "Start another release" ──
+  function releaseTabHtml(s) {
+    const run = s.releaseRun, items = (s.history && s.history.items) || [];
+    const recorded = (r) => items.some(m => m.repos.some(x => x.repo === r.repo && x.pr && r.pr && x.pr.number === r.pr.number));
+    const showRun = run && (run.running || run.rows.some(r => (r.pr && !r.merged && !r.closed && !recorded(r)) || r.status === 'blocked' || r.status === 'error'));
+    const active = activeRelease(s);
+    if (run && run.running) relOpen = false; // a run just started: its results take the picker's place
+    if (!active && !showRun && !relOpen) openPicker();
+    let h = '<div class="rl-reltab">' + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
+    if (relOpen) h += releasePickerHtml(s);
+    else if (active || showRun) h += '<button class="rl-hist-btn rl-reltab-new" data-act="releaseMenu" title="Pick envs and repos for another release (or to add to the pending one)">🚀 Start another release</button>';
+    return h + '</div>';
+  }
 
   function render() { if (ptrDown) { drawLater = true; return; } renderNow(); if (open) applyBusy(modal); }
   function renderNow() {
@@ -1228,21 +1200,16 @@
       + `<span class="rl-upd">${s.loading ? 'loading…' : esc(upd)}</span>`
       + (s.config ? `<button class="rl-appr-btn${apprOpen ? ' on' : ''}" data-act="apprMenu" title="Release approvers: releasing and merging prod needs two of them"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
         + `<span>${s.approvers && s.approvers.members ? s.approvers.members.length : ''}</span></button>` : '')
-      + (s.config && window.ReleasesCore && ReleasesCore.releaseTargets(s.config).length
-        // everyone can open the picker (what's waiting, the PR-watch bell); only Start release is for approvers
-        ? `<button class="rl-release${relOpen ? ' on' : ''}" data-act="releaseMenu" title="What's waiting to release, per env">`
-          + '<svg class="ic" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>Release</button>'
-        : '')
       + `<button data-act="refresh" class="${s.loading ? 'spin' : ''}" title="Refresh"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>`
       + '<button data-act="close" title="Close (Esc)"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>'
       + (s.grid && s.config ? '<div class="rl-nav">'
-        + [['envs', 'Environments', 'What\'s on each env, and the release in flight'], ['history', 'History', 'Every past release']]
-          .map(([k, t, tip]) => `<button data-act="tab" data-tab="${k}" class="${tab === k ? 'on' : ''}" title="${tip}">${t}${k === 'envs' && activeRelease(s) ? '<i class="rl-live-dot"></i>' : ''}</button>`).join('')
+        + [['release', 'Release', 'The release in flight: sign, release, watch it deploy. Or start one'], ['envs', 'Environments', 'What\'s on each env'], ['history', 'History', 'Every past release']]
+          .filter(([k]) => k !== 'release' || (window.ReleasesCore && ReleasesCore.releaseTargets(s.config).length))
+          .map(([k, t, tip]) => `<button data-act="tab" data-tab="${k}" class="${tab === k ? 'on' : ''}" title="${tip}">${t}${k === 'release' && activeRelease(s) ? '<i class="rl-live-dot"></i>' : ''}</button>`).join('')
         + (tab === 'envs' ? `<div class="rl-seg"><button data-act="envView" data-v="board" class="${envView === 'board' ? 'on' : ''}">Board</button><button data-act="envView" data-v="timeline" class="${envView === 'timeline' ? 'on' : ''}">Timeline</button></div>` : '')
         + '</div>' : '')
       + '<div class="rl-body">';
     if (apprOpen && s.config) h += approversHtml(s);
-    else if (relOpen && s.config) h += s.releaseRun ? releaseResultsHtml(s) : releasePickerHtml(s);
     const g = s.grid;
     if (s.editing || !g || s.error || s.problems) {
       h += (!g && s.loading && !s.error && !s.problems && !s.editing) ? skeletonHtml() : setupHtml(s);
@@ -1251,9 +1218,11 @@
     } else {
       // Header and footer stay put; only the board scrolls. The clicked cell's detail is a
       // drawer over the board's bottom edge, so opening it never resizes the modal.
-      h += (tab === 'history' && s.config ? historyHtml(s) + '</div><div class="rl-foot">'
+      h += (tab === 'release' && s.config ? releaseTabHtml(s) + '</div><div class="rl-foot">'
+        + `<div class="rl-legend"><span>Shared with the team: recorded in ${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
+        : tab === 'history' && s.config ? historyHtml(s) + '</div><div class="rl-foot">'
         + `<div class="rl-legend"><span>Releases, recorded in ${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
-        : envView === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : (!s.config ? activeStrip(s) : historyHtml(s, 'now')) + gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
+        : envView === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
         + (s.localOnly ? `<div class="rl-local" title="It isn't on GitHub yet, so teammates can't see this board. Commit and push it to share.">Local config, not pushed yet · <code>${esc(s.localOnly)}</code></div>` : '');
     }
     const prev = modal.querySelector('.rl-body'), top = prev ? prev.scrollTop : 0, left = prev ? prev.scrollLeft : 0;
@@ -1316,7 +1285,7 @@
       signWaiting = state && state.signPromptKey;
       return;
     }
-    if (act === 'review') { relOpen = true; relShown = false; show(true); }
+    if (act === 'review') { tab = 'release'; show(true); }
     promptDismissed = state && state.signPromptKey; // any choice closes it until something new arrives
     try { localStorage.setItem('rl-sign-dismissed', promptDismissed || ''); } catch {}
     signOverlay.classList.remove('open');
@@ -1406,5 +1375,5 @@
     el.classList.add('open');
   }
 
-  window.releasesUi = { releaseRepos, enforcePrWatch, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (msg.tab) { tab = 'envs'; envView = 'board'; nowFold = false; } /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
+  window.releasesUi = { releaseRepos, enforcePrWatch, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
 })();

@@ -178,10 +178,6 @@
 .rl-uses { cursor:default; }
 
 /* Release button (header) + its env picker */
-.rl-head .rl-release { width:auto; height:26px; padding:0 11px 0 9px; gap:6px; border-radius:999px; font-size:12px; font-weight:600;
-  color:var(--on-accent); background:var(--accent); }
-.rl-head .rl-release:hover, .rl-head .rl-release.on { color:var(--on-accent); background:var(--accent); filter:brightness(1.1); }
-.rl-head .rl-release .ic { width:14px; height:14px; }
 .rl-rel-pop { position:absolute; top:46px; right:60px; z-index:6; width:320px; padding:12px; border-radius:var(--r-lg); background:var(--pop);
   border:1px solid var(--border-hi); box-shadow:var(--pop-shadow); animation:rl-up .14s ease-out; }
 .rl-rel-head { font-size:10px; font-weight:600; letter-spacing:.9px; text-transform:uppercase; color:var(--dim); margin-bottom:8px; }
@@ -213,8 +209,6 @@
 /* ── Hover pass: every interactive piece of the Releases feature answers the pointer ── */
 .rl-head .rl-tabs button { transition:background .12s, color .12s; }
 .rl-head .rl-tabs button:not(.on):hover { background:var(--hover-strong); color:var(--text); }
-.rl-head .rl-release { transition:filter .12s, transform .12s, box-shadow .12s; }
-.rl-head .rl-release:hover { transform:translateY(-1px); box-shadow:0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); }
 .rl-head .rl-src { transition:color .12s; }
 /* board cells lift a touch; the repo name and "uses" placeholders respond too */
 .rl-cell { transition:background .12s, border-color .12s, transform .12s, box-shadow .12s; }
@@ -296,7 +290,6 @@
 .rl-head .rl-appr-btn { width:auto; height:26px; padding:0 9px; gap:5px; border-radius:999px; border:1px solid var(--border); font-size:11.5px; font-weight:600; color:var(--subtext); }
 .rl-head .rl-appr-btn .ic { width:14px; height:14px; }
 .rl-head .rl-appr-btn.on, .rl-head .rl-appr-btn:hover { color:var(--text); border-color:var(--border-hi); background:var(--hover-strong); }
-.rl-head .rl-release:disabled { opacity:.45; cursor:not-allowed; transform:none; box-shadow:none; filter:none; }
 .rl-rel-pop.rl-appr { width:340px; }
 .rl-appr-note { font-size:11.5px; color:var(--subtext); line-height:1.45; margin-bottom:10px; }
 .rl-appr-note.dim { color:var(--dim); margin:10px 0 0; }
@@ -318,16 +311,7 @@
 
 /* a prod release waiting on my signature */
 #releases-badge.sign { background:var(--accent-soft); color:var(--text); border-color:var(--accent); }
-.rl-tosign { margin-bottom:12px; padding:10px 12px; border-radius:var(--r); border:1px solid var(--accent); background:var(--accent-soft); }
-.rl-tosign-head { font-size:12px; font-weight:700; margin-bottom:6px; }
-.rl-tosign-row { display:flex; align-items:center; gap:8px; font-size:12px; padding:2px 0; }
-.rl-tosign-row a { color:var(--accent); font-weight:600; }
-.rl-tosign-row span { margin-left:auto; font-size:11px; color:var(--subtext); }
-.rl-tosign-by { font-size:11px; color:var(--subtext); margin:6px 0 8px; }
-.rl-tosign .rl-rr-sign { width:100%; font:inherit; font-size:12px; font-weight:600; padding:6px 12px; border-radius:999px; border:none; background:var(--accent); color:var(--on-accent); cursor:pointer; }
-.rl-tosign .rl-rr-sign:hover { filter:brightness(1.1); }
 /* locked Release: looks disabled but stays hoverable, so its tooltip explains why (a disabled button gets no mouse events) */
-.rl-head .rl-release.locked, .rl-head .rl-release.locked:hover { opacity:.45; cursor:not-allowed; transform:none; box-shadow:none; filter:none; }
 
 /* ── History tab: prod releases from release-manifests ── */
 .rl-hist { width:100%; padding:10px 0 4px; display:flex; flex-direction:column; gap:8px; }
@@ -358,7 +342,7 @@
 .rl-hist-rb-repo span { font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; color:var(--dim); }
 
 /* a popover (picker, approvers) always has room: a short modal grows while one is open */
-#rl-modal:has(.rl-rel-pop) { min-height:min(600px, calc(100vh - 64px)); }
+#rl-modal:has(.rl-rel-pop:not(.rl-reltab .rl-rel-pop)) { min-height:min(600px, calc(100vh - 64px)); }
 /* History empty state */
 .rl-hist-empty { display:flex; flex-direction:column; align-items:center; gap:8px; text-align:center; padding:40px 24px; color:var(--subtext); font-size:12px; line-height:1.5; }
 .rl-hist-empty b { color:var(--text); font-size:14px; }
@@ -506,10 +490,6 @@
 .rl-ch-list a { color:var(--accent); margin-right:4px; }
 .rl-upd.bad { color:var(--peach); }
 /* the release in flight: Board strip, card "Next" line, footer badge, tab dot */
-.rl-active { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 10px; padding:8px 12px; border-radius:var(--r); border:1px solid var(--accent); background:var(--accent-soft); font-size:12px; }
-.rl-active.warn { border-color:rgba(251,146,60,.6); background:rgba(251,146,60,.08); } .rl-active.bad { border-color:rgba(248,113,113,.6); background:rgba(248,113,113,.08); } .rl-active.ok { border-color:rgba(74,222,128,.5); background:rgba(74,222,128,.07); }
-.rl-active-id { font-weight:600; color:var(--text); } .rl-active-phase { color:var(--text); } .rl-active-next { color:var(--subtext); flex:1; min-width:0; }
-.rl-active .rl-hist-btn { margin-left:auto; }
 .rl-next-line { display:flex; gap:8px; align-items:baseline; margin:4px 0 2px; font-size:11.5px; color:var(--text); }
 .rl-next-line > span { font-size:9.5px; font-weight:700; letter-spacing:.7px; text-transform:uppercase; color:var(--accent); }
 .rl-next-line.warn > span { color:var(--peach); } .rl-next-line.bad > span { color:var(--red); } .rl-next-line.ok > span { color:var(--green); } .rl-next-line.run > span { color:var(--yellow); }
@@ -603,8 +583,6 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-seg { margin-left:auto; display:flex; gap:2px; padding:2px; border-radius:999px; background:var(--surface0); border:1px solid var(--border); }
 .rl-seg button { font:inherit; font-size:11px; padding:2px 10px; border-radius:999px; border:none; background:none; color:var(--subtext); cursor:pointer; }
 .rl-seg button.on { background:var(--surface2); color:var(--text); }
-.rl-hist-top .rl-fold { margin-left:auto; padding:2px 10px; font-size:11px; }
-.rl-hist-top .rl-fold + .rl-hist-when { margin-left:8px; }
 .rl-body > .rl-hist + .rl-grid, .rl-body > .rl-hist { margin-bottom:10px; }
 .rl-rr-quiet { margin:10px 0 2px; font-size:11.5px; color:var(--subtext); line-height:1.5; }
 /* Board: equal env columns that fill the window; 'uses X' is a quiet note, not a cell */
@@ -612,3 +590,8 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-uses { border-color:transparent; background:none; font-size:10.5px; color:var(--dim); opacity:.7; }
 .rl-uses:hover { border-color:transparent; background:none; opacity:1; }
 .rl-next.rl-back, .rl-next.rl-back b { color:var(--yellow); }
+
+/* the Release tab: the run, the cards and the picker sit in the page, not in a popover */
+.rl-reltab .rl-rel-pop, .rl-reltab .rl-rel-pop.rl-rr { position:static; width:auto; max-width:620px; max-height:none; overflow:visible; margin:0 0 14px; box-shadow:none; animation:none; }
+.rl-reltab .rl-rel-pop .rl-rel-actions { position:static; margin:12px 0 0; padding:10px 0 0; background:none; border-radius:0; }
+.rl-reltab-new { margin-top:4px; }
