@@ -5,8 +5,21 @@ const crypto = require('crypto');
 const { spawn: spawnProc } = require('child_process');
 const { HOST_VERSION } = require('./pty-host');
 
+// The host is Overlord.exe in Node mode, so the update installer can't replace Overlord while it runs (its
+// own taskkill isn't enough everywhere: "can't close Overlord"). Resolves true once pid is gone; past ms it
+// kills it and resolves false.
+const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+async function waitGone(pid, ms, { alive = isAlive, kill = (p) => process.kill(p) } = {}) {
+  const end = Date.now() + ms;
+  while (alive(pid)) {
+    if (Date.now() > end) { try { kill(pid); } catch {} return false; }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return true;
+}
+
 function createPtyClient({ pipePath, launchHost }) {
-  let sock = null;
+  let sock = null, hostPid = null;
   const procs = new Map(); // key -> proxy
   const waiting = new Map(); // reply type -> [resolve]
 
@@ -75,6 +88,7 @@ function createPtyClient({ pipePath, launchHost }) {
     s.on('close', () => { if (sock === s) sock = null; for (const p of [...procs.values()]) p._exited(1); });
     s.on('error', () => {});
     const hello = await request({ t: 'hello' }, 'hello');
+    hostPid = hello.pid || null; // hosts from before v1.154.3 don't say
     // A host left over from an older build, with nothing running in it: replace it.
     // With live agents it stays — they're worth more than the upgrade.
     if (hello.version !== HOST_VERSION && hello.count === 0) {
@@ -104,6 +118,13 @@ function createPtyClient({ pipePath, launchHost }) {
     },
     kill: (key) => out({ t: 'kill', key }),
     shutdown: () => out({ t: 'shutdown' }),
+    get hostPid() { return hostPid; },
+    // shut the host down and wait until its process is gone (an older host that doesn't give its pid: a beat)
+    async stopAndWait(ms = 5000) {
+      if (!sock) return true;
+      out({ t: 'shutdown' });
+      return hostPid ? waitGone(hostPid, ms) : new Promise(r => setTimeout(() => r(true), 700));
+    },
   };
 }
 
@@ -127,4 +148,4 @@ function hostLauncher(hostScript, pipePath, cwd = require('os').homedir()) {
   }).unref();
 }
 
-module.exports = { createPtyClient, pipePathFor, hostLauncher };
+module.exports = { createPtyClient, pipePathFor, hostLauncher, waitGone };

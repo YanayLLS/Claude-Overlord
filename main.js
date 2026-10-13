@@ -75,7 +75,9 @@ autoUpdater.on('update-available', info => {
   send({ type: 'updateAvailable', version: info.version });
 });
 
+let _updateReady = false; // a downloaded update waits to install on the next quit
 autoUpdater.on('update-downloaded', async info => {
+  _updateReady = true;
   logToRenderer(`Update downloaded: v${info.version} — ready to install`);
   send({ type: 'updateDownloaded', version: info.version, changes: await releaseChanges(app.getVersion(), info.version) });
 });
@@ -4626,7 +4628,8 @@ function handleIpc(msg) {
     // quit, not exit: exit skips before-quit, so nothing would get saved for the reattach.
     case 'fullRestart': forceQuit = true; _restarting = true; app.relaunch(); app.quit(); break;
     // The host runs from the app's own files, so it has to go before the installer replaces them.
-    case 'installUpdate': forceQuit = true; ptyHost.shutdown(); setTimeout(() => autoUpdater.quitAndInstall(), 700); break;
+    // the pty host is Overlord.exe too: the installer can't replace Overlord until it's gone, so wait for it to exit
+    case 'installUpdate': forceQuit = true; ptyHost.stopAndWait(5000).catch(() => {}).then(() => autoUpdater.quitAndInstall()); break;
     case 'checkGitUpdate': checkGitUpdate(); break;
     case 'gitPull': doGitPull(); break;
     case 'approvePr': {
@@ -5904,7 +5907,15 @@ app.on('before-quit', () => {
   // Agents live on in the pty host. A restart keeps all of them; a real close
   // keeps only the ones mid-turn, so their work finishes and they reattach next launch.
   if (!_restarting) {
-    for (const [id, a] of agents) { const t = terminals.get(id); if (t && t.key && shownStatus(a) === 'waiting') killPty(t); } // background work keeps it alive too
+    let busy = 0;
+    for (const [id, a] of agents) { const t = terminals.get(id); if (!t || !t.key) continue; if (shownStatus(a) === 'waiting') killPty(t); else busy++; } // background work keeps it alive too
+    // An update installs on this quit only if the pty host (Overlord.exe too) can go with it: nothing mid-turn
+    // left in it, so stop it now (the installer waits ~1.3s before it looks). With agents mid-turn, their work
+    // wins: the update installs on a later quit, or from the update button.
+    if (_updateReady && autoUpdater.autoInstallOnAppQuit) {
+      if (busy) { autoUpdater.autoInstallOnAppQuit = false; flog(`update not installed on quit: ${busy} agent(s) mid-turn in the pty host`); }
+      else ptyHost.shutdown();
+    }
   }
 });
 app.on('window-all-closed', () => app.quit());

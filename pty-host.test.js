@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const os = require('os');
 const path = require('path');
 const { createHost } = require('./pty-host');
-const { createPtyClient, pipePathFor } = require('./pty-client');
+const { createPtyClient, pipePathFor, waitGone } = require('./pty-client');
 
 // Echoes writes back as output, like a terminal would.
 function fakePty() {
@@ -38,6 +38,7 @@ test('ptys outlive the app connection and replay to the next one', async () => {
   // First app instance: spawn, see output, send input.
   const a = createPtyClient({ pipePath, launchHost: noLaunch });
   await a.connect();
+  assert.strictEqual(a.hostPid, process.pid, 'the host says its pid, so an update can wait for it to exit');
   const proc = a.spawn('cmd.exe', '/c claude', { cols: 80, rows: 24 });
   const got = [];
   proc.onData(d => got.push(d));
@@ -75,4 +76,12 @@ test('ptys outlive the app connection and replay to the next one', async () => {
   assert.deepStrictEqual(await b.list(), []);
 
   host.stop();
+});
+
+test('waitGone: resolves when the process exits, kills it past the deadline', async () => {
+  let alive = 3;
+  assert.strictEqual(await waitGone(1, 5000, { alive: () => alive-- > 0, kill: () => { throw new Error('no kill needed'); } }), true);
+  let killed = null;
+  assert.strictEqual(await waitGone(7, 150, { alive: () => killed === null, kill: (p) => { killed = p; } }), false);
+  assert.strictEqual(killed, 7);
 });

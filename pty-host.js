@@ -7,7 +7,7 @@
 // replaces the old one — the old app is gone by then anyway).
 //   client → host: hello | spawn{key,file,args,opts} | attach{key} | list |
 //                  write{key,d} | resize{key,cols,rows} | kill{key} | shutdown
-//   host → client: hello{version} | spawned{key,pid} | attached{key,pid,replay} |
+//   host → client: hello{version,count,pid} | spawned{key,pid} | attached{key,pid,replay} |
 //                  list{ptys} | data{key,d} | exit{key,code}
 const net = require('net');
 const fs = require('fs');
@@ -62,7 +62,7 @@ function createHost({ pty, pipePath }) {
   function handle(msg) {
     const p = ptys.get(msg.key);
     switch (msg.t) {
-      case 'hello': return out({ t: 'hello', version: HOST_VERSION, count: ptys.size });
+      case 'hello': return out({ t: 'hello', version: HOST_VERSION, count: ptys.size, pid: process.pid });
       case 'spawn': return spawn(msg);
       case 'attach': return out(p ? { t: 'attached', key: msg.key, pid: p.proc.pid, replay: p.buf } : { t: 'attached', key: msg.key, gone: true });
       case 'list': return out({ t: 'list', ptys: [...ptys].map(([key, x]) => ({ key, pid: x.proc.pid })) });
