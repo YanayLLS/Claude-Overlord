@@ -610,13 +610,20 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-rel-src::placeholder { color:var(--dim); } .rl-rel-src.custom { border-color:var(--yellow); }
 .rl-rel-to { font-size:11px; color:var(--dim); white-space:nowrap; }
 .rl-rel-src.need { border-color:var(--peach); }
-/* the branch list under a branch box: search results, keyboard-highlighted */
-.rl-br-menu { position:fixed; z-index:10000; display:none; max-height:280px; overflow:auto; padding:4px; border-radius:var(--r-lg); background:var(--pop);
-  border:1px solid var(--border-hi); box-shadow:var(--pop-shadow); font-size:12px; box-sizing:border-box; animation:rl-up .1s ease-out; }
+/* the branch table under a branch box: search results, sortable, keyboard-highlighted */
+.rl-br-menu { position:fixed; z-index:10000; display:none; max-height:320px; overflow:auto; padding:0 4px 4px; border-radius:var(--r-lg); background:var(--pop);
+  border:1px solid var(--border-hi); box-shadow:var(--pop-shadow); font-size:11.5px; box-sizing:border-box; animation:rl-up .1s ease-out; }
 .rl-br-menu.open { display:block; }
-.rl-br-opt { padding:6px 9px; border-radius:var(--r); color:var(--subtext); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  font-family:ui-monospace, 'Cascadia Code', Consolas, monospace; font-size:11.5px; }
+.rl-br-row { display:grid; grid-template-columns:minmax(0,1fr) 64px 110px 108px; gap:10px; align-items:center; padding:5px 8px; border-radius:var(--r); }
+.rl-br-row > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rl-br-head { position:sticky; top:0; z-index:1; margin:0 -4px; padding:7px 12px 6px; border-radius:0; background:var(--pop); border-bottom:1px solid var(--border);
+  font-size:10px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; color:var(--dim); }
+.rl-br-head span { cursor:pointer; user-select:none; } .rl-br-head span:hover, .rl-br-head span.on { color:var(--text); }
+.rl-br-opt { color:var(--subtext); cursor:pointer; }
 .rl-br-opt:hover { background:var(--hover-strong); color:var(--text); }
 .rl-br-opt.hi { background:var(--accent-soft); color:var(--text); }
+.rl-br-name { font-family:ui-monospace, 'Cascadia Code', Consolas, monospace; color:var(--text); }
+.rl-br-at, .rl-br-by { color:var(--dim); font-size:11px; } .rl-br-at { text-align:right; }
+.rl-br-pr { font-size:11px; color:var(--accent); } .rl-br-pr i { font-style:normal; color:var(--dim); }
 .rl-br-opt b { color:var(--accent); font-weight:700; }
-.rl-br-empty { display:flex; align-items:center; gap:6px; padding:6px 9px; color:var(--dim); font-size:11px; }
+.rl-br-empty { display:flex; align-items:center; gap:6px; padding:8px 9px; color:var(--dim); font-size:11px; }

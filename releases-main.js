@@ -1127,10 +1127,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const names = [];
     let after = null;
     for (let page = 0; page < 10; page++) { // ponytail: up to 1000 branches; the box still takes any typed name
-      const r = await ghGraphql(`query { repository(owner: ${JSON.stringify(repo.split('/')[0])}, name: ${JSON.stringify(repo.split('/')[1])}) { refs(refPrefix: "refs/heads/", first: 100${after ? `, after: ${JSON.stringify(after)}` : ''}, orderBy: { field: ALPHABETICAL, direction: ASC }) { nodes { name } pageInfo { hasNextPage endCursor } } } }`);
+      const r = await ghGraphql(`query { repository(owner: ${JSON.stringify(repo.split('/')[0])}, name: ${JSON.stringify(repo.split('/')[1])}) { refs(refPrefix: "refs/heads/", first: 100${after ? `, after: ${JSON.stringify(after)}` : ''}, orderBy: { field: ALPHABETICAL, direction: ASC }) { nodes { name target { ... on Commit { committedDate author { name user { login } } } } associatedPullRequests(first: 1, states: OPEN) { nodes { number baseRefName } } } pageInfo { hasNextPage endCursor } } } }`);
       const refs = r.data && r.data.repository && r.data.repository.refs;
       if (!refs) break;
-      names.push(...refs.nodes.map(n => n.name));
+      // each with its last commit (when, by whom) and its open PR, for the picker's sortable branch table (1 point a page)
+      names.push(...refs.nodes.map(n => { const c = n.target || {}, a = c.author || {}, pr = n.associatedPullRequests && n.associatedPullRequests.nodes[0];
+        return { name: n.name, at: c.committedDate || null, by: (a.user && a.user.login) || a.name || '', pr: pr ? { n: pr.number, base: pr.baseRefName } : null }; }));
       if (!refs.pageInfo.hasNextPage) break;
       after = refs.pageInfo.endCursor;
     }

@@ -73,20 +73,30 @@
   brMenu.className = 'rl-br-menu';
   document.body.appendChild(brMenu);
   let brFor = null, brHi = 0, brItems = [];
+  // the branch table's sort: updated (newest first) by default; remembered
+  let brSort = { k: 'at', dir: -1 }; try { brSort = JSON.parse(localStorage.getItem('rl-br-sort')) || brSort; } catch {}
+  const BR_COLS = [['name', 'Branch'], ['at', 'Updated'], ['by', 'By'], ['pr', 'PR']];
+  const brVal = { name: b => b.name.toLowerCase(), at: b => b.at || '', by: b => b.by.toLowerCase(), pr: b => (b.pr ? b.pr.n : 0) };
   const brMark = (b, q) => { const i = q ? b.toLowerCase().indexOf(q) : -1; return i < 0 ? esc(b) : esc(b.slice(0, i)) + '<b>' + esc(b.slice(i, i + q.length)) + '</b>' + esc(b.slice(i + q.length)); };
   function brShow(inp) {
     const repo = inp.dataset.src.split('|')[0], loaded = state && state.branches && state.branches[repo];
-    const all = (loaded || []).filter(b => b !== inp.dataset.target), q = inp.value.trim().toLowerCase();
-    // matches first by where the text starts (a name starting with it, then a path segment, then anywhere)
-    const rank = (b) => { const l = b.toLowerCase(); return l.startsWith(q) ? 0 : l.includes('/' + q) ? 1 : 2; };
-    brItems = (q ? all.filter(b => b.toLowerCase().includes(q)).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)) : all).slice(0, 60);
+    // older Overlords cached plain names; a search matches the branch, its author or its PR number
+    const all = (loaded || []).map(b => typeof b === 'string' ? { name: b, at: null, by: '', pr: null } : b).filter(b => b.name !== inp.dataset.target);
+    const q = inp.value.trim().toLowerCase();
+    const f = brVal[brSort.k] || brVal.at;
+    const hits = (q ? all.filter(b => b.name.toLowerCase().includes(q) || b.by.toLowerCase().includes(q) || (b.pr && ('#' + b.pr.n).includes(q))) : all)
+      .sort((a, b) => { const x = f(a), y = f(b); return (x < y ? -1 : x > y ? 1 : 0) * brSort.dir || a.name.localeCompare(b.name); });
+    brItems = hits.slice(0, 80).map(b => b.name);
     brFor = inp; brHi = Math.max(0, Math.min(brHi, brItems.length - 1));
+    const head = '<div class="rl-br-row rl-br-head">' + BR_COLS.map(([k, t]) => `<span data-brsort="${k}" class="${brSort.k === k ? 'on' : ''}">${t}${brSort.k === k ? (brSort.dir < 0 ? ' ↓' : ' ↑') : ''}</span>`).join('') + '</div>';
     brMenu.innerHTML = !loaded ? '<div class="rl-br-empty"><span class="rl-spin-dot"></span>Loading branches…</div>'
-      : !brItems.length ? `<div class="rl-br-empty">No branch matches “${esc(q)}”</div>`
-      : brItems.map((b, i) => `<div class="rl-br-opt${i === brHi ? ' hi' : ''}" data-br="${esc(b)}">${brMark(b, q)}</div>`).join('')
-        + (all.length > brItems.length && !q ? `<div class="rl-br-empty">${all.length} branches · type to search</div>` : '');
-    const r = inp.getBoundingClientRect();
-    brMenu.style.left = r.left + 'px'; brMenu.style.top = (r.bottom + 4) + 'px'; brMenu.style.width = Math.max(r.width, 260) + 'px';
+      : !hits.length ? head + `<div class="rl-br-empty">No branch matches “${esc(q)}”</div>`
+      : head + hits.slice(0, 80).map((b, i) => `<div class="rl-br-row rl-br-opt${i === brHi ? ' hi' : ''}" data-br="${esc(b.name)}" title="${esc(b.name + (b.at ? `\nlast commit ${new Date(b.at).toLocaleString()} by ${b.by}` : '') + (b.pr ? `\nopen PR #${b.pr.n} → ${b.pr.base}` : ''))}">`
+          + `<span class="rl-br-name">${brMark(b.name, q)}</span><span class="rl-br-at">${b.at ? esc(age(b.at)) : ''}</span><span class="rl-br-by">${brMark(b.by, q)}</span>`
+          + `<span class="rl-br-pr">${b.pr ? `#${b.pr.n} <i>→ ${esc(b.pr.base)}</i>` : ''}</span></div>`).join('')
+        + (hits.length > 80 ? `<div class="rl-br-empty">${hits.length - 80} more · type to narrow</div>` : '');
+    const r = inp.getBoundingClientRect(), w = Math.min(560, window.innerWidth - 24);
+    brMenu.style.left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12)) + 'px'; brMenu.style.top = (r.bottom + 4) + 'px'; brMenu.style.width = w + 'px';
     brMenu.classList.add('open');
     const hi = brMenu.querySelector('.hi'); if (hi) hi.scrollIntoView({ block: 'nearest' });
   }
@@ -98,7 +108,11 @@
     inp.blur(); render();
   }
   brMenu.addEventListener('mousedown', (e) => e.preventDefault()); // keep the input focused
-  brMenu.addEventListener('click', (e) => { const o = e.target.closest('[data-br]'); if (o) brPick(o.dataset.br); });
+  brMenu.addEventListener('click', (e) => {
+    const h = e.target.closest('[data-brsort]');
+    if (h) { const k = h.dataset.brsort; brSort = { k, dir: brSort.k === k ? -brSort.dir : (k === 'name' || k === 'by' ? 1 : -1) }; try { localStorage.setItem('rl-br-sort', JSON.stringify(brSort)); } catch {} brHi = 0; if (brFor) brShow(brFor); return; }
+    const o = e.target.closest('[data-br]'); if (o) brPick(o.dataset.br);
+  });
   overlay.addEventListener('focusin', (e) => { if (e.target.dataset && e.target.dataset.src != null) { brHi = 0; brShow(e.target); } });
   overlay.addEventListener('input', (e) => { if (e.target.dataset && e.target.dataset.src != null) { brHi = 0; brShow(e.target); } });
   overlay.addEventListener('keydown', (e) => {
@@ -1217,7 +1231,7 @@
   // the footer says what the agent will do (PRs to open, hand-deployed envs to report).
   // the picker in Hotfix mode
   function hotfixPickerHtml(s) {
-    const prs = prodPlan(), brs = s.branches || {};
+    const prs = prodPlan();
     const picked = prs.filter(p => !relSkip.has(p.repo)), missing = picked.filter(p => !relSrc.get(`${p.repo}|prod`));
     const fromDev = picked.filter(p => relSrc.get(`${p.repo}|prod`) === p.source);
     let h = '<div class="rl-rel-pop still"><div class="rl-rel-head"><span>🩹 Hotfix → <span class="rl-env" style="--hue:' + (ENV_HUE.prod || 'var(--dim)') + '">prod</span></span></div>'
@@ -1268,7 +1282,6 @@
     h += '</div>';
     if (relSel.size && relAdv) {
       // every repo × env of the plan: tick it, and pick the branch it releases from (any branch; empty = its usual)
-      const brs = (s.branches) || {};
       askBranches(fullPlan.prs);
       const allOn = !fullPlan.prs.some(p => relSkip.has(p.repo));
       h += `<div class="rl-rel-head rl-rel-repos-head"><span>Repos · release from</span><button class="rl-rel-all" data-act="relReposAll" data-on="${allOn ? 0 : 1}">${allOn ? 'None' : 'All'}</button></div><div class="rl-rel-repos">`
