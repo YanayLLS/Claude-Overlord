@@ -685,6 +685,8 @@
     if (h.conflict) bits.push('<span class="bad">conflict</span>');
     if (h.checks === 'fail') bits.push('<span class="bad">checks failing</span>');
     if (h.dbschemas) bits.push(`<span class="bad" title="Uses dbschemas fields its build doesn't ship">dbschemas: ${esc(h.dbschemas.join(', '))}</span>`);
+    if (h.fromSource) bits.push(`<span class="warn" title="${esc('Already on ' + h.fromSource.from + ':\n' + h.fromSource.titles.join('\n'))}">${h.fromSource.n} commit${h.fromSource.n === 1 ? '' : 's'} from ${esc(h.fromSource.from)}</span>`);
+    if (h.dbBump) bits.push(`<span class="warn" title="${esc((h.dbBump.prod || []).filter(x => x.version !== h.dbBump.to).map(x => `${x.label} ${x.version}`).join(', ') || 'rest of prod: unknown or same')}">dbschemas ${esc(h.dbBump.from)} → ${esc(h.dbBump.to)}</span>`);
     if (h.error) bits.push(`<span class="bad" title="${esc(h.error)}">error</span>`);
     return bits.length ? `<span class="rl-hist-health">${bits.join(' · ')}</span>` : '';
   }
@@ -1151,6 +1153,10 @@
       else if (d && d.otherLine) bits.push(`<span class="rl-rr-chip warn" title="Latest is ${esc(d.latest)}: a different major line, so fields can't be compared">dbschemas ${esc(d.shipped)} (old line)</span>`);
       else if (d && d.shipped && d.shipped !== d.latest) bits.push(`<span class="rl-rr-chip" title="${esc((d.newFields || []).join(', ') || 'no new fields')}">dbschemas ${esc(d.shipped)} · ${d.behind != null ? d.behind + ' change' + (d.behind === 1 ? '' : 's') + ' behind' : 'behind ' + esc(d.latest)}</span>`);
       else if (d && d.shipped) bits.push(`<span class="rl-rr-chip ok">dbschemas ${esc(d.shipped)}${d.via === 'latest' ? ' (latest at build)' : ''}</span>`);
+      // a fix branch's release (Hotfix / Advanced): dev work riding along; a dbschemas version the rest of prod doesn't run
+      if (r.fromSource) bits.push(`<span class="rl-rr-chip warn" title="${esc(`Already on ${r.fromSource.from}, so not just the fix:\n` + r.fromSource.titles.join('\n') + (r.fromSource.n > r.fromSource.titles.length ? `\n…and ${r.fromSource.n - r.fromSource.titles.length} more` : '') + `\n\nCut the fix branch from ${r.target} and cherry-pick only the fix (or it was merged to ${r.fromSource.from} too: then it's fine)`)}">⚠ ${r.fromSource.n} commit${r.fromSource.n === 1 ? '' : 's'} from ${esc(r.fromSource.from)}</span>`);
+      if (d && d.bump) { const off = (d.prodRepos || []).filter(x => x.version !== d.bump.to);
+        bits.push(`<span class="rl-rr-chip warn" title="${esc(`Prod runs dbschemas ${d.bump.from} here; this ships ${d.bump.to}.` + (d.prodRepos ? (off.length ? `\nThe rest of prod stays on: ${off.map(x => `${x.label} ${x.version}`).join(', ')}` : '\nThe rest of prod already runs it.') : '') + `\nCheck the schema changes between them don't break what those repos read or write.`)}">⚠ dbschemas ${esc(d.bump.from)} → ${esc(d.bump.to)}${off.length ? ` · ${off.length} prod repo${off.length === 1 ? '' : 's'} on others` : ''}</span>`); }
       if (r.pr && !r.running && r.builds === 'none') bits.push('<span class="rl-rr-chip warn" title="No check on this PR builds or tests it, so nothing verifies it still builds after merging">⚠ no CI build</span>');
       if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them, so merging isn't blocked: ${esc(r.advisory.join(', '))}">not required: ${esc([...new Set(r.advisory.map(x => x.replace(/\s*\(.*\)$/, '')))].join(', '))}</span>`);
       if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">red before: ${esc(r.knownFailing.join(', '))}</span>`);

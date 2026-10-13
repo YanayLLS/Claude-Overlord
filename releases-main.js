@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
-const { runRelease, recheckRelease, startsQueue, prHealth, rowStatus, isHotfix } = require('./release-run');
+const { runRelease, recheckRelease, startsQueue, prHealth, rowStatus, isHotfix, prodDbschemas } = require('./release-run');
 const createHistory = require('./release-history');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
@@ -1201,6 +1201,15 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const members = memberLogins(), who = await whoAmI();
     const prs = plan.prs.map(p => p.env === 'prod' ? { ...p, members, opener: { login: who.github, clickup: who.clickup } } : p);
     await runRelease(ghJson, prs, { writeJson, onRow });
+    // a fix branch that changes the dbschemas prod runs: what the rest of prod runs (it keeps reading the same data)
+    const bumps = run.rows.filter(r => r.dbschemas && r.dbschemas.bump);
+    if (bumps.length) {
+      const here = new Set(run.rows.map(r => r.repo));
+      const others = (cfg.repos || []).filter(r => r.branches && r.branches.prod && !here.has(r.repo)).map(r => ({ repo: r.repo, label: r.label, target: r.branches.prod }));
+      const prodRepos = await prodDbschemas(ghJson, others, bumps[0].dbschemas.latest).catch(() => null);
+      for (const r of bumps) r.dbschemas = { ...r.dbschemas, prodRepos };
+      push({ releaseRun: { ...run } });
+    }
     run.flags = await flags;
     // missing prod flags: say so at the top of every open prod release PR (opened now or in an
     // earlier run), once — a PR that already carries the warning is left alone

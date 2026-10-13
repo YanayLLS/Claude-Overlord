@@ -400,7 +400,9 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     const found = new Map((rows || []).filter(r => r.pr && !r.running).map(r => [key(r), {
       status: r.status || null, checks: r.checks || null, conflict: r.conflict == null ? null : r.conflict,
       backMerge: r.backMerge && r.backMerge.number ? { number: r.backMerge.number, url: r.backMerge.url, conflict: !!r.backMerge.conflict } : null,
-      dbschemas: r.dbschemas && r.dbschemas.used && r.dbschemas.used.length ? r.dbschemas.used : null, error: r.error || null }]));
+      dbschemas: r.dbschemas && r.dbschemas.used && r.dbschemas.used.length ? r.dbschemas.used : null, error: r.error || null,
+      // a fix branch's release: dev commits riding along, and a dbschemas version prod doesn't run yet
+      ...(r.fromSource ? { fromSource: r.fromSource } : {}), ...(r.dbschemas && r.dbschemas.bump ? { dbBump: { ...r.dbschemas.bump, prod: r.dbschemas.prodRepos || null } } : {}) }]));
     if (!found.size) return;
     const loaded = await load();
     if (!loaded) return;

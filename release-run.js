@@ -158,9 +158,12 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   const ahead = cmp.data.ahead_by, files = (cmp.data.files || []).length;
   if (!ahead || !files) return { nothing: true, ahead };
   const titles = (cmp.data.commits || []).filter(c => (c.parents || []).length === 1).map(c => firstLine(c.commit.message));
-  const back = await api(`repos/${repo}/compare/${source}...${target}`);
+  const [back, own] = await Promise.all([api(`repos/${repo}/compare/${source}...${target}`),
+    row.customSource ? api(`repos/${repo}/compare/${row.customSource}...${source}`) : null]);
+  const carried = own && own.data ? carriedCommits(cmp.data.commits, own.data.commits) : [];
+  const fromSource = carried.length ? { from: row.customSource, n: carried.length, titles: carried.slice(0, 8) } : null;
   const hotfixes = back.data ? hotfixTitles(back.data.commits) : [];
-  update({ ahead, hotfixes: hotfixes.length });
+  update({ ahead, hotfixes: hotfixes.length, fromSource });
 
   // the release PR: reuse an open one, else open it
   let found = await findOpen(target, source);
@@ -198,9 +201,9 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   // is the release PR mergeable, and are its checks green?
   const [health, dbschemas] = await Promise.all([
     prHealth(gh, repo, pr.number, target, wait, row.members || null),
-    dbschemasCheck(gh, repo, source, cmp.data.files, row.dbschemasLatest).catch(e => ({ error: e.message })),
+    dbschemasCheck(gh, repo, source, cmp.data.files, row.dbschemasLatest, row.customSource ? target : null).catch(e => ({ error: e.message })),
   ]);
-  return { ahead, hotfixes: hotfixes.length, pr: { number: pr.number, url: pr.html_url }, reused, body: reused ? null : lastBody, backMerge, dbschemas, ...health };
+  return { ahead, hotfixes: hotfixes.length, fromSource, pr: { number: pr.number, url: pr.html_url }, reused, body: reused ? null : lastBody, backMerge, dbschemas, ...health };
 }
 
 // ── dbschemas: does this release need a newer shared-schema package than its build ships? ──
@@ -267,15 +270,22 @@ function shippedVersion({ pkg, lock, dockerfile, latest }) {
   return { version: locked ? locked.version : String(deps[DBS]).replace(/^[\^~=]/, ''), via: locked ? 'lock' : 'package.json' };
 }
 
-async function dbschemasCheck(gh, repo, source, releaseFiles, latest) {
-  if (!latest) return null;
-  const raw = (p) => gh(['api', '-H', 'Accept:application/vnd.github.raw', `repos/${repo}/contents/${p}?ref=${source}`]);
+// the dbschemas a repo's branch builds with (null: the repo doesn't use it)
+async function shippedAt(gh, repo, ref, latest) {
+  const raw = (p) => gh(['api', '-H', 'Accept:application/vnd.github.raw', `repos/${repo}/contents/${p}?ref=${ref}`]);
   const [pkg, lock, docker] = await Promise.all([raw('package.json'), raw('package-lock.json'),
-    gh(['api', `repos/${repo}/contents/Dockerfile?ref=${source}`])]);
+    gh(['api', `repos/${repo}/contents/Dockerfile?ref=${ref}`])]);
   const dockerfile = docker.data && docker.data.content ? Buffer.from(docker.data.content, 'base64').toString('utf8') : '';
-  const shipped = shippedVersion({ pkg: pkg.data, lock: lock.data, dockerfile, latest });
+  return shippedVersion({ pkg: pkg.data, lock: lock.data, dockerfile, latest });
+}
+
+// prodRef (a fix branch's release): also the version prod runs now, so a hotfix that changes it says so
+async function dbschemasCheck(gh, repo, source, releaseFiles, latest, prodRef = null) {
+  if (!latest) return null;
+  const [shipped, prod] = await Promise.all([shippedAt(gh, repo, source, latest), prodRef ? shippedAt(gh, repo, prodRef, latest) : null]);
   if (!shipped) return null; // this repo doesn't use dbschemas
-  const res = { shipped: shipped.version, via: shipped.via, latest, newFields: [], used: [] };
+  const res = { shipped: shipped.version, via: shipped.via, latest, newFields: [], used: [],
+    ...(prod && prod.version !== shipped.version ? { bump: { from: prod.version, to: shipped.version } } : {}) };
   if (shipped.version === latest) return res;
   if (shipped.version.split('.')[0] !== latest.split('.')[0]) return { ...res, otherLine: true }; // e.g. 23.x vs 26.x: diverged lines, no field diff
   const [cmp, shippedFields] = await Promise.all([gh(['api', `repos/${DBS_REPO}/compare/${shipped.version}...${latest}`]),
@@ -287,6 +297,20 @@ async function dbschemasCheck(gh, repo, source, releaseFiles, latest) {
   res.used = fieldsUsed(res.newFields, releaseFiles);
   return res;
 }
+
+// The dbschemas each of these repos' prod branch runs ([{ repo, label, target }]); repos without it are left out.
+// For a hotfix that changes the version: the rest of prod keeps reading the same collections with the old schemas.
+async function prodDbschemas(gh, repos, latest) {
+  const got = await Promise.all(repos.map(r => shippedAt(gh, r.repo, r.target, latest).catch(() => null)));
+  return repos.map((r, i) => got[i] && { label: r.label, version: got[i].version }).filter(Boolean);
+}
+
+// A fix branch's commits that its repo's usual source already has (dev work riding along with the fix, or
+// the fix merged to dev too): ahead = target...fix, own = usual...fix. Merge commits don't count.
+const carriedCommits = (ahead, own) => {
+  const mine = new Set((own || []).map(c => c.sha));
+  return (ahead || []).filter(c => !mine.has(c.sha) && (c.parents || []).length === 1).map(c => firstLine(c.commit.message));
+};
 
 // Does anything on the PR build or test it? A green build check runs on the PR's merge result,
 // so it's the "will it still build after merging" answer; none means nothing verifies that.
@@ -338,4 +362,4 @@ async function runRelease(gh, prs, { writeJson, onRow, wait }) {
 const startsQueue = (status) => status === 'done' || status === 'partial';
 
 module.exports = { startsQueue, recheckRelease, isHotfix, hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
-  addedSchemaFields, fieldsUsed, shippedVersion, dbschemasCheck, buildCoverage };
+  addedSchemaFields, fieldsUsed, shippedVersion, dbschemasCheck, buildCoverage, carriedCommits, prodDbschemas };

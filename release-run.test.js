@@ -152,6 +152,28 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
   assert.strictEqual(rowStatus({ pr: {}, checks: 'pass', dbschemas: dbs }), 'blocked');
   assert.strictEqual(buildCoverage([{ name: 'Production Build', status: 'completed', conclusion: 'success' }]), 'pass');
   assert.strictEqual(buildCoverage([{ name: 'Semgrep', status: 'completed', conclusion: 'success' }]), 'none');
+  // a fix branch (Hotfix / Advanced): commits it shares with the repo's usual source ride along; merges don't count
+  const { carriedCommits, prodDbschemas } = require('./release-run');
+  const cm = (sha, msg, parents = 1) => ({ sha, commit: { message: msg }, parents: Array(parents).fill({}) });
+  assert.deepStrictEqual(carriedCommits([cm('a', 'fix: author names'), cm('b', 'feat: dev work\nbody'), cm('m', 'Merge dev', 2)], [cm('a', 'fix: author names')]), ['feat: dev work']);
+  assert.deepStrictEqual(carriedCommits([cm('a', 'fix')], [cm('a', 'fix')]), []);
+  // a hotfix that changes the dbschemas version prod runs: what the other prod repos run
+  const dbsAt = (v) => async (args) => {
+    const a = args.join(' ');
+    if (a.includes('package.json')) return { data: { dependencies: { '@llsltd/dbschemas': '^' + v(a) } } };
+    if (a.includes('package-lock.json')) return { data: {} };
+    if (a.includes('Dockerfile')) return { data: { content: Buffer.from('RUN npm ci').toString('base64') } };
+    return { error: 'unexpected ' + a };
+  };
+  const bumped = await dbschemasCheck(dbsAt(a => a.includes('ref=master') ? '26.3.70' : '26.3.95'), 'o/b', 'hotfix/x', [], '26.3.95', 'master');
+  assert.deepStrictEqual(bumped.bump, { from: '26.3.70', to: '26.3.95' });
+  assert.strictEqual((await dbschemasCheck(dbsAt(() => '26.3.95'), 'o/b', 'hotfix/x', [], '26.3.95', 'master')).bump, undefined);
+  const prodRepos = await prodDbschemas(async (args) => {
+    const a = args.join(' ');
+    if (a.includes('repos/o/web/')) return a.includes('package.json') && !a.includes('lock') ? { data: { dependencies: {} } } : { data: {} }; // no dbschemas
+    return dbsAt(x => x.includes('o/api') ? '26.3.70' : '26.3.95')(args);
+  }, [{ repo: 'o/api', label: 'api', target: 'main' }, { repo: 'o/web', label: 'web', target: 'master' }, { repo: 'o/id', label: 'id', target: 'main' }], '26.3.95');
+  assert.deepStrictEqual(prodRepos, [{ label: 'api', version: '26.3.70' }, { label: 'id', version: '26.3.95' }]);
   // a queued Release all starts after a clean or partly released run (a held alpha repo doesn't hold a prod hotfix), not after a stop
   const { startsQueue } = require('./release-run');
   assert.deepStrictEqual(['done', 'partial', 'stopped', 'interrupted'].map(startsQueue), [true, true, false, false]);
