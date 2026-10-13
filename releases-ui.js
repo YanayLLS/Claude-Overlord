@@ -541,7 +541,7 @@
     const failed = m.repos.filter(r => r.deploy && r.deploy.state === 'failure');
     const deploying = m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state));
     if (ra && ra.running && ra.id === m.id) return { phase: ra.status === 'checking' ? 'starting Release all' : `wave ${ra.wave}/${ra.waves} ${ra.status === 'deploying' ? 'deploying' : ra.status === 'manual' ? 'waiting for a hand deploy' : 'merging'}`, next: ra.status === 'manual' ? 'deploy the hand step, then Deployed, continue' : `Release all is on it${etaOf(st, m.id) && etaOf(st, m.id).etaMs != null ? ` · ${minLeft(etaOf(st, m.id).etaMs)} until fully deployed` : ''}`, tone: 'run' };
-    if (st.teamRun && st.teamRun.id === m.id) return { phase: `@${st.teamRun.by} is releasing (wave ${st.teamRun.wave}/${st.teamRun.waves})`, next: 'watch here', tone: 'run' };
+    if (st.teamRun && st.teamRun.id === m.id) return { phase: `@${st.teamRun.by} is releasing (wave ${st.teamRun.wave}/${st.teamRun.waves})`, next: `watch here${etaOf(st, m.id) && etaOf(st, m.id).etaMs != null ? ` · ${minLeft(etaOf(st, m.id).etaMs)} until fully deployed` : ''}`, tone: 'run' };
     if (failed.length) return { phase: `${failed.map(r => r.label).join(', ')} deploy failed`, next: `↻ Re-run or 🔧 Fix ${failed.length === 1 ? 'its' : 'their'} deploy (row buttons)`, tone: 'bad' };
     if (open.length && signs && signers.length < 2) {
       const need = 2 - signers.length, iSigned = signers.some(l => l.toLowerCase() === me);
