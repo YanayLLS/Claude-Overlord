@@ -741,7 +741,7 @@
       const other = ((s.history && s.history.items) || []).find(m => m.id === runId);
       const what = other ? `the ${other.env || 'prod'} release` : 'the running release';
       return s.releaseAllQueue === myId
-        ? `<button class="${lockedCls} queued" data-act="queueAll" data-id="${esc(myId)}" title="Starts by itself when ${esc(what)} finishes cleanly. Click to unqueue">⏳ Queued after ${esc(what)}</button>`
+        ? `<button class="${lockedCls} queued" data-act="queueAll" data-id="${esc(myId)}" title="Starts by itself when ${esc(what)} has released (all or part of it), not if it is stopped. Click to unqueue">⏳ Queued after ${esc(what)}</button>`
         : `<button class="${lockedCls}" data-act="queueAll" data-id="${esc(myId)}" title="Release all runs one release at a time: ${esc(what)} is running now. Queue this one to start right after it">🚀 Release all · after ${esc(what)}</button>`;
     }
     if (s.releaseAll && s.releaseAll.running) return '';

@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
-const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix } = require('./release-run');
+const { runRelease, recheckRelease, startsQueue, prHealth, rowStatus, isHotfix } = require('./release-run');
 const createHistory = require('./release-history');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
@@ -1022,12 +1022,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
           wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] }); }).catch(() => {});
       reconcileHistory().catch(() => {});
       refresh();
-      // a release queued behind this run starts now, if this one finished cleanly
+      // a release queued behind this run starts now, if this one released (a held repo there doesn't hold it)
       const q = state.releaseAllQueue;
       if (q && q !== id) {
         push({ releaseAllQueue: null });
         const p = state.releaseAll || {};
-        if (p.status === 'done') { send({ type: 'toast', text: `Starting the queued Release all: release ${q}` }); setTimeout(() => releaseAll(q).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })), 1500); }
+        if (startsQueue(p.status)) { send({ type: 'toast', text: `Starting the queued Release all: release ${q}` }); setTimeout(() => releaseAll(q).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })), 1500); }
         else if (notify) notify(`⏸ Queued release ${q} didn't start`, `The release before it ended "${p.status}": ${p.detail || ''}. Start it from its card when ready.`, null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
       }
     }

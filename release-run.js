@@ -334,5 +334,8 @@ async function runRelease(gh, prs, { writeJson, onRow, wait }) {
   return rows;
 }
 
-module.exports = { recheckRelease, isHotfix, hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
+// a Release all queued behind a run starts when that run released (all or part of it), not when it was stopped
+const startsQueue = (status) => status === 'done' || status === 'partial';
+
+module.exports = { startsQueue, recheckRelease, isHotfix, hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
   addedSchemaFields, fieldsUsed, shippedVersion, dbschemasCheck, buildCoverage };

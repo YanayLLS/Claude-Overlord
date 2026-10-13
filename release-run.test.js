@@ -152,6 +152,9 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
   assert.strictEqual(rowStatus({ pr: {}, checks: 'pass', dbschemas: dbs }), 'blocked');
   assert.strictEqual(buildCoverage([{ name: 'Production Build', status: 'completed', conclusion: 'success' }]), 'pass');
   assert.strictEqual(buildCoverage([{ name: 'Semgrep', status: 'completed', conclusion: 'success' }]), 'none');
+  // a queued Release all starts after a clean or partly released run (a held alpha repo doesn't hold a prod hotfix), not after a stop
+  const { startsQueue } = require('./release-run');
+  assert.deepStrictEqual(['done', 'partial', 'stopped', 'interrupted'].map(startsQueue), [true, true, false, false]);
   console.log('release-run: all passed');
 })().catch(e => { console.error(e); process.exit(1); });
 // the board's "↩ N from prod" and the back-merge share one rule: merges and CI deploy markers aren't hotfixes
