@@ -58,6 +58,11 @@ const createHistory = require('./release-history');
   // the same PRs again → the same manifest, not a second one
   assert.strictEqual(await h.recordRun(run, { opener: { login: 'alice' }, manual: [], flags: null }), id);
   assert.strictEqual(files.size, 1);
+  // its author rewrote the PR body (the tag gone) and a scan adopts it again as a hotfix: still that release, re-tagged
+  prs['o/front#9'].body = 'rewritten';
+  assert.strictEqual(await h.recordRun(run, { opener: { login: 'alice' }, manual: [], flags: null, kind: 'hotfix' }), id);
+  assert.strictEqual(files.size, 1);
+  assert.ok(prs['o/front#9'].body.includes(`<!-- release-id:${id} -->`));
 
   // merged on GitHub → reconcile folds the merge commit, signers and the deploy result in
   Object.assign(prs['o/front#9'], { state: 'closed', merged: true, merge_commit_sha: 'm1', merged_at: 't' });

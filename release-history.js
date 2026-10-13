@@ -84,8 +84,10 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     const key = (r) => r.repo + '#' + r.pr.number;
     const mine = new Set(rows.map(key));
     const pendingOf = (e) => e.manifest.status === 'pending' && (e.manifest.env || 'prod') === env;
-    const existing = kind === 'hotfix' ? null : loaded.entries.find(e => pendingOf(e) && e.manifest.repos.some(r => mine.has(key(r))))
-      || (joinPending ? loaded.entries.find(e => pendingOf(e) && (e.manifest.kind || 'release') === 'release') : null);
+    // a hotfix never joins another release, but one already holding its PR is the same release (its body,
+    // and the release-id tag with it, was rewritten, so a scan adopted it again)
+    const existing = loaded.entries.find(e => pendingOf(e) && e.manifest.repos.some(r => mine.has(key(r))))
+      || (joinPending && kind !== 'hotfix' ?loaded.entries.find(e => pendingOf(e) && (e.manifest.kind || 'release') === 'release') : null);
     for (let attempt = 0; attempt < 4; attempt++) {
       let m, sha = null;
       if (existing) {
