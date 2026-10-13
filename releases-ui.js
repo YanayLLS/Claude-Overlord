@@ -63,7 +63,49 @@
     v ? relSrc.set(i.dataset.src, v) : relSrc.delete(i.dataset.src);
     render();
   });
-  overlay.addEventListener('focusout', (e) => { if (e.target.dataset && e.target.dataset.src != null && drawLater) { drawLater = false; setTimeout(render, 0); } });
+  overlay.addEventListener('focusout', (e) => {
+    if (!e.target.dataset || e.target.dataset.src == null) return;
+    setTimeout(() => { if (document.activeElement !== brFor) brHide(); }, 120);
+    if (drawLater) { drawLater = false; setTimeout(render, 0); }
+  });
+  // ── Branch box: a searchable list under the input (the native datalist can't be styled or searched) ──
+  const brMenu = document.createElement('div');
+  brMenu.className = 'rl-br-menu';
+  document.body.appendChild(brMenu);
+  let brFor = null, brHi = 0, brItems = [];
+  const brMark = (b, q) => { const i = q ? b.toLowerCase().indexOf(q) : -1; return i < 0 ? esc(b) : esc(b.slice(0, i)) + '<b>' + esc(b.slice(i, i + q.length)) + '</b>' + esc(b.slice(i + q.length)); };
+  function brShow(inp) {
+    const repo = inp.dataset.src.split('|')[0], loaded = state && state.branches && state.branches[repo];
+    const all = (loaded || []).filter(b => b !== inp.dataset.target), q = inp.value.trim().toLowerCase();
+    // matches first by where the text starts (a name starting with it, then a path segment, then anywhere)
+    const rank = (b) => { const l = b.toLowerCase(); return l.startsWith(q) ? 0 : l.includes('/' + q) ? 1 : 2; };
+    brItems = (q ? all.filter(b => b.toLowerCase().includes(q)).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)) : all).slice(0, 60);
+    brFor = inp; brHi = Math.max(0, Math.min(brHi, brItems.length - 1));
+    brMenu.innerHTML = !loaded ? '<div class="rl-br-empty"><span class="rl-spin-dot"></span>Loading branches…</div>'
+      : !brItems.length ? `<div class="rl-br-empty">No branch matches “${esc(q)}”</div>`
+      : brItems.map((b, i) => `<div class="rl-br-opt${i === brHi ? ' hi' : ''}" data-br="${esc(b)}">${brMark(b, q)}</div>`).join('')
+        + (all.length > brItems.length && !q ? `<div class="rl-br-empty">${all.length} branches · type to search</div>` : '');
+    const r = inp.getBoundingClientRect();
+    brMenu.style.left = r.left + 'px'; brMenu.style.top = (r.bottom + 4) + 'px'; brMenu.style.width = Math.max(r.width, 260) + 'px';
+    brMenu.classList.add('open');
+    const hi = brMenu.querySelector('.hi'); if (hi) hi.scrollIntoView({ block: 'nearest' });
+  }
+  function brHide() { brMenu.classList.remove('open'); brFor = null; }
+  function brPick(b) {
+    const inp = brFor; if (!inp) return;
+    inp.value = b; brHide();
+    relSrc.set(inp.dataset.src, b);
+    inp.blur(); render();
+  }
+  brMenu.addEventListener('mousedown', (e) => e.preventDefault()); // keep the input focused
+  brMenu.addEventListener('click', (e) => { const o = e.target.closest('[data-br]'); if (o) brPick(o.dataset.br); });
+  overlay.addEventListener('focusin', (e) => { if (e.target.dataset && e.target.dataset.src != null) { brHi = 0; brShow(e.target); } });
+  overlay.addEventListener('input', (e) => { if (e.target.dataset && e.target.dataset.src != null) { brHi = 0; brShow(e.target); } });
+  overlay.addEventListener('keydown', (e) => {
+    if (!e.target.dataset || e.target.dataset.src == null) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); brHi = (brHi + (e.key === 'ArrowDown' ? 1 : -1) + brItems.length) % Math.max(1, brItems.length); brShow(e.target); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (brMenu.classList.contains('open') && brItems[brHi]) brPick(brItems[brHi]); else e.target.blur(); }
+  });
   // double-click a cell: its deploy run on GitHub (hand-deployed: the live commit)
   overlay.addEventListener('dblclick', (e) => {
     const cell = e.target.closest('.rl-cell[data-r]'), row = cell && state && state.grid && state.grid.rows[cell.dataset.r], c = row && row.cells && row.cells[cell.dataset.c];
@@ -74,6 +116,7 @@
   document.addEventListener('keydown', (e) => {
     if (!open || e.key !== 'Escape') return;
     e.stopPropagation();
+    if (brMenu.classList.contains('open')) { brHide(); return; }
     if (apprOpen) { apprOpen = false; render(); } else if (relOpen && tab === 'release' && (activeRelease(state) || (state && state.releaseRun))) { relOpen = false; render(); } else if (sel) { sel = null; render(); } else show(false);
   }, true);
 
@@ -1183,8 +1226,8 @@
       + prs.map((p, i) => {
         const k = `${p.repo}|prod`, v = relSrc.get(k) || '', on = !relSkip.has(p.repo);
         return `<div class="rl-rel-repo-row adv"><button class="rl-rel-repo${on ? ' on' : ''}" data-act="relRepo" data-repo="${esc(p.repo)}"><i></i><b>${esc(p.label)}</b><span>${esc(p.target)}</span></button>`
-          + `<input class="rl-rel-src${on && !v ? ' need' : v ? ' custom' : ''}" data-src="${esc(k)}" list="rl-hb-${i}" value="${esc(v)}" placeholder="branch with the fix" spellcheck="false" title="${esc(`The branch ${p.label}'s fix is on: its PR goes into ${p.target}`)}">`
-          + `<datalist id="rl-hb-${i}">${(brs[p.repo] || []).filter(b => b !== p.target).map(b => `<option value="${esc(b)}">`).join('')}</datalist><span></span></div>`;
+          + `<input class="rl-rel-src${on && !v ? ' need' : v ? ' custom' : ''}" data-src="${esc(k)}" data-target="${esc(p.target)}" value="${esc(v)}" placeholder="Search branches…" autocomplete="off" spellcheck="false" title="${esc(`The branch ${p.label}'s fix is on: its PR goes into ${p.target}`)}">`
+            + `<span></span></div>`;
       }).join('') + '</div>';
     if (fromDev.length) h += `<div class="rl-rr-flag warn">⚠ ${fromDev.map(p => esc(p.label)).join(', ')} from ${esc(fromDev[0].source)}: that ships everything waiting there, not just a fix. A full release does that.</div>`;
     const why = !picked.length ? 'Tick the repos the fix is in' : missing.length ? `Pick the fix branch for ${missing.map(p => p.label).join(', ')}` : '';
@@ -1233,8 +1276,7 @@
           const k = `${p.repo}|${p.env}`, v = relSrc.get(k) || '', custom = v && v !== p.source;
           return `<div class="rl-rel-repo-row adv"><button class="rl-rel-repo${relSkip.has(p.repo) ? '' : ' on'}" data-act="relRepo" data-repo="${esc(p.repo)}">`
             + `<i></i><b>${esc(p.label)}</b><span>${repoWait[p.repo] ? `${repoWait[p.repo]} waiting` : ''}</span></button>`
-            + `<input class="rl-rel-src${custom ? ' custom' : ''}" data-src="${esc(k)}" list="rl-br-${i}" value="${esc(v)}" placeholder="${esc(p.source)}" spellcheck="false" title="${esc(`Branch to release ${p.label} into ${p.env} (${p.target}) from. Empty: ${p.source}`)}">`
-            + `<datalist id="rl-br-${i}">${(brs[p.repo] || []).filter(b => b !== p.target).map(b => `<option value="${esc(b)}">`).join('')}</datalist>`
+            + `<input class="rl-rel-src${custom ? ' custom' : ''}" data-src="${esc(k)}" data-target="${esc(p.target)}" value="${esc(v)}" placeholder="${esc(p.source)}" autocomplete="off" spellcheck="false" title="${esc(`Branch to release ${p.label} into ${p.env} (${p.target}) from. Empty: ${p.source}`)}">`
             + `<span class="rl-rel-to">→ <span class="rl-env" style="--hue:${ENV_HUE[p.env.toLowerCase()] || 'var(--dim)'}">${esc(p.env)}</span></span></div>`;
         }).join('') + '</div>';
       const off = fullPlan.prs.filter(p => !relSkip.has(p.repo) && relSrc.get(`${p.repo}|${p.env}`) && relSrc.get(`${p.repo}|${p.env}`) !== p.source);
@@ -1478,5 +1520,5 @@
     el.classList.add('open');
   }
 
-  window.releasesUi = { releaseRepos, enforcePrWatch, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
+  window.releasesUi = { releaseRepos, enforcePrWatch, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (brFor && document.activeElement === brFor) brShow(brFor); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
 })();

@@ -1124,8 +1124,16 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // separate: start a release of its own even when one is pending (default: what's picked joins the pending one)
   async function branchesOf(repo) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(String(repo)) || (state.branches && state.branches[repo])) return;
-    const r = await ghGraphql(`query { repository(owner: ${JSON.stringify(repo.split('/')[0])}, name: ${JSON.stringify(repo.split('/')[1])}) { refs(refPrefix: "refs/heads/", first: 100, orderBy: { field: ALPHABETICAL, direction: ASC }) { nodes { name } } } }`);
-    const names = r.data && r.data.repository ? r.data.repository.refs.nodes.map(n => n.name) : [];
+    const names = [];
+    let after = null;
+    for (let page = 0; page < 10; page++) { // ponytail: up to 1000 branches; the box still takes any typed name
+      const r = await ghGraphql(`query { repository(owner: ${JSON.stringify(repo.split('/')[0])}, name: ${JSON.stringify(repo.split('/')[1])}) { refs(refPrefix: "refs/heads/", first: 100${after ? `, after: ${JSON.stringify(after)}` : ''}, orderBy: { field: ALPHABETICAL, direction: ASC }) { nodes { name } pageInfo { hasNextPage endCursor } } } }`);
+      const refs = r.data && r.data.repository && r.data.repository.refs;
+      if (!refs) break;
+      names.push(...refs.nodes.map(n => n.name));
+      if (!refs.pageInfo.hasNextPage) break;
+      after = refs.pageInfo.endCursor;
+    }
     push({ branches: { ...(state.branches || {}), [repo]: names } });
   }
   async function release(envs, repos, of, separate = false, sources = null, hotfix = false) {
@@ -1338,7 +1346,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         return true;
       }
       case 'releasesRefresh': refresh(); return true;
-      // Advanced mode's branch boxes: a repo's branches (one call, cached for the session; ponytail: first 100 — any name can still be typed)
+      // the picker's branch boxes: a repo's branches (cached for the session)
       case 'releasesBranches': branchesOf(msg.repo).catch(() => {}); return true;
       case 'releasesRelease': release(msg.envs, msg.repos, msg.of, !!msg.separate, msg.sources || null, !!msg.hotfix).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;

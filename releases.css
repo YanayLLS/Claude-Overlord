@@ -602,7 +602,21 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-rel-adv { font:inherit; font-size:10px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; padding:3px 9px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
 .rl-rel-adv:hover { color:var(--text); } .rl-rel-adv.on { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
 .rl-rel-repo-row.adv { display:grid; grid-template-columns:minmax(0,1fr) 180px auto; align-items:center; gap:8px; }
-.rl-rel-src { font:inherit; font-size:12px; padding:4px 8px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); color:var(--text); min-width:0; }
+.rl-rel-src { font:inherit; font-size:12px; height:28px; padding:0 26px 0 28px; border-radius:var(--r); border:1px solid var(--border); color:var(--text); min-width:0; outline:none;
+  background:var(--surface0) no-repeat 9px center / 12px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b90a5' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  transition:border-color .12s, background-color .12s; }
+.rl-rel-src:hover { background-color:var(--surface1); }
+.rl-rel-src:focus { border-color:var(--accent); background-color:var(--surface1); }
 .rl-rel-src::placeholder { color:var(--dim); } .rl-rel-src.custom { border-color:var(--yellow); }
 .rl-rel-to { font-size:11px; color:var(--dim); white-space:nowrap; }
 .rl-rel-src.need { border-color:var(--peach); }
+/* the branch list under a branch box: search results, keyboard-highlighted */
+.rl-br-menu { position:fixed; z-index:10000; display:none; max-height:280px; overflow:auto; padding:4px; border-radius:var(--r-lg); background:var(--pop);
+  border:1px solid var(--border-hi); box-shadow:var(--pop-shadow); font-size:12px; box-sizing:border-box; animation:rl-up .1s ease-out; }
+.rl-br-menu.open { display:block; }
+.rl-br-opt { padding:6px 9px; border-radius:var(--r); color:var(--subtext); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  font-family:ui-monospace, 'Cascadia Code', Consolas, monospace; font-size:11.5px; }
+.rl-br-opt:hover { background:var(--hover-strong); color:var(--text); }
+.rl-br-opt.hi { background:var(--accent-soft); color:var(--text); }
+.rl-br-opt b { color:var(--accent); font-weight:700; }
+.rl-br-empty { display:flex; align-items:center; gap:6px; padding:6px 9px; color:var(--dim); font-size:11px; }
