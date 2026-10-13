@@ -150,7 +150,7 @@
   };
   // opens with your last env choice; a finished run (nothing left open) is history, not what it opens on: start fresh
   function openPicker() {
-    relOpen = true; relSkip = new Set(); relSeparate = false;
+    relOpen = true; relSkip = new Set(); relSeparate = false; asked.clear();
     const run = state && state.releaseRun;
     if (run && !run.running && !run.rows.some(r => r.pr && !r.merged && !r.closed)) { state = { ...state, releaseRun: null }; api.send({ type: 'releasesClearRun' }); }
     // your last choice sticks (a close + reopen must never re-tick an env you unticked);
@@ -751,7 +751,7 @@
   // Hotfix mode: prod only, just the repos you tick, each from the branch with the fix; its own hotfix release
   let relHot = false;
   const prodPlan = () => ReleasesCore.releasePlan(state.config, ['prod']).prs;
-  const asked = new Set(); // repos whose branches were asked for (once a session; main caches them)
+  const asked = new Set(); // repos whose branches were asked for since the picker opened (main caches them 10 min)
   const askBranches = (prs) => { for (const r of new Set(prs.map(p => p.repo))) if (!asked.has(r)) { asked.add(r); api.send({ type: 'releasesBranches', repo: r }); } };
   const openChanges = new Set(); // History rows whose "N changes" list is open
   const openCards = new Set(); // finished releases opened (they show as one line by default)

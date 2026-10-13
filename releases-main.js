@@ -59,7 +59,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   let timer = null, inFlight = false;
 
   function persist() {
-    const { loading, ...cache } = state;
+    const { loading, branches, deployEta, ...cache } = state; // fetched fresh each session, not worth saving
     try { fs.writeFileSync(file, JSON.stringify({ source: state.source, cache }, null, 2)); } catch {}
   }
   function push(patch) {
@@ -1122,8 +1122,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // blocked and someone presses its Fix.
   // repos: only these (owner/name) — releasing one repo, e.g. a hotfix; none = every repo with changes
   // separate: start a release of its own even when one is pending (default: what's picked joins the pending one)
+  // fetched once per app session (and again after 10 min): what the saved state holds may be from an older Overlord
+  const branchesAt = new Map();
   async function branchesOf(repo) {
-    if (!/^[\w.-]+\/[\w.-]+$/.test(String(repo)) || (state.branches && state.branches[repo])) return;
+    if (!/^[\w.-]+\/[\w.-]+$/.test(String(repo)) || Date.now() - (branchesAt.get(repo) || 0) < 10 * 60 * 1000) return;
+    branchesAt.set(repo, Date.now());
     const names = [];
     let after = null;
     for (let page = 0; page < 10; page++) { // ponytail: up to 1000 branches; the box still takes any typed name
