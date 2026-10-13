@@ -2412,8 +2412,9 @@ function fetchAllPRs(repos) {
           const changesBy = reviews.filter(r => r.state === 'CHANGES_REQUESTED' && r.author).map(r => r.author.login);
           // Drafts and others' PRs that anyone has approved aren't mine to act on: they only show in the menu's "All open" view.
           // One approval is enough — a PR a teammate already approved isn't waiting on me.
+          // Changes requested: waiting on its author, until they re-request my review.
           const approvedByMe = !!ghLogin && approvedBy.includes(ghLogin);
-          const list = pr.isDraft || (!mine && approvedBy.length) ? extra : prs;
+          const list = pr.isDraft || (!mine && (approvedBy.length || (changesBy.length && !requested))) ? extra : prs;
           list.push({
             key: prKey(r, pr.number), isDraft: !!pr.isDraft, approvedByMe, repo: r, number: pr.number, title: pr.title, url: pr.url,
             author: (pr.author && pr.author.login) || '', bot: !!pr.author && pr.author.__typename === 'Bot',

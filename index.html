@@ -585,10 +585,9 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   background:var(--title-bg); font-size:11px; color:var(--dim); gap:3px; letter-spacing:.3px; cursor:pointer;
 }
 #summary-bar.show { display:flex; }
-.usage-accts { display:flex; gap:10px; font-size:10px; }
-.usage-accts span { opacity:.55; }
-.usage-accts span:hover { opacity:.85; }
-.usage-accts span.on { opacity:1; color:var(--accent); }
+.usage-kebab { order:99; align-self:flex-start; padding:3px 4px; margin-left:-8px; font-size:13px; line-height:1; color:var(--dim); border-radius:4px; }
+.usage-kebab:hover { background:var(--hover); color:var(--text); }
+.usage-kebab.other { color:var(--accent); }
 #summary-bar .pace-ok { color:var(--green); }
 #summary-bar .pace-warn { color:var(--yellow); }
 #summary-bar .pace-over { color:var(--red); }
@@ -1045,6 +1044,9 @@ button:focus-visible { outline-offset:0; }
   transition:background .12s, border-color .12s;
 }
 .archive-unbtn:hover { background:rgba(166,227,161,.12); border-color:var(--green); }
+.archive-unbtn.del { color:var(--red,#f38ba8); border-color:rgba(243,139,168,.3); }
+.archive-unbtn.del:hover { background:rgba(243,139,168,.12); border-color:var(--red,#f38ba8); }
+.archive-header .archive-unbtn.del { margin-left:auto; margin-right:10px; }
 
 /* ── Global Search overlay ── */
 #search-overlay {
@@ -1566,6 +1568,7 @@ button:focus-visible { outline-offset:0; }
     <div class="archive-modal" onclick="event.stopPropagation()">
       <div class="archive-header">
         <h3 id="archive-title">Archived</h3>
+        <button class="archive-unbtn del" onclick="deleteAllArchived()" title="Delete every archived agent in this project">Delete all</button>
         <button class="settings-close" onclick="closeArchiveModal()" aria-label="Close">&times;</button>
       </div>
       <div id="archive-list"></div>
@@ -2285,8 +2288,15 @@ function renderArchiveList(cwd) {
         ${when ? `<div class="archive-item-date">${esc(when)}</div>` : ''}
       </div>
       <button class="archive-unbtn" onclick="unarchiveAgent(${id})" title="Unarchive">Unarchive</button>
+      <button class="archive-unbtn del" onclick="closeAgent(${id})" title="Delete">Delete</button>
     </div>`;
   }).join('');
+}
+async function deleteAllArchived() {
+  const cwd = _archiveModalCwd;
+  const ids = [...agents].filter(([, a]) => a.archived && (a.cwd || '(unknown)') === cwd).map(([id]) => id);
+  if (!ids.length || !await showConfirm(`Delete ${ids.length} archived agent${ids.length > 1 ? 's' : ''}? They can't be unarchived after.`, 'Delete all')) return;
+  ids.forEach(closeAgent);
 }
 
 function closeAgent(id) {
@@ -3003,8 +3013,8 @@ function render() {
   const accts = (_accountInfo && _accountInfo.accounts) || [], mainLabel = _accountInfo && _accountInfo.activeLabel;
   if (usageView && (usageView === mainLabel || !accts.some(x => x.label === usageView))) usageView = null;
   const u = usageView ? otherUsage[usageView] : currentUsage;
-  let barHtml = accts.length > 1 ? '<div class="usage-accts">' + accts.map(x => { const main = x.label === mainLabel, on = main ? !usageView : usageView === x.label;
-    return `<span class="${on ? 'on' : ''}" data-acct="${escAttr(main ? '' : x.label)}" title="${escAttr((x.email || x.label) + (main ? ' (main)' : ''))}">${esc((x.email || x.label).split('@')[0])}</span>`; }).join('') + '</div>' : '';
+  const viewed = accts.find(x => x.label === (usageView || mainLabel));
+  let barHtml = accts.length > 1 ? `<span class="usage-kebab${usageView ? ' other' : ''}" data-acct-menu title="${escAttr('Usage of ' + ((viewed && (viewed.email || viewed.label)) || '') + ' — pick login')}">⋮</span>` : '';
   const tip = [];
   if (u && (u.hourly != null || u.weekly != null)) {
     let pace = '';
@@ -3037,7 +3047,7 @@ function render() {
   // tooltip.js moves title into data-tip, so both go.
   if (u) { bar.removeAttribute('title'); delete bar.dataset.tip; } else bar.title = tip.join('\n');
   bar.innerHTML = barHtml;
-  bar.onclick = (e) => { const s = e.target.closest('[data-acct]'); if (s) return setUsageView(s.dataset.acct || null); const m = e.target.closest('[data-meter]'); if (m) openUsageModal(m.dataset.meter); else if (usageView) setUsageView(usageView); else refreshUsage(); };
+  bar.onclick = (e) => { if (e.target.closest('[data-acct-menu]')) return showUsageAcctMenu(e); const m = e.target.closest('[data-meter]'); if (m) openUsageModal(m.dataset.meter); else if (usageView) setUsageView(usageView); else refreshUsage(); };
   bar.classList.add('show');
   if (worldView) worldSync();
 }
@@ -4011,7 +4021,9 @@ function handleAgentMsg(msg) {
       break;
     }
     case 'agentClosed': {
+      const closedCwd = agents.get(msg.id)?.cwd || '(unknown)';
       agents.delete(msg.id); destroyXterm(msg.id);
+      refreshArchiveModal(closedCwd);
       lastTermDataAt.delete(msg.id); agentEffort.delete(msg.id); _worldIdleSince.delete(msg.id); { const dt = _doneTimers.get(msg.id); if (dt) { clearTimeout(dt); _doneTimers.delete(msg.id); } } // per-agent bookkeeping goes with the agent
       // Clean up teams led by this agent
       for (const [teamName, team] of teamMap) {
@@ -4310,6 +4322,32 @@ function handleAccountInfo(msg) {
     btn.title = 'No credentials — run claude in a terminal to login';
   }
   scheduleRender(); // the usage bar's login switcher
+}
+
+// Kebab on the usage bar: whose usage it shows. Picking a login only changes the view, not the active login.
+function showUsageAcctMenu(e) {
+  e.stopPropagation();
+  document.getElementById('usage-acct-menu')?.remove();
+  const info = _accountInfo || {}, menu = document.createElement('div');
+  menu.id = 'usage-acct-menu';
+  menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.3);border-radius:6px;padding:4px 0;min-width:160px;';
+  for (const acct of info.accounts || []) {
+    const main = acct.label === info.activeLabel, on = main ? !usageView : usageView === acct.label;
+    const btn = document.createElement('button');
+    btn.textContent = (acct.email || acct.label) + (main ? ' (main)' : '');
+    btn.style.cssText = 'display:block;width:100%;text-align:left;font-family:inherit;font-size:12px;padding:5px 12px;background:none;border:none;cursor:pointer;'
+      + (on ? 'color:var(--accent);font-weight:600;' : 'color:var(--text);');
+    btn.onmouseenter = () => { btn.style.background = 'rgba(205,214,244,.06)'; };
+    btn.onmouseleave = () => { btn.style.background = 'none'; };
+    btn.onclick = () => { menu.remove(); setUsageView(main ? null : acct.label); };
+    menu.appendChild(btn);
+  }
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = Math.max(4, Math.min(e.clientX, window.innerWidth - rect.width - 8)) + 'px';
+  menu.style.top = Math.max(4, Math.min(e.clientY, window.innerHeight - rect.height - 8)) + 'px';
+  const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
 function showAccountMenu(e) {

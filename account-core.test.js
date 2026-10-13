@@ -1,6 +1,6 @@
 // Run: node account-core.test.js
 const assert = require('assert');
-const { validToken, applyRefresh, newLogin } = require('./account-core');
+const { validToken, applyRefresh, newLogin, refreshScope } = require('./account-core');
 
 const H = 3600000;
 assert.strictEqual(validToken(null, 0), null);
@@ -21,3 +21,7 @@ assert.strictEqual(u.searchParams.get('login_hint'), 'a@b.c');
 assert.strictEqual(u.searchParams.get('state'), l.state);
 assert.ok(!newLogin(1).url.includes('login_hint'));
 console.log('account-core ok');
+
+// Refresh asks for the login's own scopes; the server rejects any other set.
+assert.strictEqual(refreshScope({ scopes: ['user:inference', 'user:plugins'] }), 'user:inference user:plugins');
+assert.ok(refreshScope({}).includes('user:inference'));

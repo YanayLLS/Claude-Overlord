@@ -11,6 +11,8 @@ const AUTHORIZE_URL = 'https://claude.com/cai/oauth/authorize';
 const SUCCESS_URL = 'https://platform.claude.com/oauth/code/success?app=claude-code';
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'; // Claude Code's public OAuth client
 const USAGE_SCOPES = 'user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload';
+// A refresh must ask for exactly the scopes the login was granted, or the server says invalid_scope.
+const refreshScope = (oauth) => (oauth && oauth.scopes && oauth.scopes.length ? oauth.scopes.join(' ') : USAGE_SCOPES);
 const YEAR_S = 31536000;
 const MIN_LEFT_MS = 3600000; // re-mint an hour early so a fresh spawn never gets a dying token
 
@@ -47,9 +49,9 @@ function postToken(body) {
 
 // Mutates acct; the caller saves accounts.json.
 async function mintUsageToken(acct, now = Date.now()) {
-  const refresh = acct && acct.credentials && acct.credentials.claudeAiOauth && acct.credentials.claudeAiOauth.refreshToken;
+  const oauth = acct && acct.credentials && acct.credentials.claudeAiOauth, refresh = oauth && oauth.refreshToken;
   if (!refresh) throw new Error('no saved refresh token — switch to this account once');
-  return applyRefresh(acct, await postToken({ grant_type: 'refresh_token', refresh_token: refresh, client_id: CLIENT_ID, scope: USAGE_SCOPES }), now);
+  return applyRefresh(acct, await postToken({ grant_type: 'refresh_token', refresh_token: refresh, client_id: CLIENT_ID, scope: refreshScope(oauth) }), now);
 }
 
 // PKCE pieces for the browser login; the caller serves http://localhost:<port>/callback.
@@ -68,4 +70,4 @@ async function exchangeCode(login, code, now = Date.now()) {
   return toToken(resp, now);
 }
 
-module.exports = { validToken, applyRefresh, mintUsageToken, newLogin, exchangeCode, SUCCESS_URL };
+module.exports = { validToken, refreshScope, applyRefresh, mintUsageToken, newLogin, exchangeCode, SUCCESS_URL };
