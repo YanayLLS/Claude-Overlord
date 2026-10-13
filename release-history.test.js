@@ -63,6 +63,14 @@ const createHistory = require('./release-history');
   assert.strictEqual(await h.recordRun(run, { opener: { login: 'alice' }, manual: [], flags: null, kind: 'hotfix' }), id);
   assert.strictEqual(files.size, 1);
   assert.ok(prs['o/front#9'].body.includes(`<!-- release-id:${id} -->`));
+  // one fix across repos: its author's next hotfix PR joins their pending hotfix, another author's starts its own
+  const hot = (number, login) => h.recordRun({ rows: [{ ...run.rows[0], repo: 'o/hot', pr: { number, url: 'u' } }] }, { opener: { login }, manual: [], flags: null, kind: 'hotfix' });
+  const fix1 = await hot(1, 'yoav');
+  assert.strictEqual(await hot(2, 'yoav'), fix1);
+  assert.notStrictEqual(await hot(3, 'dana'), fix1);
+  assert.deepStrictEqual(state.history.items.find(x => x.id === fix1).repos.map(r => r.pr.number), [1, 2]);
+  for (const x of state.history.items.filter(x => x.repos[0].repo === 'o/hot')) files.delete(`releases/${x.id}.json`);
+  await h.load();
 
   // merged on GitHub → reconcile folds the merge commit, signers and the deploy result in
   Object.assign(prs['o/front#9'], { state: 'closed', merged: true, merge_commit_sha: 'm1', merged_at: 't' });

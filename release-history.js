@@ -87,7 +87,11 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     // a hotfix never joins another release, but one already holding its PR is the same release (its body,
     // and the release-id tag with it, was rewritten, so a scan adopted it again)
     const existing = loaded.entries.find(e => pendingOf(e) && e.manifest.repos.some(r => mine.has(key(r))))
-      || (joinPending && kind !== 'hotfix' ?loaded.entries.find(e => pendingOf(e) && (e.manifest.kind || 'release') === 'release') : null);
+      || (joinPending && kind !== 'hotfix' ? loaded.entries.find(e => pendingOf(e) && (e.manifest.kind || 'release') === 'release') : null)
+      // one fix across repos is one release: an author's hotfix PRs join their pending hotfix of the last 12h
+      // ponytail: by author + time, not by content; two unrelated fixes of one author ship together
+      || (kind === 'hotfix' && opener && opener.login ? loaded.entries.find(e => pendingOf(e) && e.manifest.kind === 'hotfix'
+        && e.manifest.openedBy && e.manifest.openedBy.login === opener.login && Date.now() - Date.parse(e.manifest.openedAt) < 12 * 3600e3) : null);
     for (let attempt = 0; attempt < 4; attempt++) {
       let m, sha = null;
       if (existing) {

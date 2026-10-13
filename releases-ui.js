@@ -661,7 +661,7 @@
   function relTitle(m) {
     const env = m.env || 'prod';
     if (m.kind === 'rollback') return `↩ Rollback to ${m.rollbackOf}`;
-    if (m.kind === 'hotfix' || m.kind === 'standalone') { const r = m.repos[0] || {}; return `${m.kind === 'hotfix' ? '🩹 Hotfix' : 'Standalone'} · ${r.label || ''}${r.pr ? ' #' + r.pr.number : ''}`; }
+    if (m.kind === 'hotfix' || m.kind === 'standalone') { const name = (r) => `${r.label || ''}${r.pr ? ' #' + r.pr.number : ''}`; return `${m.kind === 'hotfix' ? '🩹 Hotfix' : 'Standalone'} · ${m.repos.length > 1 ? m.repos.map(r => r.label).join(', ') : name(m.repos[0] || {})}`; }
     return `${env[0].toUpperCase() + env.slice(1)} release${m.version ? ' · v' + m.version : ''}`;
   }
   function dayLabel(iso) {
