@@ -540,7 +540,7 @@
     const signs = (m.env || 'prod') === 'prod';
     const failed = m.repos.filter(r => r.deploy && r.deploy.state === 'failure');
     const deploying = m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state));
-    if (ra && ra.running && ra.id === m.id) return { phase: ra.status === 'checking' ? 'starting Release all' : `wave ${ra.wave}/${ra.waves} ${ra.status === 'deploying' ? 'deploying' : ra.status === 'manual' ? 'waiting for a hand deploy' : 'merging'}`, next: ra.status === 'manual' ? 'deploy the hand step, then Deployed, continue' : 'Release all is on it', tone: 'run' };
+    if (ra && ra.running && ra.id === m.id) return { phase: ra.status === 'checking' ? 'starting Release all' : `wave ${ra.wave}/${ra.waves} ${ra.status === 'deploying' ? 'deploying' : ra.status === 'manual' ? 'waiting for a hand deploy' : 'merging'}`, next: ra.status === 'manual' ? 'deploy the hand step, then Deployed, continue' : `Release all is on it${etaOf(st, m.id) && etaOf(st, m.id).etaMs != null ? ` · ${minLeft(etaOf(st, m.id).etaMs)} until fully deployed` : ''}`, tone: 'run' };
     if (st.teamRun && st.teamRun.id === m.id) return { phase: `@${st.teamRun.by} is releasing (wave ${st.teamRun.wave}/${st.teamRun.waves})`, next: 'watch here', tone: 'run' };
     if (failed.length) return { phase: `${failed.map(r => r.label).join(', ')} deploy failed`, next: `↻ Re-run or 🔧 Fix ${failed.length === 1 ? 'its' : 'their'} deploy (row buttons)`, tone: 'bad' };
     if (open.length && signs && signers.length < 2) {
@@ -551,11 +551,23 @@
     if (open.length) return { phase: signs ? 'signed, ready' : 'ready', next: 'press 🚀 Release all', tone: 'ok', act: 'release' };
     if (deploying.length) {
       const left = deploying.map(r => { const d = r.deploy; const el = d.startedAt ? Date.now() - Date.parse(d.startedAt) : 0; return d.typicalMs ? Math.max(0, d.typicalMs - el) : null; }).filter(x => x != null);
+      const e = etaOf(st, m.id);
+      if (e && e.etaMs != null) return { phase: `deploying ${deploying.map(r => r.label).join(', ')}`, next: `${minLeft(e.etaMs)} until fully deployed`, tone: 'run' };
       return { phase: `deploying ${deploying.map(r => r.label).join(', ')}`, next: left.length ? `about ${Math.max(1, Math.round(Math.max(...left) / 60000))} min left` : 'wait for the deploys', tone: 'run' };
     }
     return { phase: m.status, next: '', tone: '' };
   }
   const fmtMin = (ms) => ms < 60000 ? `${Math.max(1, Math.round(ms / 1000))}s` : `${Math.round(ms / 60000)}m`;
+  // main's deploy ETA (state.deployEta[releaseId]): per repo { s, pct, step, leftMs }, and etaMs till every wave is deployed
+  const etaOf = (st, id) => (st && st.deployEta && st.deployEta[id]) || null;
+  const minLeft = (ms) => `~${Math.max(1, Math.round(ms / 60000))} min`;
+  // a deploying repo against its last good run: a filling pill, the % and time left, the step it's on
+  function etaPill(st, m, r) {
+    const e = etaOf(st, m.id), x = e && e.repos[r.label];
+    if (!x || x.s !== 'running' || x.pct == null) return '';
+    const pct = Math.round(x.pct * 100);
+    return `<a class="rl-item run rl-eta"${r.deploy && r.deploy.runUrl ? ` data-url="${esc(r.deploy.runUrl)}"` : ''} style="--p:${pct}%" title="${esc(`Compared with its last good deploy, step by step${x.step ? `. Now: ${x.step}` : ''}`)}">deploying ${pct}%${x.leftMs != null ? ` · ${minLeft(x.leftMs)} left` : ''}${x.step ? ` · ${esc(x.step.length > 28 ? x.step.slice(0, 28) + '…' : x.step)}` : ''}</a>`;
+  }
   // a repo's deploy as a pill: running = a link to the run with elapsed / usual time; done = the result (+ health)
   function deployPill(r, st) {
     const d = r.deploy;
@@ -731,8 +743,9 @@
     if (runId !== undefined && myId && runId !== myId && ready.length) {
       const other = ((s.history && s.history.items) || []).find(m => m.id === runId);
       const what = other ? `the ${other.env || 'prod'} release` : 'the running release';
+      const startsIn = etaOf(s, runId) && etaOf(s, runId).etaMs != null ? ` · starts in ${minLeft(etaOf(s, runId).etaMs)}` : '';
       return s.releaseAllQueue === myId
-        ? `<button class="${lockedCls} queued" data-act="queueAll" data-id="${esc(myId)}" title="Starts by itself when ${esc(what)} has released (all or part of it), not if it is stopped. Click to unqueue">⏳ Queued after ${esc(what)}</button>`
+        ? `<button class="${lockedCls} queued" data-act="queueAll" data-id="${esc(myId)}" title="Starts by itself when ${esc(what)} has released (all or part of it), not if it is stopped. Click to unqueue">⏳ Queued after ${esc(what)}${startsIn}</button>`
         : `<button class="${lockedCls}" data-act="queueAll" data-id="${esc(myId)}" title="Release all runs one release at a time: ${esc(what)} is running now. Queue this one to start right after it">🚀 Release all · after ${esc(what)}</button>`;
     }
     if (s.releaseAll && s.releaseAll.running) return '';
@@ -764,9 +777,13 @@
     // a finished run's message goes stale once its release has nothing left open (merged since, by hand or on GitHub)
     const man = !p.running && p.id && ((s.history && s.history.items) || []).find(m => m.id === p.id);
     if (man && !man.repos.some(r => !r.mergeSha && !r.closed) && (p.status !== 'done' || /not merged/i.test(p.detail || '') || Date.now() - (p.at || 0) > 10 * 60 * 1000)) return '';
-    const its = Object.values(p.items || {}).filter(x => x.s !== 'held');
+    const e = etaOf(s, p.id);
+    const named = Object.entries(p.items || {}).filter(([, x]) => x.s !== 'held'), its = named.map(([, x]) => x);
     const doneN = its.filter(x => DONE.has(x.s)).length;
-    const pct = its.length ? Math.round(doneN / its.length * 100) : 0;
+    // a repo mid-deploy counts for how far its deploy is (vs its last good run), not 0 until it's done
+    const part = named.reduce((n, [l, x]) => n + (DONE.has(x.s) ? 1 : (e && e.repos[l] && e.repos[l].s === 'running' && e.repos[l].pct) || 0), 0);
+    const pct = its.length ? Math.round(part / its.length * 100) : 0;
+    const left = p.running && e && e.etaMs != null ? ` · ${minLeft(e.etaMs)} until every wave is deployed` : '';
     const what = p.running && p.status === 'checking' ? `Starting: ${esc(p.detail || '')}…`
       : p.running ? `Wave ${p.wave} of ${p.waves} · ${p.status === 'deploying' ? 'waiting for deploys' : p.status === 'manual' ? 'deploy by hand' : 'merging'}${p.detail ? `: <b>${esc(p.detail)}</b>` : ''}`
       : p.status === 'done' ? `Released ✓ <span class="rl-relall-sub">${esc(p.detail || '')}</span>`
@@ -780,7 +797,7 @@
       + (p.status === 'interrupted' ? `<button class="rl-hist-btn go" data-act="relAllResume" data-id="${esc(p.id || '')}" title="Picks up with what is still open: merged PRs are skipped, a deploy still running is waited on first">▶ Resume</button>` : '')
       + (p.running ? '<button class="rl-hist-btn" data-act="relAllStop" title="Stops before the next merge. What already merged stays merged">⏹ Stop</button>' : '')
       + '</div>'
-      + (its.length ? `<div class="rl-relall-prog"><div class="rl-relall-bar"><i style="width:${pct}%"></i></div><span>${doneN} of ${its.length} done</span></div>` : '')
+      + (its.length ? `<div class="rl-relall-prog"><div class="rl-relall-bar"><i style="width:${pct}%"></i></div><span>${doneN} of ${its.length} done${left}</span></div>` : '')
       + '</div>';
   }
 
@@ -904,7 +921,7 @@
         const chKey = m.id + ':' + r.repo, chOpen = openChanges.has(chKey);
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha">${r.changes && r.changes.length ? `<button class="rl-ch-btn${chOpen ? ' on' : ''}" data-act="histChanges" data-key="${esc(chKey)}" title="The PRs this release brought into ${esc(r.label)}">${r.changes.length} change${r.changes.length === 1 ? '' : 's'} ${chOpen ? '▴' : '▾'}</button>` : ''}${cmp ? `<span title="prod before → after">${link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha))}</span>` : ''}</span>`
-          + `<span class="rl-hist-state">${rowActs(r, need, notDeployed)}${need && r.signedSha && r.headSha && r.signedSha !== r.headSha ? `<a class="rl-unsigned-new" data-url="${esc(`https://github.com/${r.repo}/compare/${r.signedSha}...${r.headSha}`)}" title="Commits that landed after the last signature: they ship without anyone signing them">+ since signed ↗</a>` : ''}${r.mergeSha ? (liveItems && liveItems[r.label] && liveItems[r.label].s === 'deploying' && !(r.deploy && ['success', 'failure'].includes(r.deploy.state)) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (!signs ? '' : (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })()) + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
+          + `<span class="rl-hist-state">${rowActs(r, need, notDeployed)}${need && r.signedSha && r.headSha && r.signedSha !== r.headSha ? `<a class="rl-unsigned-new" data-url="${esc(`https://github.com/${r.repo}/compare/${r.signedSha}...${r.headSha}`)}" title="Commits that landed after the last signature: they ship without anyone signing them">+ since signed ↗</a>` : ''}${r.mergeSha ? etaPill(s, m, r) || (liveItems && liveItems[r.label] && liveItems[r.label].s === 'deploying' && !(r.deploy && ['success', 'failure'].includes(r.deploy.state)) ? relItemHtml(liveItems[r.label]) : dep) : liveItems && liveItems[r.label] ? relItemHtml(liveItems[r.label]) : r.closed && !r.mergeSha ? 'closed' : need ? (r.health ? histHealth(r.health) + ' ' : '') + (!signs ? '' : (() => { const miss = signers.length >= 2 ? [] : anyone.filter(l => !(r.signers || []).includes(l)); return miss.length ? `<span class="warn" title="Signed the rest of the release but not this PR's latest commit">✍ needs ${miss.map(l => '@' + esc(l)).join(', ')}</span>` : '✍ ✓'; })()) + (toSign.has(r.repo + '#' + r.pr.number) ? ' · needs you' : '') : r.mergeSha ? dep : ''}</span></div>`;
         if (chOpen && r.changes) h += `<div class="rl-ch-list">${r.changes.map(c => `<div>${link(`https://github.com/${r.repo}/pull/${c.n}`, '#' + c.n)} ${esc(c.title)}</div>`).join('')}</div>`;
       }
       notDeployed = notDeployed.concat(wave.filter(r => !r.hand && !DONE.has(stOf(r))).map(r => r.label));

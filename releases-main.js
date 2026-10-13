@@ -10,6 +10,7 @@ const { runRelease, recheckRelease, startsQueue, prHealth, rowStatus, isHotfix }
 const createHistory = require('./release-history');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
+const { runProgress, releaseEtaMs } = require('./deploy-eta');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
@@ -852,6 +853,62 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // ── Managing a release in flight, one repo at a time (History card row actions) ──
   const LIVE_MS = 90 * 1000;
   let modalOpen = false, liveTimer = null;
+
+  // ── Deploy ETA: each deploying repo against its workflow's last good run (step by step), and the time left
+  // until a release is fully deployed (waves one after another). Local state only: nothing is written ──
+  const ETA_MS = 15 * 1000, BASE_TTL_MS = 30 * 60 * 1000;
+  const etaBase = new Map(); // repo|workflow → { at, wallMs, jobs } of its median recent good run
+  async function baseRun(repo, wf) {
+    const k = repo + '|' + wf, c = etaBase.get(k);
+    if (c && Date.now() - c.at < BASE_TTL_MS) return c;
+    // the median of its last 5 good runs: one odd run (a first full upload, a cold cache) doesn't skew it
+    const runs = await ghJson(['api', '-X', 'GET', `repos/${repo}/actions/workflows/${wf}/runs`, '-f', 'status=success', '-f', 'per_page=5']);
+    const wall = (x) => Date.parse(x.updated_at) - Date.parse(x.run_started_at || x.created_at);
+    const good = ((runs.data && runs.data.workflow_runs) || []).slice().sort((x, y) => wall(x) - wall(y));
+    const run = good[Math.floor(good.length / 2)];
+    let v = { at: Date.now(), wallMs: null, jobs: [] };
+    if (run) {
+      const j = await ghJson(['api', `repos/${repo}/actions/runs/${run.id}/jobs`]);
+      v = { at: Date.now(), wallMs: wall(run), jobs: (j.data && j.data.jobs) || [] };
+    }
+    etaBase.set(k, v);
+    return v;
+  }
+  async function liveRunId(r) {
+    const id = r.deploy.runUrl && (r.deploy.runUrl.match(/runs\/(\d+)/) || [])[1];
+    if (id) return id;
+    const runs = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', `head_sha=${r.mergeSha}`, '-f', 'per_page=1']);
+    const x = runs.data && runs.data.workflow_runs && runs.data.workflow_runs[0];
+    return x && x.status !== 'completed' ? x.id : null;
+  }
+  const deploying = (r) => r.mergeSha && r.deploy && r.deploy.workflow && !['success', 'failure'].includes(r.deploy.state);
+  async function updateEta() {
+    if (limited() || !state.config) return;
+    const ra = state.releaseAll;
+    // releases being released now: Release all on it (here or on a teammate's), or a repo of it deploying
+    const rels = ((state.history && state.history.items) || []).filter(m => inFlightRel(m)
+      && ((ra && ra.running && ra.id === m.id) || (state.teamRun && state.teamRun.id === m.id) || m.repos.some(deploying)));
+    if (!rels.length) { if (state.deployEta) push({ deployEta: null }); return; }
+    const out = {};
+    for (const m of rels) {
+      const repos = {};
+      await Promise.all(m.repos.filter(r => r.mergeSha || !r.closed).map(async (r) => {
+        const wf = r.deploy && r.deploy.workflow;
+        if (!wf || ['success', 'failure'].includes(r.deploy.state)) { repos[r.label] = { s: 'done' }; return; } // deployed, failed, or by hand: not timed
+        const base = await baseRun(r.repo, wf).catch(() => null), fullMs = base && base.wallMs;
+        const id = r.mergeSha ? await liveRunId(r).catch(() => null) : null;
+        if (!id) { repos[r.label] = { s: 'todo', fullMs }; return; } // not merged yet, or its deploy hasn't started
+        const j = await ghJson(['api', `repos/${r.repo}/actions/runs/${id}/jobs`]);
+        const p = runProgress((j.data && j.data.jobs) || [], base ? base.jobs : []);
+        repos[r.label] = { s: 'running', pct: p.pct, step: p.step, fullMs, leftMs: p.leftMs };
+      }));
+      const waves = releaseWaves(state.config, m.repos.filter(r => repos[r.label])).map(w => w.map(r => repos[r.label]));
+      out[m.id] = { repos, etaMs: releaseEtaMs(waves), at: Date.now() };
+    }
+    push({ deployEta: out });
+  }
+  const etaTimer = setInterval(() => { if (modalOpen || (state.releaseAll && state.releaseAll.running)) updateEta().catch(() => {}); }, ETA_MS);
+  if (etaTimer.unref) etaTimer.unref();
   const prOf = (repo, n) => { for (const m of (state.history && state.history.items) || []) { const r = m.repos.find(x => x.repo === repo && x.pr.number === Number(n)); if (r) return { m, r }; } return null; };
   // Merge one release PR now (same gate as everything else: approvers' signatures, then GitHub's own rules)
   async function mergeOne(repo, n) { return withBusy(`merge:${repo}#${n}`, 'Merging…', () => mergeOneNow(repo, n)); }
@@ -1243,6 +1300,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         if (liveTimer.unref) liveTimer.unref();
         loadApprovers().then(refreshRun).catch(() => {});
         loadTeamRun().catch(() => {});
+        updateEta().catch(() => {});
         // reopened within a minute: what's on screen is fresh enough, the timer takes it from here
         if (!state.updatedAt || Date.now() - state.updatedAt > 60000) refresh();
         return true;
