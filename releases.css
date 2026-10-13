@@ -597,3 +597,11 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-reltab-new { margin-top:4px; }
 /* a deploying repo's pill fills as its deploy goes (vs its last good run) */
 .rl-item.rl-eta { background:linear-gradient(90deg, color-mix(in srgb, var(--yellow) 28%, transparent) var(--p), var(--surface1) var(--p)); animation:none; }
+/* the picker's Advanced mode: any repo, from any branch */
+.rl-rel-head-btns { display:flex; align-items:center; gap:6px; }
+.rl-rel-adv { font:inherit; font-size:10px; font-weight:600; letter-spacing:.6px; text-transform:uppercase; padding:3px 9px; border-radius:999px; border:1px solid var(--border); background:none; color:var(--subtext); cursor:pointer; }
+.rl-rel-adv:hover { color:var(--text); } .rl-rel-adv.on { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+.rl-rel-repo-row.adv { display:grid; grid-template-columns:minmax(0,1fr) 180px auto; align-items:center; gap:8px; }
+.rl-rel-src { font:inherit; font-size:12px; padding:4px 8px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); color:var(--text); min-width:0; }
+.rl-rel-src::placeholder { color:var(--dim); } .rl-rel-src.custom { border-color:var(--yellow); }
+.rl-rel-to { font-size:11px; color:var(--dim); white-space:nowrap; }

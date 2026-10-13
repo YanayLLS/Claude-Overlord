@@ -56,6 +56,14 @@
       render();
     }
   });
+  overlay.addEventListener('change', (e) => {
+    const i = e.target.closest && e.target.closest('[data-src]');
+    if (!i) return;
+    const v = i.value.trim();
+    v ? relSrc.set(i.dataset.src, v) : relSrc.delete(i.dataset.src);
+    render();
+  });
+  overlay.addEventListener('focusout', (e) => { if (e.target.dataset && e.target.dataset.src != null && drawLater) { drawLater = false; setTimeout(render, 0); } });
   // double-click a cell: its deploy run on GitHub (hand-deployed: the live commit)
   overlay.addEventListener('dblclick', (e) => {
     const cell = e.target.closest('.rl-cell[data-r]'), row = cell && state && state.grid && state.grid.rows[cell.dataset.r], c = row && row.cells && row.cells[cell.dataset.c];
@@ -133,12 +141,20 @@
       if (repos && !repos.length) return;
       if (busyLabel('release')) return;
       localBusy.set('release', { label: 'Starting…', at: Date.now() }); render();
-      api.send({ type: 'releasesRelease', envs: [...relSel], repos, of: all.length, separate: relSeparate });
+      const usual = new Map(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => [`${p.repo}|${p.env}`, p.source]));
+      const sources = relAdv ? Object.fromEntries([...relSrc].filter(([k, b]) => b && usual.has(k) && b !== usual.get(k))) : null;
+      api.send({ type: 'releasesRelease', envs: [...relSel], repos, of: all.length, separate: relSeparate, sources: sources && Object.keys(sources).length ? sources : null });
     },
     relOnly: (el) => { relSkip = new Set(ReleasesCore.releasePlan(state.config, [...relSel]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); render(); },
     // the Board cell's "Release just this": the picker set to this repo and env
     relJust: (el) => { relSel = new Set([el.dataset.env]); relSkip = new Set(ReleasesCore.releasePlan(state.config, [el.dataset.env]).prs.map(p => p.repo).filter(r => r !== el.dataset.repo)); relOpen = true; tab = 'release'; sel = null; render(); },
     relSep: () => { relSeparate = !relSeparate; render(); },
+    relAdv: () => {
+      relAdv = !relAdv;
+      try { localStorage.setItem('rl-rel-adv', relAdv ? '1' : '0'); } catch {}
+      if (relAdv && state && state.config) askBranches(ReleasesCore.releasePlan(state.config, [...relSel]).prs);
+      render();
+    },
     // a pending release's "Add repos": the picker, adding to it
     relAddTo: (el) => { relSel = new Set([el.dataset.env || 'prod']); relSkip = new Set(); relSeparate = false; relOpen = true; tab = 'release'; render(); },
     relRepo: (el) => { const r = el.dataset.repo; relSkip.has(r) ? relSkip.delete(r) : relSkip.add(r); render(); },
@@ -658,6 +674,11 @@
   }
   let relSkip = new Set(); // release picker: repos left out (all in by default, every time it opens)
   let relSeparate = false; // release picker: start a release of its own instead of adding to the pending one
+  // Advanced mode: every repo of the picked envs (not only those with work waiting), each from a branch you pick
+  let relAdv = false; try { relAdv = localStorage.getItem('rl-rel-adv') === '1'; } catch {}
+  const relSrc = new Map(); // 'owner/repo|env' → source branch typed or picked (absent = its usual source)
+  const asked = new Set(); // repos whose branches were asked for (once a session; main caches them)
+  const askBranches = (prs) => { for (const r of new Set(prs.map(p => p.repo))) if (!asked.has(r)) { asked.add(r); api.send({ type: 'releasesBranches', repo: r }); } };
   const openChanges = new Set(); // History rows whose "N changes" list is open
   const openCards = new Set(); // finished releases opened (they show as one line by default)
   // what a person scans for: the env (or hotfix), the version, when — the id is for the tooltip
@@ -1146,7 +1167,7 @@
       if (n.ahead && relSel.has(n.to)) repoWait[row.repo] = (repoWait[row.repo] || 0) + n.ahead;
     }
     const planRepos = [...new Map(fullPlan.prs.map(p => [p.repo, p])).values()].filter(p => repoWait[p.repo]);
-    const plan = { prs: fullPlan.prs.filter(p => !relSkip.has(p.repo) && repoWait[p.repo]), manual: relSkip.size ? [] : fullPlan.manual }; // releasing some repos: the hand-deployed ones aren't part of it
+    const plan = { prs: fullPlan.prs.filter(p => !relSkip.has(p.repo) && (relAdv || repoWait[p.repo])), manual: relSkip.size ? [] : fullPlan.manual }; // releasing some repos: the hand-deployed ones aren't part of it
     const unwatched = prsUnwatched();
     const bell = !unwatched ? ''
       : `<button class="rl-rel-bell${unwatched.length ? '' : ' done'}" data-act="relWatch" title="${unwatched.length
@@ -1154,14 +1175,31 @@
         : 'Every release repo is already in the PRs panel'}"${unwatched.length ? '' : ' disabled'}>`
         + '<svg class="ic" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'
         + (unwatched.length ? `<i>${unwatched.length}</i>` : '') + '</button>';
-    let h = `<div class="rl-rel-pop still"><div class="rl-rel-head"><span>Release to</span>${bell}</div><div class="rl-rel-envs">`;
+    const advBtn = `<button class="rl-rel-adv${relAdv ? ' on' : ''}" data-act="relAdv" title="${relAdv ? 'Back to the usual release: what is waiting, from each repo\'s own source branch' : 'Pick any repo of these environments and the branch to release each from (a fix branched off prod, a prepared branch)'}">Advanced${relAdv ? ' ✓' : ''}</button>`;
+    let h = `<div class="rl-rel-pop still"><div class="rl-rel-head"><span>Release to</span><span class="rl-rel-head-btns">${advBtn}${bell}</span></div><div class="rl-rel-envs">`;
     for (const e of targets) {
       h += `<button class="rl-rel-env${relSel.has(e) ? ' on' : ''}" data-act="relToggle" data-env="${esc(e)}">`
         + `<span class="rl-env" style="--hue:${ENV_HUE[e.toLowerCase()] || 'var(--dim)'}">${esc(e)}</span>`
         + `<span class="rl-rel-wait">${waiting[e] ? `<b>${waiting[e]}</b> waiting` : 'up to date'}</span></button>`;
     }
     h += '</div>';
-    if (relSel.size && planRepos.length) {
+    if (relSel.size && relAdv) {
+      // every repo × env of the plan: tick it, and pick the branch it releases from (any branch; empty = its usual)
+      const brs = (s.branches) || {};
+      askBranches(fullPlan.prs);
+      const allOn = !fullPlan.prs.some(p => relSkip.has(p.repo));
+      h += `<div class="rl-rel-head rl-rel-repos-head"><span>Repos · release from</span><button class="rl-rel-all" data-act="relReposAll" data-on="${allOn ? 0 : 1}">${allOn ? 'None' : 'All'}</button></div><div class="rl-rel-repos">`
+        + fullPlan.prs.map((p, i) => {
+          const k = `${p.repo}|${p.env}`, v = relSrc.get(k) || '', custom = v && v !== p.source;
+          return `<div class="rl-rel-repo-row adv"><button class="rl-rel-repo${relSkip.has(p.repo) ? '' : ' on'}" data-act="relRepo" data-repo="${esc(p.repo)}">`
+            + `<i></i><b>${esc(p.label)}</b><span>${repoWait[p.repo] ? `${repoWait[p.repo]} waiting` : ''}</span></button>`
+            + `<input class="rl-rel-src${custom ? ' custom' : ''}" data-src="${esc(k)}" list="rl-br-${i}" value="${esc(v)}" placeholder="${esc(p.source)}" spellcheck="false" title="${esc(`Branch to release ${p.label} into ${p.env} (${p.target}) from. Empty: ${p.source}`)}">`
+            + `<datalist id="rl-br-${i}">${(brs[p.repo] || []).filter(b => b !== p.target).map(b => `<option value="${esc(b)}">`).join('')}</datalist>`
+            + `<span class="rl-rel-to">→ <span class="rl-env" style="--hue:${ENV_HUE[p.env.toLowerCase()] || 'var(--dim)'}">${esc(p.env)}</span></span></div>`;
+        }).join('') + '</div>';
+      const off = fullPlan.prs.filter(p => !relSkip.has(p.repo) && relSrc.get(`${p.repo}|${p.env}`) && relSrc.get(`${p.repo}|${p.env}`) !== p.source);
+      if (off.length) h += `<div class="rl-rr-flag warn">⚠ From another branch: ${off.map(p => `${esc(p.label)} (${esc(relSrc.get(`${p.repo}|${p.env}`))})`).join(', ')}. Their usual source won't have it until the release's back-merge.</div>`;
+    } else if (relSel.size && planRepos.length) {
       const allOn = !planRepos.some(p => relSkip.has(p.repo));
       h += `<div class="rl-rel-head rl-rel-repos-head"><span>Repos</span><button class="rl-rel-all" data-act="relReposAll" data-on="${allOn ? 0 : 1}">${allOn ? 'None' : 'All'}</button></div><div class="rl-rel-repos">`
         + planRepos.map(p => {
@@ -1209,7 +1247,11 @@
     return h + '</div>';
   }
 
-  function render() { if (ptrDown) { drawLater = true; return; } renderNow(); if (open) applyBusy(modal); }
+  function render() {
+    const typing = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.src != null;
+    if (ptrDown || typing) { drawLater = true; return; } // a redraw would drop the click / the box being typed in
+    renderNow(); if (open) applyBusy(modal);
+  }
   function renderNow() {
     tlTip.classList.remove('show');
     if (!open) return;
