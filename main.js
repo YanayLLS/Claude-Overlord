@@ -20,7 +20,8 @@ const { createPreviewController } = require('./preview-pane');
 const { createPtyClient, pipePathFor, hostLauncher } = require('./pty-client');
 const { startKillGuard } = require('./kill-guard');
 const { agentShell } = require('./shell-core');
-const { scanCatalog } = require('./catalog-core');
+const { scanCatalog, BUILTINS } = require('./catalog-core');
+const bscan = require('./builtins-scan');
 
 
 // ── Constants ──────────────────────────────────────────
@@ -3586,6 +3587,40 @@ function sendLeadMention(id, { names, unknown, body }) {
   send({ type: 'toast', text: sent.length ? `✉ Sent to ${sent.join(', ')}${miss}` : `✕ Not sent — that is this agent${miss}` });
 }
 
+// ── Picker catalog: Claude's real built-ins (read from its binary once per version) + "new" marks ──
+const BUILTINS_FILE = path.join(STATE_DIR, 'claude-builtins.json'); // { key, items }
+const SEEN_FILE = path.join(STATE_DIR, 'catalog-seen.json');        // { "type:name": firstSeenMs }
+let claudeBuiltins = null, builtinsScanning = false;
+function readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } }
+function claudeBinary() {
+  const names = process.platform === 'win32' ? ['claude.exe'] : ['claude'];
+  const dirs = [path.join(os.homedir(), '.local', 'bin'), ...String(process.env.PATH || '').split(path.delimiter)];
+  for (const d of dirs) for (const n of names) { try { const p = fs.realpathSync(path.join(d, n)); if (fs.statSync(p).isFile()) return p; } catch {} }
+  return null;
+}
+// Rescans only when the binary changed (Claude updated); calls done() when a rescan changed the list.
+function refreshClaudeBuiltins(done) {
+  if (builtinsScanning) return;
+  const exe = claudeBinary(); if (!exe) return;
+  let key; try { const st = fs.statSync(exe); key = `${exe}|${st.size}|${st.mtimeMs}`; } catch { return; }
+  if (!claudeBuiltins) claudeBuiltins = readJson(BUILTINS_FILE);
+  if (claudeBuiltins && claudeBuiltins.key === key) return;
+  builtinsScanning = true;
+  bscan.scanClaudeBinary(exe).then((found) => {
+    claudeBuiltins = { key, items: bscan.mergeBuiltins(found, BUILTINS) };
+    try { fs.writeFileSync(BUILTINS_FILE, JSON.stringify(claudeBuiltins)); } catch {}
+    flog(`picker: ${claudeBuiltins.items.length} built-in commands read from ${exe}`);
+    done();
+  }).catch((e) => flog(`picker: built-in scan failed: ${e.message}`)).finally(() => { builtinsScanning = false; });
+}
+function sendCatalog(cwd) {
+  if (!claudeBuiltins) claudeBuiltins = readJson(BUILTINS_FILE);
+  const seen = readJson(SEEN_FILE) || {}, before = Object.keys(seen).length;
+  const items = bscan.markNew(scanCatalog(cwd || os.homedir(), os.homedir(), claudeBuiltins?.items || BUILTINS), seen);
+  if (Object.keys(seen).length !== before) { try { fs.writeFileSync(SEEN_FILE, JSON.stringify(seen)); } catch {} }
+  send({ type: 'catalog', cwd, items });
+}
+
 function writePtyChunked(proc, data, chunkSize = 1024) {
   if (data.length <= chunkSize) { proc.write(data); return; }
   let offset = 0;
@@ -4382,7 +4417,7 @@ function handleIpc(msg) {
       // Keep the badge — the dev server watcher should auto-restart it
       break;
     }
-    case 'catalog': { const cwd = typeof msg.cwd === 'string' ? msg.cwd : ''; send({ type: 'catalog', cwd, items: scanCatalog(cwd || os.homedir(), os.homedir()) }); break; }
+    case 'catalog': { const cwd = typeof msg.cwd === 'string' ? msg.cwd : ''; sendCatalog(cwd); refreshClaudeBuiltins(() => sendCatalog(cwd)); break; }
     case 'openFolder': { const p = msg.path; if (typeof p === 'string' && fs.existsSync(p)) shell.openPath(p).catch(() => {}); break; }
     case 'openBookmark': {
       const p = msg.path;

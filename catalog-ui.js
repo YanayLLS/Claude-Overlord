@@ -67,7 +67,7 @@
   }
   function close(refocus = true) {
     if (!isOpen) return;
-    isOpen = false; pop.hidden = true;
+    isOpen = false; pop.hidden = true; peekCard(null);
     if (refocus) xterms.get(selectedId)?.terminal?.focus();
   }
   // Screen y of the top of Claude's prompt box, or null (no prompt in view, or scrolled up).
@@ -103,8 +103,17 @@
     return `<div class="cg-group"><span>${esc(name)}</span><span class="cg-sub">${sub}</span><span class="cg-count">${n}</span></div>`;
   }
 
+  // The highlighted Overlord agent lights up its card in the sidebar (a style rule, so card re-renders keep it).
+  const peek = document.head.appendChild(document.createElement('style'));
+  function peekCard(it) {
+    const id = isOpen && it && it.origin === 'overlord' ? it.id : null;
+    peek.textContent = id == null ? '' : `.agent[data-id="${id}"] { box-shadow:inset 0 0 0 2px var(--accent); background:var(--surface1); }`;
+    if (id != null) document.querySelector(`.agent[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
+  }
+
   function renderDetail() {
     const it = stage === 'list' && rows[sel];
+    peekCard(it);
     detail.hidden = stage !== 'list';
     detail.style.visibility = it ? '' : 'hidden'; // no match: keep the pane's space so the card doesn't shrink
     if (!it) return;
@@ -117,8 +126,11 @@
   }
 
   // The other agents running in this Overlord, under Agents: picking one types "@Name " (a line that starts with it is sent to that agent).
-  const liveAgents = () => [...agents].filter(([id, a]) => a.agentName && !a.archived && id !== selectedId)
-    .map(([, a]) => ({ type: 'agent', origin: 'overlord', group: 'Running in Overlord', name: a.agentName, desc: a.title || '', insert: '@' + a.agentName + ' ', path: a.cwd, hint: agentStatus(a) }));
+  // Same order as the sidebar's cards (agents not shown there go last).
+  const cardOrder = () => { const m = new Map(); document.querySelectorAll('.agent[data-id]').forEach((c, i) => m.set(+c.dataset.id, i)); return m; };
+  const liveAgents = (ord = cardOrder()) => [...agents].filter(([id, a]) => a.agentName && !a.archived && id !== selectedId)
+    .sort(([a], [b]) => (ord.get(a) ?? 1e9) - (ord.get(b) ?? 1e9))
+    .map(([id, a]) => ({ id, type: 'agent', origin: 'overlord', group: 'Running in Overlord', name: a.agentName, desc: a.title || '', insert: '@' + a.agentName + ' ', path: a.cwd, hint: agentStatus(a) }));
 
   function render() {
     const cached = cache.get(cwd), items = cached && [...liveAgents(), ...cached];
@@ -136,13 +148,15 @@
     q.placeholder = stage === 'types' ? 'Search everything…' : `Search ${t ? t.label.toLowerCase() : 'everything'}…`;
     if (!items) { list.innerHTML = '<div class="cg-empty">Loading…</div>'; rows = []; renderDetail(); foot.innerHTML = ''; return; }
     const count = (ty) => items.filter(it => it.type === ty).length;
+    const fresh = (ty) => items.filter(it => it.type === ty && it.isNew).length;
+    const newTag = (n) => n ? `<span class="cg-isnew">${n === true ? 'new' : n + ' new'}</span>` : '';
 
     if (stage === 'types') {
       rows = TYPES;
       sel = Math.min(sel, rows.length - 1);
       list.innerHTML = TYPES.map((x, i) => { const n = count(x.type);
         return `<div class="cg-row cg-type${i === sel ? ' sel' : ''}${n ? '' : ' cg-none'}" data-i="${i}"><span class="cg-icon">${icon(x.type)}</span>`
-          + `<span class="cg-name">${x.label}</span><span class="cg-count">${n}</span>${plus(x.type, x.label.toLowerCase().replace(/s$/, ''))}<kbd>${i + 1}</kbd></div>`; }).join('');
+          + `<span class="cg-name">${x.label}</span>${newTag(fresh(x.type))}<span class="cg-count">${n}</span>${plus(x.type, x.label.toLowerCase().replace(/s$/, ''))}<kbd>${i + 1}</kbd></div>`; }).join('');
       renderDetail();
       foot.innerHTML = kbd('1–5', 'pick') + kbd('↵ →', 'open') + kbd('Esc', 'close');
       return;
@@ -158,7 +172,7 @@
       const src = grouped ? '' : `<span class="cg-src">${esc(it.group.split(' · ')[0])}</span>`;
       html += `<div class="cg-row${i === sel ? ' sel' : ''}${it.shadowed ? ' shadowed' : ''}" data-i="${i}">`
         + (type ? '' : `<span class="cg-icon">${icon(it.type)}</span>`)
-        + `<span class="cg-name">${nameHtml(it)}</span>`
+        + `<span class="cg-name">${nameHtml(it)}</span>${newTag(!!it.isNew)}`
         + (it.overrides ? '<span class="cg-dot" title="Overrides ~/.claude"></span>' : '')
         + `<span class="cg-desc">${esc(it.desc || '')}</span>${src}</div>`;
     });

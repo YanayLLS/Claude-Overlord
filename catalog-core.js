@@ -123,14 +123,14 @@ function scanPlugins(cwd, home) {
 
 const insertFor = (i) => i.type === 'agent' ? `Use the ${i.name} agent to ` : `/${i.name} `;
 
-function scanCatalog(cwd, home) {
+function scanCatalog(cwd, home, builtins = BUILTINS) {
   const repo = scanRoot(path.join(cwd, '.claude'), { origin: 'repo', group: 'This repo' });
   const pc = scanRoot(path.join(home, '.claude'), { origin: 'pc', group: 'My PC' });
   const inRepo = new Set(repo.map(i => i.type + ':' + i.name));
   const inPc = new Set(pc.map(i => i.type + ':' + i.name));
   for (const i of pc) if (inRepo.has(i.type + ':' + i.name)) i.shadowed = 'repo';
   for (const i of repo) if (inPc.has(i.type + ':' + i.name)) i.overrides = 'pc';
-  return [...repo, ...pc, ...scanPlugins(cwd, home), ...BUILTINS, ...BUILTIN_MODS].map(i => ({ ...i, insert: i.insert ?? insertFor(i) }));
+  return [...repo, ...pc, ...scanPlugins(cwd, home), ...builtins, ...BUILTIN_MODS].map(i => ({ ...i, insert: i.insert ?? insertFor(i) }));
 }
 
 module.exports = { frontmatter, scanCatalog, BUILTINS };
