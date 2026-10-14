@@ -4712,7 +4712,7 @@ function showInterrupted(list) {
   const el = document.createElement('div');
   el.id = 'interrupt-bar'; el.className = 'toast show';
   const names = list.map(x => `${agents.get(x.id)?.agentName || x.id} — ${x.why}`).join('\n');
-  el.innerHTML = `<span>⚠ ${list.length} agent${list.length > 1 ? 's' : ''} cut off by the restart</span><button class="ib-go">Continue all</button><button class="ib-x" aria-label="Dismiss">&times;</button>`;
+  el.innerHTML = `<span>⚠ ${list.length} agent${list.length > 1 ? 's' : ''} cut off</span><button class="ib-go">Continue all</button><button class="ib-x" aria-label="Dismiss">&times;</button>`;
   el.firstChild.title = names;
   el.querySelector('.ib-go').onclick = () => { window.api.send({ type: 'continueInterrupted', ids: list.map(x => x.id) }); el.remove(); showToast(`Told ${list.length} to continue`); };
   el.querySelector('.ib-x').onclick = () => el.remove();

@@ -280,6 +280,8 @@ if (!process.env.OVERLORD_STATE_DIR) {
   if (n) console.log(`[Overlord] migrated ${n} file(s) from ~/.pixel-agents to ~/.overlord`);
 }
 const STATE_FILE = path.join(STATE_DIR, 'overlord-state.json');
+// Written just before an update install stops every agent; the next launch tells the cut-off ones to carry on.
+const UPDATE_MARK = path.join(STATE_DIR, 'update-continue');
 // Settings live in the state file too, but they also get their own copy: the agent
 // list is rewritten on every prompt, title and window move, and config that took
 // real work to set up (watched PR repos, workflows, bookmarks) should not share a
@@ -1318,7 +1320,10 @@ function restoreAgents(state) {
       const why = ag && !ag.archived && interruptedBy(tail);
       if (why) cut.push({ id, why });
     }
-    if (cut.length) send({ type: 'interrupted', agents: cut });
+    let updated = false; try { updated = Date.now() - fs.statSync(UPDATE_MARK).mtimeMs < 30 * 60e3; fs.unlinkSync(UPDATE_MARK); } catch {}
+    // After an update the user chose the restart: no banner, the prewarm spawn's ready detector sends the nudge.
+    if (updated) for (const { id } of cut) agents.get(id)._crashNudge = cutOffNudge('Overlord was updated');
+    else if (cut.length) send({ type: 'interrupted', agents: cut });
     await sweep;
     for (const { id, entry } of agentEntries) {
       const agent = agents.get(id);
@@ -1429,6 +1434,7 @@ function handleTermExit(id, exitCode) {
   const a = agents.get(id);
   if (!a) return;
   terminals.delete(id);
+  const hadBg = a.bgTasks?.size > 0;
   a.bgTasks?.clear(); // background shells/agents die with the Claude process
   a.claudeReady = false; // peer messages queue until a new pty shows Claude's prompt
   if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
@@ -1445,7 +1451,7 @@ function handleTermExit(id, exitCode) {
   if (crashed) a.crashed = true; // watchdog must not flip a crashed card to 'waiting'
   if (crashed && a.crashCount < MAX_CRASH_RETRIES) {
     a.crashCount++;
-    a._crashNudge = !a.isWaiting; // died mid-turn → tell the resumed Claude to carry on
+    a._crashNudge = !a.isWaiting || hadBg; // died mid-turn or with background work → tell the resumed Claude to carry on
     console.log(`[Overlord] Agent ${id} crashed (exit ${exitCode}), auto-resuming (${a.crashCount}/${MAX_CRASH_RETRIES})`);
     send({ type: 'termData', id, data: `\r\n\x1b[33m[Crashed — auto-resuming ${a.crashCount}/${MAX_CRASH_RETRIES}...]\x1b[0m\r\n` });
     send({ type: 'crashed', id, crashCount: a.crashCount, maxRetries: MAX_CRASH_RETRIES });
@@ -1463,13 +1469,13 @@ function handleTermExit(id, exitCode) {
 }
 
 
-const RESTART_NUDGE = 'Overlord or the PC restarted and your session was cut off, so it was resumed. Your running tools, background shells and subagents were killed — check what finished, re-run what did not, and continue from where you left off.';
+const cutOffNudge = (cause) => `${cause} and your session was cut off, so it was resumed. Your running tools, background shells and subagents were killed — check what finished, re-run what did not, and continue from where you left off.`;
 
 function continueInterrupted(ids) {
   for (const id of ids) {
     const a = agents.get(id);
     if (!a || a.archived) continue;
-    a._crashNudge = RESTART_NUDGE;
+    a._crashNudge = cutOffNudge('Overlord or the PC went down');
     if (a.claudeReady) sendCrashNudge(id); else spawnTerminal(id); // not up yet → the ready detector sends it
   }
 }
@@ -1477,7 +1483,7 @@ function continueInterrupted(ids) {
 function sendCrashNudge(id) {
   const a = agents.get(id), t = terminals.get(id);
   if (!a || !t || !a._crashNudge) return;
-  const text = typeof a._crashNudge === 'string' ? a._crashNudge : 'Your session crashed mid-task and was auto-resumed. Continue from where you left off.';
+  const text = typeof a._crashNudge === 'string' ? a._crashNudge : cutOffNudge('Your Claude process crashed');
   a._crashNudge = false;
   t.write(text);
   setTimeout(() => { try { t.write('\r'); } catch {} }, 300); // separate Enter so Ink submits, not pastes
@@ -4687,7 +4693,7 @@ function handleIpc(msg) {
     case 'fullRestart': forceQuit = true; _restarting = true; app.relaunch(); app.quit(); break;
     // The host runs from the app's own files, so it has to go before the installer replaces them.
     // the pty host is Overlord.exe too: the installer can't replace Overlord until it's gone, so wait for it to exit
-    case 'installUpdate': forceQuit = true; ptyHost.stopAndWait(5000).catch(() => {}).then(() => autoUpdater.quitAndInstall()); break;
+    case 'installUpdate': try { fs.writeFileSync(UPDATE_MARK, ''); } catch {} forceQuit = true; ptyHost.stopAndWait(5000).catch(() => {}).then(() => autoUpdater.quitAndInstall()); break;
     case 'checkGitUpdate': checkGitUpdate(); break;
     case 'gitPull': doGitPull(); break;
     case 'approvePr': {
