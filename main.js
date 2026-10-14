@@ -105,6 +105,7 @@ const { pullBlocker, needsInstall } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./pr-eta');
 const { sessionSwitchKind } = require('./resume-core');
+const { interruptedBy } = require('./interrupt-core');
 const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
 const { applyBgRecord } = require('./bg-core');
 const { unsettledJobFor } = require('./daemon-jobs');
@@ -1309,6 +1310,15 @@ function restoreAgents(state) {
       for (const { id } of fresh) { const ag = agents.get(id); if (ag) ag._sessionCleaned = true; }
     })();
     _restoreSweep = sweep;
+    // Cut off by the crash / restart (their Claude didn't survive): offer to tell them and carry on.
+    const cut = [];
+    for (const { id } of fresh) {
+      const ag = agents.get(id);
+      let tail = ''; try { tail = readTail(ag.jsonlFile, FOLLOW_TAIL_BYTES).text; } catch {}
+      const why = ag && !ag.archived && interruptedBy(tail);
+      if (why) cut.push({ id, why });
+    }
+    if (cut.length) send({ type: 'interrupted', agents: cut });
     await sweep;
     for (const { id, entry } of agentEntries) {
       const agent = agents.get(id);
@@ -1453,11 +1463,23 @@ function handleTermExit(id, exitCode) {
 }
 
 
+const RESTART_NUDGE = 'Overlord or the PC restarted and your session was cut off, so it was resumed. Your running tools, background shells and subagents were killed — check what finished, re-run what did not, and continue from where you left off.';
+
+function continueInterrupted(ids) {
+  for (const id of ids) {
+    const a = agents.get(id);
+    if (!a || a.archived) continue;
+    a._crashNudge = RESTART_NUDGE;
+    if (a.claudeReady) sendCrashNudge(id); else spawnTerminal(id); // not up yet → the ready detector sends it
+  }
+}
+
 function sendCrashNudge(id) {
   const a = agents.get(id), t = terminals.get(id);
   if (!a || !t || !a._crashNudge) return;
+  const text = typeof a._crashNudge === 'string' ? a._crashNudge : 'Your session crashed mid-task and was auto-resumed. Continue from where you left off.';
   a._crashNudge = false;
-  t.write('Your session crashed mid-task and was auto-resumed. Continue from where you left off.');
+  t.write(text);
   setTimeout(() => { try { t.write('\r'); } catch {} }, 300); // separate Enter so Ink submits, not pastes
 }
 
@@ -4037,6 +4059,7 @@ function featureAgentArgs(cwd) {
 function handleIpc(msg) {
   if (releases.handle(msg)) return;
   switch (msg.type) {
+    case 'continueInterrupted': continueInterrupted(msg.ids || []); break;
     case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
     case 'listBranches': {
       wt.listBranches(msg.repo)

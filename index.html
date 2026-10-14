@@ -1116,6 +1116,9 @@ button:focus-visible { outline-offset:0; }
 
 
 /* Toast */
+#interrupt-bar { pointer-events:auto; color:var(--yellow); border-color:var(--border-hi); display:flex; align-items:center; gap:10px; bottom:72px; }
+#interrupt-bar button { font:inherit; }
+#interrupt-bar .ib-x { background:none; border:none; color:var(--dim); cursor:pointer; }
 .toast {
   position:fixed; bottom:36px; left:50%; transform:translateX(-50%) translateY(12px);
   background:var(--bg3); color:var(--green); border:1px solid rgba(166,227,161,.3);
@@ -4088,6 +4091,7 @@ function handleAgentMsg(msg) {
     case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
     case 'subToolStart': { const a = agents.get(msg.id); if (a) { let subs = a.subTools.get(msg.parentToolId); if (!subs) { subs = new Map(); a.subTools.set(msg.parentToolId, subs); } subs.set(msg.toolId, { status: msg.status, name: msg.name, done: false }); scheduleRender(); } break; }
     case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
+    case 'interrupted': showInterrupted(msg.agents); break;
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
     case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
@@ -4701,6 +4705,19 @@ function showImagePop(src, ev, tag) {
   pop.style.display = 'block';
 }
 function hideImagePop() { for (const i of ['image-pop', 'image-tag-hl']) { const e = document.getElementById(i); if (e) e.style.display = 'none'; } }
+
+// Agents a crash / PC restart cut off mid-task: one click tells them and they carry on.
+function showInterrupted(list) {
+  document.getElementById('interrupt-bar')?.remove();
+  const el = document.createElement('div');
+  el.id = 'interrupt-bar'; el.className = 'toast show';
+  const names = list.map(x => `${agents.get(x.id)?.agentName || x.id} — ${x.why}`).join('\n');
+  el.innerHTML = `<span>⚠ ${list.length} agent${list.length > 1 ? 's' : ''} cut off by the restart</span><button class="ib-go">Continue all</button><button class="ib-x" aria-label="Dismiss">&times;</button>`;
+  el.firstChild.title = names;
+  el.querySelector('.ib-go').onclick = () => { window.api.send({ type: 'continueInterrupted', ids: list.map(x => x.id) }); el.remove(); showToast(`Told ${list.length} to continue`); };
+  el.querySelector('.ib-x').onclick = () => el.remove();
+  document.body.appendChild(el);
+}
 
 function showToast(text, onClick) {
   let el = document.getElementById('toast');
