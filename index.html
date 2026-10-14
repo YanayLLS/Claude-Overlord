@@ -2013,15 +2013,16 @@ const agentIconMap = JSON.parse(localStorage.getItem('overlord-agent-icons') || 
 function saveAgentIcons() { localStorage.setItem('overlord-agent-icons', JSON.stringify(agentIconMap)); }
 
 // ── Agent card drag-to-reorder ──
-const agentOrderMap = JSON.parse(localStorage.getItem('overlord-agent-order') || '{}'); // cwd -> [id, ...]
-function saveAgentOrder() { localStorage.setItem('overlord-agent-order', JSON.stringify(agentOrderMap)); }
+// Keyed by agentName: ids restart at 1 every launch, so an id-keyed order pointed at other agents after a restart.
+const agentOrderMap = JSON.parse(localStorage.getItem('overlord-agent-order-v2') || '{}'); // cwd -> [agentName, ...]
+function saveAgentOrder() { localStorage.setItem('overlord-agent-order-v2', JSON.stringify(agentOrderMap)); }
 function sortByOrder(cwd, items) {
   const order = agentOrderMap[cwd];
   if (!order || !order.length) return items;
-  const posMap = new Map(order.map((id, i) => [id, i]));
+  const posMap = new Map(order.map((name, i) => [name, i]));
   return [...items].sort((a, b) => {
-    const pa = posMap.has(a[0]) ? posMap.get(a[0]) : 9999;
-    const pb = posMap.has(b[0]) ? posMap.get(b[0]) : 9999;
+    const pa = posMap.has(a[1].agentName) ? posMap.get(a[1].agentName) : 9999;
+    const pb = posMap.has(b[1].agentName) ? posMap.get(b[1].agentName) : 9999;
     return pa - pb;
   });
 }
@@ -2070,7 +2071,7 @@ function onCardDrop(e, dropId, cwd) {
   if (e.clientY >= rect.top + rect.height / 2) toIdx++;
   ids.splice(toIdx, 0, _dragId);
 
-  agentOrderMap[cwd] = ids;
+  agentOrderMap[cwd] = ids.map(i => agents.get(i)?.agentName).filter(Boolean);
   saveAgentOrder();
   onCardDragEnd();
   render();
@@ -3987,10 +3988,10 @@ function handleAgentMsg(msg) {
       if (msg.cwd) addKnownProject(msg.cwd);
       // An agent born from a quest's Attack on a building: the ticket is its from the first prompt.
       if (isNew && pendingAssign && pendingAssign.cwd === msg.cwd && Date.now() - pendingAssign.at < 20000) { const pt = clickupState.tasks.find(x => x.id === pendingAssign.taskId); assignTicket(pendingAssign.taskId, msg.id, msg.cwd); if (pt) setTimeout(() => api.send({ type: 'renameAgent', id: msg.id, name: '⚔ ' + pt.name.slice(0, 48), quiet: true }), 2000); pendingAssign = null; }
-      // Fresh agent goes last: ids restart at 1 each launch, so a saved order may still
-      // hold this id at a stale position. Re-append it.
-      if (isNew && !msg.title && msg.cwd && agentOrderMap[msg.cwd]) {
-        agentOrderMap[msg.cwd] = agentOrderMap[msg.cwd].filter(x => x !== msg.id).concat(msg.id);
+      // Fresh agent goes last: a closed agent's name can be picked again and still sit in the saved order.
+      // createdAt, not a missing title: a restored agent with no title yet must keep its place.
+      if (isNew && Date.now() - (msg.createdAt || 0) < 60000 && msg.agentName && msg.cwd && agentOrderMap[msg.cwd]) {
+        agentOrderMap[msg.cwd] = agentOrderMap[msg.cwd].filter(x => x !== msg.agentName).concat(msg.agentName);
         saveAgentOrder();
       }
       if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
