@@ -16,3 +16,15 @@ test('idle but a background agent was running', () => {
 });
 test('old transcript is ignored', () => assert.strictEqual(interruptedBy(j(said('tool_use')), now + 4 * 86400e3), null));
 test('cut first line is skipped', () => assert.strictEqual(interruptedBy('e":"x"}\n' + j(said('tool_use')), now), 'mid-task'));
+test('stopped with Esc → not interrupted', () => {
+  const esc = { type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } };
+  assert.strictEqual(interruptedBy(j(said('tool_use'), esc), now), null);
+  const escTool = { type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } };
+  assert.strictEqual(interruptedBy(j(said('tool_use'), escTool), now), null);
+});
+test('waiting on the user’s answer → not interrupted', () => {
+  const ask = (name) => ({ type: 'assistant', message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', name }] } });
+  assert.strictEqual(interruptedBy(j(ask('AskUserQuestion')), now), null);
+  assert.strictEqual(interruptedBy(j(ask('ExitPlanMode')), now), null);
+  assert.strictEqual(interruptedBy(j(ask('Bash')), now), 'mid-task');
+});
