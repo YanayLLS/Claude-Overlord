@@ -1446,6 +1446,13 @@
     if (u) { e.stopPropagation(); return api.send({ type: 'openUrl', url: u.dataset.url }); }
     if (!a && e.target !== signOverlay) return;
     const act = a ? a.dataset.sign : 'later';
+    if (shownReady) { // the "signed, ready" prompt: Release all now, open it, or later
+      readyDismissed = shownReady; try { localStorage.setItem('rl-ready-dismissed', readyDismissed); } catch {}
+      if (act === 'release') { startingAll(); api.send({ type: 'releasesMergeRelease', id: shownReady.split('|')[0] }); tab = 'release'; show(true); }
+      if (act === 'review') { tab = 'release'; show(true); }
+      shownReady = null; signOverlay.classList.remove('open');
+      return;
+    }
     if (act === 'now') {
       // stays up showing "Signing…" until it's done; dismissed only if it worked (a failure brings it back)
       api.send({ type: 'releasesSign' });
@@ -1459,7 +1466,37 @@
     signOverlay.classList.remove('open');
   });
   let signWaiting = null; // the prompt's key while its "Sign" runs
+  // one look for every prompt in that window: icon, title, a line, the repos, the buttons ([key, label, go?])
+  const promptBox = ({ label, icon, title, sub, body, acts }) => `<div class="rl-sign-box" role="dialog" aria-label="${esc(label)}"><div class="rl-sign-icon">${icon}</div>`
+    + `<h2>${title}</h2><div class="rl-sign-sub">${sub}</div>${body}`
+    + `<div class="rl-sign-acts">${acts.map(([k, t, go]) => `<button${go ? ' class="go"' : ''} data-sign="${k}">${t}</button>`).join('')}</div></div>`;
+  // The other half: my release just got its 2nd signature → the same window tells me it's ready, once per
+  // release and set of signers ("Later" keeps it away until someone else signs)
+  let readyDismissed = null, shownReady = null;
+  try { readyDismissed = localStorage.getItem('rl-ready-dismissed'); } catch {}
+  function readyPrompt() {
+    const st = state, me = String(((st && st.approvers) || {}).me || '').toLowerCase();
+    if (!me || (st.releaseAll && st.releaseAll.running) || st.teamRun) return null;
+    const m = ((st.history && st.history.items) || []).find(x => x.status === 'pending' && (x.env || 'prod') === 'prod'
+      && x.openedBy && String(x.openedBy.login).toLowerCase() === me && releaseNext(st, x).act === 'release');
+    if (!m) return null;
+    const signers = signersOf(m);
+    const key = `${m.id}|${signers.slice().sort().join(',')}`;
+    return key === readyDismissed ? null : { m, key, signers };
+  }
   function renderSignPrompt() {
+    if (!((state && state.toSign) || []).length && !signWaiting) {
+      const r = readyPrompt();
+      if (r) {
+        shownReady = r.key;
+        const open = r.m.repos.filter(x => !x.mergeSha && !x.closed);
+        return setOverlay(signOverlay, promptBox({ label: 'Release signed', icon: '✅', title: `Release ${esc(r.m.id)} is signed`,
+          sub: `${r.signers.map(x => '@' + esc(x)).join(' · ')} · 2/2`,
+          body: '<div class="rl-sign-list">' + open.map(x => `<div class="rl-sign-row done"><b>${esc(x.label)}</b>${x.pr ? `<a data-url="${esc(x.pr.url)}">#${esc(x.pr.number)}</a>` : '<span></span>'}<span>✓ ready</span></div>`).join('') + '</div>',
+          acts: [['later', 'Later'], ['review', 'Open'], ['release', '🚀 Release all', true]] }));
+      }
+      if (shownReady && !r) { shownReady = null; signOverlay.classList.remove('open'); return; }
+    }
     if (signWaiting) {
       if (state && state.signing) return; // still signing: leave the prompt as it is
       const left = (state && state.toSign) || [];
@@ -1475,17 +1512,14 @@
       signOverlay.classList.remove('open'); return;
     }
     const by = [...new Set(t.map(x => x.author).filter(Boolean))];
-    setOverlay(signOverlay, '<div class="rl-sign-box" role="dialog" aria-label="Sign the release">'
-      + '<div class="rl-sign-icon">✍</div>'
-      + `<h2>Prod release waiting for your signature</h2>`
-      + `<div class="rl-sign-sub">${by.length ? by.map(x => '@' + esc(x)).join(', ') + ' released' : 'A release is waiting'} — prod merges only once two approvers sign. One signature covers the whole release: ${esc(t[0].count)}/${esc(t[0].need)} signed so far.</div>`
+    shownReady = null;
+    setOverlay(signOverlay, promptBox({ label: 'Sign the release', icon: '✍', title: 'Prod release waiting for your signature', sub: `${by.length ? by.map(x => '@' + esc(x)).join(', ') + ' · ' : ''}${esc(t[0].count)}/${esc(t[0].need)} signed`,
       // the release, whole: every repo in it; ✓ where my signature already covers it
-      + ((state.toSignReleases && state.toSignReleases.length) ? state.toSignReleases.map(r => (state.toSignReleases.length > 1 || /^\d/.test(r.id) ? `<div class="rl-sign-rel">Release ${esc(r.id)}</div>` : '')
+      body: ((state.toSignReleases && state.toSignReleases.length) ? state.toSignReleases.map(r => (state.toSignReleases.length > 1 || /^\d/.test(r.id) ? `<div class="rl-sign-rel">Release ${esc(r.id)}</div>` : '')
         + '<div class="rl-sign-list">' + r.repos.map(x => `<div class="rl-sign-row${x.mine ? ' done' : ''}"><b>${esc(x.label)}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a>`
           + `<span>${x.mine ? '✓ signed' : x.older ? 'new commits since you signed' : 'needs your signature'}</span></div>`).join('') + '</div>').join('')
-        : '<div class="rl-sign-list">' + t.map(x => `<div class="rl-sign-row"><b>${esc(x.label)}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a></div>`).join('') + '</div>')
-      + '<div class="rl-sign-acts"><button data-sign="later">Later</button><button data-sign="review">Review first</button>'
-      + `<button class="go" data-sign="now">✍ Sign the release</button></div></div>`);
+        : '<div class="rl-sign-list">' + t.map(x => `<div class="rl-sign-row"><b>${esc(x.label)}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a></div>`).join('') + '</div>'),
+      acts: [['later', 'Later'], ['review', 'Review first'], ['now', '✍ Sign the release', true]] }));
   }
 
   // After Release all: a popup with what still goes out by hand — each row opens where to do it.
