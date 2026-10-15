@@ -871,7 +871,9 @@
 
   // Release all's live progress: which wave, merging or waiting for deploys, the outcome; Stop.
   function releaseAllHtml(s) {
-    const p = s.releaseAll;
+    // mine, else a teammate's run in progress (shared through the release record: no Stop here, it's theirs)
+    const own = s.releaseAll, team = !(own && own.running) && s.teamRun;
+    const p = team ? { ...s.teamRun, running: true } : own;
     if (!p) return '';
     // a finished run's message goes stale once its release has nothing left open (merged since, by hand or on GitHub)
     const man = !p.running && p.id && ((s.history && s.history.items) || []).find(m => m.id === p.id);
@@ -892,9 +894,9 @@
     const cls = p.running ? 'running' : p.status === 'done' ? 'ok' : 'bad'; // partial = amber, like stopped
     return `<div class="rl-relall ${cls}"><div class="rl-relall-top">`
       + `<span class="rl-relall-icon">${p.running ? (p.status === 'checking' ? '<span class="rl-spin-dot"></span>' : '🚀') : p.status === 'done' ? '✓' : '⏸'}</span>`
-      + `<span class="rl-relall-what">${what}</span>`
+      + `<span class="rl-relall-what">${team ? `<span class="rl-relall-sub">@${esc(p.by)} ·</span> ` : ''}${what}</span>`
       + (p.status === 'interrupted' ? `<button class="rl-hist-btn go" data-act="relAllResume" data-id="${esc(p.id || '')}" title="Picks up with what is still open: merged PRs are skipped, a deploy still running is waited on first">▶ Resume</button>` : '')
-      + (p.running ? '<button class="rl-hist-btn" data-act="relAllStop" title="Stops before the next merge. What already merged stays merged">⏹ Stop</button>' : '')
+      + (p.running && !team ? '<button class="rl-hist-btn" data-act="relAllStop" title="Stops before the next merge. What already merged stays merged">⏹ Stop</button>' : '')
       + '</div>'
       + (its.length ? `<div class="rl-relall-prog"><div class="rl-relall-bar"><i style="width:${pct}%"></i></div><span>${doneN} of ${its.length} done${left}</span></div>` : '')
       + '</div>';
@@ -988,7 +990,7 @@
         if (nextTxt) h += `<div class="rl-next-line ${nx.tone}"><span>Next</span>${esc(nextTxt)}</div>`;
       }
       h += '<div class="rl-hist-repos">';
-      const liveItems = s.releaseAll && s.releaseAll.id === m.id && s.releaseAll.items;
+      const liveItems = (s.releaseAll && s.releaseAll.running && s.releaseAll.id === m.id && s.releaseAll.items) || (s.teamRun && s.teamRun.id === m.id && s.teamRun.items) || (s.releaseAll && s.releaseAll.id === m.id && s.releaseAll.items);
       // in release order, one group per wave (what everything depends on first, the frontend last), with
       // the hand-deployed steps in their wave: read top to bottom, it's the release's timeline
       const inOrderMan = (m.manual || []).filter(x => s.config && (s.config.releaseOrder || []).some(w => w.some(y => y === x.label || y.toLowerCase() === String(x.repo).toLowerCase()))).map(x => ({ ...x, hand: true }));

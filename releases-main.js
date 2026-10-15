@@ -660,7 +660,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     shareTimer = setTimeout(async () => {
       const p = state.releaseAll, who = await whoAmI();
       if (!p || !p.running) return;
-      const body = { running: true, by: who.github, id: p.id || null, wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] };
+      // items: each repo's status, so teammates draw the same progress bar
+      const body = { running: true, by: who.github, id: p.id || null, wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [], items: p.items || {} };
       const key = JSON.stringify(body);
       if (key === lastShared && force !== true) return;
       lastShared = key;
