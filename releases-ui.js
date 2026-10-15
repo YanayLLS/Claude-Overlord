@@ -567,7 +567,7 @@
     return h + '</div>';
   }
 
-  const DONE = new Set(['deployed', 'merged-hand', 'hand-done']);
+  const DONE = new Set(['deployed', 'merged-hand', 'hand-done', 'hand-live']);
   const isHotfixRow = (r) => ((state && state.history && state.history.items) || []).some(m => m.kind === 'hotfix' && m.repos.includes(r));
   // Row actions for a repo of a release in flight (approvers): merge now / fix its checks / re-run its deploy
   function rowActs(r, need, notDeployed = []) {
@@ -675,7 +675,7 @@
     if (it.s === 'held') return `<span class="rl-item warn" title="${esc(it.why || '')}">waiting${it.why ? ': ' + esc(it.why.length > 34 ? it.why.slice(0, 34) + '…' : it.why) : ''}</span>`;
     const t = { queued: ['', `wave ${it.wave}`], merging: ['run', 'merging…'], merged: ['ok', 'merged · deploying…'], 'merged-hand': ['ok', 'merged ✓'],
       deploying: ['run', 'deploying…'], deployed: ['ok', 'deployed ✓'], failed: ['bad', 'deploy failed'], held: ['warn', 'waiting'],
-      hand: ['', `wave ${it.wave} · by hand`], 'hand-wait': ['warn', 'deploy by hand…'], 'hand-done': ['ok', 'deployed by hand ✓'] }[it.s] || ['', it.s];
+      hand: ['', `wave ${it.wave} · by hand`], 'hand-wait': ['warn', 'deploy by hand…'], 'hand-done': ['ok', 'deployed by hand ✓'], 'hand-live': ['ok', 'already live ✓'] }[it.s] || ['', it.s];
     return `<span class="rl-item ${t[0]}">${esc(t[1])}</span>`;
   }
   // What the release run found for a pending PR (shared through the release record)
@@ -1005,8 +1005,8 @@
       for (const r of wave) {
         if (r.hand) {
           const it = liveItems && liveItems[r.label];
-          const handDone = (it && it.s === 'hand-done') || !handOpen.includes(r.label);
-          const handBtn = (['pending', 'merged', 'partial'].includes(m.status) || handOpen.includes(r.label)) && a.isApprover && !(it && it.s === 'hand-done') && !((liveRel && m.id === liveRel.id) && handDone) ? (armed === 'h:' + r.repo
+          const handDone = (it && (it.s === 'hand-done' || it.s === 'hand-live')) || !handOpen.includes(r.label);
+          const handBtn = (['pending', 'merged', 'partial'].includes(m.status) || handOpen.includes(r.label)) && a.isApprover && !(it && (it.s === 'hand-done' || it.s === 'hand-live')) && !((liveRel && m.id === liveRel.id) && handDone) ? (armed === 'h:' + r.repo
             ? `<button class="rl-row-btn armed" data-act="rowHand" data-repo="${esc(r.repo)}" data-label="${esc(r.label)}">Confirm: deployed</button>`
             : `<button class="rl-row-btn" data-act="rowHand" data-repo="${esc(r.repo)}" data-label="${esc(r.label)}" title="Record ${esc(r.label)} as deployed now (its branch head goes live)">✓ Deployed</button>`) : '';
           h += `<div class="rl-hist-repo hand"><b>${esc(r.label)}</b><span></span><span class="rl-hist-sha"><span class="rl-hand">✋ by hand</span></span><span class="rl-hist-state">${handBtn}${it ? relItemHtml(it) : (liveRel && m.id === liveRel.id) ? relItemHtml({ s: handDone ? 'hand-done' : 'hand-wait' }) : ''}</span></div>`;

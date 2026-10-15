@@ -718,7 +718,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // A hand-deployed wave: show where to deploy each (state.releaseAll.manualWave) and wait until every
   // one is live — checked through its `live` pin each poll — or someone presses "Deployed, continue".
   // Returns null to go on, or why it stopped.
-  let manualDone = false, manualWake = null;
+  let manualDone = false, manualWake = null, manualAsked = new Set(); // labels the wave actually asked to deploy
   // "Deployed": record each branch's head as what's live now, so the next release only asks when
   // there's something new (fetchLives reads it back). Trusts the person: nothing verifies the deploy.
   async function confirmDeployed(items, key = 'handall') { return withBusy(key, 'Recording…', () => confirmNow(items)); }
@@ -735,7 +735,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (lives) push({ results: { ...(state.results || {}), lives }, grid: buildGrid(state.config, { ...(state.results || {}), lives }) });
   }
   async function waitManual(hand) {
-    manualDone = false;
+    manualDone = false; manualAsked = new Set();
     for (;;) {
       if (releaseAllStop) return 'Stopped by you';
       const lives = await fetchLives(state.config).catch(() => null);
@@ -743,6 +743,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const left = manualLeft(state.config, [], hand, lives || (state.results && state.results.lives));
       if (manualDone) await confirmDeployed(left);
       if (!left.length || manualDone) { progress({ manualWave: null }); return null; }
+      for (const x of left) manualAsked.add(x.label);
       progress({ status: 'manual', detail: left.map(x => x.label).join(', '), manualWave: left.map(x => {
         const l = lives && lives[`${x.repo}|${x.env}`];
         return { ...x, auto: !!(l && !l.error) };
@@ -1043,7 +1044,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         if (hand.length) {
           mark(hand.map(x => x.label), { s: 'hand-wait' });
           const r = await waitManual(hand);
-          if (!r) mark(hand.map(x => x.label), { s: 'hand-done' });
+          // nothing new since its last confirmed deploy: already live, nobody was asked
+          if (!r) { const asked = hand.filter(x => manualAsked.has(x.label)).map(x => x.label);
+            if (asked.length) mark(asked, { s: 'hand-done' });
+            if (asked.length < hand.length) mark(hand.filter(x => !manualAsked.has(x.label)).map(x => x.label), { s: 'hand-live' }); }
           if (r) return progress({ running: false, status: 'stopped', detail: r, manualWave: null });
         }
         for (const it of wave.filter(x => !x.manual)) {
