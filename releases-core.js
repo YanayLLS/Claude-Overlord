@@ -279,6 +279,19 @@ function releasePlan(cfg, envs) {
   return { prs, manual };
 }
 
+// Every hand-deployed repo of these envs, as a Release all hand stop: one with a release PR (deploy it once it
+// merges) as much as one whose prod branch only moves by hand. Release all asks only for those whose branch isn't
+// confirmed live (manualLeft). `have`: hand repos the release already lists.
+function handRepos(cfg, envs, have) {
+  const out = [];
+  for (const r of cfg.repos || []) for (const env of envs) {
+    if (!r.branches || !r.branches[env] || !r.deploy || r.deploy[env] !== 'manual') continue;
+    if ((have || []).some(h => h.repo === r.repo && (h.env || 'prod') === env)) continue;
+    out.push({ repo: r.repo, label: r.label || r.repo.split('/')[1], env, branch: r.branches[env], manual: true });
+  }
+  return out;
+}
+
 // Merge order for "Release all": config releaseOrder = [[wave 1 repos], [wave 2], …] by label or
 // owner/name; each wave merges and deploys before the next. Unlisted repos go in a last wave.
 function releaseWaves(cfg, rows) {
@@ -339,7 +352,7 @@ function manualLeft(cfg, merged, manual, lives) {
   return out;
 }
 
-const api = { manualLeft, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+const api = { manualLeft, handRepos, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

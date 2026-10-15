@@ -349,4 +349,16 @@ assert.strictEqual(age('garbage', now), '');
   ]); // media is live already; web deploys by CI
   assert.deepStrictEqual(validateConfig({ envs: ['prod'], repos: [{ repo: 'o/x', branches: { prod: 'm' }, deployUrl: { prod: 'http://x' } }] }), ['repos[0].deployUrl.prod: must be an https:// link']);
 }
+{
+  // every hand-deployed repo of the release's envs is a hand stop (a PR step or not); one the release lists already isn't doubled
+  const { handRepos } = require('./releases-core');
+  const cfg = { repos: [
+    { repo: 'o/lambda', label: 'lambda', branches: { dev: 'dev', prod: 'main' }, deploy: { prod: 'manual' }, promote: ['dev', 'prod'] },
+    { repo: 'o/infra', label: 'infra', branches: { prod: 'dev' }, deploy: { prod: 'manual' } },
+    { repo: 'o/api', label: 'api', branches: { dev: 'dev', prod: 'main' }, deploy: { prod: 'd.yml' } },
+    { repo: 'o/chat', label: 'chat', branches: { dev: 'dev', alpha: 'alpha' }, deploy: { alpha: 'manual' } },
+  ] };
+  assert.deepStrictEqual(handRepos(cfg, ['prod'], [{ repo: 'o/infra', env: 'prod' }]), [{ repo: 'o/lambda', label: 'lambda', env: 'prod', branch: 'main', manual: true }]);
+  assert.deepStrictEqual(handRepos(cfg, ['alpha'], []).map(x => x.label), ['chat']);
+}
 console.log('releases-core: all passed');

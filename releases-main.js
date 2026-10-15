@@ -14,7 +14,7 @@ const { runProgress, releaseEtaMs } = require('./deploy-eta');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
-const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft } = require('./releases-core');
+const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos } = require('./releases-core');
 const { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -1014,8 +1014,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     // (seen through their `live` pin) or someone says they're deployed; the rest go in the end popup
     const man = (id ? (((state.history && state.history.items) || []).find(x => x.id === id) || {}).manual || [] : (state.releaseRun && state.releaseRun.manual) || [])
       .map(x => ({ env: (id && ((((state.history && state.history.items) || []).find(y => y.id === id) || {}).env)) || 'prod', ...x, manual: true }));
+    // and every other hand-deployed repo of these envs: one whose PR merges now, or whose branch has commits nobody
+    // confirmed live (a stop asks only when its branch isn't live; one live at its head passes as "no changes")
+    const allMan = man.concat(handRepos(state.config, [...new Set(go.map(x => x.env).concat(man.map(x => x.env)))], man));
     const inOrder = (m) => (state.config.releaseOrder || []).some(w => w.some(x => x === m.label || x.toLowerCase() === m.repo.toLowerCase()));
-    const handWaves = man.filter(inOrder), handLater = man.filter(m => !inOrder(m));
+    const handWaves = allMan.filter(inOrder), handLater = allMan.filter(m => !inOrder(m));
     const waves = releaseWaves(state.config, go.concat(handWaves));
     if (releaseAllStop) return refuse('Stopped by you before anything merged');
     manualDone = false;
@@ -1041,6 +1044,20 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         const wave = waves[w];
         progress({ wave: w + 1, status: 'merging', detail: wave.map(x => x.label + (x.env !== 'prod' ? ' ' + x.env : '')).join(', ') });
         const merged = [];
+        for (const it of wave.filter(x => !x.manual)) {
+          if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
+          const gate = await mergeGate(it.pr.url);
+          if (!gate.ok) { mark([it.label], { s: 'held', why: gate.reason }); return progress({ running: false, status: 'stopped', detail: `${it.label}: ${gate.reason}` }); }
+          mark([it.label], { s: 'merging' });
+          const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
+          // blocked = the release stops here: later waves depend on this one
+          if (apiErr(res)) { mark([it.label], { s: 'held', why: `GitHub refused the merge: ${apiErr(res)}` }); return progress({ running: false, status: 'stopped', detail: `${it.label}: GitHub refused the merge (${apiErr(res)}) — nothing after it was merged` }); }
+          mark([it.label], { s: it.deploy && it.deploy !== 'manual' ? 'merged' : 'merged-hand' });
+          merged.push({ ...it, sha: res.data && res.data.sha });
+          shipped.push(it);
+          progress({ merged: (state.releaseAll.merged || []).concat(it.label + (it.env !== 'prod' ? ' ' + it.env : '')) });
+        }
+        // then the wave's hand deploys (its PR merged just now, or its branch isn't confirmed live)
         const hand = wave.filter(x => x.manual);
         if (hand.length) {
           mark(hand.map(x => x.label), { s: 'hand-wait' });
@@ -1055,19 +1072,6 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
             } }
           if (r) return progress({ running: false, status: 'stopped', detail: r, manualWave: null });
         }
-        for (const it of wave.filter(x => !x.manual)) {
-          if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
-          const gate = await mergeGate(it.pr.url);
-          if (!gate.ok) { mark([it.label], { s: 'held', why: gate.reason }); return progress({ running: false, status: 'stopped', detail: `${it.label}: ${gate.reason}` }); }
-          mark([it.label], { s: 'merging' });
-          const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
-          // blocked = the release stops here: later waves depend on this one
-          if (apiErr(res)) { mark([it.label], { s: 'held', why: `GitHub refused the merge: ${apiErr(res)}` }); return progress({ running: false, status: 'stopped', detail: `${it.label}: GitHub refused the merge (${apiErr(res)}) — nothing after it was merged` }); }
-          mark([it.label], { s: it.deploy && it.deploy !== 'manual' ? 'merged' : 'merged-hand' });
-          merged.push({ ...it, sha: res.data && res.data.sha });
-          shipped.push(it);
-          progress({ merged: (state.releaseAll.merged || []).concat(it.label + (it.env !== 'prod' ? ' ' + it.env : '')) });
-        }
         // wait for this wave's CI deploys (repos deployed by hand can't be waited on)
         const waitOn = merged.filter(x => x.deploy && x.deploy !== 'manual' && x.sha);
         if (!waitOn.length) continue; // (the last wave is waited on too: 'Released' means deployed)
@@ -1078,7 +1082,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         mark(waitOn.map(x => x.label), { s: 'deployed' });
       }
       // what's still on people: hand-deployed repos behind, and merged PRs whose target has no CI deploy
-      const left = manualLeft(state.config, shipped, handLater, state.results && state.results.lives);
+      const handled = new Set(handWaves.map(x => x.label)); // asked in their wave already
+      const left = manualLeft(state.config, shipped.filter(x => !handled.has(x.label)), handLater, state.results && state.results.lives);
       progress({ running: false, status: skipped.length ? 'partial' : 'done', detail: skipped.length ? `not merged: ${skipped.map(x => `${x.label} (${x.why})`).join(', ')}` : 'every wave merged and deployed', manualLeft: left, doneAt: Date.now() });
       send({ type: 'toast', text: skipped.length ? 'Release all: partly released' + skippedNote() : 'Release all: every wave merged and deployed ✓' });
     } finally {
