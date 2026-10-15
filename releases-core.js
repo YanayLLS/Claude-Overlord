@@ -279,6 +279,14 @@ function releasePlan(cfg, envs) {
   return { prs, manual };
 }
 
+// Is this release part of a running Release all? A run carries several releases (state.releaseAll.rels by
+// release id, 'run' for the unrecorded one); a teammate's on an older Overlord has just the one id
+function runHas(ra, id) {
+  if (!ra || ra.running === false) return false;
+  if (ra.rels) { const r = ra.rels[id || 'run']; return !!(r && r.status === 'running'); }
+  return ra.id === (id || null);
+}
+
 // Every hand-deployed repo of these envs, as a Release all hand stop: one with a release PR (deploy it once it
 // merges) as much as one whose prod branch only moves by hand. Release all asks only for those whose branch isn't
 // confirmed live (manualLeft). `have`: hand repos the release already lists.
@@ -352,7 +360,7 @@ function manualLeft(cfg, merged, manual, lives) {
   return out;
 }
 
-const api = { manualLeft, handRepos, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+const api = { manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

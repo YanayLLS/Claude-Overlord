@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
-const { runRelease, recheckRelease, startsQueue, prHealth, rowStatus, isHotfix, prodDbschemas } = require('./release-run');
+const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix, prodDbschemas } = require('./release-run');
 const createHistory = require('./release-history');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
@@ -14,7 +14,7 @@ const { runProgress, releaseEtaMs } = require('./deploy-eta');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
-const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos } = require('./releases-core');
+const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas } = require('./releases-core');
 const { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -661,7 +661,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const p = state.releaseAll, who = await whoAmI();
       if (!p || !p.running) return;
       // items: each repo's status, so teammates draw the same progress bar
-      const body = { running: true, by: who.github, id: p.id || null, wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [], items: p.items || {} };
+      const body = { running: true, by: who.github, id: p.id || null, wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [], items: p.items || {}, rels: p.rels || null };
       const key = JSON.stringify(body);
       if (key === lastShared && force !== true) return;
       lastShared = key;
@@ -719,7 +719,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // A hand-deployed wave: show where to deploy each (state.releaseAll.manualWave) and wait until every
   // one is live — checked through its `live` pin each poll — or someone presses "Deployed, continue".
   // Returns null to go on, or why it stopped.
-  let manualDone = false, manualWake = null, manualAsked = new Set(); // labels the wave actually asked to deploy
+  let manualDone = false, manualWake = null, manualAsked = new Set(); // repo|env the wave actually asked to deploy
+  const handKey = (x) => `${x.repo}|${x.env}`;
   // "Deployed": record each branch's head as what's live now, so the next release only asks when
   // there's something new (fetchLives reads it back). Trusts the person: nothing verifies the deploy.
   async function confirmDeployed(items, key = 'handall') { return withBusy(key, 'Recording…', () => confirmNow(items)); }
@@ -744,7 +745,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const left = manualLeft(state.config, [], hand, lives || (state.results && state.results.lives));
       if (manualDone) await confirmDeployed(left);
       if (!left.length || manualDone) { progress({ manualWave: null }); return null; }
-      for (const x of left) manualAsked.add(x.label);
+      for (const x of left) manualAsked.add(handKey(x));
       progress({ status: 'manual', detail: left.map(x => x.label).join(', '), manualWave: left.map(x => {
         const l = lives && lives[`${x.repo}|${x.env}`];
         return { ...x, auto: !!(l && !l.error) };
@@ -890,7 +891,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const ra = state.releaseAll;
     // releases being released now: Release all on it (here or on a teammate's), or a repo of it deploying
     const rels = ((state.history && state.history.items) || []).filter(m => inFlightRel(m)
-      && ((ra && ra.running && ra.id === m.id) || (state.teamRun && state.teamRun.id === m.id) || m.repos.some(deploying)));
+      && (runHas(ra, m.id) || runHas(state.teamRun, m.id) || m.repos.some(deploying)));
     if (!rels.length) { if (state.deployEta) push({ deployEta: null }); return; }
     const out = {};
     for (const m of rels) {
@@ -961,22 +962,25 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     await fixPr({ repo, number: Number(n), url: p.data.html_url, headRef: p.data.head.ref, baseRef: p.data.base.ref, isCrossRepository: !!(p.data.head.repo && p.data.head.repo.full_name !== repo) });
   }
 
-  async function releaseAll(id) {
-    // a refusal before the run starts also clears the UI's optimistic "Starting…"
-    const no = (text) => { progress({ running: false, status: 'stopped', detail: text }); send({ type: 'toast', text }); };
-    if (state.releaseAll && state.releaseAll.running && state.releaseAll.status !== 'checking') return send({ type: 'toast', text: 'Release all is already running' });
-    if (!versionOk()) return no(outdatedMsg());
-    releaseAllStop = false; // reset first, so a Stop pressed during the checks below counts
-    const [lock, me] = await Promise.all([history.running().catch(() => null), whoAmI().then(w => w.github)]);
-    if (fresh(lock) && String(lock.by).toLowerCase() !== String(me).toLowerCase()) {
-      return no(`Release all is running on @${lock.by}'s Overlord (wave ${lock.wave}/${lock.waves}) — one at a time`);
-    }
-    // on screen from the first moment: the checks below read every PR and take a while
-    progress({ running: true, id: id || null, status: 'checking', detail: 'reading the PRs, back-merges and signatures', wave: 0, waves: 0, merged: [], url: null, manualLeft: null });
-    // a refusal stays in the progress line (not just a toast that's easy to miss)
-    const refuse = (text) => { progress({ running: false, status: 'stopped', detail: text }); send({ type: 'toast', text }); };
-    // what's really still open (a resume, or PRs merged elsewhere): merged ones drop out, and one that
-    // merged in the last hour gets its deploy waited on before anything else merges
+  // ── Release all: one run that can carry several releases (prod and alpha, say) side by side. Each release
+  // keeps its own waves and its own outcome; a second Release all started mid-run joins it, its wave 1 going
+  // out with the run's next wave. A failure stops only that release; Stop stops them all. ──
+  let run = null; // { tick, pending, rels: Map(key → R) } while a run is going (in this process)
+  const relKey = (id) => id || 'run';
+  const relLabel = (R) => R.env !== 'prod' ? `${R.env} ` : '';
+  // the run's state for the UI and teammates: overall line + each release's own (state.releaseAll.rels[key])
+  const relsView = () => Object.fromEntries([...run.rels.values()].map(R => [R.key, { id: R.id, env: R.env, status: R.status, detail: R.detail || '', url: R.url || null,
+    wave: R.stoppedAt || Math.max(0, Math.min(R.waves.length, run.tick - R.offset + 1)), waves: R.waves.length, items: R.items }]));
+  const relProgress = (p = {}) => {
+    const first = run.rels.values().next().value;
+    progress({ ...p, rels: relsView(), items: first ? first.items : {}, waves: Math.max(0, ...[...run.rels.values()].map(R => R.offset + R.waves.length)) });
+  };
+  const markR = (R, labels, v) => { for (const l of labels) R.items[l] = { ...(R.items[l] || {}), ...v }; relProgress(); };
+  const stopR = (R, detail, url) => { R.status = 'stopped'; R.detail = detail; R.url = url || null; R.stoppedAt = Math.max(1, Math.min(R.waves.length, run.tick - R.offset + 1)); relProgress(); };
+
+  // What a release needs before its first merge: its open PRs, gates (signatures, conflicts), back-merges merged,
+  // its waves (hand stops included). Returns the release, or why it can't go.
+  async function prepareRel(id) {
     const listed = releaseItems(id);
     const live = await Promise.all(listed.map(it => ghJson(['api', `repos/${it.repo}/pulls/${it.pr.number}`])));
     const items = [], justMerged = [];
@@ -985,123 +989,174 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       if (p && p.merged) { if (Date.now() - Date.parse(p.merged_at) < 3600e3 && it.deploy && it.deploy !== 'manual') justMerged.push({ ...it, sha: p.merge_commit_sha }); }
       else if (!(p && p.state === 'closed')) items.push(it);
     });
-    if (!items.length) return refuse('Nothing open to release');
-    // set aside what can't merge yet, per repo, and merge the rest: failing checks or a conflict the last
-    // check found, or a prod release still short of 2 signatures. An open back-merge is part of the release:
-    // it merges first (below), so the release PR carries the target's hotfixes
+    if (!items.length) return 'Nothing open to release';
+    // set aside what can't merge yet: a conflict the last check found, or a prod release still short of 2
+    // signatures. An open back-merge is part of the release: it merges first, so the release PR carries the
+    // target's hotfixes. Failing checks don't hold a repo back: GitHub's branch protection decides
     const memo = new Map(), skipped = [], go = [], backs = [];
     await Promise.all(items.map(async (it) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${it.repo}/pulls`, '-f', 'state=open', '-f', `base=${it.source}`, '-f', 'per_page=100']);
       const back = (Array.isArray(r.data) ? r.data : []).find(p => p.head && p.head.ref === it.target);
-      // failing checks don't hold a repo back: GitHub's branch protection decides what may merge, and a
-      // merge it refuses (a required check, a conflict) skips just that repo below
       const gate = await mergeGate(it.pr.url, memo);
       if (!gate.ok) return skipped.push({ ...it, why: gate.reason });
       go.push(it);
       if (back) backs.push({ it, back });
     }));
     // a blocked repo blocks the release: it doesn't start until every repo can go
-    if (skipped.length) return refuse(`Can't release yet: ${skipped.map(x => `${x.label}${x.env !== 'prod' ? ' ' + x.env : ''}: ${x.why}`).join(' · ')}`);
-    if (!go.length) return refuse('Nothing open to release');
-    // back-merges first (target → source); one that won't merge stops the release
+    if (skipped.length) return `Can't release yet: ${skipped.map(x => `${x.label}${x.env !== 'prod' ? ' ' + x.env : ''}: ${x.why}`).join(' · ')}`;
+    if (!go.length) return 'Nothing open to release';
     for (const { it, back } of backs) {
       progress({ detail: `merging the back-merge ${it.label} #${back.number}` });
       const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${back.number}/merge`, '-f', 'merge_method=merge']);
-      if (apiErr(res)) return refuse(`${it.label}: its back-merge #${back.number} didn't merge (${apiErr(res)}) — nothing else was merged`);
+      if (apiErr(res)) return `${it.label}: its back-merge #${back.number} didn't merge (${apiErr(res)}) — nothing else was merged`;
     }
-    const skippedNote = () => skipped.length ? ` · not merged: ${skipped.map(x => `${x.label} (${x.why})`).join(', ')}` : ''; // (skips found mid-run count too)
     // hand-deployed repos named in releaseOrder are waves too: Release all pauses there until they're live
     // (seen through their `live` pin) or someone says they're deployed; the rest go in the end popup
-    const man = (id ? (((state.history && state.history.items) || []).find(x => x.id === id) || {}).manual || [] : (state.releaseRun && state.releaseRun.manual) || [])
-      .map(x => ({ env: (id && ((((state.history && state.history.items) || []).find(y => y.id === id) || {}).env)) || 'prod', ...x, manual: true }));
+    const hist = id && ((state.history && state.history.items) || []).find(x => x.id === id);
+    const env = (hist && hist.env) || (go[0] && go[0].env) || 'prod';
+    const man = ((hist ? hist.manual : state.releaseRun && state.releaseRun.manual) || []).map(x => ({ env, ...x, manual: true }));
     // and every other hand-deployed repo of these envs: one whose PR merges now, or whose branch has commits nobody
     // confirmed live (a stop asks only when its branch isn't live; one live at its head passes as "no changes")
     const allMan = man.concat(handRepos(state.config, [...new Set(go.map(x => x.env).concat(man.map(x => x.env)))], man));
     const inOrder = (m) => (state.config.releaseOrder || []).some(w => w.some(x => x === m.label || x.toLowerCase() === m.repo.toLowerCase()));
     const handWaves = allMan.filter(inOrder), handLater = allMan.filter(m => !inOrder(m));
     const waves = releaseWaves(state.config, go.concat(handWaves));
-    if (releaseAllStop) return refuse('Stopped by you before anything merged');
+    const R = { id: id || null, key: relKey(id), env, waves, handWaves, handLater, justMerged, shipped: [], offset: 0, status: 'running', detail: '', items: {} };
+    waves.forEach((w, i) => w.forEach(x => { R.items[x.label] = { s: x.manual ? 'hand' : 'queued', wave: i + 1 }; }));
+    for (const x of justMerged) R.items[x.label] = { s: 'deploying' };
+    return R;
+  }
+
+  // a release whose last wave is through: done, and what's still on people (hand deploys, merged PRs with no CI deploy)
+  function finishRel(R) {
+    if (R.status !== 'running') return;
+    const handled = new Set(R.handWaves.map(x => x.label)); // asked in their wave already
+    R.manualLeft = manualLeft(state.config, R.shipped.filter(x => !handled.has(x.label)), R.handLater, state.results && state.results.lives);
+    R.status = 'done'; R.detail = 'every wave merged and deployed';
+  }
+
+  async function releaseAll(id) {
+    // a refusal before the run starts also clears the UI's optimistic "Starting…"
+    const no = (text) => { progress({ running: false, status: 'stopped', detail: text }); send({ type: 'toast', text }); };
+    if (!versionOk()) return run ? send({ type: 'toast', text: outdatedMsg() }) : no(outdatedMsg());
+    if (run) return joinRun(id);
+    if (state.releaseAll && state.releaseAll.running && state.releaseAll.status !== 'checking') return send({ type: 'toast', text: 'Release all is already running' });
+    releaseAllStop = false; // reset first, so a Stop pressed during the checks below counts
+    const [lock, me] = await Promise.all([history.running().catch(() => null), whoAmI().then(w => w.github)]);
+    if (fresh(lock) && String(lock.by).toLowerCase() !== String(me).toLowerCase()) {
+      return no(`Release all is running on @${lock.by}'s Overlord (wave ${lock.wave}/${lock.waves}) — one at a time`);
+    }
+    // on screen from the first moment: the checks below read every PR and take a while
+    progress({ running: true, id: id || null, rels: null, status: 'checking', detail: 'reading the PRs, back-merges and signatures', wave: 0, waves: 0, merged: [], url: null, manualLeft: null });
+    const R = await prepareRel(id);
+    if (typeof R === 'string') return no(R);
+    if (releaseAllStop) return no('Stopped by you before anything merged');
     manualDone = false;
-    // each repo's own status, for History and the results popover: queued (its wave) → merging → merged →
-    // deploying → deployed / deploy failed; held = not merged this time, and why
-    const repoState = {};
-    for (const x of skipped) repoState[x.label] = { s: 'held', why: x.why };
-    waves.forEach((w, i) => w.forEach(x => { repoState[x.label] = { s: x.manual ? 'hand' : 'queued', wave: i + 1 }; }));
-    for (const x of justMerged) repoState[x.label] = { s: 'deploying' };
-    const mark = (labels, v) => { const next = { ...((state.releaseAll && state.releaseAll.items) || {}) }; for (const l of labels) next[l] = { ...(next[l] || {}), ...v }; progress({ items: next }); };
-    const shipped = [];
-    progress({ running: true, id: id || null, wave: 0, waves: waves.length, merged: [], status: 'merging', detail: '', url: null, items: repoState });
+    run = { tick: 0, pending: 0, rels: new Map([[R.key, R]]) };
+    relProgress({ running: true, id: id || null, wave: 0, merged: [], status: 'merging', detail: '', url: null });
     clearInterval(beatTimer); beatTimer = setInterval(() => shareRun(true), BEAT_MS);
     try {
-      if (justMerged.length) {
-        progress({ status: 'deploying', detail: justMerged.map(x => x.label).join(', ') });
-        const bad = await waitDeploys(justMerged);
-        if (bad) { if (bad.label) mark([bad.label], { s: 'failed' }); return progress({ running: false, status: 'stopped', ...bad }); }
-        mark(justMerged.map(x => x.label), { s: 'deployed' });
-      }
-      for (let w = 0; w < waves.length; w++) {
-        if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
-        const wave = waves[w];
-        progress({ wave: w + 1, status: 'merging', detail: wave.map(x => x.label + (x.env !== 'prod' ? ' ' + x.env : '')).join(', ') });
-        const merged = [];
-        for (const it of wave.filter(x => !x.manual)) {
-          if (releaseAllStop) return progress({ running: false, status: 'stopped', detail: 'Stopped by you' });
-          const gate = await mergeGate(it.pr.url);
-          if (!gate.ok) { mark([it.label], { s: 'held', why: gate.reason }); return progress({ running: false, status: 'stopped', detail: `${it.label}: ${gate.reason}` }); }
-          mark([it.label], { s: 'merging' });
-          const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
-          // blocked = the release stops here: later waves depend on this one
-          if (apiErr(res)) { mark([it.label], { s: 'held', why: `GitHub refused the merge: ${apiErr(res)}` }); return progress({ running: false, status: 'stopped', detail: `${it.label}: GitHub refused the merge (${apiErr(res)}) — nothing after it was merged` }); }
-          mark([it.label], { s: it.deploy && it.deploy !== 'manual' ? 'merged' : 'merged-hand' });
-          merged.push({ ...it, sha: res.data && res.data.sha });
-          shipped.push(it);
-          progress({ merged: (state.releaseAll.merged || []).concat(it.label + (it.env !== 'prod' ? ' ' + it.env : '')) });
-        }
-        // then the wave's hand deploys (its PR merged just now, or its branch isn't confirmed live)
-        const hand = wave.filter(x => x.manual);
-        if (hand.length) {
-          mark(hand.map(x => x.label), { s: 'hand-wait' });
-          const r = await waitManual(hand);
-          // nothing new since its last confirmed deploy: already live, nobody was asked
-          if (!r) { const asked = hand.filter(x => manualAsked.has(x.label)).map(x => x.label);
-            if (asked.length) mark(asked, { s: 'hand-done' });
-            const lives = (state.results && state.results.lives) || {};
-            for (const x of hand.filter(y => !manualAsked.has(y.label))) {
-              const c = (lives[`${x.repo}|${x.env}`] || {}).confirmed;
-              mark([x.label], { s: 'hand-live', why: c ? `No commits since @${c.by} confirmed it live, ${new Date(c.at).toLocaleDateString()}` : 'No commits since its last deploy' });
-            } }
-          if (r) return progress({ running: false, status: 'stopped', detail: r, manualWave: null });
-        }
-        // wait for this wave's CI deploys (repos deployed by hand can't be waited on)
-        const waitOn = merged.filter(x => x.deploy && x.deploy !== 'manual' && x.sha);
-        if (!waitOn.length) continue; // (the last wave is waited on too: 'Released' means deployed)
-        progress({ status: 'deploying', detail: waitOn.map(x => x.label).join(', ') });
-        mark(waitOn.map(x => x.label), { s: 'deploying' });
-        const bad = await waitDeploys(waitOn);
-        if (bad) { if (bad.label) mark([bad.label], { s: 'failed' }); return progress({ running: false, status: 'stopped', ...bad }); }
-        mark(waitOn.map(x => x.label), { s: 'deployed' });
-      }
-      // what's still on people: hand-deployed repos behind, and merged PRs whose target has no CI deploy
-      const handled = new Set(handWaves.map(x => x.label)); // asked in their wave already
-      const left = manualLeft(state.config, shipped.filter(x => !handled.has(x.label)), handLater, state.results && state.results.lives);
-      progress({ running: false, status: skipped.length ? 'partial' : 'done', detail: skipped.length ? `not merged: ${skipped.map(x => `${x.label} (${x.why})`).join(', ')}` : 'every wave merged and deployed', manualLeft: left, doneAt: Date.now() });
-      send({ type: 'toast', text: skipped.length ? 'Release all: partly released' + skippedNote() : 'Release all: every wave merged and deployed ✓' });
+      await runLoop();
     } finally {
-      if (state.releaseAll && state.releaseAll.running) progress({ running: false });
+      const all = [...run.rels.values()];
+      const bad = all.find(R => R.status === 'stopped');
+      const left = all.flatMap(R => R.manualLeft || []);
+      // one release: its own words; several: each one's outcome (prod ✓ · alpha: backend deploy failed)
+      const detail = all.length === 1 ? all[0].detail : all.map(R => R.status === 'done' ? `${R.env} ✓` : `${R.env}: ${R.detail}`).join(' · ');
+      relProgress({ running: false, status: bad ? 'stopped' : 'done', detail, url: bad ? bad.url : null, manualLeft: left, manualWave: null, doneAt: Date.now() });
+      send({ type: 'toast', text: bad ? `Release all: ${detail}` : 'Release all: every wave merged and deployed ✓' });
+      run = null;
       clearInterval(beatTimer); clearTimeout(shareTimer);
       whoAmI().then(who => { const p = state.releaseAll || {};
         return history.setRunning({ running: false, by: who.github, beat: new Date().toISOString(), endedAt: new Date().toISOString(), id: p.id || null,
-          wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [] }); }).catch(() => {});
+          wave: p.wave, waves: p.waves, status: p.status, detail: p.detail || '', merged: p.merged || [], rels: p.rels || null }); }).catch(() => {});
       reconcileHistory().catch(() => {});
       refresh();
-      // a release queued behind this run starts now, if this one released (a held repo there doesn't hold it)
-      const q = state.releaseAllQueue;
-      if (q && q !== id) {
-        push({ releaseAllQueue: null });
-        const p = state.releaseAll || {};
-        if (startsQueue(p.status)) { send({ type: 'toast', text: `Starting the queued Release all: release ${q}` }); setTimeout(() => releaseAll(q).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })), 1500); }
-        else if (notify) notify(`⏸ Queued release ${q} didn't start`, `The release before it ended "${p.status}": ${p.detail || ''}. Start it from its card when ready.`, null, () => send({ type: 'releases', state, open: true, tab: 'history' }));
+    }
+  }
+
+  // Release all on another release while a run goes: it joins, its wave 1 with the run's next wave
+  async function joinRun(id) {
+    const key = relKey(id);
+    const cur = run.rels.get(key);
+    if (cur && cur.status === 'running') return send({ type: 'toast', text: 'That release is already in this Release all' });
+    run.pending++;
+    try {
+      const R = await prepareRel(id);
+      if (typeof R === 'string') return send({ type: 'toast', text: `Release ${id || ''} can't join: ${R}` });
+      if (!run) return send({ type: 'toast', text: 'The run ended before it could join: press Release all again' });
+      if (R.justMerged.length) { const bad = await waitDeploys(R.justMerged); if (bad) return send({ type: 'toast', text: `Release ${id || ''}: ${bad.detail}` }); }
+      R.offset = run.tick + 1;
+      for (const v of Object.values(R.items)) if (v.wave) v.wave += R.offset;
+      run.rels.set(key, R);
+      relProgress();
+      send({ type: 'toast', text: `Release ${id || ''} joined: its first wave goes out with wave ${R.offset + 1}` });
+    } finally { if (run) run.pending--; }
+  }
+
+  async function runLoop() {
+    // a release that merged minutes ago (a resume mid deploy-wait): its deploys first
+    for (const R of run.rels.values()) if (R.justMerged.length) {
+      progress({ status: 'deploying', detail: R.justMerged.map(x => x.label).join(', ') });
+      const bad = await waitDeploys(R.justMerged);
+      if (bad) { if (bad.label) markR(R, [bad.label], { s: 'failed' }); stopR(R, bad.detail, bad.url); }
+      else markR(R, R.justMerged.map(x => x.label), { s: 'deployed' });
+    }
+    for (;;) {
+      const rels = [...run.rels.values()];
+      for (const R of rels) if (R.status === 'running' && run.tick - R.offset >= R.waves.length) finishRel(R);
+      const active = rels.filter(R => R.status === 'running' && run.tick >= R.offset);
+      if (releaseAllStop) { for (const R of rels.filter(R => R.status === 'running')) stopR(R, 'Stopped by you'); return; }
+      if (!rels.some(R => R.status === 'running')) {
+        if (!run.pending) return;
+        await new Promise(r => setTimeout(r, 1000)); continue; // a release is joining: wait for it
       }
+      if (!active.length) { run.tick++; continue; }
+      const slice = active.map(R => [R, R.waves[run.tick - R.offset]]);
+      relProgress({ wave: run.tick + 1, status: 'merging', detail: slice.flatMap(([R, w]) => w.map(x => x.label + (R.env !== 'prod' ? ' ' + R.env : ''))).join(', ') });
+      const merged = new Map(slice.map(([R]) => [R, []]));
+      for (const [R, wave] of slice) {
+        for (const it of wave.filter(x => !x.manual)) {
+          if (releaseAllStop || R.status !== 'running') break;
+          const gate = await mergeGate(it.pr.url);
+          if (!gate.ok) { markR(R, [it.label], { s: 'held', why: gate.reason }); stopR(R, `${it.label}: ${gate.reason}`); break; }
+          markR(R, [it.label], { s: 'merging' });
+          const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
+          // refused = this release stops here: its later waves depend on this one
+          if (apiErr(res)) { markR(R, [it.label], { s: 'held', why: `GitHub refused the merge: ${apiErr(res)}` }); stopR(R, `${it.label}: GitHub refused the merge (${apiErr(res)}) — nothing after it was merged`); break; }
+          markR(R, [it.label], { s: it.deploy && it.deploy !== 'manual' ? 'merged' : 'merged-hand' });
+          merged.get(R).push({ ...it, sha: res.data && res.data.sha });
+          R.shipped.push(it);
+          progress({ merged: (state.releaseAll.merged || []).concat(it.label + (it.env !== 'prod' ? ' ' + it.env : '')) });
+        }
+      }
+      if (releaseAllStop) continue; // the top of the loop stops every release
+      // then the wave's hand deploys, every release's at once (its PR merged just now, or its branch isn't confirmed live)
+      const hand = slice.filter(([R]) => R.status === 'running').flatMap(([R, w]) => w.filter(x => x.manual).map(x => ({ ...x, R })));
+      if (hand.length) {
+        for (const x of hand) markR(x.R, [x.label], { s: 'hand-wait' });
+        const r = await waitManual(hand);
+        if (r) { for (const R of new Set(hand.map(x => x.R))) stopR(R, r); continue; }
+        const lives = (state.results && state.results.lives) || {};
+        for (const x of hand) {
+          if (manualAsked.has(handKey(x))) { markR(x.R, [x.label], { s: 'hand-done' }); continue; }
+          // nothing new since its last confirmed deploy: already live, nobody was asked
+          const c = (lives[`${x.repo}|${x.env}`] || {}).confirmed;
+          markR(x.R, [x.label], { s: 'hand-live', why: c ? `No commits since @${c.by} confirmed it live, ${new Date(c.at).toLocaleDateString()}` : 'No commits since its last deploy' });
+        }
+      }
+      // wait for this wave's CI deploys, each release on its own: a failed deploy stops only its release
+      const waits = slice.filter(([R]) => R.status === 'running').map(([R]) => [R, merged.get(R).filter(x => x.deploy && x.deploy !== 'manual' && x.sha)]).filter(([, w]) => w.length);
+      if (waits.length) {
+        relProgress({ status: 'deploying', detail: waits.flatMap(([, w]) => w.map(x => x.label)).join(', ') });
+        for (const [R, w] of waits) markR(R, w.map(x => x.label), { s: 'deploying' });
+        await Promise.all(waits.map(async ([R, w]) => {
+          const bad = await waitDeploys(w);
+          if (bad) { if (bad.label) markR(R, [bad.label], { s: 'failed' }); stopR(R, bad.detail, bad.url); }
+          else markR(R, w.map(x => x.label), { s: 'deployed' });
+        }));
+      }
+      run.tick++;
     }
   }
 
@@ -1403,10 +1458,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesHistory': history.load().then(() => reconcileHistory()).catch(e => push({ history: { error: e.message, items: [] } })); return true;
       case 'releasesRollback': withBusy('rollback:' + msg.id, 'Opening rollback PRs…', () => history.rollback(msg.id, msg.skip || [])).catch(e => send({ type: 'toast', text: 'Rollback failed: ' + e.message })); return true;
       case 'releasesImport': withBusy('import', 'Importing past releases…', () => history.importPast(state.config ? releasePlan(state.config, ['prod']).prs : [])).then(() => reconcileHistory()).catch(e => send({ type: 'toast', text: 'Import failed: ' + e.message })); return true;
-      // Release all for a release while another release's run is going: queued, it starts when that one is done
+      // Release all for a release while another release's run is going: it joins that run
       case 'releasesQueueAll':
-        if (state.releaseAll && state.releaseAll.running) { push({ releaseAllQueue: state.releaseAllQueue === msg.id ? null : msg.id }); send({ type: 'toast', text: state.releaseAllQueue ? `Release ${msg.id} queued: it starts when the running release is done` : 'Queue cleared' }); }
-        else releaseAll(msg.id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message }));
+        releaseAll(msg.id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })); // running: it joins the run
         return true;
       case 'releasesMergeRelease': releaseAll(msg.id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + e.message })); return true;
       case 'releasesCancel': cancelRelease(msg.id).catch(e => send({ type: 'toast', text: 'Cancel failed: ' + e.message })); return true;

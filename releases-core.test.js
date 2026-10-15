@@ -361,4 +361,9 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(handRepos(cfg, ['prod'], [{ repo: 'o/infra', env: 'prod' }]), [{ repo: 'o/lambda', label: 'lambda', env: 'prod', branch: 'main', manual: true }]);
   assert.deepStrictEqual(handRepos(cfg, ['alpha'], []).map(x => x.label), ['chat']);
 }
+{
+  const { runHas } = require('./releases-core');
+  const ra = { running: true, id: 'p', rels: { p: { status: 'running' }, a: { status: 'stopped' } } };
+  assert.deepStrictEqual([runHas(ra, 'p'), runHas(ra, 'a'), runHas(ra, 'x'), runHas({ running: true, id: 'p' }, 'p'), runHas({ ...ra, running: false }, 'p')], [true, false, false, true, false]);
+}
 console.log('releases-core: all passed');

@@ -241,7 +241,7 @@
     tab: (el) => { tab = el.dataset.tab; sel = null; toToday = tab === 'envs' && envView === 'timeline'; api.send({ type: 'releasesHistory' }); render(); },
     envView: (el) => { envView = el.dataset.v; sel = null; toToday = envView === 'timeline'; render(); },
     // history actions
-    queueAll: (el) => { api.send({ type: 'releasesQueueAll', id: el.dataset.id }); },
+    queueAll: (el) => { if (armed !== 'q:' + el.dataset.id) return arm('q:' + el.dataset.id); armed = null; api.send({ type: 'releasesQueueAll', id: el.dataset.id }); render(); },
     gotoRelease: () => { relOpen = false; tab = 'release'; api.send({ type: 'releasesHistory' }); render(); },
     rowToDev: (el) => { markBusy(el, 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: 'retarget' }); },
     strayFix: (el) => { markBusy(el, el.dataset.how === 'close' ? 'Closing…' : 'Retargeting…'); render(); api.send({ type: 'releasesStrayFix', repo: el.dataset.repo, number: +el.dataset.n, how: el.dataset.how }); },
@@ -628,8 +628,11 @@
     const signs = (m.env || 'prod') === 'prod';
     const failed = m.repos.filter(r => r.deploy && r.deploy.state === 'failure');
     const deploying = m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state));
-    if (ra && ra.running && ra.id === m.id) return { phase: ra.status === 'checking' ? 'starting Release all' : `wave ${ra.wave}/${ra.waves} ${ra.status === 'deploying' ? 'deploying' : ra.status === 'manual' ? 'waiting for a hand deploy' : 'merging'}`, next: ra.status === 'manual' ? 'deploy the hand step, then Deployed, continue' : `Release all is on it${etaOf(st, m.id) && etaOf(st, m.id).etaMs != null ? ` · ${minLeft(etaOf(st, m.id).etaMs)} until fully deployed` : ''}`, tone: 'run' };
-    if (st.teamRun && st.teamRun.id === m.id) return { phase: `@${st.teamRun.by} is releasing (wave ${st.teamRun.wave}/${st.teamRun.waves})`, next: `watch here${etaOf(st, m.id) && etaOf(st, m.id).etaMs != null ? ` · ${minLeft(etaOf(st, m.id).etaMs)} until fully deployed` : ''}`, tone: 'run' };
+    const rr = ra && ra.rels && ra.rels[m.id], rw = rr || ra || {};
+    if (ra && ra.running && ra.status === 'checking' && !ra.rels && ra.id === m.id) return { phase: 'starting Release all', next: '', tone: 'run' };
+    if (ReleasesCore.runHas(ra, m.id)) return { phase: `wave ${rw.wave}/${rw.waves} ${ra.status === 'deploying' ? 'deploying' : ra.status === 'manual' ? 'waiting for a hand deploy' : 'merging'}`, next: ra.status === 'manual' ? 'deploy the hand step, then Deployed, continue' : `Release all is on it${etaOf(st, m.id) && etaOf(st, m.id).etaMs != null ? ` · ${minLeft(etaOf(st, m.id).etaMs)} until fully deployed` : ''}`, tone: 'run' };
+    const tr = st.teamRun && ((st.teamRun.rels && st.teamRun.rels[m.id]) || st.teamRun);
+    if (ReleasesCore.runHas(st.teamRun, m.id)) return { phase: `@${st.teamRun.by} is releasing (wave ${tr.wave}/${tr.waves})`, next: `watch here${etaOf(st, m.id) && etaOf(st, m.id).etaMs != null ? ` · ${minLeft(etaOf(st, m.id).etaMs)} until fully deployed` : ''}`, tone: 'run' };
     if (failed.length) return { phase: `${failed.map(r => r.label).join(', ')} deploy failed`, next: `↻ Re-run or 🔧 Fix ${failed.length === 1 ? 'its' : 'their'} deploy (row buttons)`, tone: 'bad' };
     if (open.length && signs && signers.length < 2) {
       const need = 2 - signers.length, iSigned = signers.some(l => l.toLowerCase() === me);
@@ -709,7 +712,7 @@
       : `<button class="${cls}" data-act="relCancel"${id ? ` data-id="${esc(id)}"` : ''} title="Call this release off: closes its ${n} open PR${n === 1 ? '' : 's'} (with a note). Merged ones stay merged">✕ Cancel release</button>`;
   }
   // optimistic: the progress line shows right on the confirming click; main's first update replaces it
-  function startingAll() { if (state) state = { ...state, releaseAll: { running: true, status: 'checking', detail: 'starting', wave: 0, waves: 0, merged: [] } }; }
+  function startingAll() { if (state && !(state.releaseAll && state.releaseAll.running)) state = { ...state, releaseAll: { running: true, status: 'checking', detail: 'starting', wave: 0, waves: 0, merged: [] } }; }
   let armed = null, armTimer = null;
   // ── Busy buttons: main marks a slow action busy (state.busy[key]); the click marks it locally at once to
   // bridge the round trip. After every render, a busy button shows a spinner + its label and is locked. ──
@@ -836,18 +839,11 @@
     render();
   }
   function releaseAllBtn(s, { ready, waiting, signoff, attrs, lockedCls, armKey, held = [] }) {
-    // another release's Release all is running (one at a time): say so, and offer to queue this one behind it
-    const runId = s.releaseAll && s.releaseAll.running ? s.releaseAll.id : undefined;
+    // a Release all is running here: this release is in it (nothing to press), or joins it (its waves go out alongside)
     const myId = (attrs.match(/data-id="([^"]+)"/) || [])[1];
-    if (runId !== undefined && myId && runId !== myId && ready.length) {
-      const other = ((s.history && s.history.items) || []).find(m => m.id === runId);
-      const what = other ? `the ${other.env || 'prod'} release` : 'the running release';
-      const startsIn = etaOf(s, runId) && etaOf(s, runId).etaMs != null ? ` · starts in ${minLeft(etaOf(s, runId).etaMs)}` : '';
-      return s.releaseAllQueue === myId
-        ? `<button class="${lockedCls} queued" data-act="queueAll" data-id="${esc(myId)}" title="Starts by itself when ${esc(what)} has released (all or part of it), not if it is stopped. Click to unqueue">⏳ Queued after ${esc(what)}${startsIn}</button>`
-        : `<button class="${lockedCls}" data-act="queueAll" data-id="${esc(myId)}" title="Release all runs one release at a time: ${esc(what)} is running now. Queue this one to start right after it">🚀 Release all · after ${esc(what)}</button>`;
-    }
-    if (s.releaseAll && s.releaseAll.running) return '';
+    const running = s.releaseAll && s.releaseAll.running;
+    if (running && (!myId || ReleasesCore.runHas(s.releaseAll, myId) || s.releaseAll.status === 'checking')) return '';
+    const join = running && ready.length;
     // one Release all across the team: someone else's is running
     if (s.teamRun) return `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`@${s.teamRun.by} is running Release all: wave ${s.teamRun.wave}/${s.teamRun.waves}, ${s.teamRun.status}${s.teamRun.detail ? ' (' + s.teamRun.detail + ')' : ''}${(s.teamRun.merged || []).length ? '\nmerged: ' + s.teamRun.merged.join(', ') : ''}`)}">🚀 Running on @${esc(s.teamRun.by)}'s Overlord · wave ${esc(s.teamRun.wave)}/${esc(s.teamRun.waves)}</button>`;
     const so = signoff || { count: 0, need: 2, signers: [], gaps: [] };
@@ -866,6 +862,8 @@
       const waves = s.config ? ReleasesCore.releaseWaves(s.config, ready).length : 1;
       return `<button ${attrs.replace('class="', 'class="armed ')} title="${esc(tip)}">⚠ Confirm: merge ${ready.length} PR${ready.length === 1 ? '' : 's'} in ${waves} wave${waves === 1 ? '' : 's'}</button>`;
     }
+    if (join && armed === 'q:' + myId) return `<button class="armed ${lockedCls}" data-act="queueAll" data-id="${esc(myId)}" title="${esc(tip)}">⚠ Confirm: add ${ready.length} PR${ready.length === 1 ? '' : 's'} to the run</button>`;
+    if (join) return `<button class="${lockedCls}" data-act="queueAll" data-id="${esc(myId)}" title="${esc('Joins the running Release all: its waves go out alongside, from the next wave.\n' + tip)}">🚀 Release all · ${ready.length} · alongside</button>`;
     return `<button ${attrs} title="${esc(tip)}">🚀 Release all · ${ready.length}</button>`;
   }
 
@@ -879,10 +877,11 @@
     const man = !p.running && p.id && ((s.history && s.history.items) || []).find(m => m.id === p.id);
     if (man && !man.repos.some(r => !r.mergeSha && !r.closed) && (p.status !== 'done' || /not merged/i.test(p.detail || '') || Date.now() - (p.at || 0) > 10 * 60 * 1000)) return '';
     const e = etaOf(s, p.id);
-    const named = Object.entries(p.items || {}).filter(([, x]) => x.s !== 'held'), its = named.map(([, x]) => x);
+    const allItems = p.rels ? Object.values(p.rels).flatMap(r => Object.entries(r.items || {}).map(([l, x]) => [l, x, r.id])) : Object.entries(p.items || {}).map(([l, x]) => [l, x, p.id]);
+    const named = allItems.filter(([, x]) => x.s !== 'held'), its = named.map(([, x]) => x);
     const doneN = its.filter(x => DONE.has(x.s)).length;
     // a repo mid-deploy counts for how far its deploy is (vs its last good run), not 0 until it's done
-    const part = named.reduce((n, [l, x]) => n + (DONE.has(x.s) ? 1 : (e && e.repos[l] && e.repos[l].s === 'running' && e.repos[l].pct) || 0), 0);
+    const part = named.reduce((n, [l, x, id]) => { const ei = etaOf(s, id); return n + (DONE.has(x.s) ? 1 : (ei && ei.repos[l] && ei.repos[l].s === 'running' && ei.repos[l].pct) || 0); }, 0);
     const pct = its.length ? Math.round(part / its.length * 100) : 0;
     const left = p.running && e && e.etaMs != null ? ` · ${minLeft(e.etaMs)} until every wave is deployed` : '';
     const what = p.running && p.status === 'checking' ? `Starting: ${esc(p.detail || '')}…`
@@ -990,7 +989,8 @@
         if (nextTxt) h += `<div class="rl-next-line ${nx.tone}"><span>Next</span>${esc(nextTxt)}</div>`;
       }
       h += '<div class="rl-hist-repos">';
-      const liveItems = (s.releaseAll && s.releaseAll.running && s.releaseAll.id === m.id && s.releaseAll.items) || (s.teamRun && s.teamRun.id === m.id && s.teamRun.items) || (s.releaseAll && s.releaseAll.id === m.id && s.releaseAll.items);
+      const itemsOf = (ra) => ra && ((ra.rels && ra.rels[m.id] && ra.rels[m.id].items) || (!ra.rels && ra.id === m.id && ra.items));
+      const liveItems = (s.releaseAll && s.releaseAll.running && itemsOf(s.releaseAll)) || itemsOf(s.teamRun) || itemsOf(s.releaseAll);
       // in release order, one group per wave (what everything depends on first, the frontend last), with
       // the hand-deployed steps in their wave: read top to bottom, it's the release's timeline
       const inOrderMan = (m.manual || []).filter(x => s.config && (s.config.releaseOrder || []).some(w => w.some(y => y === x.label || y.toLowerCase() === String(x.repo).toLowerCase()))).map(x => ({ ...x, hand: true }));
@@ -1476,9 +1476,9 @@
   try { readyDismissed = localStorage.getItem('rl-ready-dismissed'); } catch {}
   function readyPrompt() {
     const st = state, me = String(((st && st.approvers) || {}).me || '').toLowerCase();
-    if (!me || (st.releaseAll && st.releaseAll.running) || st.teamRun) return null;
+    if (!me || st.teamRun || (st.releaseAll && st.releaseAll.running && st.releaseAll.status === 'checking')) return null;
     const m = ((st.history && st.history.items) || []).find(x => x.status === 'pending' && (x.env || 'prod') === 'prod'
-      && x.openedBy && String(x.openedBy.login).toLowerCase() === me && releaseNext(st, x).act === 'release');
+      && x.openedBy && String(x.openedBy.login).toLowerCase() === me && !ReleasesCore.runHas(st.releaseAll, x.id) && releaseNext(st, x).act === 'release');
     if (!m) return null;
     const signers = signersOf(m);
     const key = `${m.id}|${signers.slice().sort().join(',')}`;
