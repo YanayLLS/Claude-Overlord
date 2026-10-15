@@ -1577,5 +1577,11 @@
     el.classList.add('open');
   }
 
-  window.releasesUi = { releaseRepos, enforcePrWatch, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (brFor && document.activeElement === brFor) brShow(brFor); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
+  // a release PR or back-merge: one of the repo's env branches into another (the PRs panel's Fix skips their advisory checks)
+  const isReleasePr = (repo, head, base) => {
+    const r = state && state.config && (state.config.repos || []).find(x => x.repo.toLowerCase() === String(repo).toLowerCase());
+    const envs = r && r.branches ? Object.values(r.branches) : [];
+    return envs.includes(head) && envs.includes(base);
+  };
+  window.releasesUi = { releaseRepos, enforcePrWatch, isReleasePr, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (brFor && document.activeElement === brFor) brShow(brFor); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
 })();

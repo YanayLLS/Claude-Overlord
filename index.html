@@ -5715,7 +5715,9 @@ function prRowHtml(p, dim) {
   const cls = 'pr-row dt-row' + (showReq ? ' pr-req' : '') + (canMerge ? ' pr-mergeable' : '')
     + (conflict ? ' pr-conflict' : '') + (dim ? ' pr-muted' : '');
   // Red checks (or some already failed while others run): an agent fixes and pushes to the PR until green (main.js fixPr).
-  const fixBtn = !dim && (p.checks === 'fail' || p.failed)
+  // a release PR whose failures are all checks GitHub doesn't require (UNSTABLE, not BLOCKED): nothing to fix there
+  const advisoryOnly = p.mergeState === 'UNSTABLE' && window.releasesUi && releasesUi.isReleasePr(p.repo, p.headRef, p.baseRef);
+  const fixBtn = !dim && !advisoryOnly && (p.checks === 'fail' || p.failed)
     ? `<button class="pr-approve pr-fix" title="New agent reads the failed checks, pushes fixes to this PR and watches until it's green" onclick="event.stopPropagation();fixPr('${k}')">🔧 Fix</button>` : '';
   const act = prBranchAction(p); // pr-behind.js
   const updBtn = act === 'conflict'
