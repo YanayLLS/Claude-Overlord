@@ -1047,7 +1047,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
           // nothing new since its last confirmed deploy: already live, nobody was asked
           if (!r) { const asked = hand.filter(x => manualAsked.has(x.label)).map(x => x.label);
             if (asked.length) mark(asked, { s: 'hand-done' });
-            if (asked.length < hand.length) mark(hand.filter(x => !manualAsked.has(x.label)).map(x => x.label), { s: 'hand-live' }); }
+            const lives = (state.results && state.results.lives) || {};
+            for (const x of hand.filter(y => !manualAsked.has(y.label))) {
+              const c = (lives[`${x.repo}|${x.env}`] || {}).confirmed;
+              mark([x.label], { s: 'hand-live', why: c ? `No commits since @${c.by} confirmed it live, ${new Date(c.at).toLocaleDateString()}` : 'No commits since its last deploy' });
+            } }
           if (r) return progress({ running: false, status: 'stopped', detail: r, manualWave: null });
         }
         for (const it of wave.filter(x => !x.manual)) {

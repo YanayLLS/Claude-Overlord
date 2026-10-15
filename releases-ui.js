@@ -672,10 +672,11 @@
   // A repo's status in a Release all (state.releaseAll.items[label]), as a short coloured note
   function relItemHtml(it) {
     if (!it) return '';
+    if (it.s === 'hand-live') return `<span class="rl-item" title="${esc((it.why || 'No commits since its last deploy') + ': not deployed or confirmed in this release')}">no changes · skipped</span>`;
     if (it.s === 'held') return `<span class="rl-item warn" title="${esc(it.why || '')}">waiting${it.why ? ': ' + esc(it.why.length > 34 ? it.why.slice(0, 34) + '…' : it.why) : ''}</span>`;
     const t = { queued: ['', `wave ${it.wave}`], merging: ['run', 'merging…'], merged: ['ok', 'merged · deploying…'], 'merged-hand': ['ok', 'merged ✓'],
       deploying: ['run', 'deploying…'], deployed: ['ok', 'deployed ✓'], failed: ['bad', 'deploy failed'], held: ['warn', 'waiting'],
-      hand: ['', `wave ${it.wave} · by hand`], 'hand-wait': ['warn', 'deploy by hand…'], 'hand-done': ['ok', 'deployed by hand ✓'], 'hand-live': ['ok', 'already live ✓'] }[it.s] || ['', it.s];
+      hand: ['', `wave ${it.wave} · by hand`], 'hand-wait': ['warn', 'deploy by hand…'], 'hand-done': ['ok', 'deployed by hand ✓'] }[it.s] || ['', it.s];
     return `<span class="rl-item ${t[0]}">${esc(t[1])}</span>`;
   }
   // What the release run found for a pending PR (shared through the release record)
