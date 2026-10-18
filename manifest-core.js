@@ -66,7 +66,9 @@ function applyPr(m, repo, pr) {
     if (r.repo !== repo || r.pr.number !== pr.number) return r;
     const next = { ...r };
     if (pr.mergeSha && next.mergeSha !== pr.mergeSha) { next.mergeSha = pr.mergeSha; next.mergedAt = pr.mergedAt || null; }
-    if (!pr.mergeSha && pr.closed && !next.closed) next.closed = true;
+    // closed, or retargeted off the release's branch (master → dev on GitHub): no longer in this release
+    const moved = pr.base && next.target && pr.base !== next.target;
+    if (!pr.mergeSha && (pr.closed || moved) && !next.closed) next.closed = true;
     if (pr.headSha && !next.mergeSha && next.headSha !== pr.headSha) next.headSha = pr.headSha;
     if (pr.signers && JSON.stringify(pr.signers) !== JSON.stringify(next.signers)) next.signers = pr.signers;
     if (pr.signedSha && !next.mergeSha && next.signedSha !== pr.signedSha) next.signedSha = pr.signedSha;

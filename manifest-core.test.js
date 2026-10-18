@@ -39,6 +39,13 @@ let a = M.newManifest({ id: 'x', rows: rows.slice(0, 1) });
 [a] = M.applyPr(a, 'o/front', { number: 9, closed: true });
 assert.strictEqual(a.status, 'abandoned');
 
+// retargeted off prod (e.g. master → dev on GitHub): out of the release, like a closed PR
+let rt = M.newManifest({ id: 'rt', rows: rows.slice(0, 1) });
+[rt] = M.applyPr(rt, 'o/front', { number: 9, base: 'master' });
+assert.strictEqual(rt.status, 'pending');
+[rt] = M.applyPr(rt, 'o/front', { number: 9, base: 'dev' });
+assert.strictEqual(rt.status, 'abandoned');
+
 // called off: cancelled; partial when part of it had already merged; who and what never shipped are kept
 {
   const two = M.newManifest({ id: 'c', rows });

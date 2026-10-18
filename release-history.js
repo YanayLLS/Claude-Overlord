@@ -199,7 +199,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       for (const { r, s } of seen) {
         if (!s || s.error || !s.pr) continue;
         [m, c] = M.applyPr(m, r.repo, { number: r.pr.number, mergeSha: s.pr.merged ? s.pr.merge_commit_sha : null, mergedAt: s.pr.merged_at,
-          closed: s.pr.state === 'closed', headSha: s.pr.head && s.pr.head.sha,
+          closed: s.pr.state === 'closed', base: s.pr.base && s.pr.base.ref, headSha: s.pr.head && s.pr.head.sha,
           // signers only from an Overlord that knows the approvers team: one that doesn't sees nobody as
           // signed, and would flip the record back and forth with every approver's Overlord
           signers: teamKnown() ? s.signers.map(x => x.login) : undefined,
