@@ -46,3 +46,25 @@ test('live turn timer vs finished-turn line', () => {
   assert.ok(!liveTurnIn('Cooked for 2m 44s · done 4:05 PM'));
   assert.ok(!liveTurnIn('Churned for 1h 51m 41s · done 4:07 PM · 1 shell still running'));
 });
+
+const { questionDialogIn } = require('./ask-core');
+test('question picker on screen (AskUserQuestion), with or without spaces', () => {
+  const screen = 'What should we build? > 1. Sign-offs + tasks (Recommended) 2. Dashboard release card Chat about this Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel';
+  assert.ok(questionDialogIn(screen));
+  assert.ok(questionDialogIn(screen.replace(/ /g, '')));
+  assert.ok(!questionDialogIn('Press Enter to continue'));
+});
+
+const { dialogAtEnd } = require('./ask-core');
+test('only a dialog at the end of the settled screen counts (redrawn history does not)', () => {
+  const perm = 'Do you want to proceed? > 1. Yes   2. No';
+  const ask = 'Which one? > 1. A  2. B  Enter to select · ↑/↓ to navigate · Esc to cancel';
+  const later = ' ' + 'more conversation redrawn after it. '.repeat(20) + ' ────── ❯ ────── ⏵⏵ bypass permissions on (shift+tab to cycle)';
+  assert.strictEqual(dialogAtEnd('…' + perm + '\n Esc to cancel'), 'perm');
+  assert.strictEqual(dialogAtEnd('…' + ask), 'ask');
+  assert.strictEqual(dialogAtEnd('old chat: ' + perm + later), null);
+  assert.strictEqual(dialogAtEnd('old chat: ' + ask + later), null);
+  const box = ' ────── ❯ ────── ⏵⏵ bypass permissions on (shift+tab to cycle) · 6 agents';
+  assert.strictEqual(dialogAtEnd('last message quoted: ' + perm + box), null, 'input box back = no live dialog');
+  assert.strictEqual(dialogAtEnd(perm + ' main ( ) twin-switch Reading useRelease… 19m 26s'), 'perm', 'agent status lines may follow a live dialog');
+});

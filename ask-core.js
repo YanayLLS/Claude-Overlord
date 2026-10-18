@@ -28,4 +28,26 @@ const permDialogIn = (text) => PERM_DIALOG_RE.test(text || '');
 const LIVE_TURN_RE = /\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\s*·/;
 const liveTurnIn = (text) => LIVE_TURN_RE.test(text || '');
 
-module.exports = { applyAskRecord, permDialogIn, liveTurnIn };
+// Claude's question picker (AskUserQuestion / plan approval). Newer Claude Code writes the
+// turn's message — question included — to the transcript only after it's answered, so the
+// screen is the only live signal. Its footer: "Enter to select · ↑/↓ to navigate · Esc to cancel".
+const QUESTION_DIALOG_RE = /Enter\s*to\s*select[\s\S]{0,60}?to\s*navigate[\s\S]{0,120}?Esc\s*to\s*cancel/;
+const questionDialogIn = (text) => QUESTION_DIALOG_RE.test(text || '');
+
+// The dialog that is live: on the settled screen a real one is the last thing drawn, and
+// Claude's input box (its "shift+tab to cycle" / "? for shortcuts" footer) is hidden while it
+// waits. The same text in redrawn history (/resume, resize) is followed by the input box.
+const INPUT_BOX_RE = /shift\s*\+\s*tab\s*to\s*cycle|\?\s*for\s*shortcuts/;
+function dialogAtEnd(text) {
+  const tail = String(text || '').slice(-3000);
+  for (const [kind, re] of [['ask', QUESTION_DIALOG_RE], ['perm', PERM_DIALOG_RE]]) {
+    let last = null;
+    for (const m of tail.matchAll(new RegExp(re.source, 'g'))) last = m;
+    if (!last) continue;
+    const after = tail.slice(last.index + last[0].length);
+    if (after.length < 800 && !INPUT_BOX_RE.test(after)) return kind;
+  }
+  return null;
+}
+
+module.exports = { applyAskRecord, permDialogIn, liveTurnIn, questionDialogIn, dialogAtEnd };

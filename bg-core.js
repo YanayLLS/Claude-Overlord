@@ -36,6 +36,12 @@ function applyBgRecord(tasks, r) {
       const ids = [...block.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1]);
       const status = block.match(/<status>([^<]+)<\/status>/)?.[1];
       if (!status) continue;
+      // The same notice is written up to 3 times (enqueued, dequeued, delivered). Act on it once:
+      // a late copy of an old "finished" must not end an agent that was resumed in between.
+      const key = block.split('</task-notification>')[0].trim();
+      const seen = tasks.seenNotices || (tasks.seenNotices = new Set());
+      if (seen.has(key)) continue;
+      seen.add(key);
       // An agent that stopped with its own background work still going will notify again
       const pending = status === 'running' || NOTE_STILL_RUNNING.test(block);
       for (const id of ids) { if (pending) tasks.add(id); else tasks.delete(id); }

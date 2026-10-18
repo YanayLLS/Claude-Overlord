@@ -78,3 +78,17 @@ test('background Workflow run: launch by taskId, finish by task notification', (
   applyBgRecord(t, { type: 'queue-operation', content: note('wp5zjn879', 'completed') });
   assert.strictEqual(t.size, 0);
 });
+
+test('a late copy of an old finish notice does not end an agent resumed in between', () => {
+  const t = new Set();
+  const done = note('a1', 'completed', '<summary>Agent "x" finished</summary>\n');
+  applyBgRecord(t, { type: 'user', toolUseResult: { status: 'async_launched', agentId: 'a1' } });
+  applyBgRecord(t, { type: 'queue-operation', operation: 'enqueue', content: done });
+  assert.strictEqual(t.size, 0);
+  applyBgRecord(t, { type: 'user', toolUseResult: { success: true, message: 'Resuming agent a1', resumedAgentId: 'a1' } });
+  applyBgRecord(t, { type: 'queue-operation', operation: 'remove', content: done });
+  applyBgRecord(t, { type: 'user', message: { content: done } });
+  assert.deepStrictEqual([...t], ['a1']);
+  applyBgRecord(t, { type: 'queue-operation', operation: 'enqueue', content: note('a1', 'completed', '<summary>Agent "x" finished again</summary>\n') });
+  assert.strictEqual(t.size, 0);
+});
