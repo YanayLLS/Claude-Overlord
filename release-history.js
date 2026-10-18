@@ -443,7 +443,8 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       let conflict = false;
       for (const { manifest, sha } of loaded.entries) {
         if (!ids.includes(manifest.id) || (manifest.signedBy || []).some(x => x.login.toLowerCase() === who.login.toLowerCase())) continue;
-        const m = { ...manifest, signedBy: (manifest.signedBy || []).concat({ login: who.login, clickup: who.clickup || null, at: new Date().toISOString() }), updatedAt: new Date().toISOString() };
+        // merged PRs of it get the signature too, marked late (it didn't gate their merge)
+        const m = { ...M.signLate(manifest, who.login), signedBy: (manifest.signedBy || []).concat({ login: who.login, clickup: who.clickup || null, at: new Date().toISOString() }), updatedAt: new Date().toISOString() };
         const w = await write(m, sha, `release ${m.id}: signed by @${who.login}`);
         if (w.conflict) conflict = true;
       }

@@ -173,7 +173,7 @@
     },
     apprRemove: (el) => { markBusy(el, 'Removing…'); render(); api.send({ type: 'releasesApproversEdit', kind: 'remove', login: el.dataset.login }); },
     apprCreate: (el) => { markBusy(el, 'Creating the team…'); render(); api.send({ type: 'releasesApproversEdit', kind: 'create' }); },
-    relSign: () => { api.send({ type: 'releasesSign' }); },
+    relSign: (el) => { api.send({ type: 'releasesSign', lateId: el && el.dataset.late }); },
     // Release all merges to prod: the first click arms it (the button asks to confirm), a second within ARM_MS starts it
     relMerge: () => { if (armed !== 'run') return arm('run'); armed = null; startingAll(); api.send({ type: 'releasesMerge' }); render(); },
     relAllStop: (el) => { if (state && state.releaseAll) state = { ...state, releaseAll: { ...state.releaseAll, stopping: true } }; render(); api.send({ type: 'releasesReleaseAllStop' }); },
@@ -698,9 +698,9 @@
   // waiting = prod PRs held back until the release is signed 2/2. Nothing ready → locked, saying who still has to sign what.
   // signoff: { count, need, signers: [login], gaps: [{ login, missing: [{ label, older }] }] }
   // A Sign button; "Signing…" and not clickable while main is signing (s.signing)
-  function signBtn(s, cls, label, title) {
+  function signBtn(s, cls, label, title, lateId) {
     return s && s.signing ? `<button class="${cls} locked" aria-disabled="true">✍ Signing…</button>`
-      : `<button class="${cls}" data-act="relSign"${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
+      : `<button class="${cls}" data-act="relSign"${lateId ? ` data-late="${esc(lateId)}"` : ''}${title ? ` title="${esc(title)}"` : ''}>${label}</button>`;
   }
   const RECHECK_BTN = (id, cls) => `<button class="${cls}" data-act="recheck"${id ? ` data-id="${esc(id)}"` : ''} title="Read every open PR again: conflicts, back-merges, dbschemas, checks. Runs by itself when a blocked PR's branch moves">↻ Re-check</button>`;
   // ✕ Cancel release (History card: its id; results popover: the run here). First click arms it.
@@ -963,6 +963,7 @@
         + (m.kind === 'rollback' ? `<span class="rl-rr-chip">restores ${esc(m.rollbackOf)}</span>` : '')
         + (m.imported ? '<span class="rl-rr-chip" title="Built from merged release PRs, before release manifests existed">imported</span>' : '')
         + (!m.imported && m.repos.some(r => r.unsigned) ? `<span class="rl-rr-chip bad" title="Merged with fewer than 2 approvers' signatures (e.g. on github.com): ${esc(m.repos.filter(r => r.unsigned).map(r => r.label).join(', '))}">merged unsigned ⚠</span>` : '')
+        + (!m.repos.some(r => r.unsigned) && m.repos.some(r => (r.lateSigners || []).length) ? `<span class="rl-rr-chip warn" title="Signed after merging by ${esc([...new Set(m.repos.flatMap(r => r.lateSigners || []))].map(l => '@' + l).join(', '))}">✍ signed late</span>` : '')
         + `<span class="rl-rr-chip ${cls}">${esc(label)}</span>`
         + (env !== 'prod' ? `<span class="rl-env" style="--hue:${ENV_HUE[env.toLowerCase()] || 'var(--dim)'}">${esc(env)}</span>` : '')
         + (pending && signs ? `<span class="rl-rr-chip ${signers.length >= 2 ? 'ok' : 'warn'}" title="The release is signed as one: a signature counts once it covers every open PR of it, and stays as more commits merge in">✍ ${signers.length}/2 signed</span>` : '')
@@ -1036,6 +1037,9 @@
       // actions
       const acts = [];
       if (signs && pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push(signBtn(s, 'rl-hist-btn go', '✍ Sign'));
+      // merged unsigned: sign it late (approves the merged PRs; marked late)
+      else if (signs && !m.imported && a.isApprover && a.me && m.repos.some(r => r.unsigned && !(r.signers || []).some(l => l.toLowerCase() === String(a.me).toLowerCase())))
+        acts.push(signBtn(s, 'rl-hist-btn', '✍ Sign late', 'Approve its merged PRs now: counts as signed, marked late', m.id));
       // (an open back-merge doesn't hold a repo: Release all merges it first)
       // (failing checks don't hold a repo either: GitHub's branch protection decides; only a conflict does)
       const held = (r) => r.health && (r.health.backMerge && r.health.backMerge.conflict ? `its back-merge #${r.health.backMerge.number} conflicts` : r.health.conflict ? 'conflicts with its target' : null);

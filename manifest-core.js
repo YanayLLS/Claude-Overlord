@@ -65,9 +65,11 @@ function applyPr(m, repo, pr) {
   const repos = m.repos.map(r => {
     if (r.repo !== repo || r.pr.number !== pr.number) return r;
     const next = { ...r };
-    if (pr.mergeSha && next.mergeSha !== pr.mergeSha) { next.mergeSha = pr.mergeSha; next.mergedAt = pr.mergedAt || null; }
-    // closed, or retargeted off the release's branch (master → dev on GitHub): no longer in this release
+    // closed, or retargeted off the release's branch (master → dev on GitHub): no longer in this release,
+    // and a merge into that other branch never shipped here
     const moved = pr.base && next.target && pr.base !== next.target;
+    if (moved && !next.mergeSha) pr = { ...pr, mergeSha: null };
+    if (pr.mergeSha && next.mergeSha !== pr.mergeSha) { next.mergeSha = pr.mergeSha; next.mergedAt = pr.mergedAt || null; }
     if (!pr.mergeSha && (pr.closed || moved) && !next.closed) next.closed = true;
     if (pr.headSha && !next.mergeSha && next.headSha !== pr.headSha) next.headSha = pr.headSha;
     if (pr.signers && JSON.stringify(pr.signers) !== JSON.stringify(next.signers)) next.signers = pr.signers;
@@ -149,7 +151,17 @@ function cancel(m, by, now = Date.now()) {
   return next;
 }
 
-const api = { cancel, SCHEMA, DIR, MANIFESTS_REPO, manifestPath, releaseIdMark, nextId, newManifest, deriveStatus, groupPast, applyPr, applyDeploy, rollbackPlan, releaseIdOf };
+// A signature given after the release merged (approving the merged PRs): it counts toward the two,
+// but stays marked late (lateSigners), since it didn't gate the merge.
+function signLate(m, login) {
+  const repos = m.repos.map(r => !r.mergeSha || (r.signers || []).some(l => l.toLowerCase() === login.toLowerCase()) ? r : {
+    ...r, signers: (r.signers || []).concat(login), lateSigners: (r.lateSigners || []).concat(login),
+    unsigned: (r.signers || []).length + 1 < SIGNATURES_NEEDED,
+  });
+  return { ...m, repos };
+}
+
+const api = { cancel, signLate, SCHEMA, DIR, MANIFESTS_REPO, manifestPath, releaseIdMark, nextId, newManifest, deriveStatus, groupPast, applyPr, applyDeploy, rollbackPlan, releaseIdOf };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ManifestCore = api;
 })(this);

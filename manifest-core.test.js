@@ -84,3 +84,21 @@ console.log('manifest-core: all passed');
   assert.strictEqual(u.repos[0].unsigned, false);
   console.log('manifest-core: unsigned passed');
 }
+// merged into another branch (retargeted master → dev, then merged): never shipped to prod
+{
+  let d = M.newManifest({ id: 'd', rows: [{ repo: 'o/a', label: 'a', source: 'dev', target: 'master', pr: { number: 1, url: 'u' } }] });
+  [d] = M.applyPr(d, 'o/a', { number: 1, mergeSha: 'm', base: 'dev', signers: ['alice'] });
+  assert.strictEqual(d.repos[0].mergeSha, null);
+  assert.strictEqual(d.status, 'abandoned');
+}
+// signed after it merged: counts, but marked late
+{
+  let l = M.newManifest({ id: 'l', rows: [{ repo: 'o/a', label: 'a', source: 'dev', target: 'master', pr: { number: 1, url: 'u' } }] });
+  [l] = M.applyPr(l, 'o/a', { number: 1, mergeSha: 'm', signers: ['alice'] });
+  l = M.signLate(l, 'bob');
+  assert.deepStrictEqual(l.repos[0].signers, ['alice', 'bob']);
+  assert.deepStrictEqual(l.repos[0].lateSigners, ['bob']);
+  assert.strictEqual(l.repos[0].unsigned, false);
+  assert.strictEqual(M.signLate(l, 'bob').repos[0].lateSigners.length, 1, 'once');
+  console.log('manifest-core: late sign passed');
+}

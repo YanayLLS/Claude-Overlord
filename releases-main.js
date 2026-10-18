@@ -562,12 +562,13 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // by checkToSign (a release someone else opened).
   // Signing shows at once (state.signing → the buttons say "Signing…"); the team list is reused when
   // it's fresh — re-reading it cost two GitHub calls before anything happened.
-  async function signRelease() {
+  // lateId: a release that already merged unsigned: approve its merged PRs (a late signature, marked so)
+  async function signRelease(lateId) {
     if (state.signing) return;
     push({ signing: true });
-    try { await signNow(); } finally { push({ signing: false }); }
+    try { await signNow(lateId); } finally { push({ signing: false }); }
   }
-  async function signNow() {
+  async function signNow(lateId) {
     const who = await whoAmI();
     if (!state.approvers || !state.approvers.loadedAt || Date.now() - state.approvers.loadedAt > 5 * 60 * 1000) await loadApprovers();
     if (!state.approvers.isApprover) return send({ type: 'toast', text: 'Only release approvers can sign' });
@@ -576,6 +577,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const targets = new Map();
     for (const r of ((run && run.rows) || [])) if (r.env === 'prod' && r.pr && !r.merged && !r.closed) targets.set(r.repo + '#' + r.pr.number, { repo: r.repo, label: r.label, number: r.pr.number });
     for (const t of (state.toSign || [])) targets.set(t.repo + '#' + t.number, { repo: t.repo, label: t.label, number: t.number });
+    const lateRel = lateId && ((state.history && state.history.items) || []).find(m => m.id === lateId);
+    if (lateId) {
+      targets.clear();
+      for (const r of (lateRel ? lateRel.repos : [])) if (r.mergeSha && !(r.signers || []).some(l => l.toLowerCase() === who.github.toLowerCase()))
+        targets.set(r.repo + '#' + r.pr.number, { repo: r.repo, label: r.label, number: r.pr.number });
+    }
     // every PR at once: one signature for the whole release. Each one that lands shows right away:
     // the History item gets me as its signer, the prompt ticks the repo, it leaves my to-sign list
     const done = [], failed = [];
@@ -616,7 +623,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     push({ toSign: (state.toSign || []).filter(t => !signedKeys.has(key(t))), ...(run ? { releaseRun: { ...stampSignoff(run) } } : {}) });
     persist();
     send({ type: 'toast', text: failed.length ? `Sign failed: ${failed.join('; ')}` : done.length ? 'Signed the release ✍' : 'Nothing left for you to sign' });
-    const ids = [...new Set(done.map(t => { const m = releaseOf(t.repo, t.number); return m && m.id; }).filter(Boolean))];
+    const ids = lateRel ? [lateRel.id] : [...new Set(done.map(t => { const m = releaseOf(t.repo, t.number); return m && m.id; }).filter(Boolean))];
     if (ids.length && !failed.length) await history.markSigned(ids, { login: who.github, clickup: who.clickup }).catch(e => send({ type: 'toast', text: `Signed on GitHub, but the release record didn't update (${e.message}): teammates may not see it yet` }));
     await reconcileHistory().catch(() => {});
     checkToSign().catch(() => {});
@@ -1441,7 +1448,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesFix': fixAll(msg.i).catch(e => send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') })); return true;
       case 'releasesApprovers': loadApprovers().catch(e => push({ approvers: { ...(state.approvers || {}), error: e.message } })); return true;
       case 'releasesApproversEdit': approversEdit(msg.kind, msg.login).catch(e => send({ type: 'toast', text: 'Approvers: ' + e.message })); return true;
-      case 'releasesSign': signRelease().catch(e => send({ type: 'toast', text: 'Sign failed: ' + (e.message || 'error') })); return true;
+      case 'releasesSign': signRelease(msg.lateId).catch(e => send({ type: 'toast', text: 'Sign failed: ' + (e.message || 'error') })); return true;
       case 'releasesMerge': releaseAll(null).catch(e => send({ type: 'toast', text: 'Release all failed: ' + (e.message || 'error') })); return true;
       case 'releasesReleaseAllStop': releaseAllStop = true; if (manualWake) manualWake(); if (state.releaseAll && state.releaseAll.running) progress({ detail: 'stopping after the current step…', stopping: true }); return true;
       case 'releasesManualDone': manualDone = true; if (manualWake) manualWake(); return true;
