@@ -1607,6 +1607,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./pr-fire.js"></script>
 <script src="./theme-core.js"></script>
 <script src="./term-size-core.js"></script>
+<script src="./bidi-core.js"></script>
 <script src="./shift-select-core.js"></script>
 <script src="./link-core.js"></script>
 <script src="./paste-core.js"></script>
@@ -3100,6 +3101,76 @@ function createXterm(id) {
   terminal.loadAddon(searchAddon);
   terminal.loadAddon(imageAddon);
   terminal.open(el);
+  // Hebrew/Arabic the right way round. xterm has no bidi and its DOM renderer draws one
+  // inline-block span per Hebrew letter (fallback-font widths differ), so the browser can't
+  // reorder them: a row shows in storage order, letters and words reversed. Whenever the renderer
+  // rebuilds a row, rows holding RTL text get their spans rebuilt in visual order (bidi-core.js);
+  // each new span is a clone of the span its letters came from, so colors, cursor and
+  // letter-spacing stay. The buffer is untouched — selection and copy still work on the logical
+  // text. A MutationObserver, not onRender: blur, focus and selection changes re-render rows
+  // straight through the renderer (DomRenderer.handleBlur etc.) without firing onRender, and
+  // onRender alone left the text flipping back the moment the terminal lost focus. The observer
+  // runs as a microtask, before paint, so nothing flickers. Our own rewrite marks its spans
+  // (data-rtl) so the observer skips rows it already ordered.
+  const rowsEl = el.querySelector('.xterm-rows'), screenEl = el.querySelector('.xterm-screen'), selEl = el.querySelector('.xterm-selection');
+  const isRtlRow = (row) => !!(row && row.firstElementChild && row.firstElementChild.dataset.rtl);
+  const orderRow = (row) => {
+    const first = row.firstElementChild;
+    if (!first || first.dataset.rtl || !hasRtl(row.textContent)) return;
+    const units = []; let cursor = -1;
+    for (const span of row.children) { if (span.classList.contains('xterm-cursor')) cursor = units.length; for (const g of graphemes(span.textContent)) units.push({ text: g, key: span }); }
+    const frag = document.createDocumentFragment();
+    for (const grp of visualGroups(units, cursor)) { const s = grp.key.cloneNode(false); s.dataset.rtl = '1'; s.textContent = grp.text; frag.appendChild(s); }
+    row.replaceChildren(frag);
+  };
+  const rowsObs = new MutationObserver((recs) => {
+    const seen = new Set();
+    for (const r of recs) { const row = r.target; if (row.parentNode === rowsEl && !seen.has(row)) { seen.add(row); orderRow(row); } }
+  });
+  rowsObs.observe(rowsEl, { childList: true, subtree: true });
+  // Selection on a reordered row: xterm paints it twice — each selected cell's span gets the
+  // selection background (and moves with its letter), and a contiguous box is drawn behind at the
+  // buffer columns. On a Hebrew row the two disagree and the box lands on other letters, so the
+  // box is dropped for a partly-selected RTL row; the spans alone show the selection. Full-width
+  // boxes (middle rows of a multi-row selection) cover every letter whatever the order, and stay.
+  const selObs = new MutationObserver(() => {
+    const r = screenEl.getBoundingClientRect(); if (!r.height) return;
+    const ch = r.height / terminal.rows;
+    for (const d of selEl.children) {
+      if (Math.round(parseFloat(d.style.height) / ch) !== 1 || parseFloat(d.style.width) >= r.width - 1) continue;
+      const row = rowsEl.children[Math.round(parseFloat(d.style.top) / ch)];
+      if (row && hasRtl(row.textContent)) d.style.display = 'none';
+    }
+  });
+  selObs.observe(selEl, { childList: true });
+  // Mouse on a reordered row: xterm turns clientX into a buffer column as if the row were in
+  // storage order, so a drag over Hebrew selected other letters and a click landed elsewhere. In
+  // the capture phase, before xterm sees it, a mouse event over such a row is stopped and re-sent
+  // with clientX moved to where the letter under the pointer sits in the buffer; inside a flipped
+  // run the position within the cell is mirrored too, so xterm's half-cell rounding picks the
+  // right side of the letter. The re-sent event is untrusted, which is how it skips this handler.
+  // Covers xterm's mousedown on the screen, its document-level drag listeners, link clicks and
+  // Overlord's own handlers downstream. preventDefault on the copy is carried to the original.
+  const remap = (e) => {
+    if (!e.isTrusted || !el.contains(e.target)) return;
+    const r = screenEl.getBoundingClientRect(); if (!r.width || !terminal.cols) return;
+    const cw = r.width / terminal.cols, ch = r.height / terminal.rows;
+    const y = Math.floor((e.clientY - r.top) / ch), row = rowsEl.children[y];
+    if (!isRtlRow(row)) return;
+    const xr = e.clientX - r.left, v = Math.floor(xr / cw); if (v < 0 || v >= terminal.cols) return;
+    const b = terminal.buffer.active, line = b.getLine(b.viewportY + y); if (!line) return;
+    const cells = []; let cursor = -1; const cursorRow = b.baseY + b.cursorY === b.viewportY + y;
+    for (let x = 0; x < line.length; x++) { const c = line.getCell(x); const w = c.getWidth(); if (!w) continue; if (cursorRow && x === b.cursorX) cursor = cells.length; cells.push({ text: c.getChars() || ' ', width: w }); }
+    const m = visualCells(cells, cursor), l = m.v2l[v]; if (l === undefined) return;
+    const f = m.rtl[v] ? 1 - (xr / cw - v) : xr / cw - v, nx = r.left + (l + f) * cw;
+    if (Math.abs(nx - e.clientX) < 0.01) return;
+    e.stopImmediatePropagation();
+    const copy = new MouseEvent(e.type, { bubbles: true, cancelable: true, composed: true, view: window, clientX: nx, clientY: e.clientY, screenX: e.screenX + (nx - e.clientX), screenY: e.screenY, button: e.button, buttons: e.buttons, detail: e.detail, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey, relatedTarget: e.relatedTarget });
+    if (!e.target.dispatchEvent(copy)) e.preventDefault();
+  };
+  const MOUSE_EVENTS = ['mousedown', 'mousemove', 'mouseup', 'click'];
+  for (const t of MOUSE_EVENTS) document.addEventListener(t, remap, true);
+  const bidiOff = () => { rowsObs.disconnect(); selObs.disconnect(); for (const t of MOUSE_EVENTS) document.removeEventListener(t, remap, true); };
   // onScroll skips mouse-wheel scrolls in xterm 5.5; the viewport's own event catches them
   el.querySelector('.xterm-viewport').addEventListener('scroll', () => { if (id === selectedId) highlightPromptRail(); }, { passive: true });
   // Mouse-selected prompt text: Backspace/Delete erases it, typing replaces it, like an edit box.
@@ -3236,7 +3307,7 @@ function createXterm(id) {
     if (e.shiftKey && e.key === 'Enter') { api.send({ type: 'termInput', id, data: '\n' }); return false; }
     return true;
   });
-  xterms.set(id, { id, terminal, fitAddon, searchAddon, el });
+  xterms.set(id, { id, terminal, fitAddon, searchAddon, el, bidiOff });
   const pend = pendingTermData.get(id);
   if (pend) { pendingTermData.delete(id); terminal.write(pend, () => terminal.scrollToBottom()); }
   sendResize(id, xterms.get(id)); // pty spawns at 120x30 — hand it the real width now
@@ -3247,7 +3318,7 @@ function destroyXterm(id) {
   pendingTermData.delete(id);
   const x = xterms.get(id); if (!x) return;
   clearTimeout(x._resizeTimer);
-  x.terminal.dispose(); x.el.remove(); xterms.delete(id);
+  x.bidiOff(); x.terminal.dispose(); x.el.remove(); xterms.delete(id);
 }
 
 // The nav stack stays put whenever a terminal is on screen — no scroll-position gating,
