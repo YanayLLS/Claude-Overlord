@@ -55,7 +55,7 @@ assert.strictEqual(prBranchAction({ mine: false, mergeable: 'CONFLICTING' }), nu
 assert.strictEqual(prBranchAction(null), null);
 assert.strictEqual(prBranchAction({ mine: true, behindBy: 0 }), null);
 assert.strictEqual(prBranchAction({ mine: true, behindBy: null }), null); // behind unknown
-assert.strictEqual(prBranchAction({ mine: true, behindBy: 5 }), 'update');
+assert.strictEqual(prBranchAction({ mine: true, behindBy: 5 }), null); // behind alone: no Update button
 // conflicts beat behind — updating is impossible until they're resolved
 assert.strictEqual(prBranchAction({ mine: true, behindBy: 5, mergeable: 'CONFLICTING' }), 'conflict');
 assert.strictEqual(prBranchAction({ mine: true, behindBy: 0, mergeState: 'DIRTY' }), 'conflict');

@@ -4829,19 +4829,6 @@ function handleIpc(msg) {
       }).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
       break;
     }
-    // Merges the base branch into the PR branch server-side on GitHub — passing
-    // the URL means no local checkout is touched, whatever branch you're on.
-    case 'updatePrBranch': {
-      const url = msg.url;
-      if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
-      execFile('gh', ['pr', 'update-branch', url],
-        { timeout: 60000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-          if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
-          send({ type: 'toast', text: 'PR branch updated from base' });
-          pollPRs();
-        });
-      break;
-    }
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); break; }
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;

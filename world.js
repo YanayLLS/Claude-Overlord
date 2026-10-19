@@ -957,7 +957,7 @@ function bindInput() {
   const keys = new Set(); let drag = null;
   stage.addEventListener('contextmenu', e => e.preventDefault());
   stage.addEventListener('pointerenter', () => cam.hover = true); stage.addEventListener('pointerleave', () => { cam.hover = false; keys.clear(); });
-  selEl.addEventListener('click', e => { const b = e.target.closest && e.target.closest('button.pr-approve'); if (!b || !selected.pr) return; const cl = b.classList, kind = cl.contains('pr-merge') ? 'merge' : cl.contains('pr-update') ? 'update' : (cl.contains('pr-mute') || cl.contains('pr-snooze') || cl.contains('pr-conflictbtn')) ? null : 'review'; if (kind && !b.disabled) intents.set(selected.pr.key, { kind, t: Date.now(), behind: selected.pr.behindBy || 0, number: selected.pr.number }); }, true);
+  selEl.addEventListener('click', e => { const b = e.target.closest && e.target.closest('button.pr-approve'); if (!b || !selected.pr) return; const cl = b.classList, kind = cl.contains('pr-merge') ? 'merge' : (cl.contains('pr-mute') || cl.contains('pr-snooze') || cl.contains('pr-conflictbtn')) ? null : 'review'; if (kind && !b.disabled) intents.set(selected.pr.key, { kind, t: Date.now(), number: selected.pr.number }); }, true);
   const touched = () => { cam.lastInput = performance.now() / 1000; if (cam.cine) { cam.cine = false; cam.userMoved = true; } };
   for (const ev of ['pointerdown', 'pointermove', 'wheel']) canvas.addEventListener(ev, touched, { passive: true });
   canvas.addEventListener('pointerdown', e => {
@@ -1126,7 +1126,6 @@ function detectAwards(s) {
       const pr = (s.prs || []).find(p => p.key === key); if (now - it.t > 300000) { intents.delete(key); continue; }
       if (it.kind === 'merge' && !pr) { give('merges', 50, 'merged PR #' + it.number); intents.delete(key); }
       else if (it.kind === 'review' && (!pr || pr.reviewDecision === 'APPROVED')) { give('reviews', 25, 'reviewed PR #' + it.number); intents.delete(key); }
-      else if (it.kind === 'update' && pr && it.behind > 0 && pr.behindBy === 0) { give('updates', 10, 'updated PR #' + it.number); intents.delete(key); }
     }
   }
   const seen = new Set();

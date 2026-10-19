@@ -40,15 +40,13 @@ function parseBehind(json, keys) {
   return out;
 }
 
-// Which branch-state button a PR row gets: 'conflict' | 'update' | null.
+// Which branch-state button a PR row gets: 'conflict' | null.
 // Only the PR's own author can push to its branch, so nobody else sees either.
-// Conflicts win over behind — GitHub's update button can't run until they're
-// resolved, and it's the same base merge either way.
 // ponytail: GitHub's API exposes no conflicted-file list, so no count.
 function prBranchAction(p) {
   if (!p || !p.mine) return null;
   if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict';
-  return p.behindBy > 0 ? 'update' : null;
+  return null; // behind alone needs no button: nobody updated from here
 }
 
 if (typeof module !== 'undefined' && module.exports) {
