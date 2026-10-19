@@ -1275,7 +1275,7 @@
     // the repos it would release: each one's waiting commits for the picked envs; untick to leave it out
     const repoWait = {};
     for (const row of (s.grid && s.grid.rows) || []) for (const c of row.cells || []) for (const n of (c && c.nexts) || []) {
-      if (n.ahead && relSel.has(n.to)) repoWait[row.repo] = (repoWait[row.repo] || 0) + n.ahead;
+      if (n.ahead && relSel.has(n.to)) repoWait[row.repo] = Math.max(repoWait[row.repo] || 0, n.ahead); // same dev commits to each env: not additive
     }
     const planRepos = [...new Map(fullPlan.prs.map(p => [p.repo, p])).values()].filter(p => repoWait[p.repo]);
     const plan = { prs: fullPlan.prs.filter(p => !relSkip.has(p.repo) && (relAdv || repoWait[p.repo])), manual: relSkip.size ? [] : fullPlan.manual }; // releasing some repos: the hand-deployed ones aren't part of it
