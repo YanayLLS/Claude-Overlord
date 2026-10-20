@@ -953,10 +953,10 @@
       else if (handOpen.length && ['deployed', 'merged'].includes(m.status)) { cls = 'warn'; label = `${label.replace(' ✓', '')} · ${handOpen.length} hand step${handOpen.length === 1 ? '' : 's'} to confirm`; }
       const pending = m.status === 'pending';
       // signed as one: while pending, a signer is someone on every still-open PR
-      const openRepos = m.repos.filter(r => !r.mergeSha && !r.closed);
       // who signed the release itself (Sign records it) counts on every PR of it, later ones too
       const relSigned = (m.signedBy || []).map(x => x.login);
       m = { ...m, repos: m.repos.map(r => ({ ...r, signers: [...new Set((r.signers || []).concat(relSigned))] })) };
+      const openRepos = m.repos.filter(r => !r.mergeSha && !r.closed); // after: a PR that joined later carries those signatures
       const anyone = [...new Set(m.repos.flatMap(r => r.signers || []))];
       const signers = pending && openRepos.length ? anyone.filter(l => openRepos.every(r => (r.signers || []).includes(l))) : anyone;
       const env = m.env || 'prod', signs = env === 'prod'; // only prod is signed (SOC2); alpha / staging just merge
