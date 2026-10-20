@@ -43,7 +43,7 @@
       apprOpen = false;
       if (!e.target.closest('.rl-nav')) { render(); return; } // a tab click closes it and switches in one go
     }
-    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"]')) { armed = null; render(); }
+    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"], [data-act="queueAll"]')) { armed = null; render(); }
     if (e.target === overlay) return show(false);
     const a = e.target.closest('[data-url]');
     if (a) { e.stopPropagation(); return api.send({ type: 'openUrl', url: a.dataset.url }); }
