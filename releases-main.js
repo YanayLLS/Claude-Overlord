@@ -15,7 +15,7 @@ const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's 
 const { execFile } = require('child_process');
 const os = require('os');
 const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas } = require('./releases-core');
-const { newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
+const { checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
 const DEPLOYING_MS = 10 * 1000;       // re-read deploy runs this often while one is in flight…
@@ -1128,7 +1128,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
           const gate = await mergeGate(it.pr.url);
           if (!gate.ok) { markR(R, [it.label], { s: 'held', why: gate.reason }); stopR(R, `${it.label}: ${gate.reason}`); break; }
           markR(R, [it.label], { s: 'merging' });
-          const res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
+          let res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
+          // a required check still running (a commit landed just now): wait for it, up to 30 min, then merge
+          for (let t = Date.now(), ck; apiErr(res) && (ck = checkRunning(apiErr(res))) && Date.now() - t < 30 * 60e3 && !releaseAllStop && R.status === 'running';) {
+            markR(R, [it.label], { s: 'merging', why: `waiting for ${ck}` });
+            relProgress({ status: 'merging', detail: `${it.label}: waiting for ${ck}` });
+            await new Promise(r => setTimeout(r, 30e3));
+            res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
+          }
           // refused = this release stops here: its later waves depend on this one
           if (apiErr(res)) { markR(R, [it.label], { s: 'held', why: `GitHub refused the merge: ${apiErr(res)}` }); stopR(R, `${it.label}: GitHub refused the merge (${apiErr(res)}) — nothing after it was merged`); break; }
           markR(R, [it.label], { s: it.deploy && it.deploy !== 'manual' ? 'merged' : 'merged-hand' });

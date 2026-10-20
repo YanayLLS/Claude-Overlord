@@ -366,4 +366,10 @@ assert.strictEqual(age('garbage', now), '');
   const ra = { running: true, id: 'p', rels: { p: { status: 'running' }, a: { status: 'stopped' } } };
   assert.deepStrictEqual([runHas(ra, 'p'), runHas(ra, 'a'), runHas(ra, 'x'), runHas({ running: true, id: 'p' }, 'p'), runHas({ ...ra, running: false }, 'p')], [true, false, false, true, false]);
 }
+{ // a refused merge that's only a required check still running: wait, don't stop
+  const { checkRunning } = require('./releases-core');
+  assert.strictEqual(checkRunning('Required status check "Production Build" is in progress. (405)'), 'Production Build');
+  assert.strictEqual(checkRunning('Required status check "build" is expected. (405)'), 'build');
+  assert.strictEqual(checkRunning('Pull Request is not mergeable (405)'), null);
+}
 console.log('releases-core: all passed');

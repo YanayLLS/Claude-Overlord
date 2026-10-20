@@ -360,7 +360,11 @@ function manualLeft(cfg, merged, manual, lives) {
   return out;
 }
 
-const api = { manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+// GitHub refused a merge only because a required check hasn't finished (e.g. a commit landed just before):
+// the check's name, else null
+function checkRunning(err) { const m = String(err || '').match(/Required status check "([^"]+)" is (?:in progress|expected|pending)/i); return m ? m[1] : null; }
+
+const api = { checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);
