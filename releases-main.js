@@ -230,7 +230,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     return {
       sha: b.sha, title: commitTitle(b.commit.message.split('\n')[0], b.commit.message.split('\n').slice(2).join('\n')),
       date: b.commit.committer && b.commit.committer.date, url: b.html_url, ...extra,
-      behind: cmp.data.ahead_by, compareUrl: cmp.data.html_url,
+      // only merge commits since (e.g. the release PR's own merge): same code as live, nothing to deploy
+      behind: Array.isArray(cmp.data.files) && !cmp.data.files.length ? 0 : cmp.data.ahead_by, compareUrl: cmp.data.html_url,
     };
   }
 
