@@ -109,7 +109,7 @@ const { interruptedBy } = require('./interrupt-core');
 const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
 const { applyBgRecord } = require('./bg-core');
 const { unsettledJobFor } = require('./daemon-jobs');
-const { applyAskRecord, permDialogIn, liveTurnIn } = require('./ask-core');
+const { applyAskRecord, liveTurnIn, dialogAtEnd } = require('./ask-core');
 const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
 const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
@@ -875,7 +875,7 @@ function setPrompt(id, a, text) {
 // ── Spinner text extraction from raw PTY data ──────────
 const ANSI_RE = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]|\x1b[78]|\x1b\[\?[0-9;]*[hl]/g;
 const spinnerDebounce = new Map();
-// A permission dialog on the agent's screen — a sub-agent's tool, or a dangerous command
+// A question or permission dialog on the agent's screen — a sub-agent's tool, or a dangerous command
 // under bypassPermissions — never reaches the parent's transcript. Live output only (the
 // reattach replay isn't scanned). It clears when you answer in that terminal or the turn moves.
 const PTY_PERM_TOOL = 'pty-permission';
@@ -887,11 +887,24 @@ function watchScreen(id, d) {
   if (liveTurnIn(text)) a.liveTurnAt = Date.now();
   if (a.ptyPerm) return;
   a._screenTail = ((a._screenTail || '') + text).slice(-3000);
-  if (!permDialogIn(a._screenTail)) return;
-  a._screenTail = '';
-  a.ptyPerm = true; a.permSent = true;
-  send({ type: 'toolStart', id, toolId: PTY_PERM_TOOL, status: 'Waiting for your permission', name: 'Permission' });
-  send({ type: 'perm', id });
+  // Judge the screen, not the stream: a /resume or resize redraw replays old dialogs. Check every
+  // 0.4 s while output flows; a dialog counts when two checks in a row see it at the bottom.
+  if (!a._screenTimer) a._screenTimer = setTimeout(() => flagDialog(id), 400);
+}
+function flagDialog(id) {
+  const a = agents.get(id); if (!a) return;
+  a._screenTimer = null;
+  if (a.ptyPerm) return;
+  const kind = dialogAtEnd(a._screenTail);
+  const confirmed = kind && a._dialogSeen === kind;
+  a._dialogSeen = kind;
+  if (kind && !confirmed) a._screenTimer = setTimeout(() => flagDialog(id), 400); // look again even if output stopped
+  if (!confirmed) return;
+  const ask = kind === 'ask';
+  a._screenTail = ''; a._dialogSeen = null;
+  a.ptyPerm = kind; a.permSent = true;
+  send({ type: 'toolStart', id, toolId: PTY_PERM_TOOL, status: ask ? 'Waiting for your answer' : 'Waiting for your permission', name: ask ? 'AskUserQuestion' : 'Permission' });
+  send({ type: 'perm', id, ask });
   notifyPermission(id, a);
 }
 function clearPtyPerm(id, a) {
@@ -1714,7 +1727,7 @@ function takeSpare(cwd) {
 // argPrompt: submitted by claude itself at boot — instant and never lost, unlike the
 // typed initialPrompt. Must already be shell-safe (see fixRunPlan). A spare is already
 // running, so it can't take one.
-function createAgent(folderPath, initialPrompt, argPrompt) {
+function createAgent(folderPath, initialPrompt, argPrompt, noSubmit) {
   const cwd = folderPath || os.homedir();
   protectClaudeConfig();
   const warm = argPrompt ? null : takeSpare(cwd);
@@ -1749,10 +1762,13 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
     const proc = warm ? warm.proc : agentPty().spawn(shell, shellArgs, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
     applyLastTermSize(id, proc);
-    let promptSent = !initialPrompt;
+    let promptSent = !initialPrompt || noSubmit;
+    // noSubmit (prefix start): type it once, the moment claude paints its ❯ prompt — claude queues keys typed while it
+    // finishes booting (echo lags ~0.5s), so no delay or retry (a retry lands twice).
+    const pre = noSubmit && initialPrompt ? { probe: '', done: false } : null;
     // A spare that finished booting is already sitting at its prompt — the `>`
     // probe below never sees a fresh prompt paint, so send the prompt now.
-    if (initialPrompt && warm && Date.now() - warm.bornAt > 3000) {
+    if (!promptSent && warm && Date.now() - warm.bornAt > 3000) {
       promptSent = true;
       setTimeout(() => { try { writeInitialPrompt(proc, initialPrompt); } catch {} }, 100);
     }
@@ -1779,17 +1795,24 @@ function createAgent(folderPath, initialPrompt, argPrompt) {
           agent._readyBuf = probe.slice(-256);
         }
       }
+      if (pre && !pre.done) {
+        // ❯ or any of claude's ready phrases, matched across chunk boundaries
+        pre.probe = (pre.probe + squashTerm(d)).slice(-512);
+        if (pre.probe.includes('❯') || CLAUDE_READY_RE.test(pre.probe)) { pre.done = true; try { proc.write(initialPrompt); } catch {} }
+      }
       // Detect Claude ready prompt and send the initial prompt
       if (!promptSent) {
         const clean = d.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-        if (/>\s*$/.test(clean)) {
+        if (/❯|>\s*$/.test(clean)) { // Claude's prompt is ❯ now; `>` alone never matched, so prompts waited for the 8s fallback
           promptSent = true;
-          setTimeout(() => { try { writeInitialPrompt(proc, initialPrompt); } catch {} }, 100);
+          setTimeout(() => { try { writeInitialPrompt(proc, initialPrompt); } catch {} }, 300);
         }
       }
     };
     proc.onData(onData);
-    if (warm && warm.buf) onData(warm.buf); // replay what the spare painted while idle
+    // Replay what the spare painted while idle — minus its boot-time terminal queries (XTVERSION, DA, DSR, kitty ?u,
+    // OSC ?): xterm would answer them now, long after boot, and claude reads the late replies as keys that wipe the prompt.
+    if (warm && warm.buf) onData(warm.buf.replace(/\x1b\[(?:[>=]?[0-9;]*c|[56]n|>[0-9]*q|\?u)|\x1b\][0-9]+;\?(?:\x07|\x1b\\)/g, ''));
     proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
     // Fallback: send prompt after timeout if ready-detection didn't fire
     if (initialPrompt) {
@@ -3630,21 +3653,34 @@ function claudeBinary() {
 function refreshClaudeBuiltins(done) {
   if (builtinsScanning) return;
   const exe = claudeBinary(); if (!exe) return;
-  let key; try { const st = fs.statSync(exe); key = `${exe}|${st.size}|${st.mtimeMs}`; } catch { return; }
+  let key; try { const st = fs.statSync(exe); key = `2|${exe}|${st.size}|${st.mtimeMs}`; } catch { return; }
   if (!claudeBuiltins) claudeBuiltins = readJson(BUILTINS_FILE);
   if (claudeBuiltins && claudeBuiltins.key === key) return;
   builtinsScanning = true;
   bscan.scanClaudeBinary(exe).then((found) => {
     claudeBuiltins = { key, items: bscan.mergeBuiltins(found, BUILTINS) };
+    // offline: keep the list but not the key, so the next picker open tries the changelog again
+    return claudeSince(claudeBuiltins.items).then((items) => { if (items) claudeBuiltins.items = items; else claudeBuiltins.key = ''; });
+  }).then(() => {
     try { fs.writeFileSync(BUILTINS_FILE, JSON.stringify(claudeBuiltins)); } catch {}
     flog(`picker: ${claudeBuiltins.items.length} built-in commands read from ${exe}`);
     done();
   }).catch((e) => flog(`picker: built-in scan failed: ${e.message}`)).finally(() => { builtinsScanning = false; });
 }
+// Which Claude version added each command (first mention in the public changelog) and when that version shipped
+// (npm). ~2.5 MB, fetched only when the binary changed. Offline → null (the picker falls back to first-seen dates).
+const CC_CHANGELOG = 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md';
+const CC_NPM = 'https://registry.npmjs.org/@anthropic-ai/claude-code';
+async function claudeSince(items) {
+  try {
+    const [md, npm] = await Promise.all([fetch(CC_CHANGELOG).then(r => r.ok ? r.text() : ''), fetch(CC_NPM).then(r => r.ok ? r.json() : {})]);
+    return md ? bscan.stampSince(items, md, npm.time) : null;
+  } catch (e) { flog(`picker: changelog fetch failed: ${e.message}`); return null; }
+}
 function sendCatalog(cwd) {
   if (!claudeBuiltins) claudeBuiltins = readJson(BUILTINS_FILE);
   const seen = readJson(SEEN_FILE) || {}, before = Object.keys(seen).length;
-  const items = bscan.markNew(scanCatalog(cwd || os.homedir(), os.homedir(), claudeBuiltins?.items || BUILTINS), seen);
+  const items = bscan.markNew(scanCatalog(cwd || os.homedir(), os.homedir(), claudeBuiltins?.items || BUILTINS), seen, Date.now(), cwd);
   if (Object.keys(seen).length !== before) { try { fs.writeFileSync(SEEN_FILE, JSON.stringify(seen)); } catch {} }
   send({ type: 'catalog', cwd, items });
 }
@@ -3677,14 +3713,18 @@ function sendPromptToTerm(t, text) {
   writePtyChunked(t, paste);
   setTimeout(() => { try { t.write('\r'); } catch {} }, Math.ceil(paste.length / 1024) * 8 + 120);
 }
+const squashTerm = (s) => String(s).replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\s+/g, '');
 function writeInitialPrompt(proc, p) { if (p.includes('\x1b[200~')) sendPromptToTerm(proc, p.replace(/\x1b\[20[01]~/g, '')); else proc.write(p + '\r'); }
 function pasteTextToTerm(id, text) {
   handleTermInput(id, '\x1b[200~' + normalizePasteText(text) + '\x1b[201~');
 }
 
 function handleTermInput(id, data, shown) {
-  // Typing in the terminal answers an on-screen permission dialog (focus in/out doesn't)
-  { const a = agents.get(id); if (a?.ptyPerm && !/^\x1b\[[IO]$/.test(data)) { clearPtyPerm(id, a); a.permSent = false; send({ type: 'permClear', id }); } }
+  // Answering an on-screen dialog: any key for a permission prompt (focus in/out excluded);
+  // for a question only Enter, Esc or a number — arrow keys just move through the options.
+  { const a = agents.get(id);
+    const answered = a?.ptyPerm === 'ask' ? (data.includes('\r') || data === '\x1b' || /^\d$/.test(data)) : (a?.ptyPerm && !/^\x1b\[[IO]$/.test(data));
+    if (answered) { clearPtyPerm(id, a); a.permSent = false; send({ type: 'permClear', id }); } }
   const t = terminals.get(id);
   if (!t) {
     // PTY not yet spawned — queue input, flushed after spawn.
@@ -4066,7 +4106,7 @@ function handleIpc(msg) {
   if (releases.handle(msg)) return;
   switch (msg.type) {
     case 'continueInterrupted': continueInterrupted(msg.ids || []); break;
-    case 'createAgent': createAgent(msg.cwd, msg.prompt); break;
+    case 'createAgent': createAgent(msg.cwd, msg.prompt, undefined, !!msg.prefill); break;
     case 'listBranches': {
       wt.listBranches(msg.repo)
         .then(branches => send({ type: 'branchList', repo: msg.repo, branches, error: null }))
@@ -5021,6 +5061,7 @@ setInterval(() => {
   for (const [id, a] of agents) {
     if (a.archived || a.isWaiting || a.crashed || a.toolIds.size > 0) continue;
     if (now - (a.liveTurnAt || 0) < 30000) continue; // Claude's turn timer is still ticking on screen
+    if (a.ptyPerm) continue; // a question / permission dialog is up — the turn is waiting on you, not over
     let mtimeMs;
     // No transcript yet (fresh agent, or /resume'd into another chat before its first prompt):
     // nothing has been written since it was created — without this it stayed 'active' forever.

@@ -729,6 +729,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #catalog-pop .cg-src { flex:none; color:var(--dim); font-size:11px; }
 #catalog-pop .cg-count { margin-left:auto; color:var(--dim); font-size:11px; font-weight:400; font-variant-numeric:tabular-nums; }
 #catalog-pop .cg-type .cg-count { margin-right:4px; }
+#catalog-pop .cg-age { flex:none; width:44px; text-align:right; color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; }
+#catalog-pop .cg-age.fresh { color:var(--green); font-weight:600; }
+#catalog-pop .cg-sort { display:flex; align-items:center; gap:5px; flex:none; background:none; border:1px solid var(--border); border-radius:6px; color:var(--dim); font-size:11.5px; padding:3px 8px; cursor:pointer; }
+#catalog-pop .cg-sort:hover { color:var(--text); border-color:var(--dim); }
+#catalog-pop .cg-sort[hidden] { display:none; }
 #catalog-pop .cg-isnew { flex:none; margin-left:8px; padding:0 6px; border-radius:8px; font-size:10px; line-height:16px; font-weight:600; color:var(--bg); background:var(--green); }
 #catalog-pop .cg-empty { padding:18px 10px; color:var(--dim); text-align:center; }
 #catalog-pop .cg-detail { flex:none; padding:10px 14px 11px; border-top:1px solid var(--border); background:rgba(var(--ink),.02); }
@@ -2147,6 +2152,53 @@ let pendingCwd = null;
 let _promptCloseTimer = null;
 function browseAndAdd() { api.send({ type: 'browseFolder' }); }
 function addAgent(cwd) { api.send({ type: 'createAgent', cwd }); }
+function addAgentWithPrefix(cwd, p) { api.send({ type: 'createAgent', cwd, prompt: p + ' ', prefill: true }); }
+// ── Prompt prefixes: the + Agent chevron starts an agent with a saved prefix typed in (not sent) ──
+// ponytail: popover lives on <body>, so list re-renders don't wipe what's being typed
+// Saved in Overlord's state.json with the other settings (localStorage lost them on a crash)
+let _prefixes = [], _prefixDefault = '';
+const loadPrefixes = () => [..._prefixes];
+const savePrefixes = (l) => { _prefixes = [...l]; api.send({ type: 'saveSettings', settings: { agentPrefixes: _prefixes } }); };
+// The ★ prefix gets a star badge on + Agent that starts an agent with it; + Agent itself stays empty
+const defaultPrefix = () => _prefixes.includes(_prefixDefault) ? _prefixDefault : '';
+const setDefaultPrefix = (p) => { _prefixDefault = p || ''; api.send({ type: 'saveSettings', settings: { agentPrefixDefault: _prefixDefault } }); render(); };
+function openPrefixPop(btn, cwd) {
+  let pop = document.getElementById('prefix-pop');
+  if (pop && pop.dataset.cwd === cwd) { pop.remove(); return; }
+  if (pop) pop.remove();
+  pop = document.createElement('div');
+  pop.id = 'prefix-pop'; pop.dataset.cwd = cwd;
+  pop.onclick = (e) => e.stopPropagation();
+  document.body.appendChild(pop);
+  const r = btn.getBoundingClientRect();
+  pop.style.top = (r.bottom + 4) + 'px';
+  pop.style.left = Math.max(8, Math.min(r.right - 260, innerWidth - 268)) + 'px';
+  renderPrefixPop(pop);
+  pop.querySelector('input').focus();
+}
+function renderPrefixPop(pop) {
+  const list = loadPrefixes(), def = defaultPrefix();
+  const star = (on, i) => `<button class="pp-star${on ? ' on' : ''}" data-star="${i}" title="${on ? 'Favorite (★ on + Agent) — click to remove' : 'Favorite: ★ on + Agent starts with this'}">${on ? '&#x2605;' : '&#x2606;'}</button>`;
+  pop.innerHTML = `<div class="pp-row"><span class="pp-star" style="visibility:hidden">&#x2606;</span><button class="pp-go pp-plain" data-i="-1" title="Start agent with an empty prompt">Empty agent</button></div>`
+    + list.map((p, i) => `<div class="pp-row">${star(p === def, i)}<button class="pp-go" data-i="${i}" title="Start agent with “${escAttr(p)} ”">${esc(p)}</button><button class="pp-del" data-del="${i}" title="Delete prefix">&#x2715;</button></div>`).join('')
+    + '<input class="pp-new" placeholder="New prefix, e.g. /fix-bug — Enter to add">';
+  pop.querySelectorAll('.pp-go').forEach(b => b.onclick = () => {
+    const p = list[b.dataset.i];
+    api.send(p ? { type: 'createAgent', cwd: pop.dataset.cwd, prompt: p + ' ', prefill: true } : { type: 'createAgent', cwd: pop.dataset.cwd });
+    pop.remove();
+  });
+  pop.querySelectorAll('.pp-star').forEach(b => b.onclick = () => { const p = list[b.dataset.star]; setDefaultPrefix(p === def ? '' : p); renderPrefixPop(pop); });
+  pop.querySelectorAll('.pp-del').forEach(b => b.onclick = () => { list.splice(b.dataset.del, 1); savePrefixes(list); renderPrefixPop(pop); });
+  const input = pop.querySelector('input');
+  input.onkeydown = (e) => {
+    if (e.key === 'Escape') pop.remove();
+    if (e.key !== 'Enter') return;
+    const v = input.value.trim();
+    if (v && !list.includes(v)) { list.push(v); savePrefixes(list); }
+    renderPrefixPop(pop); pop.querySelector('input').focus();
+  };
+}
+document.addEventListener('click', () => document.getElementById('prefix-pop')?.remove());
 function duplicateAgent(id) {
   const a = agents.get(id);
   if (!a) return;
@@ -2880,9 +2932,6 @@ function render() {
       ${wtStatus}
       ${wtServerBadge}
       ${serverBadges}
-      <div class="group-actions">
-        <button onclick="event.stopPropagation();addAgent('${safeCwd}')">+ Agent</button>
-      </div>
       <div class="group-menu-wrap">
         <button class="group-menu-btn" onclick="event.stopPropagation();toggleGroupMenu(this)" title="More actions">&#x22EE;</button>
         <div class="group-dropdown" data-menu="${safeCwd}">
@@ -2902,6 +2951,9 @@ function render() {
           ${wtEntry ? `<button class="danger" onclick="event.stopPropagation();removeWorktree('${safeCwd}');closeGroupMenus()">Remove worktree</button>`
                     : `<button class="danger" onclick="event.stopPropagation();removeProject('${safeCwd}');closeGroupMenus()">Remove project</button>`}
         </div>
+      </div>
+      <div class="group-actions">
+        <span class="split-btn"><span class="agent-main"><button onclick="event.stopPropagation();addAgent('${safeCwd}')">+ Agent</button>${defaultPrefix() ? `<button class="fav-star" title="New agent with “${escAttr(defaultPrefix())} ”" onclick="event.stopPropagation();addAgentWithPrefix('${safeCwd}',defaultPrefix())"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg></button>` : ''}</span><button class="split-chev" title="Start with a prefix" onclick="event.stopPropagation();openPrefixPop(this,'${safeCwd}')">&#x25BE;</button></span>
       </div>
     </div><div class="agents">`;
 
@@ -4738,6 +4790,7 @@ function renderBookmarks(bookmarks) {
       e.preventDefault();
       showBookmarkMenu(e, [
         { label: 'Open file location', action: () => api.send({ type: 'showInFolder', path: b.path }) },
+        { label: 'Copy file path', action: () => navigator.clipboard.writeText(b.path.replace(/\\/g, '/')).then(() => showToast('Path copied'), () => showToast('Could not copy')) },
         { label: 'Rename', action: () => renameBookmark(b, btn) },
         { label: 'Remove', cls: 'ctx-danger', action: () => api.send({ type: 'removeBookmark', path: b.path }) },
       ]);
@@ -4829,6 +4882,8 @@ const DONE_CONFIRM_MS = 3000;
 let planBudget = 100;
 
 function applySettings(s) {
+  if (Array.isArray(s.agentPrefixes)) { _prefixes = s.agentPrefixes; _prefixDefault = s.agentPrefixDefault || ''; }
+  else { try { const old = JSON.parse(localStorage.getItem('agentPrefixes') || '[]'); if (old.length) { savePrefixes(old); setDefaultPrefix(localStorage.getItem('agentPrefixDefault') || ''); } } catch {} } // one-time move off localStorage
   if (s.theme) setTheme(s.theme, false);
   if (s.zoom) setUiZoom(s.zoom, false);
   if (s.termWidth) { settings_termWidth = s.termWidth; applyLayout(); }

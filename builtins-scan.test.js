@@ -31,6 +31,21 @@ b.scanClaudeBinary(f).then((m) => {
   assert.ok(!b.markNew(items, seen, 1000)[0].isNew, 'first run is the baseline');
   const later = b.markNew([...items, { type: 'skill', name: 'x' }], seen, 2000);
   assert.deepStrictEqual(later.map(i => !!i.isNew), [false, true]);
+  assert.deepStrictEqual(later.map(i => i.addedAt), [0, 2000]);
+  assert.ok(b.markNew([{ type: 'builtin', name: 'q', addedAt: 5000 }], seen, 6000)[0].isNew, 'release date wins over first-seen');
+
+  const md = ['# Changelog', '', '## 2.1.9', '- Fixed `/plans` and `/btw` scroll', '## 2.1.5', '- Added `/btw` for side questions', '## 1.0.0', '- `/plan` mode', ''].join(String.fromCharCode(10));
+  assert.deepStrictEqual([...b.parseChangelog(md, ['btw', 'plan', 'goal'])], [['btw', '2.1.5'], ['plan', '1.0.0']]);
+  const st = b.stampSince([{ name: 'btw' }, { name: 'goal' }], md, { '2.1.5': '2026-03-18T21:34:08Z' });
+  assert.deepStrictEqual(st, [{ name: 'btw', since: '2.1.5', addedAt: Date.parse('2026-03-18T21:34:08Z') }, { name: 'goal' }]);
   assert.ok(!b.markNew([{ type: 'skill', name: 'x' }], seen, 2000 + 8 * 864e5)[0].isNew, 'new for a week');
+  // a repo's skills aren't "new" the first time the picker opens in that repo; one added later is
+  const s2 = { 'builtin:clear': 0 };
+  assert.ok(!b.markNew([{ type: 'skill', name: 'r', origin: 'repo' }], s2, 9000, 'C:/a')[0].isNew);
+  assert.ok(b.markNew([{ type: 'skill', name: 'r2', origin: 'repo' }], s2, 9000, 'C:/a')[0].isNew);
+  // hand-kept commands survive only while the binary still names them
+  const sc = new Map(Array.from({ length: 12 }, (_, i) => ['c' + i, 'd'])); sc.names = new Set(['model']);
+  const fb2 = [{ name: 'model', desc: 'm' }, { name: 'vim', desc: 'v' }];
+  assert.deepStrictEqual(b.mergeBuiltins(sc, fb2).filter(x => !x.name.startsWith('c')).map(x => x.name), ['model']);
   console.log('builtins-scan ok');
 });

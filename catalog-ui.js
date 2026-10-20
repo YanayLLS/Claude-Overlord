@@ -47,11 +47,18 @@
   pop.id = 'catalog-pop';
   pop.hidden = true;
   pop.innerHTML = '<div class="cg-head"><button class="cg-back" title="Back to the menu (←)"></button><span class="cg-scope"></span>'
-    + '<input class="cg-q" spellcheck="false"><span class="cg-head-new"></span><kbd class="cg-esc">Esc</kbd></div>'
+    + '<input class="cg-q" spellcheck="false"><button class="cg-sort" title="Sort (Ctrl S)"></button><span class="cg-head-new"></span><kbd class="cg-esc">Esc</kbd></div>'
     + '<div class="cg-list"></div><div class="cg-detail"></div><div class="cg-foot"></div>';
   document.body.appendChild(pop);
   const $ = (c) => pop.querySelector(c);
-  const q = $('.cg-q'), list = $('.cg-list'), foot = $('.cg-foot'), scope = $('.cg-scope'), backBtn = $('.cg-back'), headNew = $('.cg-head-new'), detail = $('.cg-detail');
+  const q = $('.cg-q'), list = $('.cg-list'), foot = $('.cg-foot'), scope = $('.cg-scope'), backBtn = $('.cg-back'), headNew = $('.cg-head-new'), detail = $('.cg-detail'), sortBtn = $('.cg-sort');
+  // List order: 'name' (grouped by where it lives) or 'added' (newest first). Remembered per viewer.
+  let sortBy = (() => { try { return localStorage.getItem('catalogSort') || 'name'; } catch { return 'name'; } })();
+  const toggleSort = () => { sortBy = sortBy === 'added' ? 'name' : 'added'; try { localStorage.setItem('catalogSort', sortBy); } catch {} sel = 0; render(); };
+  sortBtn.onclick = toggleSort;
+  // When it was added (Claude's release date for built-ins, else first seen in the picker): today, 3d, 2w, then a date.
+  const age = (t) => { if (!t) return ''; const d = Math.floor((Date.now() - t) / 864e5);
+    return d < 1 ? 'today' : d < 7 ? d + 'd' : d < 56 ? Math.floor(d / 7) + 'w' : new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); };
   // Clicks inside keep focus in the search box, where the keys are handled (buttons and rows still get their click).
   pop.addEventListener('mousedown', (e) => { e.stopPropagation(); if (e.target !== q) e.preventDefault(); });
   document.addEventListener('mousedown', () => { if (isOpen) close(); });
@@ -141,6 +148,8 @@
     // In a list: "‹ Skills" back to the menu takes the search icon's place.
     const inList = stage === 'list';
     backBtn.hidden = !inList;
+    sortBtn.hidden = !inList;
+    sortBtn.innerHTML = `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h13M3 12h9M3 18h5M18 8v12M15 17l3 3 3-3"/></svg>${sortBy === 'added' ? 'Newest' : 'A–Z'}`;
     backBtn.innerHTML = `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>${t ? t.label : 'All'}`;
     scope.hidden = inList;
     scope.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
@@ -162,9 +171,11 @@
       return;
     }
 
-    rows = pickItems(items, type, query).slice(0, 200);
+    rows = pickItems(items, type, query);
+    if (sortBy === 'added' && !query) rows.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+    rows = rows.slice(0, 200);
     sel = Math.min(sel, Math.max(0, rows.length - 1));
-    const grouped = !query;
+    const grouped = !query && sortBy !== 'added';
     list.classList.toggle('grouped', grouped);
     let html = '', group = null;
     rows.forEach((it, i) => {
@@ -172,13 +183,14 @@
       const src = grouped ? '' : `<span class="cg-src">${esc(it.group.split(' · ')[0])}</span>`;
       html += `<div class="cg-row${i === sel ? ' sel' : ''}${it.shadowed ? ' shadowed' : ''}" data-i="${i}">`
         + (type ? '' : `<span class="cg-icon">${icon(it.type)}</span>`)
-        + `<span class="cg-name">${nameHtml(it)}</span>${newTag(!!it.isNew)}`
+        + `<span class="cg-name">${nameHtml(it)}</span>`
         + (it.overrides ? '<span class="cg-dot" title="Overrides ~/.claude"></span>' : '')
-        + `<span class="cg-desc">${esc(it.desc || '')}</span>${src}</div>`;
+        + `<span class="cg-desc">${esc(it.desc || '')}</span>${src}`
+        + `<span class="cg-age${it.isNew ? ' fresh' : ''}"${it.addedAt ? ` title="Added ${it.since ? 'in Claude ' + esc(it.since) + ' · ' : ''}${new Date(it.addedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}"` : ''}>${age(it.addedAt)}</span></div>`;
     });
     list.innerHTML = html || `<div class="cg-empty">${query ? `Nothing matches “${esc(query)}”` : 'Nothing here yet'}</div>`;
     renderDetail();
-    foot.innerHTML = kbd('↵', 'insert') + kbd('⇧↵', 'send') + kbd('←', 'back') + kbd('Ctrl O', 'open file');
+    foot.innerHTML = kbd('↵', 'insert') + kbd('⇧↵', 'send') + kbd('←', 'back') + kbd('Ctrl S', 'sort') + kbd('Ctrl O', 'open file');
     list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -213,6 +225,7 @@
       if (k === 'ArrowLeft' && stage === 'list') back();
       return;
     }
+    if (e.ctrlKey && k.toLowerCase() === 's' && stage === 'list') { e.preventDefault(); toggleSort(); return; }
     if (e.ctrlKey && k.toLowerCase() === 'o' && stage === 'list') { e.preventDefault(); const p = rows[sel]?.path; if (p) api.send({ type: 'openFile', path: p }); }
   });
   // Hover only moves the highlight; a full render here would swap the row out from under the click.
