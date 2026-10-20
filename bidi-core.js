@@ -1,18 +1,19 @@
-// Pure helpers for showing right-to-left text (Hebrew, Arabic) the right way round in
-// the terminal. Shared by the renderer (index.html) and the node self-check.
+// Pure helpers for Hebrew/Arabic in the terminal. Shared by the renderer (index.html) and
+// the node self-check.
 //
-// xterm's DOM renderer draws each row as a line of inline-block spans, one per run of
-// same-styled cells — and a new span whenever the glyph width differs, which for Hebrew
-// (no glyphs in the monospace font, so a proportional fallback) is every letter. An
-// inline-block is a bidi isolate, so the browser can't reorder across them, and the row
-// shows in storage order: letters reversed, words reversed. No bidi in xterm itself
-// (xtermjs/xterm.js#701). So after each render we reorder the spans of rows that hold
-// RTL text, by a small Unicode-bidi (an LTR paragraph with no explicit embeddings — all
-// a terminal ever shows): RTL letters flip, numbers inside keep their digit order,
-// neutrals between RTL letters flip with them, neutrals on the edges stay put, and
-// brackets inside a flipped run are mirrored. The buffer is untouched; only pixels move.
-// The same ordering maps mouse positions back to buffer columns (visualCells), so a drag
-// over Hebrew selects the letters under the pointer.
+// Two kinds of RTL rows reach the terminal. Claude Code lays out its own prose, the typed
+// prompt and tool-call headers in VISUAL order before writing them (letters and words
+// flipped, numbers kept, brackets not mirrored; paragraph direction from the first strong
+// letter), because terminals have no bidi — those rows look right as stored. Everything
+// else — code, diffs, tool output, other programs — arrives in LOGICAL order, and xterm,
+// which has no bidi (xtermjs/xterm.js#701) and whose DOM renderer isolates every Hebrew
+// letter in its own inline-block span, shows it reversed. looksVisual() tells the two apart
+// by Hebrew final letters (ם ן ך ף ץ end a word in logical text and start one in flipped
+// text) and by where sentence punctuation sits; rows without a clue count as Claude's.
+//
+// The renderer reorders the spans of logical rows into visual order (visualGroups) and maps
+// mouse positions on those rows back to buffer columns (visualCells). Copies run visual rows
+// back to logical order (toLogical) so a paste elsewhere reads right.
 
 const RTL_RE = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
 
@@ -43,51 +44,55 @@ function bidiClass(unit) {
 
 const MIRROR = { '(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{', '<': '>', '>': '<', '«': '»', '»': '«' };
 
-// Nearest strong class (R/L) before index i, 'L' at the line start (sos of an LTR paragraph).
-function strongBefore(cls, i) {
+// Nearest strong class (R/L) before index i; at the line start, the paragraph direction.
+function strongBefore(cls, i, para) {
   for (let k = i - 1; k >= 0; k--) if (cls[k] === 'R' || cls[k] === 'L') return cls[k];
-  return 'L';
+  return para;
 }
 
-// Embedding level per unit (0 = LTR, 1 = RTL, 2 = number inside RTL). LTR paragraph.
+// Embedding level per unit. LTR paragraph: 0 = LTR, 1 = RTL run, 2 = number inside an RTL
+// run. RTL paragraph (rtlPara): 1 = RTL, 2 = Latin or number inside it.
 // `cursor` is the index of the unit under the terminal cursor, or -1: a blank cursor cell
 // right after an RTL letter joins the run, so the caret sits where the next letter will
 // appear (the run's left end) instead of at its right end as a plain neutral would.
-function levels(units, cursor = -1) {
+function levels(units, cursor = -1, rtlPara = false) {
   const cls = units.map(bidiClass);
-  const n = cls.length;
+  const n = cls.length, para = rtlPara ? 'R' : 'L', base = rtlPara ? 1 : 0;
   // W4: a separator between two digits is part of the number; any other separator is neutral.
   for (let i = 1; i < n - 1; i++) if (cls[i] === 'CS' && cls[i - 1] === 'EN' && cls[i + 1] === 'EN') cls[i] = 'EN';
   for (let i = 0; i < n; i++) if (cls[i] === 'CS') cls[i] = 'N';
-  const lv = new Array(n).fill(0);
-  // W7 + I2: a number whose nearest strong letter before it is R belongs to the RTL flow at
-  // level 2 (digits keep their order, the number moves with the run); after L text or at the
-  // line start it is ordinary LTR text at level 0.
+  const lv = new Array(n).fill(base);
+  // W7 + I1/I2: a number keeps its digits in order; after an R letter (always, in an RTL
+  // paragraph) it rides inside the RTL flow at level 2, after L text in an LTR paragraph it is
+  // plain LTR text at level 0.
   for (let i = 0; i < n; i++) {
     if (cls[i] !== 'EN') continue;
     let j = i; while (j < n && cls[j] === 'EN') j++;
-    if (strongBefore(cls, i) === 'R') for (let k = i; k < j; k++) lv[k] = 2;
+    const inR = rtlPara || strongBefore(cls, i, para) === 'R';
+    for (let k = i; k < j; k++) lv[k] = inR ? 2 : 0;
     i = j - 1;
   }
-  // N1/N2: a neutral run flips when the strong text on both sides is R (a flipped number counts
-  // as R); otherwise it takes the paragraph direction. Line edges count as L.
+  for (let i = 0; i < n; i++) { if (cls[i] === 'R') lv[i] = 1; else if (cls[i] === 'L') lv[i] = rtlPara ? 2 : 0; }
+  // N1/N2: a neutral run takes the direction of its two neighbours when they agree (a number in
+  // the RTL flow counts as R); otherwise the paragraph direction. Line edges count as the paragraph.
+  const dirAt = (k) => cls[k] === 'R' ? 'R' : cls[k] === 'L' ? 'L' : lv[k] === 2 && !rtlPara ? 'R' : lv[k] === 2 ? 'R' : 'L';
   for (let i = 0; i < n; i++) {
     if (cls[i] !== 'N') continue;
     let j = i; while (j < n && cls[j] === 'N') j++;
-    const before = i > 0 && (cls[i - 1] === 'R' || lv[i - 1] === 2);
-    const after = j < n && (cls[j] === 'R' || lv[j] === 2);
-    if (before && after) for (let k = i; k < j; k++) lv[k] = 1;
+    const before = i > 0 ? dirAt(i - 1) : para, after = j < n ? dirAt(j) : para;
+    const l = before !== after ? base : before === 'R' ? 1 : (rtlPara ? 2 : 0);
+    for (let k = i; k < j; k++) lv[k] = l;
     i = j - 1;
   }
-  for (let i = 0; i < n; i++) if (cls[i] === 'R') lv[i] = 1;
-  if (cursor > 0 && cursor < n && cls[cursor] === 'N' && lv[cursor] === 0 && /^\s$/.test(units[cursor]) && lv[cursor - 1] % 2 === 1) lv[cursor] = 1;
+  if (!rtlPara && cursor > 0 && cursor < n && cls[cursor] === 'N' && lv[cursor] === 0 && /^\s$/.test(units[cursor]) && lv[cursor - 1] % 2 === 1) lv[cursor] = 1;
   return lv;
 }
 
 // Visual order of the units: an array of logical indices, left to right on screen.
 // (L2: reverse every run at the highest level, then every run at the next level down, ...)
-function visualOrder(units, cursor = -1) {
-  const lv = levels(units, cursor);
+// Its own inverse: feeding it a visual row (same paragraph direction) gives the logical one.
+function visualOrder(units, cursor = -1, rtlPara = false) {
+  const lv = levels(units, cursor, rtlPara);
   const order = units.map((_, i) => i);
   const max = Math.max(0, ...lv);
   for (let level = max; level >= 1; level--) {
@@ -136,6 +141,37 @@ function visualCells(cells, cursor = -1) {
   return { v2l, rtl };
 }
 
+// Whether a row's Hebrew is already in visual order (Claude Code's own layout) rather than
+// logical. Final letters decide: ם ן ך ף ץ end a word in logical Hebrew and so start one in
+// a flipped word. Sentence punctuation helps too: Claude Code treats a Hebrew-first line as
+// an RTL paragraph, so its full stop lands at the line's left end. No clue → visual, since
+// Claude Code's own text is most of what a terminal here shows.
+const FINAL = 'ךםןףץ';
+function looksVisual(line) {
+  let logical = 0, visual = 0;
+  for (const w of line.match(/[א-ת][א-ת֑-ׇ]*/g) || []) {
+    if (w.length < 2) continue;
+    if (FINAL.includes(w[w.length - 1])) logical += 2;
+    if (FINAL.includes(w[0])) visual += 2;
+  }
+  const t = line.trim();
+  if (/^[.,:;!?]\s*[א-ת]/.test(t)) visual += 1;
+  if (/[א-ת]\s*[.,:;!?]$/.test(t)) logical += 1;
+  return visual >= logical;
+}
+
+// Copied text back to logical order: lines Claude Code wrote visually are run through the
+// same bidi rules again (the reorder is an involution); logical lines are left alone. The
+// paragraph direction of a visual line is guessed from which script has more letters.
+function toLogical(text) {
+  return text.split('\n').map((line) => {
+    if (!hasRtl(line) || !looksVisual(line)) return line;
+    const units = graphemes(line), cls = units.map(bidiClass);
+    let r = 0, l = 0; for (const c of cls) { if (c === 'R') r++; else if (c === 'L') l++; }
+    return visualOrder(units, -1, r > l).map(i => units[i]).join('');
+  }).join('\n');
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { hasRtl, graphemes, visualOrder, visualGroups, visualCells };
+  module.exports = { hasRtl, graphemes, visualOrder, visualGroups, visualCells, looksVisual, toLogical };
 }

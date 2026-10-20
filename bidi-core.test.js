@@ -1,6 +1,32 @@
 // Self-check for bidi-core pure helpers. Run: node bidi-core.test.js
 const assert = require('assert');
-const { hasRtl, graphemes, visualOrder, visualGroups, visualCells } = require('./bidi-core');
+const { hasRtl, graphemes, visualOrder, visualGroups, visualCells, looksVisual, toLogical } = require('./bidi-core');
+
+// Which rows are already visual (Claude Code laid them out) and which are logical (code, diffs,
+// tool output). Final letters: a word ending in ם/ן/ך/ף/ץ is logical, one starting with them is flipped.
+assert.strictEqual(looksVisual('שלום עולם'), false);
+assert.strictEqual(looksVisual('םלוע םולש'), true);
+assert.strictEqual(looksVisual('const t = "ברוך הבא";'), false);          // no finals: plain-Hebrew code line...
+assert.strictEqual(looksVisual('const t = "ברוכים הבאים";'), false);      // ...with finals it is clearly logical
+assert.strictEqual(looksVisual('Beneficiaries (םיבטומ)'), true);
+assert.strictEqual(looksVisual('.רקובב קורי חופת לוכאל בהוא ינא'), true);   // full stop at the left: RTL paragraph flipped
+assert.strictEqual(looksVisual('אני אוהב לאכול תפוח ירוק בבוקר.'), false);
+assert.strictEqual(looksVisual('> הז המ יל ריבסת'), true);                   // no clue → Claude's
+assert.strictEqual(looksVisual('הקידב'), true);
+
+// Copies back to logical order — each line as Claude Code 2.1.304 actually wrote it to the pty.
+assert.strictEqual(toLogical('םלוע םולש'), 'שלום עולם');
+assert.strictEqual(toLogical('םיחופת 12 יל שי'), 'יש לי 12 תפוחים');
+assert.strictEqual(toLogical('תורדגה / ליפורפ'), 'פרופיל / הגדרות');
+assert.strictEqual(toLogical('םיספט → יונימ'), 'מינוי → טפסים');
+assert.strictEqual(toLogical('לסב )םימודא('), '(אדומים) בסל');             // Claude Code does not mirror brackets
+assert.strictEqual(toLogical('say םולש now'), 'say שלום now');
+assert.strictEqual(toLogical('.םלוע ,םולש'), 'שלום, עולם.');
+assert.strictEqual(toLogical('והד abc גבא'), 'אבג abc דהו');
+assert.strictEqual(toLogical('Beneficiaries (םיבטומ)'), 'Beneficiaries (מוטבים)');
+// Logical lines and Latin-only text pass through; lines are handled one by one.
+assert.strictEqual(toLogical('שלום עולם'), 'שלום עולם');
+assert.strictEqual(toLogical('hello\nםלוע םולש\nconst t = "ברוכים הבאים";'), 'hello\nשלום עולם\nconst t = "ברוכים הבאים";');
 
 // Detection: only rows holding Hebrew/Arabic are worth touching.
 assert.strictEqual(hasRtl('hello 123'), false);

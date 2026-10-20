@@ -3103,20 +3103,23 @@ function createXterm(id) {
   terminal.open(el);
   // Hebrew/Arabic the right way round. xterm has no bidi and its DOM renderer draws one
   // inline-block span per Hebrew letter (fallback-font widths differ), so the browser can't
-  // reorder them: a row shows in storage order, letters and words reversed. Whenever the renderer
-  // rebuilds a row, rows holding RTL text get their spans rebuilt in visual order (bidi-core.js);
-  // each new span is a clone of the span its letters came from, so colors, cursor and
-  // letter-spacing stay. The buffer is untouched — selection and copy still work on the logical
-  // text. A MutationObserver, not onRender: blur, focus and selection changes re-render rows
-  // straight through the renderer (DomRenderer.handleBlur etc.) without firing onRender, and
-  // onRender alone left the text flipping back the moment the terminal lost focus. The observer
-  // runs as a microtask, before paint, so nothing flickers. Our own rewrite marks its spans
-  // (data-rtl) so the observer skips rows it already ordered.
+  // reorder them: a row shows in storage order. Claude Code already writes its prose, the typed
+  // prompt and tool-call headers in visual order (it flips them itself, for dumb terminals), so
+  // those rows look right as stored and are left alone — reordering them flipped them back.
+  // Code, diffs, tool output and other programs arrive in logical order and show reversed; those
+  // rows get their spans rebuilt in visual order whenever the renderer rebuilds them
+  // (bidi-core.js tells the two apart, looksVisual). Each new span is a clone of the span its
+  // letters came from, so colors, cursor and letter-spacing stay. The buffer is untouched.
+  // A MutationObserver, not onRender: blur, focus and selection changes re-render rows straight
+  // through the renderer (DomRenderer.handleBlur etc.) without firing onRender, and onRender
+  // alone left the text flipping back the moment the terminal lost focus. The observer runs as
+  // a microtask, before paint, so nothing flickers. Our own rewrite marks its spans (data-rtl)
+  // so the observer skips rows it already ordered.
   const rowsEl = el.querySelector('.xterm-rows'), screenEl = el.querySelector('.xterm-screen'), selEl = el.querySelector('.xterm-selection');
   const isRtlRow = (row) => !!(row && row.firstElementChild && row.firstElementChild.dataset.rtl);
   const orderRow = (row) => {
     const first = row.firstElementChild;
-    if (!first || first.dataset.rtl || !hasRtl(row.textContent)) return;
+    if (!first || first.dataset.rtl || !hasRtl(row.textContent) || looksVisual(row.textContent)) return;
     const units = []; let cursor = -1;
     for (const span of row.children) { if (span.classList.contains('xterm-cursor')) cursor = units.length; for (const g of graphemes(span.textContent)) units.push({ text: g, key: span }); }
     const frag = document.createDocumentFragment();
@@ -3139,7 +3142,7 @@ function createXterm(id) {
     for (const d of selEl.children) {
       if (Math.round(parseFloat(d.style.height) / ch) !== 1 || parseFloat(d.style.width) >= r.width - 1) continue;
       const row = rowsEl.children[Math.round(parseFloat(d.style.top) / ch)];
-      if (row && hasRtl(row.textContent)) d.style.display = 'none';
+      if (row && !looksVisual(row.textContent) && hasRtl(row.textContent)) d.style.display = 'none';
     }
   });
   selObs.observe(selEl, { childList: true });
@@ -3171,6 +3174,11 @@ function createXterm(id) {
   const MOUSE_EVENTS = ['mousedown', 'mousemove', 'mouseup', 'click'];
   for (const t of MOUSE_EVENTS) document.addEventListener(t, remap, true);
   const bidiOff = () => { rowsObs.disconnect(); selObs.disconnect(); for (const t of MOUSE_EVENTS) document.removeEventListener(t, remap, true); };
+  // Copy via xterm's own copy event (right-click menu, Ctrl+Insert): same logical-order text as Ctrl+C below.
+  el.addEventListener('copy', (e) => {
+    if (!terminal.hasSelection() || !e.clipboardData) return;
+    e.clipboardData.setData('text/plain', toLogical(terminal.getSelection())); e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
   // onScroll skips mouse-wheel scrolls in xterm 5.5; the viewport's own event catches them
   el.querySelector('.xterm-viewport').addEventListener('scroll', () => { if (id === selectedId) highlightPromptRail(); }, { passive: true });
   // Mouse-selected prompt text: Backspace/Delete erases it, typing replaces it, like an edit box.
@@ -3287,9 +3295,10 @@ function createXterm(id) {
     k229.keydown(e);
     if (e.key === 'Tab' && ghost.text && id === selectedId) { ghostAccept(); return false; } // accept ghost suggestion
     if (e.key === 'Escape' && ghost.text) { ghostClear(); } // dismiss, but let Esc pass through too
-    if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(terminal.getSelection()); return false; }
+    // toLogical: rows Claude Code wrote in visual order (Hebrew flipped for the terminal) go back to logical order, so a paste elsewhere reads right (bidi-core.js)
+    if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(toLogical(terminal.getSelection())); return false; }
     // Ctrl+C with no selection: Claude clears the input box. Copy what was typed first so it isn't lost.
-    if (e.ctrlKey && e.key === 'c' && !terminal.hasSelection()) { const t = readPromptBox(terminal); if (t) navigator.clipboard.writeText(t); return true; }
+    if (e.ctrlKey && e.key === 'c' && !terminal.hasSelection()) { const t = readPromptBox(terminal); if (t) navigator.clipboard.writeText(toLogical(t)); return true; }
     if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
     // Alt+V goes through main too, so the pasted image is kept for the [Image #N] hover preview
     if (e.altKey && !e.ctrlKey && e.key === 'v') { api.send({ type: 'pasteImage', id, alt: true }); return false; }
