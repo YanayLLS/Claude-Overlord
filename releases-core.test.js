@@ -372,4 +372,15 @@ assert.strictEqual(age('garbage', now), '');
   assert.strictEqual(checkRunning('Required status check "build" is expected. (405)'), 'build');
   assert.strictEqual(checkRunning('Pull Request is not mergeable (405)'), null);
 }
+{ // a push the deploy workflow's paths filter skips: nothing to deploy
+  const { deployTriggered } = require('./releases-core');
+  const wf = "on:\n  push:\n    branches: [main]\n    paths:\n      - 'server/**'\n      - package.json\n  workflow_dispatch:\njobs:\n  x:\n    paths: [nope]\n";
+  assert.strictEqual(deployTriggered(wf, ['.github/workflows/semgrep.yml']), false);
+  assert.strictEqual(deployTriggered(wf, ['server/a/b.js']), true);
+  assert.strictEqual(deployTriggered(wf, ['package.json']), true);
+  assert.strictEqual(deployTriggered("on:\n  push:\n    branches: [main]\n    paths-ignore: ['docs/**', '*.md']\n", ['docs/x.md', 'README.md']), false);
+  assert.strictEqual(deployTriggered("on:\n  push:\n    branches: [main]\n    paths-ignore: ['docs/**']\n", ['src/a.js']), true);
+  assert.strictEqual(deployTriggered("on:\n  push:\n    branches: [main]\n", ['x']), true, 'no filter');
+  assert.strictEqual(deployTriggered(wf, []), true, 'no file list: assume it deploys');
+}
 console.log('releases-core: all passed');

@@ -6,6 +6,7 @@
 // GitHub API (no local clones).
 
 const M = require('./manifest-core');
+const { deploySkipped } = require('./releases-core');
 
 const HISTORY_SHOWN = 30;
 // Files whose effects live in the database, not the code: a rollback can't undo them
@@ -228,6 +229,13 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
           const durs = ((ok.data && ok.data.workflow_runs) || []).map(x => Date.parse(x.updated_at) - Date.parse(x.run_started_at || x.created_at)).filter(x => x > 0).sort((a, b) => a - b);
           m = { ...m, repos: m.repos.map(x => x.repo === r.repo && x.pr.number === r.pr.number ? { ...x, deploy: { ...x.deploy, runUrl: live.html_url, startedAt: live.run_started_at || live.created_at, typicalMs: durs.length ? durs[Math.floor(durs.length / 2)] : null } } : x) };
           changed = true;
+        }
+        // no run at all minutes after the merge: the workflow's paths filter skipped it → nothing to deploy, live as merged
+        if (!done && !live && Date.now() - Date.parse(r.mergedAt) > 5 * 60e3 && await deploySkipped(ghJson, r.repo, r.deploy.workflow, r.mergeSha).catch(() => false)) {
+          [m, c] = M.applyDeploy(m, r.repo, { state: 'success', url: null, at: new Date().toISOString() });
+          m = { ...m, repos: m.repos.map(x => x.repo === r.repo && x.pr.number === r.pr.number ? { ...x, deploy: { ...x.deploy, skipped: true } } : x) };
+          changed = true;
+          continue;
         }
         if (!done) continue;
         [m, c] = M.applyDeploy(m, r.repo, { state: done.conclusion === 'success' ? 'success' : 'failure', url: done.html_url, at: done.updated_at });

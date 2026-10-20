@@ -15,7 +15,7 @@ const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's 
 const { execFile } = require('child_process');
 const os = require('os');
 const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas } = require('./releases-core');
-const { checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
+const { deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
 const DEPLOYING_MS = 10 * 1000;       // re-read deploy runs this often while one is in flight…
@@ -702,7 +702,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const still = [];
       for (const x of pending) {
         const runs = await ghJson(['api', '-X', 'GET', `repos/${x.repo}/actions/workflows/${x.deploy}/runs`, '-f', `head_sha=${x.sha}`, '-f', 'per_page=5']);
-        const done = ((runs.data && runs.data.workflow_runs) || []).find(r => r.status === 'completed');
+        const list = (runs.data && runs.data.workflow_runs) || [], done = list.find(r => r.status === 'completed');
+        // no run at all a while after the merge: its paths filter may skip this change (nothing to deploy)
+        if (!list.length && Date.now() - (x.mergedAt || (x.mergedAt = Date.now())) > 2 * 60e3 && !x.skipChecked) {
+          x.skipChecked = true;
+          if (await deploySkipped(ghJson, x.repo, x.deploy, x.sha).catch(() => false)) { x.skipped = true; continue; }
+        }
         if (!done) { still.push(x); continue; }
         if (done.conclusion !== 'success') {
           if (notify) notify(`❌ Release stopped · ${x.label} deploy failed`, 'Later waves were not merged', done.html_url);

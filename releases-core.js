@@ -364,7 +364,44 @@ function manualLeft(cfg, merged, manual, lives) {
 // the check's name, else null
 function checkRunning(err) { const m = String(err || '').match(/Required status check "([^"]+)" is (?:in progress|expected|pending)/i); return m ? m[1] : null; }
 
-const api = { checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+// Would a push changing `files` start this workflow? Reads on.push.paths / paths-ignore (GitHub's globs:
+// ** any depth, * within a segment). Unknown shape or no file list → true (assume it deploys).
+// ponytail: line-based YAML read, enough for the usual block or [inline] lists
+function deployTriggered(yaml, files) {
+  if (!files || !files.length) return true;
+  const lines = String(yaml || '').split('\n');
+  const on = lines.findIndex(l => /^(on|"on"|'on'):\s*$/.test(l));
+  if (on < 0) return true;
+  let push = -1;
+  for (let i = on + 1; i < lines.length && !/^\S/.test(lines[i]); i++) if (/^\s+push:\s*$/.test(lines[i])) { push = i; break; }
+  if (push < 0) return true;
+  const ind = (l) => l.match(/^\s*/)[0].length, pi = ind(lines[push]);
+  const unq = (x) => x.trim().replace(/^['"]|['"]$/g, '');
+  let kind = null, globs = [];
+  for (let i = push + 1; i < lines.length && (!lines[i].trim() || ind(lines[i]) > pi); i++) {
+    const m = lines[i].match(/^\s+(paths|paths-ignore):\s*(.*)$/);
+    if (m) { kind = m[1]; globs = m[2].startsWith('[') ? m[2].replace(/[[\]]/g, '').split(',').map(unq).filter(Boolean) : []; continue; }
+    const item = kind && lines[i].match(/^\s+-\s+(.+)$/);
+    if (item && !globs.done) globs.push(unq(item[1]));
+    else if (kind && lines[i].trim()) globs.done = true;
+  }
+  if (!kind || !globs.length) return true;
+  const re = (g) => new RegExp('^' + g.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*\*\/?/g, '\0').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\0/g, '.*') + '$');
+  const pats = globs.filter(g => !g.startsWith('!')).map(re);
+  const hit = (f) => pats.some(r => r.test(f));
+  return kind === 'paths' ? files.some(hit) : files.some(f => !hit(f));
+}
+
+// A merge whose files the deploy workflow's paths filter skips: no run will ever come (nothing to deploy).
+// ghJson injected; any read failing → false (keep waiting, as before)
+async function deploySkipped(ghJson, repo, wf, sha) {
+  const [c, f] = await Promise.all([ghJson(['api', `repos/${repo}/commits/${sha}`]), ghJson(['api', `repos/${repo}/contents/.github/workflows/${wf}?ref=${sha}`])]);
+  const files = c.data && c.data.files, text = f.data && typeof f.data.content === 'string' ? Buffer.from(f.data.content, 'base64').toString('utf-8') : null;
+  if (!Array.isArray(files) || files.length >= 300 || text == null) return false; // 300 = GitHub's cap: the list may be partial
+  return !deployTriggered(text, files.map(x => x.filename));
+}
+
+const api = { deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

@@ -663,6 +663,7 @@
   function deployPill(r, st) {
     const d = r.deploy;
     if (!d) return relItemHtml({ s: 'merged-hand' });
+    if (d.state === 'success' && d.skipped) return `<span class="rl-item ok" title="Its deploy workflow skips these files (paths filter): live as merged">no deploy needed ✓</span>`;
     if (d.state === 'success') {
       const h = st.health && st.health[r.repo + '|' + r.mergeSha];
       if (h && !h.ok) return `<a class="rl-item bad" data-url="${esc(h.url)}" title="Deployed, but its health check answered ${esc(h.status)}">deployed · unhealthy (${esc(h.status)})</a>`;
