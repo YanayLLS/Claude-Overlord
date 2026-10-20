@@ -776,6 +776,16 @@
     return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   }
   const hhmm = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  // merged PRs of hand-deployed repos nobody confirmed live since: merging didn't deploy them
+  function handUnlive(m) {
+    const lives = state && state.results && state.results.lives, cfg = state && state.config, env = m.env || 'prod';
+    if (!lives || !cfg || m.imported) return [];
+    const manual = (r) => (((cfg.repos || []).find(x => x.repo === r.repo) || {}).deploy || {})[env] === 'manual';
+    return m.repos.filter(r => r.mergeSha && !r.deploy && manual(r)).filter(r => {
+      const l = lives[`${r.repo}|${env}`];
+      return !(l && !l.error && (l.behind === 0 || (l.confirmed && Date.parse(l.confirmed.at) >= Date.parse(r.mergedAt || m.openedAt))));
+    });
+  }
   // one status per release: a dot and a word
   function relStatus(m) {
     const live = m.repos.filter(r => r.mergeSha), failed = live.filter(r => r.deploy && r.deploy.state === 'failure');
@@ -784,6 +794,7 @@
     if (failed.length) return ['bad', `${failed.length} deploy failed`];
     if (m.status === 'partial') return ['warn', 'partly shipped'];
     if (m.status === 'pending') return ['warn', 'pending'];
+    if (handUnlive(m).length) return ['warn', '✋ not deployed'];
     if (m.status === 'merged') return ['run', 'deploying'];
     return ['ok', 'deployed'];
   }
@@ -937,7 +948,9 @@
         .filter(x => { const l = lives[`${x.repo}|${m.env || 'prod'}`]; return !(l && !l.error && (l.behind === 0 || (l.confirmed && Date.parse(l.confirmed.at) >= Date.parse(m.openedAt)))); }).map(x => x.label) : [];
       let [cls, label] = STATUS_CHIP[m.status] || ['', m.status];
       if (m.status === 'merged' && !flight(m)) label = 'merged'; // its deploy result was never recorded: not "deploying" forever
-      if (handOpen.length && ['deployed', 'merged'].includes(m.status)) { cls = 'warn'; label = `${label.replace(' ✓', '')} · ${handOpen.length} hand step${handOpen.length === 1 ? '' : 's'} to confirm`; }
+      const handPr = ['deployed', 'merged', 'partial'].includes(m.status) ? handUnlive(m).map(r => r.label) : [];
+      if (handPr.length) { cls = 'warn'; label = '✋ not deployed'; }
+      else if (handOpen.length && ['deployed', 'merged'].includes(m.status)) { cls = 'warn'; label = `${label.replace(' ✓', '')} · ${handOpen.length} hand step${handOpen.length === 1 ? '' : 's'} to confirm`; }
       const pending = m.status === 'pending';
       // signed as one: while pending, a signer is someone on every still-open PR
       const openRepos = m.repos.filter(r => !r.mergeSha && !r.closed);
@@ -997,7 +1010,7 @@
       const inOrderMan = (m.manual || []).filter(x => s.config && (s.config.releaseOrder || []).some(w => w.some(y => y === x.label || y.toLowerCase() === String(x.repo).toLowerCase()))).map(x => ({ ...x, hand: true }));
       const waves = s.config && window.ReleasesCore ? ReleasesCore.releaseWaves(s.config, m.repos.concat(inOrderMan)) : [m.repos];
       // a step's state from its repos: done / in progress / waiting / failed / not started
-      const stOf = (r) => { const it = liveItems && liveItems[r.label]; if (it) return it.s; if (r.hand) return ''; if (r.mergeSha) return r.deploy ? (r.deploy.state === 'success' ? 'deployed' : r.deploy.state === 'failure' ? 'failed' : 'deploying') : 'merged-hand'; return ''; };
+      const stOf = (r) => { const it = liveItems && liveItems[r.label]; if (it) return it.s; if (r.hand) return ''; if (r.mergeSha) return r.deploy ? (r.deploy.state === 'success' ? 'deployed' : r.deploy.state === 'failure' ? 'failed' : 'deploying') : handPr.includes(r.label) ? 'hand-wait' : 'merged-hand'; return ''; };
       const live = new Set(['merging', 'merged', 'deploying', 'hand-wait']);
       let notDeployed = []; // earlier waves' repos not deployed yet: merging past them warns
       waves.forEach((wave, wi) => {
@@ -1019,7 +1032,10 @@
         const need = pending && !r.mergeSha && !r.closed;
         const signed = (r.signers || []).length;
         const cmp = r.baseSha && (r.mergeSha || r.headSha) ? `https://github.com/${r.repo}/compare/${r.baseSha}...${r.mergeSha || r.headSha}` : null;
-        const dep = deployPill(r, s);
+        const dep = handPr.includes(r.label) ? (a.isApprover ? (armed === 'h:' + r.repo
+            ? `<button class="rl-row-btn armed" data-act="rowHand" data-repo="${esc(r.repo)}" data-label="${esc(r.label)}">Confirm: deployed</button>`
+            : `<button class="rl-row-btn" data-act="rowHand" data-repo="${esc(r.repo)}" data-label="${esc(r.label)}" title="Merging didn't deploy it: record it as deployed once you have">✓ Deployed</button>`) : '')
+          + '<span class="rl-hand">✋ deploy by hand</span>' : deployPill(r, s);
         const chKey = m.id + ':' + r.repo, chOpen = openChanges.has(chKey);
         h += `<div class="rl-hist-repo"><b>${esc(r.label)}</b>${link(r.pr.url, '#' + r.pr.number)}`
           + `<span class="rl-hist-sha">${r.changes && r.changes.length ? `<button class="rl-ch-btn${chOpen ? ' on' : ''}" data-act="histChanges" data-key="${esc(chKey)}" title="The PRs this release brought into ${esc(r.label)}">${r.changes.length} change${r.changes.length === 1 ? '' : 's'} ${chOpen ? '▴' : '▾'}</button>` : ''}${cmp ? `<span title="prod before → after">${link(cmp, shortSha(r.baseSha) + ' → ' + shortSha(r.mergeSha || r.headSha))}</span>` : ''}</span>`
