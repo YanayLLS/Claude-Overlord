@@ -22,7 +22,30 @@ const { startKillGuard } = require('./kill-guard');
 const { agentShell } = require('./shell-core');
 const { scanCatalog, BUILTINS } = require('./catalog-core');
 const bscan = require('./builtins-scan');
+const { mdArgs } = require('./docs-core');
+const createDocs = require('./docs-main');
+const LAUNCH_T0 = Date.now(); // double-click on an .md → how long until it is on screen (overlord.log)
 
+// One Overlord. A second launch (double-clicking an .md file registers us as its opener) hands
+// its arguments to the running instance and exits, instead of starting a second app with its
+// own agents and pty host.
+// A copy pointed at its own state dir (tests, a scratch instance) is a different app: it must not
+// take the lock, or the user's real launch would be handed to it and show its empty roster.
+if (!process.env.OVERLORD_STATE_DIR && !app.requestSingleInstanceLock()) { app.quit(); return; }
+app.on('second-instance', (_e, argv, cwd) => {
+  const paths = mdArgs(argv, cwd);
+  if (docs && paths.length) docs.openPaths(paths, { t0: Date.now() }); else focusMainWindow();
+});
+// A restart must not replay the document the app was launched with (it would come back selected
+// and the roster would open on Docs every time); open documents are restored from settings anyway.
+function relaunchArgs() { return process.argv.slice(1).filter(a => !mdArgs([a], process.cwd()).length); }
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+  try { app.focus({ steal: true }); } catch {}
+}
 
 // ── Constants ──────────────────────────────────────────
 const JSONL_POLL_MS = 1000;
@@ -195,7 +218,7 @@ async function doGitPull() {
     // next launch reattaches, so a relaunch is a supported path, not a kill.
     forceQuit = true; // this restart was explicitly asked for — skip the close prompt
     _restarting = true;
-    setTimeout(() => { app.relaunch(); app.quit(); }, 400);
+    setTimeout(() => { app.relaunch({ args: relaunchArgs() }); app.quit(); }, 400);
   } catch (e) {
     fail(e.message);
   }
@@ -336,6 +359,7 @@ let mainWindow = null;
 let browserRegistry = null;
 let mcpServer = null;
 let preview = null;
+let docs = null; // markdown documents (docs-main.js)
 // Agent terminals live in pty-host.js, a process of their own, so an app restart
 // doesn't kill the Claude sessions inside them. Until it's connected (or if it
 // can't start) agents fall back to in-process ptys, which die with the app.
@@ -1998,7 +2022,7 @@ function parseLine(id, line) {
             if (!EXEMPT.has(tn)) nonExempt = true;
             if (tn === 'CronCreate') { a.cronCount++; send({ type: 'looping', id, active: true, count: a.cronCount }); }
             if (tn === 'CronDelete') { a.cronCount = Math.max(0, a.cronCount - 1); send({ type: 'looping', id, active: a.cronCount > 0, count: a.cronCount }); }
-            send({ type: 'toolStart', id, toolId: b.id, status: st, name: tn });
+            send({ type: 'toolStart', id, toolId: b.id, status: st, name: tn, file: inp.file_path || inp.notebook_path || '' }); // the path lets the Docs column follow .md edits
           }
         }
         // These tools always block on a human choice — flag now, don't wait out the timer.
@@ -4104,6 +4128,7 @@ function featureAgentArgs(cwd) {
 
 function handleIpc(msg) {
   if (releases.handle(msg)) return;
+  if (docs && docs.handle(msg)) return;
   switch (msg.type) {
     case 'continueInterrupted': continueInterrupted(msg.ids || []); break;
     case 'createAgent': createAgent(msg.cwd, msg.prompt, undefined, !!msg.prefill); break;
@@ -4730,7 +4755,7 @@ function handleIpc(msg) {
     }
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     // quit, not exit: exit skips before-quit, so nothing would get saved for the reattach.
-    case 'fullRestart': forceQuit = true; _restarting = true; app.relaunch(); app.quit(); break;
+    case 'fullRestart': forceQuit = true; _restarting = true; app.relaunch({ args: relaunchArgs() }); app.quit(); break;
     // The host runs from the app's own files, so it has to go before the installer replaces them.
     // the pty host is Overlord.exe too: the installer can't replace Overlord until it's gone, so wait for it to exit
     case 'installUpdate': try { fs.writeFileSync(UPDATE_MARK, ''); } catch {} forceQuit = true; ptyHost.stopAndWait(5000).catch(() => {}).then(() => autoUpdater.quitAndInstall()); break;
@@ -5903,8 +5928,16 @@ app.whenReady().then(() => {
   mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
-  _ptyHostReady.then(() => startKillGuard({ getChildPids: () => app.getAppMetrics().map(m => m.pid), log: flog }));
+  // A scratch instance (own state dir: tests, verification runs) stays killable; the guard is for the user's real one.
+  if (!process.env.OVERLORD_STATE_DIR) _ptyHostReady.then(() => startKillGuard({ getChildPids: () => app.getAppMetrics().map(m => m.pid), log: flog }));
   preview = createPreviewController({ window: mainWindow, registry: browserRegistry, send, writeToAgent: (id, text) => handleTermInput(id, text) });
+  docs = createDocs({
+    send, settings, saveState, log: flog, focusWindow: focusMainWindow,
+    execPath: process.execPath, appPath: app.getAppPath(), isPackaged: app.isPackaged,
+    showOpenDialog: (o) => dialog.showOpenDialog(mainWindow, o),
+    showItemInFolder: (p) => shell.showItemInFolder(p), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u),
+    notesDir: path.join(STATE_DIR, 'notes'),
+  });
   if (settings.isMaximized) mainWindow.maximize();
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   mainWindow.setMenuBarVisibility(false);
@@ -5925,6 +5958,7 @@ app.whenReady().then(() => {
   let _didRestore = false;
   mainWindow.webContents.on('did-finish-load', () => {
     releases.handle({ type: 'releasesClose' }); // a reloaded page has no Releases modal open: stop its live polling
+    docs.restore(); // documents left open last time (or before a page reload) come back, unselected
     if (!_didRestore) {
       _didRestore = true;
       // PR and Actions checks go first: their gh calls are async, so they run while the
@@ -5938,6 +5972,9 @@ app.whenReady().then(() => {
       saveSettingsCopy();
       startRemoteServer();
       armClickupTimer();
+      // A document named on the command line (double-clicked in Explorer) is shown.
+      const launchDocs = mdArgs(process.argv, process.cwd());
+      if (launchDocs.length) docs.openPaths(launchDocs, { t0: LAUNCH_T0 });
     }
     // Runs on every load incl. renderer reload — repaints from in-memory state
     // so a reload (to pick up index.html changes) keeps all live sessions.

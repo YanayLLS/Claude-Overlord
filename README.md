@@ -21,6 +21,7 @@ Each agent gets its own terminal session, live status tracking, and conversation
 - **Auto-compact** — Automatically accepts context compaction prompts
 - **Permission bypass** — Optional unattended mode
 - **Usage stats** — Hourly/daily/weekly rate limit display
+- **Markdown documents** — A Docs column beside the terminal (Ctrl+Shift+D) shows `.md` files as tabs, rendered GitHub-style: code highlighting, tables, task lists, right-to-left paragraphs, relative images and links, outline, find, and live reload whenever a file changes on disk. Files the focused agent writes with Write/Edit open there by themselves, so a plan can be read while the agent writes it. Open a file by double-clicking it (the installer registers the `.md` association; Settings → General does it for a copy run from source), with "Open with → Overlord", by dragging it anywhere into the window, or with the column's + button. The same + starts a **quick note**: a new `.md` in `~/.overlord/notes`, opened for writing. Any document can be edited in place (Ctrl+E, or the pencil): the raw markdown replaces the rendering and every keystroke is saved to the file.
 
 ## Keyboard Shortcuts
 
@@ -34,7 +35,11 @@ Each agent gets its own terminal session, live status tracking, and conversation
 | `Ctrl+Tab` | Next agent |
 | `Ctrl+Shift+Tab` | Previous agent |
 | `Ctrl+!` | Jump to next permission request |
-| `Ctrl+F` | Find in terminal / filter agents |
+| `Ctrl+F` | Find in terminal / document / filter agents |
+| `Ctrl+Shift+D` | Show / hide the Docs column |
+| `Ctrl+W` / `Ctrl+Tab` (Docs column clicked last) | Close / next document tab |
+| `Ctrl+E` (Docs column) | Edit the markdown in place, saved as you type; `Esc` returns to the rendering |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` (Docs column) | Document text size |
 | `Ctrl+Shift+F` | Search all conversations |
 | `Ctrl+T` | Toggle timeline |
 | `Ctrl+U` | Refresh usage stats |

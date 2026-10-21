@@ -1,15 +1,15 @@
 {
   "name": "overlord",
-  "version": "1.165.3",
+  "version": "1.166.0",
   "description": "Overlord — Claude Agent Manager",
   "main": "main.js",
   "scripts": {
     "preinstall": "node scripts/check-prerequisites.js",
     "test": "node --test",
-    "start": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && electron .",
-    "dev": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && electronmon .",
-    "package": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && electron-builder --dir",
-    "dist": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && electron-builder"
+    "start": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && node scripts/bundle-md.js && electron .",
+    "dev": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && node scripts/bundle-md.js && electronmon .",
+    "package": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && node scripts/bundle-md.js && electron-builder --dir",
+    "dist": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && node scripts/bundle-md.js && electron-builder"
   },
   "dependencies": {
     "@xterm/addon-web-links": "^0.12.0",
@@ -21,10 +21,13 @@
     "@xterm/addon-image": "^0.9.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/xterm": "^5.5.0",
+    "dompurify": "^3.2.6",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
     "electronmon": "^2.0.4",
     "esbuild": "^0.25.0",
+    "highlight.js": "^11.11.1",
+    "marked": "^15.0.12",
     "three": "^0.160.1"
   },
   "build": {
@@ -67,6 +70,18 @@
       "output": "out"
     },
     "asar": true,
-    "npmRebuild": false
+    "npmRebuild": false,
+    "fileAssociations": [
+      {
+        "ext": [
+          "md",
+          "markdown"
+        ],
+        "name": "Markdown",
+        "description": "Markdown document",
+        "role": "Viewer",
+        "icon": "assets/icon.ico"
+      }
+    ]
   }
 }

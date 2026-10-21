@@ -1221,6 +1221,7 @@ button:focus-visible { outline-offset:0; }
 <!-- The modern skin: loads after the base styles so it wins ties -->
 <link rel="stylesheet" href="./theme.css" />
 <link rel="stylesheet" href="./releases.css" />
+<link rel="stylesheet" href="./docs.css" />
 </head>
 <body>
 <div id="app">
@@ -1317,6 +1318,11 @@ button:focus-visible { outline-offset:0; }
         <span>Bypass permissions (--dangerously-skip-permissions)</span>
       </label>
       <div class="settings-hint">Applies to newly spawned agents. Persisted across sessions.</div>
+      <div class="settings-field">
+        <div class="field-title">Markdown documents</div>
+        <div class="field-row"><button class="settings-btn" type="button" id="doc-assoc-btn" onclick="docsUi.associate()">Set Overlord as the .md viewer</button><button class="settings-btn" type="button" onclick="docsUi.pick()">Open .md&hellip;</button></div>
+      </div>
+      <div class="settings-hint">Double-clicking an .md file (or "Open with → Overlord") opens it rendered in the Docs column beside the terminal; files the focused agent writes open there too. The installer registers Overlord already; this button registers the copy that is running now, and opens Windows' Default apps page when another viewer was chosen before.</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-remote-control" checked onchange="api.send({ type: 'saveSettings', settings: { remoteControl: this.checked } })" />
         <span>Remote Control (continue agents in the Claude mobile app)</span>
@@ -1553,7 +1559,9 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+Shift+Tab</span><span class="help-desc">Previous agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+&#x2191;/&#x2193;</span><span class="help-desc">Cycle between your messages</span></div>
       <div class="help-row"><span class="help-key">Ctrl+!</span><span class="help-desc">Jump to next permission request</span></div>
-      <div class="help-row"><span class="help-key">Ctrl+F</span><span class="help-desc">Find in terminal / Filter agents</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+F</span><span class="help-desc">Find in terminal / document / Filter agents</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Shift+D</span><span class="help-desc">Show / hide the Docs column (markdown files beside the terminal; the focused agent's .md edits open there)</span></div>
+      <div class="help-row"><span class="help-key">Docs column</span><span class="help-desc">After a click in it: Ctrl+E edit the markdown (saves as you type; Esc back to the rendering) &middot; Ctrl+W closes the tab &middot; Ctrl+Tab next tab &middot; Ctrl+F find &middot; Ctrl+= / Ctrl+- / Ctrl+0 text size &middot; middle-click closes a tab &middot; drag tabs to reorder &middot; + for a new note</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+F</span><span class="help-desc">Search all agent conversations</span></div>
       <div class="help-row"><span class="help-key">/</span><span class="help-desc">Filter agents (when not typing)</span></div>
       <div class="help-row"><span class="help-key">Ctrl+0</span><span class="help-desc">Reset zoom to 100%</span></div>
@@ -1628,6 +1636,9 @@ button:focus-visible { outline-offset:0; }
 <script src="./releases-ui.js"></script>
 <script src="./catalog-pick.js"></script>
 <script src="./catalog-ui.js"></script>
+<script src="./md-bundle.js"></script>
+<script src="./docs-core.js"></script>
+<script src="./docs-ui.js"></script>
 <script>
 document.querySelector('#header h1').title = api.version ? 'Overlord v' + api.version : ''; // version in the tooltip, not the title bar
 
@@ -3992,9 +4003,10 @@ focusAgent = function(id) {
   document.addEventListener('mousemove', (e) => {
     if (!dragging) return;
     const delta = startPos - e.clientX;
-    const max = window.innerWidth - 200;
+    const max = window.innerWidth - 200 - docsUi.reserve(); // the Docs column keeps at least its minimum
     const size = Math.max(120, Math.min(max, startSize + delta));
     term.style.width = size + 'px';
+    docsUi.onTermResized(); // the column narrows before the row would overflow
     cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(fitActive);
   });
@@ -4050,6 +4062,7 @@ api.onMainLog((msg) => console.log('%c[main]', 'color:#888', msg));
 // ── Message handling ───────────────────────────────────
 api.on((msg) => {
   if (msg.type === 'releases') { if (window.releasesUi) releasesUi.onMsg(msg); return; } // Releases board, releases-ui.js
+  if (msg.type.startsWith('doc') && docsUi.onMsg(msg)) return; // markdown documents, docs-ui.js
   if (msg.type === 'catalog') { catalogUi.onMsg(msg); return; } // + / // popover, catalog-ui.js
   if (msg.type === 'imagePasted') {
     // ponytail: no inline thumbnail. Writing to xterm out-of-band desyncs the
@@ -4224,8 +4237,8 @@ function handleAgentMsg(msg) {
       }
       break;
     }
-    case 'toolStart': { const a = agents.get(msg.id); if (a) { a.crashed = null; if (!a.activeAt) a.activeAt = Date.now(); a.tools.set(msg.toolId, { status: msg.status, name: msg.name, done: false, perm: false, isSubagent: msg.name === 'Task' || msg.name === 'Agent' }); scheduleRender(); } break; }
-    case 'toolDone': { const a = agents.get(msg.id); if (a) { const t = a.tools.get(msg.toolId); if (t) { t.done = true; a.subTools.delete(msg.toolId); } scheduleRender(); } break; }
+    case 'toolStart': { const a = agents.get(msg.id); if (a) { a.crashed = null; if (!a.activeAt) a.activeAt = Date.now(); a.tools.set(msg.toolId, { status: msg.status, name: msg.name, file: msg.file || '', done: false, perm: false, isSubagent: msg.name === 'Task' || msg.name === 'Agent' }); scheduleRender(); } break; }
+    case 'toolDone': { const a = agents.get(msg.id); if (a) { const t = a.tools.get(msg.toolId); if (t) { t.done = true; a.subTools.delete(msg.toolId); if (t.file) docsUi.onToolFile(msg.id, t.name, t.file); /* an .md the focused agent wrote opens in the Docs column */ } scheduleRender(); } break; }
     case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
     case 'subToolStart': { const a = agents.get(msg.id); if (a) { let subs = a.subTools.get(msg.parentToolId); if (!subs) { subs = new Map(); a.subTools.set(msg.parentToolId, subs); } subs.set(msg.toolId, { status: msg.status, name: msg.name, done: false }); scheduleRender(); } break; }
     case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
@@ -5020,6 +5033,7 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+W close selected agent, Ctrl+Shift+W close all done agents
   if (e.key === 'w' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
+    if (!e.shiftKey && docsUi.hasFocus() && docsUi.closeSelected()) return; // the Docs column was clicked last: its tab closes, agents stay
     if (e.shiftKey) {
       // Close all waiting/idle agents across all groups
       for (const [id, a] of agents) {
@@ -5093,7 +5107,9 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+F: open terminal search if terminal is open, otherwise filter agents
   if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
-    if (document.getElementById('term').classList.contains('open') && termTab === 'terminal') {
+    if (docsUi.hasFocus()) {
+      docsUi.openFind();
+    } else if (document.getElementById('term').classList.contains('open') && termTab === 'terminal') {
       openTermSearch();
     } else {
       openFilter();
@@ -5125,6 +5141,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   // Ctrl+Tab / Ctrl+Shift+Tab to cycle agents
+  if (e.key === 'Tab' && (e.ctrlKey || e.metaKey) && docsUi.hasFocus() && docsUi.cycle(e.shiftKey ? -1 : 1)) { e.preventDefault(); return; } // Docs column clicked last: next / previous document
+  if ((e.key === 'D' || e.key === 'd') && (e.ctrlKey || e.metaKey) && e.shiftKey) { e.preventDefault(); docsUi.toggle(); return; } // Ctrl+Shift+D: show / hide the Docs column
   if (e.key === 'Tab' && (e.ctrlKey || e.metaKey) && agents.size > 0) {
     e.preventDefault();
     const ids = [...agents.entries()].filter(([, a]) => !a.archived).map(([i]) => i);
@@ -5183,10 +5201,13 @@ document.addEventListener('drop', (e) => {
   const files = e.dataTransfer.files;
   if (!files || files.length === 0) return;
   const paths = [];
-  for (const f of files) { if (f.path) paths.push(f.path); }
+  for (const f of files) { const p = api.getFilePath(f); if (p) paths.push(p); } // File.path is gone in modern Electron
   if (paths.length === 0) return;
-  // Send to main process — it has fs access to detect folders vs files
-  api.send({ type: 'dropPaths', paths, activeAgent: selectedId || null });
+  // Markdown files open in the Docs column (docs-ui.js); everything else goes to main — it has fs
+  // access to detect folders (→ new agent) vs files (→ paths into the terminal).
+  const md = paths.filter(p => MD_RE.test(p)), rest = paths.filter(p => !MD_RE.test(p));
+  if (md.length) api.send({ type: 'docOpen', paths: md });
+  if (rest.length) api.send({ type: 'dropPaths', paths: rest, activeAgent: selectedId || null });
 });
 
 document.addEventListener('paste', (e) => {
