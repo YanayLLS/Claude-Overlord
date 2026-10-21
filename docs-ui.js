@@ -6,7 +6,7 @@
 // from docs-core.js (page globals). index.html forwards { type: 'doc*' } messages to docsUi.onMsg,
 // tool completions to docsUi.onToolFile, and asks docsUi.hasFocus() before Ctrl+W / Ctrl+Tab / Ctrl+F.
 (function () {
-  const docs = new Map();      // path -> { path, title, text, mtime, scrollTop, changedAt, gone }
+  const docs = new Map();      // path -> { path, title, text, draft, mtime, scrollTop, changedAt, gone }; draft = unsaved editor text
   let order = [];              // tab order, oldest first
   let selected = null;         // the tab shown
   let visible = false;         // the column is open
@@ -17,7 +17,6 @@
   let editing = false;         // the raw markdown is shown in the editor instead of the rendering
   let hiddenByUser = false;    // the column was closed by hand with docs open: follow adds tabs, doesn't pop it back
   let followPending = null;    // the doc follow would have shown while the column was hidden
-  let saveTimer = 0, dirty = false; // editor autosave
   let zoom = 1;
   const pendingHash = new Map(); // doc path -> anchor to land on once it opens
   let refs = null;
@@ -42,7 +41,7 @@
     const col = document.createElement('div'); col.id = 'doc-col';
     col.innerHTML = `<div id="doc-tabs"><div id="doc-tablist" role="tablist"></div>`
       + `<button id="doc-add" onclick="docsUi.addMenu(event)" title="New note / open .md…">${ICON.plus}</button><span class="doc-sp"></span><span id="doc-updated"></span>`
-      + `<button id="doc-edit-btn" onclick="docsUi.toggleEdit()" title="Edit the markdown (Ctrl+E) — saves as you type">${ICON.pen}</button>`
+      + `<button id="doc-edit-btn" onclick="docsUi.toggleEdit()" title="Edit the markdown (Ctrl+E) · Ctrl+S saves">${ICON.pen}</button>`
       + `<button id="doc-follow-btn" onclick="docsUi.toggleFollow()" title="Follow: open the .md files the focused agent writes">${ICON.eye}</button>`
       + `<button id="doc-outline-btn" onclick="docsUi.toggleOutline()" title="Outline">${ICON.list}</button>`
       + `<button onclick="docsUi.openFind()" title="Find in document (Ctrl+F)">${ICON.find}</button>`
@@ -50,7 +49,7 @@
       + `<div id="doc-path" hidden><span id="doc-path-text" title="Click to copy the path"></span><button onclick="docsUi.copyPath()" title="Copy path">${ICON.copy}</button><button onclick="docsUi.reveal()" title="Show in folder">${ICON.folder}</button><button onclick="docsUi.openWith()" title="Open in your editor">${ICON.ext}</button></div>`
       + '<div id="doc-find" hidden><input id="doc-find-input" type="text" placeholder="Find in document…" /><span id="doc-find-count"></span><button onclick="docsUi.findStep(-1)" title="Previous (Shift+Enter)">&#x25B2;</button><button onclick="docsUi.findStep(1)" title="Next (Enter)">&#x25BC;</button><button onclick="docsUi.closeFind()" title="Close (Esc)">&times;</button></div>'
       + '<div id="doc-scroll"><div id="doc-meta"></div><article id="doc-view" class="md"></article><div id="doc-empty">No document open.<br><small>Press + above for a new note or to open an .md file, double-click one, or drop it here.<br>Files the focused agent writes open here by themselves.</small></div></div>'
-      + '<textarea id="doc-editor" class="md-src" hidden spellcheck="false" placeholder="Write markdown here — it saves as you type."></textarea>'
+      + '<textarea id="doc-editor" class="md-src" hidden spellcheck="false" placeholder="Write markdown here — Ctrl+S saves."></textarea>'
       + '<nav id="doc-outline" hidden aria-label="Outline"></nav>';
     // Before the web preview column when it is already there, so the order is terminal · docs · preview.
     const pv = $('preview-resize');
@@ -93,11 +92,12 @@
     });
     const termEl = $('term'); if (termEl) termEl.addEventListener('focusin', () => { focused = false; });
     refs.pathText.addEventListener('click', copyPath);
-    // Editor: every keystroke lands in the file after a short pause; Tab indents; Esc goes back to the rendering.
+    // Editor: typing makes a draft (● on the tab) that only Ctrl+S writes; Tab indents; Esc shows the draft rendered.
     refs.editor.addEventListener('input', () => {
       const d = docs.get(selected); if (!d) return;
-      d.text = refs.editor.value; dirty = true;
-      clearTimeout(saveTimer); saveTimer = setTimeout(flushSave, 350);
+      const was = d.draft != null;
+      if (refs.editor.value === d.text) delete d.draft; else d.draft = refs.editor.value;
+      if (was !== (d.draft != null)) renderTabs();
     });
     refs.editor.addEventListener('keydown', (e) => {
       if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -105,7 +105,6 @@
         const t = refs.editor, s = t.selectionStart, en = t.selectionEnd;
         t.setRangeText('  ', s, en, 'end'); t.dispatchEvent(new Event('input'));
       } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(false); }
-      else if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); flushSave(); showToast('Saved'); }
     });
     refs.editor.addEventListener('scroll', () => { const d = docs.get(selected); if (d) d.editScrollTop = refs.editor.scrollTop; }, { passive: true });
     // Esc closes the outline; Ctrl+= / Ctrl+- / Ctrl+0 zoom the text while the column has the keyboard.
@@ -116,6 +115,7 @@
       else if (e.key === '-') { e.preventDefault(); e.stopImmediatePropagation(); setZoom(zoom - 0.1); }
       else if (e.key === '0') { e.preventDefault(); e.stopImmediatePropagation(); setZoom(1); }
       else if ((e.key === 'e' || e.key === 'E') && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); toggleEdit(); }
+      else if ((e.key === 's' || e.key === 'S') && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); save(); }
     }, true);
     // Tabs reorder by drag. The page's file-drop handler only reacts to OS file drags, so this is left alone.
     let dragTab = null;
@@ -150,8 +150,9 @@
       const box = e.target; if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox') return;
       const d = docs.get(selected); if (!d) return;
       const n = [...refs.view.querySelectorAll('input[type=checkbox]')].indexOf(box);
-      const next = toggleTask(d.text, n, box.checked);
+      const next = toggleTask(d.draft != null ? d.draft : d.text, n, box.checked);
       if (next == null) { box.checked = !box.checked; showToast('Could not find that task in the file'); return; }
+      if (d.draft != null) { d.draft = next; return; } // the rendering shows the unsaved draft: the tick joins it
       d.text = next;
       api.send({ type: 'docWrite', path: d.path, text: next });
     });
@@ -245,7 +246,7 @@
     for (const p of order) {
       const d = docs.get(p); if (!d) continue;
       const label = titles.get(d.title) > 1 ? baseOf(p) : d.title; // two "Plan"s: show file names instead
-      h += `<div class="doc-tab${p === selected ? ' active' : ''}${d.gone ? ' gone' : ''}" role="tab" aria-selected="${p === selected}" draggable="true" data-path="${escAttr(p)}" title="${escAttr(p)}" onclick="docsUi.select(this.dataset.path)" oncontextmenu="event.preventDefault();docsUi.menu(event,this.dataset.path)">`
+      h += `<div class="doc-tab${p === selected ? ' active' : ''}${d.gone ? ' gone' : ''}${d.draft != null ? ' dirty' : ''}" role="tab" aria-selected="${p === selected}" draggable="true" data-path="${escAttr(p)}" title="${escAttr(p)}" onclick="docsUi.select(this.dataset.path)" oncontextmenu="event.preventDefault();docsUi.menu(event,this.dataset.path)">`
         + (d.changedAt && Date.now() - d.changedAt < 60000 ? '<span class="doc-live" title="Changed on disk"></span>' : '')
         + `<span class="doc-tab-name">${esc(label)}</span>`
         + `<button class="doc-x" onclick="event.stopPropagation();docsUi.close(this.parentNode.dataset.path)" title="Close" aria-label="Close document">&times;</button></div>`;
@@ -272,21 +273,18 @@
   function copyPath() { if (selected) navigator.clipboard.writeText(selected).then(() => showToast('Path copied')); }
 
   // ── Editor ─────────────────────────────────────────────────────────────────────────
-  function flushSave() {
-    clearTimeout(saveTimer); saveTimer = 0;
-    if (!dirty) return;
-    dirty = false;
-    const d = docs.get(selected); if (!d) return;
+  function save() {
+    const d = docs.get(selected); if (!d || d.draft == null) return;
+    d.text = d.draft; delete d.draft;
     d.title = docTitle(d.text, d.path);
     api.send({ type: 'docWrite', path: d.path, text: d.text });
-    renderTabs();
+    renderTabs(); showToast('Saved');
   }
   function setEditing(on, { caretEnd = false } = {}) {
-    if (editing && !on) flushSave();
     editing = on;
     const d = docs.get(selected);
     if (d && on) {
-      refs.editor.value = d.text;
+      refs.editor.value = d.draft != null ? d.draft : d.text;
       renderTabs();
       refs.editor.scrollTop = d.editScrollTop || 0;
       refs.editor.focus(); focused = true;
@@ -313,7 +311,7 @@
       { label: 'Send path to the agent', action: () => sendToAgent(p) },
       { sep: true },
       { label: 'Close', action: () => close(p) },
-      { label: 'Close others', action: () => { for (const q of order.slice()) if (q !== p) close(q); } },
+      { label: 'Close others', action: async () => { for (const q of order.slice()) if (q !== p) await close(q); } }, // one discard prompt at a time
     ]);
   }
   function popMenu(x, y, items) {
@@ -348,21 +346,20 @@
   function select(p, { hash = '' } = {}) {
     const d = docs.get(p); if (!d) return;
     if (selected !== p) {
-      flushSave();
       const prev = docs.get(selected); if (prev) { prev.scrollTop = refs.scroll.scrollTop; prev.editScrollTop = refs.editor.scrollTop; }
       selected = p;
       closeFind();
       try { localStorage.setItem('overlord-doc-selected', p); } catch {}
     }
     setVisible(true);
-    if (editing) { refs.editor.value = d.text; refs.editor.scrollTop = d.editScrollTop || 0; renderTabs(); return; }
+    if (editing) { refs.editor.value = d.draft != null ? d.draft : d.text; refs.editor.scrollTop = d.editScrollTop || 0; renderTabs(); return; }
     renderDoc(d);
     if (hash) scrollToId(hash); else refs.scroll.scrollTop = d.scrollTop || 0;
     renderTabs();
   }
 
   function renderDoc(d) {
-    const { meta: fm, body } = splitFrontMatter(d.text);
+    const { meta: fm, body } = splitFrontMatter(d.draft != null ? d.draft : d.text);
     refs.meta.innerHTML = fm ? '<table class="md-fm">' + fm.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('') + '</table>' : '';
     refs.meta.hidden = !fm;
     refs.view.innerHTML = toHtml(body, d.path);
@@ -511,11 +508,12 @@
   }
 
   // ── Open / close / messages ────────────────────────────────────────────────────────
-  function close(p) {
+  async function close(p) {
+    const d = docs.get(p); if (!d) return;
+    if (d.draft != null && !await showConfirm(`Discard unsaved changes to "${d.title}"?`, 'Discard')) return;
     if (!docs.has(p)) return;
     const wasShown = selected === p;
     const next = wasShown ? nextAfterClose(order, p) : null;
-    if (wasShown) flushSave();
     docs.delete(p); order = withoutDoc(order, p);
     if (followPending === p) followPending = null;
     api.send({ type: 'docClose', path: p });
@@ -559,9 +557,9 @@
     if (msg.type === 'docChange') {
       const d = docs.get(msg.path); if (!d) return true;
       if (selected === msg.path && editing) {
-        // Our own save coming back, or unsaved typing in flight: the editor's text stands. Someone
+        // Our own save coming back, or an unsaved draft: the editor's text stands. Someone
         // else's edit while the editor is clean: take it, keeping the caret where it was.
-        if (msg.text === d.text || dirty) { d.mtime = msg.mtime; return true; }
+        if (msg.text === d.text || d.draft != null) { d.text = msg.text; d.mtime = msg.mtime; return true; }
         const t = refs.editor, s = t.selectionStart, e = t.selectionEnd;
         d.text = msg.text; d.mtime = msg.mtime; d.changedAt = Date.now(); d.title = docTitle(msg.text, msg.path); d.gone = false;
         t.value = msg.text; try { t.setSelectionRange(Math.min(s, t.value.length), Math.min(e, t.value.length)); } catch {}
@@ -591,7 +589,6 @@
   function associate() { const b = $('doc-assoc-btn'); if (b) b.textContent = 'Registering…'; api.send({ type: 'docAssociate' }); }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
-  window.addEventListener('beforeunload', flushSave);
   window.docsUi = { onMsg, onToolFile, select, close, closeSelected, cycle, toggle, hasFocus, menu, addMenu, newNote, copyPath, toggleEdit, reveal, openWith, pick, associate, openFind, closeFind, findStep, toggleOutline, toggleFollow, reserve, onTermResized,
     isVisible: () => visible, count: () => docs.size, selected: () => selected };
 })();

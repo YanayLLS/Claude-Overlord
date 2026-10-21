@@ -38,7 +38,7 @@ Each agent gets its own terminal session, live status tracking, and conversation
 | `Ctrl+F` | Find in terminal / document / filter agents |
 | `Ctrl+Shift+D` | Show / hide the Docs column |
 | `Ctrl+W` / `Ctrl+Tab` (Docs column clicked last) | Close / next document tab |
-| `Ctrl+E` (Docs column) | Edit the markdown in place, saved as you type; `Esc` returns to the rendering |
+| `Ctrl+E` (Docs column) | Edit the markdown in place; `Ctrl+S` saves (unsaved tabs show ●, closing one asks first); `Esc` returns to the rendering |
 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` (Docs column) | Document text size |
 | `Ctrl+Shift+F` | Search all conversations |
 | `Ctrl+T` | Toggle timeline |
