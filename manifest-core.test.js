@@ -33,6 +33,11 @@ assert.strictEqual(m.status, 'deployed', 'identity has no CI deploy, so frontend
 assert.strictEqual(m.status, 'deploy-failed');
 [, changed] = M.applyDeploy(m, 'o/front', { state: 'in_progress' });
 assert.strictEqual(changed, false, 'an unfinished run changes nothing');
+[m, changed] = M.applyDeploy(m, 'o/front', { state: 'waiting', url: null });
+assert.strictEqual(m.status, 'merged', 'a re-run after a failed deploy is deploying again');
+[, changed] = M.applyDeploy(m, 'o/front', { state: 'waiting' });
+assert.strictEqual(changed, false, 'waiting only resets a failure');
+[m] = M.applyDeploy(m, 'o/front', { state: 'failure', url: 'r2' });
 
 // every PR closed unmerged → abandoned
 let a = M.newManifest({ id: 'x', rows: rows.slice(0, 1) });

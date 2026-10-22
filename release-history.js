@@ -217,12 +217,14 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       }
       // a deploy whose result never got recorded stops being looked up a day after the merge (old records re-asked forever)
       const settling = (r) => { const t = Date.parse(r.mergedAt); return !t || Date.now() - t < 86400e3; }; // unknown time: still settling
-      const deploys = await Promise.all(m.repos.filter(r => r.mergeSha && r.deploy && !['success', 'failure'].includes(r.deploy.state) && settling(r)).map(async (r) => {
+      // a failed deploy is looked up too: a re-run (or a fresh run on the same merge) can still ship it
+      const deploys = await Promise.all(m.repos.filter(r => r.mergeSha && r.deploy && r.deploy.state !== 'success' && settling(r)).map(async (r) => {
         const runs = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', `head_sha=${r.mergeSha}`, '-f', 'per_page=5']);
-        const list = (runs.data && runs.data.workflow_runs) || [];
-        return [r, list.find(x => x.status === 'completed'), list.find(x => x.status !== 'completed')];
+        const list = (runs.data && runs.data.workflow_runs) || [], newest = list[0]; // newest first
+        return [r, newest && newest.status === 'completed' ? newest : null, newest && newest.status !== 'completed' ? newest : null];
       }));
-      for (const [r, done, live] of deploys) {
+      for (let [r, done, live] of deploys) {
+        if (live && r.deploy.state === 'failure') { [m, c] = M.applyDeploy(m, r.repo, { state: 'waiting', url: null }); changed = changed || c; r = m.repos.find(x => x.repo === r.repo && x.pr.number === r.pr.number); }
         // still running: where to watch it, since when, and how long it usually takes (its last good runs)
         if (!done && live && (!r.deploy.runUrl || r.deploy.runUrl !== live.html_url)) {
           const ok = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', 'status=success', '-f', 'per_page=5']);

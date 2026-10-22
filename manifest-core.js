@@ -86,7 +86,9 @@ function applyPr(m, repo, pr) {
 function applyDeploy(m, repo, run) {
   let changed = false;
   const repos = m.repos.map(r => {
-    if (r.repo !== repo || !r.deploy || !run || !['success', 'failure'].includes(run.state)) return r;
+    // 'waiting' only resets a failed deploy that is running again (a re-run)
+    const retry = run && run.state === 'waiting' && r.deploy && r.deploy.state === 'failure';
+    if (r.repo !== repo || !r.deploy || !run || (!retry && !['success', 'failure'].includes(run.state))) return r;
     if (r.deploy.state === run.state && r.deploy.url === run.url) return r;
     changed = true;
     return { ...r, deploy: { ...r.deploy, state: run.state, url: run.url || null, at: run.at || null } };
