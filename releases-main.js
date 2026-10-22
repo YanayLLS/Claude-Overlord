@@ -962,7 +962,15 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const runs = await ghJson(['api', '-X', 'GET', `repos/${repo}/actions/workflows/${d.workflow}/runs`, '-f', `head_sha=${sha}`, '-f', 'per_page=1']);
     const run = runs.data && runs.data.workflow_runs && runs.data.workflow_runs[0];
     if (!run) return send({ type: 'toast', text: `${found.r.label}: no deploy run found for ${sha.slice(0, 7)}` });
-    const res = await ghJson(['api', '-X', 'POST', `repos/${repo}/actions/runs/${run.id}/rerun-failed-jobs`]);
+    let res = await ghJson(['api', '-X', 'POST', `repos/${repo}/actions/runs/${run.id}/rerun-failed-jobs`]);
+    // A run that failed before any job started (an invalid workflow) can't be retried: start a fresh one on the
+    // branch, but only while the branch still points at the release's merge, so nothing newer ships with it.
+    if (apiErr(res) && /cannot be retried|cannot be rerun/i.test(apiErr(res))) {
+      const head = await ghJson(['api', `repos/${repo}/branches/${run.head_branch}`]);
+      const at = head.data && head.data.commit && head.data.commit.sha;
+      if (at !== sha) return send({ type: 'toast', text: `${found.r.label}: ${run.head_branch} moved past the release — deploy it from GitHub` });
+      res = await ghJson(['api', '-X', 'POST', `repos/${repo}/actions/workflows/${d.workflow}/dispatches`, '-f', `ref=${run.head_branch}`]);
+    }
     if (apiErr(res) && !/Unexpected end|JSON/i.test(apiErr(res))) return send({ type: 'toast', text: `${found.r.label}: ${apiErr(res)}` });
     send({ type: 'toast', text: `${found.r.label}: deploy re-running` });
   }
