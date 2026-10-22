@@ -383,4 +383,12 @@ assert.strictEqual(age('garbage', now), '');
   assert.strictEqual(deployTriggered("on:\n  push:\n    branches: [main]\n", ['x']), true, 'no filter');
   assert.strictEqual(deployTriggered(wf, []), true, 'no file list: assume it deploys');
 }
+{ // deployState: the newest run decides
+  const { deployState } = require('./releases-core');
+  assert.strictEqual(deployState([]), 'none');
+  assert.strictEqual(deployState([{ status: 'waiting' }]), 'waiting', 'parked on required reviewers');
+  assert.strictEqual(deployState([{ status: 'in_progress' }, { status: 'completed', conclusion: 'failure' }]), 'running', 'a re-run after a failure is running, not failed');
+  assert.strictEqual(deployState([{ status: 'completed', conclusion: 'success' }, { status: 'completed', conclusion: 'failure' }]), 'success');
+  assert.strictEqual(deployState([{ status: 'completed', conclusion: 'cancelled' }]), 'failure');
+}
 console.log('releases-core: all passed');

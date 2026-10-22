@@ -670,6 +670,7 @@
       return `<a class="rl-item ok"${d.url ? ` data-url="${esc(d.url)}"` : ''} title="${h ? 'Deployed and its health check answered OK' : 'Deploy run succeeded'}">${h ? 'live · healthy ✓' : 'deployed ✓'}</a>`;
     }
     if (d.state === 'failure') return `<a class="rl-item bad"${d.url ? ` data-url="${esc(d.url)}"` : ''} title="Open the failed deploy run">deploy failed ↗</a>`;
+    if (d.awaiting) return `<a class="rl-item warn"${d.runUrl ? ` data-url="${esc(d.runUrl)}"` : ''} title="The deploy waits for a required reviewer: open the run → Review deployments">needs approval ↗</a>`;
     const el = d.startedAt ? Date.now() - Date.parse(d.startedAt) : null;
     return `<a class="rl-item run"${d.runUrl ? ` data-url="${esc(d.runUrl)}"` : ''} title="Open the deploy run">deploying${el != null ? ` ${fmtMin(el)}${d.typicalMs ? ` / ~${fmtMin(d.typicalMs)}` : ''}` : '…'}${d.runUrl ? ' ↗' : ''}</a>`;
   }
@@ -677,6 +678,8 @@
   function relItemHtml(it) {
     if (!it) return '';
     if (it.s === 'hand-live') return `<span class="rl-item" title="${esc((it.why || 'No commits since its last deploy') + ': not deployed or confirmed in this release')}">no changes · skipped</span>`;
+    if (it.s === 'deploying' && it.why) return `<span class="rl-item warn" title="${esc(it.why)}">needs approval</span>`;
+    if (it.s === 'failed' && it.why) return `<span class="rl-item bad" title="${esc(it.why)}">deploy failed · ↻ re-run</span>`;
     if (it.s === 'held') return `<span class="rl-item warn" title="${esc(it.why || '')}">waiting${it.why ? ': ' + esc(it.why.length > 34 ? it.why.slice(0, 34) + '…' : it.why) : ''}</span>`;
     const t = { queued: ['', `wave ${it.wave}`], merging: ['run', 'merging…'], merged: ['ok', 'merged · deploying…'], 'merged-hand': ['ok', 'merged ✓'],
       deploying: ['run', 'deploying…'], deployed: ['ok', 'deployed ✓'], failed: ['bad', 'deploy failed'], held: ['warn', 'waiting'],

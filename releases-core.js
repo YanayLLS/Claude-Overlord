@@ -401,7 +401,17 @@ async function deploySkipped(ghJson, repo, wf, sha) {
   return !deployTriggered(text, files.map(x => x.filename));
 }
 
-const api = { deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+// A merge's deploy, from its workflow runs (newest first): the newest run decides, so a re-run of a failed
+// deploy counts. 'none' (no run yet) | 'waiting' (on an environment's reviewers) | 'running' | 'success' | 'failure'
+function deployState(runs) {
+  const r = runs && runs[0];
+  if (!r) return 'none';
+  if (r.status === 'waiting') return 'waiting';
+  if (r.status !== 'completed') return 'running';
+  return r.conclusion === 'success' ? 'success' : 'failure';
+}
+
+const api = { deployState, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

@@ -15,7 +15,7 @@ const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's 
 const { execFile } = require('child_process');
 const os = require('os');
 const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas } = require('./releases-core');
-const { deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
+const { deployState, deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 const REFRESH_MS = 5 * 60 * 1000;
 const DEPLOYING_MS = 10 * 1000;       // re-read deploy runs this often while one is in flight…
@@ -692,26 +692,48 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     lastTeamEnd = end; // the first read only learns where things stand (no notification on startup)
   }
   // after a deploy that merged minutes ago (Release all resumed mid deploy-wait): same wait as a wave's
-  async function waitDeploys(list) {
-    const until = Date.now() + DEPLOY_WAIT_MS;
+  // hooks (Release all): onWait(x, why) while a run waits on someone, onFail(x, run) when it fails. With onFail
+  // a failed deploy doesn't end the wait: a re-run (or a fresh run on the same merge) that passes carries on,
+  // for up to FAIL_WAIT_MS after the failure.
+  const FAIL_WAIT_MS = 3 * 3600e3;
+  async function waitDeploys(list, hooks = {}) {
+    let until = Date.now() + DEPLOY_WAIT_MS;
     let pending = list;
     while (pending.length) {
       if (releaseAllStop) return { detail: 'Stopped by you' };
-      if (Date.now() > until) return { detail: `Deploys still running after 30 min: ${pending.map(x => x.label).join(', ')}` };
+      if (Date.now() > until) {
+        const failed = pending.find(x => x.failed);
+        if (failed) return { detail: `${failed.label} deploy failed — later waves not merged`, url: failed.failed.html_url, label: failed.label };
+        return { detail: `Deploys still running after 30 min: ${pending.map(x => x.label).join(', ')}` };
+      }
       await new Promise(r => setTimeout(r, DEPLOY_POLL_MS));
       const still = [];
       for (const x of pending) {
         const runs = await ghJson(['api', '-X', 'GET', `repos/${x.repo}/actions/workflows/${x.deploy}/runs`, '-f', `head_sha=${x.sha}`, '-f', 'per_page=5']);
-        const list = (runs.data && runs.data.workflow_runs) || [], done = list.find(r => r.status === 'completed');
+        const list = (runs.data && runs.data.workflow_runs) || [], newest = list[0], st = deployState(list);
         // no run at all a while after the merge: its paths filter may skip this change (nothing to deploy)
         if (!list.length && Date.now() - (x.mergedAt || (x.mergedAt = Date.now())) > 2 * 60e3 && !x.skipChecked) {
           x.skipChecked = true;
           if (await deploySkipped(ghJson, x.repo, x.deploy, x.sha).catch(() => false)) { x.skipped = true; continue; }
         }
-        if (!done) { still.push(x); continue; }
-        if (done.conclusion !== 'success') {
-          if (notify) notify(`❌ Release stopped · ${x.label} deploy failed`, 'Later waves were not merged', done.html_url);
-          return { detail: `${x.label} deploy failed — later waves not merged`, url: done.html_url, label: x.label };
+        // parked on an environment's required reviewers: nobody's late, so no timeout while it waits
+        if (st === 'waiting') {
+          until = Math.max(until, Date.now() + DEPLOY_WAIT_MS);
+          if (!x.awaiting && hooks.onWait) hooks.onWait(x, 'waiting for approval in GitHub');
+          x.awaiting = true; still.push(x); continue;
+        }
+        if (st === 'none' || st === 'running') { if (x.failed || x.awaiting) { x.failed = null; x.awaiting = false; if (hooks.onWait) hooks.onWait(x, null); } still.push(x); continue; }
+        if (st === 'failure') {
+          if (!hooks.onFail) {
+            if (notify) notify(`❌ Release stopped · ${x.label} deploy failed`, 'Later waves were not merged', newest.html_url);
+            return { detail: `${x.label} deploy failed — later waves not merged`, url: newest.html_url, label: x.label };
+          }
+          if (!x.failed || x.failed.run_attempt !== newest.run_attempt || x.failed.id !== newest.id) {
+            hooks.onFail(x, newest);
+            if (notify) notify(`❌ ${x.label} deploy failed`, '↻ Re-run it — the release carries on when it passes', newest.html_url);
+            until = Date.now() + FAIL_WAIT_MS;
+          }
+          x.failed = newest; still.push(x); continue;
         }
       }
       pending = still;
@@ -1179,7 +1201,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         relProgress({ status: 'deploying', detail: waits.flatMap(([, w]) => w.map(x => x.label)).join(', ') });
         for (const [R, w] of waits) markR(R, w.map(x => x.label), { s: 'deploying' });
         await Promise.all(waits.map(async ([R, w]) => {
-          const bad = await waitDeploys(w);
+          const bad = await waitDeploys(w, {
+            onWait: (x, why) => markR(R, [x.label], { s: 'deploying', why: why || undefined }),
+            onFail: (x) => markR(R, [x.label], { s: 'failed', why: '↻ Re-run it — the release carries on when it passes' }),
+          });
           if (bad) { if (bad.label) markR(R, [bad.label], { s: 'failed' }); stopR(R, bad.detail, bad.url); }
           else markR(R, w.map(x => x.label), { s: 'deployed' });
         }));
