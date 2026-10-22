@@ -1492,14 +1492,15 @@
     + `<h2>${title}</h2><div class="rl-sign-sub">${sub}</div>${body}`
     + `<div class="rl-sign-acts">${acts.map(([k, t, go]) => `<button${go ? ' class="go"' : ''} data-sign="${k}">${t}</button>`).join('')}</div></div>`;
   // The other half: my release just got its 2nd signature → the same window tells me it's ready, once per
-  // release and set of signers ("Later" keeps it away until someone else signs)
+  // release and set of signers ("Later" keeps it away until someone else signs); a release already under way
+  // (a wave merged) is past this point, its card says what's next
   let readyDismissed = null, shownReady = null;
   try { readyDismissed = localStorage.getItem('rl-ready-dismissed'); } catch {}
   function readyPrompt() {
     const st = state, me = String(((st && st.approvers) || {}).me || '').toLowerCase();
     if (!me || st.teamRun || (st.releaseAll && st.releaseAll.running && st.releaseAll.status === 'checking')) return null;
     const m = ((st.history && st.history.items) || []).find(x => x.status === 'pending' && (x.env || 'prod') === 'prod'
-      && x.openedBy && String(x.openedBy.login).toLowerCase() === me && !ReleasesCore.runHas(st.releaseAll, x.id) && releaseNext(st, x).act === 'release');
+      && x.openedBy && String(x.openedBy.login).toLowerCase() === me && !ReleasesCore.runHas(st.releaseAll, x.id) && !x.repos.some(r => r.mergeSha) && releaseNext(st, x).act === 'release');
     if (!m) return null;
     const signers = signersOf(m);
     const key = `${m.id}|${signers.slice().sort().join(',')}`;
@@ -1512,7 +1513,7 @@
         shownReady = r.key;
         const open = r.m.repos.filter(x => !x.mergeSha && !x.closed);
         return setOverlay(signOverlay, promptBox({ label: 'Release signed', icon: '✅', title: `Release ${esc(r.m.id)} is signed`,
-          sub: `${r.signers.map(x => '@' + esc(x)).join(' · ')} · 2/2`,
+          sub: `${r.signers.map(x => '@' + esc(x)).join(' · ')} · ${r.signers.length}/2`,
           body: '<div class="rl-sign-list">' + open.map(x => `<div class="rl-sign-row done"><b>${esc(x.label)}</b>${x.pr ? `<a data-url="${esc(x.pr.url)}">#${esc(x.pr.number)}</a>` : '<span></span>'}<span>✓ ready</span></div>`).join('') + '</div>',
           acts: [['later', 'Later'], ['review', 'Open'], ['release', '🚀 Release all', true]] }));
       }
