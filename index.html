@@ -3170,8 +3170,11 @@ blinkCaret();
 document.addEventListener('keydown', (e) => { if (e.target.classList && e.target.classList.contains('xterm-helper-textarea')) blinkCaret(); }, true);
 // One switch for "nobody's looking": body.bg pauses CSS animations (see the style block), the caret clock, the
 // status-line and summary tickers. Everything resumes on focus or when the tab is visible again.
+// Window focus comes from main (BrowserWindow focus/blur): document.hasFocus() goes false while you work
+// inside an embedded preview view, and the list beside it would freeze.
+let winFocused = true;
 function onBgChange() {
-  const bg = document.hidden || !document.hasFocus();
+  const bg = document.hidden || !winFocused;
   if (bg === document.body.classList.contains('bg')) return;
   document.body.classList.toggle('bg', bg);
   blinkCaret();
@@ -3203,7 +3206,7 @@ function createXterm(id) {
   const fitAddon = new XFitAddon();
   const terminal = new XTerminal({
     theme: xtermTheme(currentTheme), // theme-core.js
-    fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: false /* blinkCaret() below */, scrollback: 4000 /* ~12 B/cell × cols × lines, per terminal: 10000 lines × 200 cols ≈ 24 MB each */, cursorStyle: 'bar', cursorWidth: 2,
+    fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: false /* blinkCaret() below */, scrollback: 10000 /* ~12 B/cell × cols × lines: up to ~24 MB per terminal at 200 cols — kept, history is worth it */, cursorStyle: 'bar', cursorWidth: 2,
     allowProposedApi: true, // search highlight decorations (TERM_SEARCH_OPTS) throw without it
   });
   const searchAddon = new XSearchAddon();
@@ -4316,6 +4319,7 @@ function handleAgentMsg(msg) {
     case 'setupDone': su.result[msg.id] = msg.ok ? 'ok' : (msg.error || 'unknown error'); su.url[msg.id] = msg.url; break; // setupState follows and renders
     case 'perfUsage': renderPerf(msg); break;
     case 'sysIdle': prSysIdleMs = msg.ms; break;
+    case 'winFocus': winFocused = !!msg.focused; onBgChange(); break;
     case 'ramUsage': showTopRam(msg); break;
     case 'models': setModels(msg.models || [], msg.error); break;
     case 'branchList': if (_branchCbs[msg.repo]) _branchCbs[msg.repo](msg.branches, msg.error); break;

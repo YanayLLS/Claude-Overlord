@@ -417,9 +417,11 @@ function deployState(runs) {
 function releasePeriods({ modalOpen = false, inFlight = false, deploying = false } = {}) {
   const S = 1000, M = 60 * S;
   return {
+    // Closed board: only what nobody can see slows down. The footer badge (deploys) and "a release needs
+    // you" (ping) keep their cadence; the full refresh runs again the moment the board opens if it's stale.
     refresh: modalOpen ? 5 * M : 15 * M,
-    deploys: modalOpen ? (deploying ? 10 * S : 60 * S) : (deploying ? 30 * S : 180 * S),
-    ping: inFlight ? 15 * S : modalOpen ? 30 * S : 60 * S,
+    deploys: deploying ? 10 * S : 60 * S,
+    ping: inFlight ? 15 * S : 30 * S,
     stray: modalOpen ? 90 * S : 5 * M,
   };
 }

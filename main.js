@@ -73,7 +73,7 @@ const USAGE_POLL_MS = 60000;
 const USAGE_TIMEOUT_MS = 15000;
 const USAGE_STALE_MS = 60 * 60 * 1000; // 1 hour — fetch even when idle if data older than this
 const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
-const TEAM_POLL_MS = 10000; // reads + parses every ~/.claude/teams dir each tick
+const TEAM_POLL_MS = 3000; // reads + parses every ~/.claude/teams dir each tick — but returns early with no agents
 const TEAMS_DIR = path.join(os.homedir(), '.claude', 'teams');
 const TASKS_DIR = path.join(os.homedir(), '.claude', 'tasks');
 const SERVER_URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})\b[^\s)>\]'"]*/g;
@@ -2698,7 +2698,7 @@ function notifyPrDecision(pr, kind) {
 // every PR_CHECK_WATCH_MS each open PR's head commit ("owner/name@sha#checks" / "#status") catches CI from outside Actions.
 // ponytail: unchanged answers are free; a change costs one request, and the full poll it triggers is budgeted below.
 // If GitHub's secondary (per-minute) limit ever bites, slow PR_CHECK_WATCH_MS first.
-const PR_WATCH_MS = 30e3, PR_CHECK_WATCH_MS = 60e3; // 304s are free for the rate limit but each is a TLS round trip; 10 repos + 20 PRs was ~1 request/s
+const PR_WATCH_MS = 10e3, PR_CHECK_WATCH_MS = 30e3;
 // Nobody at the PC for AWAY_S (system idle, any app): background GitHub polling rests — PR timers and watch here,
 // the Releases board's loops via away. The first tick after you're back catches up.
 const AWAY_S = 15 * 60;
@@ -6057,8 +6057,8 @@ app.whenReady().then(() => {
     send(setupState()); // a missing git/claude shows the setup card before anything else
     if (recoveryNote) { send({ type: 'toast', text: recoveryNote }); recoveryNote = null; }
   });
-  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); switchKeyboardToEnglish(); if (Date.now() - _lastUpdateCheck > UPDATE_CHECK_MS) checkUpdatesNow(); });
-  mainWindow.on('blur', () => { _windowFocused = false; });
+  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); switchKeyboardToEnglish(); if (Date.now() - _lastUpdateCheck > UPDATE_CHECK_MS) checkUpdatesNow(); send({ type: 'winFocus', focused: true }); });
+  mainWindow.on('blur', () => { _windowFocused = false; send({ type: 'winFocus', focused: false }); });
   mainWindow.webContents.on('before-input-event', (_e, input) => {
     if (input.key === 'F12' && input.type === 'keyDown') {
       mainWindow.webContents.toggleDevTools();
@@ -6093,7 +6093,7 @@ app.whenReady().then(() => {
   });
   // Check for updates — only runs when packaged (not in dev, not in a sandboxed test instance)
   // Re-check so a long-running app catches new releases without a restart: every UPDATE_CHECK_MS,
-  // plus on focus once that long has passed (every minute was 2 880 GitHub fetches a day).
+  // plus on focus once that long has passed (every minute was 2 880 GitHub fetches a day; 5 min keeps the update button prompt).
   if (app.isPackaged && !process.env.OVERLORD_STATE_DIR) {
     setupAutoUpdater();
     setTimeout(() => { _lastUpdateCheck = Date.now(); autoUpdater.checkForUpdatesAndNotify(); }, 3000);
@@ -6105,7 +6105,7 @@ app.whenReady().then(() => {
   }
   if (_checkUpdates) setInterval(checkUpdatesNow, UPDATE_CHECK_MS);
 });
-const UPDATE_CHECK_MS = 30 * 60 * 1000;
+const UPDATE_CHECK_MS = 5 * 60 * 1000;
 let _checkUpdates = null, _lastUpdateCheck = 0;
 function checkUpdatesNow() { if (!_checkUpdates) return; _lastUpdateCheck = Date.now(); _checkUpdates(); }
 app.on('before-quit', () => {
