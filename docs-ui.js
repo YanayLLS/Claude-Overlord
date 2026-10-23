@@ -1,7 +1,7 @@
 // Markdown documents in the page: a Docs column beside the terminal (like the web preview column),
 // with the open files as tabs across its top. The agent's terminal stays where it is, so a plan an
-// agent is writing can be read while it writes: files the focused agent edits with Write/Edit open
-// here by themselves ("follow"), and every open file re-renders when it changes on disk.
+// agent is writing can be read while it writes: an open tab comes to the front when the focused
+// agent writes it ("follow"), and every open file re-renders when it changes on disk.
 // Rendering is marked + highlight.js, sanitized by DOMPurify (md-bundle.js); pure helpers come
 // from docs-core.js (page globals). index.html forwards { type: 'doc*' } messages to docsUi.onMsg,
 // tool completions to docsUi.onToolFile, and asks docsUi.hasFocus() before Ctrl+W / Ctrl+Tab / Ctrl+F.
@@ -11,12 +11,10 @@
   let selected = null;         // the tab shown
   let visible = false;         // the column is open
   let focused = false;         // the last click landed in the column (keyboard shortcuts go to it)
-  let follow = true;           // open what the focused agent writes
+  let follow = true;           // switch to an open tab the focused agent writes
   let find = { q: '', marks: [], i: -1 };
   let outlineOpen = false;
   let editing = false;         // the raw markdown is shown in the editor instead of the rendering
-  let hiddenByUser = false;    // the column was closed by hand with docs open: follow adds tabs, doesn't pop it back
-  let followPending = null;    // the doc follow would have shown while the column was hidden
   let zoom = 1;
   const pendingHash = new Map(); // doc path -> anchor to land on once it opens
   let refs = null;
@@ -42,13 +40,13 @@
     col.innerHTML = `<div id="doc-tabs"><div id="doc-tablist" role="tablist"></div>`
       + `<button id="doc-add" onclick="docsUi.addMenu(event)" title="New note / open .md…">${ICON.plus}</button><span class="doc-sp"></span><span id="doc-updated"></span>`
       + `<button id="doc-edit-btn" onclick="docsUi.toggleEdit()" title="Edit the markdown (Ctrl+E) · Ctrl+S saves">${ICON.pen}</button>`
-      + `<button id="doc-follow-btn" onclick="docsUi.toggleFollow()" title="Follow: open the .md files the focused agent writes">${ICON.eye}</button>`
+      + `<button id="doc-follow-btn" onclick="docsUi.toggleFollow()" title="Follow: jump to the open tab the focused agent writes">${ICON.eye}</button>`
       + `<button id="doc-outline-btn" onclick="docsUi.toggleOutline()" title="Outline">${ICON.list}</button>`
       + `<button onclick="docsUi.openFind()" title="Find in document (Ctrl+F)">${ICON.find}</button>`
       + `<button onclick="docsUi.toggle()" class="doc-col-x" title="Hide documents (Ctrl+Shift+D)" aria-label="Hide documents">&times;</button></div>`
       + `<div id="doc-path" hidden><span id="doc-path-text" title="Click to copy the path"></span><button onclick="docsUi.copyPath()" title="Copy path">${ICON.copy}</button><button onclick="docsUi.reveal()" title="Show in folder">${ICON.folder}</button><button onclick="docsUi.openWith()" title="Open in your editor">${ICON.ext}</button></div>`
       + '<div id="doc-find" hidden><input id="doc-find-input" type="text" placeholder="Find in document…" /><span id="doc-find-count"></span><button onclick="docsUi.findStep(-1)" title="Previous (Shift+Enter)">&#x25B2;</button><button onclick="docsUi.findStep(1)" title="Next (Enter)">&#x25BC;</button><button onclick="docsUi.closeFind()" title="Close (Esc)">&times;</button></div>'
-      + '<div id="doc-scroll"><div id="doc-meta"></div><article id="doc-view" class="md"></article><div id="doc-empty">No document open.<br><small>Press + above for a new note or to open an .md file, double-click one, or drop it here.<br>Files the focused agent writes open here by themselves.</small></div></div>'
+      + '<div id="doc-scroll"><div id="doc-meta"></div><article id="doc-view" class="md"></article><div id="doc-empty">No document open.<br><small>Press + above for a new note or to open an .md file, double-click one, or drop it here.</small></div></div>'
       + '<textarea id="doc-editor" class="md-src" hidden spellcheck="false" placeholder="Write markdown here — Ctrl+S saves."></textarea>'
       + '<nav id="doc-outline" hidden aria-label="Outline"></nav>';
     // Before the web preview column when it is already there, so the order is terminal · docs · preview.
@@ -225,11 +223,9 @@
     termWanted = 0;
   }
   function toggle() {
-    if (visible) { hiddenByUser = order.length > 0; setVisible(false); return; }
-    hiddenByUser = false;
+    if (visible) { setVisible(false); return; }
     setVisible(true);
-    const want = followPending && docs.has(followPending) ? followPending : null; followPending = null;
-    if (want) select(want); else if (!selected && order.length) select(order[order.length - 1]);
+    if (!selected && order.length) select(order[order.length - 1]);
   }
   // Opening the column must leave the roster readable: if the terminal plus the column would
   // squeeze it under 200px, the terminal gives way (its own saved width is untouched).
@@ -513,17 +509,16 @@
   }
 
   // ── Follow the agent ─────────────────────────────────────────────────────────────────
-  function toggleFollow() { follow = !follow; refs.followBtn.classList.toggle('active', follow); try { localStorage.setItem('overlord-doc-follow', follow ? '1' : '0'); } catch {} showToast(follow ? 'Following: the focused agent\'s .md edits open here' : 'Follow off'); }
-  // A Write/Edit of an .md by the focused agent just finished: show that file (the watcher keeps it
-  // current from here). Other agents' edits are left alone; the user is reading along with one.
-  // While the column is hidden by hand, the file is added as a tab (the header badge ticks up and
-  // pulses) and shown once the column is opened again, instead of popping the column back open.
+  function toggleFollow() { follow = !follow; refs.followBtn.classList.toggle('active', follow); try { localStorage.setItem('overlord-doc-follow', follow ? '1' : '0'); } catch {} showToast(follow ? 'Following: jumps to the open tab the focused agent writes' : 'Follow off'); }
+  // A Write/Edit of an .md by the focused agent just finished: if that file is already a tab in the
+  // open column, switch to it (the watcher keeps it current). Files the user never opened, and a
+  // hidden column, are left alone.
+  const normPath = (p) => String(p).replace(/\//g, '\\').toLowerCase();
   function onToolFile(agentId, toolName, file) {
-    if (!follow || agentId !== selectedId || !file || !MD_RE.test(file)) return;
+    if (!follow || !visible || agentId !== selectedId || !file || !MD_RE.test(file)) return;
     if (!/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(toolName || '')) return;
-    const quietAdd = !visible && hiddenByUser;
-    if (quietAdd) { followPending = file; refs.btn.classList.remove('pulse'); void refs.btn.offsetWidth; refs.btn.classList.add('pulse'); }
-    api.send({ type: 'docOpen', paths: [file], select: !quietAdd, quiet: true });
+    const p = order.find(k => normPath(k) === normPath(file));
+    if (p && p !== selected) select(p);
   }
 
   // ── Open / close / messages ────────────────────────────────────────────────────────
@@ -534,14 +529,13 @@
     const wasShown = selected === p;
     const next = wasShown ? nextAfterClose(order, p) : null;
     docs.delete(p); order = withoutDoc(order, p);
-    if (followPending === p) followPending = null;
     api.send({ type: 'docClose', path: p });
     if (wasShown) {
       selected = null; closeFind(); setOutline(false);
       if (next) select(next); else { refs.view.innerHTML = ''; refs.meta.innerHTML = ''; refs.updated.textContent = ''; refs.editor.value = ''; editing = false; }
     }
     renderTabs();
-    if (!order.length) { hiddenByUser = false; setVisible(false); }
+    if (!order.length) setVisible(false);
   }
   function closeSelected() { if (selected && visible) { close(selected); return true; } return false; }
   function cycle(dir) {
@@ -560,7 +554,6 @@
       docs.set(msg.path, d); if (fresh) order = [...order, msg.path];
       if (msg.select) {
         const hash = pendingHash.get(msg.path) || ''; pendingHash.delete(msg.path);
-        hiddenByUser = false;
         if (editing && !msg.edit) setEditing(false);
         select(msg.path, { hash });
         if (msg.edit) setEditing(true, { caretEnd: true });
