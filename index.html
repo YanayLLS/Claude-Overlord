@@ -4726,7 +4726,7 @@ function openUsageModal(key) {
 }
 // usageModalBack: 0 = the current window, 1 = the one before, … Past windows come from the reset
 // times stored with each reading, so they match the API's real sessions/weeks.
-let usageModalBack = 0, usageHistAll = false;
+let usageModalBack = 0, usageHistAll = false, usageStripMode = 'cap';
 function renderUsageModal() {
   if (!usageModalKey) return;
   const meters = usageMeters(currentUsage), m = meters.find(x => x.key === usageModalKey);
@@ -4740,22 +4740,20 @@ function renderUsageModal() {
     + `<button onclick="usageModalBack++;renderUsageModal()" ${usageModalBack >= wins.length - 1 ? 'disabled' : ''} aria-label="Previous ${unit}">‹</button>`
     + `<span>${usageModalBack ? usageModalBack + ' ' + unit + (usageModalBack > 1 ? 's' : '') + ' ago' : 'This ' + unit}</span>`
     + `<button onclick="usageModalBack--;renderUsageModal()" ${usageModalBack === 0 ? 'disabled' : ''} aria-label="Next ${unit}">›</button></div>`;
-  // Every window's final reading as a bar, oldest left; click one to open it.
-  const strip = wins.length > 1 ? `<div class="ut-strip" aria-label="Past ${unit}s">` + wins.map((w, i) => {
-    const back = wins.length - 1 - i, v = back === 0 ? m.pct : (w.last || 0);
-    return `<button class="${back === usageModalBack ? 'on' : ''}" onclick="usageModalBack=${back};renderUsageModal()" title="${escAttr(usageWhen(w.end, true))}: ${v.toFixed(1)}%"><i style="height:${Math.max(2, Math.min(100, v))}%"></i></button>`;
-  }).join('') + `</div>` : '';
-  // Same windows, bar = how big that window's 100% was. Shrinking bars = a smaller limit.
+  // One bar per window, oldest left; click one to open it. The switch picks what a bar measures:
+  // how big that window's 100% was (shrinking bars = a smaller limit) or how much of it was used.
   const caps = wins.map((w, i) => i === wins.length - 1 ? usageCapacity(usageCost[m.key], m.pct) : usageCapacity(w.usd, w.last));
   const capMax = Math.max(0, ...caps.filter(v => v != null));
-  const capStrip = wins.length > 1 && capMax ? `<div class="ut-strip ut-cap" aria-label="Size of 100% per ${unit}">` + wins.map((w, i) => {
-    const back = wins.length - 1 - i, c = caps[i];
-    return `<button class="${back === usageModalBack ? 'on' : ''}" onclick="usageModalBack=${back};renderUsageModal()" title="${escAttr(usageWhen(w.end, true))}: ${c == null ? 'not enough data' : '100% ≈ $' + Math.round(c).toLocaleString()}">${c == null ? '' : `<i style="height:${Math.max(2, c / capMax * 100)}%"></i>`}</button>`;
+  const mode = capMax ? usageStripMode : 'used';
+  const strip = wins.length > 1 ? `<div class="ut-strip" aria-label="Past ${unit}s">` + wins.map((w, i) => {
+    const back = wins.length - 1 - i, v = back === 0 ? m.pct : (w.last || 0), c = caps[i];
+    const [h, tip] = mode === 'cap' ? [c == null ? null : c / capMax * 100, c == null ? 'not enough data' : '100% ≈ $' + Math.round(c).toLocaleString()] : [Math.min(100, v), v.toFixed(1) + '%'];
+    return `<button class="${back === usageModalBack ? 'on' : ''}" onclick="usageModalBack=${back};renderUsageModal()" title="${escAttr(usageWhen(w.end, true))}: ${tip}">${h == null ? '' : `<i style="height:${Math.max(2, h)}%"></i>`}</button>`;
   }).join('') + `</div>` : '';
+  const sw = capMax ? `<div class="ut-switch" role="group">` + [['cap', '100% ≈'], ['used', 'Used']].map(([k, l]) => `<button class="${mode === k ? 'on' : ''}" onclick="usageStripMode='${k}';renderUsageModal()">${l}</button>`).join('') + `</div>` : '';
   document.getElementById('usage-modal-body').innerHTML = `<div class="ut-tabs">${tabs}${nav}</div>`
     + usagePanelHTML(m.key, 560, 240, usageModalBack ? win : undefined)
-    // both rows in one scroller, so each window's two bars stay in the same column
-    + (strip ? `<div class="ut-hist"><div class="ut-hist-labels"><span>Used</span>${capStrip ? '<span>100% ≈</span>' : ''}</div><div class="ut-hist-scroll">${strip}${capStrip}</div></div>` : '');
+    + (strip ? `<div class="ut-hist">${sw}<div class="ut-hist-scroll">${strip}</div></div>` : '');
   document.querySelector('#usage-modal-body .ut-strip .on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 function closeUsageModal() { usageModalKey = null; document.getElementById('usage-overlay').classList.remove('open'); }
