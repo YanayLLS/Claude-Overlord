@@ -18,8 +18,8 @@ async function waitGone(pid, ms, { alive = isAlive, kill = (p) => process.kill(p
   return true;
 }
 
-function createPtyClient({ pipePath, launchHost }) {
-  let sock = null, hostPid = null;
+function createPtyClient({ pipePath, launchHost, hostVersion = HOST_VERSION }) { // hostVersion: tests stand in for an older build
+  let sock = null, hostPid = null, stale = false, upgrading = false;
   const procs = new Map(); // key -> proxy
   const waiting = new Map(); // reply type -> [resolve]
 
@@ -90,17 +90,33 @@ function createPtyClient({ pipePath, launchHost }) {
     const hello = await request({ t: 'hello' }, 'hello');
     hostPid = hello.pid || null; // hosts from before v1.154.3 don't say
     // A host left over from an older build, with nothing running in it: replace it.
-    // With live agents it stays — they're worth more than the upgrade.
-    if (hello.version !== HOST_VERSION && hello.count === 0) {
-      out({ t: 'shutdown' });
-      sock = null; s.destroy();
-      await new Promise(r => setTimeout(r, 700));
-      return connect();
-    }
+    // With live agents it stays — they're worth more than the upgrade — until upgradeIfEmpty() finds it empty.
+    stale = hello.version !== hostVersion;
+    if (stale && hello.count === 0) return replaceHost(s);
+  }
+  async function replaceHost(s) {
+    out({ t: 'shutdown' });
+    sock = null; s.destroy();
+    await new Promise(r => setTimeout(r, 700));
+    return connect();
+  }
+  // The old host outlives app restarts by design, so a host fix only lands once it's gone: the moment
+  // nothing runs in a stale host (last agent closed, spare dropped), swap in the current one.
+  async function upgradeIfEmpty() {
+    if (!stale || !sock || upgrading) return false;
+    upgrading = true;
+    try {
+      const ptys = await request({ t: 'list' }, 'list').then(m => m.ptys);
+      if (ptys.length || !sock) return false;
+      await replaceHost(sock);
+      return !stale;
+    } catch { return false; } finally { upgrading = false; }
   }
 
   return {
     connect,
+    upgradeIfEmpty,
+    get stale() { return stale; },
     get connected() { return !!sock; },
     spawn(file, args, opts) {
       const key = crypto.randomUUID();

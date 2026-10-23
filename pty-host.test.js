@@ -124,3 +124,32 @@ test('host stamps each pty with its spawn window and reaps with the live set', a
   assert.deepStrictEqual(await host.reap(), [11]);
   host.stop();
 });
+
+// The host outlives the app, so a host fix only lands once the old host is gone. With agents in it the old one
+// stays; the moment it's empty the client swaps in the current build.
+test('a stale host with live ptys is kept, then replaced once it is empty', async () => {
+  const { HOST_VERSION } = require('./pty-host');
+  const pipePath = pipePathFor(path.join(os.tmpdir(), 'ov-pty-stale-' + process.pid));
+  const pty = fakePty();
+  const old = createHost({ pty, pipePath, version: HOST_VERSION - 1 });
+  await old.listen();
+  const seed = createPtyClient({ pipePath, launchHost: () => { throw new Error('up'); }, hostVersion: HOST_VERSION - 1 }); // the older build's own app
+  await seed.connect();
+  const proc = seed.spawn('cmd.exe', '/c claude', { cols: 80, rows: 24 }); // an agent lives in the old host
+  await tick();
+  let launched = 0;
+  const fresh = createHost({ pty: fakePty(), pipePath });
+  const c = createPtyClient({ pipePath, launchHost: () => { launched++; fresh.listen(); } });
+  const origExit = process.exit; process.exit = () => {}; // the old host's shutdown would end the test runner
+  try {
+    await c.connect();
+    assert.strictEqual(c.stale, true, 'older host, but it holds an agent: stays');
+    assert.strictEqual(await c.upgradeIfEmpty(), false);
+    assert.strictEqual(launched, 0);
+    c.kill(proc.key); await tick();
+    assert.strictEqual(await c.upgradeIfEmpty(), true, 'empty now: replaced');
+    assert.strictEqual(launched, 1);
+    assert.strictEqual(c.stale, false);
+    assert.strictEqual(await c.upgradeIfEmpty(), false, 'nothing left to do');
+  } finally { process.exit = origExit; old.stop(); fresh.stop(); }
+});

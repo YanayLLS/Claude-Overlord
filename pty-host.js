@@ -12,7 +12,7 @@
 const net = require('net');
 const fs = require('fs');
 
-const HOST_VERSION = 1;
+const HOST_VERSION = 2; // 2: reaps what node-pty leaks on a natural exit (below)
 const REPLAY_MAX = 256 * 1024; // chars of output kept per pty for a reattaching app
 const IDLE_EXIT_MS = 30 * 1000; // no ptys and no app → nothing to keep alive
 // ponytail: after a close, agents that were mid-turn finish and then sit at their prompt
@@ -58,7 +58,7 @@ function listConhostsWin32() {
   });
 }
 
-function createHost({ pty, pipePath, listConhosts = null, killPid = (pid) => process.kill(pid) }) {
+function createHost({ pty, pipePath, listConhosts = null, killPid = (pid) => process.kill(pid), version = HOST_VERSION }) {
   const ptys = new Map(); // key -> { proc, buf, spawnedAt, spawnedDoneAt }
   let client = null;
   let idleTimer = null;
@@ -107,7 +107,7 @@ function createHost({ pty, pipePath, listConhosts = null, killPid = (pid) => pro
   function handle(msg) {
     const p = ptys.get(msg.key);
     switch (msg.t) {
-      case 'hello': return out({ t: 'hello', version: HOST_VERSION, count: ptys.size, pid: process.pid });
+      case 'hello': return out({ t: 'hello', version, count: ptys.size, pid: process.pid });
       case 'spawn': return spawn(msg);
       case 'attach': return out(p ? { t: 'attached', key: msg.key, pid: p.proc.pid, replay: p.buf } : { t: 'attached', key: msg.key, gone: true });
       case 'list': return out({ t: 'list', ptys: [...ptys].map(([key, x]) => ({ key, pid: x.proc.pid })) });
@@ -116,6 +116,7 @@ function createHost({ pty, pipePath, listConhosts = null, killPid = (pid) => pro
       case 'kill': return kill(p);
       case 'shutdown':
         for (const x of ptys.values()) kill(x);
+        server.close(); // the pipe goes first, so a replacing host can take it and a reconnect can't land here
         return setTimeout(() => process.exit(0), 500); // let the kills land
     }
   }

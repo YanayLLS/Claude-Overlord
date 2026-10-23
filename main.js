@@ -5139,6 +5139,8 @@ setInterval(() => {
 // Periodically scan for teams
 setInterval(() => scanTeams(), TEAM_POLL_MS);
 setInterval(() => flog('memory ' + JSON.stringify(memorySummary())), 10 * 60 * 1000);
+// A pty host from an older build keeps running (agents live in it); once it's empty, swap in this build's.
+setInterval(() => { if (ptyHost.stale) ptyHost.upgradeIfEmpty().then(ok => { if (ok) flog('pty host upgraded to the current build'); }); }, 60 * 1000);
 
 // Periodically fetch usage — when user is active OR any agent is running OR data is stale
 function hasActiveAgents() { for (const a of agents.values()) { if (!a.isWaiting) return true; } return false; }
