@@ -3247,8 +3247,8 @@ function armClickupTimer() {
 let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
 // Set before any programmatic quit so the close confirmation doesn't block it.
 let forceQuit = false;
-const { parseModelWeekly, parseOauthUsage, carryModelWeekly, appendUsageSample, usageMeters } = require('./usage-core');
-const { scanCosts, sumCost } = require('./api-cost');
+const { parseModelWeekly, parseOauthUsage, carryModelWeekly, appendUsageSample, usageMeters, stampWindowCosts } = require('./usage-core');
+const { scanCosts, sumCost, KEEP_MS: COST_KEEP_MS } = require('./api-cost');
 // What each meter's current window would have cost at API prices, from every transcript on this machine.
 // The transcript walk (every .jsonl under ~/.claude/projects, stat'd one by one) runs at most every
 // COST_SCAN_MS; the per-meter sums from the cached rows are cheap and follow every usage poll.
@@ -3267,6 +3267,8 @@ async function sendUsageCost(usage) {
     }
     lastUsageCost = cost;
     send({ type: 'usageCost', cost });
+    // Each window's $ rides in the history, so past weeks/sessions keep their "100% = $X" after the transcripts age out.
+    stampWindowCosts(loadUsageHistory()[usageAccountKey()], usageMeters(usage), now, sumCost, now - COST_KEEP_MS);
   } catch (e) { console.log('[Overlord] API cost scan failed:', e.message); }
   finally { costScanning = false; }
 }

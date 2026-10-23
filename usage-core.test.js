@@ -46,6 +46,29 @@ const { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly } = requ
   assert.strictEqual(usageWindows([], 'w', 7 * 86400000, 0, 1000).length, 1); // no history: just "now"
 }
 
+// ── usageWindows carries each window's $; usageCapacity turns $ + % into "100% = $X"
+{
+  const { usageWindows, usageCapacity, stampWindowCosts } = require('./usage-core');
+  const H = 3600000, S = 5 * H;
+  const pts = [{ t: 1 * H, h: 10, 'h@': 5 * H }, { t: 4 * H, h: 40, 'h@': 5 * H, 'h$': 20 }];
+  assert.strictEqual(usageWindows(pts, 'h', S, 0, 6 * H)[0].usd, 20);
+  assert.strictEqual(usageCapacity(20, 40), 50);
+  assert.strictEqual(usageCapacity(1, 4), null);    // under 10% the rounding swamps it
+  assert.strictEqual(usageCapacity(null, 40), null);
+  assert.strictEqual(usageCapacity(0, 40), null);     // no transcripts for it (other device / model id mismatch)
+  // stamping: newest point gets the live window $, each past window's last point is backfilled once
+  const hist = [{ t: 1 * H, h: 10, 'h@': 5 * H }, { t: 4 * H, h: 40, 'h@': 5 * H }, { t: 9 * H, h: 20, 'h@': 12 * H }];
+  const calls = [];
+  const cost = (a, b, model) => { calls.push([a / H, b / H, model]); return b / H; };
+  stampWindowCosts(hist, [{ key: 'h', span: S, reset: 12 * H }], 9 * H, cost);
+  assert.deepStrictEqual(hist.map(p => p['h$']), [undefined, 4, 9]);
+  assert.deepStrictEqual(calls, [[7, 9, ''], [0, 4, '']]);
+  calls.length = 0;
+  stampWindowCosts(hist, [{ key: 'h', span: S, reset: 12 * H }], 9 * H, cost);
+  assert.deepStrictEqual(calls, [[7, 9, '']]);       // the past window is not recomputed
+  stampWindowCosts([{ t: 1, 'm:fable': 5, 'm:fable@': 9 }], [{ key: 'm:fable', span: 5, reset: 9 }], 1, (a, b, m) => { assert.strictEqual(m, 'fable'); return 1; });
+}
+
 // ── parseModelWeekly ──────────────────────────────────
 assert.deepStrictEqual(parseModelWeekly({}), []);
 assert.deepStrictEqual(parseModelWeekly(null), []);

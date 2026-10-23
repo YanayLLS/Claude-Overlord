@@ -51,7 +51,7 @@ function parseLine(line) {
 
 // Per-file cache: only bytes appended since the last scan are read. { size, rows }
 const files = new Map();
-const KEEP_MS = 8 * 86400000;
+const KEEP_MS = 15 * 86400000; // last week's whole window, so it can be compared with this one
 
 function jsonlFiles(dir, since, out) {
   let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
@@ -97,4 +97,4 @@ function sumCost(start, end, model) {
   return usd;
 }
 
-module.exports = { priceFor, usageCost, parseLine, scanCosts, sumCost, _files: files };
+module.exports = { KEEP_MS, priceFor, usageCost, parseLine, scanCosts, sumCost, _files: files };

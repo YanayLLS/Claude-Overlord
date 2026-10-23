@@ -106,10 +106,36 @@ function usageWindows(points, key, span, currentReset, now) {
   ends.add(cur);
   return [...ends].sort((a, b) => a - b).filter(e => e <= cur).map(end => {
     const start = end - span;
-    let last = null;
-    for (const p of points || []) if (p.t > start && p.t <= end && p[key] != null) last = p[key];
-    return { start, end, last };
+    let last = null, usd = null;
+    for (const p of points || []) if (p.t > start && p.t <= end && p[key] != null) { last = p[key]; usd = p[key + '$'] ?? null; }
+    return { start, end, last, usd };
   }).filter((w, i, all) => w.last != null || i === all.length - 1);
+}
+
+// What a full 100% of a window is worth at API prices, from what it cost to reach pct.
+// The point of it: two weeks both "at 100%" can be different sizes, and this shows it.
+// ponytail: counts this machine's transcripts only, every login's; use elsewhere, or two logins at once, skews it.
+// Upgrade path: drop transcripts of agents pinned to another login (main.js agentAccountEnv).
+function usageCapacity(usd, pct) {
+  return !(usd > 0) || !(pct >= 10) ? null : usd / pct * 100;
+}
+
+// Writes '<key>$' (the window's $ so far) onto history points: the newest point always, and the
+// last point of each past window once. costFn(start, end, model) reads the transcripts, so
+// windows that started before `since` (older than the scanned transcripts) are left alone.
+function stampWindowCosts(points, meters, now, costFn, since = -Infinity) {
+  if (!points || !points.length) return;
+  for (const m of meters) {
+    const model = m.key.startsWith('m:') ? m.key.slice(2) : '';
+    const newest = points[points.length - 1];
+    if (newest[m.key] != null) newest[m.key + '$'] = costFn((m.reset > now ? m.reset : now) - m.span, now, model);
+    const lastOf = new Map();
+    for (const p of points) if (p !== newest && p[m.key] != null && p[m.key + '@']) lastOf.set(p[m.key + '@'], p);
+    for (const [reset, p] of lastOf) {
+      if (reset === newest[m.key + '@'] || p[m.key + '$'] != null || reset - m.span < since) continue;
+      p[m.key + '$'] = costFn(reset - m.span, p.t, model);
+    }
+  }
 }
 
 // SVG of one meter's % across its window [start, end]: line + area, a dashed "on pace"
@@ -147,5 +173,5 @@ function usageChartSvg(points, key, start, end, W = 280, H = 110) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageChartSvg, MODEL_7D_RE };
+  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageCapacity, stampWindowCosts, usageChartSvg, MODEL_7D_RE };
 }

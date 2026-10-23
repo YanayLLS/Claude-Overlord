@@ -4685,11 +4685,18 @@ function usagePanelHTML(key, W, H, win) {
   const foot = past
     ? `<span>${usageWhen(start, long)} – ${usageWhen(end, long)}</span><span>Ended at ${pct.toFixed(1)}%</span>`
     : `<span><i class="ut-key-pace"></i>On pace: ${Math.round(expected)}% by now</span>${m.reset ? `<span>Resets ${escapeHtml(usageWhen(m.reset, long))}</span>` : ''}`;
-  const usd = past ? null : usageCost[key];
-  const costRow = usd == null ? '' : `<div class="ut-foot" title="Tokens in every Claude Code transcript on this machine this window, priced at pay-per-token API rates per model"><span>At API prices</span><span class="ut-cost">$${usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>`;
+  const usd = past ? win.usd : usageCost[key];
+  const money = v => '$' + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const costRow = usd == null ? '' : `<div class="ut-foot" title="Tokens in every Claude Code transcript on this machine this window, priced at pay-per-token API rates per model"><span>At API prices</span><span class="ut-cost">${money(usd)}</span></div>`;
+  // How big this window's 100% is, against the average of the (up to) 4 windows before it.
+  const cap = usageCapacity(usd, pct); // usage-core.js
+  const before = usageWindows(usageHist, key, m.span, m.reset, now).filter(w => w.end < end - 60000).slice(-4).map(w => usageCapacity(w.usd, w.last)).filter(v => v != null);
+  const avg = before.length ? before.reduce((a, b) => a + b, 0) / before.length : null;
+  const diff = cap != null && avg ? Math.round((cap / avg - 1) * 100) : null;
+  const capRow = cap == null ? '' : `<div class="ut-foot" title="What a full 100% is worth at API prices: $ so far ÷ % used. Counts this machine's transcripts: use on other devices skews it, and so does using two logins in the same window."><span>100% ≈</span><span class="ut-cost">${money(cap)}${diff == null ? '' : ` <span class="ut-diff ${diff <= -10 ? 'down' : diff >= 10 ? 'up' : ''}" title="vs avg of last ${before.length} ${long ? 'week' : 'session'}${before.length > 1 ? 's' : ''} (${money(avg)})">${diff > 0 ? '▲' : diff < 0 ? '▼' : ''}${Math.abs(diff)}%</span>`}</span></div>`;
   return `<div class="ut-head"><span>${escapeHtml(m.label)}${past ? ' <span class="ut-past">past</span>' : ''}</span><span class="ut-pct um-pct ${cls}">${pct == null ? '–' : pct.toFixed(1) + '%'}</span></div>`
     + usageChartSvg(usageHist, key, start, end, W, H)
-    + `<div class="ut-foot">${foot}</div>` + costRow;
+    + `<div class="ut-foot">${foot}</div>` + costRow + capRow;
 }
 const usageTip = document.createElement('div');
 usageTip.id = 'usage-tip'; usageTip.setAttribute('role', 'tooltip');
@@ -4737,8 +4744,15 @@ function renderUsageModal() {
     const back = wins.length - 1 - i, v = back === 0 ? m.pct : (w.last || 0);
     return `<button class="${back === usageModalBack ? 'on' : ''}" onclick="usageModalBack=${back};renderUsageModal()" title="${escAttr(usageWhen(w.end, true))}: ${v.toFixed(1)}%"><i style="height:${Math.max(2, Math.min(100, v))}%"></i></button>`;
   }).join('') + `</div>` : '';
+  // Same windows, bar = how big that window's 100% was. Shrinking bars = a smaller limit.
+  const caps = wins.map((w, i) => i === wins.length - 1 ? usageCapacity(usageCost[m.key], m.pct) : usageCapacity(w.usd, w.last));
+  const capMax = Math.max(0, ...caps.filter(v => v != null));
+  const capStrip = wins.length > 1 && capMax ? `<div class="ut-strip ut-cap" aria-label="Size of 100% per ${unit}"><span>100%</span>` + wins.map((w, i) => {
+    const back = wins.length - 1 - i, c = caps[i];
+    return `<button class="${back === usageModalBack ? 'on' : ''}" onclick="usageModalBack=${back};renderUsageModal()" title="${escAttr(usageWhen(w.end, true))}: ${c == null ? 'not enough data' : '100% ≈ $' + Math.round(c).toLocaleString()}">${c == null ? '' : `<i style="height:${Math.max(2, c / capMax * 100)}%"></i>`}</button>`;
+  }).join('') + `</div>` : '';
   document.getElementById('usage-modal-body').innerHTML = `<div class="ut-tabs">${tabs}${nav}</div>`
-    + usagePanelHTML(m.key, 560, 240, usageModalBack ? win : undefined) + strip;
+    + usagePanelHTML(m.key, 560, 240, usageModalBack ? win : undefined) + strip + capStrip;
 }
 function closeUsageModal() { usageModalKey = null; document.getElementById('usage-overlay').classList.remove('open'); }
 function handleUsageHistory(points, since) {

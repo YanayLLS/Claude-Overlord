@@ -37,7 +37,7 @@ console.log('api-cost ok');
 // Per-file cache entries for transcripts that aged out of the window are dropped, not just their rows.
 {
   const os = require('os'), fs = require('fs'), path = require('path');
-  const { scanCosts, _files } = require('./api-cost');
+  const { scanCosts, _files, KEEP_MS } = require('./api-cost');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-cost-'));
   const old = path.join(root, 'old.jsonl'), fresh = path.join(root, 'fresh.jsonl');
   fs.writeFileSync(old, line + '\n'); fs.writeFileSync(fresh, line + '\n');
@@ -45,7 +45,7 @@ console.log('api-cost ok');
   (async () => {
     await scanCosts(root, now);
     assert.ok(_files.has(old) && _files.has(fresh));
-    const stale = new Date(now - 9 * 86400000); fs.utimesSync(old, stale, stale);
+    const stale = new Date(now - KEEP_MS - 86400000); fs.utimesSync(old, stale, stale);
     await scanCosts(root, now);
     assert.ok(!_files.has(old), 'aged-out transcript leaves the cache');
     assert.ok(_files.has(fresh));
