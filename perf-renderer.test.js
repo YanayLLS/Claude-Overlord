@@ -8,11 +8,10 @@ const read = f => fs.readFileSync(__dirname + '/' + f, 'utf8');
 test('md-bundle.js and world.css load on demand, not with the page', () => {
   const html = read('index.html');
   assert.ok(!/<script[^>]*src="\.\/md-bundle\.js"/.test(html), 'md-bundle.js is 223 KB; docs-ui loads it with the first document');
-  assert.ok(!/<link[^>]*href="\.\/world\.css"/.test(html), 'world.css rides along in loadWorld()');
-  assert.match(html, /function loadWorld\(\)[\s\S]*world\.css/);
+  // world.css must stay eager: it also carries the "world off" rules for shared markup (#term-order & co.)
+  assert.ok(/<link[^>]*href="\.\/world\.css"/.test(html), 'world.css is linked in the head');
   assert.match(read('docs-ui.js'), /function loadMd\(\)[\s\S]*md-bundle\.js/);
-  // the world's static markup must still be hidden before world.css arrives
-  assert.match(html, /#world-stage, #world-roster-grip[^{]*\{ display:none; \}/);
+
 });
 
 test('no :has() on the PR foot or dropdown, no backdrop-filter, no animated box-shadow', () => {

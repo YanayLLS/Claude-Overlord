@@ -4,11 +4,10 @@
 <meta charset="UTF-8" />
 <title>Overlord</title>
 <link rel="stylesheet" href="./xterm.css" />
+<link rel="stylesheet" href="./world.css" />
 <style>
-/* world.css (63 KB) loads with the world (loadWorld). These are its "world off" base rules, so the world's static
-   markup stays hidden before then; once loaded, its body.world-mode rules win on specificity exactly as before. */
-#world-stage, #world-roster-grip, #world-roster-hide, #world-roster-tab, #world-counters, #world-attn, #world-extra, #quest-log, #quest-log-dim { display:none; }
-body:not(.world-on) #hdr-world, body:not(.world-on) .help-world { display:none !important; }
+/* world.css stays eager: besides the island it carries "world off" base rules for shared markup (#term-order, #conversation,
+   #term-dossier…) — loading it lazily once left the order bar unstyled in the plain view. 63 KB of CSS is not worth that. */
 /* Window blurred or hidden: decorative animations stop painting. Nothing relies on animationend for logic
    (done-flash only clears its own class), so pausing is safe; focus/visibility restores them where they were. */
 body.bg *, body.bg *::before, body.bg *::after { animation-play-state:paused !important; }
@@ -7357,9 +7356,7 @@ let worldEnabled = false, _worldLoad = null;
 function loadWorld() {
   if (window.World) return Promise.resolve();
   const add = src => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error(src + ' failed to load')); document.head.appendChild(el); });
-  const css = href => new Promise((res, rej) => { const el = document.createElement('link'); el.rel = 'stylesheet'; el.href = href; el.onload = res; el.onerror = () => rej(new Error(href + ' failed to load')); document.head.appendChild(el); });
-  // world.css rides along: its "world off" base rules are inlined in the head, so nothing shows before it's here
-  return _worldLoad || (_worldLoad = Promise.all([css('./world.css'), add('./three-bundle.js').then(() => add('./world.js'))]).catch(e => { _worldLoad = null; throw e; }));
+  return _worldLoad || (_worldLoad = add('./three-bundle.js').then(() => add('./world.js')).catch(e => { _worldLoad = null; throw e; }));
 }
 function setWorldEnabled(on, persist = true, view = true) {
   worldEnabled = !!on;
