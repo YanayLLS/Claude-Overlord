@@ -26,6 +26,10 @@ const defaultPartitionFor = (id) => `persist:overlord-agent-${id}`;
 
 function createRegistry({ makeView, attach, detach, onErrorCount, onNavigated = () => {}, partitionFor = defaultPartitionFor }) {
   const entries = new Map(); // agentId -> { view, errors, actions, partition }
+  // A dev-server URL seen in an agent's output before anything asked for its browser. The view is
+  // created (a whole renderer process) only on first show / first browser tool call, and loads this
+  // then; the first action waits for that load, so navigate-less snapshot/click see the page.
+  const primed = new Map(); // agentId -> url
 
   const park = (view) => { view.setVisible(false); view.setBounds({ ...view.getBounds(), ...PARKED }); };
 
@@ -54,15 +58,26 @@ function createRegistry({ makeView, attach, detach, onErrorCount, onNavigated = 
     const entry = { view, errors: null, actions: null, partition, lastNavAt: 0 };
     wireNavigation(id, view.webContents, onNavigated, rebinder.isSuppressed, () => { entry.lastNavAt = Date.now(); });
     wireNetworkErrors(partition, errors);
-    const actions = createActions({
+    const raw = createActions({
       getWebContents: () => { const e = entries.get(id); return e ? e.view.webContents : null; },
       errors,
       rebindInput: rebinder.rebind,
     });
+    const actions = {};
+    for (const [k, f] of Object.entries(raw)) actions[k] = async (...a) => { if (entry.priming) { await entry.priming.catch(() => {}); entry.priming = null; } return f(...a); };
     entry.errors = errors; entry.actions = actions;
     entries.set(id, entry);
     establishViewport(view);
+    const url = primed.get(id);
+    if (url) { primed.delete(id); entry.priming = raw.navigate(url); entry.priming.catch(() => {}); }
     return view;
+  }
+
+  // Remember (or, if the browser already exists, load) the agent's dev-server URL.
+  function prime(id, url) {
+    const e = entries.get(id);
+    if (!e) return primed.set(id, url);
+    e.priming = e.actions.navigate(url); e.priming.catch(() => {}); // the next action waits for this load too
   }
 
   function show(id, b) {
@@ -78,6 +93,7 @@ function createRegistry({ makeView, attach, detach, onErrorCount, onNavigated = 
   }
 
   function destroy(id) {
+    primed.delete(id);
     const entry = entries.get(id);
     if (!entry) return;
     try { detach(entry.view); } catch {}
@@ -93,7 +109,7 @@ function createRegistry({ makeView, attach, detach, onErrorCount, onNavigated = 
   // True when some agent view loaded within the last `ms` — the moment a view steals focus from the terminal.
   const navigatedWithin = (ms, now = Date.now()) => [...entries.values()].some(e => now - e.lastNavAt < ms);
 
-  return { ensure, show, hideAll, has, errorsFor, actionsFor, destroy, destroyAll, navigatedWithin };
+  return { ensure, show, hideAll, has, errorsFor, actionsFor, prime, destroy, destroyAll, navigatedWithin };
 }
 
 module.exports = { createRegistry, DEFAULT_VIEW_WIDTH, DEFAULT_VIEW_HEIGHT };

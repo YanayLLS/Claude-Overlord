@@ -75,8 +75,14 @@
     parts.push(p);
   }
 
+  // A full-window canvas redraw is the cost here: ~30 fps is plenty for flames, and nothing at all while the window
+  // is blurred or hidden (the particles keep their state and pick up on focus).
+  const FRAME_MS = 1000 / 30;
+  const hidden = () => document.hidden || !document.hasFocus();
   function frame(now) {
     raf = 0;
+    if (hidden()) { last = 0; return; }
+    if (last && now - last < FRAME_MS - 1) { raf = requestAnimationFrame(frame); return; }
     const dt = Math.min(0.05, (now - (last || now)) / 1000); last = now;
     const time = now / 1000;
     if (stage) {
@@ -142,13 +148,15 @@
     if (stage || parts.length) raf = requestAnimationFrame(frame); else last = 0;
   }
 
+  const run = () => { if ((stage || parts.length) && !raf && !hidden()) raf = requestAnimationFrame(frame); };
+  addEventListener('focus', run); document.addEventListener('visibilitychange', run);
   window.PrFire = {
     // footRect: the PR foot's bounding rect, where stages 1-7 burn from.
     set(s, footRect) {
       if (!cv) init();
       stage = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : s | 0; rect = footRect || rect; // reduced motion: the red foot is enough
       if (!stage) acc = { spark: 0, ember: 0, flame: 0, smoke: 0 };
-      if ((stage || parts.length) && !raf) raf = requestAnimationFrame(frame);
+      run();
     },
   };
 })();

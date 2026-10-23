@@ -150,7 +150,7 @@ html, body { font-family: 'Geist', 'Segoe UI Variable Text', 'Segoe UI', system-
 #term-container .xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 999px; }
 #term-scroll-nav { gap: 8px; right: 22px; }
 #term-scroll-nav button { width: 30px; height: 30px; line-height: 28px; font-size: 13px; opacity: .85; color: var(--subtext);
-  background: rgba(28,28,32,.75); border: 1px solid var(--border-hi); backdrop-filter: blur(8px); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+  background: rgba(28,28,32,.92); border: 1px solid var(--border-hi); box-shadow: 0 4px 14px rgba(0,0,0,.35); } /* no backdrop-filter: it re-blurs on every terminal redraw beneath */
 #term-scroll-nav button:hover { background: var(--surface1); color: var(--text); opacity: 1; }
 #prompt-rail .pr-pop { background: var(--pop); border: none; box-shadow: var(--pop-shadow); }
 #prompt-rail .pr-dashes i.on { background: var(--accent); }
@@ -275,16 +275,22 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-badge::before, #actions-badge:not(.running)::before { width: 13px; height: 13px; }
 #pr-badge.alert, #actions-badge.alert { background: rgba(248,113,113,.14); color: var(--red); border-color: rgba(248,113,113,.3); }
 /* Footer takes the PR state's colour and breathes softly: red = teammates' PRs to approve, green = mine approved, waiting for my merge */
-#list-foot:has(#pr-badge.alert, #pr-badge.split), #list-foot.heat-debug { --pf: 255,77,77; --pa: calc(.26 + var(--heat, 0) * .5); --pg: calc(.55 + var(--heat, 0) * .4); border-top-width: 2px; }
-#list-foot:has(#pr-badge.ready) { --pf: 74,222,128; }
-#list-foot:has(#pr-badge.alert, #pr-badge.split, #pr-badge.ready), #list-foot.heat-debug { background: rgba(var(--pf),var(--pa,.09)); border-top-color: rgba(var(--pf),.75); animation: pr-foot-glow 2.6s ease-in-out infinite; }
-#pr-badge.alert, #pr-badge.ready, #pr-badge.split { color: #fff; border-color: transparent; font-weight: 600; animation: pr-chip-glow 2.6s ease-in-out infinite; }
+/* .pr-red / .pr-green are set by renderPrBadge with the badge's class: :has(#pr-badge.alert) would re-evaluate on every style change in the column.
+   The glows are static shadows on ::after pseudo-elements whose opacity breathes — animating box-shadow repaints the foot every frame. */
+#list-foot.pr-red, #list-foot.heat-debug { --pf: 255,77,77; --pa: calc(.26 + var(--heat, 0) * .5); --pg: calc(.55 + var(--heat, 0) * .4); border-top-width: 2px; }
+#list-foot.pr-green { --pf: 74,222,128; }
+#list-foot.pr-red, #list-foot.pr-green, #list-foot.heat-debug { background: rgba(var(--pf),var(--pa,.09)); border-top-color: rgba(var(--pf),.75); }
+#list-foot.pr-red::after, #list-foot.pr-green::after, #list-foot.heat-debug::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  box-shadow: inset 0 0 18px rgba(var(--pf),var(--pg,.22)); animation: pr-foot-glow 2.6s ease-in-out infinite; }
+#pr-badge.alert, #pr-badge.ready, #pr-badge.split { position: relative; color: #fff; border-color: transparent; font-weight: 600; }
+#pr-badge.alert::after, #pr-badge.ready::after, #pr-badge.split::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 12px 1px rgba(var(--pf),.8); animation: pr-chip-glow 2.6s ease-in-out infinite; }
 #pr-badge.alert, #pr-badge.alert:hover { background: #ff3b3b; }
 #pr-badge.ready, #pr-badge.ready:hover { background: #3fae68; }
 #pr-badge.split, #pr-badge.split:hover { background: linear-gradient(90deg, #ff3b3b 50%, #3fae68 50%); }
 #pr-badge.alert:hover, #pr-badge.ready:hover, #pr-badge.split:hover { color: #fff; filter: brightness(1.1); }
-@keyframes pr-foot-glow { 50% { box-shadow: inset 0 0 18px rgba(var(--pf),var(--pg,.22)); } }
-@keyframes pr-chip-glow { 50% { box-shadow: 0 0 12px 1px rgba(var(--pf),.8); } }
+@keyframes pr-foot-glow { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes pr-chip-glow { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
 /* Heat stages (applyPrHeat): the flames are pr-fire.js's canvas; this layer holds it, the rage glow and the Approve button */
 #pr-fire { display: none; position: fixed; inset: 0; z-index: 9000; pointer-events: none; }
 #pr-fire:not([data-stage="0"]) { display: block; }
@@ -303,8 +309,8 @@ body:not(.world-mode) #term-header { display: none; }
 #pr-fire:is([data-stage="8"], [data-stage="9"], [data-stage="10"]) .pr-fire-cta { display: block; bottom: 18vh; padding: 14px 28px; font-size: 20px; border-width: 3px; }
 @keyframes pr-cta-pulse { to { transform: translateX(-50%) scale(1.06); } }
 /* PR list open: the fire backs off so the list (and its Approve buttons) can be read */
-body:has(#pr-dropdown[style*="block"]) #pr-fire { opacity: .12; transition: opacity .3s; }
-body:has(#pr-dropdown[style*="block"]) #pr-fire .pr-fire-cta { display: none; }
+body.pr-open #pr-fire { opacity: .12; transition: opacity .3s; } /* body.pr-open: a MutationObserver on the dropdown's style (index.html), cheaper than body:has() */
+body.pr-open #pr-fire .pr-fire-cta { display: none; }
 #pr-fire.dissolve::before, #pr-fire.dissolve .pr-fire-cta { opacity: 0; transition: opacity 1.2s ease-out; }
 #pr-heat-debug { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 100001; display: flex; align-items: center; gap: 8px; padding: 6px 12px;
   border-radius: 8px; background: var(--surface0); border: 1px solid var(--border); color: var(--text); font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
@@ -312,8 +318,8 @@ body:has(#pr-dropdown[style*="block"]) #pr-fire .pr-fire-cta { display: none; }
 #pr-heat-debug button { border: 0; background: none; color: var(--subtext); cursor: pointer; font-size: 12px; padding: 0 2px; }
 #pr-heat-debug button:hover { color: var(--text); }
 #pr-heat-debug b { font-weight: 600; min-width: 160px; font-variant-numeric: tabular-nums; }
-@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge, #pr-fire::before, #pr-fire .pr-fire-cta { animation: none !important; } }
-#list-foot { position: relative; }
+@media (prefers-reduced-motion: reduce) { #list-foot, #pr-badge, #pr-fire::before, #pr-fire .pr-fire-cta { animation: none !important; } #list-foot::after, #pr-badge::after { display: none; } }
+#list-foot { position: relative; isolation: isolate; } /* isolate: the glow pseudo at z-index -1 paints over the foot's background, under its chips */
 #pr-nag { position: absolute; left: 10px; bottom: calc(100% + 8px); z-index: 50; max-width: min(260px, calc(100% - 20px)); flex-direction: column; gap: 2px;
   padding: 8px 12px; border-radius: 10px; background: var(--red); color: #11111b; font-size: 11.5px; cursor: pointer;
   box-shadow: 0 6px 20px rgba(0,0,0,.4); animation: pr-nag-in .3s ease-out, pr-nag-bob 2.4s ease-in-out .3s infinite; }

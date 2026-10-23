@@ -3,7 +3,8 @@
 // unknown flags, any non-200/304 answer — runs `gh` exactly as before, so callers see the same { data } | { error }.
 // Once GitHub says the limit is hit (403/429 with remaining 0 or Retry-After), every REST call through here waits
 // until the reset instead of hammering it; blockedUntil() lets other callers (the PR watch) honour the same pause.
-const MAX_ENTRIES = 600; // ponytail: LRU by insertion, plenty for the board's per-repo/per-sha URLs
+const MAX_ENTRIES = 600; // LRU by insertion, plenty for the board's per-repo/per-sha URLs…
+const MAX_BYTES = 8 * 1024 * 1024; // …but entries are whole bodies (a workflow-run list is 50-150 KB), so the size caps first
 
 function parseGet(args) {
   if (args[0] !== 'api' || typeof args[1] !== 'string') return null;
@@ -28,6 +29,7 @@ function parseGet(args) {
 
 function createGhCache({ run, fetch, token, now = Date.now }) {
   const cache = new Map();
+  let bytes = 0;
   let blocked = 0;
   const limitedUntil = (r) => {
     if (r.status !== 403 && r.status !== 429) return 0;
@@ -55,8 +57,12 @@ function createGhCache({ run, fetch, token, now = Date.now }) {
         const until = limitedUntil(r);
         if (until) { if (until > blocked) blocked = until; return pausedError(); }
         if (r.status === 200) {
-          const data = await r.json(), etag = r.headers.get('etag');
-          if (etag) { cache.delete(url); cache.set(url, { etag, data }); if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value); }
+          const text = await r.text(), data = JSON.parse(text), etag = r.headers.get('etag');
+          if (etag) {
+            const old = cache.get(url); if (old) { bytes -= old.bytes; cache.delete(url); }
+            cache.set(url, { etag, data, bytes: text.length }); bytes += text.length;
+            while (cache.size > MAX_ENTRIES || bytes > MAX_BYTES) { const k = cache.keys().next().value; bytes -= cache.get(k).bytes; cache.delete(k); }
+          }
           return { data };
         }
       } catch {}

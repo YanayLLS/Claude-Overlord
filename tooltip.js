@@ -86,7 +86,7 @@ if (typeof document !== 'undefined') {
         tipText(m.target);
         if (m.target === tipTarget && tipEl.classList.contains('show')) showTip(m.target); // live text, e.g. "updated 5s ago"
       }
-      else for (const n of m.addedNodes) stripTitles(n);
+      else if (!m.target.closest?.('.xterm')) for (const n of m.addedNodes) stripTitles(n); // xterm rebuilds rows constantly and never sets title
     }
   }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['title'] });
   stripTitles(document.documentElement);

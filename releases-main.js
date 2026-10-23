@@ -14,12 +14,12 @@ const { runProgress, releaseEtaMs } = require('./deploy-eta');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
-const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas } = require('./releases-core');
+const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas, releasePeriods } = require('./releases-core');
 const { deployState, deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
-const REFRESH_MS = 5 * 60 * 1000;
-const DEPLOYING_MS = 10 * 1000;       // re-read deploy runs this often while one is in flight…
-const DEPLOY_IDLE_MS = 60 * 1000;     // …and this often otherwise, so a new deploy shows within a minute
+// Polling cadence (full refresh, deploy runs, sign ping, stray scan) lives in releasePeriods: slower while the modal is closed
+const TICK_MS = 15 * 1000;              // the background loop wakes this often and runs whatever releasePeriods says is due
+const PERSIST_MS = 2 * 1000;            // releases.json is written this long after the last change (one write per burst)
 const RUN_TTL_MS = 24 * 3600 * 1000;   // release results older than this are dropped on load
 const RECHECK_MS = 60 * 1000;           // re-read release PRs' checks this often…
 const RECHECK_FOR_MS = 30 * 60 * 1000;  // …for this long after a run, until they settle
@@ -27,7 +27,6 @@ const SIGN_POLL_MS = 30 * 1000;         // while a prod release waits for its 2n
 const SIGN_WATCH_MS = 24 * 3600 * 1000; // …for up to a day
 const ROLLBACK_HEAD = /^rollback\/[\d-]+$/; // a Rollback's PR head (release-history.js)
 const TO_SIGN_POLL_MS = 60 * 1000;      // an approver with a release waiting on them re-checks this often
-const SIGN_PING_MS = 15 * 1000;         // approvers look for a new review request / release-manifests change this often (1 GraphQL call; 5s cost 720 points/h)
 const PENDING_SHOWN = 10;
 const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
@@ -57,11 +56,21 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   if (state.releaseAll && state.releaseAll.running) state.releaseAll = { ...state.releaseAll, running: false, status: 'interrupted', detail: 'Overlord closed mid-release', manualWave: null };
   state.teamRun = null;
   delete state.branches; delete state.deployEta; // an older Overlord saved these; fetched fresh instead
-  let timer = null, inFlight = false;
+  let inFlight = false, modalOpen = false;
 
+  // A refresh, a deploy poll and a sign check each call persist(): one write per burst, and none when
+  // nothing changed (the deploy poll usually sees the same runs). flush() is for main's before-quit.
+  let persistTimer = null, lastWritten = null;
   function persist() {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(flush, PERSIST_MS);
+  }
+  function flush() {
+    clearTimeout(persistTimer); persistTimer = null;
     const { loading, branches, branchesMore, deployEta, ...cache } = state; // fetched fresh each session, not worth saving
-    try { fs.writeFileSync(file, JSON.stringify({ source: state.source, cache }, null, 2)); } catch {}
+    const text = JSON.stringify({ source: state.source, cache }, null, 2);
+    if (text === lastWritten) return;
+    try { fs.writeFileSync(file, text); lastWritten = text; } catch {}
   }
   function push(patch) {
     state = { ...state, ...patch };
@@ -237,7 +246,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
 
   async function refresh() {
     if (inFlight) return;
-    inFlight = true;
+    inFlight = true; lastRefreshAt = Date.now();
     push({ loading: true });
     try {
       // The config almost never changes, so query with last time's copy while the
@@ -279,34 +288,37 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
 
   // A deploy just went red: say so once (the transition, not every poll), click opens the run.
   // Between full refreshes, re-read just the deploy runs: every few seconds while one is in
-  // flight, every minute otherwise (a red run's job details are reused, so that's 1 call per env).
-  let deployTimer = null;
+  // flight, every minute otherwise, slower with the modal closed (a red run's job details are reused, so that's 1 call per env).
+  let deployTimer = null, deployRunning = false; // a run was in flight at the last read
+  const releasing = () => ((state.history && state.history.items) || []).some(inFlightRel) || !!(state.releaseAll && state.releaseAll.running);
+  const periods = (over) => releasePeriods({ modalOpen, inFlight: releasing(), deploying: deployRunning, ...over });
   function deploysChanged(prev, next) {
     for (const k of newDeployFailures(prev, next)) {
       const d = next[k], [repo, env] = k.split('|');
       const why = (d.failed || []).map(f => f.job + (f.step ? ' › ' + f.step : '')).join('; ');
       if (notify) notify(`❌ Deploy failed · ${repo.split('/')[1]} · ${env}`, why || d.name || '', d.url);
     }
-    armDeploys(Object.values(next || {}).some(d => d.state === 'running') ? DEPLOYING_MS : DEPLOY_IDLE_MS);
+    deployRunning = Object.values(next || {}).some(d => d.state === 'running');
+    armDeploys();
   }
-  function armDeploys(ms) {
+  function armDeploys(idle = false) { // idle: wait the slow period whatever the last read saw
     clearTimeout(deployTimer);
     deployTimer = setTimeout(async () => {
       const cfg = state.config;
-      if (!cfg || inFlight || !state.results || limited()) return armDeploys(DEPLOY_IDLE_MS); // a full refresh is on it, or we're resting
+      if (!cfg || inFlight || !state.results || limited()) return armDeploys(true); // a full refresh is on it, or we're resting
       const prevDeploys = state.results.deploys, deploys = await fetchDeploys(cfg, prevDeploys);
-      if (state.config !== cfg || inFlight) return armDeploys(DEPLOY_IDLE_MS);
+      if (state.config !== cfg || inFlight) return armDeploys(true);
       const results = { ...state.results, deploys };
       push({ results, grid: buildGrid(cfg, results) }); // not updatedAt: only deploys are fresh, opening still does a full refresh
       persist();
       deploysChanged(prevDeploys, deploys);
-    }, ms);
+    }, periods(idle ? { deploying: false } : null).deploys);
     deployTimer.unref?.();
   }
 
   // Polls even while the modal is closed: the footer badge says when a deploy is failing.
   // Starts late so it stays out of the app's startup rush.
-  // Near-instant "a release needs you": every SIGN_PING_MS, one GitHub search for open PRs that
+  // Near-instant "a release needs you": every periods().ping, one GitHub search for open PRs that
   // ask ME for review (a release asks every other approver). When that set changes, run the full checkToSign (which
   // notifies). Cheap: a single search call, only on approvers' machines.
   // The same call watches <org>/release-manifests' head: every sign, merge or new release writes a
@@ -330,20 +342,21 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // a release in flight: open PRs, or merged in the last 2 days and still settling (an old or imported record
   // stuck at 'merged', its deploy result never recorded, doesn't count)
   const inFlightRel = (m) => m.status === 'pending' || (['merged', 'partial'].includes(m.status) && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
-  // every SIGN_PING_MS while a release is in flight; every other tick (10s) when none is
-  let pingTick = 0;
-  const pingTimer = setInterval(() => {
+  // One loop, one decision per tick: whatever releasePeriods says is due runs (so opening/closing the modal
+  // changes the cadence at the next tick, not after the old period). Half a tick of slack: a period equal to
+  // the tick must fire every tick, not every other one on timer jitter.
+  let lastPingAt = 0, lastStrayAt = 0, lastRefreshAt = Date.now(); // refresh: the startup timeout below does the first
+  const tick = setInterval(() => {
     if (limited()) return;
-    const inFlight = ((state.history && state.history.items) || []).some(inFlightRel) || (state.releaseAll && state.releaseAll.running);
-    if (pingTick % 6 === 0) scanStray().catch(() => {});
-    if (!inFlight && (pingTick++ % 2)) return;
-    if (inFlight) pingTick++;
-    signPing().catch(() => {});
-  }, SIGN_PING_MS);
-  if (pingTimer.unref) pingTimer.unref();
+    const now = Date.now(), p = periods(), due = (last, ms) => now - last >= ms - TICK_MS / 2;
+    if (due(lastStrayAt, p.stray)) { lastStrayAt = now; scanStray().catch(() => {}); }
+    if (due(lastPingAt, p.ping)) { lastPingAt = now; signPing().catch(() => {}); }
+    if (due(lastRefreshAt, p.refresh)) refresh();
+  }, TICK_MS);
+  if (tick.unref) tick.unref();
 
   setTimeout(() => {
-    refresh(); timer = setInterval(() => { if (!limited()) refresh(); }, REFRESH_MS); timer.unref?.();
+    refresh();
     // Overlord restarted while a recent run was still settling: keep watching its PRs
     const r = state.releaseRun;
     if (r && !r.running && Date.now() - r.startedAt < RECHECK_FOR_MS) recheck(r);
@@ -618,7 +631,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       }
     }));
     // show it right away (my run, my to-sign list), then write it to the manifest: that commit is what
-    // the teammates' Overlords see within SIGN_PING_MS
+    // the teammates' Overlords see within a sign ping (releasePeriods)
     const key = (t) => t.repo + '#' + t.number;
     const signedKeys = new Set(done.map(key));
     push({ toSign: (state.toSign || []).filter(t => !signedKeys.has(key(t))), ...(run ? { releaseRun: { ...stampSignoff(run) } } : {}) });
@@ -891,7 +904,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
 
   // ── Managing a release in flight, one repo at a time (History card row actions) ──
   const LIVE_MS = 90 * 1000;
-  let modalOpen = false, liveTimer = null;
+  let liveTimer = null;
 
   // ── Deploy ETA: each deploying repo against its workflow's last good run (step by step), and the time left
   // until a release is fully deployed (waves one after another). Local state only: nothing is written ──
@@ -1348,7 +1361,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     // a prod release PR I opened elsewhere (or before sign-off existed) gets my opener line now,
     // so it carries my signature's ClickUp id like one Overlord opened
     // ask the other approvers to review every open prod release PR: GitHub notifies them right away
-    // (mail, mobile), and each one's Overlord sees the request within SIGN_PING_MS. People, not the
+    // (mail, mobile), and each one's Overlord sees the request within a sign ping (releasePeriods). People, not the
     // team: requesting a team needs the team to have access to every repo, people already do.
     const others = members.filter(m => m.toLowerCase() !== String(who.github).toLowerCase());
     if (others.length) await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed).map(r =>
@@ -1472,8 +1485,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         loadApprovers().then(refreshRun).catch(() => {});
         loadTeamRun().catch(() => {});
         updateEta().catch(() => {});
-        // reopened within a minute: what's on screen is fresh enough, the timer takes it from here
-        if (!state.updatedAt || Date.now() - state.updatedAt > 60000) refresh();
+        // closed, the loop ran slow: catch up now if what's on screen is older than the open cadence allows,
+        // and poll deploys at the open cadence from here
+        if (!state.updatedAt || Date.now() - state.updatedAt > periods().refresh) refresh();
+        else if (state.results) armDeploys();
         return true;
       case 'releasesStrayFix': strayFix(msg.repo, msg.number, msg.how).catch(e => send({ type: 'toast', text: 'Failed: ' + e.message })); return true;
       case 'releasesClose': modalOpen = false; clearInterval(liveTimer); return true;
@@ -1628,5 +1643,5 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     return !!(r && !r.standalone && !(r.deploy && r.deploy.prod === 'manual') && r.branches && r.branches.prod && r.branches.prod === base);
   }
 
-  return { handle, mergeGate, isProdPr };
+  return { handle, mergeGate, isProdPr, flush };
 };

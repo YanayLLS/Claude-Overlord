@@ -4,8 +4,14 @@
 <meta charset="UTF-8" />
 <title>Overlord</title>
 <link rel="stylesheet" href="./xterm.css" />
-<link rel="stylesheet" href="./world.css" />
 <style>
+/* world.css (63 KB) loads with the world (loadWorld). These are its "world off" base rules, so the world's static
+   markup stays hidden before then; once loaded, its body.world-mode rules win on specificity exactly as before. */
+#world-stage, #world-roster-grip, #world-roster-hide, #world-roster-tab, #world-counters, #world-attn, #world-extra, #quest-log, #quest-log-dim { display:none; }
+body:not(.world-on) #hdr-world, body:not(.world-on) .help-world { display:none !important; }
+/* Window blurred or hidden: decorative animations stop painting. Nothing relies on animationend for logic
+   (done-flash only clears its own class), so pausing is safe; focus/visibility restores them where they were. */
+body.bg *, body.bg *::before, body.bg *::after { animation-play-state:paused !important; }
 :root {
   --bg: #1e1e2e; --bg2: #181825; --bg3: #252536; --border: #313244; --border-hi: #45475a;
   --accent: #89b4fa; --green: #a6e3a1; --text: rgba(205,214,244,.95); --dim: rgba(166,173,200,.5);
@@ -230,14 +236,19 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 /* ── Update button: built like the Feature button (outline, var(--r)), so it belongs
    to the header. Green marks it as news: the arrow, a status dot that pings like
    the agent dots, and a faint sweep every few seconds. */
-#update-btn.update-btn { position:relative; overflow:hidden; isolation:isolate; gap:6px; padding:0 10px 0 9px;
+/* The ring and the dot's ping are static box-shadows on pseudo-elements whose opacity animates: animating the
+   shadow itself repaints the header every frame. No overflow:hidden (the ring lives outside the button), so the
+   shine's band is narrow and sweeps edge to edge inside the button instead of being clipped. */
+#update-btn.update-btn { position:relative; isolation:isolate; gap:6px; padding:0 10px 0 9px;
   border-radius:var(--r); border:none; background:var(--green);
   color:#05240f; font-size:12px; font-weight:700;
-  animation:upd-in .35s cubic-bezier(.2,1.3,.4,1) both, upd-ring 2.4s ease-out .4s infinite;
+  animation:upd-in .35s cubic-bezier(.2,1.3,.4,1) both;
   transition:background .12s, border-color .12s; }
-#update-btn.update-btn::before { content:''; position:absolute; inset:0; z-index:-1; pointer-events:none;
-  background:linear-gradient(105deg, transparent 35%, rgba(255,255,255,.45) 50%, transparent 65%);
-  transform:translateX(-130%); animation:upd-shine 4s ease-in-out 1s infinite; }
+#update-btn.update-btn::before { content:''; position:absolute; inset:0; z-index:-1; pointer-events:none; border-radius:inherit;
+  background:linear-gradient(105deg, transparent 38%, rgba(255,255,255,.45) 50%, transparent 62%);
+  transform:translateX(-38%); animation:upd-shine 4s ease-in-out 1s infinite; }
+#update-btn.update-btn::after { content:''; position:absolute; inset:0; z-index:-1; pointer-events:none; border-radius:inherit;
+  box-shadow:0 0 0 7px rgba(74,222,128,.55); animation:upd-ring 2.4s ease-out .4s infinite; }
 #update-btn.update-btn:hover { background:var(--green); color:#05240f; filter:brightness(1.1); }
 #update-btn.update-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 #update-btn .upd-ic { width:14px; height:14px; stroke-width:2.6; transition:transform .15s; }
@@ -245,18 +256,20 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #update-btn .upd-ver { padding-left:2px; }
 #update-btn .upd-ver { font-weight:600; font-size:11px; padding:1px 6px; border-radius:var(--r-sm); background:rgba(5,36,15,.16); font-variant-numeric:tabular-nums; }
 #update-btn .upd-icw { position:relative; display:inline-flex; margin-right:2px; }
-#update-btn .upd-dot { position:absolute; top:-2px; right:-3px; width:5px; height:5px; border-radius:50%; background:#fff;
-  animation:upd-ping 2.4s ease-out infinite; }
+#update-btn .upd-dot { position:absolute; top:-2px; right:-3px; width:5px; height:5px; border-radius:50%; background:#fff; }
+#update-btn .upd-dot::after { content:''; position:absolute; inset:0; border-radius:50%; pointer-events:none;
+  box-shadow:0 0 0 4px rgba(255,255,255,.7); animation:upd-ping 2.4s ease-out infinite; }
 #update-btn.busy { cursor:progress; animation:none; }
 #update-btn.busy::before { animation-duration:1.4s; animation-delay:0s; }
-#update-btn.busy .upd-dot { display:none; }
+#update-btn.busy::after, #update-btn.busy .upd-dot { display:none; }
 #update-btn .setup-spin { margin-right:0; }
 @keyframes upd-in { from { opacity:0; transform:translateY(-4px); } }
-@keyframes upd-shine { 0% { transform:translateX(-130%); } 30%, 100% { transform:translateX(130%); } }
-@keyframes upd-ring { 0% { box-shadow:0 0 0 0 rgba(74,222,128,.55); } 70%, 100% { box-shadow:0 0 0 7px rgba(74,222,128,0); } }
-@keyframes upd-ping { 0% { box-shadow:0 0 0 0 rgba(255,255,255,.7); } 70%, 100% { box-shadow:0 0 0 4px rgba(255,255,255,0); } }
+@keyframes upd-shine { 0% { transform:translateX(-38%); } 30%, 100% { transform:translateX(38%); } }
+@keyframes upd-ring { 0% { opacity:1; } 70%, 100% { opacity:0; } }
+@keyframes upd-ping { 0% { opacity:1; } 70%, 100% { opacity:0; } }
 @media (prefers-reduced-motion: reduce) {
-  #update-btn.update-btn, #update-btn.update-btn::before, #update-btn .upd-dot { animation:none; }
+  #update-btn.update-btn, #update-btn.update-btn::before { animation:none; }
+  #update-btn.update-btn::after, #update-btn .upd-dot::after { display:none; } /* a halo that never fades would just sit there */
 }
 
 #account-btn {
@@ -799,8 +812,7 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #term-dead {
   display:none; position:absolute; left:0; right:0; bottom:0; z-index:11;
   align-items:center; gap:10px; padding:8px 12px;
-  background:rgba(243,139,168,.12); border-top:1px solid var(--red);
-  backdrop-filter:blur(2px);
+  background:linear-gradient(rgba(243,139,168,.12), rgba(243,139,168,.12)), var(--term-bg, var(--bg)); border-top:1px solid var(--red); /* opaque tint, not backdrop-filter: that re-blurs the terminal on every redraw beneath */
 }
 #term-dead.visible { display:flex; }
 #term-dead-msg { flex:1; font-size:11px; color:var(--red); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -931,17 +943,18 @@ button:focus-visible { outline-offset:0; }
 /* Hover stroke — must beat data-status border-color above */
 .agent[data-status]:hover { border-color:var(--accent); }
 
-/* Answer needed — orange pulse while the agent is blocked on a chat answer */
-@keyframes needs-answer-flash {
-  0%, 100% { box-shadow:0 0 0 0 rgba(250,179,135,.15); border-color:rgba(250,179,135,.3); }
-  50%      { box-shadow:0 0 10px 2px rgba(250,179,135,.55); border-color:var(--peach); }
-}
-.agent.needs-answer { animation:needs-answer-flash 1.4s ease-in-out infinite; }
+/* Answer needed — orange pulse while the agent is blocked on a chat answer. The glow is a static inset shadow on
+   ::after whose opacity pulses (animating box-shadow/border-color repaints the whole list every frame); the card's
+   overflow:hidden keeps it inside, so the border holds a steady mid tint instead of flashing. */
+@keyframes needs-answer-flash { 0%, 100% { opacity:.2; } 50% { opacity:1; } }
+.agent.needs-answer { border-color:rgba(250,179,135,.55); }
+.agent.needs-answer::after { content:''; position:absolute; inset:0; z-index:0; border-radius:inherit; pointer-events:none;
+  box-shadow:inset 0 0 10px 2px rgba(250,179,135,.5); animation:needs-answer-flash 1.4s ease-in-out infinite; }
 .agent.needs-answer:not(.selected) { background:rgba(250,179,135,.07); }
 .agent.needs-answer::before { background:var(--peach) !important; }
 .agent.needs-answer:not(.selected) .agent-dot { background:var(--peach) !important; opacity:1; }
 .agent.needs-answer:not(.selected) .agent-status-line { color:var(--peach); }
-@media (prefers-reduced-motion:reduce) { .agent.needs-answer { animation:none; border-color:var(--peach); } }
+@media (prefers-reduced-motion:reduce) { .agent.needs-answer { border-color:var(--peach); } .agent.needs-answer::after { animation:none; } }
 
 /* Done flash — green glow that fades out when agent finishes */
 @keyframes done-flash {
@@ -1645,7 +1658,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./releases-ui.js"></script>
 <script src="./catalog-pick.js"></script>
 <script src="./catalog-ui.js"></script>
-<script src="./md-bundle.js"></script>
+<!-- md-bundle.js (marked + highlight.js + DOMPurify, 223 KB) loads the first time docs-ui renders a document (loadMd) -->
 <script src="./docs-core.js"></script>
 <script src="./docs-ui.js"></script>
 <script>
@@ -2708,6 +2721,7 @@ function showModelMenu(e, id) {
 // payload as the picker — capabilities.effort says which rungs a model has, so
 // a model that gains `max` tomorrow gets it here without an app release.
 const agentEffort = new Map(); // agent id -> effort last set from this menu
+const lastStatsKey = new Map(); // agent id -> JSON of the last 'stats' applied; a repeat is dropped before it rebuilds the list
 function showEffortMenu(e, id) {
   const a = agents.get(id);
   const m = CLAUDE_MODELS.find(x => x.id === (a?.stats?.model || ''))
@@ -3068,7 +3082,12 @@ function render() {
   restoreOpenMenu(); // a re-render mid-interaction shouldn't close an open kebab menu
   window.restoreAgentTip?.(); // ditto for the hover tooltip on the status dot
 
-  // Summary bar — 3-line layout: session bar, weekly bar, info/pace row
+  renderSummaryBar();
+  if (worldView) worldSync();
+}
+// Summary bar — 3-line layout: session bar, weekly bar, info/pace row. Its own function so the 30 s age/reset
+// refresh redraws just this, not the whole agent list.
+function renderSummaryBar() {
   const bar = document.getElementById('summary-bar');
   const agentCount = agents.size;
   const activeCount = [...agents.values()].filter(a => agentStatus(a) === 'active').length;
@@ -3136,7 +3155,6 @@ function render() {
   bar.innerHTML = barHtml;
   bar.onclick = (e) => { if (e.target.closest('[data-acct-menu]')) return showUsageAcctMenu(e); const m = e.target.closest('[data-meter]'); if (m) openUsageModal(m.dataset.meter); else if (usageView) setUsageView(usageView); else refreshUsage(); };
   bar.classList.add('show');
-  if (worldView) worldSync();
 }
 
 // ── Terminal panel (real xterm.js) ──────────────────────
@@ -3144,10 +3162,23 @@ const xterms = new Map(); // id -> { terminal, fitAddon, searchAddon, el }
 const container = document.getElementById('term-container');
 // One blink clock for every terminal, on an element redraws never replace. A key press or a caret move
 // (the typed letter's echo) shows the caret and restarts the clock, so it stays solid while typing.
+// Stops (caret solid) while the window is blurred or hidden — a class flip every 530 ms is a style recalc nobody sees — and
+// restarts on focus (onBgChange).
 const blinkCaret = (() => { let t = null; const tick = () => container.classList.toggle('caret-off');
-  return () => { clearInterval(t); container.classList.remove('caret-off'); t = setInterval(tick, 530); }; })();
+  return () => { clearInterval(t); container.classList.remove('caret-off'); if (!document.body.classList.contains('bg')) t = setInterval(tick, 530); }; })();
 blinkCaret();
 document.addEventListener('keydown', (e) => { if (e.target.classList && e.target.classList.contains('xterm-helper-textarea')) blinkCaret(); }, true);
+// One switch for "nobody's looking": body.bg pauses CSS animations (see the style block), the caret clock, the
+// status-line and summary tickers. Everything resumes on focus or when the tab is visible again.
+function onBgChange() {
+  const bg = document.hidden || !document.hasFocus();
+  if (bg === document.body.classList.contains('bg')) return;
+  document.body.classList.toggle('bg', bg);
+  blinkCaret();
+  if (!bg) { tickStatusMeta(); summaryTick(); }
+}
+for (const ev of ['focus', 'blur']) window.addEventListener(ev, onBgChange);
+document.addEventListener('visibilitychange', onBgChange);
 // termData that arrived while #term was closed (container unmeasurable). Creating an xterm
 // then would pin it to 80x24 and force a scrollback reflow on first open. Held here, flushed
 // by createXterm once the terminal has been fit to real dimensions.
@@ -3172,7 +3203,7 @@ function createXterm(id) {
   const fitAddon = new XFitAddon();
   const terminal = new XTerminal({
     theme: xtermTheme(currentTheme), // theme-core.js
-    fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: false /* blinkCaret() below */, scrollback: 10000, cursorStyle: 'bar', cursorWidth: 2,
+    fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: false /* blinkCaret() below */, scrollback: 4000 /* ~12 B/cell × cols × lines, per terminal: 10000 lines × 200 cols ≈ 24 MB each */, cursorStyle: 'bar', cursorWidth: 2,
     allowProposedApi: true, // search highlight decorations (TERM_SEARCH_OPTS) throw without it
   });
   const searchAddon = new XSearchAddon();
@@ -3298,8 +3329,9 @@ function createXterm(id) {
   // ponytail: string index = cell column, off by one per wide char before the name; viewport rows only, max 40;
   // a caret moved inside the name is hidden under it.
   const mentionLayer = document.createElement('div'); mentionLayer.className = 'term-mentions'; el.appendChild(mentionLayer);
+  // Not for a hidden terminal (every agent's xterm renders in the background): showXterm syncs it when it comes forward.
   let mentionRaf = 0, mentionKey = '';
-  terminal.onRender(() => { if (!mentionRaf) mentionRaf = requestAnimationFrame(() => {
+  const mentionSync = () => { if (!mentionRaf && el.style.visibility !== 'hidden') mentionRaf = requestAnimationFrame(() => {
     mentionRaf = 0;
     const scr = el.querySelector('.xterm-screen'), r = scr && scr.getBoundingClientRect(), er = el.getBoundingClientRect();
     const names = [...agents.values()].map(a => a.agentName).filter(Boolean);
@@ -3320,7 +3352,8 @@ function createXterm(id) {
     mentionLayer.style.cssText = `font-family:${o.fontFamily.replace(/"/g, "'")};font-size:${o.fontSize}px;line-height:${ch}px;background:transparent`;
     mentionLayer.innerHTML = hits.slice(0, 40).map(h => `<i style="left:${r.left - er.left + h.col * cw}px;top:${r.top - er.top + h.row * ch}px;height:${ch}px;background:${(o.theme && o.theme.background) || '#000'}">`
       + [...h.text].map((c, i) => `<b style="width:${cw}px;animation-delay:-${phase + (h.text.length - i) * 150}ms">${c}</b>`).join('') + '</i>').join('');
-  }); });
+  }); };
+  terminal.onRender(mentionSync);
   // [Image #N] tags: hover shows the pasted image and tints the tag.
   // Plain mousemove, not a link provider: Claude redraws the prompt rows constantly, and xterm drops link hover on every redraw.
   el.addEventListener('mousemove', (ev) => {
@@ -3398,7 +3431,7 @@ function createXterm(id) {
     if (e.shiftKey && e.key === 'Enter') { api.send({ type: 'termInput', id, data: '\n' }); return false; }
     return true;
   });
-  xterms.set(id, { id, terminal, fitAddon, searchAddon, el, bidiOff });
+  xterms.set(id, { id, terminal, fitAddon, searchAddon, el, bidiOff, mentionSync });
   const pend = pendingTermData.get(id);
   if (pend) { pendingTermData.delete(id); terminal.write(pend, () => terminal.scrollToBottom()); }
   sendResize(id, xterms.get(id)); // pty spawns at 120x30 — hand it the real width now
@@ -3492,7 +3525,7 @@ function showXterm(id) {
   // visibility, not display — a display:none xterm loses its dims and reflows on re-show
   for (const [xid, x] of xterms) x.el.style.visibility = xid === id ? 'visible' : 'hidden';
   const x = xterms.get(id);
-  if (x) { setTimeout(() => {
+  if (x) { x.mentionSync?.(); setTimeout(() => {
     if (!xterms.has(id)) return;
     if (!x._shown) {
       x.fitAddon.fit();
@@ -4195,7 +4228,7 @@ function handleAgentMsg(msg) {
       const closedCwd = agents.get(msg.id)?.cwd || '(unknown)';
       agents.delete(msg.id); destroyXterm(msg.id);
       refreshArchiveModal(closedCwd);
-      lastTermDataAt.delete(msg.id); agentEffort.delete(msg.id); _worldIdleSince.delete(msg.id); { const dt = _doneTimers.get(msg.id); if (dt) { clearTimeout(dt); _doneTimers.delete(msg.id); } } // per-agent bookkeeping goes with the agent
+      lastTermDataAt.delete(msg.id); agentEffort.delete(msg.id); _worldIdleSince.delete(msg.id); lastStatsKey.delete(msg.id); pastedImages.delete(msg.id); { const dt = _doneTimers.get(msg.id); if (dt) { clearTimeout(dt); _doneTimers.delete(msg.id); } } // per-agent bookkeeping goes with the agent
       // Clean up teams led by this agent
       for (const [teamName, team] of teamMap) {
         if (team.leadAgentId === msg.id) teamMap.delete(teamName);
@@ -4269,7 +4302,10 @@ function handleAgentMsg(msg) {
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = -1; /* -1 = at bottom; the buffer scan owns the real range */ if (selectedId === msg.id) updatePromptNav(); } break; }
     case 'title': { const a = agents.get(msg.id); if (a) { if (a.customName && msg.customName === undefined) break; a.title = msg.text; if (msg.customName !== undefined) a.customName = !!msg.customName; if (selectedId === msg.id) { const t = a.prompt || msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'agentNameChanged': { const a = agents.get(msg.id); if (a) { a.agentName = msg.agentName; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = termAgentLabel(a); scheduleRender(); } break; }
-    case 'stats': { const a = agents.get(msg.id); if (a) { if (msg.stats.effort !== a.stats?.effort) agentEffort.delete(msg.id); a.stats = msg.stats; scheduleRender(); } break; }
+    case 'stats': { const a = agents.get(msg.id); if (a) {
+      const key = JSON.stringify(msg.stats); if (key === lastStatsKey.get(msg.id)) break; // unchanged stats: no list rebuild
+      lastStatsKey.set(msg.id, key);
+      if (msg.stats.effort !== a.stats?.effort) agentEffort.delete(msg.id); a.stats = msg.stats; scheduleRender(); } break; }
     case 'folderSelected': addAgent(msg.path); break;
     case 'focused': selectedId = msg.id; scheduleRender(); break;
     case 'focusFromNotification': focusAgent(msg.id); break;
@@ -4301,7 +4337,8 @@ function handleAgentMsg(msg) {
       break;
     case 'prList': {
       if (msg.error) { prState.error = msg.error; prState.errorCode = msg.errorCode || null; }
-      else { prState.prs = msg.prs || []; prState.extra = msg.extraPrs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; prApplyPending(); }
+      else { prState.prs = msg.prs || []; prState.extra = msg.extraPrs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; prApplyPending();
+        for (const url of prHeatMs.keys()) if (!prState.prs.some(p => p.url === url)) prHeatMs.delete(url); } // merged/closed PRs don't keep their heat forever
       renderPrBadge();
       refreshOpenDropdown('pr-dropdown', prDropdownHtml);
       if (worldView) scheduleRender();
@@ -4707,8 +4744,10 @@ function handleUsageHistory(points, since) {
   if (usageTipEl && usageTipEl.isConnected) showUsageTip(usageTipEl);
   renderUsageModal();
 }
-// Re-render every 30s so age + reset countdowns stay fresh
-setInterval(() => { if (currentUsage) scheduleRender(); }, 30000);
+// Redraw the summary bar every 30s so age + reset countdowns stay fresh (not the list; nothing else aged). Skipped
+// while hidden — onBgChange redraws once on return.
+const summaryTick = () => { if (currentUsage && !document.hidden && (agents.size || knownProjects.size)) renderSummaryBar(); };
+setInterval(summaryTick, 30000);
 function usageCls(pct) { return pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : ''; }
 
 // ── Audio ──────────────────────────────────────────────
@@ -5801,7 +5840,13 @@ function renderPrBadge() {
     b.textContent = 'PRs'; b.title = 'No open PRs need you — click to open the list';
     renderPrNag(0);
   }
+  // The foot's red/green keys off these classes (theme.css) rather than :has(#pr-badge.alert), which re-evaluates on every style change in the column.
+  const f = document.getElementById('list-foot');
+  if (f) { f.classList.toggle('pr-red', b.className === 'alert' || b.className === 'split'); f.classList.toggle('pr-green', b.className === 'ready'); }
 }
+// Same for "the PR list is open": a body class from the one attribute that changes, not body:has(#pr-dropdown[style*="block"]).
+new MutationObserver(() => document.body.classList.toggle('pr-open', document.getElementById('pr-dropdown').style.display === 'block'))
+  .observe(document.getElementById('pr-dropdown'), { attributes: true, attributeFilter: ['style'] });
 
 // PR view filter by where a PR lands: 'all' | 'dev' (only into dev) | 'norel' (hide release-pipeline PRs).
 let prScope = 'all';
@@ -6098,8 +6143,9 @@ function renderSetup() {
   const s = su.info;
   let el = document.getElementById('setup-overlay');
   const complete = s && !s.missing.length && s.loggedIn;
-  if (!s || su.skipped || (complete && !su.allSet)) { if (el) el.remove(); return; }
+  if (!s || su.skipped || (complete && !su.allSet)) { if (el) el.remove(); suTicker(false); return; }
   if (!el) { el = document.createElement('div'); el.id = 'setup-overlay'; document.body.appendChild(el); }
+  suTicker(true);
   const needs = id => s.missing.includes(id);
   const spin = '<span class="setup-spin"></span>';
   const timer = since => '<span class="setup-elapsed" data-since="' + since + '">' + suElapsed(since) + '</span>';
@@ -6197,12 +6243,17 @@ function onSetupProgress(msg) {
 function setupDownload(id) { api.send({ type: 'openUrl', url: su.url[id] }); }
 function setupSkip() { su.skipped = true; renderSetup(); showToast('Setup skipped — it comes back next launch'); }
 function setupClose() { su.allSet = false; su.skipped = true; renderSetup(); }
-// One ticker for the card: running timers, and the login wait running out.
-setInterval(() => {
-  if (!document.getElementById('setup-overlay')) return;
-  for (const t of document.querySelectorAll('#setup-overlay .setup-elapsed')) t.textContent = suElapsed(+t.dataset.since);
-  if (su.login && Date.now() - su.login > LOGIN_WAIT_MS) { su.login = 0; su.loginFailed = true; renderSetup(); }
-}, 1000);
+// One ticker for the card: running timers, and the login wait running out. Runs only while the card is up (suTicker).
+let suTimer = 0;
+function suTicker(on) {
+  if (!on) { clearInterval(suTimer); suTimer = 0; return; }
+  if (suTimer) return;
+  suTimer = setInterval(() => {
+    if (!document.getElementById('setup-overlay')) return suTicker(false);
+    for (const t of document.querySelectorAll('#setup-overlay .setup-elapsed')) t.textContent = suElapsed(+t.dataset.since);
+    if (su.login && Date.now() - su.login > LOGIN_WAIT_MS) { su.login = 0; su.loginFailed = true; renderSetup(); }
+  }, 1000);
+}
 // Coming back from the browser login or a manual install: re-probe while the card is up.
 window.addEventListener('focus', () => { if (document.getElementById('setup-overlay')) api.send({ type: 'setupRecheck' }); });
 
@@ -7260,15 +7311,17 @@ function renderPerf(msg) {
     + `<div class="zm-hint">Heaviest first · CPU is % of the whole PC · refreshes every ${PERF_POLL_MS / 1000}s</div>`;
 }
 
-// Live status line timer — update every second without full re-render
-setInterval(() => {
+// Live status line timer — update every second without full re-render. Writes only what changed (a textContent
+// set invalidates layout even when equal) and sits out while the tab is hidden (onBgChange catches up).
+function tickStatusMeta() {
   for (const [id, a] of agents) {
     const el = document.querySelector(`.agent[data-id="${id}"] .status-meta`);
     if (!el) continue;
-    const txt = statusMetaText(a);
-    if (txt) el.textContent = txt; else el.textContent = '';
+    const txt = statusMetaText(a) || '';
+    if (el.textContent !== txt) el.textContent = txt;
   }
-}, 1000);
+}
+setInterval(() => { if (!document.hidden) tickStatusMeta(); }, 1000);
 
 // ── World view (3D map) ─────────────────────────────────
 // Off by default. When on, world.js draws the same state the list shows, beside it.
@@ -7300,7 +7353,9 @@ let worldEnabled = false, _worldLoad = null;
 function loadWorld() {
   if (window.World) return Promise.resolve();
   const add = src => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error(src + ' failed to load')); document.head.appendChild(el); });
-  return _worldLoad || (_worldLoad = add('./three-bundle.js').then(() => add('./world.js')).catch(e => { _worldLoad = null; throw e; }));
+  const css = href => new Promise((res, rej) => { const el = document.createElement('link'); el.rel = 'stylesheet'; el.href = href; el.onload = res; el.onerror = () => rej(new Error(href + ' failed to load')); document.head.appendChild(el); });
+  // world.css rides along: its "world off" base rules are inlined in the head, so nothing shows before it's here
+  return _worldLoad || (_worldLoad = Promise.all([css('./world.css'), add('./three-bundle.js').then(() => add('./world.js'))]).catch(e => { _worldLoad = null; throw e; }));
 }
 function setWorldEnabled(on, persist = true, view = true) {
   worldEnabled = !!on;

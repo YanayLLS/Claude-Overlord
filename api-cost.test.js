@@ -33,3 +33,23 @@ assert.strictEqual(r.k, 'm1:r1'); near(r.c, 20); assert.strictEqual(r.t, Date.pa
 assert.strictEqual(parseLine('{"type":"user","message":{"content":"usage assistant"}}'), null);
 assert.strictEqual(parseLine('not json "usage" "assistant"'), null);
 console.log('api-cost ok');
+
+// Per-file cache entries for transcripts that aged out of the window are dropped, not just their rows.
+{
+  const os = require('os'), fs = require('fs'), path = require('path');
+  const { scanCosts, _files } = require('./api-cost');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-cost-'));
+  const old = path.join(root, 'old.jsonl'), fresh = path.join(root, 'fresh.jsonl');
+  fs.writeFileSync(old, line + '\n'); fs.writeFileSync(fresh, line + '\n');
+  const now = Date.now();
+  (async () => {
+    await scanCosts(root, now);
+    assert.ok(_files.has(old) && _files.has(fresh));
+    const stale = new Date(now - 9 * 86400000); fs.utimesSync(old, stale, stale);
+    await scanCosts(root, now);
+    assert.ok(!_files.has(old), 'aged-out transcript leaves the cache');
+    assert.ok(_files.has(fresh));
+    fs.rmSync(root, { recursive: true, force: true });
+    console.log('api-cost prune ok');
+  })();
+}

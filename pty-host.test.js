@@ -85,3 +85,42 @@ test('waitGone: resolves when the process exits, kills it past the deadline', as
   assert.strictEqual(await waitGone(7, 150, { alive: () => killed === null, kill: (p) => { killed = p; } }), false);
   assert.strictEqual(killed, 7);
 });
+
+// A conhost is born inside the synchronous pty.spawn, so its creation time sits inside that
+// pty's [spawnedAt, spawnedDoneAt] window; anything outside every live window is a leak.
+test('reaper kills only the headless conhosts no live pty can own', async () => {
+  const { createReaper, ATTR_SLACK_MS, CONHOST_MIN_AGE_MS } = require('./pty-host');
+  const T = 1_000_000, now = () => T + 60_000;
+  const live = () => [{ spawnedAt: T, spawnedDoneAt: T + 400 }];
+  const conhosts = [
+    { pid: 1, createdAt: T + 100 },                      // the live pty's own
+    { pid: 2, createdAt: T + 400 + ATTR_SLACK_MS },      // edge of the window: still the live pty's
+    { pid: 3, createdAt: T - 5000 },                     // a pty that exited earlier → leak
+    { pid: 4, createdAt: now() - CONHOST_MIN_AGE_MS + 1 }, // too young to judge
+  ];
+  const killed = [];
+  const reap = createReaper({ listConhosts: async () => conhosts, kill: (pid) => killed.push(pid), now, live });
+  assert.deepStrictEqual(await reap(), [3]);
+  assert.deepStrictEqual(killed, [3]);
+  // a kill that throws (already gone) doesn't stop the sweep
+  const reap2 = createReaper({ listConhosts: async () => [{ pid: 5, createdAt: T - 9000 }, { pid: 6, createdAt: T - 8000 }], kill: (pid) => { if (pid === 5) throw new Error('gone'); killed.push(pid); }, now, live });
+  assert.deepStrictEqual(await reap2(), [6]);
+});
+
+test('host stamps each pty with its spawn window and reaps with the live set', async () => {
+  const pipePath = pipePathFor(path.join(os.tmpdir(), 'ov-pty-reap-' + process.pid));
+  const pty = fakePty();
+  const seen = [], killed = [];
+  const host = createHost({ pty, pipePath, listConhosts: async () => seen, killPid: (pid) => killed.push(pid) });
+  await host.listen();
+  const c = createPtyClient({ pipePath, launchHost: () => { throw new Error('up'); } });
+  await c.connect();
+  const before = Date.now();
+  const proc = c.spawn('cmd.exe', '/c claude', { cols: 80, rows: 24 });
+  await tick();
+  const p = host.ptys.get(proc.key);
+  assert.ok(p.spawnedAt >= before && p.spawnedDoneAt >= p.spawnedAt);
+  seen.push({ pid: 11, createdAt: p.spawnedAt - 60_000 }, { pid: 12, createdAt: p.spawnedAt });
+  assert.deepStrictEqual(await host.reap(), [11]);
+  host.stop();
+});

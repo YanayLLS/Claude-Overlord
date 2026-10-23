@@ -7,7 +7,7 @@ const http = require('http');
 const https = require('https');
 const { spawn, exec, execSync } = require('child_process');
 const net = require('net');
-const { autoUpdater } = require('electron-updater');
+let autoUpdater = null; // electron-updater: packaged builds only, loaded on app ready (setupAutoUpdater)
 const pty = require('node-pty');
 const wt = require('./worktree');
 const pc = require('./peer-core');
@@ -49,6 +49,7 @@ function focusMainWindow() {
 
 // ── Constants ──────────────────────────────────────────
 const JSONL_POLL_MS = 1000;
+const JSONL_FALLBACK_MS = 5000;
 const RECOVER_DAYS = 7; // how far back to rebuild the agent list from transcripts when state is lost
 const TOOL_DONE_DELAY_MS = 300;
 const PERMISSION_TIMER_MS = 7000;
@@ -72,7 +73,7 @@ const USAGE_POLL_MS = 60000;
 const USAGE_TIMEOUT_MS = 15000;
 const USAGE_STALE_MS = 60 * 60 * 1000; // 1 hour — fetch even when idle if data older than this
 const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
-const TEAM_POLL_MS = 3000;
+const TEAM_POLL_MS = 10000; // reads + parses every ~/.claude/teams dir each tick
 const TEAMS_DIR = path.join(os.homedir(), '.claude', 'teams');
 const TASKS_DIR = path.join(os.homedir(), '.claude', 'tasks');
 const SERVER_URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})\b[^\s)>\]'"]*/g;
@@ -91,20 +92,24 @@ const AGENT_NAMES = [
 ];
 
 // ── Auto-updater ──────────────────────────────────────────
-autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
-
-autoUpdater.on('update-available', info => {
-  logToRenderer(`Update available: v${info.version}`);
-  send({ type: 'updateAvailable', version: info.version });
-});
-
 let _updateReady = false; // a downloaded update waits to install on the next quit
-autoUpdater.on('update-downloaded', async info => {
-  _updateReady = true;
-  logToRenderer(`Update downloaded: v${info.version} — ready to install`);
-  send({ type: 'updateDownloaded', version: info.version, changes: await releaseChanges(app.getVersion(), info.version) });
-});
+function setupAutoUpdater() {
+  ({ autoUpdater } = require('electron-updater'));
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-available', info => {
+    logToRenderer(`Update available: v${info.version}`);
+    send({ type: 'updateAvailable', version: info.version });
+  });
+  autoUpdater.on('update-downloaded', async info => {
+    _updateReady = true;
+    logToRenderer(`Update downloaded: v${info.version} — ready to install`);
+    send({ type: 'updateDownloaded', version: info.version, changes: await releaseChanges(app.getVersion(), info.version) });
+  });
+  autoUpdater.on('error', err => {
+    logToRenderer(`Auto-updater error: ${err.message}`);
+  });
+}
 
 // Commit subjects between two release tags, for the update button's hover. Release
 // bodies are empty, so ask GitHub's compare API (public repo, no auth); [] on any failure.
@@ -116,10 +121,6 @@ async function releaseChanges(from, to) {
     return (j.commits || []).map(c => c.commit.message.split('\n')[0]).reverse();
   } catch { return []; }
 }
-
-autoUpdater.on('error', err => {
-  logToRenderer(`Auto-updater error: ${err.message}`);
-});
 
 // ── Git self-update (source checkouts) ────────────────
 // Packaged builds update through electron-updater above. People who run the
@@ -317,8 +318,11 @@ const CLAUDE_JSON = path.join(os.homedir(), '.claude.json');
 // too, so no agent sits parked on Claude's "trust this folder?" prompt. `extra` is
 // [{ repo, path }] for worktree folders not in settings. One read, at most one write.
 const { inheritTrust } = require('./trust-core');
+let _claudeJsonGuard = null; // what the last pass saw: nothing to do again until the file or the worktree list changes
 function protectClaudeConfig(extra = []) {
   try {
+    const guard = extra.length ? null : `${fs.statSync(CLAUDE_JSON).mtimeMs}|${fs.statSync(CLAUDE_JSON).size}|${JSON.stringify(settings.worktrees || [])}|${settings.remoteControl !== false}`;
+    if (guard && guard === _claudeJsonGuard) return; // ~/.claude.json is multi-MB on a heavy user; this ran on every spawn
     const data = JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf-8'));
     let changed = false;
     if (!data.hasCompletedOnboarding) {
@@ -335,6 +339,7 @@ function protectClaudeConfig(extra = []) {
       data.remoteControlReadyPushCount = 9999; data.remoteControlReadyPushKey ??= 'v1'; changed = true;
     }
     if (changed) fs.writeFileSync(CLAUDE_JSON, JSON.stringify(data, null, 2));
+    _claudeJsonGuard = guard; // only a pass that read and wrote cleanly is skipped next time
   } catch {}
 }
 const ACCOUNTS_PATH = path.join(STATE_DIR, 'accounts.json');
@@ -347,9 +352,12 @@ const LOG_FILE = path.join(STATE_DIR, 'overlord.log');
 function memorySummary() {
   try { const out = {}; for (const p of app.getAppMetrics()) { const k = p.type === 'Tab' ? 'renderer' : p.type.toLowerCase(); out[k + (out[k] ? p.pid : '')] = Math.round(p.memory.privateBytes / 1024); } out.mainHeap = Math.round(process.memoryUsage().heapUsed / 1048576); return out; } catch (e) { return { err: String(e) }; }
 }
+const LOG_ROTATE_BYTES = 5 * 1024 * 1024; // overlord.log grew without bound (a line per status change)
+let _flogN = 0;
 function flog(...args) {
   const msg = args.map(a => (typeof a === 'string' ? a : (a && a.stack) || JSON.stringify(a))).join(' ');
   const line = `[${new Date().toISOString()}] ${msg}\n`;
+  if (++_flogN % 200 === 0) { try { if (fs.statSync(LOG_FILE).size > LOG_ROTATE_BYTES) fs.renameSync(LOG_FILE, LOG_FILE + '.1'); } catch {} }
   try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.appendFileSync(LOG_FILE, line); } catch {}
   try { process.stdout.write(line); } catch {}
 }
@@ -357,6 +365,9 @@ process.on('uncaughtException', (e) => flog('uncaughtException:', e));
 process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
 
 let mainWindow = null;
+// Nobody can see the window (minimized, hidden to tray): background ticks that only feed the
+// screen — stats fallback, PR/CI watch, port probes — skip, and catch up on the first tick after.
+const appQuiet = () => { try { return !!mainWindow && !mainWindow.isDestroyed() && (mainWindow.isMinimized() || !mainWindow.isVisible()); } catch { return false; } };
 let browserRegistry = null;
 let mcpServer = null;
 let preview = null;
@@ -407,7 +418,7 @@ function syncRemoteControl() {
     a._rcSyncing = true;
     try { t.write('/remote-control\r'); } catch { a._rcSyncing = false; continue; }
     setTimeout(() => {
-      const tail = (termBuffers.get(id) || '').slice(-6000).replace(/\x1b\[[0-9;?]*[a-zA-Z]|\s+/g, '');
+      const tail = termBufText(id).slice(-6000).replace(/\x1b\[[0-9;?]*[a-zA-Z]|\s+/g, '');
       const isOn = tail.lastIndexOf('Disconnectthissession') > tail.lastIndexOf('EnableRemoteControl');
       const keys = isOn === want ? '\x1b' : want ? '\r' : '\x1b[A\x1b[A';
       try { t.write(keys); if (keys.startsWith('\x1b[A')) setTimeout(() => { try { t.write('\r'); } catch {} }, 400); } catch {}
@@ -437,7 +448,7 @@ function portListening(port) { return new Promise(res => { let done = false; con
 // an agent's remembered port that no longer answers is dropped from the roster and the island.
 let probeBusy = false;
 async function probeServers() {
-  if (probeBusy) return; probeBusy = true;
+  if (probeBusy || appQuiet()) return; probeBusy = true;
   try {
     for (const w of settings.worktrees || []) {
       if (!w.path || !w.port || devServers.has(w.path)) continue;
@@ -461,7 +472,25 @@ const teams = new Map(); // teamName -> { name, leadAgentId, leadSessionId, memb
 const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
 const pendingClearAgents = new Set(); // agentIds that recently ran /clear — used to correctly assign new JSONL files
-const termBuffers = new Map(); // agentId -> string (last TERM_BUFFER_MAX chars of terminal output)
+// Terminal output kept for the mobile remote and a renderer-reload replay (last TERM_BUFFER_MAX chars).
+// A chunk list, not one string: `s += d; s = s.slice(-MAX)` copied ~2 MB (UTF-16) per pty chunk once an
+// agent passed the cap — 30-60 chunks/s on a busy one. Chunks are joined only when the text is read.
+const termBuffers = new Map(); // agentId -> { chunks: string[], len }
+function termBufAppend(id, d) {
+  let b = termBuffers.get(id);
+  if (!b) { b = { chunks: [], len: 0 }; termBuffers.set(id, b); }
+  b.chunks.push(d); b.len += d.length;
+  while (b.chunks.length > 1 && b.len - b.chunks[0].length >= TERM_BUFFER_MAX) b.len -= b.chunks.shift().length;
+}
+function termBufText(id) {
+  const b = termBuffers.get(id);
+  if (!b) return '';
+  if (b.chunks.length > 1) b.chunks = [b.chunks.join('')];
+  if (b.chunks[0].length > TERM_BUFFER_MAX) b.chunks[0] = b.chunks[0].slice(-TERM_BUFFER_MAX);
+  b.len = b.chunks[0].length;
+  return b.chunks[0];
+}
+function termBufSet(id, s) { termBuffers.set(id, { chunks: [s], len: s.length }); }
 const devServers = new Map(); // worktree path -> { proc, port, url, repo } (per-worktree dev server pty)
 
 // /clear submitted: zero the context bar now. The new JSONL only appears on the next
@@ -541,7 +570,9 @@ const REMOTE_PORT = 7778;
 let nextId = 1;
 
 const lastStatusSent = new Map();
+const lastStatsSent = new Map(); // agentId -> JSON of the stats last sent, by any path — the 5 s fallback skips unchanged ones
 function send(data) {
+  if (data.type === 'stats') lastStatsSent.set(data.id, JSON.stringify(data.stats));
   // Status trail: each change of an agent's dot, with the code line that caused it — the
   // evidence for "why does this row show the wrong state" (see ~/.overlord/overlord.log).
   if (data.type === 'status' && lastStatusSent.get(data.id) !== data.status) {
@@ -586,7 +617,7 @@ function sendFullState() {
     send({ type: 'stats', id, stats: a.stats });
     // Replay buffered terminal output so a renderer reload (Ctrl+Shift+R) restores scrollback
     // instead of showing a blank terminal. Renderer's termData handler lazily builds the xterm.
-    const tbuf = termBuffers.get(id);
+    const tbuf = termBufText(id);
     if (tbuf) send({ type: 'termData', id, data: tbuf });
     const ports = serverPorts.get(id);
     if (ports) { for (const [port, url] of ports) send({ type: 'serverDetected', id, port, url }); }
@@ -732,11 +763,10 @@ function scanForServers(id, text) {
       ports.set(port, normalUrl); serverPortAt.set(id + ':' + port, Date.now());
       console.log(`[Overlord] Server detected for agent ${id}: ${normalUrl}`);
       send({ type: 'serverDetected', id, port, url: normalUrl });
-      // Point this agent's own browser at its dev server, whether or not anyone is watching.
-      if (browserRegistry) {
-        const actions = browserRegistry.actionsFor(id);
-        if (actions) actions.navigate(normalUrl).catch(() => {});
-      }
+      // Point this agent's own browser at its dev server — once something asks for that browser.
+      // Creating it here gave every agent that ever started a dev server a hidden Chromium renderer
+      // running the dev app (HMR socket and all, ~100-300 MB) for the agent's whole life.
+      if (browserRegistry) browserRegistry.prime(id, normalUrl);
     }
   }
 }
@@ -1578,8 +1608,7 @@ function spawnShell(id) {
     send({ type: 'termData', id, data: '\r\n\x1b[90m[Plain shell — type exit to leave]\x1b[0m\r\n' });
     proc.onData((d) => {
       try { send({ type: 'termData', id, data: d }); } catch {}
-      const buf = (termBuffers.get(id) || '') + d;
-      termBuffers.set(id, buf.length > TERM_BUFFER_MAX ? buf.slice(-TERM_BUFFER_MAX) : buf);
+      termBufAppend(id, d);
     });
     proc.onExit((e) => { proc._ovKilled = true; terminals.delete(id); send({ type: 'termExit', id, code: e?.exitCode }); });
   } catch (e) {
@@ -1612,7 +1641,7 @@ function doSpawnTerminal(id, attached) {
       // Same Claude process as before the restart: it's already at its prompt or mid-turn.
       a.claudeReady = true;
       a._resumeHandled = true; // its boot output is long gone — nothing to scan for resume errors
-      termBuffers.set(id, (proc.replay || '').slice(-TERM_BUFFER_MAX));
+      termBufSet(id, (proc.replay || '').slice(-TERM_BUFFER_MAX));
       if (proc.replay) send({ type: 'termData', id, data: proc.replay });
       // The replay starts mid-stream; a size change makes Claude repaint the whole screen.
       const sz = spawnSize(id);
@@ -1632,11 +1661,7 @@ function doSpawnTerminal(id, attached) {
     let resumeErrorBuf = '';
     proc.onData((d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); watchScreen(id, d); } catch {}
-      // Buffer terminal output for mobile remote
-      let buf = termBuffers.get(id) || '';
-      buf += d;
-      if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
-      termBuffers.set(id, buf);
+      termBufAppend(id, d); // for the mobile remote and a reload replay
       // Claude boot banner seen → ready after a settle delay (see the matching
       // detector in createAgent for the reasoning).
       if (!a.claudeReady && !a._readyTimer) {
@@ -1710,14 +1735,18 @@ function doSpawnTerminal(id, attached) {
 // was created in; the next new agent there adopts it and is typeable at once.
 // ponytail: one spare for the most recent folder; per-project spares if people hop folders a lot.
 const SPARE_DELAY_MS = 5000; // after a launch — concurrent claude startups race-write ~/.claude.json
-let spare = null; // { id, sessionId, cwd, key, proc, buf, bornAt, exited, adopted }
+// A booted claude is 250-400 MB. One that nobody adopted within this long is dropped; the next
+// launch re-warms one. (Before: it sat there for the rest of the day.)
+const SPARE_TTL_MS = 10 * 60 * 1000;
+const SPARE_BUF_MAX = 256 * 1024; // what's replayed into the adopting terminal; an idle claude repaints its status line forever
+let spare = null; // { id, sessionId, cwd, key, proc, buf, bornAt, exited, adopted, ttl }
 let _spareTimer = null;
 function spareKey(cwd) {
   return `${!!settings.bypassPermissions}|${settings.remoteControl !== false}|${featureAgentArgs(cwd).flags}|${(mcpServer && mcpServer.port()) || 0}`;
 }
 function dropSpare() {
   if (!spare) return;
-  const s = spare; spare = null;
+  const s = spare; spare = null; clearTimeout(s.ttl);
   if (!s.exited) killPty(s.proc);
   if (mcpServer) mcpServer.revokeToken(s.id);
   removeAgentConfig(s.id);
@@ -1737,15 +1766,16 @@ function scheduleSpare(cwd) {
     try {
       const s = { id, sessionId, cwd, key: spareKey(cwd), buf: '', bornAt: Date.now(), exited: false, adopted: false };
       s.proc = agentPty().spawn(shell, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env }) });
-      s.proc.onData((d) => { if (!s.adopted) s.buf += d; });
+      s.proc.onData((d) => { if (!s.adopted) { s.buf += d; if (s.buf.length > SPARE_BUF_MAX * 2) s.buf = s.buf.slice(-SPARE_BUF_MAX); } });
       s.proc.onExit(() => { s.exited = true; if (spare === s) dropSpare(); });
+      s.ttl = setTimeout(() => { if (spare === s) { flog('spare expired unadopted'); dropSpare(); } }, SPARE_TTL_MS);
       spare = s;
     } catch (e) { flog('spare spawn failed:', e); }
   }, SPARE_DELAY_MS);
 }
 function takeSpare(cwd) {
   if (!spareFits(spare, cwd, spareKey(cwd))) return null;
-  const s = spare; spare = null; s.adopted = true;
+  const s = spare; spare = null; s.adopted = true; clearTimeout(s.ttl);
   return s;
 }
 
@@ -1799,11 +1829,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit) {
     }
     const onData = (d) => {
       try { send({ type: 'termData', id, data: d }); scanForServers(id, d); extractSpinnerText(id, d); watchScreen(id, d); } catch {}
-      // Buffer terminal output for mobile remote
-      let buf = termBuffers.get(id) || '';
-      buf += d;
-      if (buf.length > TERM_BUFFER_MAX) buf = buf.slice(-TERM_BUFFER_MAX);
-      termBuffers.set(id, buf);
+      termBufAppend(id, d); // for the mobile remote and a reload replay
       // Claude boot banner seen → ready to inject queued peer messages after a
       // short settle (the banner paints before the input handler accepts keys;
       // injecting at banner-time silently drops the paste). Strip ANSI FIRST
@@ -1872,7 +1898,7 @@ function closeAgent(id) {
   pendingTermInput.delete(id);
   inBracketedPaste.delete(id);
   bracketedPasteBuffers.delete(id);
-  termBuffers.delete(id);
+  termBuffers.delete(id); lastStatsSent.delete(id);
   pendingPeerMsgs.delete(id);
   peerApprovalQueue.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
@@ -1901,7 +1927,7 @@ function archiveAgent(id) {
   pendingTermInput.delete(id);
   inBracketedPaste.delete(id);
   bracketedPasteBuffers.delete(id);
-  termBuffers.delete(id);
+  termBuffers.delete(id); lastStatsSent.delete(id);
   const t = terminals.get(id); if (t) { killPty(t); terminals.delete(id); }
   // A session handed to Claude Code's daemon outlives the pty: stop it too, or the
   // closed agent keeps working (and billing) where nobody sees it.
@@ -1943,7 +1969,9 @@ function startWatch(id) {
   const p = polls.get(id); if (p) { clearInterval(p); polls.delete(id); }
   try { watchers.set(id, fs.watch(a.jsonlFile, () => readLines(id))); } catch {}
   try { fs.watchFile(a.jsonlFile, { interval: JSONL_POLL_MS }, () => readLines(id)); } catch {}
-  const interval = setInterval(() => { if (!agents.has(id)) { clearInterval(interval); try { fs.unwatchFile(a.jsonlFile); } catch {} return; } readLines(id); }, JSONL_POLL_MS);
+  // fs.watch + watchFile (a libuv stat thread) already notice within JSONL_POLL_MS; this main-thread
+  // stat is only the belt-and-braces fallback, so it runs 5× slower than before.
+  const interval = setInterval(() => { if (!agents.has(id)) { clearInterval(interval); try { fs.unwatchFile(a.jsonlFile); } catch {} return; } readLines(id); }, JSONL_FALLBACK_MS);
   polls.set(id, interval);
   readLines(id);
 }
@@ -2670,7 +2698,7 @@ function notifyPrDecision(pr, kind) {
 // every PR_CHECK_WATCH_MS each open PR's head commit ("owner/name@sha#checks" / "#status") catches CI from outside Actions.
 // ponytail: unchanged answers are free; a change costs one request, and the full poll it triggers is budgeted below.
 // If GitHub's secondary (per-minute) limit ever bites, slow PR_CHECK_WATCH_MS first.
-const PR_WATCH_MS = 10e3, PR_CHECK_WATCH_MS = 30e3;
+const PR_WATCH_MS = 30e3, PR_CHECK_WATCH_MS = 60e3; // 304s are free for the rate limit but each is a TLS round trip; 10 repos + 20 PRs was ~1 request/s
 // Nobody at the PC for AWAY_S (system idle, any app): background GitHub polling rests — PR timers and watch here,
 // the Releases board's loops via away. The first tick after you're back catches up.
 const AWAY_S = 15 * 60;
@@ -2730,9 +2758,9 @@ function armPrTimer() {
   const sec = Math.max(30, Number(cfg.intervalSec) || 60);
   pollPRs();
   prTimer = setInterval(async () => { if (userAway()) return; if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
-  prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled && !userAway()) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
+  prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled && !userAway() && !appQuiet()) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
   prCheckWatchTimer = setInterval(() => {
-    if (userAway()) return;
+    if (userAway() || appQuiet()) return;
     const heads = ((settings.prCache && settings.prCache.prs) || []).filter(p => p.headSha && PR_REPO_RE.test(p.repo || ''));
     prCheckWatch.tick(heads.flatMap(p => [`${p.repo}@${p.headSha}#checks`, `${p.repo}@${p.headSha}#status`]));
   }, PR_CHECK_WATCH_MS);
@@ -3222,13 +3250,16 @@ let forceQuit = false;
 const { parseModelWeekly, parseOauthUsage, carryModelWeekly, appendUsageSample, usageMeters } = require('./usage-core');
 const { scanCosts, sumCost } = require('./api-cost');
 // What each meter's current window would have cost at API prices, from every transcript on this machine.
-let lastUsageCost = null, costScanning = false;
+// The transcript walk (every .jsonl under ~/.claude/projects, stat'd one by one) runs at most every
+// COST_SCAN_MS; the per-meter sums from the cached rows are cheap and follow every usage poll.
+const COST_SCAN_MS = 10 * 60 * 1000;
+let lastUsageCost = null, costScanning = false, lastCostScanAt = 0;
 async function sendUsageCost(usage) {
   if (costScanning) return;
   costScanning = true;
   try {
     const now = Date.now();
-    await scanCosts(path.join(os.homedir(), '.claude', 'projects'), now);
+    if (now - lastCostScanAt >= COST_SCAN_MS) { lastCostScanAt = now; await scanCosts(path.join(os.homedir(), '.claude', 'projects'), now); }
     const cost = {};
     for (const m of usageMeters(usage)) {
       const end = m.reset > now ? m.reset : now;
@@ -3527,10 +3558,11 @@ function buildTeamPrompt(task, roles) {
 function scanTeams() {
   try {
     if (!fs.existsSync(TEAMS_DIR)) return;
-    const teamDirs = fs.readdirSync(TEAMS_DIR);
     // Build sessionId -> agentId lookup from our agents
     const sessionToAgent = new Map();
     for (const [id, a] of agents) sessionToAgent.set(a.sessionId, id);
+    if (!sessionToAgent.size && !teams.size) return; // nobody could lead a team: no reason to read every team dir
+    const teamDirs = fs.readdirSync(TEAMS_DIR);
 
     for (const teamName of teamDirs) {
       const configPath = path.join(TEAMS_DIR, teamName, 'config.json');
@@ -4761,7 +4793,7 @@ function handleIpc(msg) {
     case 'fullRestart': forceQuit = true; _restarting = true; app.relaunch({ args: relaunchArgs() }); app.quit(); break;
     // The host runs from the app's own files, so it has to go before the installer replaces them.
     // the pty host is Overlord.exe too: the installer can't replace Overlord until it's gone, so wait for it to exit
-    case 'installUpdate': try { fs.writeFileSync(UPDATE_MARK, ''); } catch {} forceQuit = true; ptyHost.stopAndWait(5000).catch(() => {}).then(() => autoUpdater.quitAndInstall()); break;
+    case 'installUpdate': try { fs.writeFileSync(UPDATE_MARK, ''); } catch {} forceQuit = true; ptyHost.stopAndWait(5000).catch(() => {}).then(() => autoUpdater && autoUpdater.quitAndInstall()); break;
     case 'checkGitUpdate': checkGitUpdate(); break;
     case 'gitPull': doGitPull(); break;
     case 'approvePr': {
@@ -5073,8 +5105,12 @@ ipcMain.on('cmd', (_e, msg) => {
 });
 
 // Periodically push stats + scan for new JSONL files (/clear detection)
+// parseLine already sends stats as they change; this is the fallback, so only what differs from the
+// last send goes out (every agent's stats every 5 s made the renderer rebuild its whole list each time).
 setInterval(() => {
-  for (const [id, a] of agents) send({ type: 'stats', id, stats: a.stats });
+  if (!appQuiet()) {
+    for (const [id, a] of agents) if (lastStatsSent.get(id) !== JSON.stringify(a.stats)) send({ type: 'stats', id, stats: a.stats });
+  }
   scanForNewJsonlFiles();
   followPrompts();
 }, 5000);
@@ -6021,7 +6057,7 @@ app.whenReady().then(() => {
     send(setupState()); // a missing git/claude shows the setup card before anything else
     if (recoveryNote) { send({ type: 'toast', text: recoveryNote }); recoveryNote = null; }
   });
-  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); switchKeyboardToEnglish(); });
+  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); switchKeyboardToEnglish(); if (Date.now() - _lastUpdateCheck > UPDATE_CHECK_MS) checkUpdatesNow(); });
   mainWindow.on('blur', () => { _windowFocused = false; });
   mainWindow.webContents.on('before-input-event', (_e, input) => {
     if (input.key === 'F12' && input.type === 'keyDown') {
@@ -6056,18 +6092,25 @@ app.whenReady().then(() => {
     mainWindow = null;
   });
   // Check for updates — only runs when packaged (not in dev, not in a sandboxed test instance)
+  // Re-check so a long-running app catches new releases without a restart: every UPDATE_CHECK_MS,
+  // plus on focus once that long has passed (every minute was 2 880 GitHub fetches a day).
   if (app.isPackaged && !process.env.OVERLORD_STATE_DIR) {
-    setTimeout(() => autoUpdater.checkForUpdatesAndNotify(), 3000);
-    // Re-check every minute so a long-running app catches new releases without a restart.
-    setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 60 * 1000);
+    setupAutoUpdater();
+    setTimeout(() => { _lastUpdateCheck = Date.now(); autoUpdater.checkForUpdatesAndNotify(); }, 3000);
+    _checkUpdates = () => autoUpdater.checkForUpdates().catch(() => {});
   } else if (isGitCheckout() && !process.env.OVERLORD_STATE_DIR) {
     // Source checkout: same idea, different mechanism — watch origin/master.
-    setTimeout(checkGitUpdate, 4000);
-    setInterval(checkGitUpdate, 5 * 60 * 1000);
+    setTimeout(() => { _lastUpdateCheck = Date.now(); checkGitUpdate(); }, 4000);
+    _checkUpdates = checkGitUpdate;
   }
+  if (_checkUpdates) setInterval(checkUpdatesNow, UPDATE_CHECK_MS);
 });
+const UPDATE_CHECK_MS = 30 * 60 * 1000;
+let _checkUpdates = null, _lastUpdateCheck = 0;
+function checkUpdatesNow() { if (!_checkUpdates) return; _lastUpdateCheck = Date.now(); _checkUpdates(); }
 app.on('before-quit', () => {
   clearTimeout(_spareTimer); dropSpare();
+  try { releases.flush(); } catch {} // releases.json writes are debounced 2 s
   if (remoteServer) { try { remoteServer.close(); } catch {} }
   if (mcpServer) { try { mcpServer.stop(); } catch {} }
   if (preview) { try { preview.destroy(); } catch {} }
@@ -6080,7 +6123,7 @@ app.on('before-quit', () => {
     // An update installs on this quit only if the pty host (Overlord.exe too) can go with it: nothing mid-turn
     // left in it, so stop it now (the installer waits ~1.3s before it looks). With agents mid-turn, their work
     // wins: the update installs on a later quit, or from the update button.
-    if (_updateReady && autoUpdater.autoInstallOnAppQuit) {
+    if (_updateReady && autoUpdater && autoUpdater.autoInstallOnAppQuit) {
       if (busy) { autoUpdater.autoInstallOnAppQuit = false; flog(`update not installed on quit: ${busy} agent(s) mid-turn in the pty host`); }
       else ptyHost.shutdown();
     }

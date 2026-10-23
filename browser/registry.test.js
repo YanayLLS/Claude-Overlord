@@ -300,3 +300,23 @@ test('navigatedWithin: true only shortly after some view loaded', async () => {
   assert.strictEqual(h.registry.navigatedWithin(2000), true);
   assert.strictEqual(h.registry.navigatedWithin(2000, Date.now() + 5000), false);
 });
+
+test('prime: a dev-server URL loads only once the browser is first needed, and the first action waits for it', async () => {
+  const { registry, made } = harness();
+  registry.prime(1, 'http://localhost:3000');
+  assert.strictEqual(made.length, 0, 'no renderer for a URL nobody looked at');
+  const actions = registry.actionsFor(1);
+  assert.strictEqual(made.length, 1);
+  assert.strictEqual(made[0].webContents.url, 'http://localhost:3000');
+  await actions.navigate('http://localhost:3000/b');
+  assert.strictEqual(made[0].webContents.url, 'http://localhost:3000/b');
+  // the browser exists now: a later prime navigates it directly
+  registry.prime(1, 'http://localhost:4000');
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(made[0].webContents.url, 'http://localhost:4000');
+  registry.destroy(1);
+  registry.prime(1, 'http://localhost:5000');
+  registry.destroy(1);
+  registry.ensure(1);
+  assert.strictEqual(made[1].webContents.url, 'about:blank', 'destroy forgets the primed URL');
+});

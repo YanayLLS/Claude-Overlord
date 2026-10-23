@@ -411,7 +411,20 @@ function deployState(runs) {
   return r.conclusion === 'success' ? 'success' : 'failure';
 }
 
-const api = { deployState, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+// Background polling cadence (ms) for releases-main. Everything slows while the Releases modal is closed —
+// the footer badge still needs a failed deploy / a release waiting on me, just not as fast; a release in
+// flight keeps the sign ping at its fastest, a deploy in flight keeps the deploy poll at its fastest.
+function releasePeriods({ modalOpen = false, inFlight = false, deploying = false } = {}) {
+  const S = 1000, M = 60 * S;
+  return {
+    refresh: modalOpen ? 5 * M : 15 * M,
+    deploys: modalOpen ? (deploying ? 10 * S : 60 * S) : (deploying ? 30 * S : 180 * S),
+    ping: inFlight ? 15 * S : modalOpen ? 30 * S : 60 * S,
+    stray: modalOpen ? 90 * S : 5 * M,
+  };
+}
+
+const api = { deployState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

@@ -391,4 +391,16 @@ assert.strictEqual(age('garbage', now), '');
   assert.strictEqual(deployState([{ status: 'completed', conclusion: 'success' }, { status: 'completed', conclusion: 'failure' }]), 'success');
   assert.strictEqual(deployState([{ status: 'completed', conclusion: 'cancelled' }]), 'failure');
 }
+{ // polling cadence: closed modal slows everything; in-flight release / deploy keep their fast lane
+  const { releasePeriods } = require('./releases-core');
+  const S = 1000, M = 60 * S;
+  assert.deepStrictEqual(releasePeriods({ modalOpen: true }), { refresh: 5 * M, deploys: 60 * S, ping: 30 * S, stray: 90 * S });
+  assert.deepStrictEqual(releasePeriods({ modalOpen: false }), { refresh: 15 * M, deploys: 180 * S, ping: 60 * S, stray: 5 * M });
+  assert.deepStrictEqual(releasePeriods(), releasePeriods({ modalOpen: false }), 'defaults = closed, nothing in flight');
+  assert.strictEqual(releasePeriods({ modalOpen: true, deploying: true }).deploys, 10 * S);
+  assert.strictEqual(releasePeriods({ modalOpen: false, deploying: true }).deploys, 30 * S);
+  assert.strictEqual(releasePeriods({ modalOpen: true, inFlight: true }).ping, 15 * S);
+  assert.strictEqual(releasePeriods({ modalOpen: false, inFlight: true }).ping, 15 * S, 'a release in flight pings fast even when closed');
+  assert.strictEqual(releasePeriods({ modalOpen: false, inFlight: true }).refresh, 15 * M, 'inFlight only touches ping');
+}
 console.log('releases-core: all passed');

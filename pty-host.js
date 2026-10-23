@@ -18,10 +18,52 @@ const IDLE_EXIT_MS = 30 * 1000; // no ptys and no app → nothing to keep alive
 // ponytail: after a close, agents that were mid-turn finish and then sit at their prompt
 // until the app reopens (or reboot). Add a no-client timeout if that starts to cost memory.
 
-function createHost({ pty, pipePath }) {
-  const ptys = new Map(); // key -> { proc, buf }
+// node-pty on Windows never closes the pseudo console of a pty that exits on its own: conpty.cc
+// drops its handle-table entry before the JS exit callback runs, so kill() afterwards is a no-op
+// and ClosePseudoConsole never happens. Every natural exit therefore leaves a headless conhost.exe
+// (~8 MB) and node-pty's conout worker isolate (~10 MB) behind for the host's whole life — a host
+// with 4 live ptys was carrying 13 stray conhosts. The reaper below kills the conhosts no live pty
+// can own: a conhost is born inside the synchronous pty.spawn, so one whose creation time falls
+// outside every live pty's spawn window (± ATTR_SLACK_MS) belongs to a dead one.
+const ATTR_SLACK_MS = 250;
+const REAP_AFTER_EXIT_MS = 2000; // past node-pty's own 1 s flush-and-cleanup
+const REAP_EVERY_MS = 10 * 60 * 1000;
+const CONHOST_MIN_AGE_MS = 10 * 1000; // a brand-new conhost's pty may still be registering
+function createReaper({ listConhosts, kill, now = Date.now, live }) {
+  let busy = false;
+  return async function reap() {
+    if (busy) return [];
+    busy = true;
+    const killed = [];
+    try {
+      const windows = live().map(p => [p.spawnedAt - ATTR_SLACK_MS, p.spawnedDoneAt + ATTR_SLACK_MS]);
+      for (const c of await listConhosts()) {
+        if (now() - c.createdAt < CONHOST_MIN_AGE_MS) continue;
+        if (windows.some(([a, b]) => c.createdAt >= a && c.createdAt <= b)) continue;
+        try { kill(c.pid); killed.push(c.pid); } catch {}
+      }
+    } catch {}
+    busy = false;
+    return killed;
+  };
+}
+// Headless conhost children of this process: [{ pid, createdAt }]. One PowerShell call (~0.3 s, async).
+function listConhostsWin32() {
+  return new Promise((resolve) => {
+    const script = `Get-CimInstance Win32_Process -Filter "Name='conhost.exe' AND ParentProcessId=${process.pid}" | ForEach-Object { "$($_.ProcessId) $(([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()) $($_.CommandLine)" }`;
+    require('child_process').execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 15000 }, (err, stdout) => {
+      if (err) return resolve([]);
+      resolve(String(stdout).split('\n').map(l => l.trim().match(/^(\d+) (\d+) (.*)$/)).filter(m => m && /--headless/.test(m[3])).map(m => ({ pid: +m[1], createdAt: +m[2] })));
+    });
+  });
+}
+
+function createHost({ pty, pipePath, listConhosts = null, killPid = (pid) => process.kill(pid) }) {
+  const ptys = new Map(); // key -> { proc, buf, spawnedAt, spawnedDoneAt }
   let client = null;
   let idleTimer = null;
+  const reap = listConhosts ? createReaper({ listConhosts, kill: killPid, live: () => [...ptys.values()] }) : async () => [];
+  if (listConhosts) setInterval(reap, REAP_EVERY_MS).unref();
 
   const out = (msg) => { if (client && !client.destroyed) client.write(JSON.stringify(msg) + '\n'); };
 
@@ -32,11 +74,12 @@ function createHost({ pty, pipePath }) {
 
   function spawn({ key, file, args, opts }) {
     let proc;
+    const spawnedAt = Date.now();
     try { proc = pty.spawn(file, args, opts); } catch (e) {
       out({ t: 'data', key, d: `\r\n\x1b[31mFailed to start terminal: ${e.message}\x1b[0m\r\n` });
       return out({ t: 'exit', key, code: -1 });
     }
-    const p = { proc, buf: '' };
+    const p = { proc, buf: '', spawnedAt, spawnedDoneAt: Date.now() };
     ptys.set(key, p);
     proc.onData((d) => {
       p.buf += d;
@@ -48,6 +91,8 @@ function createHost({ pty, pipePath }) {
       ptys.delete(key);
       out({ t: 'exit', key, code: e && e.exitCode });
       checkIdle();
+      // What node-pty leaves behind on a natural exit (see the reaper note above).
+      setTimeout(() => { try { proc._agent?._conoutSocketWorker?.dispose?.(); } catch {} reap(); }, REAP_AFTER_EXIT_MS).unref();
     });
     out({ t: 'spawned', key, pid: proc.pid });
   }
@@ -104,13 +149,13 @@ function createHost({ pty, pipePath }) {
 
   const stop = () => { clearTimeout(idleTimer); if (client) client.destroy(); server.close(); };
 
-  return { listen, stop, ptys };
+  return { listen, stop, ptys, reap };
 }
 
-module.exports = { createHost, HOST_VERSION };
+module.exports = { createHost, createReaper, listConhostsWin32, HOST_VERSION, ATTR_SLACK_MS, CONHOST_MIN_AGE_MS };
 
 if (require.main === module) {
-  const host = createHost({ pty: require('node-pty'), pipePath: process.argv[2] });
+  const host = createHost({ pty: require('node-pty'), pipePath: process.argv[2], listConhosts: process.platform === 'win32' ? listConhostsWin32 : null });
   // Another host already owns the pipe (two app instances racing) — let it.
   host.listen().catch(() => process.exit(0));
 }

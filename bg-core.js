@@ -3,6 +3,7 @@
 // <task-notification> with a final <status>. Turn-level state alone says "idle".
 
 const NOTE_STILL_RUNNING = /background work of its own still running/;
+const SEEN_NOTICES_MAX = 200; // notices acted on, kept so a late copy isn't acted on twice
 
 function recordText(r) {
   if (r.type === 'queue-operation') return typeof r.content === 'string' ? r.content : '';
@@ -38,10 +39,12 @@ function applyBgRecord(tasks, r) {
       if (!status) continue;
       // The same notice is written up to 3 times (enqueued, dequeued, delivered). Act on it once:
       // a late copy of an old "finished" must not end an agent that was resumed in between.
-      const key = block.split('</task-notification>')[0].trim();
+      // Keyed by a hash, capped: the whole block text, uncapped, grew by MBs on a long-lived agent.
+      const key = require('crypto').createHash('sha1').update(block.split('</task-notification>')[0].trim()).digest('hex');
       const seen = tasks.seenNotices || (tasks.seenNotices = new Set());
       if (seen.has(key)) continue;
       seen.add(key);
+      if (seen.size > SEEN_NOTICES_MAX) seen.delete(seen.values().next().value); // oldest first: Set keeps insertion order
       // An agent that stopped with its own background work still going will notify again
       const pending = status === 'running' || NOTE_STILL_RUNNING.test(block);
       for (const id of ids) { if (pending) tasks.add(id); else tasks.delete(id); }

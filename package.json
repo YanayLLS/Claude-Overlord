@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "1.168.3",
+  "version": "1.169.0",
   "description": "Overlord — Claude Agent Manager",
   "main": "main.js",
   "scripts": {
@@ -12,12 +12,12 @@
     "dist": "node scripts/bundle-xterm.js && node scripts/bundle-three.js && node scripts/bundle-md.js && electron-builder"
   },
   "dependencies": {
-    "@xterm/addon-web-links": "^0.12.0",
     "electron-updater": "^6.8.3",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.12.0",
     "@xterm/addon-image": "^0.9.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/xterm": "^5.5.0",
@@ -64,7 +64,13 @@
       "!**/*.test.js",
       "!scripts/**",
       "!docs/**",
-      "!*.md"
+      "!*.md",
+      "!package-lock.json",
+      "!node_modules/node-pty/build/deps/**",
+      "!node_modules/node-pty/build/Release/obj/**",
+      "!node_modules/node-pty/build/**/*.{pdb,iobj,ipdb,exp,lib,sln,vcxproj,filters,tlog,log}",
+      "!node_modules/node-pty/prebuilds/darwin-*/**",
+      "!node_modules/node-pty/prebuilds/win32-arm64/**"
     ],
     "directories": {
       "output": "out"

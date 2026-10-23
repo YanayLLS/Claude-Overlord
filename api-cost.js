@@ -66,7 +66,10 @@ function jsonlFiles(dir, since, out) {
 // Reads new transcript lines under root. Async so the first (large) scan doesn't block the main process.
 async function scanCosts(root, now) {
   const since = now - KEEP_MS;
-  for (const [p, size] of jsonlFiles(root, since, [])) {
+  const found = jsonlFiles(root, since, []);
+  const keep = new Set(found.map(([p]) => p));
+  for (const p of files.keys()) if (!keep.has(p)) files.delete(p); // transcripts that aged out of the window (rows were filtered, entries never were)
+  for (const [p, size] of found) {
     let rec = files.get(p);
     if (!rec || size < rec.size) { rec = { size: 0, rows: [] }; files.set(p, rec); }
     if (size === rec.size) continue;
@@ -94,4 +97,4 @@ function sumCost(start, end, model) {
   return usd;
 }
 
-module.exports = { priceFor, usageCost, parseLine, scanCosts, sumCost };
+module.exports = { priceFor, usageCost, parseLine, scanCosts, sumCost, _files: files };

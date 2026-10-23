@@ -92,3 +92,17 @@ test('a late copy of an old finish notice does not end an agent resumed in betwe
   applyBgRecord(t, { type: 'queue-operation', operation: 'enqueue', content: note('a1', 'completed', '<summary>Agent "x" finished again</summary>\n') });
   assert.strictEqual(t.size, 0);
 });
+
+test('seen notices are capped, oldest first', () => {
+  const t = new Set();
+  for (let i = 0; i < 230; i++) applyBgRecord(t, { type: 'user', message: { content: note('x' + i, 'completed') } });
+  assert.strictEqual(t.seenNotices.size, 200);
+  assert.strictEqual(t.seenNotices.has(require('crypto').createHash('sha1').update(note('x0', 'completed').split('<task-notification>')[1].split('</task-notification>')[0].trim()).digest('hex')), false);
+  // a late copy of a notice within the cap is still ignored: 'y' launched, finished, then its old
+  // "running" copy is written again — the task must not come back
+  applyBgRecord(t, { type: 'user', message: { content: note('y', 'running') } });
+  assert.strictEqual(t.size, 1);
+  applyBgRecord(t, { type: 'user', message: { content: note('y', 'completed') } });
+  applyBgRecord(t, { type: 'user', message: { content: note('y', 'running') } });
+  assert.strictEqual(t.size, 0);
+});

@@ -14,7 +14,7 @@ test('parseGet: plain GETs become URLs; writes, fields without -X GET, and unkno
   assert.strictEqual(parseGet(['pr', 'list']), null);
 });
 
-const res = (status, body, h = {}) => ({ status, headers: { get: k => h[k.toLowerCase()] ?? null }, json: async () => body });
+const res = (status, body, h = {}) => ({ status, headers: { get: k => h[k.toLowerCase()] ?? null }, json: async () => body, text: async () => JSON.stringify(body) });
 
 test('second identical GET is answered from cache on 304; non-GET and errors go through gh', async () => {
   const sent = [], ran = [];
@@ -46,4 +46,17 @@ test('rate-limited answer pauses every call until the reset, without touching Gi
   assert.strictEqual(calls, 1);
   t = 2001e3;
   assert.strictEqual(c.blockedUntil(), 0);
+});
+
+test('cache evicts by body size: big bodies push the oldest out before the entry cap', async () => {
+  const { createGhCache } = require('./gh-cache');
+  const big = { pad: 'x'.repeat(3 * 1024 * 1024) }; // 3 MB each: the 4th exceeds the 8 MB cap
+  let n = 0;
+  const gh = createGhCache({ run: async () => ({ data: 'gh' }), token: async () => 't', fetch: async (url, o) => (o.headers['If-None-Match'] ? res(304, null) : res(200, big, { etag: 'e' + (++n) })) });
+  for (let i = 1; i <= 4; i++) await gh.ghJson(['api', '/r/' + i]);
+  const before = n;
+  await gh.ghJson(['api', '/r/1']); // evicted: a full 200 again, not a 304
+  assert.strictEqual(n, before + 1);
+  await gh.ghJson(['api', '/r/4']); // still cached: answered by 304
+  assert.strictEqual(n, before + 1);
 });

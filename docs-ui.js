@@ -353,12 +353,31 @@
     }
     setVisible(true);
     if (editing) { refs.editor.value = d.draft != null ? d.draft : d.text; refs.editor.scrollTop = d.editScrollTop || 0; renderTabs(); return; }
+    lastHash = hash;
     renderDoc(d);
     if (hash) scrollToId(hash); else refs.scroll.scrollTop = d.scrollTop || 0;
     renderTabs();
   }
 
+  // md-bundle.js (marked + highlight.js + DOMPurify, 223 KB) loads with the first document, the way loadWorld pulls in
+  // the world; most sessions never open a doc. lastHash: the hash of the latest select, so the deferred render lands on it.
+  let _mdLoad = null, lastHash = '';
+  function loadMd() {
+    if (window.marked) return Promise.resolve();
+    return _mdLoad || (_mdLoad = new Promise((res, rej) => { const el = document.createElement('script'); el.src = './md-bundle.js'; el.onload = res; el.onerror = () => rej(new Error('md-bundle.js failed to load')); document.head.appendChild(el); })
+      .catch(e => { _mdLoad = null; throw e; }));
+  }
+
   function renderDoc(d) {
+    if (!window.marked) { // first document: render once the bundle is in. select() re-runs so scroll/hash land as if it had been sync.
+      refs.view.innerHTML = ''; refs.view.hidden = false;
+      const plain = e => { console.error('[docs]', e); refs.view.innerHTML = '<pre>' + esc(d.draft != null ? d.draft : d.text) + '</pre>'; };
+      loadMd().then(() => {
+        if (!window.marked) return plain(new Error('md-bundle.js loaded without marked')); // never loop back into this branch
+        if (docs.get(d.path) === d && selected === d.path && !editing) select(d.path, { hash: lastHash });
+      }, plain);
+      return;
+    }
     const { meta: fm, body } = splitFrontMatter(d.draft != null ? d.draft : d.text);
     refs.meta.innerHTML = fm ? '<table class="md-fm">' + fm.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('') + '</table>' : '';
     refs.meta.hidden = !fm;
