@@ -80,6 +80,8 @@ const ev = (o) => ({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: fa
 assert.ok(chordMatch(ev({ key: 'K', ctrlKey: true }), parseHotkey('Ctrl+K')), 'case-insensitive key');
 assert.ok(!chordMatch(ev({ key: 'k', ctrlKey: true, shiftKey: true }), parseHotkey('Ctrl+K')), 'extra modifier → no');
 assert.ok(!chordMatch(ev({ key: 'k', ctrlKey: true }), parseHotkey('//')));
+assert.ok(chordMatch(ev({ key: 'ל', code: 'KeyK', ctrlKey: true }), parseHotkey('Ctrl+K')), 'Hebrew layout: the physical key matches');
+assert.strictEqual(hotkeyFromEvent(ev({ key: 'ל', code: 'KeyK', ctrlKey: true })), 'Ctrl+K', 'recorder writes the Latin letter under a Hebrew layout');
 assert.strictEqual(hotkeyFromEvent(ev({ key: 'p', altKey: true })), 'Alt+P');
 assert.strictEqual(hotkeyFromEvent(ev({ key: ' ', ctrlKey: true, shiftKey: true })), 'Ctrl+Shift+Space');
 assert.strictEqual(hotkeyFromEvent(ev({ key: 'Control', ctrlKey: true })), null, 'modifier alone');

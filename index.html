@@ -1329,6 +1329,11 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">Agents show under their chat title in the app and at claude.ai/code. Switching it also connects or disconnects running agents as soon as each is idle.</div>
       <label class="settings-label">
+        <input type="checkbox" id="chk-english-focus" checked onchange="api.send({ type: 'saveSettings', settings: { englishOnFocus: this.checked } })" />
+        <span>Switch the keyboard to English when Overlord gets focus (Windows)</span>
+      </label>
+      <div class="settings-hint">Coming back from a Hebrew window, the first words typed to an agent land in English. Shortcuts (Ctrl+V, Ctrl+W, Ctrl+F…) work under any layout regardless.</div>
+      <label class="settings-label">
         <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
         <span>Prompt autocomplete (ghost text)</span>
       </label>
@@ -1615,6 +1620,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./xterm-bundle.js"></script>
 <script src="./ghost-core.js"></script>
 <script src="./key229.js"></script>
+<script src="./hotkey-core.js"></script>
 <script src="./actions-core.js"></script>
 <script src="./update-core.js"></script>
 <script src="./pr-behind.js"></script>
@@ -3357,10 +3363,10 @@ function createXterm(id) {
       return false;
     }
     // Any other key ends the selection; typing, paste, Backspace or Delete replace it.
-    if (shiftSel && !/^(Shift|Control|Alt|Meta)$/.test(e.key) && !(e.ctrlKey && e.key === 'c')) {
+    if (shiftSel && !/^(Shift|Control|Alt|Meta)$/.test(e.key) && !(e.ctrlKey && hotkeyLetter(e) === 'c')) {
       const { anchorX } = shiftSel; shiftSel = null; terminal.clearSelection();
       const erase = e.key === 'Backspace' || e.key === 'Delete';
-      if (erase || (e.key.length === 1 && !e.altKey && !e.metaKey && (!e.ctrlKey || e.key === 'v'))) {
+      if (erase || (e.key.length === 1 && !e.altKey && !e.metaKey && (!e.ctrlKey || hotkeyLetter(e) === 'v'))) {
         api.send({ type: 'termInput', id, data: deleteSelSeq(anchorX, terminal.buffer.active.cursorX) });
         if (erase) return false;
       }
@@ -3369,20 +3375,20 @@ function createXterm(id) {
     if (e.key === 'Tab' && ghost.text && id === selectedId) { ghostAccept(); return false; } // accept ghost suggestion
     if (e.key === 'Escape' && ghost.text) { ghostClear(); } // dismiss, but let Esc pass through too
     // toLogical: rows Claude Code wrote in visual order (Hebrew flipped for the terminal) go back to logical order, so a paste elsewhere reads right (bidi-core.js)
-    if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(toLogical(terminal.getSelection())); return false; }
+    if (e.ctrlKey && hotkeyLetter(e) === 'c' && terminal.hasSelection()) { navigator.clipboard.writeText(toLogical(terminal.getSelection())); return false; }
     // Ctrl+C with no selection: Claude clears the input box. Copy what was typed first so it isn't lost.
-    if (e.ctrlKey && e.key === 'c' && !terminal.hasSelection()) { const t = readPromptBox(terminal); if (t) navigator.clipboard.writeText(toLogical(t)); return true; }
-    if (e.ctrlKey && e.key === 'v') return false; // block xterm keydown; browser paste event → onData handles it
+    if (e.ctrlKey && hotkeyLetter(e) === 'c' && !terminal.hasSelection()) { const t = readPromptBox(terminal); if (t) navigator.clipboard.writeText(toLogical(t)); return true; }
+    if (e.ctrlKey && hotkeyLetter(e) === 'v') return false; // block xterm keydown; browser paste event → onData handles it
     // Alt+V goes through main too, so the pasted image is kept for the [Image #N] hover preview
-    if (e.altKey && !e.ctrlKey && e.key === 'v') { api.send({ type: 'pasteImage', id, alt: true }); return false; }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey && !e.altKey) { selectPromptBox(terminal); return false; }
+    if (e.altKey && !e.ctrlKey && hotkeyLetter(e) === 'v') { api.send({ type: 'pasteImage', id, alt: true }); return false; }
+    if ((e.ctrlKey || e.metaKey) && hotkeyLetter(e) === 'a' && !e.shiftKey && !e.altKey) { selectPromptBox(terminal); return false; }
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
-    if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
-    if ((e.ctrlKey || e.metaKey) && e.key === 'n') return false; // new agent, not ^N to the shell
+    if (e.ctrlKey && hotkeyLetter(e) === 'f') return false; // let global handler open term search
+    if ((e.ctrlKey || e.metaKey) && hotkeyLetter(e) === 'n') return false; // new agent, not ^N to the shell
     if (e.ctrlKey && e.altKey && /^Digit[1-9]$/.test(e.code)) return false; // new agent with prefix #N
-    if ((e.ctrlKey || e.metaKey) && e.key === 'w') return false; // archive agent, not ^W to the shell
+    if ((e.ctrlKey || e.metaKey) && hotkeyLetter(e) === 'w') return false; // archive agent, not ^W to the shell
     // Ctrl+Z undoes a Ctrl+W while there is one to undo; otherwise the shell gets it.
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && closedStack.some(i => agents.get(i)?.archived)) return false;
+    if ((e.ctrlKey || e.metaKey) && hotkeyLetter(e) === 'z' && !e.shiftKey && closedStack.some(i => agents.get(i)?.archived)) return false;
     // Bare PageUp/PageDown cycle agents. xterm binds them to scrollPages and its cancel()
     // calls stopPropagation(), which would kill the event before the document handler sees
     // it. Shift+PageUp/Down still scrolls the terminal.
@@ -4913,6 +4919,7 @@ function applySettings(s) {
     if (chk) chk.checked = bypassPermissions;
   }
   if (s.remoteControl !== undefined) document.getElementById('chk-remote-control').checked = s.remoteControl;
+  if (s.englishOnFocus !== undefined) document.getElementById('chk-english-focus').checked = s.englishOnFocus;
   if (s.notifications !== undefined) {
     notificationsEnabled = s.notifications;
     const chk = document.getElementById('chk-notif');
@@ -5037,8 +5044,9 @@ function toggleSettings() {
   }
 }
 document.addEventListener('keydown', (e) => {
+  const key = hotkeyLetter(e); // hotkey-core.js: the Latin letter even under a Hebrew layout
   // Ctrl+W close selected agent, Ctrl+Shift+W close all done agents
-  if (e.key === 'w' && (e.ctrlKey || e.metaKey)) {
+  if (key === 'w' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     if (!e.shiftKey && docsUi.hasFocus() && docsUi.closeSelected()) return; // the Docs column was clicked last: its tab closes, agents stay
     if (e.shiftKey) {
@@ -5055,7 +5063,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   // Ctrl+Z: undo the last Ctrl+W — unarchive that agent and switch to it
-  if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey && popClosed()) {
+  if (key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey && popClosed()) {
     e.preventDefault();
     return;
   }
@@ -5079,26 +5087,26 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   // Ctrl+R to restart selected agent
-  if (e.key === 'r' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+  if (key === 'r' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
     e.preventDefault();
     if (selectedId && agents.has(selectedId)) restartAgent(selectedId);
     return;
   }
   // Ctrl+L to clear terminal display
-  if (e.key === 'l' && (e.ctrlKey || e.metaKey)) {
+  if (key === 'l' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     const x = selectedId ? xterms.get(selectedId) : null;
     if (x) { x.terminal.clear(); x.terminal.focus(); }
     return;
   }
   // Ctrl+D to duplicate selected agent
-  if (e.key === 'd' && (e.ctrlKey || e.metaKey)) {
+  if (key === 'd' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
     e.preventDefault();
     if (selectedId && agents.has(selectedId)) duplicateAgent(selectedId);
     return;
   }
   // Ctrl+N to quickly add agent in current/last-used project
-  if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
+  if (key === 'n' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     const cwd = (selectedId && agents.get(selectedId)?.cwd) || [...agents.values()].pop()?.cwd;
     if (cwd) { addAgent(cwd); }
@@ -5112,13 +5120,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   // Ctrl+Shift+F: global search across all agents
-  if (e.key === 'F' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+  if (key === 'f' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
     e.preventDefault();
     openSearch();
     return;
   }
   // Ctrl+F: open terminal search if terminal is open, otherwise filter agents
-  if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
+  if (key === 'f' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     if (docsUi.hasFocus()) {
       docsUi.openFind();
@@ -5142,7 +5150,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   // Ctrl+U to refresh usage
-  if (e.key === 'u' && (e.ctrlKey || e.metaKey)) {
+  if (key === 'u' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     refreshUsage();
     return;
@@ -5155,7 +5163,7 @@ document.addEventListener('keydown', (e) => {
   }
   // Ctrl+Tab / Ctrl+Shift+Tab to cycle agents
   if (e.key === 'Tab' && (e.ctrlKey || e.metaKey) && docsUi.hasFocus() && docsUi.cycle(e.shiftKey ? -1 : 1)) { e.preventDefault(); return; } // Docs column clicked last: next / previous document
-  if ((e.key === 'D' || e.key === 'd') && (e.ctrlKey || e.metaKey) && e.shiftKey) { e.preventDefault(); docsUi.toggle(); return; } // Ctrl+Shift+D: show / hide the Docs column
+  if (key === 'd' && (e.ctrlKey || e.metaKey) && e.shiftKey) { e.preventDefault(); docsUi.toggle(); return; } // Ctrl+Shift+D: show / hide the Docs column
   if (e.key === 'Tab' && (e.ctrlKey || e.metaKey) && agents.size > 0) {
     e.preventDefault();
     const ids = [...agents.entries()].filter(([, a]) => !a.archived).map(([i]) => i);

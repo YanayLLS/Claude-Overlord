@@ -139,6 +139,7 @@ const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'activ
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered } = require('./recover-core');
 const { normalizePasteText } = require('./paste-core');
+const { KBD_SRC, hwndOf, cscPath, kbdExeName, kbdPowershell } = require('./kbd-core');
 const { migrateLegacy } = require('./state-dir');
 const APP_DIR = __dirname;
 let gitUpdateBusy = false;
@@ -1127,7 +1128,7 @@ function globalSearch(query) {
 }
 
 // ── State persistence ─────────────────────────────────
-let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100, peersEnabled: false, peerName: null, peerCode: null, peers: [] };
+let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100, englishOnFocus: true, peersEnabled: false, peerName: null, peerCode: null, peers: [] };
 
 // restoreAgents() runs on the renderer's did-finish-load, but saves fire earlier
 // (window move/resize, a crash-time close). Saving before the restore writes an
@@ -4678,6 +4679,7 @@ function handleIpc(msg) {
       Object.assign(settings, msg.settings); saveState();
       if ('worldEnabled' in msg.settings) armClickupTimer();
       if ('remoteControl' in msg.settings) syncRemoteControl();
+      if (msg.settings.englishOnFocus) kbdHelper(() => {}); // build the helper now so the next focus switches at once
       break;
     case 'uiZoom': // the header scales with the UI, so the native window buttons must too
       settings.zoom = Math.max(60, Math.min(200, Number(msg.zoom) || 100));
@@ -5874,7 +5876,43 @@ function saveWindowBounds() {
   _boundsTimer = setTimeout(() => saveState(), 500);
 }
 
+// ── Keyboard to English on focus (Windows) ───────────────
+// settings.englishOnFocus (default on): a focused Overlord posts WM_INPUTLANGCHANGEREQUEST
+// to its own window via a helper exe compiled once from kbd-core.js's C# source
+// (inbox csc.exe, ~1 s, in the background at startup). No csc → PowerShell Add-Type,
+// ~1 s per focus. Nothing else touches the layout: switching back is the user's.
+let _kbdExe; // undefined = not built yet, '' = csc missing (PowerShell fallback), else the exe path
+let _kbdBuilding = null;
+function kbdHelper(cb) {
+  if (_kbdExe !== undefined) return cb(_kbdExe);
+  if (_kbdBuilding) { _kbdBuilding.push(cb); return; }
+  _kbdBuilding = [cb];
+  const done = (exe) => { _kbdExe = exe; const l = _kbdBuilding; _kbdBuilding = null; for (const f of l) f(exe); };
+  const exe = path.join(STATE_DIR, kbdExeName());
+  if (fs.existsSync(exe)) return done(exe);
+  const csc = cscPath(process.env.WINDIR || 'C:\\Windows', p => fs.existsSync(p));
+  if (!csc) return done('');
+  const cs = path.join(STATE_DIR, 'kbd-en.cs');
+  try { fs.writeFileSync(cs, KBD_SRC); } catch { return done(''); }
+  for (const f of fs.readdirSync(STATE_DIR)) if (/^kbd-en-[0-9a-f]{8}\.exe$/.test(f) && f !== path.basename(exe)) { try { fs.unlinkSync(path.join(STATE_DIR, f)); } catch {} } // a stale build
+  execFile(csc, ['/nologo', '/optimize+', '/target:exe', '/out:' + exe, cs], { timeout: 60000, windowsHide: true }, (err, out, errOut) => {
+    try { fs.unlinkSync(cs); } catch {}
+    if (err || !fs.existsSync(exe)) { flog('[Overlord] keyboard helper build failed, using PowerShell:', (errOut || out || err?.message || '').toString().trim().slice(0, 300)); return done(''); }
+    done(exe);
+  });
+}
+function switchKeyboardToEnglish() {
+  if (process.platform !== 'win32' || settings.englishOnFocus === false || !mainWindow || mainWindow.isDestroyed()) return;
+  let hwnd; try { hwnd = hwndOf(mainWindow.getNativeWindowHandle()); } catch { return; }
+  kbdHelper((exe) => {
+    const onDone = (err) => { if (err) flog('[Overlord] keyboard switch failed:', err.message); };
+    if (exe) execFile(exe, [hwnd], { timeout: 5000, windowsHide: true }, onDone);
+    else execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', kbdPowershell(hwnd)], { timeout: 20000, windowsHide: true }, onDone);
+  });
+}
+
 app.whenReady().then(() => {
+  if (process.platform === 'win32' && settings.englishOnFocus !== false) setTimeout(() => kbdHelper(() => {}), 1500); // after the window is up; settings load first
   // PR heat only grows while someone's at the PC (any app): the renderer gets the system idle time.
   setInterval(() => send({ type: 'sysIdle', ms: powerMonitor.getSystemIdleTime() * 1000 }), 15e3);
   // Windows needs an explicit AppUserModelID or toast notifications silently no-op.
@@ -5982,7 +6020,7 @@ app.whenReady().then(() => {
     send(setupState()); // a missing git/claude shows the setup card before anything else
     if (recoveryNote) { send({ type: 'toast', text: recoveryNote }); recoveryNote = null; }
   });
-  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); });
+  mainWindow.on('focus', () => { mainWindow.flashFrame(false); _windowFocused = true; _lastActivity = Date.now(); fetchUsage(); switchKeyboardToEnglish(); });
   mainWindow.on('blur', () => { _windowFocused = false; });
   mainWindow.webContents.on('before-input-event', (_e, input) => {
     if (input.key === 'F12' && input.type === 'keyDown') {

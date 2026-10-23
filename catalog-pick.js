@@ -65,15 +65,18 @@ function parseHotkey(str) {
   }
   return [...str].length === 2 ? { seq: str } : null; // ponytail: exactly two chars; one would eat every keystroke
 }
+// Letters compare by hotkeyLetter (hotkey-core.js), so Ctrl+K fires under a Hebrew layout where e.key is 'ל'.
+const _hotkeyLetter = typeof hotkeyLetter === 'function' ? hotkeyLetter : require('./hotkey-core').hotkeyLetter;
 function chordMatch(e, hk) {
   const c = hk && hk.chord;
   return !!c && e.ctrlKey === c.ctrl && e.altKey === c.alt && e.shiftKey === c.shift && e.metaKey === c.meta
-    && String(e.key).toLowerCase() === c.key;
+    && _hotkeyLetter(e) === c.key;
 }
 // What the settings recorder writes for a pressed chord, or null (no modifier / modifier alone).
 function hotkeyFromEvent(e) {
   if (!(e.ctrlKey || e.altKey || e.metaKey) || /^(Control|Alt|Shift|Meta)$/.test(e.key)) return null;
-  const key = e.key === ' ' ? 'Space' : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+  const letter = _hotkeyLetter(e); // 'k' for the K key under any layout
+  const key = e.key === ' ' ? 'Space' : /^[a-z]$/.test(letter) ? letter.toUpperCase() : e.key.length === 1 ? e.key.toUpperCase() : e.key;
   return [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta', key].filter(Boolean).join('+');
 }
 

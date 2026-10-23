@@ -114,8 +114,8 @@
       if (e.key === '=' || e.key === '+') { e.preventDefault(); e.stopImmediatePropagation(); setZoom(zoom + 0.1); }
       else if (e.key === '-') { e.preventDefault(); e.stopImmediatePropagation(); setZoom(zoom - 0.1); }
       else if (e.key === '0') { e.preventDefault(); e.stopImmediatePropagation(); setZoom(1); }
-      else if ((e.key === 'e' || e.key === 'E') && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); toggleEdit(); }
-      else if ((e.key === 's' || e.key === 'S') && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); save(); }
+      else if (hotkeyLetter(e) === 'e' && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); toggleEdit(); }
+      else if (hotkeyLetter(e) === 's' && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); save(); } // hotkey-core.js: Ctrl+E / Ctrl+S under a Hebrew layout too
     }, true);
     // Tabs reorder by drag. The page's file-drop handler only reacts to OS file drags, so this is left alone.
     let dragTab = null;
