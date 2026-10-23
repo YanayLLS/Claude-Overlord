@@ -571,7 +571,7 @@ function sendFullState() {
   if (settings.prCache) send({ type: 'prList', ...settings.prCache, error: null });
   if (settings.actionsCache) send({ type: 'actionsList', runs: settings.actionsCache, error: null });
   for (const [id, a] of agents) {
-    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, account: a.account || null });
+    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, archivedAt: a.archivedAt || null, account: a.account || null });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
@@ -1144,7 +1144,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, account: a.account || null, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, termSize: lastTermSize.get(a.id) || null, servers: [...(serverPorts.get(a.id) || [])] });
+    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, account: a.account || null, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, archivedAt: a.archivedAt || null, termSize: lastTermSize.get(a.id) || null, servers: [...(serverPorts.get(a.id) || [])] });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -1268,7 +1268,7 @@ function restoreAgents(state) {
       lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', aiTitle: entry.aiTitle || '', customName: customName || false,
       promptHistory: entry.promptHistory || [], titlePending: false, createdAt: createdAt || Date.now(),
       crashCount: 0, cronCount: entry.cronCount || 0, compacting: false, orphanAlive: false, agentName: agentName, spinnerText: '',
-      archived: entry.archived || false, account: entry.account || null,
+      archived: entry.archived || false, archivedAt: entry.archivedAt || null, account: entry.account || null,
       stats: savedStats,
     };
     // ponytail: one sync JSONL read per agent, only until aiTitle is in saved state
@@ -1890,6 +1890,7 @@ function archiveAgent(id) {
   const a = agents.get(id);
   if (!a || a.archived) return;
   a.archived = true;
+  a.archivedAt = Date.now(); // Ctrl+Shift+T reopens the newest first, across restarts (reopen-core.js)
   // Kill pty + watchers to free resources; keep agent metadata + jsonl intact.
   const w = watchers.get(id); if (w) { try { w.close(); } catch {} watchers.delete(id); }
   const p = polls.get(id); if (p) { clearInterval(p); polls.delete(id); }
@@ -1909,7 +1910,7 @@ function archiveAgent(id) {
   // and temp config stay: the agent can be unarchived and ensure() is lazy.
   if (preview) preview.onAgentClosed(id);
   if (browserRegistry) browserRegistry.destroy(id);
-  send({ type: 'agentArchived', id });
+  send({ type: 'agentArchived', id, archivedAt: a.archivedAt });
   saveState();
 }
 

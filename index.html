@@ -1559,6 +1559,7 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+A</span><span class="help-desc">Mark all text in the prompt</span></div>
       <div class="help-row"><span class="help-key">Ctrl+L</span><span class="help-desc">Clear terminal display</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+W</span><span class="help-desc">Close all done agents</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Shift+T</span><span class="help-desc">Bring back the last archived agent &middot; again for the one before</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Z</span><span class="help-desc">Bring back the last Ctrl+W agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Shift+↑/↓</span><span class="help-desc">Previous / next agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Tab</span><span class="help-desc">Next agent</span></div>
@@ -1621,6 +1622,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./ghost-core.js"></script>
 <script src="./key229.js"></script>
 <script src="./hotkey-core.js"></script>
+<script src="./reopen-core.js"></script>
 <script src="./actions-core.js"></script>
 <script src="./update-core.js"></script>
 <script src="./pr-behind.js"></script>
@@ -2306,23 +2308,22 @@ function confirmResolve(value) {
 }
 
 function archiveAgent(id) {
+  noteArchived(closedStack, id); // reopen-core.js: Ctrl+Shift+T / Ctrl+Z bring it back, newest first
   api.send({ type: 'archiveAgent', id });
 }
 function unarchiveAgent(id) {
   api.send({ type: 'unarchiveAgent', id });
 }
-// Agents archived by Ctrl+W, newest last. Ctrl+Z pops one back and focuses it.
+// Agents archived this session, newest last. Ctrl+Shift+T (and Ctrl+Z) pop one back and focus it;
+// with the stack empty (a reload) the most recently archived agent comes back (reopen-core.js).
 const closedStack = [];
 let focusOnUnarchive = null;
 function popClosed() {
-  while (closedStack.length) {
-    const id = closedStack.pop();
-    if (!agents.get(id)?.archived) continue; // unarchived or deleted meanwhile
-    focusOnUnarchive = id;
-    unarchiveAgent(id);
-    return true;
-  }
-  return false;
+  const id = nextReopen(closedStack, agents);
+  if (id === null) return false;
+  focusOnUnarchive = id;
+  unarchiveAgent(id);
+  return true;
 }
 
 let _archiveModalCwd = null;
@@ -3387,6 +3388,7 @@ function createXterm(id) {
     if ((e.ctrlKey || e.metaKey) && hotkeyLetter(e) === 'n') return false; // new agent, not ^N to the shell
     if (e.ctrlKey && e.altKey && /^Digit[1-9]$/.test(e.code)) return false; // new agent with prefix #N
     if ((e.ctrlKey || e.metaKey) && hotkeyLetter(e) === 'w') return false; // archive agent, not ^W to the shell
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && hotkeyLetter(e) === 't') return false; // reopen the last archived agent
     // Ctrl+Z undoes a Ctrl+W while there is one to undo; otherwise the shell gets it.
     if ((e.ctrlKey || e.metaKey) && hotkeyLetter(e) === 'z' && !e.shiftKey && closedStack.some(i => agents.get(i)?.archived)) return false;
     // Bare PageUp/PageDown cycle agents. xterm binds them to scrollPages and its cancel()
@@ -4147,7 +4149,7 @@ function handleAgentMsg(msg) {
   switch (msg.type) {
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
-      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', archived: msg.archived || false, account: msg.account || null });
+      if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', archived: msg.archived || false, archivedAt: msg.archivedAt || null, account: msg.account || null });
       if (msg.cwd) addKnownProject(msg.cwd);
       // An agent born from a quest's Attack on a building: the ticket is its from the first prompt.
       if (isNew && pendingAssign && pendingAssign.cwd === msg.cwd && Date.now() - pendingAssign.at < 20000) { const pt = clickupState.tasks.find(x => x.id === pendingAssign.taskId); assignTicket(pendingAssign.taskId, msg.id, msg.cwd); if (pt) setTimeout(() => api.send({ type: 'renameAgent', id: msg.id, name: '⚔ ' + pt.name.slice(0, 48), quiet: true }), 2000); pendingAssign = null; }
@@ -4165,6 +4167,7 @@ function handleAgentMsg(msg) {
       const a = agents.get(msg.id);
       if (a) {
         a.archived = true;
+        a.archivedAt = msg.archivedAt || Date.now();
         a.status = 'idle';
         a.tools.clear(); a.subTools.clear(); a.spinnerText = '';
         destroyXterm(msg.id);
@@ -5056,10 +5059,15 @@ document.addEventListener('keydown', (e) => {
         if (st === 'waiting' || st === 'idle') closeAgent(id);
       }
     } else if (selectedId && agents.has(selectedId)) {
-      // Archive, not close: the session survives so Ctrl+Z can bring it back.
-      closedStack.push(selectedId);
+      // Archive, not close: the session survives so Ctrl+Shift+T / Ctrl+Z can bring it back.
       archiveAgent(selectedId);
     }
+    return;
+  }
+  // Ctrl+Shift+T: reopen the last archived agent, again for the one before (like a browser's closed tabs)
+  if (key === 't' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+    e.preventDefault();
+    if (!popClosed()) showToast('No archived agent to bring back');
     return;
   }
   // Ctrl+Z: undo the last Ctrl+W — unarchive that agent and switch to it
