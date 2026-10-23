@@ -1726,6 +1726,7 @@ function closeFilterMenu() {
 // ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
 const collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
 function toggleGroup(cwd) {
+  hotCwd = cwd;
   if (collapsedGroups.has(cwd)) collapsedGroups.delete(cwd); else collapsedGroups.add(cwd);
   localStorage.setItem('collapsedGroups', JSON.stringify([...collapsedGroups]));
   render();
@@ -2163,12 +2164,15 @@ document.getElementById('filter-input').addEventListener('keydown', (e) => { if 
 let pendingCwd = null;
 let _promptCloseTimer = null;
 function browseAndAdd() { api.send({ type: 'browseFolder' }); }
-function addAgent(cwd) { api.send({ type: 'createAgent', cwd }); }
-function addAgentWithPrefix(cwd, p) { api.send({ type: 'createAgent', cwd, prompt: p + ' ', prefill: true }); }
+function addAgent(cwd) { hotCwd = cwd; api.send({ type: 'createAgent', cwd }); }
+function addAgentWithPrefix(cwd, p) { hotCwd = cwd; api.send({ type: 'createAgent', cwd, prompt: p + ' ', prefill: true }); }
 // ── Prompt prefixes: the + Agent chevron starts an agent with a saved prefix typed in (not sent) ──
 // ponytail: popover lives on <body>, so list re-renders don't wipe what's being typed
 // Saved in Overlord's state.json with the other settings (localStorage lost them on a crash)
 let _prefixes = [], _prefixDefault = '';
+// Ctrl+Alt+N target: the project you last clicked (header, + Agent) or whose agent you selected — last one wins
+let hotCwd = null;
+const hotkeyCwd = () => [...agents.values()].some(a => a.cwd === hotCwd) ? hotCwd : (selectedId && agents.get(selectedId)?.cwd) || [...agents.values()].pop()?.cwd;
 const loadPrefixes = () => [..._prefixes];
 const savePrefixes = (l) => { _prefixes = [...l]; api.send({ type: 'saveSettings', settings: { agentPrefixes: _prefixes } }); };
 // The ★ prefix gets a star badge on + Agent that starts an agent with it; + Agent itself stays empty
@@ -2187,6 +2191,7 @@ function openPrefixPop(btn, cwd) {
   pop.style.left = Math.max(8, Math.min(r.right - 260, innerWidth - 268)) + 'px';
   renderPrefixPop(pop);
   pop.querySelector('input').focus();
+  if (hotCwd !== cwd) { hotCwd = cwd; render(); }
 }
 function renderPrefixPop(pop) {
   const list = loadPrefixes(), def = defaultPrefix();
@@ -2436,7 +2441,7 @@ function setTheme(name, persist = true) {
 }
 document.getElementById('sel-theme').innerHTML = Object.entries(THEMES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
 document.getElementById('sel-theme').value = currentTheme;
-function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
+function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; if (agents.get(id)) hotCwd = agents.get(id).cwd; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
   _renaming = true;
@@ -2938,7 +2943,7 @@ function render() {
     const wtServerBadge = wtEntry && running
       ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openLink('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${esc(running.url.replace(/^https?:\/\//, ''))}<span class="server-menu-btn">&#x2197;</span></a></div>`
       : (wtEntry ? `<a class="wt-port" onclick="event.stopPropagation();openLink('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
-    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}"><div class="group-header" onclick="toggleGroup('${safeCwd}')">
+    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}"><div class="group-header${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
       <span class="group-chevron">&#x25BC;</span>
       <div class="group-info" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>
       ${wtStatus}
@@ -5102,8 +5107,7 @@ document.addEventListener('keydown', (e) => {
   }
   // Ctrl+Alt+1..9: new agent in current project with saved prefix #N (order in the + Agent ▾ list)
   if (e.ctrlKey && e.altKey && /^Digit[1-9]$/.test(e.code)) {
-    const p = _prefixes[e.code.slice(5) - 1];
-    const cwd = (selectedId && agents.get(selectedId)?.cwd) || [...agents.values()].pop()?.cwd;
+    const p = _prefixes[e.code.slice(5) - 1], cwd = hotkeyCwd();
     if (p && cwd) { e.preventDefault(); addAgentWithPrefix(cwd, p); }
     return;
   }
