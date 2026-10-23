@@ -1547,6 +1547,7 @@ button:focus-visible { outline-offset:0; }
     <div class="help-modal" onclick="event.stopPropagation()">
       <h3>Keyboard Shortcuts</h3>
       <div class="help-row"><span class="help-key">Ctrl+N</span><span class="help-desc">New agent in current project</span></div>
+      <div class="help-row"><span class="help-key">Ctrl+Alt+1–9</span><span class="help-desc">New agent with saved prefix</span></div>
       <div class="help-row"><span class="help-key">Ctrl+W</span><span class="help-desc">Close selected agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+R</span><span class="help-desc">Restart selected agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+D</span><span class="help-desc">Duplicate agent (same project, pre-filled prompt)</span></div>
@@ -2191,7 +2192,7 @@ function renderPrefixPop(pop) {
   const list = loadPrefixes(), def = defaultPrefix();
   const star = (on, i) => `<button class="pp-star${on ? ' on' : ''}" data-star="${i}" title="${on ? 'Favorite (★ on + Agent) — click to remove' : 'Favorite: ★ on + Agent starts with this'}">${on ? '&#x2605;' : '&#x2606;'}</button>`;
   pop.innerHTML = `<div class="pp-row"><span class="pp-star" style="visibility:hidden">&#x2606;</span><button class="pp-go pp-plain" data-i="-1" title="Start agent with an empty prompt">Empty agent</button></div>`
-    + list.map((p, i) => `<div class="pp-row">${star(p === def, i)}<button class="pp-go" data-i="${i}" title="Start agent with “${escAttr(p)} ”">${esc(p)}</button><button class="pp-del" data-del="${i}" title="Delete prefix">&#x2715;</button></div>`).join('')
+    + list.map((p, i) => `<div class="pp-row">${star(p === def, i)}<button class="pp-go" data-i="${i}" title="Start agent with “${escAttr(p)} ”">${esc(p)}</button>${i < 9 ? `<kbd class="pp-key">Ctrl+Alt+${i + 1}</kbd>` : ''}<button class="pp-del" data-del="${i}" title="Delete prefix">&#x2715;</button></div>`).join('')
     + '<input class="pp-new" placeholder="New prefix, e.g. /fix-bug — Enter to add">';
   pop.querySelectorAll('.pp-go').forEach(b => b.onclick = () => {
     const p = list[b.dataset.i];
@@ -3373,6 +3374,7 @@ function createXterm(id) {
     if (e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
     if (e.ctrlKey && e.key === 'f') return false; // let global handler open term search
     if ((e.ctrlKey || e.metaKey) && e.key === 'n') return false; // new agent, not ^N to the shell
+    if (e.ctrlKey && e.altKey && /^Digit[1-9]$/.test(e.code)) return false; // new agent with prefix #N
     if ((e.ctrlKey || e.metaKey) && e.key === 'w') return false; // archive agent, not ^W to the shell
     // Ctrl+Z undoes a Ctrl+W while there is one to undo; otherwise the shell gets it.
     if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && closedStack.some(i => agents.get(i)?.archived)) return false;
@@ -5096,6 +5098,13 @@ document.addEventListener('keydown', (e) => {
     const cwd = (selectedId && agents.get(selectedId)?.cwd) || [...agents.values()].pop()?.cwd;
     if (cwd) { addAgent(cwd); }
     else { browseAndAdd(); }
+    return;
+  }
+  // Ctrl+Alt+1..9: new agent in current project with saved prefix #N (order in the + Agent ▾ list)
+  if (e.ctrlKey && e.altKey && /^Digit[1-9]$/.test(e.code)) {
+    const p = _prefixes[e.code.slice(5) - 1];
+    const cwd = (selectedId && agents.get(selectedId)?.cwd) || [...agents.values()].pop()?.cwd;
+    if (p && cwd) { e.preventDefault(); addAgentWithPrefix(cwd, p); }
     return;
   }
   // Ctrl+Shift+F: global search across all agents

@@ -734,6 +734,7 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
 #prefix-pop .pp-star:hover { color: var(--yellow); }
 #prefix-pop .pp-go { padding-left: 6px; }
 #prefix-pop .pp-plain { font-family: inherit; color: var(--subtext); }
+#prefix-pop .pp-key { font: inherit; font-size: 10px; color: var(--dim); white-space: nowrap; padding-right: 2px; }
 /* Favorite prefix: its own icon segment of the split pill — [+ Agent | ★ | ▾] */
 .split-btn .agent-main { display: contents; }
 .group-actions .split-btn .fav-star { display: inline-flex; align-items: center; padding: 0 6px; border-radius: 0; border-left-color: rgba(124,140,255,.4); }
