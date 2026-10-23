@@ -44,6 +44,9 @@ const { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly } = requ
   const ws = usageWindows(pts, 'h', S, 20 * H, 13 * H);                   // current one ends at 20h, no data yet
   assert.deepStrictEqual(ws.map(w => [w.end / H, w.last]), [[5, 40], [12, 20], [20, null]]);
   assert.strictEqual(usageWindows([], 'w', 7 * 86400000, 0, 1000).length, 1); // no history: just "now"
+  // early reset: the week due at 100h is reset at 50h; readings after it belong to the new week only
+  const D = 100 * H, er = [{ t: 10 * H, w: 60, 'w@': D, 'w$': 300 }, { t: 49 * H, w: 80, 'w@': D, 'w$': 400 }, { t: 51 * H, w: 1, 'w@': 50 * H + D, 'w$': 5 }];
+  assert.deepStrictEqual(usageWindows(er, 'w', D, 50 * H + D, 60 * H).map(w => [w.end / H, w.last, w.usd]), [[100, 80, 400], [150, 1, 5]]);
 }
 
 // ── usageWindows carries each window's $; usageCapacity turns $ + % into "100% = $X"

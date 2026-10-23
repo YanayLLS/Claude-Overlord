@@ -4748,12 +4748,15 @@ function renderUsageModal() {
   // Same windows, bar = how big that window's 100% was. Shrinking bars = a smaller limit.
   const caps = wins.map((w, i) => i === wins.length - 1 ? usageCapacity(usageCost[m.key], m.pct) : usageCapacity(w.usd, w.last));
   const capMax = Math.max(0, ...caps.filter(v => v != null));
-  const capStrip = wins.length > 1 && capMax ? `<div class="ut-strip ut-cap" aria-label="Size of 100% per ${unit}"><span>100%</span>` + wins.map((w, i) => {
+  const capStrip = wins.length > 1 && capMax ? `<div class="ut-strip ut-cap" aria-label="Size of 100% per ${unit}">` + wins.map((w, i) => {
     const back = wins.length - 1 - i, c = caps[i];
     return `<button class="${back === usageModalBack ? 'on' : ''}" onclick="usageModalBack=${back};renderUsageModal()" title="${escAttr(usageWhen(w.end, true))}: ${c == null ? 'not enough data' : '100% ≈ $' + Math.round(c).toLocaleString()}">${c == null ? '' : `<i style="height:${Math.max(2, c / capMax * 100)}%"></i>`}</button>`;
   }).join('') + `</div>` : '';
   document.getElementById('usage-modal-body').innerHTML = `<div class="ut-tabs">${tabs}${nav}</div>`
-    + usagePanelHTML(m.key, 560, 240, usageModalBack ? win : undefined) + strip + capStrip;
+    + usagePanelHTML(m.key, 560, 240, usageModalBack ? win : undefined)
+    // both rows in one scroller, so each window's two bars stay in the same column
+    + (strip ? `<div class="ut-hist"><div class="ut-hist-labels"><span>Used</span>${capStrip ? '<span>100% ≈</span>' : ''}</div><div class="ut-hist-scroll">${strip}${capStrip}</div></div>` : '');
+  document.querySelector('#usage-modal-body .ut-strip .on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 function closeUsageModal() { usageModalKey = null; document.getElementById('usage-overlay').classList.remove('open'); }
 function handleUsageHistory(points, since) {

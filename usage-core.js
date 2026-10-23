@@ -107,7 +107,12 @@ function usageWindows(points, key, span, currentReset, now) {
   return [...ends].sort((a, b) => a - b).filter(e => e <= cur).map(end => {
     const start = end - span;
     let last = null, usd = null;
-    for (const p of points || []) if (p.t > start && p.t <= end && p[key] != null) { last = p[key]; usd = p[key + '$'] ?? null; }
+    // A reading belongs to the window its own reset names, so after an early (mid-week) reset the
+    // old window ends at its last reading instead of picking up the new window's. No reset stored: by time.
+    for (const p of points || []) {
+      if (p[key] == null || !(p[key + '@'] ? Math.round(p[key + '@'] / 60000) * 60000 === end : p.t > start && p.t <= end)) continue;
+      last = p[key]; usd = p[key + '$'] ?? null;
+    }
     return { start, end, last, usd };
   }).filter((w, i, all) => w.last != null || i === all.length - 1);
 }
