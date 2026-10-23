@@ -120,22 +120,33 @@ function usageCapacity(usd, pct) {
   return !(usd > 0) || !(pct >= 10) ? null : usd / pct * 100;
 }
 
+// Ended windows (reset <= now; an idle account's last week counts too) whose last history point has no '<key>$' yet: [{ p, key, start, end, model }].
+// Grouped by reset rounded to the minute, as usageWindows does (resets_at jitters by milliseconds).
+function pastUnstamped(points, now) {
+  const out = [];
+  if (!points || !points.length) return out;
+  const keys = new Set();
+  for (const p of points) for (const k in p) if (k !== 't' && !/[@$]$/.test(k)) keys.add(k);
+  for (const key of keys) {
+    const span = key === 'h' ? H5 : D7, model = key.startsWith('m:') ? key.slice(2) : '';
+    const round = r => Math.round(r / 60000);
+    const lastOf = new Map();
+    for (const p of points) if (p[key] != null && p[key + '@'] && p[key + '@'] <= now) lastOf.set(round(p[key + '@']), p);
+    for (const p of lastOf.values()) if (p[key + '$'] == null) out.push({ p, key, start: p[key + '@'] - span, end: p.t, model });
+  }
+  return out;
+}
+
 // Writes '<key>$' (the window's $ so far) onto history points: the newest point always, and the
 // last point of each past window once. costFn(start, end, model) reads the transcripts, so
-// windows that started before `since` (older than the scanned transcripts) are left alone.
+// windows that started before `since` (older than the scanned transcripts) are left for the backfill.
 function stampWindowCosts(points, meters, now, costFn, since = -Infinity) {
   if (!points || !points.length) return;
+  const newest = points[points.length - 1];
   for (const m of meters) {
-    const model = m.key.startsWith('m:') ? m.key.slice(2) : '';
-    const newest = points[points.length - 1];
-    if (newest[m.key] != null) newest[m.key + '$'] = costFn((m.reset > now ? m.reset : now) - m.span, now, model);
-    const lastOf = new Map();
-    for (const p of points) if (p !== newest && p[m.key] != null && p[m.key + '@']) lastOf.set(p[m.key + '@'], p);
-    for (const [reset, p] of lastOf) {
-      if (reset === newest[m.key + '@'] || p[m.key + '$'] != null || reset - m.span < since) continue;
-      p[m.key + '$'] = costFn(reset - m.span, p.t, model);
-    }
+    if (newest[m.key] != null) newest[m.key + '$'] = costFn((m.reset > now ? m.reset : now) - m.span, now, m.key.startsWith('m:') ? m.key.slice(2) : '');
   }
+  for (const w of pastUnstamped(points, now)) if (w.start >= since) w.p[w.key + '$'] = costFn(w.start, w.end, w.model);
 }
 
 // SVG of one meter's % across its window [start, end]: line + area, a dashed "on pace"
@@ -173,5 +184,5 @@ function usageChartSvg(points, key, start, end, W = 280, H = 110) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageCapacity, stampWindowCosts, usageChartSvg, MODEL_7D_RE };
+  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageCapacity, pastUnstamped, stampWindowCosts, usageChartSvg, MODEL_7D_RE };
 }

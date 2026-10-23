@@ -4433,6 +4433,7 @@ function handleAgentMsg(msg) {
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;
     case 'usageCost': usageCost = msg.cost; scheduleRender(); renderUsageModal(); break;
     case 'usageHistory': handleUsageHistory(msg.points, msg.since); break;
+    case 'usageStamped': if (usageModalKey) api.send({ type: 'getUsageHistory', since: 0 }); break;
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'agentAccount': { const a = agents.get(msg.id); if (a) { a.account = msg.account; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = termAgentLabel(a); } break; }
     case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); break;

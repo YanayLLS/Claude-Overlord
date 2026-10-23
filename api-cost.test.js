@@ -1,6 +1,19 @@
 // Run: node api-cost.test.js
 const assert = require('assert');
-const { priceFor, usageCost, parseLine } = require('./api-cost');
+const { priceFor, usageCost, parseLine, windowCosts } = require('./api-cost');
+
+// windowCosts: one pass over old transcripts, $ per window, a response counted once even if copied
+{
+  const os = require('os'), fs = require('fs'), path = require('path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-win-'));
+  const row = (id, ts, model) => JSON.stringify({ type: 'assistant', timestamp: ts, requestId: id, message: { id, model, usage: { output_tokens: 1e6 } } });
+  const a = row('a', '2026-01-01T01:00:00Z', 'claude-opus-4-6'), b = row('b', '2026-01-01T03:00:00Z', 'claude-fable-5-1');
+  fs.writeFileSync(path.join(root, 'x.jsonl'), [a, b, ''].join('\n'));
+  fs.writeFileSync(path.join(root, 'resumed.jsonl'), a + '\n');
+  const T = Date.parse('2026-01-01T00:00:00Z'), H = 3600000;
+  windowCosts(root, [{ start: T, end: T + 2 * H, model: '' }, { start: T, end: T + 5 * H, model: '' }, { start: T, end: T + 5 * H, model: 'fable' }])
+    .then(r => { assert.deepStrictEqual(r, [25, 75, 50]); fs.rmSync(root, { recursive: true, force: true }); console.log('api-cost windows ok'); });
+}
 
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
 

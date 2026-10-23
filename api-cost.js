@@ -97,4 +97,22 @@ function sumCost(start, end, model) {
   return usd;
 }
 
-module.exports = { KEEP_MS, priceFor, usageCost, parseLine, scanCosts, sumCost, _files: files };
+// $ per window [{ start, end, model }] over every transcript, however old, in one streaming pass.
+// For the one-time backfill of history older than KEEP_MS; keeps no rows, only the dedup keys.
+async function windowCosts(root, wins) {
+  const readline = require('readline');
+  const usd = wins.map(() => 0), seen = new Set();
+  const since = Math.min(...wins.map(w => w.start)), until = Math.max(...wins.map(w => w.end));
+  for (const [p] of jsonlFiles(root, since, [])) {
+    const rl = readline.createInterface({ input: fs.createReadStream(p), crlfDelay: Infinity });
+    for await (const line of rl) {
+      const r = parseLine(line);
+      if (!r || r.t < since || r.t > until || seen.has(r.k)) continue;
+      seen.add(r.k);
+      wins.forEach((w, i) => { if (r.t >= w.start && r.t <= w.end && (!w.model || r.m.includes(w.model))) usd[i] += r.c; });
+    }
+  }
+  return usd;
+}
+
+module.exports = { KEEP_MS, windowCosts, priceFor, usageCost, parseLine, scanCosts, sumCost, _files: files };

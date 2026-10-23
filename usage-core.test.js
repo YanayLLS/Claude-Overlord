@@ -66,6 +66,13 @@ const { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly } = requ
   calls.length = 0;
   stampWindowCosts(hist, [{ key: 'h', span: S, reset: 12 * H }], 9 * H, cost);
   assert.deepStrictEqual(calls, [[7, 9, '']]);       // the past window is not recomputed
+  // past windows still missing $, for the one-time deep backfill; reset jitter of a few ms is one window
+  const { pastUnstamped } = require('./usage-core');
+  const ps = [{ t: 1 * H, h: 10, 'h@': 5 * H + 3 }, { t: 4 * H, h: 40, 'h@': 5 * H }, { t: 9 * H, h: 20, 'h@': 12 * H }];
+  assert.deepStrictEqual(pastUnstamped(ps, 9 * H).map(w => [w.key, w.start / H, w.end / H]), [['h', 0, 4]]);
+  assert.strictEqual(pastUnstamped(ps, 13 * H).length, 2); // the last window ended too (idle account)
+  ps[1]['h$'] = 0;                                   // stamped, even with $0 (nothing on this machine)
+  assert.strictEqual(pastUnstamped(ps, 9 * H).length, 0);
   stampWindowCosts([{ t: 1, 'm:fable': 5, 'm:fable@': 9 }], [{ key: 'm:fable', span: 5, reset: 9 }], 1, (a, b, m) => { assert.strictEqual(m, 'fable'); return 1; });
 }
 

@@ -3247,7 +3247,7 @@ function armClickupTimer() {
 let usageHeadersLogged = false; // log the rate-limit header names once, not every poll
 // Set before any programmatic quit so the close confirmation doesn't block it.
 let forceQuit = false;
-const { parseModelWeekly, parseOauthUsage, carryModelWeekly, appendUsageSample, usageMeters, stampWindowCosts } = require('./usage-core');
+const { parseModelWeekly, parseOauthUsage, carryModelWeekly, appendUsageSample, usageMeters, stampWindowCosts, pastUnstamped } = require('./usage-core');
 const { scanCosts, sumCost, KEEP_MS: COST_KEEP_MS } = require('./api-cost');
 // What each meter's current window would have cost at API prices, from every transcript on this machine.
 // The transcript walk (every .jsonl under ~/.claude/projects, stat'd one by one) runs at most every
@@ -3269,6 +3269,7 @@ async function sendUsageCost(usage) {
     send({ type: 'usageCost', cost });
     // Each window's $ rides in the history, so past weeks/sessions keep their "100% = $X" after the transcripts age out.
     stampWindowCosts(loadUsageHistory()[usageAccountKey()], usageMeters(usage), now, sumCost, now - COST_KEEP_MS);
+    backfillUsageCosts();
   } catch (e) { console.log('[Overlord] API cost scan failed:', e.message); }
   finally { costScanning = false; }
 }
@@ -3293,8 +3294,30 @@ function recordUsage(usage) {
   // A poll inside the 10-min spacing only refreshes the newest sample in memory; the file is
   // rewritten when a sample is added (<= 6 writes an hour), so at most 10 min of readings can be lost.
   if (all[key].length === before) return;
+  saveUsageHistory();
+}
+function saveUsageHistory() {
   // ponytail: plain write, a torn file only loses chart history, never state
-  try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(USAGE_HISTORY_FILE, JSON.stringify(all)); } catch (e) { console.log('[Overlord] Failed to save usage history:', e.message); }
+  try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(USAGE_HISTORY_FILE, JSON.stringify(loadUsageHistory())); } catch (e) { console.log('[Overlord] Failed to save usage history:', e.message); }
+}
+// Once per run: past windows (every account) older than the live scan get their $ from a low-priority
+// child that streams all transcripts. Windows with nothing on this machine are stamped $0, so not retried.
+let usageBackfillStarted = false;
+function backfillUsageCosts() {
+  if (usageBackfillStarted) return;
+  usageBackfillStarted = true;
+  const todo = Object.values(loadUsageHistory()).flatMap(pts => pastUnstamped(pts, Date.now()));
+  if (!todo.length) return;
+  const child = require('child_process').fork(path.join(__dirname, 'usage-backfill.js'), [], { stdio: 'ignore' });
+  try { os.setPriority(child.pid, os.constants.priority.PRIORITY_LOW); } catch {}
+  child.on('message', (usd) => {
+    todo.forEach((w, i) => { w.p[w.key + '$'] = +usd[i].toFixed(2); });
+    saveUsageHistory();
+    send({ type: 'usageStamped' });
+    console.log('[Overlord] Usage $ backfilled for', todo.length, 'windows');
+  });
+  child.on('error', (e) => console.log('[Overlord] Usage backfill failed:', e.message));
+  child.send({ root: path.join(os.homedir(), '.claude', 'projects'), wins: todo.map(({ start, end, model }) => ({ start, end, model })) });
 }
 let lastUsage = null;
 
