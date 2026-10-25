@@ -23,7 +23,9 @@ function runProgress(liveJobs, baseJobs, now = Date.now()) {
       else if (ls.status === 'in_progress') { done += Math.min(w * 0.95, dur(ls.started_at, nowIso)); step = step || ls.name; }
     }
   }
-  if (!total) return { pct: null, leftMs: null, step };
+  // a job the good run didn't have (a new prod region) still going: how long it takes is unknown → no %, no time left
+  const unknown = (liveJobs || []).some(lj => lj.status !== 'completed' && !(baseJobs || []).some(bj => bj.name === lj.name));
+  if (!total || unknown) return { pct: null, leftMs: null, step };
   // pace: how long this run took for what the good run did in `done`; trusted once a minute of work is behind it
   // ponytail: one pace for the whole run, clamped 0.5–3×; per-step paces if a deploy mixes fast and slow phases
   const pace = done > 60000 && start ? Math.min(3, Math.max(0.5, dur(start, nowIso) / done)) : 1;

@@ -913,11 +913,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // until a release is fully deployed (waves one after another). Local state only: nothing is written ──
   const ETA_MS = 15 * 1000, BASE_TTL_MS = 30 * 60 * 1000;
   const etaBase = new Map(); // repo|workflow → { at, wallMs, jobs } of its median recent good run
-  async function baseRun(repo, wf) {
-    const k = repo + '|' + wf, c = etaBase.get(k);
+  // branch: the release's target — the same workflow on dev (terraform: plan only) is no measure of a prod run
+  async function baseRun(repo, wf, branch) {
+    const k = repo + '|' + wf + '|' + branch, c = etaBase.get(k);
     if (c && Date.now() - c.at < BASE_TTL_MS) return c;
     // the median of its last 5 good runs: one odd run (a first full upload, a cold cache) doesn't skew it
-    const runs = await ghJson(['api', '-X', 'GET', `repos/${repo}/actions/workflows/${wf}/runs`, '-f', 'status=success', '-f', 'per_page=5']);
+    const runs = await ghJson(['api', '-X', 'GET', `repos/${repo}/actions/workflows/${wf}/runs`, '-f', 'status=success', '-f', `branch=${branch}`, '-f', 'per_page=5']);
     const wall = (x) => Date.parse(x.updated_at) - Date.parse(x.run_started_at || x.created_at);
     const good = ((runs.data && runs.data.workflow_runs) || []).slice().sort((x, y) => wall(x) - wall(y));
     const run = good[Math.floor(good.length / 2)];
@@ -950,7 +951,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       await Promise.all(m.repos.filter(r => r.mergeSha || !r.closed).map(async (r) => {
         const wf = r.deploy && r.deploy.workflow;
         if (!wf || ['success', 'failure'].includes(r.deploy.state)) { repos[r.label] = { s: 'done' }; return; } // deployed, failed, or by hand: not timed
-        const base = await baseRun(r.repo, wf).catch(() => null), fullMs = base && base.wallMs;
+        const base = await baseRun(r.repo, wf, r.target).catch(() => null), fullMs = base && base.wallMs;
         const id = r.mergeSha ? await liveRunId(r).catch(() => null) : null;
         if (!id) { repos[r.label] = { s: 'todo', fullMs }; return; } // not merged yet, or its deploy hasn't started
         const j = await ghJson(['api', `repos/${r.repo}/actions/runs/${id}/jobs`]);

@@ -22,6 +22,10 @@ assert.ok(runProgress(live, base, Date.parse(t(60))).pct < 1);
 // queued (no steps yet), and no good run to compare with
 assert.strictEqual(runProgress([{ name: 'deploy', status: 'queued', steps: [] }], base).pct, 0);
 assert.strictEqual(runProgress(live, []).pct, null);
+// a job the good run never had (a new prod region) still running: its length is unknown, so no %
+const extra = live.concat([{ name: 'new-region', status: 'in_progress', started_at: t(0), steps: [step('apply', 0, null, 'in_progress')] }]);
+assert.strictEqual(runProgress(extra, base, Date.parse(t(7))).pct, null);
+assert.strictEqual(runProgress(live.concat([{ name: 'new-region', status: 'completed', steps: [] }]), base, Date.parse(t(7))).step, 'upload', 'a finished new job: estimate as before');
 
 // waves one after another, each as slow as its slowest repo: 10 × 0.3 left, then max(8, 5)
 const M = 60000;
