@@ -510,7 +510,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const who = await whoAmI();
     if (!state.approvers.isApprover || !who.github) { if ((state.toSign || []).length) push({ toSign: [] }); return; }
     const steps = releasePlan(cfg, ['prod']).prs;
-    const found = [], all = [];
+    let found = [], all = [];
     const soloOwn = (repo, body) => standaloneRepo(repo) && !releaseIdOf(body); // a standalone repo's own PR: no signatures
     await Promise.all(steps.map(async (p) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
@@ -536,8 +536,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     // the counts people see are the release's (signed as one), not each PR's
     for (const f of found) {
       const rs = releaseSignoff(all.filter(x => x.release === f.release));
-      Object.assign(f, { signers: rs.signers.map(x => x.login), count: rs.count });
+      Object.assign(f, { signers: rs.signers.map(x => x.login), count: rs.count, done: rs.ok });
     }
+    // signed 2/2 already: a 3rd signature isn't needed, so it isn't asked for (GitHub still lists me as a reviewer)
+    const items = (state.history && state.history.items) || [];
+    found = found.filter(f => !f.done && ((items.find(m => m.id === f.release) || {}).signedBy || []).length < 2);
     found.sort((a, b) => a.label.localeCompare(b.label));
     // the prompt shows each release whole: every repo in it, and which ones still need me
     const toSignReleases = [...new Set(found.map(f => f.release))].map(id => ({ id, repos: all.filter(x => x.release === id)
