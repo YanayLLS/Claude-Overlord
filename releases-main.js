@@ -1044,6 +1044,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const listed = releaseItems(id);
     const live = await Promise.all(listed.map(it => ghJson(['api', `repos/${it.repo}/pulls/${it.pr.number}`])));
     const items = [], justMerged = [];
+    // merged already (by hand on GitHub, or a stopped run) and still deploying: its deploy is waited for before the next wave
+    const m = id && ((state.history && state.history.items) || []).find(x => x.id === id);
+    for (const r of (m ? m.repos : []).filter(r => r.mergeSha && r.deploy && r.deploy.workflow && r.deploy.workflow !== 'manual' && !['success', 'failure'].includes(r.deploy.state) && Date.now() - Date.parse(r.mergedAt) < 3600e3))
+      justMerged.push({ repo: r.repo, label: r.label, env: m.env || 'prod', source: r.source, target: r.target, pr: r.pr, deploy: r.deploy.workflow, sha: r.mergeSha });
     listed.forEach((it, i) => {
       const p = live[i].data;
       if (p && p.merged) { if (Date.now() - Date.parse(p.merged_at) < 3600e3 && it.deploy && it.deploy !== 'manual') justMerged.push({ ...it, sha: p.merge_commit_sha }); }
