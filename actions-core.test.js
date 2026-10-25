@@ -160,6 +160,8 @@ const { fixPrPlan } = require('./actions-core');
   assert.ok(/every check that is already red/.test(p.prompt));
   // the pr-green skill only exists in the frontend repo
   assert.ok(!p.prompt.includes('pr-green'));
+  assert.ok(!p.prompt.includes('slims'));
+  assert.ok(fixPrPlan({ ...pr, repo: 'LLSLtd/frontlineio-frontend' }, [{ dir: 'C:/x/f', repo: 'LLSLtd/frontlineio-frontend', branch: 'yanay-features' }], []).prompt.includes('slims the PR body'));
   assert.ok(fixPrPlan({ ...pr, repo: 'LLSLtd/frontlineio-frontend' }, [{ dir: 'C:/x/f', repo: 'LLSLtd/frontlineio-frontend', branch: 'yanay-features' }], []).prompt.includes('pr-green skill'));
   assert.ok(/never merge/i.test(p.prompt));
   assert.ok(!/["&|<>^%!$`\;\n]/.test(fixPrPlan({ ...pr, url: 'x"&$(rm)`;|<>' }, infos, []).prompt));

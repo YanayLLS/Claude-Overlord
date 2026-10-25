@@ -146,7 +146,8 @@ function fixPrPlan(pr, infos, worktreeDirs) {
     ? `${head} is an environment branch - never push to it. Push this branch and open one fix PR into it: gh pr create --repo ${repo} --base ${head}, then work on that PR's checks the same way, and keep pushing to it (no new PR per round)`
     : `push to the PR: git push origin HEAD:${head}. If the push is rejected, git pull --no-rebase origin ${head}, resolve any conflicts, and push again`;
   const skill = /(^|\/)frontlineio-frontend$/i.test(repo)
-    ? `This repo has a pr-green skill with the CI and BDD diagnosis steps - invoke it first and follow it (a BDD container that exits early hides its real error in the run log in S3, the skill says where). ` : '';
+    ? `This repo has a pr-green skill with the CI and BDD diagnosis steps - invoke it first and follow it (a BDD container that exits early hides its real error in the run log in S3, the skill says where). `
+    + `Once one full BDD run has finished, every push slims the PR body's bdd block to that run's reds and flakies, plus the scopes the code changed since that run can reach, with a note under the block (pr-dev skill step 5b) - re-testing what CI already proved green on the same code is not a check, so this is not loosening one. ` : '';
   const prompt = `PR #${n} in ${repo} (${head} into ${base}) has failing checks: ${pr.url} - get it green. `
     + where + skill
     + `You are authorized to commit and push fixes without asking - do not stop to ask for confirmation, a fix that is not pushed does not count. `
