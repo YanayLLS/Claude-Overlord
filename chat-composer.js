@@ -6,7 +6,7 @@
   const order = () => document.getElementById('term-order');
   const chat = () => termTab === 'conversation' && !worldView;
   let hist = -1, draft = '';
-  const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('empty', !t.value.trim()); };
+  const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('blank', !t.value.trim()); };
 
   // questPrompt pastes the text and sends Enter in its own write once the paste has landed: the TUI swallows an Enter
   // written together with the text. Images pasted here already sit in the agent's prompt, so they go with it.
@@ -15,7 +15,7 @@
     if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
     api.send({ type: 'questPrompt', id: selectedId, text });
     if (chat()) { chatUi.addPending(selectedId, text); clearAttachments(); }
-    inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('empty');
+    inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank');
     if (chat()) renderConversation();
   }
   function insert(text, andSend) {
