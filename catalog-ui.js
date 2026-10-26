@@ -65,8 +65,11 @@
 
   const agentCwd = () => agents.get(selectedId)?.cwd || '';
 
-  function open() {
+  // into: the Chat view's composer ({ anchor, insert(text, send), focus() }); the pick goes there instead of the terminal.
+  let into = null;
+  function open(target = null) {
     if (selectedId == null) return;
+    into = target;
     cwd = agentCwd();
     api.send({ type: 'catalog', cwd }); // ponytail: rescan every open (~10 ms); the cached list shows meanwhile
     isOpen = true; stage = 'types'; type = null; sel = 0; q.value = '';
@@ -75,7 +78,7 @@
   function close(refocus = true) {
     if (!isOpen) return;
     isOpen = false; pop.hidden = true; peekCard(null);
-    if (refocus) xterms.get(selectedId)?.terminal?.focus();
+    if (refocus) { if (into) into.focus(); else xterms.get(selectedId)?.terminal?.focus(); }
   }
   // Screen y of the top of Claude's prompt box, or null (no prompt in view, or scrolled up).
   function promptY() {
@@ -89,6 +92,7 @@
     return r.top + row * (r.height / t.rows);
   }
   function place() {
+    if (into) { const a = into.anchor.getBoundingClientRect(); pop.style.left = Math.max(8, a.left) + 'px'; pop.style.bottom = Math.max(8, innerHeight - a.top + 8) + 'px'; pop.style.maxHeight = Math.min(560, a.top - 14) + 'px'; return; }
     const r = btn.getBoundingClientRect();
     const py = promptY(), top = container.getBoundingClientRect().top;
     // Above the prompt box so what you're typing stays readable — unless that leaves too little room; then above the + button.
@@ -199,8 +203,9 @@
     if (!it) return;
     if (stage === 'types') { stage = 'list'; type = it.type; sel = 0; q.value = ''; render(); return; }
     if (!it.insert) return; // a mod with no command — the detail pane says it runs on its own
-    const id = selectedId;
-    close();
+    const id = selectedId, target = into;
+    close(!target);
+    if (target) { target.insert(it.insert, send); return; }
     api.send({ type: 'termInput', id, data: send ? it.insert.trimEnd() + '\r' : it.insert });
   }
 

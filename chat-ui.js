@@ -1,7 +1,8 @@
 // Chat view: the agent's transcript drawn like Claude's desktop app. Replies in markdown, your prompts as bubbles,
 // each run of tool calls folded into one line ("Ran 2 commands, read 3 files") that opens to the calls, and each call
 // to its command + output or its diff. Fed by the timeline events (timeline-core.js); index.html's renderConversation
-// owns the live state (permission cards, working indicator) and calls render() for the transcript.
+// hands over the agent and its status, this file draws the thread, the live tail (working line, plan, background
+// agents, permission/question cards) and the composer's chips (mode, model, context).
 (function () {
   const escH = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const svg = (d, cls = 'ic') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
@@ -19,9 +20,11 @@
     chev: svg('<path d="m9 6 6 6-6 6"/>', 'ic chev'),
     copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
     check: svg('<path d="m5 12 5 5 9-10"/>'),
+    shield: svg('<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/>'),
   };
-  // Claude's spark: still on a finished reply, turning while the agent works.
+  // Claude's spark: turning while the agent works, popping once when a turn lands.
   const SPARK = '<svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l1.6 6.2 5.6-3.2-3.2 5.6 6.2 1.6-6.2 1.6 3.2 5.6-5.6-3.2L12 21.5l-1.6-6.2-5.6 3.2 3.2-5.6L1.8 12l6.2-1.6-3.2-5.6 5.6 3.2z"/></svg>';
+  const MODES = { bypassPermissions: ['Bypass permissions', 'bypass'], acceptEdits: ['Accept edits', 'accept'], plan: ['Plan mode', 'plan'], default: ['Ask first', 'ask'] };
 
   // Events never change once received, so each renders once; tool rows again when their result lands.
   // The text cache is dropped when md-bundle arrives (replies first render as plain text).
@@ -34,43 +37,43 @@
     }
     return window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_'); // relative links resolve against the agent's folder
   }
+  const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
+  const clock = (ts) => { try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
 
   function diffHtml(old, neu) {
     const d = lineDiff(old, neu);
-    const rows = d.rows.map(r => r.t === '…' ? '<div class="dl fold">⋯</div>' : `<div class="dl ${r.t === '+' ? 'add' : r.t === '-' ? 'del' : ''}"><i>${r.t === ' ' ? '' : r.t}</i>${escH(r.s) || ' '}</div>`).join('');
+    const rows = d.rows.map(r => r.t === '…' ? '<div class="dl fold"><i></i><span>⋯</span></div>' : `<div class="dl ${r.t === '+' ? 'add' : r.t === '-' ? 'del' : ''}"><i>${r.t === ' ' ? '' : r.t}</i><span>${escH(r.s) || ' '}</span></div>`).join('');
     return { html: `<div class="diff">${rows}</div>`, add: d.add, del: d.del };
   }
   function todoHtml(todos) {
     return '<ul class="todos">' + todos.map(t => `<li class="${escH(t.status)}">${t.status === 'completed' ? ICON.check : '<span class="box"></span>'}<span>${escH(t.text)}</span></li>`).join('') + '</ul>';
   }
-  // One call: icon · verb · target · (+add −del), opening to its command/output, diff or plan.
+  // One call: icon · verb · target · (+add −del) · chevron, opening to its command/output, diff, plan or answer.
   function toolRow(ev, done, cwd) {
     const c = toolCache.get(ev); if (c && c[0] === done) return c[1];
-    const running = !done && !!ev.toolId, a = ev.args || {}, v = toolView(ev, running);
+    const running = !done && !!ev.toolId, a = ev.args || {}, v = toolView(ev, running), err = !!(done && done.err);
     const out = done && done.text ? done.text.replace(/\s+$/, '') : '';
     let body = '', stat = '';
-    if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new); body = d.html; stat = `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (done && done.err && out) body += `<pre class="out err">${escH(out)}</pre>`; }
+    if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new); body = d.html; stat = `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (err && out) body += `<pre class="out">${escH(out)}</pre>`; }
     else if (a.todos) body = todoHtml(a.todos);
     else if (a.plan) body = `<div class="md sub">${md(a.plan, cwd)}</div>`;
-    else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o)}</li>`).join('') + '</ul>' + (out && !done.err ? `<pre class="out">${escH(out)}</pre>` : '') : '';
-    else if (v.kind === 'cmd') body = `<pre class="io"><span class="lbl">IN</span>${escH(a.command || '')}</pre>` + (out ? `<pre class="io${done.err ? ' err' : ''}"><span class="lbl">OUT</span>${escH(out)}</pre>` : '');
+    else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
+    else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${escH(out)}</pre></div>` : ''}</div>`;
     else if (v.kind === 'agent' && out) body = `<div class="md sub">${md(out, cwd)}</div>`;
-    else if (out) body = `<pre class="out${done.err ? ' err' : ''}">${escH(out)}</pre>`;
-    const cls = `trow k-${v.kind}${running ? ' running' : ''}${done && done.err ? ' err' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
+    else if (out) body = `<pre class="out${err ? ' err' : ''}">${escH(out)}</pre>`;
+    const cls = `trow k-${v.kind}${running ? ' running' : ''}${err ? ' err' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
     const head = `${ICON[v.kind] || ICON.tool}<span class="verb">${escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}`;
     const h = body ? `<details class="${cls}" data-tid="${escH(ev.toolId || '')}"><summary>${head}${ICON.chev}</summary><div class="tbody">${body}</div></details>` : `<div class="${cls}"><div class="sumrow">${head}</div></div>`;
     toolCache.set(ev, [done, h]);
     return h;
   }
-  // A run of calls between two messages: one call shows as itself; more fold into a summary line, which names
-  // the call still running so the line says what's happening now.
+  // A run of calls between two messages: one call shows as itself; more fold into one summary line.
   function groupHtml(tools, doneBy, cwd) {
     const rows = tools.map(ev => toolRow(ev, doneBy.get(ev.toolId), cwd));
     if (tools.length === 1) return `<div class="tools">${rows[0]}</div>`;
-    const live = [...tools].reverse().find(ev => ev.toolId && !doneBy.get(ev.toolId));
     const errs = tools.filter(ev => (doneBy.get(ev.toolId) || {}).err).length;
-    const label = live ? (() => { const v = toolView(live, true); return `${escH(v.verb)} <span class="tgt mono">${escH(v.target)}</span>`; })() : escH(groupSummary(tools));
-    return `<div class="tools"><details class="tgroup${live ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary>${live ? '<span class="dot"></span>' : ''}<span class="gl">${label}</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`;
+    const running = tools.some(ev => ev.toolId && !doneBy.get(ev.toolId));
+    return `<div class="tools"><details class="tgroup${running ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary><span class="gl">${escH(groupSummary(tools))}</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`;
   }
 
   function msgHtml(ev, i, cwd) {
@@ -83,35 +86,164 @@
     } else if (ev.type === 'text') h = `<div class="msg ai" data-i="${i}"><div class="md">${md(ev.text, cwd)}</div></div>`;
     else if (ev.type === 'command') h = `<div class="msg cmd"><span>${escH(ev.text)}</span></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">Interrupted</div>';
+    else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
     else h = '';
     if (mdReady || ev.type !== 'text') cache.set(ev, h);
     return h;
   }
+  // Under a finished turn: copy its last reply · how long it worked · when it finished — the CLI's "Cogitated for 42s".
+  function footHtml(textAt, turn) {
+    const meta = turn ? `<span class="tf-meta">${SPARK}Worked ${escH(dur(turn.ms))}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : '';
+    return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button>` : ''}${meta}</div>`;
+  }
 
-  // The whole transcript. data-i on a reply is its index in evs, so Copy can fetch the raw markdown.
-  function render(evs, doneBy, cwd) {
-    let h = '', run = [];
-    // Copy sits under each turn's last reply only, as in Claude's apps: narration between tool runs gets none.
-    const finals = new Set(); let seen = false;
-    for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'prompt' || t === 'command') seen = false; else if (t === 'text' && !seen) { finals.add(k); seen = true; } }
-    const flush = () => { if (run.length) h += groupHtml(run, doneBy, cwd); run = []; };
+  // The transcript as blocks (one per message, tool run or turn footer), so paint can swap only what changed.
+  // A turn's footer waits until the turn is over (busy = the last turn is still running).
+  function blocks(evs, doneBy, cwd, busy) {
+    const out = []; let run = [], textAt = -1, turn = null, open = false;
+    const flush = () => { if (run.length) out.push(groupHtml(run, doneBy, cwd)); run = []; };
+    const close = () => { flush(); if (open && (textAt >= 0 || turn)) out.push(footHtml(textAt, turn)); textAt = -1; turn = null; open = false; };
     evs.forEach((ev, i) => {
-      if (ev.type === 'tool' || ev.type === 'subtask') { run.push(ev); return; }
-      if (ev.type === 'tool_done' || ev.type === 'turn') return;
-      flush(); h += msgHtml(ev, i, cwd);
-      if (finals.has(i)) h += `<div class="acts" data-i="${i}"><button class="act copy" type="button" title="Copy" aria-label="Copy">${ICON.copy}</button></div>`;
+      const t = ev.type;
+      if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
+      if (t === 'tool_done' || t === 'mode') return;
+      if (t === 'turn') { turn = ev; return; }
+      if (t === 'prompt' || t === 'command') close();
+      flush(); out.push(msgHtml(ev, i, cwd));
+      if (t === 'text') { textAt = i; open = true; }
     });
-    flush();
+    if (busy) flush(); else close();
+    return out;
+  }
+
+  // ── Live tail: what the CLI shows under the transcript ──
+  const lastTool = (evs, name, doneBy) => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if (e.type === 'tool' && e.name === name) return doneBy && doneBy.get(e.toolId) ? null : e; if (e.type === 'prompt') return null; } return null; };
+  function permHtml(perm) {
+    const n = perm.name || '', title = n === 'Bash' || n === 'PowerShell' ? 'Run this command?' : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n) ? 'Make this edit?' : /^Web/.test(n) ? 'Fetch this page?' : `Allow ${escH(n.replace(/^mcp__[^_]+__/, '')) || 'this action'}?`;
+    const kind = toolView({ name: n }).kind;
+    return `<div class="card perm"><div class="card-h">${ICON[kind] || ICON.shield}<span>${title}</span></div><pre>${escH(perm.status || n)}</pre><div class="btns"><button class="primary" type="button" data-keys="1">Allow once<kbd>1</kbd></button><button type="button" data-keys="2">Always allow<kbd>2</kbd></button><button type="button" data-keys="esc">Deny<kbd>Esc</kbd></button></div></div>`;
+  }
+  function askHtml(ask, perm) {
+    const a = (ask && ask.args) || {}, opts = a.options || [];
+    const q = a.question || (perm && perm.status) || 'Claude has a question';
+    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span>${escH(o)}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>…</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
+  }
+  function liveHtml(a, st, evs, doneBy, now) {
+    const live = [...a.tools.values()].filter(t => !t.done), perm = live.find(t => t.perm);
+    let h = '';
+    // The plan: the latest todo list while any of it is open, like the CLI's checklist under the spinner.
+    const todo = (() => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if (e.type === 'tool' && e.name === 'TodoWrite') return e.args && e.args.todos; if (e.type === 'prompt') return null; } return null; })();
+    const busy = st === 'active' || st === 'resuming' || st === 'permission' || st === 'question';
+    if (busy && todo && todo.some(t => t.status !== 'completed')) {
+      const done = todo.filter(t => t.status === 'completed').length;
+      h += `<div class="plan-card"><div class="pc-h">${ICON.todo}<span>Plan</span><span class="pc-n">${done}/${todo.length}</span><span class="pc-bar"><i style="width:${Math.round(done / todo.length * 100)}%"></i></span></div>${todoHtml(todo)}</div>`;
+    }
+    // Background agents still running (Agent/Task calls without a result).
+    const bg = evs.filter(e => e.type === 'tool' && (e.name === 'Agent' || e.name === 'Task') && !doneBy.get(e.toolId));
+    if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<div class="bga">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></div>`).join('')}</div>`;
+    if (perm && perm.perm === 'ask') return h + askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm);
+    if (perm) return h + permHtml(perm);
+    if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.shield}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
+    if (a.compacting) return h + `<div class="working">${SPARK}<span class="shimmer">Compacting conversation…</span></div>`;
+    if (st === 'active' || st === 'resuming') {
+      // The CLI's own playful verb ("Cogitating…") when it has one; the call in flight under it; elapsed; the Esc hint.
+      const tool = (() => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if ((e.type === 'tool') && e.toolId && !doneBy.get(e.toolId) && e.name !== 'Agent' && e.name !== 'Task') return e; if (e.type === 'prompt') return null; } return null; })();
+      const v = tool ? toolView(tool, true) : null;
+      const since = a.activeAt ? ` · ${dur(now - a.activeAt)}` : '';
+      return h + `<div class="working">${SPARK}<span class="shimmer">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span>${v ? `<span class="w-tool">${escH(v.verb)} <span class="mono">${escH(v.target)}</span></span>` : ''}<span class="w-hint">${escH(since.slice(3))}${since ? ' · ' : ''}<kbd>Esc</kbd> to interrupt</span></div>`;
+    }
     return h;
   }
 
-  // Clicks inside the view: copy a reply or a code block, expand a long prompt, follow links as the Docs column does.
+  // A prompt sent from the composer shows at once, dimmed, until the transcript writes it (or the agent queues it).
+  const pending = new Map(); // agent id → { text, at }
+  function pendingHtml(id, evs, busy) {
+    const p = pending.get(id); if (!p) return '';
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+    if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.text)) || Date.now() - p.at > 120000) { pending.delete(id); return ''; }
+    return `<div class="msg user pending"><div class="bubble">${escH(p.text)}</div><span class="q">${busy ? 'Queued' : 'Sending…'}</span></div>`;
+  }
+
+  // ── Composer chips: permission mode (click cycles it, like Shift+Tab), model · effort, context used ──
+  function chipsHtml(a, mode) {
+    const s = a.stats || {}, m = MODES[mode] || null;
+    const win = typeof ctxWindow === 'function' ? ctxWindow(s.modelFamily, s.ctxTok) : 200000;
+    const pct = s.ctxTok ? Math.min(100, Math.round(s.ctxTok / win * 100)) : 0, r = 7, c = 2 * Math.PI * r;
+    const model = String(s.model || '').replace(/^claude-/, '').replace(/-(\d+)-(\d+).*$/, ' $1.$2').replace(/^\w/, x => x.toUpperCase());
+    return (m ? `<button type="button" class="chip mode m-${m[1]}" data-act="mode" title="Permission mode (Shift+Tab cycles)">${ICON.shield}<span>${m[0]}</span></button>` : '')
+      + '<span class="grow"></span>'
+      + (pct ? `<span class="chip ctx${pct >= 80 ? ' hot' : ''}" title="${pct}% of the context window used"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${(pct / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${pct}%</span>` : '')
+      + (model ? `<span class="chip model" title="${escH(s.model)}">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</span>` : '');
+  }
+
+  // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
+  // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
+  let prevBusy = new Map(), tick = null;
+  function paint(el, id, a, evs, st) {
+    const now = Date.now();
+    const doneBy = new Map(); let mode = '';
+    if (evs) for (const ev of evs) { if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev); else if (ev.type === 'mode') mode = ev.mode; }
+    const busy = st === 'active' || st === 'resuming';
+    const order = document.getElementById('term-order');
+    order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
+    const chips = document.getElementById('chat-chips'); if (chips) { const ch = chipsHtml(a, mode); if (chips._h !== ch) chips.innerHTML = chips._h = ch; }
+    document.getElementById('term').classList.toggle('chat-new', !!evs && !evs.length);
+    let list;
+    if (!evs) list = ['<div class="chat-empty"><span class="loading"></span></div>'];
+    else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
+    else list = blocks(evs, doneBy, a.cwd, busy || st === 'permission' || st === 'question');
+    const tail = (evs ? pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) : '');
+
+    let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
+    const fresh = el.dataset.for !== String(id) || !thread;
+    if (fresh) { el.innerHTML = '<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); }
+    const stuck = !fresh && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
+    const old = el._blocks || [];
+    for (let k = 0; k < list.length; k++) {
+      if (old[k] === list[k]) continue;
+      const tmp = document.createElement('div'); tmp.innerHTML = list[k];
+      const node = tmp.firstElementChild || document.createElement('div');
+      const cur = thread.children[k];
+      if (cur) { keepOpen(cur, node); cur.replaceWith(node); }
+      else { if (!fresh) node.classList.add('enter'); if (!fresh && node.classList.contains('turnfoot') && prevBusy.get(id)) node.classList.add('landed'); thread.appendChild(node); }
+    }
+    while (thread.children.length > list.length) thread.lastElementChild.remove();
+    el._blocks = list;
+    if (tailEl._h !== tail) { tailEl.innerHTML = tailEl._h = tail; }
+    prevBusy.set(id, busy);
+    // The working line's elapsed time ticks once a second while the agent works and the view is open.
+    if (busy && !tick) tick = setInterval(() => { if (!el.classList.contains('open')) { clearInterval(tick); tick = null; return; } rerender(); }, 1000);
+    else if (!busy && tick) { clearInterval(tick); tick = null; }
+    if (!stuck) el.scrollTop = el.scrollHeight;
+    syncJump(el);
+  }
+  // A replaced block keeps its open tool rows and expanded prompt.
+  function keepOpen(cur, node) {
+    const open = new Set([...cur.querySelectorAll('details[open]'), ...(cur.matches('details[open]') ? [cur] : [])].map(d => d.dataset.tid));
+    for (const d of [...node.querySelectorAll('details[data-tid]'), ...(node.matches('details[data-tid]') ? [node] : [])]) if (open.has(d.dataset.tid)) d.open = true;
+    const b = cur.querySelector('.bubble.open'), nb = node.querySelector('.bubble.long');
+    if (b && nb) { nb.classList.add('open'); nb.nextElementSibling.textContent = 'Show less'; }
+  }
+  // The round "jump to latest" button over the composer, shown while you're scrolled up.
+  function syncJump(el) { const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 200); }
+
+  // Keys typed into the agent's terminal one write at a time, so the TUI reads each as its own key press.
+  function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
+
+  // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
     const cwd = a && a.cwd;
-    const key = e.target.closest('[data-key]'); // permission card: the same keys the terminal menu takes
-    if (key && selectedId != null) { api.send({ type: 'termInput', id: selectedId, data: key.dataset.key === 'esc' ? '\x1b' : key.dataset.key + '\r' }); return; }
+    const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
+    if (k && selectedId != null) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
+    const pick = e.target.closest('[data-pick]'); // question card: arrow down to the option, then Enter
+    if (pick && selectedId != null) { keys([...Array(+pick.dataset.pick).fill('\x1b[B'), '\r']); pick.classList.add('picked'); return; }
     const act = e.target.closest('[data-act]');
-    if (act) { if (act.dataset.act === 'resume') resumeSelected(); else { switchTermTab('terminal'); const x = xterms.get(selectedId); if (x) x.terminal.focus(); } return; }
+    if (act) {
+      if (act.dataset.act === 'resume') resumeSelected();
+      else if (act.dataset.act === 'mode') keys(['\x1b[Z']); // Shift+Tab: the CLI cycles its permission mode
+      else { switchTermTab('terminal'); askFlip = true; const x = xterms.get(selectedId); if (x) x.terminal.focus(); }
+      return;
+    }
     const flash = (btn) => { btn.classList.add('done'); setTimeout(() => btn.classList.remove('done'), 1200); };
     const copy = e.target.closest('.md-copy');
     if (copy) { navigator.clipboard.writeText(copy.closest('.md-code').querySelector('code').textContent).then(() => { copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); }); return; }
@@ -126,36 +258,6 @@
     else if (c.kind === 'doc') api.send({ type: 'docOpen', paths: [c.path] });
     else if (c.kind === 'file') api.send({ type: 'docOpenWith', path: c.path });
   }
-  // The live tail under the transcript: a permission card, the working line, a crash. st = agentStatus(a).
-  function liveHtml(a, st) {
-    const live = [...a.tools.values()].filter(t => !t.done), perm = live.find(t => t.perm);
-    if (perm && perm.perm === 'ask') return `<div class="card ask"><div class="card-h">Claude has a question</div><p>${escH(perm.status || 'Waiting for your answer.')}</p><div class="btns"><button class="primary" type="button" data-act="answer">Answer</button></div></div>`;
-    if (perm) return `<div class="card perm"><div class="card-h">Allow this action?</div><pre>${escH(perm.status || perm.name || '')}</pre><div class="btns"><button class="primary" type="button" data-key="1">Allow once</button><button type="button" data-key="2">Always allow</button><button type="button" data-key="esc">Deny</button></div></div>`;
-    if (a.crashed === 'fatal') return `<div class="card err"><div class="card-h">The agent stopped</div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
-    if (st === 'active' || st === 'resuming') { const t = live[live.length - 1]; return `<div class="working">${SPARK}<span class="shimmer">${escH(t ? 'Working…' : a.spinnerText || 'Thinking…')}</span></div>`; }
-    return '';
-  }
-  // Draw the Chat view for agent a. Skips identical HTML (a text selection survives the live ticks), keeps open
-  // tool rows and expanded prompts open, and follows the bottom unless you scrolled up.
-  function paint(el, id, a, evs, st) {
-    const doneBy = new Map(); if (evs) for (const ev of evs) if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev);
-    let h;
-    if (!evs) h = '<div class="chat-empty"><span class="loading"></span></div>';
-    else if (!evs.length) h = `<div class="chat-empty">${SPARK}<div>Ready when you are</div></div>`;
-    else h = render(evs, doneBy, a.cwd);
-    h += liveHtml(a, st);
-    const busy = st === 'active' || st === 'resuming';
-    document.getElementById('term-order').classList.toggle('busy', busy);
-    const key = id + '|' + h; if (el._key === key) return; el._key = key;
-    const same = el.dataset.for === String(id), stuck = same && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
-    const open = new Set([...el.querySelectorAll('details[open]')].map(d => d.dataset.tid)), more = new Set([...el.querySelectorAll('.bubble.open')].map(b => b.closest('[data-i]').dataset.i));
-    el.innerHTML = h; el.dataset.for = String(id);
-    if (same) { for (const d of el.querySelectorAll('details[data-tid]')) if (open.has(d.dataset.tid)) d.open = true; for (const b of el.querySelectorAll('.bubble.long')) if (more.has(b.closest('[data-i]').dataset.i)) { b.classList.add('open'); b.nextElementSibling.textContent = 'Show less'; } }
-    if (!stuck) el.scrollTop = el.scrollHeight;
-    syncJump(el);
-  }
-  // The round "jump to latest" button over the composer, shown while you're scrolled up.
-  function syncJump(el) { const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 200); }
 
-  window.chatUi = { render, paint, onClick, syncJump, SPARK, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { paint, onClick, syncJump, SPARK, keys, addPending: (id, text) => pending.set(id, { text, at: Date.now() }), onMdReady: (fn) => { rerender = fn; } };
 })();

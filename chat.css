@@ -1,135 +1,221 @@
 /* Chat view outside world mode, modelled on Claude's desktop app: one centred reading column, prompts as soft bubbles,
-   replies as plain prose, tool calls as quiet one-line rows. Colors from theme.css, markdown from docs.css (.md). */
+   replies in a serif like Claude's, tool calls as quiet rows, a composer with the CLI's chips. Colors from theme.css,
+   markdown from docs.css (.md). */
 body:not(.world-mode) {
   --chat-w: 740px;
   --claude: #d97757;
   --chat-fs: 14.5px;
+  --chat-serif: 'Tiempos Text', Charter, 'Iowan Old Style', Georgia, Cambria, serif;
+  --chat-ease: cubic-bezier(.2, .8, .2, 1);
 }
 body:not(.world-mode) #tab-conversation { display: inline-block; }
-body.world-mode #hdr-chat { display: none; } /* world mode has its own Conversation tab */
-body.world-mode #term-order textarea { resize: none; } /* world.css styles it as its one-line order box */
-body.world-mode #chat-jump, body.world-mode #chat-send svg { display: none; }
+body:not(.world-mode) #term:has(#conversation.open) { background: var(--term-bg); }
+
+/* World mode keeps its own Conversation tab and order box */
+body.world-mode #hdr-chat, body.world-mode #chat-jump, body.world-mode #chat-send svg, body.world-mode #chat-plus, body.world-mode #chat-chips, body.world-mode #chat-att { display: none; }
+body.world-mode #chat-bar { display: contents; }
+body.world-mode #term-order textarea { resize: none; }
 body:not(.world-mode) #chat-send .w { display: none; }
 
-body:not(.world-mode) #conversation.open { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding: 28px 24px 24px; background: var(--term-bg); user-select: text; scrollbar-gutter: stable both-edges; }
-body:not(.world-mode) #conversation > * { width: 100%; max-width: var(--chat-w); align-self: center; box-sizing: border-box; flex: none; }
+/* ── Reading column ── */
+body:not(.world-mode) #conversation.open { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding: 32px 24px 28px; background: var(--term-bg); user-select: text; scrollbar-gutter: stable both-edges; container-type: inline-size; }
+body:not(.world-mode) #conversation .thread, body:not(.world-mode) #conversation .tail { width: 100%; max-width: var(--chat-w); align-self: center; flex: none; }
 body:not(.world-mode) #conversation .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+body:not(.world-mode) #conversation kbd, body:not(.world-mode) #term-order kbd { font-family: 'Geist Mono', monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-hi); color: var(--dim); background: none; }
+/* New blocks slide in; a finished turn's spark pops */
+body:not(.world-mode) #conversation .enter { animation: chat-in .38s var(--chat-ease) both; }
+body:not(.world-mode) #conversation .msg.user.enter { animation-name: chat-in-right; }
+body:not(.world-mode) #conversation .turnfoot.landed .spark { animation: chat-pop .7s var(--chat-ease) both; }
+body:not(.world-mode) #conversation .tail > * { animation: chat-in .3s var(--chat-ease) both; }
 
 /* Your prompts */
-body:not(.world-mode) #conversation .msg.user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin: 22px 0 18px; }
-body:not(.world-mode) #conversation .msg.user:first-child { margin-top: 0; }
-body:not(.world-mode) #conversation .bubble { position: relative; max-width: min(85%, 600px); padding: 10px 16px; border-radius: 18px; background: var(--surface0); color: var(--text); font-size: var(--chat-fs); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+body:not(.world-mode) #conversation .msg.user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin: 26px 0 20px; }
+body:not(.world-mode) #conversation .thread > .msg.user:first-child { margin-top: 0; }
+body:not(.world-mode) #conversation .bubble { max-width: min(85%, 600px); padding: 10px 16px; border-radius: 18px; background: var(--surface0); color: var(--text); font-size: var(--chat-fs); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 body:not(.world-mode) #conversation .bubble.long:not(.open) { max-height: 220px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
-body:not(.world-mode) #conversation .msg.user .more { border: 0; border-radius: 999px; padding: 3px 10px; margin-top: -2px; background: none; color: var(--dim); font: inherit; font-size: 12px; cursor: pointer; } body:not(.world-mode) #conversation .msg.user .more:hover { background: var(--hover-strong); color: var(--text); }
-body:not(.world-mode) #term:has(#conversation.open) { background: var(--term-bg); } /* the strip around the composer matches the reading column */
+body:not(.world-mode) #conversation .msg.user .more { border: 0; border-radius: 999px; padding: 3px 10px; margin-top: -2px; background: none; color: var(--dim); font: inherit; font-size: 12px; cursor: pointer; }
+body:not(.world-mode) #conversation .msg.user .more:hover { background: var(--hover-strong); color: var(--text); }
+body:not(.world-mode) #conversation .msg.user.pending .bubble { opacity: .55; }
+body:not(.world-mode) #conversation .msg.user.pending .q { font-size: 11.5px; color: var(--dim); animation: chat-pulse 1.4s ease-in-out infinite; }
 body:not(.world-mode) #conversation .imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 body:not(.world-mode) #conversation .imgs img { max-width: 220px; max-height: 160px; border-radius: 12px; border: 1px solid var(--border); object-fit: cover; }
-body:not(.world-mode) #conversation .msg.cmd { display: flex; justify-content: flex-end; margin: 18px 0 14px; }
+body:not(.world-mode) #conversation .msg.cmd { display: flex; justify-content: flex-end; margin: 20px 0 14px; }
 body:not(.world-mode) #conversation .msg.cmd span { font-family: 'Geist Mono', monospace; font-size: 12.5px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border-hi); color: var(--subtext); }
 body:not(.world-mode) #conversation .msg.note { text-align: center; font-size: 12px; color: var(--dim); margin: 6px 0 10px; }
+body:not(.world-mode) #conversation .msg.divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; font-size: 11.5px; color: var(--dim); }
+body:not(.world-mode) #conversation .msg.divider::before, body:not(.world-mode) #conversation .msg.divider::after { content: ''; flex: 1; height: 1px; background: var(--border-hi); }
 
-/* Replies */
-body:not(.world-mode) #conversation .msg.ai { position: relative; margin: 4px 0 6px; }
-body:not(.world-mode) #conversation .msg.ai .md { font-size: var(--chat-fs); line-height: 1.7; color: var(--text); }
+/* Replies: Claude's serif, prose-sized */
+body:not(.world-mode) #conversation .msg.ai { margin: 6px 0 10px; }
+body:not(.world-mode) #conversation .msg.ai .md { font-family: var(--chat-serif); font-size: 16px; line-height: 1.65; color: var(--text); letter-spacing: 0; }
+body:not(.world-mode) #conversation .msg p { font-size: inherit; line-height: inherit; white-space: normal; color: inherit; background: none; border: 0; padding: 0; }
 body:not(.world-mode) #conversation .md > :last-child { margin-bottom: 0; }
-body:not(.world-mode) #conversation .md p, body:not(.world-mode) #conversation .md ul, body:not(.world-mode) #conversation .md ol, body:not(.world-mode) #conversation .md blockquote, body:not(.world-mode) #conversation .md table, body:not(.world-mode) #conversation .md .md-code { margin: 0 0 12px; }
-body:not(.world-mode) #conversation .md li + li { margin-top: 3px; }
-body:not(.world-mode) #conversation .md h1, body:not(.world-mode) #conversation .md h2, body:not(.world-mode) #conversation .md h3, body:not(.world-mode) #conversation .md h4 { margin: 20px 0 8px; font-weight: 600; line-height: 1.35; border: 0; padding: 0; }
-body:not(.world-mode) #conversation .md h1 { font-size: 1.3em; } body:not(.world-mode) #conversation .md h2 { font-size: 1.18em; } body:not(.world-mode) #conversation .md h3, body:not(.world-mode) #conversation .md h4 { font-size: 1.05em; }
+body:not(.world-mode) #conversation .md p, body:not(.world-mode) #conversation .md ul, body:not(.world-mode) #conversation .md ol, body:not(.world-mode) #conversation .md blockquote, body:not(.world-mode) #conversation .md table, body:not(.world-mode) #conversation .md .md-code { margin: 0 0 14px; }
+body:not(.world-mode) #conversation .md li + li { margin-top: 4px; }
+body:not(.world-mode) #conversation .md h1, body:not(.world-mode) #conversation .md h2, body:not(.world-mode) #conversation .md h3, body:not(.world-mode) #conversation .md h4 { margin: 22px 0 8px; font-weight: 600; line-height: 1.3; border: 0; padding: 0; }
+body:not(.world-mode) #conversation .md h1 { font-size: 1.35em; } body:not(.world-mode) #conversation .md h2 { font-size: 1.2em; } body:not(.world-mode) #conversation .md h3, body:not(.world-mode) #conversation .md h4 { font-size: 1.05em; }
 body:not(.world-mode) #conversation .md > :first-child { margin-top: 0; }
 body:not(.world-mode) #conversation .md .md-anchor { display: none; }
-body:not(.world-mode) #conversation .md :not(pre) > code { font-size: .86em; padding: .12em .38em; border-radius: 5px; background: var(--surface0); border: 1px solid var(--border); }
-body:not(.world-mode) #conversation .md table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .93em; }
-body:not(.world-mode) #conversation .md th, body:not(.world-mode) #conversation .md td { padding: 6px 12px; border: 0; border-bottom: 1px solid var(--border); text-align: left; }
+body:not(.world-mode) #conversation .md :not(pre) > code { font-family: 'Geist Mono', monospace; font-size: .8em; padding: .15em .4em; border-radius: 5px; background: var(--surface0); border: 0; }
+body:not(.world-mode) #conversation .md table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-family: 'Geist', sans-serif; font-size: 13.5px; }
+body:not(.world-mode) #conversation .md th, body:not(.world-mode) #conversation .md td { padding: 7px 14px 7px 0; border: 0; border-bottom: 1px solid var(--border); text-align: left; }
 body:not(.world-mode) #conversation .md th { font-weight: 600; border-bottom-color: var(--border-hi); }
-body:not(.world-mode) #conversation .md .md-code { border-radius: 10px; }
+body:not(.world-mode) #conversation .md .md-code { border-radius: 12px; font-family: 'Geist', sans-serif; }
+body:not(.world-mode) #conversation .md blockquote { border-left: 3px solid var(--border-hi); padding-left: 14px; color: var(--subtext); }
 body:not(.world-mode) #conversation .md p.plain { white-space: pre-wrap; }
-body:not(.world-mode) #conversation .acts { display: flex; gap: 2px; margin: 2px 0 8px -6px; }
-body:not(.world-mode) #conversation .act { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 7px; background: none; color: var(--dim); cursor: pointer; }
+body:not(.world-mode) #conversation .md.sub { font-family: 'Geist', sans-serif; font-size: 13.5px; line-height: 1.6; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); color: var(--subtext); }
+
+/* Turn footer: copy · worked for · finished at */
+body:not(.world-mode) #conversation .turnfoot { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px -6px; min-height: 28px; font-size: 12px; color: var(--dim); }
+body:not(.world-mode) #conversation .tf-meta { display: inline-flex; align-items: center; gap: 6px; opacity: .8; }
+body:not(.world-mode) #conversation .tf-meta .spark { width: 13px; height: 13px; }
+body:not(.world-mode) #conversation .act { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 7px; background: none; color: var(--dim); cursor: pointer; transition: background .15s, color .15s, transform .1s; }
 body:not(.world-mode) #conversation .act:hover { background: var(--hover-strong); color: var(--text); }
-body:not(.world-mode) #conversation .act.done { color: var(--green); }
+body:not(.world-mode) #conversation .act:active { transform: scale(.9); }
+body:not(.world-mode) #conversation .act.done { color: var(--green); animation: chat-pop .4s var(--chat-ease); }
 
 /* Tool calls: quiet rows, a run of them folded into one summary line */
-body:not(.world-mode) #conversation .tools { margin: 2px 0 12px; font-size: 13px; color: var(--dim); }
+body:not(.world-mode) #conversation .tools { margin: 4px 0 12px; font-size: 13px; color: var(--dim); }
 body:not(.world-mode) #conversation .tools summary { list-style: none; cursor: pointer; }
 body:not(.world-mode) #conversation .tools summary::-webkit-details-marker { display: none; }
-body:not(.world-mode) #conversation .sumrow, body:not(.world-mode) #conversation .tools summary { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; padding: 0 8px; margin: 0 -8px; border-radius: 8px; }
+body:not(.world-mode) #conversation .sumrow, body:not(.world-mode) #conversation .tools summary { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; padding: 0 8px; margin: 0 -8px; border-radius: 8px; width: fit-content; max-width: calc(100% + 16px); box-sizing: border-box; transition: background .15s, color .15s; }
 body:not(.world-mode) #conversation .tools summary:hover { background: var(--hover); color: var(--subtext); }
-body:not(.world-mode) #conversation .tools .chev { width: 13px; height: 13px; margin-left: auto; opacity: 0; transition: transform .15s, opacity .15s; }
+body:not(.world-mode) #conversation .tools .chev { width: 13px; height: 13px; opacity: .35; transition: transform .2s var(--chat-ease), opacity .15s; }
 body:not(.world-mode) #conversation .tools summary:hover > .chev, body:not(.world-mode) #conversation .tools details[open] > summary > .chev { opacity: .8; }
 body:not(.world-mode) #conversation .tools details[open] > summary > .chev { transform: rotate(90deg); }
+body:not(.world-mode) #conversation .tools details[open] > .tbody, body:not(.world-mode) #conversation .tools details[open] > .tlist { animation: chat-unfold .22s var(--chat-ease); }
 body:not(.world-mode) #conversation .verb { flex: none; color: var(--subtext); }
 body:not(.world-mode) #conversation .tgt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
-body:not(.world-mode) #conversation .tgt.mono { font-family: 'Geist Mono', monospace; font-size: 12px; }
+body:not(.world-mode) #conversation .tgt.mono, body:not(.world-mode) #conversation .mono { font-family: 'Geist Mono', monospace; font-size: 12px; }
 body:not(.world-mode) #conversation .gl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext); }
 body:not(.world-mode) #conversation .stat { flex: none; font-family: 'Geist Mono', monospace; font-size: 11.5px; }
 body:not(.world-mode) #conversation .stat .add { color: var(--green); font-weight: 500; } body:not(.world-mode) #conversation .stat .del { color: var(--red); font-weight: 500; }
 body:not(.world-mode) #conversation .errs { flex: none; font-size: 11.5px; color: var(--red); }
-body:not(.world-mode) #conversation .trow.err > summary .ic:first-child, body:not(.world-mode) #conversation .trow.err > .sumrow .ic:first-child { color: var(--red); }
+body:not(.world-mode) #conversation .trow.err > summary > .ic:first-child, body:not(.world-mode) #conversation .trow.err > .sumrow > .ic:first-child { color: var(--red); }
 body:not(.world-mode) #conversation .trow.running .verb, body:not(.world-mode) #conversation .tgroup.running .gl { background: linear-gradient(90deg, var(--subtext) 40%, var(--text) 50%, var(--subtext) 60%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chat-shimmer 1.8s linear infinite; }
-body:not(.world-mode) #conversation .tgroup .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--claude); animation: chat-pulse 1.1s ease-in-out infinite; }
 body:not(.world-mode) #conversation .tlist { margin: 2px 0 4px 7px; padding-left: 14px; border-left: 1px solid var(--border-hi); }
 body:not(.world-mode) #conversation .trow.sub { padding-left: 16px; }
 body:not(.world-mode) #conversation .tbody { margin: 4px 0 10px 23px; }
-body:not(.world-mode) #conversation .tbody pre { margin: 0 0 6px; max-height: 300px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--border); font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--subtext); }
-body:not(.world-mode) #conversation .tbody pre.io { position: relative; padding-left: 48px; }
-body:not(.world-mode) #conversation .tbody pre.io .lbl { position: absolute; left: 12px; top: 11px; font-size: 10px; letter-spacing: .06em; color: var(--dim); }
-body:not(.world-mode) #conversation .tbody pre.err { color: var(--red); }
-body:not(.world-mode) #conversation .tbody .md.sub { font-size: 13.5px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); color: var(--subtext); }
+body:not(.world-mode) #conversation .tbody pre, body:not(.world-mode) #conversation .io { margin: 0 0 6px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--border); font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.55; color: var(--subtext); }
+body:not(.world-mode) #conversation .tbody pre { max-height: 300px; overflow: auto; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+body:not(.world-mode) #conversation .io { overflow: hidden; }
+body:not(.world-mode) #conversation .io-r { display: flex; gap: 12px; padding: 9px 12px; }
+body:not(.world-mode) #conversation .io-r + .io-r { border-top: 1px solid var(--border); }
+body:not(.world-mode) #conversation .io-r .lbl { flex: none; width: 28px; font-size: 10px; letter-spacing: .06em; color: var(--dim); padding-top: 2px; }
+body:not(.world-mode) #conversation .io-r pre { margin: 0; padding: 0; border: 0; background: none; border-radius: 0; max-height: 280px; flex: 1; min-width: 0; }
+body:not(.world-mode) #conversation .io.err { border-left: 2px solid var(--red); }
+body:not(.world-mode) #conversation .io.err .io-r + .io-r .lbl { color: var(--red); }
+body:not(.world-mode) #conversation .tbody pre.err { border-left: 2px solid var(--red); }
 body:not(.world-mode) #conversation .diff { max-height: 360px; overflow: auto; border-radius: 10px; border: 1px solid var(--border); background: var(--bg2); font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.6; padding: 6px 0; margin-bottom: 6px; }
-body:not(.world-mode) #conversation .dl { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 12px 0 0; color: var(--subtext); }
-body:not(.world-mode) #conversation .dl i { display: inline-block; width: 26px; text-align: center; font-style: normal; color: var(--dim); user-select: none; }
+body:not(.world-mode) #conversation .dl { display: flex; color: var(--subtext); padding-right: 12px; }
+body:not(.world-mode) #conversation .dl i { flex: none; width: 26px; text-align: center; font-style: normal; color: var(--dim); user-select: none; }
+body:not(.world-mode) #conversation .dl span { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 body:not(.world-mode) #conversation .dl.add { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--text); } body:not(.world-mode) #conversation .dl.add i { color: var(--green); }
 body:not(.world-mode) #conversation .dl.del { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--text); } body:not(.world-mode) #conversation .dl.del i { color: var(--red); }
-body:not(.world-mode) #conversation .dl.fold { color: var(--dim); padding-left: 26px; }
+body:not(.world-mode) #conversation .dl.fold { color: var(--dim); }
 body:not(.world-mode) #conversation .todos { list-style: none; margin: 0; padding: 4px 0; }
-body:not(.world-mode) #conversation .todos li { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; color: var(--subtext); }
+body:not(.world-mode) #conversation .todos li { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; color: var(--subtext); transition: color .3s; }
 body:not(.world-mode) #conversation .todos li .ic, body:not(.world-mode) #conversation .todos .box { margin-top: 2px; }
-body:not(.world-mode) #conversation .todos .box { flex: none; width: 13px; height: 13px; border: 1.5px solid var(--dim); border-radius: 4px; }
-body:not(.world-mode) #conversation .todos li.completed { color: var(--dim); text-decoration: line-through; } body:not(.world-mode) #conversation .todos li.completed .ic { color: var(--green); }
-body:not(.world-mode) #conversation .todos li.in_progress { color: var(--text); } body:not(.world-mode) #conversation .todos li.in_progress .box { border-color: var(--claude); }
+body:not(.world-mode) #conversation .todos .box { flex: none; width: 13px; height: 13px; border: 1.5px solid var(--dim); border-radius: 4px; box-sizing: border-box; }
+body:not(.world-mode) #conversation .todos li.completed { color: var(--dim); text-decoration: line-through; } body:not(.world-mode) #conversation .todos li.completed .ic { color: var(--green); animation: chat-pop .4s var(--chat-ease); }
+body:not(.world-mode) #conversation .todos li.in_progress { color: var(--text); } body:not(.world-mode) #conversation .todos li.in_progress .box { border-color: var(--claude); animation: chat-pulse 1.4s ease-in-out infinite; }
+body:not(.world-mode) #conversation .opts { margin: 0 0 6px; padding-left: 18px; color: var(--subtext); }
+body:not(.world-mode) #conversation .answer { color: var(--text); font-size: 12.5px; }
 
-/* Live tail: working line, permission / question / crash cards */
+/* ── Live tail: plan, background agents, working line, cards ── */
 body:not(.world-mode) #conversation .spark { width: 18px; height: 18px; flex: none; fill: var(--claude); }
-body:not(.world-mode) #conversation .working { display: flex; align-items: center; gap: 10px; margin: 6px 0 4px; font-size: 13.5px; }
+body:not(.world-mode) #conversation .working { display: flex; align-items: center; gap: 10px; margin: 8px 0 4px; font-size: 13.5px; min-width: 0; }
 body:not(.world-mode) #conversation .working .spark { animation: chat-spin 2.4s cubic-bezier(.5, 0, .5, 1) infinite; }
-body:not(.world-mode) #conversation .shimmer { background: linear-gradient(90deg, var(--dim) 40%, var(--text) 50%, var(--dim) 60%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chat-shimmer 1.8s linear infinite; }
-body:not(.world-mode) #conversation .card { margin: 10px 0; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--surface0); font-size: 13.5px; }
-body:not(.world-mode) #conversation .card-h { font-weight: 600; color: var(--text); margin-bottom: 6px; }
+body:not(.world-mode) #conversation .shimmer { flex: none; background: linear-gradient(90deg, var(--claude) 35%, #f4c7b4 50%, var(--claude) 65%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chat-shimmer 2s linear infinite; font-weight: 500; }
+body:not(.world-mode) #conversation .w-tool { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext); font-size: 12.5px; }
+body:not(.world-mode) #conversation .w-hint { flex: none; margin-left: auto; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+body:not(.world-mode) #conversation .plan-card { margin: 10px 0; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--surface0); font-size: 13px; }
+body:not(.world-mode) #conversation .pc-h { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; margin-bottom: 6px; }
+body:not(.world-mode) #conversation .pc-n { font-weight: 400; color: var(--dim); font-size: 12px; }
+body:not(.world-mode) #conversation .pc-bar { flex: 1; max-width: 120px; height: 4px; border-radius: 4px; background: var(--surface2); overflow: hidden; margin-left: auto; }
+body:not(.world-mode) #conversation .pc-bar i { display: block; height: 100%; border-radius: 4px; background: var(--claude); transition: width .5s var(--chat-ease); }
+body:not(.world-mode) #conversation .bg-agents { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+body:not(.world-mode) #conversation .bga { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border-hi); font-size: 12px; color: var(--subtext); }
+body:not(.world-mode) #conversation .bga-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body:not(.world-mode) #conversation .bga-t { color: var(--dim); font-family: 'Geist Mono', monospace; font-size: 11px; }
+body:not(.world-mode) #conversation .bga-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--claude); animation: chat-pulse 1.1s ease-in-out infinite; }
+body:not(.world-mode) #conversation .card { margin: 12px 0; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--surface0); font-size: 13.5px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+body:not(.world-mode) #conversation .card-h { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
 body:not(.world-mode) #conversation .card p { margin: 0; color: var(--subtext); line-height: 1.5; }
-body:not(.world-mode) #conversation .card pre { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--bg2); font-family: 'Geist Mono', monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
-body:not(.world-mode) #conversation .card.ask { border-color: color-mix(in srgb, var(--claude) 55%, var(--border-hi)); }
+body:not(.world-mode) #conversation .card pre { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--bg2); font-family: 'Geist Mono', monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); max-height: 200px; overflow: auto; }
+body:not(.world-mode) #conversation .card.perm, body:not(.world-mode) #conversation .card.ask { border-color: color-mix(in srgb, var(--claude) 55%, var(--border-hi)); animation: chat-in .3s var(--chat-ease) both, chat-glow 2.4s ease-in-out .3s infinite; }
 body:not(.world-mode) #conversation .card.err { border-color: color-mix(in srgb, var(--red) 50%, var(--border-hi)); }
 body:not(.world-mode) #conversation .btns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-body:not(.world-mode) #conversation .btns button { height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-hi); background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
-body:not(.world-mode) #conversation .btns button:hover { background: var(--hover-strong); }
+body:not(.world-mode) #conversation .btns button, body:not(.world-mode) #conversation .choices button { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-hi); background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; transition: background .15s, transform .1s; }
+body:not(.world-mode) #conversation .btns button:hover, body:not(.world-mode) #conversation .choices button:hover { background: var(--hover-strong); }
+body:not(.world-mode) #conversation .btns button:active, body:not(.world-mode) #conversation .choices button:active { transform: scale(.97); }
 body:not(.world-mode) #conversation .btns .primary { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 500; }
+body:not(.world-mode) #conversation .btns .primary kbd { color: var(--bg); border-color: color-mix(in srgb, var(--bg) 40%, transparent); }
 body:not(.world-mode) #conversation .btns .primary:hover { background: var(--subtext); }
-body:not(.world-mode) #conversation .chat-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--dim); font-size: 15px; }
-body:not(.world-mode) #conversation .chat-empty .spark { width: 34px; height: 34px; }
+body:not(.world-mode) #conversation .choices { display: flex; flex-direction: column; gap: 6px; }
+body:not(.world-mode) #conversation .choices button { justify-content: flex-start; height: auto; min-height: 36px; padding: 6px 12px; text-align: left; }
+body:not(.world-mode) #conversation .choices button.picked { border-color: var(--claude); background: color-mix(in srgb, var(--claude) 14%, transparent); }
+body:not(.world-mode) #conversation .choices .other { color: var(--subtext); }
+body:not(.world-mode) #conversation .chat-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; color: var(--dim); font-size: 15px; }
+body:not(.world-mode) #conversation .chat-empty.hello { font-family: var(--chat-serif); font-size: 28px; color: var(--text); gap: 16px; flex-direction: row; }
+body:not(.world-mode) #conversation .chat-empty.hello .spark { width: 30px; height: 30px; animation: chat-spin 6s linear infinite; }
 body:not(.world-mode) #conversation .loading { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-hi); border-top-color: var(--dim); animation: chat-spin 1s linear infinite; }
+/* An empty session: the greeting and the composer sit together in the middle, as on Claude's new-chat screen */
+body:not(.world-mode) #term.chat-new #conversation.open { flex: 0 0 auto; margin-top: auto; padding-bottom: 20px; }
+body:not(.world-mode) #term.chat-new #term-order.open { margin-bottom: auto; }
+
+@keyframes chat-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes chat-in-right { from { opacity: 0; transform: translate(12px, 4px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes chat-unfold { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes chat-pop { 0% { transform: scale(.4) rotate(-40deg); opacity: 0; } 60% { transform: scale(1.35) rotate(15deg); opacity: 1; } 100% { transform: none; } }
+@keyframes chat-glow { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--claude) 14%, transparent), 0 6px 24px rgba(0,0,0,.18); } }
 @keyframes chat-pulse { 50% { opacity: .3; } }
 @keyframes chat-spin { to { transform: rotate(360deg); } }
 @keyframes chat-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { body:not(.world-mode) #conversation * { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { body:not(.world-mode) #conversation *, body:not(.world-mode) #term-order * { animation: none !important; transition: none !important; } }
 
-/* Composer */
-body:not(.world-mode) #term-order.open { position: relative; display: flex; align-items: flex-end; gap: 8px; flex: none; width: calc(100% - 48px); max-width: var(--chat-w); align-self: center; margin: 0 auto 18px; padding: 10px 10px 10px 18px; border: 1px solid var(--border-hi); border-radius: 20px; background: var(--surface0); box-sizing: border-box; box-shadow: 0 4px 18px rgba(0,0,0,.18); transition: border-color .15s; }
-body:not(.world-mode) #term-order.open:focus-within { border-color: color-mix(in srgb, var(--text) 25%, var(--border-hi)); }
-body:not(.world-mode) #term-order textarea { flex: 1; min-width: 0; min-height: 24px; max-height: 240px; resize: none; border: 0; outline: none; background: none; color: var(--text); font: inherit; font-size: var(--chat-fs); line-height: 1.55; padding: 5px 0; }
+/* Narrow pane: give code the width back */
+@container (max-width: 640px) {
+  body:not(.world-mode) #conversation .tbody { margin-left: 0; }
+  body:not(.world-mode) #conversation .tlist { margin-left: 2px; padding-left: 10px; }
+  body:not(.world-mode) #conversation .w-hint { display: none; }
+  body:not(.world-mode) #conversation .bubble { max-width: 92%; }
+}
+
+/* ── Composer ── */
+body:not(.world-mode) #term-order.open { position: relative; display: flex; flex-direction: column; gap: 6px; flex: none; width: calc(100% - 48px); max-width: var(--chat-w); align-self: center; margin: 0 auto 18px; padding: 12px 10px 10px 16px; border: 1px solid var(--border-hi); border-radius: 22px; background: var(--surface0); box-sizing: border-box; box-shadow: 0 6px 24px rgba(0,0,0,.2); transition: border-color .2s, box-shadow .2s; }
+body:not(.world-mode) #term-order.open:focus-within { border-color: color-mix(in srgb, var(--text) 22%, var(--border-hi)); box-shadow: 0 6px 28px rgba(0,0,0,.28); }
+/* the thread fades out under the composer instead of being cut */
+body:not(.world-mode) #term-order.open::before { content: ''; position: absolute; left: -24px; right: -24px; bottom: 100%; height: 36px; background: linear-gradient(transparent, var(--term-bg)); pointer-events: none; }
+body:not(.world-mode) #term-order textarea { width: 100%; min-height: 24px; max-height: 240px; resize: none; border: 0; outline: none; background: none; color: var(--text); font: inherit; font-size: var(--chat-fs); line-height: 1.55; padding: 2px 4px 2px 0; box-sizing: border-box; }
 body:not(.world-mode) #term-order textarea::placeholder { color: var(--dim); }
-body:not(.world-mode) #chat-send { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border-radius: 10px; border: 0; background: var(--claude); color: #fff; cursor: pointer; clip-path: none; transition: opacity .15s, background .15s; }
-body:not(.world-mode) #chat-send .ic { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+body:not(.world-mode) #term-order.dead textarea { opacity: .5; pointer-events: none; }
+body:not(.world-mode) #chat-att { display: none; gap: 6px; flex-wrap: wrap; }
+body:not(.world-mode) #term-order.has-att #chat-att { display: flex; }
+body:not(.world-mode) #chat-att img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border-hi); animation: chat-pop .35s var(--chat-ease); }
+body:not(.world-mode) #chat-bar { display: flex; align-items: center; gap: 6px; min-width: 0; margin-left: -6px; }
+body:not(.world-mode) #chat-plus { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 10px; border: 1px solid var(--border-hi); background: none; color: var(--subtext); cursor: pointer; clip-path: none; transition: background .15s, transform .2s var(--chat-ease); }
+body:not(.world-mode) #chat-plus:hover { background: var(--hover-strong); color: var(--text); transform: rotate(90deg); }
+body:not(.world-mode) #chat-plus .ic, body:not(.world-mode) #chat-send .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+body:not(.world-mode) #chat-chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+body:not(.world-mode) #chat-chips .grow { flex: 1; }
+body:not(.world-mode) #chat-chips .chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 0; background: none; color: var(--dim); font: inherit; font-size: 12px; white-space: nowrap; }
+body:not(.world-mode) #chat-chips .chip .ic { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+body:not(.world-mode) #chat-chips .chip em { font-style: normal; opacity: .7; }
+body:not(.world-mode) #chat-chips button.chip { cursor: pointer; transition: background .15s; }
+body:not(.world-mode) #chat-chips button.chip:hover { background: var(--hover-strong); }
+body:not(.world-mode) #chat-chips .mode.m-bypass { color: #f87171; } body:not(.world-mode) #chat-chips .mode.m-accept { color: var(--purple); } body:not(.world-mode) #chat-chips .mode.m-plan { color: #2dd4bf; }
+body:not(.world-mode) #chat-chips .ctx svg { width: 15px; height: 15px; transform: rotate(-90deg); fill: none; stroke-width: 2.4; }
+body:not(.world-mode) #chat-chips .ctx circle { stroke: var(--surface2); } body:not(.world-mode) #chat-chips .ctx circle.v { stroke: var(--subtext); stroke-linecap: round; transition: stroke-dasharray .5s var(--chat-ease); }
+body:not(.world-mode) #chat-chips .ctx.hot { color: var(--peach); } body:not(.world-mode) #chat-chips .ctx.hot circle.v { stroke: var(--peach); }
+body:not(.world-mode) #chat-send { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 10px; border: 0; background: var(--claude); color: #fff; cursor: pointer; clip-path: none; transition: background .2s, color .2s, transform .1s; }
+body:not(.world-mode) #chat-send:active { transform: scale(.9); }
 body:not(.world-mode) #chat-send .stop { display: none; fill: currentColor; stroke: none; }
-body:not(.world-mode) #term-order textarea:placeholder-shown + #chat-send { opacity: .45; cursor: default; }
-body:not(.world-mode) #term-order.busy textarea:placeholder-shown + #chat-send { opacity: 1; cursor: pointer; background: var(--surface2); color: var(--text); }
-body:not(.world-mode) #term-order.busy textarea:placeholder-shown + #chat-send .up { display: none; }
-body:not(.world-mode) #term-order.busy textarea:placeholder-shown + #chat-send .stop { display: block; }
-body:not(.world-mode) #chat-jump { position: absolute; left: 50%; top: -48px; transform: translateX(-50%) scale(.9); width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--border-hi); background: var(--surface0); color: var(--text); cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+body:not(.world-mode) #term-order.empty #chat-send { background: var(--surface2); color: var(--dim); cursor: default; }
+body:not(.world-mode) #term-order.busy.empty #chat-send { background: var(--text); color: var(--bg); cursor: pointer; }
+body:not(.world-mode) #term-order.busy.empty #chat-send .up { display: none; }
+body:not(.world-mode) #term-order.busy.empty #chat-send .stop { display: block; }
+body:not(.world-mode) #chat-jump { position: absolute; left: 50%; top: -50px; z-index: 1; transform: translateX(-50%) translateY(6px); width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--border-hi); background: var(--surface0); color: var(--text); cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s var(--chat-ease); box-shadow: 0 2px 12px rgba(0,0,0,.3); }
 body:not(.world-mode) #chat-jump .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-body:not(.world-mode) #chat-jump.show { opacity: 1; pointer-events: auto; transform: translateX(-50%) scale(1); }
-
-/* world.css styles #conversation unscoped; undo its game look here */
-body:not(.world-mode) #conversation .msg p { font-size: inherit; line-height: inherit; white-space: normal; color: inherit; background: none; border: 0; padding: 0; }
-body:not(.world-mode) #conversation .md p.plain { white-space: pre-wrap; }
-body:not(.world-mode) #conversation .opts { margin: 0 0 6px; padding-left: 18px; color: var(--subtext); } body:not(.world-mode) #conversation .opts li + li { margin-top: 2px; }
+body:not(.world-mode) #chat-jump.show { opacity: 1; pointer-events: auto; transform: translateX(-50%); }
+body:not(.world-mode) #term-order button { text-transform: none; letter-spacing: 0; font-family: inherit; font-weight: 400; clip-path: none; } /* world.css styles the order box buttons unscoped */

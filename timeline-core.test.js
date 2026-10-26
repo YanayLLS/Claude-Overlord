@@ -28,6 +28,11 @@ test('a pasted image rides along as a data URL', () => {
   assert.deepStrictEqual(ev.images, ['data:image/png;base64,AAAA']);
 });
 
+test('the permission mode and a compaction become events', () => {
+  assert.deepStrictEqual(parse({ type: 'permission-mode', permissionMode: 'plan' }), [{ type: 'mode', ts: null, mode: 'plan' }]);
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'compact_boundary', timestamp: 't' }), [{ type: 'compact', ts: 't' }]);
+});
+
 test('tool output from content blocks is joined, errors flagged', () => {
   const [ev] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }] } });
   assert.deepStrictEqual(ev, { type: 'tool_done', ts: null, toolId: 't1', text: 'a\nb', err: true });

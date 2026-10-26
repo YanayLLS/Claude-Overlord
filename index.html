@@ -1311,7 +1311,7 @@ button:focus-visible { outline-offset:0; }
     </div>
     <div id="term-container"><span id="term-name-chip"></span><span id="term-agent-name"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button><button id="term-shell-btn" onclick="shellSelected()" title="Open a plain shell here, without Claude">&gt;_ Continue in CLI</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 7v14"/></svg></button><div id="prompt-rail"><div class="pr-dashes"></div><div class="pr-pop"></div></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg></button></div></div>
     <div id="conversation"></div>
-    <div id="term-order"><button id="chat-jump" type="button" title="Jump to latest" aria-label="Jump to latest" onclick="const c=document.getElementById('conversation');c.scrollTo({top:c.scrollHeight,behavior:'smooth'})"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button><textarea id="term-order-input" rows="1" placeholder="Reply&hellip;" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendOrder()}" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea><button id="chat-send" onclick="sendOrder()" title="Send (Enter)" aria-label="Send"><span class="w">Send</span><svg class="ic up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg><svg class="ic stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button></div>
+    <div id="term-order" class="empty"><button id="chat-jump" type="button" title="Jump to latest" aria-label="Jump to latest" onclick="const c=document.getElementById('conversation');c.scrollTo({top:c.scrollHeight,behavior:'smooth'})"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button><div id="chat-att"></div><textarea id="term-order-input" rows="1" placeholder="Reply&hellip;" onkeydown="chatComposer.onKey(event)" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px';document.getElementById('term-order').classList.toggle('empty',!this.value.trim())"></textarea><div id="chat-bar"><button id="chat-plus" type="button" title="Commands, skills and agents (/)" aria-label="Commands, skills and agents"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><div id="chat-chips"></div><button id="chat-send" onclick="sendOrder()" title="Send (Enter) · Stop (Esc)" aria-label="Send"><span class="w">Send</span><svg class="ic up" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg><svg class="ic stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button></div></div>
   </div>
   </div><!-- end #content -->
   <div id="quest-view" hidden onclick="if(event.target===this||event.target.classList.contains('qv-close'))closeQuestView()"><button class="qv-nav qv-prev" onclick="questViewStep(-1)" title="Previous">&#x2039;</button><div id="quest-view-box"></div><button class="qv-nav qv-next" onclick="questViewStep(1)" title="Next">&#x203A;</button><button class="qv-close" title="Close">&times;</button><div id="quest-view-cap"></div></div>
@@ -1664,6 +1664,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./docs-ui.js"></script>
 <script src="./chat-core.js"></script>
 <script src="./chat-ui.js"></script>
+<script src="./chat-composer.js"></script>
 <script>
 document.querySelector('#header h1').title = api.version ? 'Overlord v' + api.version : ''; // version in the tooltip, not the title bar
 
@@ -4125,6 +4126,7 @@ api.on((msg) => {
   if (msg.type.startsWith('doc') && docsUi.onMsg(msg)) return; // markdown documents, docs-ui.js
   if (msg.type === 'catalog') { catalogUi.onMsg(msg); return; } // + / // popover, catalog-ui.js
   if (msg.type === 'imagePasted') {
+    chatComposer.onImagePasted(msg); // the Chat view's composer shows it as a thumbnail
     // ponytail: no inline thumbnail. Writing to xterm out-of-band desyncs the
     // TUI's own redraw (it does not know those rows exist) and scrambles the prompt.
     if (!msg.tagged) { showToast('Image pasted — path inserted'); return; }
@@ -4306,7 +4308,7 @@ function handleAgentMsg(msg) {
     case 'interrupted': showInterrupted(msg.agents); break;
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
-    case 'perm': { const a = agents.get(msg.id); if (msg.ask && msg.id === selectedId && termTab === 'conversation' && !worldView) { switchTermTab('terminal'); askFlip = true; } if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
+    case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
     case 'permClear': { const a = agents.get(msg.id); if (askFlip && msg.id === selectedId && termTab === 'terminal') switchTermTab('conversation'); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; if (msg.id === selectedId && termTab === 'conversation' && !worldView) renderConversation(); } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
@@ -7675,15 +7677,7 @@ function renderConversation() {
 }
 // The order box and approval buttons type into the agent's pty exactly as the terminal would.
 function worldReply(data) { if (selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data }); }
-// questPrompt pastes the text and sends Enter in its own write once the paste has landed: the TUI swallows an Enter
-// written together with the text, which left the prompt sitting unsent in the terminal.
-// Empty box while the agent works: the button is Stop, which sends Esc like the terminal's interrupt.
-function sendOrder() {
-  const inp = document.getElementById('term-order-input'); const text = inp.value.trim(); if (selectedId == null) return;
-  if (!text) { if (!worldView && document.getElementById('term-order').classList.contains('busy')) api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); return; }
-  api.send({ type: 'questPrompt', id: selectedId, text });
-  inp.value = ''; inp.style.height = '';
-}
+function sendOrder() { chatComposer.send(); } // chat-composer.js; world mode's order box uses it too
 document.getElementById('conversation').addEventListener('click', (e) => { if (worldView) return; chatUi.onClick(e, selectedId != null ? agents.get(selectedId) : null, worldTl && worldTl.id === selectedId ? worldTl.events : null); });
 document.getElementById('conversation').addEventListener('scroll', (e) => chatUi.syncJump(e.currentTarget), { passive: true });
 chatUi.onMdReady(() => { const el = document.getElementById('conversation'); el._key = null; renderConversation(); });

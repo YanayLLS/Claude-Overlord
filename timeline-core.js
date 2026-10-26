@@ -64,6 +64,9 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     if (r.type === 'attachment' && r.attachment?.type === 'queued_command' && r.attachment.origin?.kind === 'human' && typeof r.attachment.prompt === 'string') {
       return promptEvents(ts, [{ type: 'text', text: r.attachment.prompt }], isSystemMessage);
     }
+    // The CLI's permission mode (bypass / accept edits / plan / ask), for the Chat view's mode chip.
+    if (r.type === 'permission-mode' && typeof r.permissionMode === 'string') return [{ type: 'mode', ts, mode: r.permissionMode }];
+    if (r.type === 'system' && r.subtype === 'compact_boundary') return [{ type: 'compact', ts }];
     if (r.type === 'system' && r.subtype === 'turn_duration') {
       return [{ type: 'turn', ts, text: `Turn completed (${Math.round((r.durationMs || 0) / 1000)}s)`, ms: r.durationMs || 0 }];
     }

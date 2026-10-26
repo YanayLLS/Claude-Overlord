@@ -53,7 +53,8 @@ function groupSummary(evs) {
 // ponytail: O(n·m) table, capped at DIFF_CELLS; bigger edits show as all-removed then all-added.
 const DIFF_CELLS = 400000;
 function lineDiff(oldText, newText) {
-  const a = oldText ? String(oldText).split('\n') : [], b = newText ? String(newText).split('\n') : [];
+  const lines = (t) => t ? String(t).replace(/\n$/, '').split('\n') : []; // a closing newline isn't an extra blank row
+  const a = lines(oldText), b = lines(newText);
   let rows = [];
   if (a.length * b.length > DIFF_CELLS) rows = a.map(s => ({ t: '-', s })).concat(b.map(s => ({ t: '+', s })));
   else {
