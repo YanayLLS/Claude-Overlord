@@ -7400,6 +7400,9 @@ function setWorldView(on, persist = true) {
   const changed = on !== worldView;
   worldView = on;
   document.body.classList.toggle('world-mode', on);
+  document.getElementById('tab-conversation').textContent = on ? 'Conversation' : 'Chat'; // world mode keeps its own Conversation tab
+  document.getElementById('term-order-input').placeholder = on ? 'Give an order… (Enter sends it to the agent)' : 'Reply…';
+  document.querySelector('#term-order button').textContent = on ? 'Send' : '↑';
   const hb = document.getElementById('hdr-world'); if (hb) hb.classList.toggle('on', on);
   const chk = document.getElementById('chk-world'); if (chk) chk.checked = on;
   if (on && window.World && (changed || !window.World.ready)) {
@@ -7650,7 +7653,14 @@ function renderConversation() {
   let h = '';
   if (!evs) h += '<div class="tl-empty">Loading conversation…</div>';
   else if (!evs.length) h += `<div class="msg ai"><div class="eyebrow">${esc(name)}</div><p>Nothing yet. Give an order below to put this agent to work.</p></div>`;
-  for (const ev of evs || []) h += chatUi.evHtml(ev, ev.toolId ? doneBy.get(ev.toolId) : null, name, a.cwd);
+  if (!worldView) for (const ev of evs || []) h += chatUi.evHtml(ev, ev.toolId ? doneBy.get(ev.toolId) : null, name, a.cwd);
+  else for (const ev of evs || []) { // world mode's Conversation tab: its original compact transcript
+    const short = (t) => t && t.length > 200 ? t.slice(0, 200) + '…' : t || '';
+    if (ev.type === 'prompt') h += `<div class="msg user"><div class="eyebrow">You<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(short(ev.text))}</p></div>`;
+    else if (ev.type === 'text') h += `<div class="msg ai"><div class="eyebrow">${esc(name)}<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(short(ev.text))}</p></div>`;
+    else if (ev.type === 'tool' || ev.type === 'subtask') { const d = ev.toolId ? doneBy.get(ev.toolId) : null; h += `<div class="msg tool${ev.type === 'subtask' ? ' sub' : ''}${!d && ev.toolId ? ' running' : ''}"><span class="t">${esc(ev.name || '')}</span><span class="f" title="${escAttr(ev.text || '')}">${esc(ev.text || '')}</span>${d && d.text ? `<span class="d" title="${escAttr(d.text.slice(0, 150))}">${esc(d.text.slice(0, 40))}</span>` : ''}</div>`; }
+    else if (ev.type === 'turn') h += `<div class="msg turn">${esc(ev.text)}</div>`;
+  }
   // Live state on top of the transcript: tools still running, a permission prompt, a question, a crash.
   const live = [...a.tools.values()].filter(t => !t.done);
   const perm = live.find(t => t.perm);

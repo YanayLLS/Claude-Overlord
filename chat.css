@@ -42,9 +42,9 @@ body:not(.world-mode) #term-order.open:focus-within { border-color: color-mix(in
 body:not(.world-mode) #term-order textarea { flex: 1; min-width: 0; max-height: 200px; resize: none; border: 0; outline: none; background: none; color: var(--text); font: inherit; font-size: 14px; line-height: 1.5; padding: 4px 0; }
 body:not(.world-mode) #term-order textarea::placeholder { color: var(--dim); }
 body:not(.world-mode) #term-order button { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent); font-size: 16px; font-weight: 700; cursor: pointer; }
-#term-order textarea { flex: 1; min-width: 0; resize: none; font: inherit; } /* world mode styles the old input; keep the textarea usable there */
 /* world.css styles these ids unscoped; undo its game look here */
 body:not(.world-mode) #conversation .msg.tool { padding: 0; border: 0; background: none; }
 body:not(.world-mode) #conversation .msg.tool .t { font-family: inherit; font-size: 12px; text-transform: none; min-width: 0; }
 body:not(.world-mode) #conversation .msg.tool.running .t::after { content: none; }
 body:not(.world-mode) #term-order button { clip-path: none; padding: 0; font-family: inherit; letter-spacing: 0; }
+body.world-mode #term-order textarea { resize: none; } /* world.css styles it as its one-line order box */
