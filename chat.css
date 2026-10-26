@@ -48,3 +48,4 @@ body:not(.world-mode) #conversation .msg.tool .t { font-family: inherit; font-si
 body:not(.world-mode) #conversation .msg.tool.running .t::after { content: none; }
 body:not(.world-mode) #term-order button { clip-path: none; padding: 0; font-family: inherit; letter-spacing: 0; }
 body.world-mode #term-order textarea { resize: none; } /* world.css styles it as its one-line order box */
+body.world-mode #hdr-chat { display: none; } /* world mode has its own Conversation tab */

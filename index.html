@@ -1246,6 +1246,7 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
 
     <button class="hdr-btn" id="perf-top" onclick="togglePerfMenu(event)" aria-haspopup="dialog" aria-expanded="false" title="Performance: RAM in use on this PC"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span id="perf-top-ram"></span></button>
+    <button class="hdr-btn" id="hdr-chat" onclick="switchTermTab(termTab === 'conversation' ? 'terminal' : 'conversation')" title="Chat view"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
     <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="hdr-btn update-btn" id="update-btn" style="display:none" title="Restart and install the downloaded update"></button>
@@ -3869,6 +3870,7 @@ function switchTermTab(tab) {
   try { localStorage.setItem('termTab', tab); } catch {}
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
   document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
+  document.getElementById('hdr-chat').classList.toggle('on', tab === 'conversation'); // the pane header is hidden outside world mode, so the top bar carries the toggle
   const tc = document.getElementById('term-container');
   const cv = document.getElementById('conversation'), od = document.getElementById('term-order');
   cv.classList.toggle('open', tab === 'conversation'); od.classList.toggle('open', tab === 'conversation');
