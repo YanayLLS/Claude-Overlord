@@ -601,6 +601,6 @@
   function associate() { const b = $('doc-assoc-btn'); if (b) b.textContent = 'Registering…'; api.send({ type: 'docAssociate' }); }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
-  window.docsUi = { onMsg, onToolFile, select, close, closeSelected, cycle, toggle, hasFocus, menu, addMenu, newNote, copyPath, toggleEdit, reveal, openWith, pick, associate, openFind, closeFind, findStep, toggleOutline, toggleFollow, reserve, onTermResized,
+  window.docsUi = { onMsg, onToolFile, select, close, closeSelected, cycle, toggle, hasFocus, menu, addMenu, newNote, copyPath, toggleEdit, reveal, openWith, pick, associate, openFind, closeFind, findStep, toggleOutline, toggleFollow, reserve, onTermResized, toHtml, loadMd, // the Chat tab renders replies with the same markdown pipeline
     isVisible: () => visible, count: () => docs.size, selected: () => selected };
 })();

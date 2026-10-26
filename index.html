@@ -1234,6 +1234,7 @@ button:focus-visible { outline-offset:0; }
 <link rel="stylesheet" href="./theme.css" />
 <link rel="stylesheet" href="./releases.css" />
 <link rel="stylesheet" href="./docs.css" />
+<link rel="stylesheet" href="./chat.css" />
 </head>
 <body>
 <div id="app">
@@ -1289,7 +1290,7 @@ button:focus-visible { outline-offset:0; }
     <div id="term-dossier"></div>
     <div id="term-header">
       <div class="term-tabs">
-        <button class="term-tab" id="tab-conversation" onclick="switchTermTab('conversation')">Conversation</button>
+        <button class="term-tab" id="tab-conversation" onclick="switchTermTab('conversation')">Chat</button>
         <button class="term-tab active" id="tab-terminal" onclick="switchTermTab('terminal')">Terminal</button>
       </div>
       <span class="term-title" id="term-title"></span>
@@ -1309,7 +1310,7 @@ button:focus-visible { outline-offset:0; }
     </div>
     <div id="term-container"><span id="term-name-chip"></span><span id="term-agent-name"></span><div id="term-dead"><span id="term-dead-msg"></span><button id="term-resume-btn" onclick="resumeSelected()">&#x21BB; Resume chat</button><button id="term-shell-btn" onclick="shellSelected()" title="Open a plain shell here, without Claude">&gt;_ Continue in CLI</button></div><div id="term-scroll-nav"><button id="scroll-top-btn" onclick="scrollTermTop()" title="Scroll to top"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 7v14"/></svg></button><div id="prompt-rail"><div class="pr-dashes"></div><div class="pr-pop"></div></div><button id="scroll-bottom-btn" onclick="scrollTermBottom()" title="Scroll to bottom (End)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg></button></div></div>
     <div id="conversation"></div>
-    <div id="term-order"><input id="term-order-input" type="text" placeholder="Give an order&hellip; (Enter sends it to the agent)" onkeydown="if(event.key==='Enter'){sendOrder()}" /><button onclick="sendOrder()">Send</button></div>
+    <div id="term-order"><textarea id="term-order-input" rows="1" placeholder="Reply&hellip;" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendOrder()}" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea><button onclick="sendOrder()" title="Send (Enter)" aria-label="Send">&#x2191;</button></div>
   </div>
   </div><!-- end #content -->
   <div id="quest-view" hidden onclick="if(event.target===this||event.target.classList.contains('qv-close'))closeQuestView()"><button class="qv-nav qv-prev" onclick="questViewStep(-1)" title="Previous">&#x2039;</button><div id="quest-view-box"></div><button class="qv-nav qv-next" onclick="questViewStep(1)" title="Next">&#x203A;</button><button class="qv-close" title="Close">&times;</button><div id="quest-view-cap"></div></div>
@@ -1660,6 +1661,7 @@ button:focus-visible { outline-offset:0; }
 <!-- md-bundle.js (marked + highlight.js + DOMPurify, 223 KB) loads the first time docs-ui renders a document (loadMd) -->
 <script src="./docs-core.js"></script>
 <script src="./docs-ui.js"></script>
+<script src="./chat-ui.js"></script>
 <script>
 document.querySelector('#header h1').title = api.version ? 'Overlord v' + api.version : ''; // version in the tooltip, not the title bar
 
@@ -2162,7 +2164,8 @@ function showIconPicker(e, sessionId) {
 }
 
 // ── Timeline state ──
-let termTab = 'terminal'; // 'terminal', or 'conversation' in world mode
+let termTab = (() => { try { return localStorage.getItem('termTab') === 'conversation' ? 'conversation' : 'terminal'; } catch { return 'terminal'; } })(); // 'terminal' or 'conversation' (the Chat view)
+let askFlip = false; // the Chat view flipped to the terminal for a question menu; flips back once it's answered
 let timelineAgentId = null;
 
 function openFilter() {
@@ -3083,6 +3086,7 @@ function render() {
 
   renderSummaryBar();
   if (worldView) worldSync();
+  else if (termTab === 'conversation') renderConversation(); // working dots and permission cards follow the agent's state
 }
 // Summary bar — 3-line layout: session bar, weekly bar, info/pace row. Its own function so the 30 s age/reset
 // refresh redraws just this, not the whole agent list.
@@ -3692,7 +3696,8 @@ function openTerm(id) {
   // Update prompt nav after xterm exists and buffer has time to populate
   setTimeout(() => updatePromptNav(), 150);
   // Load timeline if tab is active or agent changed
-  if (timelineAgentId !== id) loadTimeline(id);
+  if (termTab === 'conversation' && timelineAgentId !== id) loadTimeline(id); // switchTermTab loads it on the way in
+  if (termTab === 'conversation' && !worldView) setTimeout(() => document.getElementById('term-order-input').focus(), 60);
   render();
   // Re-focus terminal after render so keyboard input works immediately
   if (termTab === 'terminal') {
@@ -3860,7 +3865,8 @@ function jumpPrompt(dir) {
 
 // ── Terminal / conversation tabs ───────────────────────
 function switchTermTab(tab) {
-  termTab = tab;
+  termTab = tab; askFlip = false;
+  try { localStorage.setItem('termTab', tab); } catch {}
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
   document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
   const tc = document.getElementById('term-container');
@@ -3874,6 +3880,7 @@ function switchTermTab(tab) {
     tc.style.display = 'none';
     if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
     renderConversation();
+    if (!worldView) setTimeout(() => document.getElementById('term-order-input').focus(), 0);
   }
   updatePromptNav();
   updateScrollBtn();
@@ -4296,8 +4303,8 @@ function handleAgentMsg(msg) {
     case 'interrupted': showInterrupted(msg.agents); break;
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
-    case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
-    case 'permClear': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
+    case 'perm': { const a = agents.get(msg.id); if (msg.ask && msg.id === selectedId && termTab === 'conversation' && !worldView) { switchTermTab('terminal'); askFlip = true; } if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
+    case 'permClear': { const a = agents.get(msg.id); if (askFlip && msg.id === selectedId && termTab === 'terminal') switchTermTab('conversation'); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
@@ -7437,7 +7444,6 @@ function setWorldView(on, persist = true) {
   } else if (!on && window.World && window.World.ready) {
     window.World.dispose(); window.World.ready = false;
   }
-  if (!on && termTab === 'conversation') switchTermTab('terminal'); // that tab only exists in world mode
   // The terminal's xterm needs a refit after the columns change width; schedFit is the same path the window resize uses.
   if (typeof schedFit === 'function') schedFit();
 }
@@ -7644,25 +7650,33 @@ function renderConversation() {
   let h = '';
   if (!evs) h += '<div class="tl-empty">Loading conversation…</div>';
   else if (!evs.length) h += `<div class="msg ai"><div class="eyebrow">${esc(name)}</div><p>Nothing yet. Give an order below to put this agent to work.</p></div>`;
-  for (const ev of evs || []) {
-    if (ev.type === 'prompt') h += `<div class="msg user"><div class="eyebrow">You<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(ev.text)}</p></div>`;
-    else if (ev.type === 'text') h += `<div class="msg ai"><div class="eyebrow">${esc(name)}<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(ev.text)}</p></div>`;
-    else if (ev.type === 'tool' || ev.type === 'subtask') { const d = ev.toolId ? doneBy.get(ev.toolId) : null; h += `<div class="msg tool${ev.type === 'subtask' ? ' sub' : ''}${!d && ev.toolId ? ' running' : ''}"><span class="t">${esc(ev.name || '')}</span><span class="f" title="${escAttr(ev.text || '')}">${esc(ev.text || '')}</span>${d && d.text ? `<span class="d" title="${escAttr(d.text)}">${esc(d.text.slice(0, 40))}</span>` : ''}</div>`; }
-    else if (ev.type === 'turn') h += `<div class="msg turn">${esc(ev.text)}</div>`;
-  }
+  for (const ev of evs || []) h += chatUi.evHtml(ev, ev.toolId ? doneBy.get(ev.toolId) : null, name, a.cwd);
   // Live state on top of the transcript: tools still running, a permission prompt, a question, a crash.
   const live = [...a.tools.values()].filter(t => !t.done);
   const perm = live.find(t => t.perm);
   if (perm && perm.perm === 'ask') h += `<div class="msg ask" style="--c:var(--purple)"><div class="eyebrow">Question for you</div><p>${esc(perm.status || 'The agent is waiting for your answer in the terminal.')}</p><div class="row2"><button class="yes" onclick="switchTermTab('terminal');const x=xterms.get(selectedId);if(x)x.terminal.focus()">Answer in terminal</button></div></div>`;
   else if (perm) h += `<div class="msg ask" style="--c:var(--yellow)"><div class="eyebrow">Wants to run</div><pre>${esc(perm.status || perm.name || '')}</pre><div class="row2"><button class="yes" onclick="worldReply('1\\r')">Approve</button><button onclick="worldReply('2\\r')">Always this session</button><button onclick="worldReply('\\x1b')">Deny</button></div></div>`;
-  else for (const t of live) h += `<div class="msg tool running"><span class="t">${esc(t.name || 'tool')}</span><span class="f">${esc(t.status || 'running…')}</span></div>`;
+  else if (worldView) for (const t of live) h += `<div class="msg tool running"><span class="t">${esc(t.name || 'tool')}</span><span class="f">${esc(t.status || 'running…')}</span></div>`;
+  else if (a.status === 'active' || a.status === 'settling') h += '<div class="working"><i></i><i></i><i></i></div>'; // the transcript already shows its running tools
   if (a.crashed === 'fatal') h += `<div class="msg err">Process exited (${a.crashCount}/${a.crashMax} attempts).<div class="row2"><button class="yes" onclick="resumeSelected()">Resume</button></div></div>`;
+  // Live updates re-run this on every render: skip identical HTML so a text selection survives, and keep open tool cards open.
+  const key = selectedId + '|' + h; if (el._key === key) return; el._key = key;
+  const open = new Set([...el.querySelectorAll('details[open]')].map(d => d.dataset.tid));
   el.innerHTML = h; el.dataset.for = String(selectedId);
+  for (const d of el.querySelectorAll('details[data-tid]')) if (open.has(d.dataset.tid)) d.open = true;
   if (!stuck) el.scrollTop = el.scrollHeight;
 }
 // The order box and approval buttons type into the agent's pty exactly as the terminal would.
 function worldReply(data) { if (selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data }); }
-function sendOrder() { const inp = document.getElementById('term-order-input'); const text = inp.value.trim(); if (!text || selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data: text + '\r' }); inp.value = ''; }
+// Multi-line text goes in as one bracketed paste with Enter after it: an Enter in the same write as the paste end is swallowed by the TUI.
+function sendOrder() {
+  const inp = document.getElementById('term-order-input'); const text = inp.value.trim(); if (!text || selectedId == null) return;
+  const id = selectedId;
+  if (text.includes('\n')) { api.send({ type: 'termInput', id, data: '\x1b[200~' + text + '\x1b[201~' }); setTimeout(() => api.send({ type: 'termInput', id, data: '\r' }), 150); }
+  else api.send({ type: 'termInput', id, data: text + '\r' });
+  inp.value = ''; inp.style.height = '';
+}
+document.getElementById('conversation').addEventListener('click', (e) => { const a = selectedId != null ? agents.get(selectedId) : null; chatUi.onClick(e, a && a.cwd); });
 // Hovering an agent card in the list lights its unit on the map.
 document.getElementById('list').addEventListener('mouseover', (e) => { if (!worldView || !window.World) return; const card = e.target.closest('.agent[data-id]'); if (card) World.hover(+card.dataset.id); });
 document.getElementById('list').addEventListener('mouseleave', () => { if (worldView && window.World) World.hover(null); });
@@ -7670,6 +7684,7 @@ document.getElementById('list').addEventListener('mouseleave', () => { if (world
 document.getElementById('list').addEventListener('click', (e) => { if (!worldView || !window.World) return; if (e.target.closest('button, .model-tag, .agent-actions')) return; const card = e.target.closest('.agent[data-id]'); if (card) World.focus(+card.dataset.id, .9); });
 
 // Initial render
+if (termTab === 'conversation') switchTermTab('conversation'); // the Chat view was left open last session
 render();
 api.send({ type: 'getAgents' });
 </script>

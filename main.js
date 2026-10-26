@@ -1027,6 +1027,9 @@ function fmtTool(name, input) {
 // ── Timeline parsing ──────────────────────────────────
 let timelineAgentId = null;
 const TIMELINE_MAX_EVENTS = 1000;
+// The Chat tab renders replies whole and opens tool output, so events carry full text up to these caps.
+const TL_TEXT_MAX = 20000, TL_OUT_MAX = 4000;
+const tlCap = (t, n) => t.length > n ? t.slice(0, n) + '…' : t;
 
 function parseLineForTimeline(line) {
   try {
@@ -1036,7 +1039,7 @@ function parseLineForTimeline(line) {
       const events = [];
       for (const b of r.message.content) {
         if (b.type === 'text' && b.text) {
-          events.push({ type: 'text', ts, text: b.text.length > 200 ? b.text.slice(0, 200) + '\u2026' : b.text });
+          events.push({ type: 'text', ts, text: tlCap(b.text, TL_TEXT_MAX) });
         }
         if (b.type === 'tool_use' && b.id) {
           events.push({ type: 'tool', ts, name: b.name || 'unknown', text: fmtTool(b.name || '', b.input || {}), toolId: b.id });
@@ -1051,17 +1054,17 @@ function parseLineForTimeline(line) {
           const events = [];
           for (const b of c) {
             if (b.type === 'tool_result' && b.tool_use_id) {
-              const out = typeof b.content === 'string' ? b.content : '';
-              events.push({ type: 'tool_done', ts, toolId: b.tool_use_id, text: out.length > 150 ? out.slice(0, 150) + '\u2026' : out });
+              const out = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.filter(x => x.type === 'text').map(x => x.text || '').join('\n') : '';
+              events.push({ type: 'tool_done', ts, toolId: b.tool_use_id, text: tlCap(out, TL_OUT_MAX), err: !!b.is_error });
             }
           }
           return events.length ? events : null;
         }
         const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-        if (txt && !isSystemMessage(txt)) return [{ type: 'prompt', ts, text: txt.length > 200 ? txt.slice(0, 200) + '\u2026' : txt }];
+        if (txt && !isSystemMessage(txt)) return [{ type: 'prompt', ts, text: tlCap(txt, TL_TEXT_MAX) }];
       } else if (typeof c === 'string' && c.trim()) {
         const txt = c.trim();
-        if (!isSystemMessage(txt)) return [{ type: 'prompt', ts, text: txt.length > 200 ? txt.slice(0, 200) + '\u2026' : txt }];
+        if (!isSystemMessage(txt)) return [{ type: 'prompt', ts, text: tlCap(txt, TL_TEXT_MAX) }];
       }
     }
     if (r.type === 'system' && r.subtype === 'turn_duration') {
