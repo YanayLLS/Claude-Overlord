@@ -21,6 +21,7 @@
     copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
     check: svg('<path d="m5 12 5 5 9-10"/>'),
     shield: svg('<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/>'),
+    alert: svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
   };
   // Claude's spark: turning while the agent works, popping once when a turn lands.
   const SPARK = '<svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l1.6 6.2 5.6-3.2-3.2 5.6 6.2 1.6-6.2 1.6 3.2 5.6-5.6-3.2L12 21.5l-1.6-6.2-5.6 3.2 3.2-5.6L1.8 12l6.2-1.6-3.2-5.6 5.6 3.2z"/></svg>';
@@ -57,7 +58,7 @@
     if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new); body = d.html; stat = `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (err && out) body += `<pre class="out">${escH(out)}</pre>`; }
     else if (a.todos) body = todoHtml(a.todos);
     else if (a.plan) body = `<div class="md sub">${md(a.plan, cwd)}</div>`;
-    else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
+    else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o.label ?? o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
     else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${escH(out)}</pre></div>` : ''}</div>`;
     else if (v.kind === 'agent' && out) body = `<div class="md sub">${md(out, cwd)}</div>`;
     else if (out) body = `<pre class="out${err ? ' err' : ''}">${escH(out)}</pre>`;
@@ -85,7 +86,7 @@
       h = `<div class="msg user" data-i="${i}">${imgs ? `<div class="imgs">${imgs}</div>` : ''}${text ? `<div class="bubble${long ? ' long' : ''}">${escH(text)}</div>${long ? '<button class="more" type="button">Show more</button>' : ''}` : ''}</div>`;
     } else if (ev.type === 'text') h = `<div class="msg ai" data-i="${i}"><div class="md">${md(ev.text, cwd)}</div></div>`;
     else if (ev.type === 'command') h = `<div class="msg cmd"><span>${escH(ev.text)}</span></div>`;
-    else if (ev.type === 'interrupt') h = '<div class="msg note">Interrupted</div>';
+    else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
     else h = '';
     if (mdReady || ev.type !== 'text') cache.set(ev, h);
@@ -98,13 +99,14 @@
   }
 
   // The transcript as blocks (one per message, tool run or turn footer), so paint can swap only what changed.
-  // A turn's footer waits until the turn is over (busy = the last turn is still running).
-  function blocks(evs, doneBy, cwd, busy) {
+  // A turn's footer waits until the turn is over: its turn_duration line, or the next prompt.
+  function blocks(evs, doneBy, cwd) {
     const out = []; let run = [], textAt = -1, turn = null, open = false;
     const flush = () => { if (run.length) out.push(groupHtml(run, doneBy, cwd)); run = []; };
     const close = () => { flush(); if (open && (textAt >= 0 || turn)) out.push(footHtml(textAt, turn)); textAt = -1; turn = null; open = false; };
     evs.forEach((ev, i) => {
       const t = ev.type;
+      if (t === 'tool' && ev.name === 'AskUserQuestion' && !doneBy.get(ev.toolId)) return; // the question card shows it
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
       if (t === 'tool_done' || t === 'mode') return;
       if (t === 'turn') { turn = ev; return; }
@@ -112,7 +114,7 @@
       flush(); out.push(msgHtml(ev, i, cwd));
       if (t === 'text') { textAt = i; open = true; }
     });
-    if (busy) flush(); else close();
+    flush(); if (turn) close();
     return out;
   }
 
@@ -126,7 +128,7 @@
   function askHtml(ask, perm) {
     const a = (ask && ask.args) || {}, opts = a.options || [];
     const q = a.question || (perm && perm.status) || 'Claude has a question';
-    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span>${escH(o)}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>…</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
+    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>…</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
   }
   function liveHtml(a, st, evs, doneBy, now) {
     const live = [...a.tools.values()].filter(t => !t.done), perm = live.find(t => t.perm);
@@ -143,14 +145,16 @@
     if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<div class="bga">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></div>`).join('')}</div>`;
     if (perm && perm.perm === 'ask') return h + askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm);
     if (perm) return h + permHtml(perm);
-    if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.shield}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
+    if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
     if (a.compacting) return h + `<div class="working">${SPARK}<span class="shimmer">Compacting conversation…</span></div>`;
     if (st === 'active' || st === 'resuming') {
       // The CLI's own playful verb ("Cogitating…") when it has one; the call in flight under it; elapsed; the Esc hint.
       const tool = (() => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if ((e.type === 'tool') && e.toolId && !doneBy.get(e.toolId) && e.name !== 'Agent' && e.name !== 'Task') return e; if (e.type === 'prompt') return null; } return null; })();
       const v = tool ? toolView(tool, true) : null;
-      const since = a.activeAt ? ` · ${dur(now - a.activeAt)}` : '';
-      return h + `<div class="working">${SPARK}<span class="shimmer">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span>${v ? `<span class="w-tool">${escH(v.verb)} <span class="mono">${escH(v.target)}</span></span>` : ''}<span class="w-hint">${escH(since.slice(3))}${since ? ' · ' : ''}<kbd>Esc</kbd> to interrupt</span></div>`;
+      // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
+      const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
+      const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
+      return h + `<div class="working">${SPARK}<span class="shimmer">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span>${v ? `<span class="w-tool">${escH(v.verb)} <span class="mono">${escH(v.target)}</span></span>` : ''}<span class="w-hint">${meta}${meta ? ' · ' : ''}<kbd>Esc</kbd> to interrupt</span></div>`;
     }
     return h;
   }
@@ -172,8 +176,9 @@
     const model = String(s.model || '').replace(/^claude-/, '').replace(/-(\d+)-(\d+).*$/, ' $1.$2').replace(/^\w/, x => x.toUpperCase());
     return (m ? `<button type="button" class="chip mode m-${m[1]}" data-act="mode" title="Permission mode (Shift+Tab cycles)">${ICON.shield}<span>${m[0]}</span></button>` : '')
       + '<span class="grow"></span>'
-      + (pct ? `<span class="chip ctx${pct >= 80 ? ' hot' : ''}" title="${pct}% of the context window used"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${(pct / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${pct}%</span>` : '')
-      + (model ? `<span class="chip model" title="${escH(s.model)}">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</span>` : '');
+      // Context left before auto-compact, once it matters (half used); click puts /compact in the box.
+      + (pct >= 50 ? `<button type="button" class="chip ctx${pct >= 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${(pct / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
+      + (model ? `<button type="button" class="chip model" data-insert="/model " title="${escH(s.model)}. Click for /model">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</button>` : '');
   }
 
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
@@ -191,7 +196,8 @@
     let list;
     if (!evs) list = ['<div class="chat-empty"><span class="loading"></span></div>'];
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
-    else list = blocks(evs, doneBy, a.cwd, busy || st === 'permission' || st === 'question');
+    else list = blocks(evs, doneBy, a.cwd);
+    if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
     const tail = (evs ? pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) : '');
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
@@ -237,6 +243,8 @@
     if (k && selectedId != null) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
     const pick = e.target.closest('[data-pick]'); // question card: arrow down to the option, then Enter
     if (pick && selectedId != null) { keys([...Array(+pick.dataset.pick).fill('\x1b[B'), '\r']); pick.classList.add('picked'); return; }
+    const ins = e.target.closest('[data-insert]'); // composer chips: /compact, /model
+    if (ins) { chatComposer.insert(ins.dataset.insert, false); return; }
     const act = e.target.closest('[data-act]');
     if (act) {
       if (act.dataset.act === 'resume') resumeSelected();

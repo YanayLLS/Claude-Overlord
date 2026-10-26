@@ -61,5 +61,5 @@
   document.getElementById('chat-plus').addEventListener('click', (e) => { e.stopPropagation(); catalogUi.isOpen() ? catalogUi.close() : openPicker(); });
   document.getElementById('chat-plus').addEventListener('mousedown', (e) => e.stopPropagation()); // the picker's outside-click close would reopen it
   document.getElementById('chat-chips').addEventListener('click', (e) => chatUi.onClick(e, agents.get(selectedId), null));
-  window.chatComposer = { send, onKey, onImagePasted, clearAttachments };
+  window.chatComposer = { send, insert, onKey, onImagePasted, clearAttachments };
 })();

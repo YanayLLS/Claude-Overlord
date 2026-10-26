@@ -11,7 +11,7 @@ function toolArgs(name, inp) {
   if (name === 'Edit') { o.old = cap(String(inp.old_string || ''), TL_DIFF_MAX); o.new = cap(String(inp.new_string || ''), TL_DIFF_MAX); }
   else if (name === 'MultiEdit' && Array.isArray(inp.edits)) { o.old = cap(inp.edits.map(e => e.old_string || '').join('\n'), TL_DIFF_MAX); o.new = cap(inp.edits.map(e => e.new_string || '').join('\n'), TL_DIFF_MAX); }
   else if (name === 'Write') { o.old = ''; o.new = cap(String(inp.content || ''), TL_DIFF_MAX); }
-  else if (name === 'AskUserQuestion' && Array.isArray(inp.questions) && inp.questions[0]) { const q = inp.questions[0]; o.question = cap(String(q.question || ''), 600); o.options = (q.options || []).map(x => cap(String(x.label || ''), 200)); }
+  else if (name === 'AskUserQuestion' && Array.isArray(inp.questions) && inp.questions[0]) { const q = inp.questions[0]; o.question = cap(String(q.question || ''), 600); o.options = (q.options || []).map(x => ({ label: cap(String(x.label || ''), 200), desc: cap(String(x.description || ''), 300) })); }
   else if (name === 'ExitPlanMode' && typeof inp.plan === 'string') o.plan = cap(inp.plan, TL_TEXT_MAX);
   else if (name === 'TodoWrite' && Array.isArray(inp.todos)) o.todos = inp.todos.map(t => ({ text: cap(String(t.content || ''), 300), status: t.status }));
   return o;
