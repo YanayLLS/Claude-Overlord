@@ -57,13 +57,13 @@
     let body = '', stat = '';
     if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new); body = d.html; stat = `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (err && out) body += `<pre class="out">${escH(out)}</pre>`; }
     else if (a.todos) body = todoHtml(a.todos);
-    else if (a.plan) body = `<div class="md sub">${md(a.plan, cwd)}</div>`;
+    else if (a.plan) body = `<div class="md sub plan">${md(a.plan.replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div>`;
     else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o.label ?? o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
     else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${escH(out)}</pre></div>` : ''}</div>`;
     else if (v.kind === 'agent' && out) body = `<div class="md sub">${md(out, cwd)}</div>`;
     else if (out) body = `<pre class="out${err ? ' err' : ''}">${escH(out)}</pre>`;
     const cls = `trow k-${v.kind}${running ? ' running' : ''}${err ? ' err' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
-    const head = `${ICON[v.kind] || ICON.tool}<span class="verb">${escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}`;
+    const head = `${ICON[v.kind] || ICON.tool}<span class="verb">${escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}${running && ev.ts ? `<span class="el" data-t="${Date.parse(ev.ts)}"></span>` : ''}`;
     const h = body ? `<details class="${cls}" data-tid="${escH(ev.toolId || '')}"><summary>${head}${ICON.chev}</summary><div class="tbody">${body}</div></details>` : `<div class="${cls}"><div class="sumrow">${head}</div></div>`;
     toolCache.set(ev, [done, h]);
     return h;
@@ -115,6 +115,7 @@
       if (t === 'text') { textAt = i; open = true; }
     });
     flush(); if (turn) close();
+    for (let k = out.length - 1; k >= 0; k--) if (out[k].startsWith('<div class="turnfoot"')) { out[k] = out[k].replace('<div class="turnfoot"', '<div class="turnfoot latest"'); break; }
     return out;
   }
 
@@ -128,7 +129,7 @@
   function askHtml(ask, perm) {
     const a = (ask && ask.args) || {}, opts = a.options || [];
     const q = a.question || (perm && perm.status) || 'Claude has a question';
-    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>…</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
+    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
   }
   function liveHtml(a, st, evs, doneBy, now) {
     const live = [...a.tools.values()].filter(t => !t.done), perm = live.find(t => t.perm);
@@ -142,7 +143,7 @@
     }
     // Background agents still running (Agent/Task calls without a result).
     const bg = evs.filter(e => e.type === 'tool' && (e.name === 'Agent' || e.name === 'Task') && !doneBy.get(e.toolId));
-    if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<div class="bga">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></div>`).join('')}</div>`;
+    if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<button type="button" class="bga" data-jump="${escH(e.toolId)}" title="Show this agent's call">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`).join('')}</div>`;
     if (perm && perm.perm === 'ask') return h + askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm);
     if (perm) return h + permHtml(perm);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -177,7 +178,7 @@
     return (m ? `<button type="button" class="chip mode m-${m[1]}" data-act="mode" title="Permission mode (Shift+Tab cycles)">${ICON.shield}<span>${m[0]}</span></button>` : '')
       + '<span class="grow"></span>'
       // Context left before auto-compact, once it matters (half used); click puts /compact in the box.
-      + (pct >= 50 ? `<button type="button" class="chip ctx${pct >= 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${(pct / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
+      + (pct >= 50 ? `<button type="button" class="chip ctx${pct > 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${((100 - pct) / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
       + (model ? `<button type="button" class="chip model" data-insert="/model " title="${escH(s.model)}. Click for /model">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</button>` : '');
   }
 
@@ -221,6 +222,7 @@
     if (busy && !tick) tick = setInterval(() => { if (!el.classList.contains('open')) { clearInterval(tick); tick = null; return; } rerender(); }, 1000);
     else if (!busy && tick) { clearInterval(tick); tick = null; }
     if (!stuck) el.scrollTop = el.scrollHeight;
+    for (const s of thread.querySelectorAll('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
     syncJump(el);
   }
   // A replaced block keeps its open tool rows and expanded prompt.
@@ -243,6 +245,8 @@
     if (k && selectedId != null) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
     const pick = e.target.closest('[data-pick]'); // question card: arrow down to the option, then Enter
     if (pick && selectedId != null) { keys([...Array(+pick.dataset.pick).fill('\x1b[B'), '\r']); pick.classList.add('picked'); return; }
+    const jump = e.target.closest('[data-jump]'); // a background agent's chip: open and show its call
+    if (jump) { const d = document.querySelector(`#conversation details[data-tid="${CSS.escape(jump.dataset.jump)}"]`); if (d) { const g = d.parentElement.closest('details'); if (g) g.open = true; d.open = true; d.scrollIntoView({ block: 'center', behavior: 'smooth' }); d.classList.remove('flash'); void d.offsetWidth; d.classList.add('flash'); } return; }
     const ins = e.target.closest('[data-insert]'); // composer chips: /compact, /model
     if (ins) { chatComposer.insert(ins.dataset.insert, false); return; }
     const act = e.target.closest('[data-act]');
@@ -266,6 +270,9 @@
     else if (c.kind === 'doc') api.send({ type: 'docOpen', paths: [c.path] });
     else if (c.kind === 'file') api.send({ type: 'docOpenWith', path: c.path });
   }
+
+  // Opening a run of calls that had a failure opens the failed call too: "1 failed" should show which.
+  document.getElementById('conversation').addEventListener('toggle', (e) => { const d = e.target; if (d.matches && d.matches('details.tgroup') && d.open) { const f = d.querySelector('details.trow.err'); if (f) f.open = true; } }, true);
 
   window.chatUi = { paint, onClick, syncJump, SPARK, keys, addPending: (id, text) => pending.set(id, { text, at: Date.now() }), onMdReady: (fn) => { rerender = fn; } };
 })();

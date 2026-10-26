@@ -78,4 +78,20 @@ function lineDiff(oldText, newText) {
   return { rows: out, add, del };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName };
+// @file suggestions: file name starting with the query, then containing it, then the path containing it, then the
+// query's letters in order (fuzzy). Shorter paths first within a rank. q '' lists the shallowest files.
+function matchFiles(files, q, max = 12) {
+  q = String(q || '').toLowerCase().replace(/\\/g, '/');
+  const rank = (f) => {
+    const p = f.toLowerCase(), b = baseName(p);
+    if (!q) return 0;
+    if (b.startsWith(q)) return 0; if (b.includes(q)) return 1; if (p.includes(q)) return 2;
+    let i = 0; for (const ch of p) if (ch === q[i]) i++;
+    return i === q.length ? 3 : -1;
+  };
+  return files.map(f => [rank(f), f]).filter(r => r[0] >= 0)
+    .sort((x, y) => x[0] - y[0] || x[1].split('/').length - y[1].split('/').length || x[1].length - y[1].length)
+    .slice(0, max).map(r => r[1]);
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles };

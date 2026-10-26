@@ -1030,6 +1030,21 @@ let timelineAgentId = null;
 const TIMELINE_MAX_EVENTS = 1000;
 const parseLineForTimeline = (line) => timelineCore.parseLineForTimeline(line, fmtTool, isSystemMessage);
 
+// @file suggestions for the Chat view's composer: the folder's git files (tracked + untracked, not ignored),
+// listed once per 30 s per folder, best matches first (chat-core.js matchFiles).
+const chatFileCache = new Map();
+function chatFiles({ id, cwd, q, seq }) {
+  if (typeof cwd !== 'string' || !cwd) return;
+  const reply = (files) => send({ type: 'chatFiles', id, seq, files: require('./chat-core').matchFiles(files, q) });
+  const hit = chatFileCache.get(cwd);
+  if (hit && Date.now() - hit.at < 30000) return reply(hit.files);
+  execFile('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd, timeout: 10000, maxBuffer: 64 << 20, windowsHide: true }, (err, out) => {
+    const files = err ? [] : String(out).split('\n').map(s => s.trim()).filter(Boolean);
+    chatFileCache.set(cwd, { at: Date.now(), files });
+    reply(files);
+  });
+}
+
 function getFullTimeline(id) {
   const a = agents.get(id);
   if (!a || !fs.existsSync(a.jsonlFile)) return [];
@@ -4497,6 +4512,7 @@ function handleIpc(msg) {
       break;
     }
     case 'pollClickupNow': armClickupTimer(); break;
+    case 'chatFiles': chatFiles(msg); break;
     case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;

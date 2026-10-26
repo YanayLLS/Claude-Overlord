@@ -237,3 +237,30 @@ body:not(.world-mode) #conversation .choices .ch-t small { font-size: 12px; colo
 body:not(.world-mode) #chat-chips .mode.m-bypass { color: var(--subtext); } body:not(.world-mode) #chat-chips .mode.m-bypass .ic { color: #f87171; }
 body:not(.world-mode) #chat-chips button.chip:hover { color: var(--text); }
 body:not(.world-mode) #term-order.dead #chat-send, body:not(.world-mode) #term-order.dead #chat-plus { opacity: .35; pointer-events: none; }
+
+/* Round 4 */
+body:not(.world-mode) #conversation .turnfoot:not(.latest) .act.copy { opacity: 0; transition: opacity .15s; }
+body:not(.world-mode) #conversation .turnfoot:hover .act.copy, body:not(.world-mode) #conversation .turnfoot .act.copy:focus-visible { opacity: 1; }
+body:not(.world-mode) #conversation .md.sub.plan { font-family: var(--chat-serif); font-size: 15px; color: var(--text); }
+body:not(.world-mode) #conversation .el { flex: none; font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--dim); }
+body:not(.world-mode) #conversation button.bga { background: none; font: inherit; font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
+body:not(.world-mode) #conversation button.bga:hover { background: var(--hover-strong); border-color: var(--claude); }
+body:not(.world-mode) #conversation details.flash > summary { animation: chat-flash 1.2s ease-out; }
+body:not(.world-mode) #conversation .thread > .msg.ai:has(+ .turnfoot.landed) .md { animation: chat-landed 1.6s ease-out; }
+body:not(.world-mode) #chat-plus { border: 0; }
+body:not(.world-mode) #chat-chips .ctx circle.v { stroke: var(--subtext); }
+@keyframes chat-flash { 0%, 40% { background: color-mix(in srgb, var(--claude) 22%, transparent); } }
+@keyframes chat-landed { 0% { text-shadow: 0 0 18px color-mix(in srgb, var(--claude) 45%, transparent); } }
+/* @file suggestions above the composer */
+body:not(.world-mode) #chat-at { display: none; position: absolute; left: 10px; right: 10px; bottom: calc(100% + 8px); z-index: 2; max-height: 300px; overflow: auto; padding: 6px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 10px 32px rgba(0,0,0,.35); animation: chat-in .18s var(--chat-ease); }
+body:not(.world-mode) #chat-at.open { display: block; }
+body.world-mode #chat-at { display: none; }
+body:not(.world-mode) #chat-at .at-i { display: flex; align-items: baseline; gap: 10px; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; min-width: 0; }
+body:not(.world-mode) #chat-at .at-i b { font-weight: 500; color: var(--text); font-family: 'Geist Mono', monospace; font-size: 12.5px; white-space: nowrap; }
+body:not(.world-mode) #chat-at .at-i span { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+body:not(.world-mode) #chat-at .at-i.sel, body:not(.world-mode) #chat-at .at-i:hover { background: var(--hover-strong); }
+/* Narrow composer: chips shrink to their essentials */
+body:not(.world-mode) #term-order.open { container-type: inline-size; }
+@container (max-width: 520px) {
+  body:not(.world-mode) #chat-chips .mode span, body:not(.world-mode) #chat-chips .model em { display: none; }
+}
