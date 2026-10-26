@@ -7680,12 +7680,11 @@ function renderConversation() {
 }
 // The order box and approval buttons type into the agent's pty exactly as the terminal would.
 function worldReply(data) { if (selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data }); }
-// Multi-line text goes in as one bracketed paste with Enter after it: an Enter in the same write as the paste end is swallowed by the TUI.
+// questPrompt pastes the text and sends Enter in its own write once the paste has landed: the TUI swallows an Enter
+// written together with the text, which left the prompt sitting unsent in the terminal.
 function sendOrder() {
   const inp = document.getElementById('term-order-input'); const text = inp.value.trim(); if (!text || selectedId == null) return;
-  const id = selectedId;
-  if (text.includes('\n')) { api.send({ type: 'termInput', id, data: '\x1b[200~' + text + '\x1b[201~' }); setTimeout(() => api.send({ type: 'termInput', id, data: '\r' }), 150); }
-  else api.send({ type: 'termInput', id, data: text + '\r' });
+  api.send({ type: 'questPrompt', id: selectedId, text });
   inp.value = ''; inp.style.height = '';
 }
 document.getElementById('conversation').addEventListener('click', (e) => { const a = selectedId != null ? agents.get(selectedId) : null; chatUi.onClick(e, a && a.cwd); });
