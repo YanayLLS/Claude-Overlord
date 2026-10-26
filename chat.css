@@ -178,7 +178,7 @@ body:not(.world-mode) #term.chat-new #term-order.open { margin-bottom: auto; }
 @container (max-width: 640px) {
   body:not(.world-mode) #conversation .tbody { margin-left: 0; }
   body:not(.world-mode) #conversation .tlist { margin-left: 2px; padding-left: 10px; }
-  body:not(.world-mode) #conversation .w-hint { display: none; }
+
   body:not(.world-mode) #conversation .bubble { max-width: 92%; }
 }
 
@@ -263,4 +263,17 @@ body:not(.world-mode) #chat-at .at-i.sel, body:not(.world-mode) #chat-at .at-i:h
 body:not(.world-mode) #term-order.open { container-type: inline-size; }
 @container (max-width: 520px) {
   body:not(.world-mode) #chat-chips .mode span, body:not(.world-mode) #chat-chips .model em { display: none; }
+}
+
+/* Round 5: narrow panes keep the useful cues */
+body:not(.world-mode) #chat-chips .mode .s, body:not(.world-mode) #conversation .gl.gs { display: none; }
+body:not(.world-mode) #conversation .working { flex-wrap: wrap; row-gap: 2px; }
+body:not(.world-mode) #conversation .plan-card.past { margin: 0 0 6px; padding: 8px 12px; }
+@container (max-width: 520px) {
+  body:not(.world-mode) #chat-chips .mode .l { display: none; }
+  body:not(.world-mode) #chat-chips .mode .s { display: inline; }
+  body:not(.world-mode) #conversation .tgroup .gl:not(.gs) { display: none; }
+  body:not(.world-mode) #conversation .gl.gs { display: inline; }
+  body:not(.world-mode) #conversation .w-hint { display: inline; margin-left: 28px; flex-basis: 100%; }
+  body:not(.world-mode) #conversation .w-x { display: none; }
 }

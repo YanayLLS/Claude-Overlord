@@ -25,7 +25,7 @@
   };
   // Claude's spark: turning while the agent works, popping once when a turn lands.
   const SPARK = '<svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l1.6 6.2 5.6-3.2-3.2 5.6 6.2 1.6-6.2 1.6 3.2 5.6-5.6-3.2L12 21.5l-1.6-6.2-5.6 3.2 3.2-5.6L1.8 12l6.2-1.6-3.2-5.6 5.6 3.2z"/></svg>';
-  const MODES = { bypassPermissions: ['Bypass permissions', 'bypass'], acceptEdits: ['Accept edits', 'accept'], plan: ['Plan mode', 'plan'], default: ['Ask first', 'ask'] };
+  const MODES = { bypassPermissions: ['Bypass permissions', 'bypass', 'Bypass'], acceptEdits: ['Accept edits', 'accept', 'Auto'], plan: ['Plan mode', 'plan', 'Plan'], default: ['Ask first', 'ask', 'Ask'] };
 
   // Events never change once received, so each renders once; tool rows again when their result lands.
   // The text cache is dropped when md-bundle arrives (replies first render as plain text).
@@ -56,7 +56,7 @@
     const out = done && done.text ? done.text.replace(/\s+$/, '') : '';
     let body = '', stat = '';
     if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new); body = d.html; stat = `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (err && out) body += `<pre class="out">${escH(out)}</pre>`; }
-    else if (a.todos) body = todoHtml(a.todos);
+    else if (a.todos) body = `<div class="plan-card past">${todoHtml(a.todos)}</div>`; // the live plan card's frame, without its bar
     else if (a.plan) body = `<div class="md sub plan">${md(a.plan.replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div>`;
     else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o.label ?? o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
     else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${escH(out)}</pre></div>` : ''}</div>`;
@@ -74,7 +74,7 @@
     if (tools.length === 1) return `<div class="tools">${rows[0]}</div>`;
     const errs = tools.filter(ev => (doneBy.get(ev.toolId) || {}).err).length;
     const running = tools.some(ev => ev.toolId && !doneBy.get(ev.toolId));
-    return `<div class="tools"><details class="tgroup${running ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary><span class="gl">${escH(groupSummary(tools))}</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`;
+    return `<div class="tools"><details class="tgroup${running ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary><span class="gl">${escH(groupSummary(tools))}</span><span class="gl gs">${tools.length} actions</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`;
   }
 
   function msgHtml(ev, i, cwd) {
@@ -155,7 +155,7 @@
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
       const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
-      return h + `<div class="working">${SPARK}<span class="shimmer">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span>${v ? `<span class="w-tool">${escH(v.verb)} <span class="mono">${escH(v.target)}</span></span>` : ''}<span class="w-hint">${meta}${meta ? ' · ' : ''}<kbd>Esc</kbd> to interrupt</span></div>`;
+      return h + `<div class="working">${SPARK}<span class="shimmer">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span>${v ? `<span class="w-tool">${escH(v.verb)} <span class="mono">${escH(v.target)}</span></span>` : ''}<span class="w-hint">${meta}${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
     }
     return h;
   }
@@ -175,7 +175,7 @@
     const win = typeof ctxWindow === 'function' ? ctxWindow(s.modelFamily, s.ctxTok) : 200000;
     const pct = s.ctxTok ? Math.min(100, Math.round(s.ctxTok / win * 100)) : 0, r = 7, c = 2 * Math.PI * r;
     const model = String(s.model || '').replace(/^claude-/, '').replace(/-(\d+)-(\d+).*$/, ' $1.$2').replace(/^\w/, x => x.toUpperCase());
-    return (m ? `<button type="button" class="chip mode m-${m[1]}" data-act="mode" title="Permission mode (Shift+Tab cycles)">${ICON.shield}<span>${m[0]}</span></button>` : '')
+    return (m ? `<button type="button" class="chip mode m-${m[1]}" data-act="mode" title="Permission mode (Shift+Tab cycles)">${ICON.shield}<span class="l">${m[0]}</span><span class="s">${m[2]}</span></button>` : '')
       + '<span class="grow"></span>'
       // Context left before auto-compact, once it matters (half used); click puts /compact in the box.
       + (pct >= 50 ? `<button type="button" class="chip ctx${pct > 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${((100 - pct) / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
