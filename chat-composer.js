@@ -35,7 +35,7 @@
     if (!chat()) return;
     const m = atQuery(e.target), a = agents.get(selectedId);
     if (!m || !a) return closeAt();
-    at = { start: m.start, files: at ? at.files : [], sel: 0 };
+    at = { start: m.start, q: m.q, files: at ? at.files : [], sel: 0 };
     api.send({ type: 'chatFiles', id: selectedId, cwd: a.cwd, q: m.q, seq: ++atSeq });
   }
   function onFiles(msg) {
@@ -44,7 +44,10 @@
   }
   function drawAt() {
     const l = atList();
-    l.innerHTML = at && at.files.length ? at.files.map((f, k) => { const i = f.lastIndexOf('/'); return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${f.slice(i + 1).replace(/[&<>]/g, '')}</b><span>${i > 0 ? f.slice(0, i).replace(/[&<>]/g, '') : ''}</span></div>`; }).join('') : '';
+    const esc = (s) => s.replace(/[&<>]/g, '');
+    // The typed part of each name is marked, so it's clear why the file matched.
+    const mark = (name) => { const j = at.q ? name.toLowerCase().indexOf(at.q.toLowerCase()) : -1; return j < 0 ? esc(name) : esc(name.slice(0, j)) + '<mark>' + esc(name.slice(j, j + at.q.length)) + '</mark>' + esc(name.slice(j + at.q.length)); };
+    l.innerHTML = at && at.files.length ? at.files.map((f, k) => { const i = f.lastIndexOf('/'); return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.slice(i + 1))}</b><span>${i > 0 ? esc(f.slice(0, i)) : ''}</span></div>`; }).join('') : '';
     l.classList.toggle('open', !!(at && at.files.length));
   }
   function closeAt() { at = null; drawAt(); }
@@ -78,11 +81,14 @@
     if (e.key === '/' && !t.value) { e.preventDefault(); openPicker(); return; }
     // History, like the CLI: ↑ at the start of the box steps back through your prompts, ↓ comes forward again.
     const ps = prompts();
-    if (e.key === 'ArrowUp' && t.selectionStart === 0 && t.selectionEnd === 0 && ps.length) {
+    // On the first line ↑ goes back, on the last line ↓ comes forward; the caret lands at the end of what's recalled.
+    const firstLine = !t.value.slice(0, t.selectionStart).includes('\n'), lastLine = !t.value.slice(t.selectionEnd).includes('\n');
+    const recall = (v) => { t.value = v; grow(t); t.selectionStart = t.selectionEnd = v.length; };
+    if (e.key === 'ArrowUp' && firstLine && ps.length && hist < ps.length - 1) {
       e.preventDefault(); if (hist < 0) draft = t.value;
-      hist = Math.min(ps.length - 1, hist + 1); t.value = ps[ps.length - 1 - hist]; grow(t); t.selectionStart = t.selectionEnd = 0;
-    } else if (e.key === 'ArrowDown' && hist >= 0 && t.selectionStart === t.value.length) {
-      e.preventDefault(); hist--; t.value = hist < 0 ? draft : ps[ps.length - 1 - hist]; grow(t);
+      hist++; recall(ps[ps.length - 1 - hist]);
+    } else if (e.key === 'ArrowDown' && hist >= 0 && lastLine) {
+      e.preventDefault(); hist--; recall(hist < 0 ? draft : ps[ps.length - 1 - hist]);
     }
   }
   // An image on the clipboard goes through main like Alt+V in the terminal: saved, then pasted into the agent's prompt.

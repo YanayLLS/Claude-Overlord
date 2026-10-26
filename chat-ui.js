@@ -73,8 +73,10 @@
     const rows = tools.map(ev => toolRow(ev, doneBy.get(ev.toolId), cwd));
     if (tools.length === 1) return `<div class="tools">${rows[0]}</div>`;
     const errs = tools.filter(ev => (doneBy.get(ev.toolId) || {}).err).length;
-    const running = tools.some(ev => ev.toolId && !doneBy.get(ev.toolId));
-    return `<div class="tools"><details class="tgroup${running ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary><span class="gl">${escH(groupSummary(tools))}</span><span class="gl gs">${tools.length} actions</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`;
+    // While a call runs the line names it ("Running npm test"), with a dot; once all are done, the summary.
+    const live = [...tools].reverse().find(ev => ev.toolId && !doneBy.get(ev.toolId)), lv = live && toolView(live, true);
+    const label = lv ? `${escH(lv.verb)}${lv.target ? ` <span class="mono">${escH(lv.target)}</span>` : ''}` : escH(groupSummary(tools));
+    return `<div class="tools"><details class="tgroup${live ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary>${live ? '<span class="dot"></span>' : ''}<span class="gl">${label}</span><span class="gl gs">${tools.length} actions</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`;
   }
 
   function msgHtml(ev, i, cwd) {
@@ -199,7 +201,7 @@
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
     else list = blocks(evs, doneBy, a.cwd);
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
-    const tail = (evs ? pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) : '');
+    const tail = (evs ? liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) : ''); // queued text waits under the spinner, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;

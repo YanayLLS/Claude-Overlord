@@ -277,3 +277,11 @@ body:not(.world-mode) #conversation .plan-card.past { margin: 0 0 6px; padding: 
   body:not(.world-mode) #conversation .w-hint { display: inline; margin-left: 28px; flex-basis: 100%; }
   body:not(.world-mode) #conversation .w-x { display: none; }
 }
+
+/* Round 6 */
+body:not(.world-mode) #conversation .tgroup .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--claude); animation: chat-pulse 1.1s ease-in-out infinite; }
+body:not(.world-mode) #conversation .tgroup.running .gl { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--subtext); animation: none; }
+body:not(.world-mode) #conversation .chat-empty.hello { -webkit-font-smoothing: antialiased; color: var(--text); }
+body:not(.world-mode) #conversation, body:not(.world-mode) #term-order { -webkit-font-smoothing: antialiased; }
+body:not(.world-mode) #chat-at mark { background: none; color: var(--claude); }
+body:not(.world-mode) #conversation .msg.user.pending { margin-top: 10px; }
