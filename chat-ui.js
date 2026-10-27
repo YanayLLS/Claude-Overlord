@@ -47,7 +47,13 @@
       // a bare claude.ai artifact URL reads as a short chip; the card drawn for it carries title and actions
       .replace(/(<a [^>]*href="(https:\/\/claude\.ai\/[^"]*artifact\/([\w-]+))"[^>]*)>\2<\/a>/g, (_, open, url, aid) => `${open.replace('<a ', '<a class="art-link" title="' + url + '" ')}>claude.ai · ${aid.slice(0, 8)}</a>`)
       // `C:\…\live-0.png` in a reply: the file's name and folder as a link (an image opens in the preview)
-      .replace(/(?<!<pre>)<code>([^<]+)<\/code>/g, (m, t) => { const p = pathRef(t); return p ? `<a class="fileref pathref${p.img ? ' img' : ''}" href="#" data-file="${t.trim().replace(/"/g, '&quot;')}" data-line="0" title="${t.trim().replace(/"/g, '&quot;')}">${p.img ? `<img src="${escH(fileUrl(p.file.replace(/&amp;/g, '&')))}" alt="" loading="lazy">` : ''}<span>${escH(p.name)}</span>${p.dir ? `<span class="pr-dir">${escH(p.dir)}</span>` : ''}</a>` : m; });
+      .replace(/(?<!<pre>)<code>([^<]+)<\/code>/g, (m, t) => pathChip(t) || m);
+  }
+  // An absolute file path (already HTML-escaped) as a chip: name and folder, the full path on hover, opens on click.
+  function pathChip(t) {
+    const p = pathRef(t); if (!p) return '';
+    const raw = p.file.replace(/&amp;/g, '&'), attr = escH(raw);
+    return `<a class="fileref pathref${p.img ? ' img' : ''}" href="#" data-file="${attr}" data-line="0" title="${attr}">${p.img ? `<img src="${escH(fileUrl(raw))}" alt="" loading="lazy">` : ''}<span>${escH(p.name)}</span>${p.dir ? `<span class="pr-dir">${escH(p.dir)}</span>` : ''}</a>`;
   }
   const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   // A prompt's images, numbered 1, 2, … in order, and its [Image #N] tags as chips with the same numbers (the k-th tag
@@ -59,7 +65,9 @@
   const thumbs = (srcs, nums = []) => srcs.length ? `<div class="imgs">${srcs.map((s, k) => `<span class="th"><img src="${escH(s)}" alt="" loading="lazy"><b>${escH(nums[k] || k + 1)}</b></span>`).join('')}</div>` : '';
   const promptSrcs = (ev) => (ev.images && ev.images.length ? ev.images : (ev.paths || []).map(fileUrl));
   // own: the prompt's own number → picture map (a not-yet-sent prompt numbers its images itself)
-  const tagChips = (text, own) => escH(text).replace(/\[Pasted text #\d+ · (\d+) lines\]/g, (_, n) => `<span class="imgtag">¶ Pasted text · ${n} lines</span>`).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
+  // A prompt as typed: its tags as chips, and a file path (quoted when it has spaces, as the box sends it) as a file chip.
+  const PROMPT_PATH = /&quot;([A-Za-z]:[\\/][^&<\n]+?)&quot;|(?<![\w/])([A-Za-z]:[\\/][^\s&<]+)/g;
+  const tagChips = (text, own) => escH(text).replace(PROMPT_PATH, (m, q, u) => pathChip(q || u) || m).replace(/(^|\s)(\/[a-z][\w:-]*)(?=\s|$)/g, '$1<span class="cmdtag">$2</span>').replace(/\[Pasted text #\d+ · (\d+) lines\]/g, (_, n) => `<span class="imgtag">¶ Pasted text · ${n} lines</span>`).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
   // When a usage limit resets: "…|1761580800" (epoch seconds) or "resets 6pm" / "resets at 18:30" (the next such time).
   function resetOf(ev) {
     const t = String(ev.text || ''), ep = /\|(\d{10})\b/.exec(t); if (ep) return +ep[1] * 1000;

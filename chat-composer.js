@@ -19,27 +19,40 @@
   // A long paste (over 20 lines or 1,500 characters) becomes "[Pasted text #1 · 200 lines]" in the box, like the CLI,
   // with a chip above it to peek (hover), expand back into the box (click) or drop (✕); Send puts the text back in.
   const PASTE = /\[Pasted text #(\d+)[^\]]*\]/g;
+  const FILE = /\[File #(\d+)[^\]]*\]/g; // a pasted or dropped file: a chip, its full path on send
   const escA = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function drawAtt() {
     syncDraft(); // called when the Chat view shows another agent: its own draft and images
-    const a = atts.get(selectedId), list = a ? a.list : [], pastes = (a && a.pastes) || [];
+    const a = atts.get(selectedId), list = a ? a.list : [], pastes = (a && a.pastes) || [], files = (a && a.files) || [];
     document.getElementById('chat-att').innerHTML = list.map(x => `<span class="att${x.saving ? ' saving' : ''}" data-n="${x.n}"><img src="${x.url}" alt=""><b>${x.n}</b><button type="button" class="att-x" title="Remove" aria-label="Remove image ${x.n}">×</button></span>`).join('')
-      + pastes.map(x => `<span class="att doc" data-p="${x.n}" title="${escA(x.text.split('\n').slice(0, 8).join('\n'))}"><span class="doc-i">¶</span><span class="doc-t"><b>Pasted text #${x.n}</b><small>${x.lines} lines · click to expand</small></span><button type="button" class="att-x" title="Remove" aria-label="Remove pasted text ${x.n}">×</button></span>`).join('');
-    order().classList.toggle('has-att', list.length + pastes.length > 0);
+      + pastes.map(x => `<span class="att doc" data-p="${x.n}" title="${escA(x.text.split('\n').slice(0, 8).join('\n'))}"><span class="doc-i">¶</span><span class="doc-t"><b>Pasted text #${x.n}</b><small>${x.lines} lines · click to expand</small></span><button type="button" class="att-x" title="Remove" aria-label="Remove pasted text ${x.n}">×</button></span>`).join('')
+      + files.map(x => `<span class="att doc file" data-f="${x.n}" title="${escA(x.path)}"><span class="doc-i">${FILE_IC}</span><span class="doc-t"><b>${escA(x.name)}</b><small>${escA(x.dir || 'file')}</small></span><button type="button" class="att-x" title="Remove" aria-label="Remove ${escA(x.name)}">×</button></span>`).join('');
+    order().classList.toggle('has-att', list.length + pastes.length + files.length > 0);
   }
   // A tag deleted from the text drops its image or pasted text (and its chip).
   function pruneAtt() {
-    const a = atts.get(selectedId); if (!a || (!a.list.length && !(a.pastes || []).length)) return;
-    const v = box().value, used = new Set([...v.matchAll(TAG)].map(m => +m[1])), usedP = new Set([...v.matchAll(PASTE)].map(m => +m[1]));
-    const keep = a.list.filter(x => used.has(x.n)), keepP = (a.pastes || []).filter(x => usedP.has(x.n));
-    if (keep.length !== a.list.length || keepP.length !== (a.pastes || []).length) { a.list = keep; a.pastes = keepP; if (!keep.length) a.next = 1; if (!keepP.length) a.nextP = 1; drawAtt(); }
+    const a = atts.get(selectedId); if (!a || (!a.list.length && !(a.pastes || []).length && !(a.files || []).length)) return;
+    const v = box().value, used = new Set([...v.matchAll(TAG)].map(m => +m[1])), usedP = new Set([...v.matchAll(PASTE)].map(m => +m[1])), usedF = new Set([...v.matchAll(FILE)].map(m => +m[1]));
+    const keep = a.list.filter(x => used.has(x.n)), keepP = (a.pastes || []).filter(x => usedP.has(x.n)), keepF = (a.files || []).filter(x => usedF.has(x.n));
+    if (keep.length !== a.list.length || keepP.length !== (a.pastes || []).length || keepF.length !== (a.files || []).length) { a.list = keep; a.pastes = keepP; a.files = keepF; if (!keep.length) a.next = 1; if (!keepP.length) a.nextP = 1; if (!keepF.length) a.nextF = 1; drawAtt(); }
   }
   function addPaste(text) {
     const a = attOf(selectedId); a.pastes = a.pastes || []; a.nextP = a.nextP || 1;
     const x = { n: a.nextP++, text, lines: text.split('\n').length }; a.pastes.push(x);
     insert(`[Pasted text #${x.n} · ${x.lines} lines] `); drawAtt();
   }
-  const expandPastes = (text, a) => text.replace(PASTE, (m, n) => { const x = ((a && a.pastes) || []).find(p => p.n === +n); return x ? x.text : m; });
+  // A file (not an image) by path: "[File #N · name]" in the text and a chip above, the quoted path when sent.
+  const FILE_IC = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+  function addFileRef(path) {
+    const r = pathRef(path); if (!r) return false;
+    const a = attOf(selectedId); a.files = a.files || []; a.nextF = a.nextF || 1;
+    if (r.img) { a.list.push({ n: a.next, url: fileUrlOf(r.file), path: r.file.replace(/\\/g, '/') }); insert(`[Image #${a.next++}] `); return true; } // an image path: a thumbnail like a pasted image
+    const x = { n: a.nextF++, path: r.file, name: r.name, dir: r.dir }; a.files.push(x);
+    insert(`[File #${x.n} · ${r.name}] `); return true;
+  }
+  const fileUrlOf = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
+  const expandPastes = (text, a) => text.replace(PASTE, (m, n) => { const x = ((a && a.pastes) || []).find(p => p.n === +n); return x ? x.text : m; })
+    .replace(FILE, (m, n) => { const x = ((a && a.files) || []).find(p => p.n === +n); return x ? (/\s/.test(x.path) ? `"${x.path}"` : x.path) : m; });
   let saveSeq = 0; const saving = new Map(); // seq → attachment waiting for main's saved path
   function addFiles(files) {
     const id = selectedId; if (id == null) return false;
@@ -51,7 +64,7 @@
         a.list.push(x); took = true;
         if (!p) { const seq = ++saveSeq; saving.set(seq, x); api.send({ type: 'saveClipboardImage', id, seq }); } // a screenshot: main saves it
         insert(`[Image #${x.n}] `);
-      } else if (p) { insert((/\s/.test(p) ? `"${p}"` : p) + ' '); took = true; } // any other file: its path, like the CLI
+      } else if (p) { if (!addFileRef(p)) insert((/\s/.test(p) ? `"${p}"` : p) + ' '); took = true; } // any other file: a chip (a folder: its path, like the CLI)
     }
     drawAtt();
     return took;
@@ -86,7 +99,7 @@
     micStop();
     pruneAtt();
     const a = atts.get(id), shown = inp.value.trim(), text = expandPastes(inp.value, a).trim(), list = a ? a.list.splice(0) : [];
-    if (a) { a.next = 1; a.pastes = []; a.nextP = 1; }
+    if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; }
     if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
     const held = list.some(x => x.saving);
     if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text); // shows the box as typed (paste chips), matches the full text
@@ -133,6 +146,7 @@
     catalog.set(msg.cwd, msg.items || []);
     const a = agents.get(selectedId);
     if (at && at.kind === '/' && a && a.cwd === msg.cwd) { at.files = slashMatches(a.cwd, at.q); drawAt(); }
+    syncHl(); // its /commands can be coloured now
   }
   function drawAt() {
     const l = atList();
@@ -215,6 +229,9 @@
     const files = [...(e.clipboardData?.files || [])];
     if (files.length && addFiles(files)) { e.preventDefault(); return; }
     const txt = e.clipboardData?.getData('text/plain') || '';
+    // Explorer's "Copy as path" (one or more "C:\…\file.ext" lines): each becomes a chip, not a long path
+    const paths = txt.trim().split(/\r?\n/).map(l => l.trim().replace(/^"(.*)"$/, '$1'));
+    if (paths.length <= 20 && paths.every(l => pathRef(l))) { e.preventDefault(); paths.forEach(addFileRef); drawAtt(); return; }
     if (txt.length > 1500 || txt.split('\n').length > 20) { e.preventDefault(); addPaste(txt.replace(/\r\n?/g, '\n')); }
   }
   // Files dropped anywhere on the Chat view do the same (the app-wide drop handler would type them into the terminal unseen).
@@ -235,6 +252,13 @@
   document.getElementById('chat-att').addEventListener('click', (e) => {
     const chip = e.target.closest('.att'); if (!chip) return;
     const x = e.target.closest('.att-x'), t = box();
+    if (chip.dataset.f) { // a file chip: ✕ drops it and its tag, a click opens the file
+      e.stopPropagation();
+      const n = +chip.dataset.f, f = ((atts.get(selectedId) || {}).files || []).find(q => q.n === n);
+      if (!x) { if (f) api.send({ type: 'openFileAt', cwd: '', file: f.path, line: 0 }); return; }
+      t.value = t.value.replace(new RegExp(`\\[File #${n}[^\\]]*\\] ?`), ''); grow(t); pruneAtt(); t.focus();
+      return;
+    }
     if (chip.dataset.p) { // a pasted-text chip: ✕ drops it, a click puts the text back into the box
       e.stopPropagation();
       const n = +chip.dataset.p, re = new RegExp(`\\[Pasted text #${n}[^\\]]*\\] ?`);
@@ -273,11 +297,17 @@
   // tags in a tint, transparent otherwise, kept on the textarea's size and scroll.
   const hl = document.createElement('div'); hl.id = 'chat-hl'; hl.setAttribute('aria-hidden', 'true');
   box().before(hl);
+  const askedCat = new Set(); // folders whose command list was asked for once
   function syncHl() {
     const t = box(), v = t.value;
-    if (!/\[(Image|Pasted text) #\d+/.test(v)) { if (hl.innerHTML) hl.innerHTML = ''; hl.hidden = true; return; }
+    // a /command or /skill this agent has (from its catalog) reads in the brand colour, like the CLI
+    const a = typeof agents === 'undefined' ? null : agents.get(selectedId), names = new Set((catalog.get(a && a.cwd) || []).filter(i => i.insert && i.insert.startsWith('/')).map(i => i.insert.trim().split(/\s/)[0].toLowerCase()));
+    if (a && !catalog.has(a.cwd) && !askedCat.has(a.cwd) && /(^|\s)\/[\w:-]/.test(v)) { askedCat.add(a.cwd); api.send({ type: 'catalog', cwd: a.cwd }); }
+    const cmd = /(^|\s)(\/[\w:.-]+)/g, hasCmd = names.size && [...v.matchAll(cmd)].some(m => names.has(m[2].toLowerCase()));
+    if (!/\[(Image|Pasted text|File) #\d+/.test(v) && !hasCmd) { if (hl.innerHTML) hl.innerHTML = ''; hl.hidden = true; return; }
     hl.hidden = false;
-    hl.innerHTML = v.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])).replace(/\[(?:Image #\d+|Pasted text #\d+[^\]]*)\]/g, m => `<mark>${m}</mark>`) + '\n';
+    hl.innerHTML = v.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])).replace(/\[(?:Image #\d+|Pasted text #\d+[^\]]*|File #\d+[^\]]*)\]/g, m => `<mark>${m}</mark>`)
+      .replace(cmd, (m, sp, c) => names.has(c.toLowerCase()) ? `${sp}<mark class="cmd">${c}</mark>` : m) + '\n';
     hl.style.top = t.offsetTop + 'px'; hl.style.left = t.offsetLeft + 'px'; hl.style.width = t.clientWidth + 'px'; hl.style.height = t.clientHeight + 'px';
     hl.scrollTop = t.scrollTop;
   }

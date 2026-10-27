@@ -627,10 +627,10 @@ body.world-mode #hdr-chat { display: none; }
 /* the composer box is the focus cue; no ring on the textarea inside it (theme.css rings every :focus-visible) */
 :root body #term-order textarea:focus-visible { outline: none; }
 /* an absolute path in a reply: the file's name and folder, full path on hover */
-:root body #conversation .md a.pathref { display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%; padding: 1px 7px; border-radius: 6px; background: var(--surface0); color: var(--text); text-decoration: none; font-family: 'Geist Mono', monospace; font-size: .85em; vertical-align: baseline; }
-:root body #conversation .md a.pathref:hover { background: var(--hover-strong); color: var(--claude); }
-:root body #conversation .md a.pathref .pr-dir { color: var(--dim); font-size: .92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:root body #conversation .md a.pathref img { width: 1.4em; height: 1.4em; object-fit: cover; border-radius: 3px; align-self: center; margin: 0; }
+:root body #conversation :is(.md, .bubble) a.pathref { display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%; padding: 1px 7px; border-radius: 6px; background: var(--surface0); color: var(--text); text-decoration: none; font-family: 'Geist Mono', monospace; font-size: .85em; vertical-align: baseline; }
+:root body #conversation :is(.md, .bubble) a.pathref:hover { background: var(--hover-strong); color: var(--claude); }
+:root body #conversation :is(.md, .bubble) a.pathref .pr-dir { color: var(--dim); font-size: .92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root body #conversation :is(.md, .bubble) a.pathref img { width: 1.4em; height: 1.4em; object-fit: cover; border-radius: 3px; align-self: center; margin: 0; }
 /* table columns keep their markdown alignment (:---: centre, ---: right) */
 :root body #conversation .md :is(th, td)[align="center"] { text-align: center; }
 :root body #conversation .md :is(th, td)[align="right"] { text-align: right; }
@@ -649,3 +649,10 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-mic.live { animation: mic-pulse 1.6s ease-in-out infinite; }
 @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--claude) 45%, transparent); } 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--claude) 0%, transparent); } }
 @media (prefers-reduced-motion: reduce) { :root body #chat-mic.live { animation: none; } }
+/* reply box: a file chip's icon; a known /command or /skill tinted like the CLI */
+:root body #chat-att .att.file .doc-i svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+:root body #chat-att .att.file { cursor: pointer; }
+:root body #chat-hl mark.cmd { background: color-mix(in srgb, #d97757 16%, transparent); box-shadow: none; }
+/* in your own message: a file chip stands off the bubble, a /command or /skill in the brand colour */
+:root body #conversation .bubble a.pathref { background: var(--bg); }
+:root body #conversation .bubble .cmdtag { color: var(--claude); font-weight: 500; }
