@@ -4,7 +4,7 @@
 (function () {
   const box = () => document.getElementById('term-order-input');
   const order = () => document.getElementById('term-order');
-  const chat = () => termTab === 'conversation' && !worldView;
+  const chat = () => termTab === 'conversation';
   let hist = -1, draft = '';
   const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('blank', !t.value.trim()); syncHl(); };
 

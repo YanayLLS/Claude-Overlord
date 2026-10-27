@@ -977,7 +977,7 @@ function extractSpinnerText(id, data) {
     const cp = t.codePointAt(0);
     // Braille spinner chars (U+2800-U+28FF), * prefix, or ✻ (U+273B) / ❯ (U+276F)
     if ((cp >= 0x2800 && cp <= 0x28FF) || t[0] === '*' || cp === 0x273B || cp === 0x276F) {
-      const text = t.replace(/^.\s*/, '').trim();
+      let text = t.replace(/^.\s*/, '').trim();
       if (text && text.length > 1) {
         // Completion messages like "Sautéed for 36s" or "Cooked for 2m 44s" mean the turn is done — clear spinner
         if (/\bfor\s+\d+[smh]/i.test(text)) {
@@ -994,6 +994,7 @@ function extractSpinnerText(id, data) {
         // a "* bullet…" in the reply.
         if (!/^\p{Lu}[^…]{0,40}…(\s*\(|\s*$)/u.test(text)) return;
         if (t[0] === '*' && !/…\s*\(/.test(text)) return; // a "*" line without its timer is a Markdown bullet
+        text = text.replace(/\s*\(.*$/, ''); // just the verb: Overlord draws its own elapsed time and token count
         const a = agents.get(id);
         if (a && a.spinnerText !== text) {
           a.spinnerText = text;

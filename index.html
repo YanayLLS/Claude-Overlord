@@ -3090,7 +3090,7 @@ function render() {
   renderSummaryBar();
   if (worldView) worldSync();
   chatUi.syncInbox(); // the top bar's Needs you count
-  if (!worldView && termTab === 'conversation') renderConversation(); // working dots and permission cards follow the agent's state
+  if (termTab === 'conversation') renderConversation(); // working dots and permission cards follow the agent's state
 }
 // Summary bar — 3-line layout: session bar, weekly bar, info/pace row. Its own function so the 30 s age/reset
 // refresh redraws just this, not the whole agent list.
@@ -3888,7 +3888,7 @@ function switchTermTab(tab) {
     if (split && selectedId) { showXterm(selectedId); if (typeof schedFit === 'function') schedFit(); }
     if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
     renderConversation();
-    if (!worldView) setTimeout(() => document.getElementById('term-order-input').focus(), 0);
+    setTimeout(() => document.getElementById('term-order-input').focus(), 0);
   }
   updatePromptNav();
   updateScrollBtn();
@@ -4315,7 +4315,7 @@ function handleAgentMsg(msg) {
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
     case 'perm': { const a = agents.get(msg.id); if (msg.id !== selectedId) setTimeout(() => chatUi.permToast(msg.id, msg.ask), 400); /* another agent: answer from a toast (after its menu has drawn) */ if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
     case 'permClear': { chatUi.dropToast(msg.id); const a = agents.get(msg.id); if (askFlip && msg.id === selectedId && termTab === 'terminal') switchTermTab('conversation'); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
-    case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; if (msg.id === selectedId && termTab === 'conversation' && !worldView) renderConversation(); } break; }
+    case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; if (msg.id === selectedId && termTab === 'conversation') renderConversation(); } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = -1; /* -1 = at bottom; the buffer scan owns the real range */ if (selectedId === msg.id) updatePromptNav(); } break; }
@@ -7413,8 +7413,7 @@ function setWorldView(on, persist = true) {
   const changed = on !== worldView;
   worldView = on;
   document.body.classList.toggle('world-mode', on);
-  document.getElementById('tab-conversation').textContent = on ? 'Conversation' : 'Chat'; // world mode keeps its own Conversation tab
-  document.getElementById('term-order-input').placeholder = on ? 'Give an order… (Enter sends it to the agent)' : 'Reply…';
+  document.getElementById('tab-conversation').textContent = 'Chat'; // world mode's tab opens the same Chat view
   const hb = document.getElementById('hdr-world'); if (hb) hb.classList.toggle('on', on);
   const chk = document.getElementById('chk-world'); if (chk) chk.checked = on;
   if (on && window.World && (changed || !window.World.ready)) {
@@ -7659,34 +7658,10 @@ function renderConversation() {
   const a = selectedId != null ? agents.get(selectedId) : null;
   if (!a) { el.innerHTML = '<div class="tl-empty">Select an agent to read its conversation</div>'; return; }
   const evs = worldTl && worldTl.id === selectedId ? worldTl.events : null;
-  if (!worldView) return chatUi.paint(el, selectedId, a, evs, agentStatus(a)); // chat-ui.js: the Claude-app look
-  const stuck = el.scrollTop + el.clientHeight < el.scrollHeight - 30 && el.dataset.for === String(selectedId);
-  const doneBy = new Map(); if (evs) for (const ev of evs) if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev);
-  const name = a.customName ? a.title : (a.agentName || 'Agent');
-  let h = '';
-  if (!evs) h += '<div class="tl-empty">Loading conversation…</div>';
-  else if (!evs.length) h += `<div class="msg ai"><div class="eyebrow">${esc(name)}</div><p>Nothing yet. Give an order below to put this agent to work.</p></div>`;
-  for (const ev of evs || []) { // world mode's Conversation tab: its original compact transcript
-    const short = (t) => t && t.length > 200 ? t.slice(0, 200) + '…' : t || '';
-    if (ev.type === 'prompt') h += `<div class="msg user"><div class="eyebrow">You<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(short(ev.text))}</p></div>`;
-    else if (ev.type === 'text') h += `<div class="msg ai"><div class="eyebrow">${esc(name)}<em>${esc(fmtTs(ev.ts))}</em></div><p>${esc(short(ev.text))}</p></div>`;
-    else if (ev.type === 'tool' || ev.type === 'subtask') { const d = ev.toolId ? doneBy.get(ev.toolId) : null; h += `<div class="msg tool${ev.type === 'subtask' ? ' sub' : ''}${!d && ev.toolId ? ' running' : ''}"><span class="t">${esc(ev.name || '')}</span><span class="f" title="${escAttr(ev.text || '')}">${esc(ev.text || '')}</span>${d && d.text ? `<span class="d" title="${escAttr(d.text.slice(0, 150))}">${esc(d.text.slice(0, 40))}</span>` : ''}</div>`; }
-    else if (ev.type === 'turn') h += `<div class="msg turn">${esc(ev.text)}</div>`;
-  }
-  // Live state on top of the transcript: tools still running, a permission prompt, a question, a crash.
-  const live = [...a.tools.values()].filter(t => !t.done);
-  const perm = live.find(t => t.perm);
-  if (perm && perm.perm === 'ask') h += `<div class="msg ask" style="--c:var(--purple)"><div class="eyebrow">Question for you</div><p>${esc(perm.status || 'The agent is waiting for your answer in the terminal.')}</p><div class="row2"><button class="yes" onclick="switchTermTab('terminal');const x=xterms.get(selectedId);if(x)x.terminal.focus()">Answer in terminal</button></div></div>`;
-  else if (perm) h += `<div class="msg ask" style="--c:var(--yellow)"><div class="eyebrow">Wants to run</div><pre>${esc(perm.status || perm.name || '')}</pre><div class="row2"><button class="yes" onclick="worldReply('1\\r')">Approve</button><button onclick="worldReply('2\\r')">Always this session</button><button onclick="worldReply('\\x1b')">Deny</button></div></div>`;
-  else for (const t of live) h += `<div class="msg tool running"><span class="t">${esc(t.name || 'tool')}</span><span class="f">${esc(t.status || 'running…')}</span></div>`;
-  if (a.crashed === 'fatal') h += `<div class="msg err">Process exited (${a.crashCount}/${a.crashMax} attempts).<div class="row2"><button class="yes" onclick="resumeSelected()">Resume</button></div></div>`;
-  el._key = null; el.innerHTML = h; el.dataset.for = String(selectedId);
-  if (!stuck) el.scrollTop = el.scrollHeight;
+  chatUi.paint(el, selectedId, a, evs, agentStatus(a)); // chat-ui.js: the Claude-app look, in world mode too
 }
-// The order box and approval buttons type into the agent's pty exactly as the terminal would.
-function worldReply(data) { if (selectedId == null) return; api.send({ type: 'termInput', id: selectedId, data }); }
 function sendOrder() { chatComposer.send(); } // chat-composer.js; world mode's order box uses it too
-document.getElementById('conversation').addEventListener('click', (e) => { if (worldView) return; chatUi.onClick(e, selectedId != null ? agents.get(selectedId) : null, worldTl && worldTl.id === selectedId ? worldTl.events : null); });
+document.getElementById('conversation').addEventListener('click', (e) => { chatUi.onClick(e, selectedId != null ? agents.get(selectedId) : null, worldTl && worldTl.id === selectedId ? worldTl.events : null); });
 document.getElementById('conversation').addEventListener('scroll', (e) => chatUi.syncJump(e.currentTarget), { passive: true });
 chatUi.onMdReady(() => { const el = document.getElementById('conversation'); el._key = null; renderConversation(); });
 // Hovering an agent card in the list lights its unit on the map.
