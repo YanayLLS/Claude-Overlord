@@ -24,6 +24,10 @@ function promptEvents(ts, blocks, isSystemMessage) {
   const cmd = /^<command-name>\/?([^<]+)<\/command-name>/.exec(txt) || /<command-name>\/?([^<]+)<\/command-name>/.exec(txt);
   if (cmd) { const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(txt); return [{ type: 'command', ts, text: '/' + cmd[1].trim() + (args && args[1].trim() ? ' ' + cap(args[1].trim(), 2000) : '') }]; }
   if (/^\[Request interrupted by user/.test(txt)) return [{ type: 'interrupt', ts }];
+  // Overlord's own nudge after a crash or restart ("Your Claude process crashed and your session was cut off, so it was
+  // resumed…"): a marker in the thread, not something you typed.
+  const cut = /^(.*?) and your session was cut off, so it was resumed/.exec(txt);
+  if (cut) return [{ type: 'resumed', ts, text: cut[1] }];
   // A background shell or agent finished: the CLI tells the model with a <task-notification>.
   if (/^<task-notification>/.test(txt)) { const id = /<task-id>([^<]+)<\/task-id>/.exec(txt), st = /<status>([^<]+)<\/status>/.exec(txt); return id ? [{ type: 'bgdone', ts, taskId: id[1].trim(), status: st ? st[1].trim() : '' }] : null; }
   if (isSystemMessage(txt)) return null;

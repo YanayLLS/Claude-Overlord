@@ -15,6 +15,7 @@ test('an Edit carries its before/after for the diff', () => {
 test('a slash command becomes one /name line, an interrupt its own marker', () => {
   assert.deepStrictEqual(parse({ type: 'user', message: { content: '<command-name>/model</command-name><command-args>opus</command-args>' } }), [{ type: 'command', ts: null, text: '/model opus' }]);
   assert.deepStrictEqual(parse({ type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }), [{ type: 'interrupt', ts: null }]);
+  assert.deepStrictEqual(parse({ type: 'user', message: { content: [{ type: 'text', text: 'Your Claude process crashed and your session was cut off, so it was resumed. Your running tools…' }] } }), [{ type: 'resumed', ts: null, text: 'Your Claude process crashed' }]);
 });
 
 test('a message typed mid-turn shows as a prompt; reminders do not', () => {

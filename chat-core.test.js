@@ -4,6 +4,8 @@ const { toolView, groupSummary, lineDiff, matchFiles } = require('./chat-core');
 
 test('a call reads as verb + target, present tense while it runs', () => {
   assert.deepStrictEqual(toolView({ name: 'Bash', args: { command: 'git status' } }), { kind: 'cmd', verb: 'Ran', target: 'git status', mono: true });
+  // the agent's own one-line description reads better than a long command; the command shows when opened
+  assert.deepStrictEqual(toolView({ name: 'Bash', args: { command: 'D=/c/x; nice -n 19 npx electron run.js', description: 'Render screenshots' } }), { kind: 'cmd', verb: 'Ran', target: 'Render screenshots', mono: false });
   assert.strictEqual(toolView({ name: 'Edit', args: { file_path: 'C:\\w\\main.js' } }, true).verb, 'Editing');
   assert.strictEqual(toolView({ name: 'Edit', args: { file_path: 'C:\\w\\main.js' } }).target, 'main.js');
   assert.strictEqual(toolView({ name: 'mcp__clickup__clickup_get_task', args: {} }).verb, 'clickup get task');

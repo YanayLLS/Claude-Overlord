@@ -127,7 +127,6 @@ body:not(.world-mode) #conversation .spark { width: 18px; height: 18px; flex: no
 body:not(.world-mode) #conversation .working { display: flex; align-items: center; gap: 10px; margin: 8px 0 4px; font-size: 13.5px; min-width: 0; }
 body:not(.world-mode) #conversation .working .spark { animation: chat-spin 2.4s cubic-bezier(.5, 0, .5, 1) infinite; }
 body:not(.world-mode) #conversation .shimmer { flex: none; background: linear-gradient(90deg, var(--claude) 35%, #f4c7b4 50%, var(--claude) 65%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: chat-shimmer 2s linear infinite; font-weight: 500; }
-body:not(.world-mode) #conversation .w-tool { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--subtext); font-size: 12.5px; }
 body:not(.world-mode) #conversation .w-hint { flex: none; margin-left: auto; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
 body:not(.world-mode) #conversation .plan-card { margin: 10px 0; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--surface0); font-size: 13px; }
 body:not(.world-mode) #conversation .pc-h { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; margin-bottom: 6px; }
@@ -285,7 +284,6 @@ body:not(.world-mode) #conversation .chat-empty.hello { -webkit-font-smoothing: 
 body:not(.world-mode) #conversation, body:not(.world-mode) #term-order { -webkit-font-smoothing: antialiased; }
 body:not(.world-mode) #chat-at mark { background: none; color: var(--claude); }
 body:not(.world-mode) #conversation .msg.user.pending { margin-top: 10px; }
-body:not(.world-mode) #conversation .w-tool { flex: 1 1 0; } /* the call in flight shrinks with an ellipsis instead of wrapping */
 
 /* Images: thumbnails open full size; a drop target while dragging files over the Chat view */
 body:not(.world-mode) #conversation .imgs img, body:not(.world-mode) #chat-att img { cursor: zoom-in; transition: transform .15s var(--chat-ease); }

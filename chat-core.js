@@ -9,7 +9,7 @@ function toolView(ev, running) {
   const a = ev.args || {}, n = ev.name || '';
   const v = (done, now) => running ? now : done;
   switch (n) {
-    case 'Bash': case 'PowerShell': return { kind: 'cmd', verb: v('Ran', 'Running'), target: a.command || a.description || '', mono: true };
+    case 'Bash': case 'PowerShell': return a.description ? { kind: 'cmd', verb: v('Ran', 'Running'), target: a.description, mono: false } : { kind: 'cmd', verb: v('Ran', 'Running'), target: a.command || '', mono: true };
     case 'Read': return { kind: 'read', verb: v('Read', 'Reading'), target: baseName(a.file_path), mono: true };
     case 'Edit': case 'MultiEdit': return { kind: 'edit', verb: v('Edited', 'Editing'), target: baseName(a.file_path), mono: true };
     case 'Write': return { kind: 'edit', verb: v('Wrote', 'Writing'), target: baseName(a.file_path), mono: true };

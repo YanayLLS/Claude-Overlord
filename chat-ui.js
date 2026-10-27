@@ -155,6 +155,7 @@
     else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${escH(ev.text)}</span></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
+    else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
@@ -290,9 +291,11 @@
     // Background agents still running: an Agent call without a result, or one launched in the background whose
     // task-notification hasn't come yet.
     const ended = new Set(evs.filter(e => e.type === 'bgdone').map(e => e.taskId));
-    const bg = evs.filter(e => { if (e.type !== 'tool' || (e.name !== 'Agent' && e.name !== 'Task')) return false; const d = doneBy.get(e.toolId); return !d || (d.agentId && /background|launched/i.test(d.text) && !ended.has(d.agentId)); });
+    // A crash or restart kills them without a notification; Overlord's resume prompt marks that point.
+    let cut = -1; evs.forEach((e, k) => { if (e.type === 'resumed') cut = k; });
+    const bg = evs.filter((e, k) => { if (k <= cut || e.type !== 'tool' || (e.name !== 'Agent' && e.name !== 'Task')) return false; const d = doneBy.get(e.toolId); return !d || (d.agentId && /background|launched/i.test(d.text) && !ended.has(d.agentId)); });
     // Background shells (Bash run_in_background) until their task-notification: a chip each, opening to the live output.
-    const shells = evs.filter(e => e.type === 'tool' && doneBy.get(e.toolId) && doneBy.get(e.toolId).bgId && !ended.has(doneBy.get(e.toolId).bgId));
+    const shells = evs.filter((e, k) => k > cut && e.type === 'tool' && doneBy.get(e.toolId) && doneBy.get(e.toolId).bgId && !ended.has(doneBy.get(e.toolId).bgId));
     if (shells.length) h += `<div class="bg-agents">${shells.map(e => { const d = doneBy.get(e.toolId); return `<button type="button" class="bga bgsh" data-bgout="${escH(d.bgOut)}" data-bgname="${escH((e.args && (e.args.description || e.args.command)) || 'Background shell')}" title="Show its output">${ICON.cmd}<span class="bga-n">${escH((e.args && (e.args.description || e.args.command)) || 'Background shell')}</span><span class="bga-t" data-live="s${escH(e.toolId)}">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`; }).join('')}</div>`;
     if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<button type="button" class="bga" data-jump="${escH(e.toolId)}" title="Show this agent's call">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`).join('')}</div>`;
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
@@ -300,13 +303,12 @@
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
     if (a.compacting) return h + `<div class="working">${SPARK}<span class="shimmer">Compacting conversation…</span></div>`;
     if (st === 'active' || st === 'resuming') {
-      // The CLI's own playful verb ("Cogitating…") when it has one; the call in flight under it; elapsed; the Esc hint.
-      const tool = (() => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if ((e.type === 'tool') && e.toolId && !doneBy.get(e.toolId) && e.name !== 'Agent' && e.name !== 'Task') return e; if (e.type === 'prompt') return null; } return null; })();
-      const v = tool ? toolView(tool, true) : null;
+      // The CLI's own playful verb ("Cogitating…") when it has one; elapsed; the Esc hint. The call in flight already
+      // shows as the running row just above, so it isn't repeated here.
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
       const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
-      return h + `<div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(String(a.spinnerText || '').replace(/\s*\(.*$/, '') || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span>${v ? `<span class="w-tool">${escH(v.verb)} <span class="mono">${escH(v.target)}</span></span>` : ''}<span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
+      return h + `<div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(String(a.spinnerText || '').replace(/\s*\(.*$/, '') || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
     }
     return h;
   }
