@@ -22,6 +22,7 @@ function toolView(ev, running) {
     case 'TodoWrite': return { kind: 'todo', verb: v('Updated the plan', 'Updating the plan'), target: '', mono: false };
     case 'AskUserQuestion': return { kind: 'ask', verb: v('Asked', 'Asking'), target: a.question || '', mono: false };
     case 'ExitPlanMode': return { kind: 'plan', verb: v('Proposed a plan', 'Proposing a plan'), target: '', mono: false };
+    case 'Artifact': return a.title || a.file_path ? { kind: 'artifact', verb: v('Published', 'Publishing'), target: a.title || baseName(a.file_path), mono: !a.title } : { kind: 'artifact', verb: v('Used Artifacts', 'Using Artifacts'), target: a.action || '', mono: false };
     case 'Skill': return { kind: 'tool', verb: v('Used skill', 'Using skill'), target: a.skill || '', mono: true };
     default: return { kind: 'tool', verb: n.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '').replace(/_/g, ' ') || 'Tool', target: '', mono: false };
   }

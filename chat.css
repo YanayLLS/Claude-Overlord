@@ -589,3 +589,34 @@ body:not(.world-mode) #conversation .turnfoot { margin: 0 0 2px; min-height: 24p
 body:not(.world-mode) #conversation.open { padding-bottom: 56px; }
 body:not(.world-mode) #conversation.finding .thread { padding-top: 52px; }
 body:not(.world-mode) #chat-chips { overflow: visible; } /* the ⋯ count pill sits off the corner */
+
+/* ── Round 10 ── */
+/* the ⋯ count clear of Send; room for docked toasts at the bottom of the thread */
+body:not(.world-mode) #chat-chips .chip.icon[data-act="view-menu"] { margin-right: 6px; }
+body:not(.world-mode) #conversation.open { padding-bottom: calc(56px + var(--toast-h, 0px)); }
+/* Revert / Delete: quiet until hovered or focused */
+#chat-changes .cc-btn.danger:focus-visible { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border-hi)); }
+/* ⋯ menu: answer a waiting agent inline; shortcuts fold behind one row */
+body:not(.world-mode) #chat-view-menu .ib-row { display: flex; align-items: center; gap: 6px; }
+body:not(.world-mode) #chat-view-menu .ib-row .ib-i { flex: 1; min-width: 0; }
+body:not(.world-mode) #chat-view-menu .ib-a { display: inline-flex; gap: 4px; flex: none; }
+body:not(.world-mode) #chat-view-menu .ib-a button { height: 26px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border-hi); background: none; color: var(--text); font: inherit; font-size: 11.5px; cursor: pointer; text-transform: none; letter-spacing: 0; clip-path: none; white-space: nowrap; }
+body:not(.world-mode) #chat-view-menu .ib-a button:hover { background: var(--hover-strong); }
+body:not(.world-mode) #chat-view-menu .ib-a .primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+body:not(.world-mode) #chat-view-menu .vm-toggle .chev { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; transition: transform .15s; }
+body:not(.world-mode) #chat-view-menu .vm-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+/* Artifact card: a published page, standing on its own in the thread */
+body:not(.world-mode) #conversation .art-card { display: flex; align-items: center; gap: 14px; margin: 8px 0 12px; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--surface0); }
+body:not(.world-mode) #conversation .art-card .ac-ic { flex: none; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: color-mix(in srgb, #d97757 16%, transparent); color: #d97757; }
+body:not(.world-mode) #conversation .art-card .ac-ic .ic { width: 22px; height: 22px; }
+body:not(.world-mode) #conversation .art-card .ac-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+body:not(.world-mode) #conversation .art-card .ac-t b { font-size: 14px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body:not(.world-mode) #conversation .art-card .ac-t small { font-size: 12.5px; color: var(--subtext); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body:not(.world-mode) #conversation .art-card .ac-u { font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--dim); }
+body:not(.world-mode) #conversation .art-card .ac-b { flex: none; display: flex; gap: 6px; }
+body:not(.world-mode) #conversation .art-card .ac-b button { height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-hi); background: none; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+body:not(.world-mode) #conversation .art-card .ac-b .primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; }
+body:not(.world-mode) #conversation .art-card .ac-b .ic-only { width: 32px; padding: 0; }
+body:not(.world-mode) #conversation .art-card .ac-b .ic-only.done { color: var(--green); }
+/* claude.ai artifact links in a reply read as links to a page */
+body:not(.world-mode) #conversation .md a[href*="claude.ai/"][href*="artifact"] { padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, #d97757 12%, transparent); text-decoration: none; }

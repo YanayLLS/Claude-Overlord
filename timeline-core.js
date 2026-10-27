@@ -13,6 +13,7 @@ function toolArgs(name, inp) {
   else if (name === 'Write') { o.old = ''; o.new = cap(String(inp.content || ''), TL_DIFF_MAX); }
   else if (name === 'AskUserQuestion' && Array.isArray(inp.questions) && inp.questions[0]) { const q = inp.questions[0]; o.question = cap(String(q.question || ''), 600); o.options = (q.options || []).map(x => ({ label: cap(String(x.label || ''), 200), desc: cap(String(x.description || ''), 300) })); }
   else if (name === 'ExitPlanMode' && typeof inp.plan === 'string') o.plan = cap(inp.plan, TL_TEXT_MAX);
+  else if (name === 'Artifact') { for (const k of ['title', 'description', 'action', 'icon']) if (typeof inp[k] === 'string') o[k] = cap(inp[k], 400); }
   else if (name === 'TodoWrite' && Array.isArray(inp.todos)) o.todos = inp.todos.map(t => ({ text: cap(String(t.content || ''), 300), status: t.status }));
   return o;
 }
@@ -68,6 +69,8 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
               // A background shell: its task id and the file its output streams to.
               const bg = /running in background with ID: (\w+)\. Output is being written to: (.+?\.output)/.exec(out);
               if (bg) { ev.bgId = bg[1]; ev.bgOut = bg[2]; }
+              const art = /https:\/\/claude\.ai\/[\w/.-]*artifact\/[\w-]+/.exec(out); // a published Artifact's page
+              if (art) ev.artifactUrl = art[0];
               const ag = /agentId: (\w+)/.exec(out); // an Agent call's subagent, for its steps
               if (ag) ev.agentId = ag[1];
               events.push(ev);

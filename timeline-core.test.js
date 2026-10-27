@@ -42,6 +42,13 @@ test('API errors, token use, background shells and their end become events', () 
   assert.deepStrictEqual(parse({ type: 'user', message: { content: '<task-notification><task-id>b2k</task-id><status>completed</status></task-notification>' } }), [{ type: 'bgdone', ts: null, taskId: 'b2k', status: 'completed' }]);
 });
 
+test('an Artifact call keeps its title and the published page link', () => {
+  const [u] = parse({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a1', name: 'Artifact', input: { file_path: 'C:/s/report.html', title: 'Release notes', description: 'What shipped' } }] } });
+  assert.deepStrictEqual(u.args, { file_path: 'C:/s/report.html', title: 'Release notes', description: 'What shipped' });
+  const [d] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a1', content: 'Published: https://claude.ai/code/artifact/0b1c-22 (private)' }] } });
+  assert.strictEqual(d.artifactUrl, 'https://claude.ai/code/artifact/0b1c-22');
+});
+
 test('the permission mode and a compaction become events', () => {
   assert.deepStrictEqual(parse({ type: 'permission-mode', permissionMode: 'plan' }), [{ type: 'mode', ts: null, mode: 'plan' }]);
   assert.deepStrictEqual(parse({ type: 'system', subtype: 'compact_boundary', timestamp: 't' }), [{ type: 'compact', ts: 't' }]);

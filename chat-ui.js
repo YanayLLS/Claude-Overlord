@@ -22,6 +22,8 @@
     check: svg('<path d="m5 12 5 5 9-10"/>'),
     shield: svg('<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/>'),
     diff: svg('<path d="M12 3v18"/><path d="M5 8h4M7 6v4"/><path d="M15 16h4"/><rect x="3" y="3" width="18" height="18" rx="2"/>'),
+    artifact: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M7 6.5h.01M10 6.5h.01"/><path d="m10 13-2 2 2 2M14 13l2 2-2 2"/>'),
+    trash: svg('<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>'),
     more: svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>'),
     star: svg('<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>'),
     inbox: svg('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>'),
@@ -97,6 +99,12 @@
       }
       return out + seg.slice(at);
     }).join('');
+  }
+  // The card for a published Artifact: its icon word, title, description and claude.ai link. Open goes to the browser,
+  // where you're signed in to claude.ai (the page is private to your account, so it can't be embedded here).
+  function artifactCard(ev, url) {
+    const a = ev.args || {}, title = a.title || baseName(a.file_path) || 'Artifact', id = url.split('/').pop();
+    return `<div class="art-card" data-tid="${escH(ev.toolId)}"><div class="ac-ic">${ICON.artifact}</div><div class="ac-t"><b>${escH(title)}</b>${a.description ? `<small>${escH(a.description)}</small>` : ''}<span class="ac-u">claude.ai · ${escH(id.slice(0, 8))}</span></div><div class="ac-b"><button type="button" class="primary" data-art-open="${escH(url)}">Open</button><button type="button" class="ic-only" data-art-copy="${escH(url)}" title="Copy link" aria-label="Copy link">${ICON.copy}</button></div></div>`;
   }
   function todoHtml(todos) {
     return '<ul class="todos">' + todos.map(t => `<li class="${escH(t.status)}">${t.status === 'completed' ? ICON.check : '<span class="box"></span>'}<span>${escH(t.text)}</span></li>`).join('') + '</ul>';
@@ -218,6 +226,8 @@
       const t = ev.type;
       tally(ev, i);
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
+      // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.
+      if (t === 'tool' && ev.name === 'Artifact' && doneBy.get(ev.toolId) && doneBy.get(ev.toolId).artifactUrl) { flush(); out.push(artifactCard(ev, doneBy.get(ev.toolId).artifactUrl)); open = true; return; }
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
       if (t === 'tool_done' || t === 'mode' || t === 'bgdone') return;
       // The "[Image: source: …]" record after a prompt: only shown when that prompt had no thumbnails of its own.
@@ -400,18 +410,31 @@
     if (document.getElementById('chat-view-menu')) return closeViewMenu();
     const m = document.createElement('div'); m.id = 'chat-view-menu'; m.setAttribute('role', 'menu');
     // Agents waiting on you (questions, approvals, finished unseen), then view settings, then the shortcuts.
+    let keysOpen = false;
     const draw = () => {
       const items = inboxItems().filter(x => x.id !== selectedId), label = { question: 'Question', permission: 'Needs approval', done: 'Finished', crashed: 'Stopped' };
       const split = document.getElementById('term').classList.contains('split');
-      m.innerHTML = (items.length ? `<div class="vm-h">Needs you</div>${items.map(x => `<button type="button" class="ib-i k-${x.kind}" data-agent="${x.id}"><span class="ib-dot"></span><span class="ib-t"><b>${escH(x.a.title || 'Agent')}</b><small>${escH(label[x.kind])}${x.what ? ' · ' + escH(String(x.what).split('\n')[0].slice(0, 70)) : ''}</small></span></button>`).join('')}<div class="vm-sep"></div>` : '')
+      // A waiting agent can be answered right here: Allow / Deny, or the question's options read off its terminal.
+      const actions = (x) => x.kind === 'permission' ? `<span class="ib-a"><button type="button" class="primary" data-ans="${x.id}" data-k="1">Allow</button><button type="button" data-ans="${x.id}" data-k="esc">Deny</button></span>`
+        : x.kind === 'question' ? `<span class="ib-a">${menuOptions(x.id).slice(0, 3).map((o, k) => `<button type="button" data-ans="${x.id}" data-pick="${k}" title="${escH(o)}">${escH(o.length > 18 ? o.slice(0, 17) + '…' : o)}</button>`).join('')}</span>` : '';
+      m.innerHTML = (items.length ? `<div class="vm-h">Needs you</div>${items.map(x => `<div class="ib-row"><button type="button" class="ib-i k-${x.kind}" data-agent="${x.id}"><span class="ib-dot"></span><span class="ib-t"><b>${escH(x.a.title || 'Agent')}</b><small>${escH(label[x.kind])}${x.what ? ' · ' + escH(String(x.what).split('\n')[0].slice(0, 70)) : ''}</small></span></button>${actions(x)}</div>`).join('')}<div class="vm-sep"></div>` : '')
         + `<div class="vm-row"><span>Text size</span><button type="button" data-z="-1" aria-label="Smaller">A−</button><b>${Math.round(zoom * 100)}%</b><button type="button" data-z="1" aria-label="Larger">A+</button></div>`
         + `<button type="button" class="vm-toggle" role="menuitemcheckbox" aria-checked="${split}" data-split="1"><span>Terminal beside the chat</span><i class="${split ? 'on' : ''}"></i></button>`
-        + `<div class="vm-h">Shortcuts</div>${SHORTCUTS.map(([k, v]) => `<div class="vm-k"><span>${escH(v)}</span><kbd>${escH(k)}</kbd></div>`).join('')}`;
+        + `<button type="button" class="vm-toggle" aria-expanded="${keysOpen}" data-keys-list="1"><span>Keyboard shortcuts</span>${ICON.chev}</button>`
+        + (keysOpen ? SHORTCUTS.map(([k, v]) => `<div class="vm-k"><span>${escH(v)}</span><kbd>${escH(k)}</kbd></div>`).join('') : '');
     };
     draw();
     m.addEventListener('click', (e) => {
+      const an = e.target.closest('[data-ans]'); // answering a waiting agent from the menu: only while it still waits
+      if (an) {
+        const id = +an.dataset.ans; if (!stillWaiting(id)) { draw(); return; }
+        if (an.dataset.k) api.send({ type: 'termInput', id, data: an.dataset.k === 'esc' ? '\x1b' : an.dataset.k });
+        else { const k = +an.dataset.pick; for (let j = 0; j < k; j++) setTimeout(() => api.send({ type: 'termInput', id, data: '\x1b[B' }), j * 70); setTimeout(() => { if (stillWaiting(id)) api.send({ type: 'termInput', id, data: '\r' }); }, k * 70); }
+        dropToast(id); setTimeout(draw, 400); return;
+      }
       const ag = e.target.closest('[data-agent]'); if (ag) { closeViewMenu(); focusAgent(+ag.dataset.agent); return; }
       if (e.target.closest('[data-split]')) { toggleSplit(); draw(); return; }
+      if (e.target.closest('[data-keys-list]')) { keysOpen = !keysOpen; draw(); return; }
       const b = e.target.closest('[data-z]'); if (!b) return; const i = Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + +b.dataset.z)); zoom = ZOOMS[i] || 1; try { localStorage.setItem('chatZoom', zoom); } catch {} applyZoom(); draw();
     });
     document.getElementById('term-order').appendChild(m);
@@ -555,6 +578,8 @@
     if (ar) { const at = +ar.dataset.autoretry; ar.checked ? autoRetry.add(at) : autoRetry.delete(at); rerender(); return; }
     const uq = e.target.closest('[data-unqueue]'); // ✕ on a queued prompt: take it back, the agent keeps working
     if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
+    const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
+    if (art) { if (art.dataset.artOpen) api.send({ type: 'openUrl', url: art.dataset.artOpen }); else navigator.clipboard.writeText(art.dataset.artCopy).then(() => { art.classList.add('done'); setTimeout(() => art.classList.remove('done'), 1200); }); return; }
     const sh = e.target.closest('[data-bgout]'); // a background shell's chip: its live output
     if (sh) { openShell(sh.dataset.bgout, sh.dataset.bgname); return; }
     const jump = e.target.closest('[data-jump]'); // a background agent's chip: open and show its call
@@ -630,7 +655,7 @@
   function onGitDiff(msg) {
     const p = document.getElementById('chat-changes'); if (!p || p.dataset.kind !== 'Uncommitted' || msg.id !== selectedId) return;
     const files = parseUnified(msg.diff).map(f => ({ path: (msg.cwd || '').replace(/\\/g, '/') + '/' + f.file, rel: f.file, tracked: !f.created, add: f.add, del: f.del, created: f.created, deleted: f.deleted, sections: [{ rows: f.rows }] }));
-    for (const u of msg.untracked || []) { const rows = u.text.split('\n').map(s => ({ t: '+', s })); files.push({ path: (msg.cwd || '').replace(/\\/g, '/') + '/' + u.file, add: rows.length, del: 0, created: true, sections: [{ rows }] }); }
+    for (const u of msg.untracked || []) { const rows = u.text.split('\n').map(s => ({ t: '+', s })); files.push({ path: (msg.cwd || '').replace(/\\/g, '/') + '/' + u.file, rel: u.file, tracked: false, add: rows.length, del: 0, created: true, sections: [{ rows }] }); }
     showChanges('Uncommitted', files, agents.get(selectedId), '', null, msg.error && !files.length ? `git: ${msg.error}` : 'Nothing uncommitted');
   }
   // The panel: files on the left (+/−), the picked file's diff on the right. ↑/↓ or j/k move, Esc closes. Per file:
@@ -652,7 +677,7 @@
     const draw = () => {
       const f = list[cur];
       // The file name keeps the room: Whole file and Open as words, copy path / copy diff as icons, Revert quiet until hovered.
-      const tools = `<button type="button" class="cc-btn${whole ? ' on' : ''}" data-whole="1" aria-pressed="${whole}">Whole file</button><button type="button" class="cc-btn" data-open="1">Open</button><button type="button" class="cc-btn ic-only" data-path="1" title="Copy path" aria-label="Copy path">${ICON.copy}</button><button type="button" class="cc-btn ic-only" data-copy="1" title="Copy diff" aria-label="Copy diff">${ICON.diff}</button>${f.tracked ? `<button type="button" class="cc-btn ic-only danger" data-revert="1" title="Revert file" aria-label="Revert file">${ICON.retry}</button>` : ''}`;
+      const tools = `<button type="button" class="cc-btn${whole ? ' on' : ''}" data-whole="1" aria-pressed="${whole}">Whole file</button><button type="button" class="cc-btn" data-open="1">Open</button><button type="button" class="cc-btn ic-only" data-path="1" title="Copy path" aria-label="Copy path">${ICON.copy}</button><button type="button" class="cc-btn ic-only" data-copy="1" title="Copy diff" aria-label="Copy diff">${ICON.diff}</button>${f.rel ? `<button type="button" class="cc-btn ic-only danger" data-revert="1" title="${f.tracked ? 'Revert file' : 'Delete new file'}" aria-label="${f.tracked ? 'Revert file' : 'Delete new file'}">${f.tracked ? ICON.retry : ICON.trash}</button>` : ''}`;
       panel.querySelector('.cc-diff').innerHTML = `<div class="cc-dh"><span class="mono">${escH(rel(f.path))}</span>${tools}</div>` + (whole ? '<div class="cc-whole"><span class="loading"></span></div>'
         : f.sections.map(x => `${x.label ? `<div class="cc-sep">${escH(x.label)}</div>` : ''}${rowsHtml(x.rows, f.path)}`).join(''));
       if (whole) api.send({ type: 'filePeek', cwd: a && a.cwd, file: f.path, line: 0, all: true, seq: 'whole:' + cur });
@@ -680,7 +705,11 @@
       if (e.target.closest('[data-whole]')) { whole = !whole; return draw(); }
       const cp = e.target.closest('[data-path]'); if (cp) { navigator.clipboard.writeText(f.path).then(() => { cp.classList.add('done'); setTimeout(() => cp.classList.remove('done'), 1200); }); return; }
       // Revert: back to the last commit, after a confirm (it can't be undone from here). The panel then reloads.
-      if (e.target.closest('[data-revert]') && f.tracked) { showConfirm(`Revert ${f.rel} to the last commit? This throws away its uncommitted changes.`, 'Revert').then(ok => { if (ok) api.send({ type: 'gitRevertFile', id: selectedId, cwd: a && a.cwd, file: f.rel }); }); return; }
+      if (e.target.closest('[data-revert]') && f.rel) {
+        const q = f.tracked ? `Revert ${f.rel} to the last commit? This throws away its uncommitted changes.` : `Delete ${f.rel}? It's a new file, so this removes it.`;
+        showConfirm(q, f.tracked ? 'Revert' : 'Delete').then(ok => { if (ok) api.send({ type: 'gitRevertFile', id: selectedId, cwd: a && a.cwd, file: f.rel, untracked: !f.tracked }); });
+        return;
+      }
       const c = e.target.closest('[data-copy]');
       if (c) { navigator.clipboard.writeText(f.sections.map(x => x.rows.map(r => (r.t === '…' ? '@@' : r.t) + r.s).join('\n')).join('\n@@\n')).then(() => { c.classList.add('done'); setTimeout(() => c.classList.remove('done'), 1200); }); }
     });
@@ -727,6 +756,9 @@
     toasts.style.right = (r ? Math.max(16, innerWidth - r.right + 16) : 16) + 'px';
     // Docked just above the composer while the Chat view is open (out of the thread's way), else the window's top-right.
     const o = document.getElementById('term-order'), ob = o && o.classList.contains('open') ? o.getBoundingClientRect() : null;
+    // While toasts sit above the composer, the thread gets that much more room at the bottom so they never hide the
+    // newest message.
+    document.getElementById('conversation')?.style.setProperty('--toast-h', (ob && ob.height && toasts.childElementCount ? toasts.offsetHeight + 12 : 0) + 'px');
     if (ob && ob.height) { toasts.style.top = 'auto'; toasts.style.bottom = Math.max(16, innerHeight - ob.top + 10) + 'px'; }
     else { toasts.style.bottom = 'auto'; toasts.style.top = '56px'; }
     const shown = [...toasts.querySelectorAll('.ctoast')];
@@ -836,10 +868,19 @@
     const tools = evs.filter(ev => ev.type === 'tool');
     box.innerHTML = tools.length ? `<div class="as-h">${tools.length} step${tools.length > 1 ? 's' : ''}</div>` + tools.map(ev => toolRow(ev, doneBy.get(ev.toolId), '')).join('') : '<div class="as-h">No steps recorded</div>';
   }
+  let undoRevert = null; // the latest Revert's undo, for Ctrl+Z while its toast shows
+  document.addEventListener('keydown', (e) => { if (undoRevert && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/^(INPUT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName)) { e.preventDefault(); undoRevert(); } }, true);
   function onMsg(msg) {
     if (msg.type === 'gitDiff') return onGitDiff(msg);
     // Reverted: 10 seconds to take it back (git restore can't be undone, so main kept the file as it was).
-    if (msg.type === 'gitReverted') { if (typeof msg.content === 'string') showToast(`Reverted ${msg.file} · click to undo`, () => api.send({ type: 'restoreFileContent', id: msg.id, cwd: msg.cwd, file: msg.file, content: msg.content })); setTimeout(() => { const t = document.getElementById('toast'); if (t && /^Reverted /.test(t.textContent)) t.className = 'toast'; }, 10000); return; }
+    if (msg.type === 'gitReverted') {
+      if (typeof msg.content !== 'string') return;
+      // Click the toast or press Ctrl+Z within 10 s; main refuses if the file changed since the revert.
+      const undo = () => { undoRevert = null; api.send({ type: 'restoreFileContent', id: msg.id, cwd: msg.cwd, file: msg.file, content: msg.content, after: msg.after }); };
+      undoRevert = undo; showToast(`${msg.deleted ? 'Deleted' : 'Reverted'} ${msg.file} · click or Ctrl+Z to undo`, undo); announce(`${msg.deleted ? 'Deleted' : 'Reverted'} ${msg.file}. Ctrl+Z undoes it.`);
+      setTimeout(() => { if (undoRevert === undo) undoRevert = null; const t = document.getElementById('toast'); if (t && /^(Reverted|Deleted) /.test(t.textContent)) t.className = 'toast'; }, 10000);
+      return;
+    }
     if (msg.type === 'filePeek') { if (String(msg.seq).startsWith('whole:')) { const p = document.getElementById('chat-changes'); if (p && p._whole) p._whole(msg); } else showPeek(msg); return; }
     if (msg.type === 'agentSteps') { steps.set(msg.toolId, msg.events || []); const d = document.querySelector(`#conversation details.trow.k-agent[data-tid="${CSS.escape(msg.toolId)}"]`); if (d && d.open) drawSteps(d, msg.events || []); }
     if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.textContent = msg.ok ? (msg.text || '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }

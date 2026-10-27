@@ -4616,18 +4616,28 @@ function handleIpc(msg) {
       const cwd = typeof msg.cwd === 'string' ? msg.cwd : '', f = typeof msg.file === 'string' ? msg.file : '';
       if (!cwd || !f || f.includes('..') || path.isAbsolute(f)) break;
       let before = null; try { before = fs.readFileSync(path.join(cwd, f), 'utf8'); } catch {} // kept for Undo
+      // A new (untracked) file has nothing to go back to: Revert deletes it (same confirm, same Undo).
+      if (msg.untracked) {
+        try { fs.unlinkSync(path.join(cwd, f)); send({ type: 'gitReverted', id: msg.id, cwd, file: f, content: before, after: null, deleted: true }); }
+        catch (e) { send({ type: 'toast', text: `Couldn't delete ${f}: ${e.message}` }); }
+        gitDiff(msg); break;
+      }
       execFile('git', ['restore', '--source=HEAD', '--staged', '--worktree', '--', f], { cwd, timeout: 15000, windowsHide: true }, (err) => {
         if (err) send({ type: 'toast', text: `Couldn't revert ${f}: ${String(err.message).split('\n')[0].slice(0, 120)}` });
-        else send({ type: 'gitReverted', id: msg.id, cwd, file: f, content: before });
+        else { let after = null; try { after = fs.readFileSync(path.join(cwd, f), 'utf8'); } catch {} send({ type: 'gitReverted', id: msg.id, cwd, file: f, content: before, after }); }
         gitDiff(msg);
       });
       break;
     }
-    // Undo of a Revert file: the content from just before it, written back (only inside that folder).
+    // Undo of a Revert file: the content from just before it, written back (only inside that folder), and only if the
+    // file is still exactly as the revert left it, so a change made since (by the agent or you) is never overwritten.
     case 'restoreFileContent': {
       const cwd = typeof msg.cwd === 'string' ? msg.cwd : '', f = typeof msg.file === 'string' ? msg.file : '';
       if (!cwd || !f || f.includes('..') || path.isAbsolute(f) || typeof msg.content !== 'string') break;
-      try { fs.writeFileSync(path.join(cwd, f), msg.content, 'utf8'); } catch (e) { send({ type: 'toast', text: `Couldn't undo: ${e.message}` }); }
+      const p = path.join(cwd, f);
+      let now = null; try { now = fs.readFileSync(p, 'utf8'); } catch {}
+      if (now !== (msg.after ?? null)) { send({ type: 'toast', text: `Not undone: ${f} has changed since the revert` }); break; }
+      try { fs.writeFileSync(p, msg.content, 'utf8'); } catch (e) { send({ type: 'toast', text: `Couldn't undo: ${e.message}` }); }
       gitDiff(msg);
       break;
     }
