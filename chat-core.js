@@ -135,4 +135,13 @@ function pathRef(text) {
   return { file: t, name: parts[parts.length - 1], dir: parts.length > 1 ? parts[parts.length - 2] : '', img: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(t) };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef };
+// Dictated words dropped in at the caret: a space before them unless the text there already ends in whitespace, and one
+// after unless what follows starts with it. The recognizer capitalises every phrase, so mid-sentence its first letter
+// goes lower case (not "I" or an acronym like "API").
+function dictJoin(pre, words, post) {
+  if (!words) return pre + post;
+  if (pre.trim() && !/[.!?:]\s*$|\n\s*$/.test(pre) && !/^(I\b|[A-Z]{2,})/.test(words)) words = words[0].toLowerCase() + words.slice(1);
+  return pre + (pre && !/\s$/.test(pre) ? ' ' : '') + words + (post && !/^\s/.test(post) ? ' ' : '') + post;
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin };

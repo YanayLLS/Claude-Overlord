@@ -1036,6 +1036,25 @@ let timelineAgentId = null;
 const TIMELINE_MAX_EVENTS = 1000;
 const parseLineForTimeline = (line) => timelineCore.parseLineForTimeline(line, fmtTool, isSystemMessage);
 
+// The Chat view's mic: dictate.ps1 runs Windows' offline recognizer on the default microphone and streams its
+// phrases back as 'dictation' messages. One take at a time; it runs at low priority and dies with the app.
+let dictateProc = null;
+function dictateStop() { if (dictateProc) { try { dictateProc.kill(); } catch {} dictateProc = null; } }
+function dictateStart() {
+  dictateStop();
+  const script = fs.readFileSync(path.join(__dirname, 'dictate.ps1'), 'utf8'); // read through asar; powershell can't
+  const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
+  dictateProc = p;
+  try { os.setPriority(p.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch {}
+  let buf = '';
+  p.stdout.on('data', (d) => {
+    buf += d; let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); try { const m = JSON.parse(line); send({ type: 'dictation', t: m.t, text: m.text }); } catch {} }
+  });
+  p.on('exit', () => { if (dictateProc === p) { dictateProc = null; send({ type: 'dictation', t: 'end' }); } });
+  p.on('error', (e) => send({ type: 'dictation', t: 'error', text: e.message }));
+}
+
 // A Chat view prompt with images in place: its text and image paths go into the agent's prompt one after another, so
 // Claude turns each path into its [Image #N] right where the user put it; then Enter in its own write (the TUI
 // swallows an Enter written with a paste). Image parts must be existing image files.
@@ -4649,6 +4668,8 @@ function handleIpc(msg) {
     }
     case 'bgTail': bgTail(msg); break;
     case 'chatSend': chatSend(msg.id, Array.isArray(msg.parts) ? msg.parts : []); break;
+    case 'dictateStart': dictateStart(); break;
+    case 'dictateStop': dictateStop(); break;
     case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;
@@ -6237,6 +6258,7 @@ const UPDATE_CHECK_MS = 5 * 60 * 1000;
 let _checkUpdates = null, _lastUpdateCheck = 0;
 function checkUpdatesNow() { if (!_checkUpdates) return; _lastUpdateCheck = Date.now(); _checkUpdates(); }
 app.on('before-quit', () => {
+  dictateStop();
   clearTimeout(_spareTimer); dropSpare();
   try { releases.flush(); } catch {} // releases.json writes are debounced 2 s
   if (remoteServer) { try { remoteServer.close(); } catch {} }

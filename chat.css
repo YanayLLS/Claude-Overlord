@@ -641,3 +641,11 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .md-code.drawn:not(.bad) .md-code-head span { font-size: 0; }
 :root body #conversation .md-code.drawn:not(.bad) .md-code-head span::after { content: 'Diagram'; font-size: 11px; }
 :root body:has(#conversation.open) #prompt-nav { display: none !important; } /* the chat has its own prompt rail; !important beats the inline display prompt-nav sets */
+/* mic: quiet until dictating, then the brand colour with a soft pulse while it listens */
+:root body #chat-mic { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin-right: 6px; padding: 0; border: 0; border-radius: 10px; background: none; color: var(--dim); cursor: pointer; clip-path: none; text-transform: none; }
+:root body #chat-mic svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+:root body #chat-mic:hover { background: var(--hover-strong); color: var(--text); }
+:root body #chat-mic.on { color: #fff; background: var(--claude); }
+:root body #chat-mic.live { animation: mic-pulse 1.6s ease-in-out infinite; }
+@keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--claude) 45%, transparent); } 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--claude) 0%, transparent); } }
+@media (prefers-reduced-motion: reduce) { :root body #chat-mic.live { animation: none; } }

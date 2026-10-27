@@ -3,6 +3,7 @@
 // skills/commands picker, a pasted image goes to the agent's prompt as [Image #N] and shows here as a thumbnail.
 (function () {
   const box = () => document.getElementById('term-order-input');
+  let dict = null; // the mic's take in progress: { id, pre, post, said, live } (see Mic below)
   const order = () => document.getElementById('term-order');
   const chat = () => termTab === 'conversation';
   let hist = -1, draft = '';
@@ -82,6 +83,7 @@
   }
   function send() {
     const inp = box(), id = selectedId; if (id == null) return;
+    micStop();
     pruneAtt();
     const a = atts.get(id), shown = inp.value.trim(), text = expandPastes(inp.value, a).trim(), list = a ? a.list.splice(0) : [];
     if (a) { a.next = 1; a.pastes = []; a.nextP = 1; }
@@ -158,6 +160,7 @@
   const drafts = new Map(); let draftFor = null;
   function syncDraft() {
     if (draftFor === selectedId) return;
+    micStop(); // a take belongs to the agent it started on
     if (draftFor != null) drafts.set(draftFor, box().value);
     box().value = drafts.get(selectedId) || ''; grow(box()); hist = -1; closeAt();
     draftFor = selectedId;
@@ -281,5 +284,41 @@
   box().addEventListener('input', syncHl); box().addEventListener('scroll', () => { hl.scrollTop = box().scrollTop; });
   new ResizeObserver(syncHl).observe(box());
 
-  window.chatComposer = { send, insert, onKey, onFiles, onCatalog, onImageSaved, drawAtt };
+  // ── Mic: dictation through Windows' offline recognizer (main.js runs dictate.ps1). Words go in at the caret as you
+  // talk: the phrase still being spoken shows live and settles when the recognizer is sure. Typing, sending, Esc or
+  // switching agent ends the take; what was written stays. ──
+  const mic = document.getElementById('chat-mic');
+  function drawMic() {
+    if (!mic) return;
+    mic.classList.toggle('on', !!dict); mic.classList.toggle('live', !!(dict && dict.live));
+    mic.setAttribute('aria-pressed', String(!!dict));
+    mic.title = dict ? 'Stop dictating (Esc)' : 'Dictate (Ctrl+Shift+M)';
+  }
+  function micStart() {
+    const t = box();
+    dict = { id: selectedId, pre: t.value.slice(0, t.selectionStart), post: t.value.slice(t.selectionEnd), said: '', live: false };
+    api.send({ type: 'dictateStart' }); drawMic(); t.focus();
+  }
+  function micStop() { if (!dict) return; dict = null; api.send({ type: 'dictateStop' }); drawMic(); }
+  function micToggle() { dict ? micStop() : micStart(); }
+  function onDictation(m) {
+    if (!dict) return;
+    if (dict.id !== selectedId) return micStop();
+    if (m.t === 'ready') dict.live = true;
+    else if (m.t === 'hyp' || m.t === 'final') {
+      const words = (dict.said + ' ' + m.text).trim(), t = box();
+      if (m.t === 'final') dict.said = words;
+      t.value = dictJoin(dict.pre, words, dict.post);
+      const at = t.value.length - dict.post.length; t.setSelectionRange(at, at);
+      t.dispatchEvent(new Event('input')); // grows the box and redraws its state like typing would
+    } else if (m.t === 'error') { showToast('Mic: ' + m.text); dict = null; }
+    else if (m.t === 'end') dict = null;
+    drawMic();
+  }
+  if (mic) mic.addEventListener('click', micToggle);
+  // Typing takes over from the mic (Esc just stops it); sending or switching agent ends the take too.
+  box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
+  document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
+
+  window.chatComposer = { send, insert, onKey, onFiles, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();

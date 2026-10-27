@@ -55,3 +55,17 @@ test('an absolute path in inline code becomes a file chip; relative names and pr
   assert.strictEqual(pathRef('npm run build'), null);
   assert.strictEqual(pathRef('C:\\Work\\overlord'), null); // a folder: no extension
 });
+
+test('dictated words go in at the caret with a space either side only where needed', () => {
+  const { dictJoin } = require('./chat-core');
+  assert.strictEqual(dictJoin('', 'Hello world', ''), 'Hello world');
+  assert.strictEqual(dictJoin('fix', 'the bug', ''), 'fix the bug');
+  assert.strictEqual(dictJoin('fix ', 'the bug', 'now'), 'fix the bug now');
+  assert.strictEqual(dictJoin('line\n', 'next', ' end'), 'line\nnext end');
+  assert.strictEqual(dictJoin('abc', '', 'def'), 'abcdef');
+  // the recognizer capitalises every phrase: mid-sentence it reads lower case, after a full stop it stays
+  assert.strictEqual(dictJoin('Please', 'Fix the bug', ''), 'Please fix the bug');
+  assert.strictEqual(dictJoin('Done.', 'Next one', ''), 'Done. Next one');
+  assert.strictEqual(dictJoin('so', 'I think', ''), 'so I think');
+  assert.strictEqual(dictJoin('check', 'API keys', ''), 'check API keys');
+});
