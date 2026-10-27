@@ -4611,6 +4611,16 @@ function handleIpc(msg) {
     case 'openFileAt': openFileAt(msg); break;
     case 'filePeek': filePeek(msg); break;
     case 'gitDiff': gitDiff(msg); break;
+    // The Chat view's Revert file (after the user confirmed): back to HEAD, staged and working copy; then a fresh diff.
+    case 'gitRevertFile': {
+      const cwd = typeof msg.cwd === 'string' ? msg.cwd : '', f = typeof msg.file === 'string' ? msg.file : '';
+      if (!cwd || !f || f.includes('..') || path.isAbsolute(f)) break;
+      execFile('git', ['restore', '--source=HEAD', '--staged', '--worktree', '--', f], { cwd, timeout: 15000, windowsHide: true }, (err) => {
+        if (err) send({ type: 'toast', text: `Couldn't revert ${f}: ${String(err.message).split('\n')[0].slice(0, 120)}` });
+        gitDiff(msg);
+      });
+      break;
+    }
     case 'bgTail': bgTail(msg); break;
     case 'chatSend': chatSend(msg.id, Array.isArray(msg.parts) ? msg.parts : []); break;
     case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt

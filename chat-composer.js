@@ -6,7 +6,7 @@
   const order = () => document.getElementById('term-order');
   const chat = () => termTab === 'conversation' && !worldView;
   let hist = -1, draft = '';
-  const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('blank', !t.value.trim()); };
+  const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('blank', !t.value.trim()); syncHl(); };
 
   // ── Images: each pasted or dropped image puts an [Image #N] tag at the caret and a numbered thumbnail above the box,
   // so a prompt can say "compare [Image #1] with [Image #2]". Nothing reaches the agent until Send: then the text and
@@ -255,6 +255,21 @@
     if (cardKey(e)) { e.preventDefault(); return; } // an open question/permission card takes 1–9 first, as in the terminal
     box().focus();
   }, true);
+
+  // The box's [Image #N] / [Pasted text #N · …] tags read as chips: a layer behind the textarea draws the same text, the
+  // tags in a tint, transparent otherwise, kept on the textarea's size and scroll.
+  const hl = document.createElement('div'); hl.id = 'chat-hl'; hl.setAttribute('aria-hidden', 'true');
+  box().before(hl);
+  function syncHl() {
+    const t = box(), v = t.value;
+    if (!/\[(Image|Pasted text) #\d+/.test(v)) { if (hl.innerHTML) hl.innerHTML = ''; hl.hidden = true; return; }
+    hl.hidden = false;
+    hl.innerHTML = v.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])).replace(/\[(?:Image #\d+|Pasted text #\d+[^\]]*)\]/g, m => `<mark>${m}</mark>`) + '\n';
+    hl.style.top = t.offsetTop + 'px'; hl.style.left = t.offsetLeft + 'px'; hl.style.width = t.clientWidth + 'px'; hl.style.height = t.clientHeight + 'px';
+    hl.scrollTop = t.scrollTop;
+  }
+  box().addEventListener('input', syncHl); box().addEventListener('scroll', () => { hl.scrollTop = box().scrollTop; });
+  new ResizeObserver(syncHl).observe(box());
 
   window.chatComposer = { send, insert, onKey, onFiles, onCatalog, onImageSaved, drawAtt };
 })();

@@ -342,8 +342,6 @@ body:not(.world-mode) #term:has(#conversation.open) #chat-rail.has { display: bl
 body:not(.world-mode) #conversation .msg.flash .bubble { animation: chat-flash 1.2s ease-out; }
 
 /* Side by side: terminal left, chat right */
-#hdr-split { display: none; }
-body:not(.world-mode) #hdr-chat.on + #hdr-split { display: inline-flex; }
 body:not(.world-mode) #term.split:has(#conversation.open) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
 body:not(.world-mode) #term.split:has(#conversation.open) > #term-search { grid-column: 1; grid-row: 1; }
 body:not(.world-mode) #term.split:has(#conversation.open) > #term-container { grid-column: 1; grid-row: 2 / 4; border-right: 1px solid var(--border); min-height: 0; }
@@ -502,21 +500,71 @@ body:not(.world-mode) #conversation .turnfoot:hover .act.mark { opacity: 1; }
 #chat-toasts .ct-btns button:hover { background: var(--hover-strong); }
 #chat-toasts .ct-btns .primary { background: var(--text); color: var(--bg); border-color: var(--text); }
 
-/* Needs you inbox */
-#hdr-inbox { position: relative; }
-#hdr-inbox b { display: none; position: absolute; top: 2px; right: 2px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--dim); color: var(--bg); font: 600 10px/15px 'Geist', sans-serif; }
-#hdr-inbox.has b { display: block; }
-#hdr-inbox.urgent b { background: #d97757; color: #fff; animation: chat-pulse 1.4s ease-in-out 3; }
-body.world-mode #hdr-inbox { display: none; }
-#chat-inbox { position: fixed; z-index: 40; width: 320px; max-height: 60vh; overflow: auto; padding: 6px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 12px 36px rgba(0,0,0,.4); animation: chat-in .16s ease-out; }
-#chat-inbox .ib-h { padding: 6px 8px; font-size: 11px; color: var(--dim); }
-#chat-inbox .ib-i { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-#chat-inbox .ib-i:hover { background: var(--hover-strong); }
-#chat-inbox .ib-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
-#chat-inbox .k-question .ib-dot, #chat-inbox .k-permission .ib-dot { background: #d97757; }
-#chat-inbox .k-done .ib-dot { background: var(--green); }
-#chat-inbox .k-crashed .ib-dot { background: var(--red); }
-#chat-inbox .ib-t { display: flex; flex-direction: column; min-width: 0; }
-#chat-inbox .ib-t b { font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#chat-inbox .ib-t small { font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#chat-inbox .ib-empty { padding: 16px; text-align: center; color: var(--dim); font-size: 12.5px; }
+
+/* ── Round 8 ── */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Tags in the composer read as chips: a layer behind the textarea tints them */
+body:not(.world-mode) #term-order textarea { position: relative; z-index: 1; background: transparent; }
+body:not(.world-mode) #chat-hl { position: absolute; z-index: 0; overflow: hidden; pointer-events: none; box-sizing: border-box; font: inherit; font-size: var(--chat-fs); line-height: 1.55; padding: 4px 4px 2px 2px; white-space: pre-wrap; overflow-wrap: break-word; color: transparent; }
+body:not(.world-mode) #chat-hl[hidden] { display: none; }
+body:not(.world-mode) #chat-hl mark { color: transparent; background: color-mix(in srgb, #d97757 22%, transparent); border-radius: 5px; box-shadow: 0 0 0 1px color-mix(in srgb, #d97757 35%, transparent); }
+body.world-mode #chat-hl { display: none; }
+body:not(.world-mode) #chat-att .att b { top: auto; bottom: 6px; }
+
+/* Turn footer: what happened first, always lined up; actions and cost show on the last turn and on hover */
+body:not(.world-mode) #conversation .turnfoot { margin: 2px 0 4px; gap: 10px; }
+body:not(.world-mode) #conversation .tf-acts { display: inline-flex; gap: 2px; }
+body:not(.world-mode) #conversation .turnfoot:not(.latest) .tf-acts { opacity: 0; transition: opacity .15s; }
+body:not(.world-mode) #conversation .turnfoot:not(.latest):hover .tf-acts, body:not(.world-mode) #conversation .turnfoot .tf-acts:focus-within { opacity: 1; }
+body:not(.world-mode) #conversation .turnfoot:not(.latest) .tf-acts .act.mark.on { opacity: 1; }
+body:not(.world-mode) #conversation .turnfoot:not(.latest):not(:hover) .tf-cost { display: none; }
+body:not(.world-mode) #conversation .turnfoot .act.copy, body:not(.world-mode) #conversation .turnfoot .act.mark { opacity: 1; }
+body:not(.world-mode) #conversation .msg.user { margin: 16px 0 12px; }
+body:not(.world-mode) #conversation .msg.ai { margin: 4px 0 6px; }
+
+/* Error card: calm frame, the red is in the icon */
+body:not(.world-mode) #conversation .card.err { border-color: var(--border-hi); }
+body:not(.world-mode) #conversation .card.err .card-h .ic { color: var(--red); }
+body:not(.world-mode) #conversation .card .reset { margin-top: 6px !important; color: var(--text); font-weight: 500; }
+body:not(.world-mode) #conversation .card label.auto { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--subtext); cursor: pointer; }
+body:not(.world-mode) #conversation .btns button:disabled { opacity: .45; cursor: default; }
+
+/* Changes panel: line numbers, hunk headers, Revert */
+#chat-changes .diff.numbered .dl .ln { flex: none; width: 46px; padding-right: 8px; text-align: right; font-style: normal; color: var(--dim); opacity: .7; user-select: none; }
+#chat-changes .diff .dl.fold { padding: 4px 0; margin: 2px 0; background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--subtext); font-size: 11.5px; }
+#chat-changes .cc-btn.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border-hi)); }
+#chat-changes .cc-btn.danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+
+/* ⋯ chip: a count while other agents need you */
+body:not(.world-mode) #chat-chips .chip.icon[data-act="view-menu"] { position: relative; }
+body:not(.world-mode) #chat-chips .chip.icon.alert::after { content: attr(data-count); position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: #d97757; color: #fff; font: 600 10px/16px 'Geist', sans-serif; box-shadow: 0 0 0 2px var(--surface0); }
+
+/* ⋯ menu: Needs you rows, a separator, the side-by-side switch */
+body:not(.world-mode) #chat-view-menu { max-height: 70vh; overflow: auto; width: 300px; }
+body:not(.world-mode) #chat-view-menu .vm-sep { height: 1px; margin: 6px 0; background: var(--border); }
+body:not(.world-mode) #chat-view-menu .ib-i { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 6px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; text-transform: none; letter-spacing: 0; clip-path: none; }
+body:not(.world-mode) #chat-view-menu .ib-i:hover, body:not(.world-mode) #chat-view-menu .ib-i:focus-visible { background: var(--hover-strong); }
+body:not(.world-mode) #chat-view-menu .ib-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+body:not(.world-mode) #chat-view-menu .k-question .ib-dot, body:not(.world-mode) #chat-view-menu .k-permission .ib-dot { background: #d97757; }
+body:not(.world-mode) #chat-view-menu .k-done .ib-dot { background: var(--green); }
+body:not(.world-mode) #chat-view-menu .k-crashed .ib-dot { background: var(--red); }
+body:not(.world-mode) #chat-view-menu .ib-t { display: flex; flex-direction: column; min-width: 0; }
+body:not(.world-mode) #chat-view-menu .ib-t b { font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body:not(.world-mode) #chat-view-menu .ib-t small { font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body:not(.world-mode) #chat-view-menu .vm-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 6px; margin-bottom: 4px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; text-transform: none; letter-spacing: 0; clip-path: none; }
+body:not(.world-mode) #chat-view-menu .vm-toggle:hover { background: var(--hover-strong); }
+body:not(.world-mode) #chat-view-menu .vm-toggle i { position: relative; width: 30px; height: 18px; border-radius: 9px; background: var(--surface2); transition: background .15s; }
+body:not(.world-mode) #chat-view-menu .vm-toggle i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+body:not(.world-mode) #chat-view-menu .vm-toggle i.on { background: #d97757; }
+body:not(.world-mode) #chat-view-menu .vm-toggle i.on::after { transform: translateX(12px); background: #fff; }
+
+/* toasts: over the chat pane's corner, at most 3 */
+#chat-toasts .ctoast[hidden] { display: none; }
+#chat-toasts .ct-more { align-self: flex-end; height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); color: var(--subtext); font: inherit; font-size: 12px; cursor: pointer; }
+
+/* narrow composer: the effort goes first, then the mode label; Changes keeps its icon */
+@container (max-width: 640px) { body:not(.world-mode) #chat-chips .model em { display: none; } }
+
+/* focus rings for keyboard use */
+body:not(.world-mode) #conversation :is(button, a, summary):focus-visible, body:not(.world-mode) #term-order :is(button, textarea):focus-visible, #chat-changes :is(button):focus-visible, #chat-toasts button:focus-visible { outline: 2px solid color-mix(in srgb, #d97757 70%, transparent); outline-offset: 2px; }

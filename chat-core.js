@@ -95,18 +95,21 @@ function matchFiles(files, q, max = 12) {
 }
 
 // git's unified diff → [{ file, add, del, created, deleted, rows: [{ t: ' '|'+'|'-'|'…', s }] }], hunks separated by a fold.
+// Rows carry their line number (n: the new file's, or the old file's for a removed line); each hunk opens with a fold
+// row holding git's context ("function foo()") and its first line.
 function parseUnified(text) {
-  const files = []; let f = null;
+  const files = []; let f = null, oldN = 0, newN = 0;
   for (const line of String(text || '').split('\n')) {
     if (line.startsWith('diff --git ')) { const m = / b\/(.+)$/.exec(line); f = { file: m ? m[1] : line.slice(11), add: 0, del: 0, created: false, deleted: false, rows: [] }; files.push(f); continue; }
     if (!f) continue;
+    const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/.exec(line);
     if (line.startsWith('new file mode')) f.created = true;
     else if (line.startsWith('deleted file mode')) f.deleted = true;
-    else if (line.startsWith('@@')) { if (f.rows.length) f.rows.push({ t: '…', s: '' }); }
+    else if (h) { oldN = +h[1]; newN = +h[2]; f.rows.push({ t: '…', s: h[3] || '', n: newN }); }
     else if (/^(---|\+\+\+|index |similarity|rename |old mode|new mode|Binary)/.test(line)) continue;
-    else if (line[0] === '+') { f.rows.push({ t: '+', s: line.slice(1) }); f.add++; }
-    else if (line[0] === '-') { f.rows.push({ t: '-', s: line.slice(1) }); f.del++; }
-    else if (line[0] === ' ') f.rows.push({ t: ' ', s: line.slice(1) });
+    else if (line[0] === '+') { f.rows.push({ t: '+', s: line.slice(1), n: newN++ }); f.add++; }
+    else if (line[0] === '-') { f.rows.push({ t: '-', s: line.slice(1), n: oldN++ }); f.del++; }
+    else if (line[0] === ' ') { f.rows.push({ t: ' ', s: line.slice(1), n: newN++ }); oldN++; }
   }
   return files;
 }

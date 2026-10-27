@@ -54,6 +54,16 @@
   const promptSrcs = (ev) => (ev.images && ev.images.length ? ev.images : (ev.paths || []).map(fileUrl));
   // own: the prompt's own number → picture map (a not-yet-sent prompt numbers its images itself)
   const tagChips = (text, own) => escH(text).replace(/\[Pasted text #\d+ · (\d+) lines\]/g, (_, n) => `<span class="imgtag">¶ Pasted text · ${n} lines</span>`).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
+  // When a usage limit resets: "…|1761580800" (epoch seconds) or "resets 6pm" / "resets at 18:30" (the next such time).
+  function resetOf(ev) {
+    const t = String(ev.text || ''), ep = /\|(\d{10})\b/.exec(t); if (ep) return +ep[1] * 1000;
+    const m = /resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(t); if (!m) return 0;
+    let h = +m[1] % 24; if (m[3]) h = (h % 12) + (/pm/i.test(m[3]) ? 12 : 0);
+    const base = ev.ts ? new Date(ev.ts) : new Date(), d = new Date(base); d.setHours(h, +(m[2] || 0), 0, 0);
+    if (d <= base) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  const autoRetry = new Set(); let retryTimer = null; // reset times the user asked to retry at
   const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
   const clock = (ts) => { try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
 
@@ -66,7 +76,9 @@
   function rowsHtml(rows, file) {
     const ext = String(file || '').split('.').pop().toLowerCase(), lang = LANG[ext], hl = lang && window.hljs && hljs.getLanguage(lang);
     const line = (s) => { if (!s) return ' '; if (hl) try { return hljs.highlight(s, { language: lang, ignoreIllegals: true }).value; } catch {} return escH(s); };
-    return `<div class="diff">${rows.map(r => r.t === '…' ? '<div class="dl fold"><i></i><span>⋯</span></div>' : `<div class="dl ${r.t === '+' ? 'add' : r.t === '-' ? 'del' : ''}"><i>${r.t === ' ' ? '' : r.t}</i><span>${line(r.s)}</span></div>`).join('')}</div>`;
+    // Rows from git carry line numbers (a gutter) and hunk headers (a fold row with git's context, e.g. "function foo()").
+    const nums = rows.some(r => r.n != null), ln = (r) => nums ? `<em class="ln">${r.t === '…' ? '' : r.n ?? ''}</em>` : '';
+    return `<div class="diff${nums ? ' numbered' : ''}">${rows.map(r => r.t === '…' ? `<div class="dl fold">${ln(r)}<i></i><span>${r.s ? escH(r.s) : '⋯'}</span></div>` : `<div class="dl ${r.t === '+' ? 'add' : r.t === '-' ? 'del' : ''}">${ln(r)}<i>${r.t === ' ' ? '' : r.t}</i><span>${line(r.s)}</span></div>`).join('')}</div>`;
   }
   // file:line references in a reply become links: click opens the file at that line, hover peeks at it. Only text
   // outside tags is touched, and nothing inside code blocks or existing links.
@@ -131,9 +143,14 @@
     else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${escH(ev.text)}</span></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
-    else if (ev.type === 'apierror') { // rate limit, overload, login trouble: a card that says so, with Retry
+    else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
+      // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
+      const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div><p>${escH(msg)}</p><p class="reset">Resets ${escH(clock(new Date(at).toISOString()))} · <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" data-act="retry" data-reset="${at}">Retry</button><label class="auto"><input type="checkbox" data-autoretry="${at}"> Retry when it resets</label></div></div></div>`;
+    }
+    else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err">${'<div class="card-h">' + ICON.alert}<span>${limit ? 'Usage limit reached' : 'Request failed'}</span></div><p>${escH(ev.text)}</p><div class="btns"><button type="button" data-act="retry">Retry</button></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert">${'<div class="card-h">' + ICON.alert}<span>${limit ? 'Usage limit reached' : 'Request failed'}</span></div><p>${escH(ev.text)}</p><div class="btns"><button type="button" data-act="retry">Retry</button></div></div></div>`;
     }
     else h = '';
     if (mdReady || ev.type !== 'text') cache.set(ev, h);
@@ -149,7 +166,9 @@
     let files = '', cost = '';
     if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
     if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
-    return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button>` : ''}${mark && mark.ts ? `<button class="act mark${mark.on ? ' on' : ''}" type="button" data-act="mark" data-ts="${escH(mark.ts)}" title="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-pressed="${mark.on}">${ICON.star}</button>` : ''}${meta}${cost}${files}</div>`;
+    // What happened first (always in the same place), then the actions, which hide on older turns until hovered.
+    const acts = (textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button>` : '') + (mark && mark.ts ? `<button class="act mark${mark.on ? ' on' : ''}" type="button" data-act="mark" data-ts="${escH(mark.ts)}" title="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-label="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-pressed="${mark.on}">${ICON.star}</button>` : '');
+    return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${meta}${files}${cost}${acts ? `<span class="tf-acts">${acts}</span>` : ''}</div>`;
   }
 
   // The transcript as blocks (one per message, tool run or turn footer), so paint can swap only what changed.
@@ -377,10 +396,22 @@
   const SHORTCUTS = [['Enter', 'Send'], ['Shift+Enter', 'New line'], ['Esc', 'Stop the agent'], ['↑ / ↓', 'Your earlier prompts'], ['@', 'Mention a file'], ['/', 'Commands and skills'], ['Ctrl+F', 'Find in chat'], ['Ctrl+↑ / ↓', 'Jump between prompts'], ['Ctrl+`', 'Chat ↔ terminal'], ['1–9', 'Answer a question card'], ['J / K', 'Files in the changes panel']];
   function openViewMenu(chip) {
     if (document.getElementById('chat-view-menu')) return closeViewMenu();
-    const m = document.createElement('div'); m.id = 'chat-view-menu';
-    const draw = () => { m.innerHTML = `<div class="vm-row"><span>Text size</span><button type="button" data-z="-1" aria-label="Smaller">A−</button><b>${Math.round(zoom * 100)}%</b><button type="button" data-z="1" aria-label="Larger">A+</button></div><div class="vm-h">Shortcuts</div>${SHORTCUTS.map(([k, v]) => `<div class="vm-k"><span>${escH(v)}</span><kbd>${escH(k)}</kbd></div>`).join('')}`; };
+    const m = document.createElement('div'); m.id = 'chat-view-menu'; m.setAttribute('role', 'menu');
+    // Agents waiting on you (questions, approvals, finished unseen), then view settings, then the shortcuts.
+    const draw = () => {
+      const items = inboxItems().filter(x => x.id !== selectedId), label = { question: 'Question', permission: 'Needs approval', done: 'Finished', crashed: 'Stopped' };
+      const split = document.getElementById('term').classList.contains('split');
+      m.innerHTML = (items.length ? `<div class="vm-h">Needs you</div>${items.map(x => `<button type="button" class="ib-i k-${x.kind}" data-agent="${x.id}"><span class="ib-dot"></span><span class="ib-t"><b>${escH(x.a.title || 'Agent')}</b><small>${escH(label[x.kind])}${x.what ? ' · ' + escH(String(x.what).split('\n')[0].slice(0, 70)) : ''}</small></span></button>`).join('')}<div class="vm-sep"></div>` : '')
+        + `<div class="vm-row"><span>Text size</span><button type="button" data-z="-1" aria-label="Smaller">A−</button><b>${Math.round(zoom * 100)}%</b><button type="button" data-z="1" aria-label="Larger">A+</button></div>`
+        + `<button type="button" class="vm-toggle" role="menuitemcheckbox" aria-checked="${split}" data-split="1"><span>Terminal beside the chat</span><i class="${split ? 'on' : ''}"></i></button>`
+        + `<div class="vm-h">Shortcuts</div>${SHORTCUTS.map(([k, v]) => `<div class="vm-k"><span>${escH(v)}</span><kbd>${escH(k)}</kbd></div>`).join('')}`;
+    };
     draw();
-    m.addEventListener('click', (e) => { const b = e.target.closest('[data-z]'); if (!b) return; const i = Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + +b.dataset.z)); zoom = ZOOMS[i] || 1; try { localStorage.setItem('chatZoom', zoom); } catch {} applyZoom(); draw(); });
+    m.addEventListener('click', (e) => {
+      const ag = e.target.closest('[data-agent]'); if (ag) { closeViewMenu(); focusAgent(+ag.dataset.agent); return; }
+      if (e.target.closest('[data-split]')) { toggleSplit(); draw(); return; }
+      const b = e.target.closest('[data-z]'); if (!b) return; const i = Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + +b.dataset.z)); zoom = ZOOMS[i] || 1; try { localStorage.setItem('chatZoom', zoom); } catch {} applyZoom(); draw();
+    });
     document.getElementById('term-order').appendChild(m);
     const r = chip.getBoundingClientRect(), o = document.getElementById('term-order').getBoundingClientRect();
     m.style.right = Math.max(0, o.right - r.right) + 'px';
@@ -392,6 +423,8 @@
   // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
   let prevBusy = new Map(), tick = null, jumpOnce = false;
   const liveKey = (h) => h.replace(/(data-live="[^"]*">)[^<]*/g, '$1');
+  const srStatus = document.createElement('div'); srStatus.id = 'chat-sr'; srStatus.setAttribute('role', 'status'); srStatus.setAttribute('aria-live', 'polite'); srStatus.className = 'sr-only'; document.body.appendChild(srStatus);
+  function announce(t) { if (srStatus.textContent !== t) srStatus.textContent = t; }
   function paint(el, id, a, evs, st) {
     const now = Date.now();
     const doneBy = new Map(); let mode = '';
@@ -438,6 +471,7 @@
       else tailEl.innerHTML = tail;
       tailEl._h = tail; tailEl._k = key;
     }
+    announce(st === 'question' ? 'The agent has a question' : st === 'permission' ? 'The agent needs approval' : busy ? 'The agent is working' : a.crashed === 'fatal' ? 'The agent stopped' : 'The agent is done');
     prevBusy.set(id, busy);
     // The working line's elapsed time ticks once a second while the agent works and the view is open.
     if (busy && !tick) tick = setInterval(() => { if (!el.classList.contains('open')) { clearInterval(tick); tick = null; return; } rerender(); }, 1000);
@@ -452,6 +486,12 @@
     }
     jumpOnce = false;
     for (const s of thread.querySelectorAll('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
+    // Usage-limit cards: the countdown, Retry held until the reset, and the retry the user asked for once it's passed.
+    for (const s of thread.querySelectorAll('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
+    for (const b of thread.querySelectorAll('button[data-reset]')) b.disabled = +b.dataset.reset > now;
+    for (const c of thread.querySelectorAll('input[data-autoretry]')) c.checked = autoRetry.has(+c.dataset.autoretry);
+    for (const at of [...autoRetry]) if (at <= now) { autoRetry.delete(at); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) api.send({ type: 'questPrompt', id, text: t.text }); }
+    if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
     syncJump(el);
   }
@@ -508,6 +548,8 @@
     if (tag) { lightbox(tag.dataset.src); return; }
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
     if (img) { lightbox(img.src); return; }
+    const ar = e.target.closest('input[data-autoretry]'); // "Retry when it resets"
+    if (ar) { const at = +ar.dataset.autoretry; ar.checked ? autoRetry.add(at) : autoRetry.delete(at); rerender(); return; }
     const uq = e.target.closest('[data-unqueue]'); // ✕ on a queued prompt: take it back, the agent keeps working
     if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
     const sh = e.target.closest('[data-bgout]'); // a background shell's chip: its live output
@@ -552,7 +594,7 @@
 
   // An image full size over the app; a click or Esc closes it.
   function lightbox(src) {
-    const d = document.createElement('div'); d.className = 'chat-lightbox'; d.innerHTML = `<img src="${escH(src)}" alt="">`;
+    const d = document.createElement('div'); d.className = 'chat-lightbox'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true'); d.setAttribute('aria-label', 'Image'); d.innerHTML = `<img src="${escH(src)}" alt="">`;
     const close = () => { d.remove(); document.removeEventListener('keydown', key, true); };
     const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); } };
     d.onclick = close; document.addEventListener('keydown', key, true); document.body.appendChild(d);
@@ -584,7 +626,7 @@
   }
   function onGitDiff(msg) {
     const p = document.getElementById('chat-changes'); if (!p || p.dataset.kind !== 'Uncommitted' || msg.id !== selectedId) return;
-    const files = parseUnified(msg.diff).map(f => ({ path: (msg.cwd || '').replace(/\\/g, '/') + '/' + f.file, add: f.add, del: f.del, created: f.created, deleted: f.deleted, sections: [{ rows: f.rows }] }));
+    const files = parseUnified(msg.diff).map(f => ({ path: (msg.cwd || '').replace(/\\/g, '/') + '/' + f.file, rel: f.file, tracked: !f.created, add: f.add, del: f.del, created: f.created, deleted: f.deleted, sections: [{ rows: f.rows }] }));
     for (const u of msg.untracked || []) { const rows = u.text.split('\n').map(s => ({ t: '+', s })); files.push({ path: (msg.cwd || '').replace(/\\/g, '/') + '/' + u.file, add: rows.length, del: 0, created: true, sections: [{ rows }] }); }
     showChanges('Uncommitted', files, agents.get(selectedId), '', null, msg.error && !files.length ? `git: ${msg.error}` : 'Nothing uncommitted');
   }
@@ -595,6 +637,8 @@
     const cwd = String((a && a.cwd) || '').replace(/\\/g, '/').toLowerCase();
     const rel = (p) => { const q = String(p).replace(/\\/g, '/'); return cwd && q.toLowerCase().startsWith(cwd + '/') ? q.slice(cwd.length + 1) : q; };
     const panel = document.createElement('div'); panel.id = 'chat-changes'; panel.tabIndex = -1; panel.dataset.kind = kind;
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', kind === 'This turn' ? 'Changes in this turn' : 'Uncommitted changes');
+    returnTo = document.activeElement; trapFocus(panel);
     const tot = (list || []).reduce((t, f) => ({ add: t.add + f.add, del: t.del + f.del }), { add: 0, del: 0 });
     const head = `<div class="cc-h">${ICON.edit}<b>${escH(kind === 'This turn' ? 'Changes' : 'Uncommitted changes')}</b>${list ? `<span class="cc-tot">${list.length} file${list.length === 1 ? '' : 's'} <b class="add">+${tot.add}</b> <b class="del">−${tot.del}</b></span>` : ''}<span class="grow"></span>${extra}<button type="button" class="cc-x" aria-label="Close">×</button></div>`;
     if (!list) panel.innerHTML = head + '<div class="cc-empty"><span class="loading"></span></div>';
@@ -604,7 +648,7 @@
     let cur = 0, whole = false;
     const draw = () => {
       const f = list[cur];
-      const tools = `<button type="button" class="cc-btn" data-copy="1">Copy diff</button><button type="button" class="cc-btn${whole ? ' on' : ''}" data-whole="1">Whole file</button><button type="button" class="cc-btn" data-open="1">Open</button>`;
+      const tools = `${f.tracked ? '<button type="button" class="cc-btn danger" data-revert="1">Revert file</button>' : ''}<button type="button" class="cc-btn" data-path="1">Copy path</button><button type="button" class="cc-btn" data-copy="1">Copy diff</button><button type="button" class="cc-btn${whole ? ' on' : ''}" data-whole="1">Whole file</button><button type="button" class="cc-btn" data-open="1">Open</button>`;
       panel.querySelector('.cc-diff').innerHTML = `<div class="cc-dh"><span class="mono">${escH(rel(f.path))}</span>${tools}</div>` + (whole ? '<div class="cc-whole"><span class="loading"></span></div>'
         : f.sections.map(x => `${x.label ? `<div class="cc-sep">${escH(x.label)}</div>` : ''}${rowsHtml(x.rows, f.path)}`).join(''));
       if (whole) api.send({ type: 'filePeek', cwd: a && a.cwd, file: f.path, line: 0, all: true, seq: 'whole:' + cur });
@@ -630,6 +674,9 @@
       const f = list && list[cur]; if (!f) return;
       if (e.target.closest('[data-open]')) { const first = f.sections[0] && f.sections[0].rows.find(r => r.t === '+'); return api.send({ type: 'openFileAt', cwd: a && a.cwd, file: f.path, line: 1 }); }
       if (e.target.closest('[data-whole]')) { whole = !whole; return draw(); }
+      if (e.target.closest('[data-path]')) { navigator.clipboard.writeText(f.path); return; }
+      // Revert: back to the last commit, after a confirm (it can't be undone from here). The panel then reloads.
+      if (e.target.closest('[data-revert]') && f.tracked) { showConfirm(`Revert ${f.rel} to the last commit? This throws away its uncommitted changes.`, 'Revert').then(ok => { if (ok) api.send({ type: 'gitRevertFile', id: selectedId, cwd: a && a.cwd, file: f.rel }); }); return; }
       const c = e.target.closest('[data-copy]');
       if (c) { navigator.clipboard.writeText(f.sections.map(x => x.rows.map(r => (r.t === '…' ? '@@' : r.t) + r.s).join('\n')).join('\n@@\n')).then(() => { c.textContent = 'Copied'; setTimeout(() => { c.textContent = 'Copy diff'; }, 1200); }); }
     });
@@ -640,7 +687,20 @@
     });
     pick(0); panel.focus();
   }
-  function closeChanges(keepFocus) { const p = document.getElementById('chat-changes'); if (p) { p.remove(); if (!keepFocus) document.getElementById('term-order-input')?.focus(); } }
+  function closeChanges(keepFocus) { const p = document.getElementById('chat-changes'); if (p) { p.remove(); if (!keepFocus) backFocus(); } }
+  // Panels are dialogs: Tab stays inside, and closing puts focus back where it was (the chip or link that opened it).
+  let returnTo = null;
+  const backFocus = () => { const r = returnTo; returnTo = null; (r && document.contains(r) ? r : document.getElementById('term-order-input'))?.focus(); };
+  function trapFocus(box) {
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      const f = [...box.querySelectorAll('button, [href], input, [tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && x.offsetParent);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === box)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+  }
   // The old way, still one click away: open that turn's edit rows in the thread and scroll to the first.
   function showEditsInline(evs, from, to) {
     let first = null;
@@ -652,32 +712,46 @@
   }
 
   // ── Another agent needs you: a toast you can answer from (Allow / Always / Deny, or the question's options read off
-  // that agent's terminal), so there's no switching for a quick yes. Gone once it's answered (permClear). ──
-  const toasts = document.createElement('div'); toasts.id = 'chat-toasts'; document.body.appendChild(toasts);
+  // that agent's terminal), so there's no switching for a quick yes. Gone once it's answered (permClear). A button
+  // only acts while that agent's prompt is still open, so a stale toast can never type into it. At most 3 show; the
+  // rest wait in the ⋯ menu's Needs you list. They sit over the chat pane's top-right corner, not the whole window. ──
+  const toasts = document.createElement('div'); toasts.id = 'chat-toasts'; toasts.setAttribute('role', 'region'); toasts.setAttribute('aria-label', 'Agents that need you');
+  document.body.appendChild(toasts);
+  const stillWaiting = (id) => { const a = agents.get(id); return !!(a && [...a.tools.values()].some(t => t.perm && !t.done)); };
+  function placeToasts() {
+    const t = document.getElementById('term'), r = t && t.classList.contains('open') ? t.getBoundingClientRect() : null;
+    toasts.style.right = (r ? Math.max(16, innerWidth - r.right + 16) : 16) + 'px';
+    const shown = [...toasts.querySelectorAll('.ctoast')];
+    shown.forEach((el, k) => { el.hidden = k >= 3; });
+    let more = toasts.querySelector('.ct-more');
+    if (shown.length > 3) { if (!more) { more = document.createElement('button'); more.type = 'button'; more.className = 'ct-more'; more.onclick = () => { const v = document.querySelector('#chat-chips [data-act="view-menu"]'); if (v) openViewMenu(v); }; toasts.appendChild(more); } more.textContent = `+${shown.length - 3} more waiting`; }
+    else if (more) more.remove();
+  }
   function permToast(id, ask) {
-    const a = agents.get(id); if (!a || worldView) return;
+    const a = agents.get(id); if (!a || worldView || !stillWaiting(id)) return;
     dropToast(id);
     const t = [...a.tools.values()].find(x => x.perm) || {}, opts = ask ? menuOptions(id) : [];
     const keysFor = (k) => { const n = id; [...Array(k).fill('\x1b[B'), '\r'].forEach((d, j) => setTimeout(() => api.send({ type: 'termInput', id: n, data: d }), j * 70)); };
-    const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id;
+    const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
     el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
       + `<div class="ct-what">${escH(t.status || t.name || '')}</div>`
       + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : '<button type="button" class="primary" data-k="1">Allow</button><button type="button" data-k="2">Always</button><button type="button" data-k="esc">Deny</button>'}<button type="button" data-open="1">Open</button></div>`;
     el.addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
-      if (b.classList.contains('ct-x')) return el.remove();
-      if (b.dataset.open) { el.remove(); focusAgent(id); return; }
+      if (b.classList.contains('ct-x')) { el.remove(); return placeToasts(); }
+      if (b.dataset.open) { el.remove(); placeToasts(); focusAgent(id); return; }
+      if (!stillWaiting(id)) { el.remove(); placeToasts(); return; } // answered elsewhere already: never type into a live prompt
       if (b.dataset.k) api.send({ type: 'termInput', id, data: b.dataset.k === 'esc' ? '\x1b' : b.dataset.k });
       if (b.dataset.pick) keysFor(+b.dataset.pick);
-      el.classList.add('done'); setTimeout(() => el.remove(), 300);
+      el.classList.add('done'); setTimeout(() => { el.remove(); placeToasts(); }, 300);
     });
-    toasts.appendChild(el);
+    toasts.prepend(el); placeToasts();
   }
-  function dropToast(id) { for (const t of toasts.querySelectorAll(`.ctoast[data-id="${id}"]`)) t.remove(); }
+  function dropToast(id) { for (const t of toasts.querySelectorAll(`.ctoast[data-id="${id}"]`)) t.remove(); placeToasts(); }
 
-  // ── "Needs you" inbox in the top bar: every agent waiting on you (a question, a permission) or finished unseen ──
-  function syncInbox() {
-    const btn = document.getElementById('hdr-inbox'); if (!btn) return;
+  // ── Needs you: every agent waiting on you (a question, a permission) or finished unseen. Listed in the ⋯ menu; the
+  // ⋯ chip carries a count while any of them is urgent. ──
+  function inboxItems() {
     const items = [];
     for (const [id, a] of agents) {
       if (a.archived) continue;
@@ -686,19 +760,13 @@
       else if (a.unread) items.push({ id, a, kind: 'done', what: a.preview || '' });
       else if (st === 'crashed') items.push({ id, a, kind: 'crashed', what: 'Stopped' });
     }
-    btn._items = items;
-    const urgent = items.filter(x => x.kind !== 'done').length;
-    btn.classList.toggle('has', items.length > 0); btn.classList.toggle('urgent', urgent > 0);
-    const n = btn.querySelector('b'); if (n) n.textContent = items.length ? String(items.length) : '';
-    if (document.getElementById('chat-inbox')) drawInbox();
+    return items;
   }
-  function toggleInbox() { if (document.getElementById('chat-inbox')) return document.getElementById('chat-inbox').remove(); const m = document.createElement('div'); m.id = 'chat-inbox'; document.body.appendChild(m); drawInbox(); setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!m.contains(e.target) && !e.target.closest('#hdr-inbox')) m.remove(); document.removeEventListener('mousedown', off, true); }, true), 0); }
-  function drawInbox() {
-    const m = document.getElementById('chat-inbox'), btn = document.getElementById('hdr-inbox'); if (!m || !btn) return;
-    const items = btn._items || [], label = { question: 'Question', permission: 'Needs approval', done: 'Finished', crashed: 'Stopped' };
-    m.innerHTML = `<div class="ib-h">Needs you</div>` + (items.length ? items.map(x => `<button type="button" class="ib-i k-${x.kind}" data-id="${x.id}"><span class="ib-dot"></span><span class="ib-t"><b>${escH(x.a.title || 'Agent')}</b><small>${escH(label[x.kind])}${x.what ? ' · ' + escH(String(x.what).split('\n')[0].slice(0, 80)) : ''}</small></span></button>`).join('') : '<div class="ib-empty">All clear</div>');
-    const r = btn.getBoundingClientRect(); m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(8, innerWidth - r.right) + 'px';
-    m.onclick = (e) => { const b = e.target.closest('[data-id]'); if (!b) return; m.remove(); focusAgent(+b.dataset.id); if (termTab !== 'conversation') switchTermTab('conversation'); };
+  function syncInbox() {
+    const chip = document.querySelector('#chat-chips [data-act="view-menu"]'); if (!chip) return;
+    const n = inboxItems().filter(x => x.id !== selectedId && x.kind !== 'done').length;
+    chip.dataset.count = n ? String(n) : ''; chip.classList.toggle('alert', n > 0);
+    chip.setAttribute('aria-label', n ? `${n} agent${n > 1 ? 's' : ''} need you · view options` : 'View options');
   }
 
   // ── file:line links: click opens the file at the line in your editor; resting on one peeks at those lines ──
@@ -710,6 +778,9 @@
     peekFor = r; clearTimeout(peekTimer);
     peekTimer = setTimeout(() => { const a = agents.get(selectedId); api.send({ type: 'filePeek', cwd: a && a.cwd, file: r.dataset.file, line: r.dataset.line, seq: ++peekSeq }); }, 350);
   });
+  // Keyboard: tabbing onto a link peeks the same way (Enter opens it).
+  conv.addEventListener('focusin', (e) => { const r = e.target.closest && e.target.closest('a.fileref'); if (r) r.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+  conv.addEventListener('focusout', (e) => { const r = e.target.closest && e.target.closest('a.fileref'); if (r) { peekFor = null; clearTimeout(peekTimer); peekEl.hidden = true; } });
   conv.addEventListener('mouseout', (e) => { const r = e.target.closest('a.fileref'); if (r && !r.contains(e.relatedTarget)) { peekFor = null; clearTimeout(peekTimer); peekEl.hidden = true; } });
   function showPeek(msg) {
     if (msg.seq !== peekSeq || !peekFor || !msg.lines || !msg.lines.length) return;
@@ -727,14 +798,15 @@
   let shellTimer = null;
   function openShell(file, name) {
     closeShell();
-    const d = document.createElement('div'); d.id = 'chat-shell';
+    const d = document.createElement('div'); d.id = 'chat-shell'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Background shell output'); d.tabIndex = -1; returnTo = document.activeElement; trapFocus(d);
+    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShell(); } });
     d.innerHTML = `<div class="sh-h">${ICON.cmd}<span>${escH(name)}</span><button type="button" class="sh-x" aria-label="Close">×</button></div><pre class="sh-out">…</pre>`;
     d.querySelector('.sh-x').onclick = closeShell; d.dataset.file = file;
     document.getElementById('term').appendChild(d);
     const pull = () => api.send({ type: 'bgTail', id: selectedId, file });
-    pull(); shellTimer = setInterval(pull, 2000);
+    pull(); shellTimer = setInterval(pull, 2000); d.focus();
   }
-  function closeShell() { clearInterval(shellTimer); shellTimer = null; document.getElementById('chat-shell')?.remove(); }
+  function closeShell() { clearInterval(shellTimer); shellTimer = null; const d = document.getElementById('chat-shell'); if (d) { d.remove(); backFocus(); } }
 
   // ── A subagent's own steps, fetched when its Agent row is opened ──
   const steps = new Map(); // toolId → events
@@ -828,5 +900,5 @@
   }
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { permToast, dropToast, syncInbox, toggleInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '') => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '') => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
