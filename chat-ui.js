@@ -428,7 +428,7 @@
       // then the answers, labelled with the agent's name for screen readers.
       const who = (x) => escH(x.a.title || 'Agent');
       const actions = (x) => x.kind === 'permission' ? `<span class="ib-a"><button type="button" class="primary" data-ans="${x.id}" data-k="1" aria-label="Allow ${who(x)}">Allow</button><button type="button" data-ans="${x.id}" data-k="esc" aria-label="Deny ${who(x)}">Deny</button></span>`
-        : x.kind === 'question' ? `<span class="ib-a">${menuOptions(x.id).slice(0, 3).map((o, k) => `<button type="button" data-ans="${x.id}" data-pick="${k}" title="${escH(o)}" aria-label="Answer ${who(x)}: ${escH(o)}">${escH(o.length > 22 ? o.slice(0, 21) + '…' : o)}</button>`).join('')}</span>` : '';
+        : x.kind === 'question' ? `<span class="ib-a">${quickOpts(x.id).slice(0, 3).map((o, k) => `<button type="button" data-ans="${x.id}" data-pick="${k}" title="${escH(o)}" aria-label="Answer ${who(x)}: ${escH(o)}">${escH(o.length > 22 ? o.slice(0, 21) + '…' : o)}</button>`).join('')}</span>` : '';
       const waited = (x) => x.kind === 'done' ? '' : ` · <span data-since="${x.since}">waiting ${escH(dur(Date.now() - x.since))}</span>`;
       m.innerHTML = (items.length ? `<div class="vm-h">Needs you</div>${items.map(x => `<div class="ib-row"><button type="button" class="ib-i k-${x.kind}" data-agent="${x.id}" aria-label="Open ${who(x)}"><span class="ib-dot"></span><span class="ib-t"><b>${who(x)}</b><small>${escH(label[x.kind])}${waited(x)}</small></span></button>${x.what && x.kind !== 'done' && x.kind !== 'crashed' ? `<div class="ib-what" title="${escH(x.what)}">${escH(x.what)}</div>` : ''}${actions(x)}</div>`).join('')}<div class="vm-sep"></div>` : '')
         + `<div class="vm-row"><span>Text size</span><button type="button" data-z="-1" aria-label="Smaller">A−</button><b>${Math.round(zoom * 100)}%</b><button type="button" data-z="1" aria-label="Larger">A+</button></div>`
@@ -442,8 +442,11 @@
       if (an) {
         const id = +an.dataset.ans; if (!stillWaiting(id)) { draw(); return; }
         if (an.dataset.k) api.send({ type: 'termInput', id, data: an.dataset.k === 'esc' ? '\x1b' : an.dataset.k });
-        else pickOption(id, +an.dataset.pick);
-        dropToast(id); setTimeout(draw, 400); return;
+        else if (!pickOption(id, +an.dataset.pick)) { closeViewMenu(); return; }
+        // the row says what went through for a moment, then drops off the list
+        const said = an.dataset.k === 'esc' ? 'Denied' : an.dataset.k ? 'Allowed' : 'Answered: ' + (an.title || an.textContent);
+        const row = an.closest('.ib-row'); row?.querySelector('.ib-a')?.replaceWith(Object.assign(document.createElement('span'), { className: 'ib-ok', textContent: said }));
+        announce(said); dropToast(id); setTimeout(draw, 1000); return;
       }
       const ag = e.target.closest('[data-agent]'); if (ag) { closeViewMenu(); focusAgent(+ag.dataset.agent); return; }
       if (e.target.closest('[data-split]')) { toggleSplit(); draw(); return; }
@@ -466,6 +469,8 @@
     const timer = setInterval(() => { for (const s of m.querySelectorAll('[data-since]')) s.textContent = 'waiting ' + dur(Date.now() - +s.dataset.since); }, 1000);
     setTimeout(() => document.addEventListener('mousedown', off, true), 0);
     m.addEventListener('keydown', esc);
+    // Tab past its last button closes it (it isn't modal), unless focus went to ⋯ itself
+    m.addEventListener('focusout', (e) => { if (e.relatedTarget && !m.contains(e.relatedTarget) && e.relatedTarget !== chip) closeViewMenu(); });
     m._close = () => { clearInterval(timer); document.removeEventListener('mousedown', off, true); };
     m.querySelector('button')?.focus();
   }
@@ -590,15 +595,23 @@
   // Keys typed into the agent's terminal one write at a time, so the TUI reads each as its own key press.
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
   // Option k of an open question: its number key, as in the terminal, so it lands wherever the CLI's cursor sits.
-  function pickOption(id, k) { if (k < 9) api.send({ type: 'termInput', id, data: String(k + 1) }); }
+  // A multi-select box ("[ ] Postgres") only toggles and "Type something" waits for typing: those go to the terminal.
+  const oneKey = (o) => !/^\s*(\[[ x✓✔]?\]|[☐☑◯◉○●])/i.test(o) && !/^type something/i.test(o);
+  const quickOpts = (id) => { const o = menuOptions(id); return o.every(oneKey) ? o : o.some(x => !oneKey(x) && /^\s*(\[|[☐☑◯◉○●])/.test(x)) ? [] : o.filter(oneKey); };
+  function pickOption(id, k) {
+    const o = menuOptions(id)[k];
+    if (k < 9 && (o === undefined || oneKey(o))) { api.send({ type: 'termInput', id, data: String(k + 1) }); return true; }
+    focusAgent(id); switchTermTab('terminal'); return false; // answer it where it can be answered
+  }
 
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
     const cwd = a && a.cwd;
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
-    if (k && selectedId != null) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
-    const pick = e.target.closest('[data-pick]'); // question card: arrow down to the option, then Enter
-    if (pick && selectedId != null) { pickOption(selectedId, +pick.dataset.pick); pick.classList.add('picked'); return; }
+    // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
+    if (k && selectedId != null) { if (stillWaiting(selectedId)) keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
+    const pick = e.target.closest('[data-pick]'); // question card: the option's number key
+    if (pick && selectedId != null) { if (stillWaiting(selectedId) && !pick.closest('.picked-card') && pickOption(selectedId, +pick.dataset.pick)) { pick.classList.add('picked'); pick.closest('.card')?.classList.add('picked-card'); } return; }
     const tag = e.target.closest('.imgtag[data-src]'); // an [Image #N] chip opens the image it names
     if (tag) { lightbox(tag.dataset.src); return; }
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
@@ -799,8 +812,7 @@
   function permToast(id, ask) {
     const a = agents.get(id); if (!a || worldView || !stillWaiting(id)) return;
     dropToast(id);
-    const tools = [...a.tools.values()], t = tools.find(x => ask ? x.perm === 'ask' : x.perm === true) || tools.find(x => x.perm) || {}, opts = ask ? menuOptions(id) : [];
-    const keysFor = (k) => { pickOption(id, k); announce(`Answered ${a.title || 'the agent'}`); };
+    const tools = [...a.tools.values()], t = tools.find(x => ask ? x.perm === 'ask' : x.perm === true) || tools.find(x => x.perm) || {}, opts = ask ? quickOpts(id) : [];
     const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
     el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
       + `<div class="ct-what">${escH(t.status || t.name || '')}</div>`
@@ -811,8 +823,11 @@
       if (b.dataset.open) { el.remove(); placeToasts(); focusAgent(id); return; }
       if (!stillWaiting(id)) { el.remove(); placeToasts(); return; } // answered elsewhere already: never type into a live prompt
       if (b.dataset.k) api.send({ type: 'termInput', id, data: b.dataset.k === 'esc' ? '\x1b' : b.dataset.k });
-      if (b.dataset.pick) keysFor(+b.dataset.pick);
-      el.classList.add('done'); setTimeout(() => { el.remove(); placeToasts(); }, 300);
+      if (b.dataset.pick && !pickOption(id, +b.dataset.pick)) { el.remove(); placeToasts(); return; }
+      if (b.dataset.pick) announce(`Answered ${a.title || 'the agent'}`);
+      const said = b.dataset.k === 'esc' ? 'Denied' : b.dataset.k ? 'Allowed' : 'Answered: ' + b.textContent;
+      el.querySelector('.ct-btns').innerHTML = `<span class="ct-ok">${escH(said)}</span>`;
+      setTimeout(() => el.classList.add('done'), 800); setTimeout(() => { el.remove(); placeToasts(); }, 1100);
     });
     toasts.prepend(el); placeToasts();
   }

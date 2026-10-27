@@ -627,3 +627,5 @@ body:not(.world-mode) #chat-view-menu .ib-row { flex-wrap: wrap; }
 body:not(.world-mode) #chat-view-menu .ib-what { order: 3; flex-basis: 100%; margin: -2px 8px 4px 30px; padding: 5px 8px; border-radius: 6px; background: var(--surface0); font-family: 'Geist Mono', monospace; font-size: 11px; line-height: 1.45; color: var(--subtext); white-space: pre-wrap; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 /* an artifact link in a reply: short chip, the card above carries the details */
 body:not(.world-mode) #conversation .md a.art-link { font-family: 'Geist Mono', monospace; font-size: .85em; }
+/* what an answer from the ⋯ menu or a toast sent, for a moment */
+body:not(.world-mode) #chat-view-menu .ib-ok, #chat-toasts .ct-ok { flex: none; font-size: 11.5px; font-weight: 500; color: var(--green); padding: 0 6px; }

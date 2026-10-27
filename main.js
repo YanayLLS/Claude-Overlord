@@ -993,6 +993,7 @@ function extractSpinnerText(id, data) {
         // spinner line is "Verb…" alone or before its "(1m 4s · esc to interrupt)"; anything else is a partial repaint, or
         // a "* bullet…" in the reply.
         if (!/^\p{Lu}[^…]{0,40}…(\s*\(|\s*$)/u.test(text)) return;
+        if (t[0] === '*' && !/…\s*\(/.test(text)) return; // a "*" line without its timer is a Markdown bullet
         const a = agents.get(id);
         if (a && a.spinnerText !== text) {
           a.spinnerText = text;
