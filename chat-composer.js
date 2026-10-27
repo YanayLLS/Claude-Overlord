@@ -16,6 +16,7 @@
   const attOf = (id) => { if (!atts.has(id)) atts.set(id, { list: [], next: 1 }); return atts.get(id); };
   const TAG = /\[Image #(\d+)\]/g;
   function drawAtt() {
+    syncDraft(); // called when the Chat view shows another agent: its own draft and images
     const a = atts.get(selectedId), list = a ? a.list : [];
     document.getElementById('chat-att').innerHTML = list.map(x => `<span class="att${x.saving ? ' saving' : ''}" data-n="${x.n}"><img src="${x.url}" alt=""><b>${x.n}</b><button type="button" class="att-x" title="Remove" aria-label="Remove image ${x.n}">×</button></span>`).join('');
     order().classList.toggle('has-att', list.length > 0);
@@ -90,34 +91,65 @@
 
   function prompts() { const a = agents.get(selectedId); return ((a && a.prompts) || []).map(p => typeof p === 'string' ? p : (p && p.text) || '').filter(Boolean); }
   // ── @file suggestions: typing @name lists matching files in the agent's folder; ↑/↓ pick, Enter/Tab insert ──
-  let at = null, atSeq = 0; // { start, files, sel } while the list is open
+  // …and "/name" anywhere at a word start lists matching commands and skills (the + picker's catalog), as the CLI does.
+  let at = null, atSeq = 0; // { kind: '@' | '/', start, q, files, sel } while the list is open
   const atList = () => document.getElementById('chat-at');
-  function atQuery(t) { const m = /(^|\s)@([^\s@]*)$/.exec(t.value.slice(0, t.selectionStart)); return m ? { start: t.selectionStart - m[2].length - 1, q: m[2] } : null; }
+  const catalog = new Map(); // cwd → catalog items (main's 'catalog' message, shared with the + picker)
+  function atQuery(t) {
+    const before = t.value.slice(0, t.selectionStart), m = /(^|\s)([@/])([^\s@/]*)$/.exec(before);
+    return m ? { kind: m[2], start: t.selectionStart - m[3].length - 1, q: m[3] } : null;
+  }
+  function slashMatches(cwd, q) {
+    const items = (catalog.get(cwd) || []).filter(i => i.insert && i.insert.startsWith('/')), lq = q.toLowerCase();
+    const rank = (i) => { const n = i.name.toLowerCase(); return n.startsWith(lq) ? 0 : n.includes(lq) ? 1 : (i.desc || '').toLowerCase().includes(lq) ? 2 : -1; };
+    return items.map(i => [rank(i), i]).filter(r => r[0] >= 0).sort((a, b) => a[0] - b[0] || a[1].name.length - b[1].name.length).slice(0, 12).map(r => r[1]);
+  }
   function onInput(e) {
     if (!chat()) return;
     const m = atQuery(e.target), a = agents.get(selectedId);
     if (!m || !a) return closeAt();
-    at = { start: m.start, q: m.q, files: at ? at.files : [], sel: 0 };
-    api.send({ type: 'chatFiles', id: selectedId, cwd: a.cwd, q: m.q, seq: ++atSeq });
+    at = { kind: m.kind, start: m.start, q: m.q, files: at && at.kind === m.kind ? at.files : [], sel: 0 };
+    if (m.kind === '@') api.send({ type: 'chatFiles', id: selectedId, cwd: a.cwd, q: m.q, seq: ++atSeq });
+    else { if (!catalog.has(a.cwd)) api.send({ type: 'catalog', cwd: a.cwd }); at.files = slashMatches(a.cwd, m.q); drawAt(); }
   }
   function onFiles(msg) {
-    if (!at || msg.seq !== atSeq || msg.id !== selectedId) return;
+    if (!at || at.kind !== '@' || msg.seq !== atSeq || msg.id !== selectedId) return;
     at.files = msg.files || []; at.sel = 0; drawAt();
+  }
+  function onCatalog(msg) {
+    catalog.set(msg.cwd, msg.items || []);
+    const a = agents.get(selectedId);
+    if (at && at.kind === '/' && a && a.cwd === msg.cwd) { at.files = slashMatches(a.cwd, at.q); drawAt(); }
   }
   function drawAt() {
     const l = atList();
-    const esc = (s) => s.replace(/[&<>]/g, '');
-    // The typed part of each name is marked, so it's clear why the file matched.
+    const esc = (s) => String(s).replace(/[&<>]/g, '');
+    // The typed part of each name is marked, so it's clear why it matched.
     const mark = (name) => { const j = at.q ? name.toLowerCase().indexOf(at.q.toLowerCase()) : -1; return j < 0 ? esc(name) : esc(name.slice(0, j)) + '<mark>' + esc(name.slice(j, j + at.q.length)) + '</mark>' + esc(name.slice(j + at.q.length)); };
-    l.innerHTML = at && at.files.length ? at.files.map((f, k) => { const i = f.lastIndexOf('/'); return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.slice(i + 1))}</b><span>${i > 0 ? esc(f.slice(0, i)) : ''}</span></div>`; }).join('') : '';
+    const row = (f, k) => {
+      if (at.kind === '/') return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>/${mark(f.name)}</b><span class="d">${esc(f.desc || '')}</span></div>`;
+      const i = f.lastIndexOf('/'); return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.slice(i + 1))}</b><span>${i > 0 ? esc(f.slice(0, i)) : ''}</span></div>`;
+    };
+    l.innerHTML = at && at.files.length ? at.files.map(row).join('') : '';
     l.classList.toggle('open', !!(at && at.files.length));
+    l.classList.toggle('slash', !!(at && at.kind === '/'));
+    const sel = l.querySelector('.sel'); if (sel) sel.scrollIntoView({ block: 'nearest' });
   }
   function closeAt() { at = null; drawAt(); }
   function pickAt(k) {
     const t = box(), f = at && at.files[k]; if (!f) return closeAt();
-    const end = t.selectionStart, ins = '@' + f + ' ';
+    const end = t.selectionStart, ins = at.kind === '/' ? f.insert : '@' + f + ' ';
     t.value = t.value.slice(0, at.start) + ins + t.value.slice(end); t.selectionStart = t.selectionEnd = at.start + ins.length;
     closeAt(); grow(t); t.focus();
+  }
+
+  // ── Drafts per agent: what you've typed stays with the agent it was for ──
+  const drafts = new Map(); let draftFor = null;
+  function syncDraft() {
+    if (draftFor === selectedId) return;
+    if (draftFor != null) drafts.set(draftFor, box().value);
+    box().value = drafts.get(selectedId) || ''; grow(box()); hist = -1; closeAt();
+    draftFor = selectedId;
   }
 
   // With the box empty, a question or permission card takes the terminal's keys: 1–9 pick, Esc denies.
@@ -140,7 +172,6 @@
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); return; }
     if (!chat()) return;
     if (e.key === 'Escape' && order().classList.contains('busy')) { e.preventDefault(); chatUi.keys(['\x1b']); return; }
-    if (e.key === '/' && !t.value) { e.preventDefault(); openPicker(); return; }
     // History, like the CLI: ↑ at the start of the box steps back through your prompts, ↓ comes forward again.
     const ps = prompts();
     // On the first line ↑ goes back, on the last line ↓ comes forward; the caret lands at the end of what's recalled.
@@ -183,6 +214,16 @@
   }, true);
   // Typing anywhere in the Chat view goes to the box, like the CLI's always-live prompt: a plain key pressed while
   // focus isn't in another field moves focus here first, so the character lands in the box.
+  // Ctrl+` flips Chat ↔ Terminal (from either). In the Chat view, Ctrl+F finds in the chat and Ctrl+↑/↓ jump between
+  // your prompts — the terminal's own versions would act on the hidden terminal.
+  document.addEventListener('keydown', (e) => {
+    if (worldView || selectedId == null) return;
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'Backquote') { e.preventDefault(); e.stopPropagation(); switchTermTab(termTab === 'conversation' ? 'terminal' : 'conversation'); if (termTab === 'terminal') { const x = xterms.get(selectedId); if (x) x.terminal.focus(); } return; }
+    if (!chat()) return;
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && hotkeyLetter(e) === 'f') { e.preventDefault(); e.stopPropagation(); chatUi.openFind(); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); e.stopPropagation(); chatUi.jumpPrompt(e.key === 'ArrowUp' ? -1 : 1); }
+  }, true);
+
   document.addEventListener('keydown', (e) => {
     if (!chat() || selectedId == null || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
     const a = document.activeElement;
@@ -193,5 +234,5 @@
     box().focus();
   }, true);
 
-  window.chatComposer = { send, insert, onKey, onFiles, onImageSaved, drawAtt };
+  window.chatComposer = { send, insert, onKey, onFiles, onCatalog, onImageSaved, drawAtt };
 })();

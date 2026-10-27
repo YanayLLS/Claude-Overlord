@@ -1044,6 +1044,31 @@ async function chatSend(id, parts) {
   try { t.write('\r'); } catch {}
 }
 
+// A subagent's own steps for the Chat view: Claude Code keeps each one's transcript beside the session
+// (<session>/subagents/agent-<id>.jsonl, its .meta.json naming the Agent call that started it).
+function agentSteps({ id, toolId, agentId }) {
+  const a = agents.get(id); if (!a || !a.jsonlFile) return;
+  const dir = path.join(a.jsonlFile.replace(/\.jsonl$/, ''), 'subagents');
+  let file = agentId && /^\w+$/.test(agentId) ? path.join(dir, `agent-${agentId}.jsonl`) : '';
+  try {
+    if (!file || !fs.existsSync(file)) {
+      file = '';
+      for (const f of fs.readdirSync(dir)) if (f.endsWith('.meta.json')) { try { if (JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).toolUseId === toolId) { file = path.join(dir, f.replace(/\.meta\.json$/, '.jsonl')); break; } } catch {} }
+    }
+  } catch {}
+  const events = [];
+  if (file) try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) { if (!l.trim()) continue; const e = parseLineForTimeline(l); if (e) events.push(...e.filter(x => x.type !== 'prompt' && x.type !== 'mode')); } } catch {}
+  send({ type: 'agentSteps', id, toolId, events: events.slice(-200) });
+}
+// The tail of a background shell's output (the CLI streams it to <tmp>/claude/…/tasks/<id>.output). Only those files.
+function bgTail({ id, file }) {
+  const f = typeof file === 'string' ? path.resolve(file) : '';
+  const ok = f.endsWith('.output') && f.toLowerCase().startsWith(path.join(os.tmpdir(), 'claude').toLowerCase()) && fs.existsSync(f);
+  let text = '';
+  if (ok) try { const st = fs.statSync(f), n = Math.min(st.size, 16384), buf = Buffer.alloc(n), fd = fs.openSync(f, 'r'); try { fs.readSync(fd, buf, 0, n, st.size - n); } finally { fs.closeSync(fd); } text = buf.toString('utf8'); } catch {}
+  send({ type: 'bgTail', id, file, text, ok });
+}
+
 // @file suggestions for the Chat view's composer: the folder's git files (tracked + untracked, not ignored),
 // listed once per 30 s per folder, best matches first (chat-core.js matchFiles).
 const chatFileCache = new Map();
@@ -4536,6 +4561,8 @@ function handleIpc(msg) {
       send({ type: 'clipboardImageSaved', id: msg.id, seq: msg.seq, path: p.replace(/\\/g, '/') });
       break;
     }
+    case 'agentSteps': agentSteps(msg); break;
+    case 'bgTail': bgTail(msg); break;
     case 'chatSend': chatSend(msg.id, Array.isArray(msg.parts) ? msg.parts : []); break;
     case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {

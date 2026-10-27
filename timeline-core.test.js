@@ -33,6 +33,15 @@ test('Claude Code\'s "[Image: source: …]" lines are not a prompt of their own'
   assert.strictEqual(parse({ type: 'user', message: { content: 'look [Image: source: C:/t/a.png]' } })[0].text, 'look');
 });
 
+test('API errors, token use, background shells and their end become events', () => {
+  assert.deepStrictEqual(parse({ type: 'assistant', isApiErrorMessage: true, error: 'rate_limit', message: { content: [{ type: 'text', text: 'limit reached' }] } }), [{ type: 'apierror', ts: null, text: 'limit reached', kind: 'rate_limit' }]);
+  const [t] = parse({ type: 'assistant', message: { model: 'claude-opus-5-5', usage: { input_tokens: 5, output_tokens: 7, cache_read_input_tokens: 100, cache_creation_input_tokens: 3 }, content: [{ type: 'text', text: 'hi' }] } });
+  assert.deepStrictEqual(t.u, { m: 'claude-opus-5-5', i: 5, o: 7, cr: 100, cw: 3 });
+  const [d] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'Command running in background with ID: b2k. Output is being written to: C:\\t\\b2k.output. You will be notified' }] } });
+  assert.strictEqual(d.bgId, 'b2k'); assert.strictEqual(d.bgOut, 'C:\\t\\b2k.output');
+  assert.deepStrictEqual(parse({ type: 'user', message: { content: '<task-notification><task-id>b2k</task-id><status>completed</status></task-notification>' } }), [{ type: 'bgdone', ts: null, taskId: 'b2k', status: 'completed' }]);
+});
+
 test('the permission mode and a compaction become events', () => {
   assert.deepStrictEqual(parse({ type: 'permission-mode', permissionMode: 'plan' }), [{ type: 'mode', ts: null, mode: 'plan' }]);
   assert.deepStrictEqual(parse({ type: 'system', subtype: 'compact_boundary', timestamp: 't' }), [{ type: 'compact', ts: 't' }]);

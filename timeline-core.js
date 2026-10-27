@@ -23,6 +23,8 @@ function promptEvents(ts, blocks, isSystemMessage) {
   const cmd = /^<command-name>\/?([^<]+)<\/command-name>/.exec(txt) || /<command-name>\/?([^<]+)<\/command-name>/.exec(txt);
   if (cmd) { const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(txt); return [{ type: 'command', ts, text: '/' + cmd[1].trim() + (args && args[1].trim() ? ' ' + cap(args[1].trim(), 2000) : '') }]; }
   if (/^\[Request interrupted by user/.test(txt)) return [{ type: 'interrupt', ts }];
+  // A background shell or agent finished: the CLI tells the model with a <task-notification>.
+  if (/^<task-notification>/.test(txt)) { const id = /<task-id>([^<]+)<\/task-id>/.exec(txt), st = /<status>([^<]+)<\/status>/.exec(txt); return id ? [{ type: 'bgdone', ts, taskId: id[1].trim(), status: st ? st[1].trim() : '' }] : null; }
   if (isSystemMessage(txt)) return null;
   // Claude Code adds an "[Image: source: <path>]" line per pasted image (often as a record of its own). The path is kept:
   // an image too big to embed below still gets its thumbnail from the file.
@@ -42,11 +44,16 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     const r = JSON.parse(line);
     const ts = r.timestamp || null;
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
+      // An API failure (rate limit, overload, login) is written as a synthetic assistant message: its own event.
+      if (r.isApiErrorMessage) { const t = r.message.content.filter(b => b.type === 'text').map(b => b.text).join('\n'); return [{ type: 'apierror', ts, text: cap(t, 2000), kind: r.error || '' }]; }
       const events = [];
       for (const b of r.message.content) {
         if (b.type === 'text' && b.text) events.push({ type: 'text', ts, text: cap(b.text, TL_TEXT_MAX) });
         if (b.type === 'tool_use' && b.id) { const inp = b.input || {}; events.push({ type: 'tool', ts, name: b.name || 'unknown', text: fmtTool(b.name || '', inp), toolId: b.id, args: toolArgs(b.name, inp) }); }
       }
+      // The record's token use rides on its first event, so the Chat view can total a turn's tokens and cost.
+      const u = r.message.usage;
+      if (events.length && u) events[0].u = { m: r.message.model || '', i: u.input_tokens || 0, o: u.output_tokens || 0, cr: u.cache_read_input_tokens || 0, cw: u.cache_creation_input_tokens || 0 };
       return events.length ? events : null;
     }
     if (r.type === 'user') {
@@ -57,7 +64,13 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
           for (const b of c) {
             if (b.type === 'tool_result' && b.tool_use_id) {
               const out = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.filter(x => x.type === 'text').map(x => x.text || '').join('\n') : '';
-              events.push({ type: 'tool_done', ts, toolId: b.tool_use_id, text: cap(out, TL_OUT_MAX), err: !!b.is_error });
+              const ev = { type: 'tool_done', ts, toolId: b.tool_use_id, text: cap(out, TL_OUT_MAX), err: !!b.is_error };
+              // A background shell: its task id and the file its output streams to.
+              const bg = /running in background with ID: (\w+)\. Output is being written to: (.+?\.output)/.exec(out);
+              if (bg) { ev.bgId = bg[1]; ev.bgOut = bg[2]; }
+              const ag = /agentId: (\w+)/.exec(out); // an Agent call's subagent, for its steps
+              if (ag) ev.agentId = ag[1];
+              events.push(ev);
             }
           }
           return events.length ? events : null;

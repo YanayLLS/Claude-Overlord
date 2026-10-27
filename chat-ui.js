@@ -21,6 +21,7 @@
     copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
     check: svg('<path d="m5 12 5 5 9-10"/>'),
     shield: svg('<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/>'),
+    retry: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
     alert: svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
   };
   // Claude's spark: turning while the agent works, popping once when a turn lands.
@@ -104,30 +105,52 @@
     else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${escH(ev.text)}</span></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
+    else if (ev.type === 'apierror') { // rate limit, overload, login trouble: a card that says so, with Retry
+      const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err">${'<div class="card-h">' + ICON.alert}<span>${limit ? 'Usage limit reached' : 'Request failed'}</span></div><p>${escH(ev.text)}</p><div class="btns"><button type="button" data-act="retry">Retry</button></div></div></div>`;
+    }
     else h = '';
     if (mdReady || ev.type !== 'text') cache.set(ev, h);
     return h;
   }
   // Under a finished turn: copy its last reply · how long it worked · when it finished — the CLI's "Cogitated for 42s".
-  function footHtml(textAt, turn) {
+  // Also what the turn changed ("3 files · +42 −10", click opens those edits) and what it cost ("$0.42 · ↓ 18k").
+  const famOf = (m) => /opus/i.test(m) ? 'opus' : /haiku/i.test(m) ? 'haiku' : /fable|mythos/i.test(m) ? 'fable' : 'sonnet';
+  const diffCache = new WeakMap();
+  const editStat = (ev) => { let d = diffCache.get(ev); if (!d) { d = lineDiff(ev.args.old, ev.args.new); diffCache.set(ev, d); } return d; };
+  function footHtml(textAt, turn, sum) {
     const meta = turn ? `<span class="tf-meta">${SPARK}Worked ${escH(dur(turn.ms))}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : '';
-    return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button>` : ''}${meta}</div>`;
+    let files = '', cost = '';
+    if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
+    if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
+    return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button>` : ''}${meta}${cost}${files}</div>`;
   }
 
   // The transcript as blocks (one per message, tool run or turn footer), so paint can swap only what changed.
   // A turn's footer waits until the turn is over: its turn_duration line, or the next prompt.
   function blocks(evs, doneBy, cwd) {
-    const out = []; let run = [], textAt = -1, turn = null, open = false, lastPrompt = null;
+    const out = []; let run = [], textAt = -1, turn = null, open = false, lastPrompt = null, lastPromptAt = -1;
+    const fresh = () => ({ files: new Set(), add: 0, del: 0, i: 0, o: 0, cr: 0, cw: 0, m: '', from: -1, to: -1 });
+    let sum = fresh();
+    const tally = (ev, i) => {
+      if (ev.u) { sum.i += ev.u.i; sum.o += ev.u.o; sum.cr += ev.u.cr; sum.cw += ev.u.cw; if (ev.u.m && ev.u.m !== '<synthetic>') sum.m = ev.u.m; }
+      if (ev.type === 'tool' && ev.args && (ev.args.old != null || ev.args.new != null) && doneBy.get(ev.toolId) && !doneBy.get(ev.toolId).err) {
+        const d = editStat(ev); sum.files.add(ev.args.file_path || ev.args.notebook_path || '?'); sum.add += d.add; sum.del += d.del;
+        if (sum.from < 0) sum.from = i; sum.to = i;
+      }
+    };
+    for (let k = evs.length - 1; k >= 0; k--) if (evs[k].type === 'prompt') { lastPromptAt = k; break; }
     // This agent's image numbers → pictures, so a later [Image #N] can show the image it means.
     tagSrc.clear(); for (const ev of evs) if (ev.type === 'prompt') { const ns = tagNums(ev.text); promptSrcs(ev).forEach((src, k) => { if (ns[k]) tagSrc.set(ns[k], src); }); }
     const flush = () => { if (run.length) out.push(groupHtml(run, doneBy, cwd)); run = []; };
     // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
-    const close = () => { flush(); if (open && turn) out.push(footHtml(textAt, turn)); textAt = -1; turn = null; open = false; };
+    const close = () => { flush(); if (open && turn) out.push(footHtml(textAt, turn, sum)); textAt = -1; turn = null; open = false; sum = fresh(); };
     evs.forEach((ev, i) => {
       const t = ev.type;
-      if (t === 'tool' && ev.name === 'AskUserQuestion' && !doneBy.get(ev.toolId)) return; // the question card shows it
+      tally(ev, i);
+      if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
-      if (t === 'tool_done' || t === 'mode') return;
+      if (t === 'tool_done' || t === 'mode' || t === 'bgdone') return;
       // The "[Image: source: …]" record after a prompt: only shown when that prompt had no thumbnails of its own.
       if (t === 'images') { if (lastPrompt && ((lastPrompt.images || []).length || (lastPrompt.paths || []).length)) return; }
       if (t === 'prompt') lastPrompt = ev;
@@ -135,6 +158,8 @@
       if (t === 'prompt' || t === 'command') close();
       flush(); out.push(msgHtml(ev, i, cwd));
       if (t === 'text') { textAt = i; open = true; }
+      // Your last prompt: Edit puts it back in the box, Retry sends it again.
+      if (i === lastPromptAt && ev.text) out.push(`<div class="uacts" data-i="${i}"><button type="button" class="act" data-act="edit-prompt" title="Edit">${ICON.edit}</button><button type="button" class="act" data-act="retry" title="Send again">${ICON.retry}</button></div>`);
     });
     flush(); if (turn) close();
     for (let k = out.length - 1; k >= 0; k--) if (out[k].startsWith('<div class="turnfoot"')) { out[k] = out[k].replace('<div class="turnfoot"', '<div class="turnfoot latest"'); break; }
@@ -143,10 +168,28 @@
 
   // ── Live tail: what the CLI shows under the transcript ──
   const lastTool = (evs, name, doneBy) => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if (e.type === 'tool' && e.name === name) return doneBy && doneBy.get(e.toolId) ? null : e; if (e.type === 'prompt') return null; } return null; };
-  function permHtml(perm) {
+  // What's being approved, as the terminal shows it: an edit's diff, a command in full, a new file's content.
+  function permHtml(perm, evs, doneBy) {
     const n = perm.name || '', title = n === 'Bash' || n === 'PowerShell' ? 'Run this command?' : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n) ? 'Make this edit?' : /^Web/.test(n) ? 'Fetch this page?' : `Allow ${escH(n.replace(/^mcp__[^_]+__/, '')) || 'this action'}?`;
-    const kind = toolView({ name: n }).kind;
-    return `<div class="card perm"><div class="card-h">${ICON[kind] || ICON.shield}<span>${title}</span></div><pre>${escH(perm.status || n)}</pre><div class="btns"><button class="primary" type="button" data-keys="1">Allow once<kbd>1</kbd></button><button type="button" data-keys="2">Always allow<kbd>2</kbd></button><button type="button" data-keys="esc">Deny<kbd>Esc</kbd></button></div></div>`;
+    const kind = toolView({ name: n }).kind, ev = lastTool(evs, n, doneBy), a = (ev && ev.args) || {};
+    let what = `<pre>${escH(perm.status || n)}</pre>`;
+    if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new).html}`;
+    else if (a.command) what = `<pre>${escH(a.command)}</pre>${a.description ? `<p class="perm-desc">${escH(a.description)}</p>` : ''}`;
+    else if (a.url || a.query) what = `<pre>${escH(a.url || a.query)}</pre>`;
+    return `<div class="card perm"><div class="card-h">${ICON[kind] || ICON.shield}<span>${title}</span></div>${what}<div class="btns"><button class="primary" type="button" data-keys="1">Allow once<kbd>1</kbd></button><button type="button" data-keys="2">Always allow<kbd>2</kbd></button><button type="button" data-keys="esc">Deny<kbd>Esc</kbd></button></div></div>`;
+  }
+  // The terminal's open menu ("❯ 1. Yes …  2. No …"), read off its last lines: the plan card's choices are exactly
+  // the CLI's, whatever this version offers.
+  function menuOptions(id) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active; if (!b) return [];
+    const out = [];
+    for (let i = Math.max(0, b.length - 30); i < b.length; i++) { const m = /^\s*[❯›>]?\s*(\d)\.\s+(.+?)\s*$/.exec(b.getLine(i)?.translateToString() || ''); if (m) out[+m[1] - 1] = m[2]; }
+    return out.filter(Boolean);
+  }
+  // A proposed plan waiting for approval: the plan itself, rendered, and the CLI's own choices as buttons.
+  function planHtml(ev, cwd) {
+    const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
+    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Ready to code? Here's the plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="choices">${labels.map((l, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(l)}</b></span></button>`).join('')}</div></div>`;
   }
   function askHtml(ask, perm) {
     const a = (ask && ask.args) || {}, opts = a.options || [];
@@ -163,11 +206,16 @@
       const done = todo.filter(t => t.status === 'completed').length;
       h += `<div class="plan-card"><div class="pc-h">${ICON.todo}<span>Plan</span><span class="pc-n">${done}/${todo.length}</span><span class="pc-bar"><i style="width:${Math.round(done / todo.length * 100)}%"></i></span></div>${todoHtml(todo)}</div>`;
     }
-    // Background agents still running (Agent/Task calls without a result).
-    const bg = evs.filter(e => e.type === 'tool' && (e.name === 'Agent' || e.name === 'Task') && !doneBy.get(e.toolId));
+    // Background agents still running: an Agent call without a result, or one launched in the background whose
+    // task-notification hasn't come yet.
+    const ended = new Set(evs.filter(e => e.type === 'bgdone').map(e => e.taskId));
+    const bg = evs.filter(e => { if (e.type !== 'tool' || (e.name !== 'Agent' && e.name !== 'Task')) return false; const d = doneBy.get(e.toolId); return !d || (d.agentId && /background|launched/i.test(d.text) && !ended.has(d.agentId)); });
+    // Background shells (Bash run_in_background) until their task-notification: a chip each, opening to the live output.
+    const shells = evs.filter(e => e.type === 'tool' && doneBy.get(e.toolId) && doneBy.get(e.toolId).bgId && !ended.has(doneBy.get(e.toolId).bgId));
+    if (shells.length) h += `<div class="bg-agents">${shells.map(e => { const d = doneBy.get(e.toolId); return `<button type="button" class="bga bgsh" data-bgout="${escH(d.bgOut)}" data-bgname="${escH((e.args && (e.args.description || e.args.command)) || 'Background shell')}" title="Show its output">${ICON.cmd}<span class="bga-n">${escH((e.args && (e.args.description || e.args.command)) || 'Background shell')}</span><span class="bga-t" data-live="s${escH(e.toolId)}">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`; }).join('')}</div>`;
     if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<button type="button" class="bga" data-jump="${escH(e.toolId)}" title="Show this agent's call">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`).join('')}</div>`;
-    if (perm && perm.perm === 'ask') return h + askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm);
-    if (perm) return h + permHtml(perm);
+    if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
+    if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
     if (a.compacting) return h + `<div class="working">${SPARK}<span class="shimmer">Compacting conversation…</span></div>`;
     if (st === 'active' || st === 'resuming') {
@@ -184,16 +232,42 @@
 
   // A prompt sent from the composer shows at once, dimmed, until the transcript writes it (or the agent queues it).
   // It matches the transcript's prompt with the [Image #N] tags Claude adds for its images taken out.
-  const pending = new Map(); // agent id → { text, imgs, at, held }
+  // Several can wait at once (each prompt you send while the agent works); each queued one has ✕ to take it back.
+  const pending = new Map(); // agent id → [{ text, imgs, at, held, busyAt }]
+  const norm = (s) => String(s || '').replace(/\[Image #\d+\]/g, ' ').replace(/\s+/g, ' ').trim();
   function pendingHtml(id, evs, busy) {
-    const p = pending.get(id); if (!p) return '';
-    const norm = (s) => String(s || '').replace(/\[Image #\d+\]/g, ' ').replace(/\s+/g, ' ').trim();
+    const list = pending.get(id); if (!list || !list.length) return '';
     // A prompt sent while the agent works can wait in the CLI's queue until the turn ends, so it only expires once the
     // agent has been idle a while without it showing up.
-    if (busy) p.busyAt = Date.now();
-    if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.text)) || (!busy && Date.now() - (p.busyAt || p.at) > 120000)) { pending.delete(id); return ''; }
-    const imgs = thumbs(p.imgs, tagNums(p.text));
-    return `<div class="msg user pending">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, k) => [n, p.imgs[k]]).filter(e => e[1])))}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : busy ? 'Queued' : 'Sending…'}</span></div>`;
+    for (const p of [...list]) {
+      if (busy) p.busyAt = Date.now();
+      if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.text)) || (!busy && Date.now() - (p.busyAt || p.at) > 120000)) list.splice(list.indexOf(p), 1);
+    }
+    return list.map((p, k) => {
+      const imgs = thumbs(p.imgs, tagNums(p.text));
+      const queued = busy && !p.held;
+      return `<div class="msg user pending">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1])))}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? 'Queued' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x" data-unqueue="${k}" title="Take back (the agent keeps working)">Cancel</button>` : ''}</span></div>`;
+    }).join('');
+  }
+  // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
+  // the queued messages into the input; if that's what came up, Ctrl+C on the (non-empty) input clears it — it only
+  // interrupts on an empty input, which is checked first — and the others still wanted are queued again.
+  async function unqueue(id, k) {
+    const list = pending.get(id) || [], p = list[k]; if (!p) return;
+    const x = typeof xterms !== 'undefined' && xterms.get(id), t = x && x.terminal;
+    const box = () => (t && typeof readPromptBox === 'function' ? norm(readPromptBox(t)) : null);
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    if (box() == null) return showToast('Open the agent once in Terminal, then cancel again');
+    if (box()) return showToast("The agent's prompt has text in it; cancel from the terminal");
+    api.send({ type: 'termInput', id, data: '\x1b[A' }); await wait(350);
+    const got = box();
+    if (!got) return showToast('Already delivered to the agent');
+    if (!got.includes(norm(p.text))) { api.send({ type: 'termInput', id, data: '\x03' }); return showToast('Already delivered to the agent'); } // ↑ recalled history instead: clear it
+    api.send({ type: 'termInput', id, data: '\x03' }); await wait(250);
+    if (box()) return showToast("Couldn't clear the agent's prompt; check the terminal");
+    list.splice(k, 1);
+    for (const o of list) if (!o.held && o.text && got.includes(norm(o.text))) { api.send({ type: 'questPrompt', id, text: o.text }); await wait(400); } // the rest go back in the queue
+    rerender();
   }
 
   // ── Permission mode: read live from the CLI's footer ("bypass permissions on", "plan mode on", …), since the
@@ -211,6 +285,14 @@
     for (let k = 0; k < 6 && liveMode(id) !== target; k++) { api.send({ type: 'termInput', id, data: '\x1b[Z' }); await new Promise(r => setTimeout(r, 300)); }
     if (liveMode(id) !== target && typeof showToast === 'function') showToast(`${MODES[target][0]} isn't available for this agent`);
     rerender();
+  }
+  // The model chip opens Overlord's own Switch model menu (index.html showModelMenu), placed just above the chip.
+  function openModelMenu(chip) {
+    const r = chip.getBoundingClientRect();
+    showModelMenu({ stopPropagation() {}, preventDefault() {}, clientX: r.left, clientY: r.top }, selectedId);
+    const m = document.getElementById('model-ctx-menu'); if (!m) return;
+    const h = m.getBoundingClientRect();
+    m.style.top = Math.max(8, r.top - h.height - 8) + 'px'; m.style.left = Math.max(8, Math.min(r.right - h.width, innerWidth - h.width - 8)) + 'px';
   }
   function closeModeMenu() { document.getElementById('chat-mode-menu')?.remove(); }
   function openModeMenu(chip, cur) {
@@ -234,7 +316,7 @@
       + '<span class="grow"></span>'
       // Context left before auto-compact, once it matters (half used); click puts /compact in the box.
       + (pct >= 50 ? `<button type="button" class="chip ctx${pct > 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${((100 - pct) / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
-      + (model ? `<button type="button" class="chip model" data-insert="/model " title="${escH(s.model)}. Click for /model">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</button>` : '');
+      + (model ? `<button type="button" class="chip model" data-act="model" aria-haspopup="menu" title="${escH(s.model)}">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</button>` : '');
   }
 
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
@@ -352,14 +434,30 @@
     if (tag) { lightbox(tag.dataset.src); return; }
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
     if (img) { lightbox(img.src); return; }
+    const uq = e.target.closest('[data-unqueue]'); // ✕ on a queued prompt: take it back, the agent keeps working
+    if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
+    const sh = e.target.closest('[data-bgout]'); // a background shell's chip: its live output
+    if (sh) { openShell(sh.dataset.bgout, sh.dataset.bgname); return; }
     const jump = e.target.closest('[data-jump]'); // a background agent's chip: open and show its call
     if (jump) { const d = document.querySelector(`#conversation details[data-tid="${CSS.escape(jump.dataset.jump)}"]`); if (d) { const g = d.parentElement.closest('details'); if (g) g.open = true; d.open = true; d.scrollIntoView({ block: 'center', behavior: 'smooth' }); d.classList.remove('flash'); void d.offsetWidth; d.classList.add('flash'); } return; }
     const ins = e.target.closest('[data-insert]'); // composer chips: /compact, /model
     if (ins) { chatComposer.insert(ins.dataset.insert, false); return; }
     const act = e.target.closest('[data-act]');
     if (act) {
+      const lastPrompt = () => { for (let k = (evs || []).length - 1; k >= 0; k--) if (evs[k].type === 'prompt' && evs[k].text) return evs[k].text; return ''; };
       if (act.dataset.act === 'resume') resumeSelected();
+      else if (act.dataset.act === 'retry') { const t = lastPrompt(); if (t) { api.send({ type: 'questPrompt', id: selectedId, text: t }); chatUi.addPending(selectedId, t); rerender(); } }
+      else if (act.dataset.act === 'edit-prompt') chatComposer.insert(lastPrompt(), false);
+      else if (act.dataset.act === 'turn-edits') { // open every edit of that turn and bring the first into view
+        const from = +act.dataset.from, to = +act.dataset.to; let first = null;
+        for (const d of document.querySelectorAll('#conversation details.trow.k-edit')) {
+          const i = (evs || []).findIndex(x => x.toolId === d.dataset.tid); if (i < from || i > to) continue;
+          const g = d.parentElement.closest('details'); if (g) g.open = true; d.open = true; first = first || d;
+        }
+        if (first) first.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
       else if (act.dataset.act === 'mode') openModeMenu(act, act.dataset.modeCur);
+      else if (act.dataset.act === 'model') openModelMenu(act);
       else { switchTermTab('terminal'); askFlip = true; const x = xterms.get(selectedId); if (x) x.terminal.focus(); }
       return;
     }
@@ -390,5 +488,108 @@
   // Opening a run of calls that had a failure opens the failed call too: "1 failed" should show which.
   document.getElementById('conversation').addEventListener('toggle', (e) => { const d = e.target; if (d.matches && d.matches('details.tgroup') && d.open) { const f = d.querySelector('details.trow.err'); if (f) f.open = true; } }, true);
 
-  window.chatUi = { paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false) => { pending.set(id, { text, imgs, held, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = pending.get(id); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  // ── A background shell's live output: a panel over the view, re-read every 2 s while it's open ──
+  let shellTimer = null;
+  function openShell(file, name) {
+    closeShell();
+    const d = document.createElement('div'); d.id = 'chat-shell';
+    d.innerHTML = `<div class="sh-h">${ICON.cmd}<span>${escH(name)}</span><button type="button" class="sh-x" aria-label="Close">×</button></div><pre class="sh-out">…</pre>`;
+    d.querySelector('.sh-x').onclick = closeShell; d.dataset.file = file;
+    document.getElementById('term').appendChild(d);
+    const pull = () => api.send({ type: 'bgTail', id: selectedId, file });
+    pull(); shellTimer = setInterval(pull, 2000);
+  }
+  function closeShell() { clearInterval(shellTimer); shellTimer = null; document.getElementById('chat-shell')?.remove(); }
+
+  // ── A subagent's own steps, fetched when its Agent row is opened ──
+  const steps = new Map(); // toolId → events
+  document.getElementById('conversation').addEventListener('toggle', (e) => {
+    const d = e.target; if (!d.matches || !d.matches('details.trow.k-agent') || !d.open) return;
+    const tid = d.dataset.tid; if (!tid) return;
+    if (steps.has(tid)) return drawSteps(d, steps.get(tid));
+    const evs = (worldTl && worldTl.id === selectedId) ? worldTl.events : [], done = evs.find(x => x.type === 'tool_done' && x.toolId === tid);
+    api.send({ type: 'agentSteps', id: selectedId, toolId: tid, agentId: done && done.agentId });
+  }, true);
+  function drawSteps(d, evs) {
+    let box = d.querySelector('.agent-steps'); if (!box) { box = document.createElement('div'); box.className = 'agent-steps'; d.querySelector('.tbody')?.prepend(box); }
+    const doneBy = new Map(); for (const ev of evs) if (ev.type === 'tool_done') doneBy.set(ev.toolId, ev);
+    const tools = evs.filter(ev => ev.type === 'tool');
+    box.innerHTML = tools.length ? `<div class="as-h">${tools.length} step${tools.length > 1 ? 's' : ''}</div>` + tools.map(ev => toolRow(ev, doneBy.get(ev.toolId), '')).join('') : '<div class="as-h">No steps recorded</div>';
+  }
+  function onMsg(msg) {
+    if (msg.type === 'agentSteps') { steps.set(msg.toolId, msg.events || []); const d = document.querySelector(`#conversation details.trow.k-agent[data-tid="${CSS.escape(msg.toolId)}"]`); if (d && d.open) drawSteps(d, msg.events || []); }
+    if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.textContent = msg.ok ? (msg.text || '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }
+  }
+
+  // ── "Ask about this": select text in a reply and a small button quotes it into the composer ──
+  const quoteBtn = document.createElement('button'); quoteBtn.type = 'button'; quoteBtn.id = 'chat-quote'; quoteBtn.innerHTML = `${ICON.ask}<span>Ask about this</span>`; quoteBtn.hidden = true;
+  document.body.appendChild(quoteBtn);
+  document.getElementById('conversation').addEventListener('mouseup', () => setTimeout(() => {
+    const sel = getSelection(), t = sel && String(sel).trim();
+    const inReply = t && sel.anchorNode && sel.anchorNode.parentElement && sel.anchorNode.parentElement.closest('#conversation .msg.ai, #conversation .tbody');
+    if (!inReply) { quoteBtn.hidden = true; return; }
+    const r = sel.getRangeAt(0).getBoundingClientRect();
+    quoteBtn.style.left = Math.min(innerWidth - 150, r.left + r.width / 2 - 60) + 'px'; quoteBtn.style.top = Math.max(8, r.top - 40) + 'px'; quoteBtn.hidden = false; quoteBtn._text = t;
+  }, 0));
+  document.addEventListener('mousedown', (e) => { if (e.target.closest && !e.target.closest('#chat-quote')) quoteBtn.hidden = true; });
+  quoteBtn.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
+  quoteBtn.addEventListener('click', () => { const q = quoteBtn._text.split('\n').map(l => '> ' + l).join('\n') + '\n\n'; quoteBtn.hidden = true; getSelection().removeAllRanges(); chatComposer.insert(q, false); });
+
+  // ── Find in chat (Ctrl+F): matches lit with the CSS highlight API (no DOM changes), Enter / Shift+Enter step ──
+  let find = null; // { ranges, i }
+  function openFind() {
+    let bar = document.getElementById('chat-find');
+    if (!bar) {
+      bar = document.createElement('div'); bar.id = 'chat-find';
+      bar.innerHTML = `${ICON.search}<input type="text" placeholder="Find in chat" spellcheck="false"><span class="cf-n"></span><button type="button" data-d="-1" aria-label="Previous">↑</button><button type="button" data-d="1" aria-label="Next">↓</button><button type="button" class="cf-x" aria-label="Close">×</button>`;
+      document.getElementById('term').appendChild(bar);
+      const inp = bar.querySelector('input');
+      inp.addEventListener('input', () => runFind(inp.value));
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); } else if (e.key === 'Escape') { e.preventDefault(); closeFind(); } });
+      bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.classList.contains('cf-x')) closeFind(); else stepFind(+b.dataset.d); });
+    }
+    bar.hidden = false; const inp = bar.querySelector('input'); inp.focus(); inp.select(); if (inp.value) runFind(inp.value);
+  }
+  function runFind(q) {
+    const root = document.querySelector('#conversation .thread'), ranges = [];
+    if (q && root) {
+      for (const d of root.querySelectorAll('details')) d.dataset.findOpen = d.open ? '1' : ''; // matches inside closed rows still count
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), lq = q.toLowerCase();
+      for (let n = walk.nextNode(); n && ranges.length < 2000; n = walk.nextNode()) {
+        const t = n.nodeValue.toLowerCase(); let k = t.indexOf(lq);
+        while (k >= 0) { const r = new Range(); r.setStart(n, k); r.setEnd(n, k + q.length); ranges.push(r); k = t.indexOf(lq, k + q.length); }
+      }
+    }
+    find = { ranges, i: ranges.length ? 0 : -1 };
+    showFind();
+  }
+  function stepFind(d) { if (!find || !find.ranges.length) return; find.i = (find.i + d + find.ranges.length) % find.ranges.length; showFind(); }
+  function showFind() {
+    if (!window.CSS || !CSS.highlights) return;
+    const all = find ? find.ranges : [], cur = find && find.i >= 0 ? all[find.i] : null;
+    CSS.highlights.set('chat-find', new Highlight(...all)); CSS.highlights.set('chat-find-cur', cur ? new Highlight(cur) : new Highlight());
+    const n = document.querySelector('#chat-find .cf-n'); if (n) n.textContent = all.length ? `${find.i + 1}/${all.length}` : (document.querySelector('#chat-find input').value ? '0' : '');
+    if (cur) { const el = cur.startContainer.parentElement; let d = el.closest('details'); while (d) { d.open = true; d = d.parentElement.closest('details'); } el.scrollIntoView({ block: 'center' }); }
+  }
+  function closeFind() { const bar = document.getElementById('chat-find'); if (bar) bar.hidden = true; if (window.CSS && CSS.highlights) { CSS.highlights.delete('chat-find'); CSS.highlights.delete('chat-find-cur'); } find = null; document.getElementById('term-order-input').focus(); }
+
+  // Ctrl+↑/↓: the previous / next of your prompts, like the terminal's prompt jump.
+  function jumpPrompt(dir) {
+    const el = document.getElementById('conversation'), us = [...el.querySelectorAll('.thread > .msg.user[data-i], .thread > .msg.cmd[data-i]')]; if (!us.length) return;
+    const top = el.getBoundingClientRect().top + 8, y = (u) => u.getBoundingClientRect().top;
+    const target = dir < 0 ? [...us].reverse().find(u => y(u) < top - 4) : us.find(u => y(u) > top + 4);
+    if (target) { target.scrollIntoView({ block: 'start', behavior: 'smooth' }); target.classList.remove('flash'); void target.offsetWidth; target.classList.add('flash'); }
+  }
+
+  // ── Side by side: terminal left, chat right (chat.css #term.split); remembered ──
+  function toggleSplit(on) {
+    const t = document.getElementById('term'); on = on ?? !t.classList.contains('split');
+    t.classList.toggle('split', on); document.getElementById('hdr-split')?.classList.toggle('on', on);
+    try { localStorage.setItem('chatSplit', on ? '1' : ''); } catch {}
+    if (termTab === 'conversation') switchTermTab('conversation');
+    if (typeof schedFit === 'function') setTimeout(schedFit, 50);
+  }
+  try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
+
+  window.chatUi = { toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
