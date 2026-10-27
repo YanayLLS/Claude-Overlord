@@ -4513,6 +4513,14 @@ function handleIpc(msg) {
     }
     case 'pollClickupNow': armClickupTimer(); break;
     case 'chatFiles': chatFiles(msg); break;
+    // The Chat view attaching an image file (dropped, or copied from Explorer): pasted into the agent's prompt the way
+    // the terminal does, so Claude turns it into [Image #N]; the ack lets the composer send only once it's in.
+    case 'attachImage': {
+      const t = terminals.get(msg.id), p = typeof msg.path === 'string' ? msg.path.replace(/\\/g, '/') : '';
+      if (t && !t._ovShell && p && /\.(png|jpe?g|gif|webp|bmp)$/i.test(p) && fs.existsSync(p)) { send({ type: 'imagePasted', id: msg.id, path: p, tagged: true }); t.write('\x1b[200~' + p + '\x1b[201~'); }
+      else send({ type: 'imagePasted', id: msg.id, path: '', failed: true });
+      break;
+    }
     case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;

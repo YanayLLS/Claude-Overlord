@@ -8,15 +8,57 @@
   let hist = -1, draft = '';
   const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('blank', !t.value.trim()); };
 
+  // ── Images: shown the moment they're pasted or dropped (straight from the clipboard / file), handed to the agent's
+  // prompt through main, which acks once it's in. A send made before every ack waits for them, so the image is
+  // always in the prompt before the text and Enter land. Kept per agent: each one's images sit in its own prompt.
+  const atts = new Map(); // agent id → { urls, waiting: Set<token>, queued: text to send once waiting empties | null }
+  const attOf = (id) => { if (!atts.has(id)) atts.set(id, { urls: [], waiting: new Set(), queued: null }); return atts.get(id); };
+  function drawAtt() {
+    const a = atts.get(selectedId), urls = a ? a.urls : [];
+    document.getElementById('chat-att').innerHTML = urls.map(u => `<img src="${u}" alt="">`).join('');
+    order().classList.toggle('has-att', urls.length > 0);
+  }
+  function addFiles(files) {
+    const id = selectedId; if (id == null) return false;
+    let took = false;
+    for (const f of files) {
+      const p = api.getFilePath(f) || '';
+      if (f.type && f.type.startsWith('image/')) {
+        const a = attOf(id), tok = {}; a.urls.push(URL.createObjectURL(f)); a.waiting.add(tok); took = true;
+        api.send(p ? { type: 'attachImage', id, path: p } : { type: 'pasteImage', id });
+        setTimeout(() => { if (a.waiting.delete(tok)) flush(id); }, 4000); // no ack in 4 s: don't hold the prompt forever
+      } else if (p) { insert((/\s/.test(p) ? `"${p}"` : p) + ' '); took = true; } // any other file: its path, like the CLI
+    }
+    drawAtt();
+    return took;
+  }
+  // main's ack for one image (pasteImage / attachImage); a terminal-tab paste has nothing waiting and is ignored here.
+  function onImagePasted(msg) {
+    const a = atts.get(msg.id); if (!a || !a.waiting.size) return;
+    a.waiting.delete(a.waiting.values().next().value);
+    flush(msg.id);
+  }
+  function flush(id) {
+    const a = atts.get(id); if (!a || a.waiting.size || a.queued == null) return;
+    const text = a.queued; a.queued = null;
+    setTimeout(() => deliver(id, text), 150); // Claude turns the pasted path into [Image #N] in ~30 ms
+  }
   // questPrompt pastes the text and sends Enter in its own write once the paste has landed: the TUI swallows an Enter
-  // written together with the text. Images pasted here already sit in the agent's prompt, so they go with it.
-  function send() {
-    const inp = box(), text = inp.value.trim(); if (selectedId == null) return;
-    if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
-    api.send({ type: 'questPrompt', id: selectedId, text });
-    if (chat()) { chatUi.addPending(selectedId, text); clearAttachments(); }
-    inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank');
+  // written together with the text. An image-only prompt is just Enter on what's already in the agent's prompt.
+  function deliver(id, text) {
+    if (text) api.send({ type: 'questPrompt', id, text }); else api.send({ type: 'termInput', id, data: '\r' });
+    chatUi.releasePending(id);
     if (chat()) renderConversation();
+  }
+  function send() {
+    const inp = box(), text = inp.value.trim(), id = selectedId; if (id == null) return;
+    const a = atts.get(id), imgs = a ? a.urls.splice(0) : [];
+    if (!text && !imgs.length) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
+    const held = !!(a && a.waiting.size);
+    if (chat()) chatUi.addPending(id, text, imgs, held);
+    inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt();
+    if (held) { a.queued = text; if (chat()) renderConversation(); return; } // goes once main confirms the images are in
+    deliver(id, text);
   }
   function insert(text, andSend) {
     const t = box(), s = t.selectionStart ?? t.value.length;
@@ -91,20 +133,18 @@
       e.preventDefault(); hist--; recall(hist < 0 ? draft : ps[ps.length - 1 - hist]);
     }
   }
-  // An image on the clipboard goes through main like Alt+V in the terminal: saved, then pasted into the agent's prompt.
+  // Pasted files: a screenshot goes through main like Alt+V in the terminal; an image file copied in Explorer is attached
+  // by path; any other file drops its path into the box. Plain text pastes as usual.
   function onPaste(e) {
     if (!chat() || selectedId == null) return;
-    const img = [...(e.clipboardData?.items || [])].find(i => i.kind === 'file' && i.type.startsWith('image/'));
-    if (img) { e.preventDefault(); api.send({ type: 'pasteImage', id: selectedId }); }
+    const files = [...(e.clipboardData?.files || [])];
+    if (files.length && addFiles(files)) e.preventDefault();
   }
-  // main answers with the saved file: a thumbnail above the box until the prompt is sent.
-  function onImagePasted(msg) {
-    if (!chat() || msg.id !== selectedId || !msg.path) return;
-    const att = document.getElementById('chat-att');
-    att.insertAdjacentHTML('beforeend', `<img src="file:///${encodeURI(msg.path.replace(/^\/+/, ''))}" alt="">`);
-    order().classList.add('has-att');
-  }
-  function clearAttachments() { document.getElementById('chat-att').innerHTML = ''; order().classList.remove('has-att'); }
+  // Files dropped anywhere on the Chat view do the same (the app-wide drop handler would type them into the terminal unseen).
+  const pane = document.getElementById('term'), hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  pane.addEventListener('dragover', (e) => { if (!chat() || !hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; order().classList.add('drop'); });
+  pane.addEventListener('dragleave', (e) => { if (!pane.contains(e.relatedTarget)) order().classList.remove('drop'); });
+  pane.addEventListener('drop', (e) => { order().classList.remove('drop'); if (!chat() || !e.dataTransfer?.files.length) return; e.preventDefault(); e.stopPropagation(); addFiles([...e.dataTransfer.files]); box().focus(); });
 
   document.getElementById('term-order-input').addEventListener('paste', onPaste);
   document.getElementById('term-order-input').addEventListener('input', onInput);
@@ -113,5 +153,5 @@
   document.getElementById('chat-plus').addEventListener('click', (e) => { e.stopPropagation(); catalogUi.isOpen() ? catalogUi.close() : openPicker(); });
   document.getElementById('chat-plus').addEventListener('mousedown', (e) => e.stopPropagation()); // the picker's outside-click close would reopen it
   document.getElementById('chat-chips').addEventListener('click', (e) => chatUi.onClick(e, agents.get(selectedId), null));
-  window.chatComposer = { send, insert, onKey, onFiles, onImagePasted, clearAttachments };
+  window.chatComposer = { send, insert, onKey, onFiles, onImagePasted, drawAtt };
 })();

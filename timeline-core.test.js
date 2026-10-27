@@ -28,6 +28,11 @@ test('a pasted image rides along as a data URL', () => {
   assert.deepStrictEqual(ev.images, ['data:image/png;base64,AAAA']);
 });
 
+test('Claude Code\'s "[Image: source: …]" lines are not a prompt of their own', () => {
+  assert.deepStrictEqual(parse({ type: 'user', message: { content: '[Image: source: C:/t/a.png][Image: source: C:/t/b.png]' } }), [{ type: 'images', ts: null, paths: ['C:/t/a.png', 'C:/t/b.png'] }]);
+  assert.strictEqual(parse({ type: 'user', message: { content: 'look [Image: source: C:/t/a.png]' } })[0].text, 'look');
+});
+
 test('the permission mode and a compaction become events', () => {
   assert.deepStrictEqual(parse({ type: 'permission-mode', permissionMode: 'plan' }), [{ type: 'mode', ts: null, mode: 'plan' }]);
   assert.deepStrictEqual(parse({ type: 'system', subtype: 'compact_boundary', timestamp: 't' }), [{ type: 'compact', ts: 't' }]);

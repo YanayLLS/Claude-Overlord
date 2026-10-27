@@ -23,11 +23,17 @@ function promptEvents(ts, blocks, isSystemMessage) {
   const cmd = /^<command-name>\/?([^<]+)<\/command-name>/.exec(txt) || /<command-name>\/?([^<]+)<\/command-name>/.exec(txt);
   if (cmd) { const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(txt); return [{ type: 'command', ts, text: '/' + cmd[1].trim() + (args && args[1].trim() ? ' ' + cap(args[1].trim(), 2000) : '') }]; }
   if (/^\[Request interrupted by user/.test(txt)) return [{ type: 'interrupt', ts }];
-  if (!txt || isSystemMessage(txt)) return null;
+  if (isSystemMessage(txt)) return null;
+  // Claude Code adds an "[Image: source: <path>]" line per pasted image (often as a record of its own). The path is kept:
+  // an image too big to embed below still gets its thumbnail from the file.
+  const paths = [...txt.matchAll(/\[Image: source: ([^\]]*)\]/g)].map(m => m[1].trim()).filter(Boolean);
+  const text = txt.replace(/\[Image: source: [^\]]*\]/g, '').trim();
+  if (!text && !blocks.some(b => b.type === 'image')) return paths.length ? [{ type: 'images', ts, paths }] : null;
   const images = blocks.filter(b => b.type === 'image' && b.source && b.source.type === 'base64' && (b.source.data || '').length <= TL_IMG_MAX)
     .map(b => `data:${b.source.media_type || 'image/png'};base64,${b.source.data}`);
-  const ev = { type: 'prompt', ts, text: cap(txt, TL_TEXT_MAX) };
+  const ev = { type: 'prompt', ts, text: cap(text, TL_TEXT_MAX) };
   if (images.length) ev.images = images;
+  if (paths.length) ev.paths = paths;
   return [ev];
 }
 

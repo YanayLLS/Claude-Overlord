@@ -286,3 +286,12 @@ body:not(.world-mode) #conversation, body:not(.world-mode) #term-order { -webkit
 body:not(.world-mode) #chat-at mark { background: none; color: var(--claude); }
 body:not(.world-mode) #conversation .msg.user.pending { margin-top: 10px; }
 body:not(.world-mode) #conversation .w-tool { flex: 1 1 0; } /* the call in flight shrinks with an ellipsis instead of wrapping */
+
+/* Images: thumbnails open full size; a drop target while dragging files over the Chat view */
+body:not(.world-mode) #conversation .imgs img, body:not(.world-mode) #chat-att img { cursor: zoom-in; transition: transform .15s var(--chat-ease); }
+body:not(.world-mode) #conversation .imgs img:hover, body:not(.world-mode) #chat-att img:hover { transform: scale(1.03); }
+body:not(.world-mode) #conversation .msg.user.imgs-only { margin-top: -12px; }
+body:not(.world-mode) #conversation .msg.user.pending .imgs img { opacity: .7; }
+body:not(.world-mode) #term-order.drop { border-color: var(--claude); box-shadow: 0 0 0 4px color-mix(in srgb, var(--claude) 18%, transparent), 0 6px 24px rgba(0,0,0,.2); }
+.chat-lightbox { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 32px; background: rgba(0,0,0,.72); cursor: zoom-out; animation: chat-in .18s ease-out; }
+.chat-lightbox img { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }

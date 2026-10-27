@@ -38,6 +38,7 @@
     }
     return window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_'); // relative links resolve against the agent's folder
   }
+  const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
   const clock = (ts) => { try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
 
@@ -81,8 +82,11 @@
 
   function msgHtml(ev, i, cwd) {
     let h = cache.get(ev); if (h != null) return h;
-    if (ev.type === 'prompt') {
-      const imgs = (ev.images || []).map(src => `<img src="${escH(src)}" alt="">`).join('');
+    if (ev.type === 'images') h = `<div class="msg user imgs-only"><div class="imgs">${ev.paths.map(p => `<img src="${escH(fileUrl(p))}" alt="" loading="lazy">`).join('')}</div></div>`;
+    else if (ev.type === 'prompt') {
+      // Embedded images first; an image too big to embed shows from its file, via the path Claude Code wrote.
+      const srcs = (ev.images && ev.images.length ? ev.images : (ev.paths || []).map(fileUrl));
+      const imgs = srcs.map(src => `<img src="${escH(src)}" alt="" loading="lazy">`).join('');
       const text = (ev.text || '').replace(/\s*\[Image #\d+\]\s*/g, ' ').trim();
       const long = text.length > 900 || text.split('\n').length > 14;
       h = `<div class="msg user" data-i="${i}">${imgs ? `<div class="imgs">${imgs}</div>` : ''}${text ? `<div class="bubble${long ? ' long' : ''}">${escH(text)}</div>${long ? '<button class="more" type="button">Show more</button>' : ''}` : ''}</div>`;
@@ -103,14 +107,18 @@
   // The transcript as blocks (one per message, tool run or turn footer), so paint can swap only what changed.
   // A turn's footer waits until the turn is over: its turn_duration line, or the next prompt.
   function blocks(evs, doneBy, cwd) {
-    const out = []; let run = [], textAt = -1, turn = null, open = false;
+    const out = []; let run = [], textAt = -1, turn = null, open = false, lastPrompt = null;
     const flush = () => { if (run.length) out.push(groupHtml(run, doneBy, cwd)); run = []; };
-    const close = () => { flush(); if (open && (textAt >= 0 || turn)) out.push(footHtml(textAt, turn)); textAt = -1; turn = null; open = false; };
+    // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
+    const close = () => { flush(); if (open && turn) out.push(footHtml(textAt, turn)); textAt = -1; turn = null; open = false; };
     evs.forEach((ev, i) => {
       const t = ev.type;
       if (t === 'tool' && ev.name === 'AskUserQuestion' && !doneBy.get(ev.toolId)) return; // the question card shows it
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
       if (t === 'tool_done' || t === 'mode') return;
+      // The "[Image: source: …]" record after a prompt: only shown when that prompt had no thumbnails of its own.
+      if (t === 'images') { if (lastPrompt && ((lastPrompt.images || []).length || (lastPrompt.paths || []).length)) return; }
+      if (t === 'prompt') lastPrompt = ev;
       if (t === 'turn') { turn = ev; return; }
       if (t === 'prompt' || t === 'command') close();
       flush(); out.push(msgHtml(ev, i, cwd));
@@ -163,12 +171,14 @@
   }
 
   // A prompt sent from the composer shows at once, dimmed, until the transcript writes it (or the agent queues it).
-  const pending = new Map(); // agent id → { text, at }
+  // It matches the transcript's prompt with the [Image #N] tags Claude adds for its images taken out.
+  const pending = new Map(); // agent id → { text, imgs, at, held }
   function pendingHtml(id, evs, busy) {
     const p = pending.get(id); if (!p) return '';
-    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+    const norm = (s) => String(s || '').replace(/\[Image #\d+\]/g, ' ').replace(/\s+/g, ' ').trim();
     if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.text)) || Date.now() - p.at > 120000) { pending.delete(id); return ''; }
-    return `<div class="msg user pending"><div class="bubble">${escH(p.text)}</div><span class="q">${busy ? 'Queued' : 'Sending…'}</span></div>`;
+    const imgs = p.imgs.length ? `<div class="imgs">${p.imgs.map(u => `<img src="${escH(u)}" alt="">`).join('')}</div>` : '';
+    return `<div class="msg user pending">${imgs}${p.text ? `<div class="bubble">${escH(p.text)}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : busy ? 'Queued' : 'Sending…'}</span></div>`;
   }
 
   // ── Composer chips: permission mode (click cycles it, like Shift+Tab), model · effort, context used ──
@@ -186,11 +196,14 @@
 
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
   // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
-  let prevBusy = new Map(), tick = null;
+  let prevBusy = new Map(), tick = null, jumpOnce = false;
   function paint(el, id, a, evs, st) {
     const now = Date.now();
     const doneBy = new Map(); let mode = '';
     if (evs) for (const ev of evs) { if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev); else if (ev.type === 'mode') mode = ev.mode; }
+    // The transcript outranks a stale "working": a turn whose end is the last thing written is over, whatever a
+    // leftover per-call status in the list says.
+    if (evs && (st === 'active' || st === 'settling')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done') continue; if (t === 'turn') st = 'waiting'; break; } }
     const busy = st === 'active' || st === 'resuming';
     const order = document.getElementById('term-order');
     order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
@@ -205,8 +218,9 @@
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
-    if (fresh) { el.innerHTML = '<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); }
-    const stuck = !fresh && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
+    if (fresh && window.chatComposer) chatComposer.drawAtt(); // another agent: its own pending images
+    if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); }
+    const stuck = !fresh && !jumpOnce && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
     const old = el._blocks || [];
     for (let k = 0; k < list.length; k++) {
       if (old[k] === list[k]) continue;
@@ -223,7 +237,12 @@
     // The working line's elapsed time ticks once a second while the agent works and the view is open.
     if (busy && !tick) tick = setInterval(() => { if (!el.classList.contains('open')) { clearInterval(tick); tick = null; return; } rerender(); }, 1000);
     else if (!busy && tick) { clearInterval(tick); tick = null; }
-    if (!stuck) el.scrollTop = el.scrollHeight;
+    if (!stuck) {
+      el.scrollTop = el.scrollHeight;
+      // Images grow the thread as they load: stay pinned to the bottom through that.
+      for (const i of el.querySelectorAll('img')) if (!i.complete) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
+    }
+    jumpOnce = false;
     for (const s of thread.querySelectorAll('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
     syncJump(el);
   }
@@ -247,6 +266,8 @@
     if (k && selectedId != null) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
     const pick = e.target.closest('[data-pick]'); // question card: arrow down to the option, then Enter
     if (pick && selectedId != null) { keys([...Array(+pick.dataset.pick).fill('\x1b[B'), '\r']); pick.classList.add('picked'); return; }
+    const img = e.target.closest('.imgs img'); // a thumbnail opens full size
+    if (img) { lightbox(img.src); return; }
     const jump = e.target.closest('[data-jump]'); // a background agent's chip: open and show its call
     if (jump) { const d = document.querySelector(`#conversation details[data-tid="${CSS.escape(jump.dataset.jump)}"]`); if (d) { const g = d.parentElement.closest('details'); if (g) g.open = true; d.open = true; d.scrollIntoView({ block: 'center', behavior: 'smooth' }); d.classList.remove('flash'); void d.offsetWidth; d.classList.add('flash'); } return; }
     const ins = e.target.closest('[data-insert]'); // composer chips: /compact, /model
@@ -273,8 +294,17 @@
     else if (c.kind === 'file') api.send({ type: 'docOpenWith', path: c.path });
   }
 
+  // An image full size over the app; a click or Esc closes it.
+  function lightbox(src) {
+    const d = document.createElement('div'); d.className = 'chat-lightbox'; d.innerHTML = `<img src="${escH(src)}" alt="">`;
+    const close = () => { d.remove(); document.removeEventListener('keydown', key, true); };
+    const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); } };
+    d.onclick = close; document.addEventListener('keydown', key, true); document.body.appendChild(d);
+  }
+  document.getElementById('chat-att').addEventListener('click', (e) => { const i = e.target.closest('img'); if (i) lightbox(i.src); });
+
   // Opening a run of calls that had a failure opens the failed call too: "1 failed" should show which.
   document.getElementById('conversation').addEventListener('toggle', (e) => { const d = e.target; if (d.matches && d.matches('details.tgroup') && d.open) { const f = d.querySelector('details.trow.err'); if (f) f.open = true; } }, true);
 
-  window.chatUi = { paint, onClick, syncJump, SPARK, keys, addPending: (id, text) => pending.set(id, { text, at: Date.now() }), onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false) => { pending.set(id, { text, imgs, held, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = pending.get(id); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
