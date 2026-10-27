@@ -203,7 +203,8 @@
     if (evs) for (const ev of evs) { if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev); else if (ev.type === 'mode') mode = ev.mode; }
     // The transcript outranks a stale "working": a turn whose end is the last thing written is over, whatever a
     // leftover per-call status in the list says.
-    if (evs && (st === 'active' || st === 'settling')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done') continue; if (t === 'turn') st = 'waiting'; break; } }
+    // (Covers "resuming" too: it can linger after Overlord reattaches an agent that has since finished.)
+    if (evs && (st === 'active' || st === 'settling' || st === 'resuming')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done' || t === 'images') continue; if (t === 'turn') st = 'waiting'; break; } }
     const busy = st === 'active' || st === 'resuming';
     const order = document.getElementById('term-order');
     order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
