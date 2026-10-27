@@ -15,19 +15,30 @@
   const atts = new Map(); // agent id → { list: [{ n, url, path, saving }], next }
   const attOf = (id) => { if (!atts.has(id)) atts.set(id, { list: [], next: 1 }); return atts.get(id); };
   const TAG = /\[Image #(\d+)\]/g;
+  // A long paste (over 20 lines or 1,500 characters) becomes "[Pasted text #1 · 200 lines]" in the box, like the CLI,
+  // with a chip above it to peek (hover), expand back into the box (click) or drop (✕); Send puts the text back in.
+  const PASTE = /\[Pasted text #(\d+)[^\]]*\]/g;
+  const escA = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function drawAtt() {
     syncDraft(); // called when the Chat view shows another agent: its own draft and images
-    const a = atts.get(selectedId), list = a ? a.list : [];
-    document.getElementById('chat-att').innerHTML = list.map(x => `<span class="att${x.saving ? ' saving' : ''}" data-n="${x.n}"><img src="${x.url}" alt=""><b>${x.n}</b><button type="button" class="att-x" title="Remove" aria-label="Remove image ${x.n}">×</button></span>`).join('');
-    order().classList.toggle('has-att', list.length > 0);
+    const a = atts.get(selectedId), list = a ? a.list : [], pastes = (a && a.pastes) || [];
+    document.getElementById('chat-att').innerHTML = list.map(x => `<span class="att${x.saving ? ' saving' : ''}" data-n="${x.n}"><img src="${x.url}" alt=""><b>${x.n}</b><button type="button" class="att-x" title="Remove" aria-label="Remove image ${x.n}">×</button></span>`).join('')
+      + pastes.map(x => `<span class="att doc" data-p="${x.n}" title="${escA(x.text.split('\n').slice(0, 8).join('\n'))}"><span class="doc-i">¶</span><span class="doc-t"><b>Pasted text #${x.n}</b><small>${x.lines} lines · click to expand</small></span><button type="button" class="att-x" title="Remove" aria-label="Remove pasted text ${x.n}">×</button></span>`).join('');
+    order().classList.toggle('has-att', list.length + pastes.length > 0);
   }
-  // A tag deleted from the text drops its image (and its thumbnail).
+  // A tag deleted from the text drops its image or pasted text (and its chip).
   function pruneAtt() {
-    const a = atts.get(selectedId); if (!a || !a.list.length) return;
-    const used = new Set([...box().value.matchAll(TAG)].map(m => +m[1]));
-    const keep = a.list.filter(x => used.has(x.n));
-    if (keep.length !== a.list.length) { a.list = keep; if (!keep.length) a.next = 1; drawAtt(); }
+    const a = atts.get(selectedId); if (!a || (!a.list.length && !(a.pastes || []).length)) return;
+    const v = box().value, used = new Set([...v.matchAll(TAG)].map(m => +m[1])), usedP = new Set([...v.matchAll(PASTE)].map(m => +m[1]));
+    const keep = a.list.filter(x => used.has(x.n)), keepP = (a.pastes || []).filter(x => usedP.has(x.n));
+    if (keep.length !== a.list.length || keepP.length !== (a.pastes || []).length) { a.list = keep; a.pastes = keepP; if (!keep.length) a.next = 1; if (!keepP.length) a.nextP = 1; drawAtt(); }
   }
+  function addPaste(text) {
+    const a = attOf(selectedId); a.pastes = a.pastes || []; a.nextP = a.nextP || 1;
+    const x = { n: a.nextP++, text, lines: text.split('\n').length }; a.pastes.push(x);
+    insert(`[Pasted text #${x.n} · ${x.lines} lines] `); drawAtt();
+  }
+  const expandPastes = (text, a) => text.replace(PASTE, (m, n) => { const x = ((a && a.pastes) || []).find(p => p.n === +n); return x ? x.text : m; });
   let saveSeq = 0; const saving = new Map(); // seq → attachment waiting for main's saved path
   function addFiles(files) {
     const id = selectedId; if (id == null) return false;
@@ -70,13 +81,13 @@
     if (chat()) renderConversation();
   }
   function send() {
-    const inp = box(), text = inp.value.trim(), id = selectedId; if (id == null) return;
+    const inp = box(), id = selectedId; if (id == null) return;
     pruneAtt();
-    const a = atts.get(id), list = a ? a.list.splice(0) : [];
-    if (a) a.next = 1;
+    const a = atts.get(id), shown = inp.value.trim(), text = expandPastes(inp.value, a).trim(), list = a ? a.list.splice(0) : [];
+    if (a) { a.next = 1; a.pastes = []; a.nextP = 1; }
     if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
     const held = list.some(x => x.saving);
-    if (chat()) chatUi.addPending(id, text, list.map(x => x.url), held);
+    if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text); // shows the box as typed (paste chips), matches the full text
     inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt();
     if (held) { queued.set(id, { text, list }); if (chat()) renderConversation(); return; }
     deliver(id, text, list);
@@ -189,7 +200,9 @@
   function onPaste(e) {
     if (!chat() || selectedId == null) return;
     const files = [...(e.clipboardData?.files || [])];
-    if (files.length && addFiles(files)) e.preventDefault();
+    if (files.length && addFiles(files)) { e.preventDefault(); return; }
+    const txt = e.clipboardData?.getData('text/plain') || '';
+    if (txt.length > 1500 || txt.split('\n').length > 20) { e.preventDefault(); addPaste(txt.replace(/\r\n?/g, '\n')); }
   }
   // Files dropped anywhere on the Chat view do the same (the app-wide drop handler would type them into the terminal unseen).
   const pane = document.getElementById('term'), hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
@@ -207,9 +220,18 @@
   document.getElementById('term-order-input').addEventListener('input', pruneAtt);
   // ✕ on a thumbnail removes the image and its tag; a click on the picture opens it full size (chat-ui.js).
   document.getElementById('chat-att').addEventListener('click', (e) => {
-    const x = e.target.closest('.att-x'); if (!x) return;
+    const chip = e.target.closest('.att'); if (!chip) return;
+    const x = e.target.closest('.att-x'), t = box();
+    if (chip.dataset.p) { // a pasted-text chip: ✕ drops it, a click puts the text back into the box
+      e.stopPropagation();
+      const n = +chip.dataset.p, re = new RegExp(`\\[Pasted text #${n}[^\\]]*\\] ?`);
+      const p = ((atts.get(selectedId) || {}).pastes || []).find(q => q.n === n);
+      t.value = t.value.replace(re, () => (x || !p ? '' : p.text)); grow(t); pruneAtt(); t.focus(); // a function: the text may hold "$&"
+      return;
+    }
+    if (!x) return;
     e.stopPropagation();
-    const n = x.closest('.att').dataset.n, t = box();
+    const n = chip.dataset.n;
     t.value = t.value.split(`[Image #${n}] `).join('').split(`[Image #${n}]`).join(''); grow(t); pruneAtt(); t.focus();
   }, true);
   // Typing anywhere in the Chat view goes to the box, like the CLI's always-live prompt: a plain key pressed while

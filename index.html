@@ -1246,7 +1246,7 @@ button:focus-visible { outline-offset:0; }
     <button class="hdr-btn" id="peer-btn" onclick="showChatMenu(event)" title="Peers & chat" style="display:none">&#x21C4;</button>
 
     <button class="hdr-btn" id="perf-top" onclick="togglePerfMenu(event)" aria-haspopup="dialog" aria-expanded="false" title="Performance: RAM in use on this PC"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span id="perf-top-ram"></span></button>
-    <button class="hdr-btn" id="hdr-chat" onclick="switchTermTab(termTab === 'conversation' ? 'terminal' : 'conversation')" title="Chat view"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button><button class="hdr-btn" id="hdr-split" onclick="chatUi.toggleSplit()" title="Chat and terminal side by side"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button>
+    <button class="hdr-btn" id="hdr-inbox" onclick="chatUi.toggleInbox()" title="Needs you"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/></svg><b></b></button><button class="hdr-btn" id="hdr-chat" onclick="switchTermTab(termTab === 'conversation' ? 'terminal' : 'conversation')" title="Chat view"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button><button class="hdr-btn" id="hdr-split" onclick="chatUi.toggleSplit()" title="Chat and terminal side by side"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button>
     <button class="hdr-btn" id="hdr-world" onclick="toggleWorldView()" title="World view: the roster as a 3D map"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></button>
     <button class="hdr-btn" onclick="toggleSettings()" title="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="hdr-btn update-btn" id="update-btn" style="display:none" title="Restart and install the downloaded update"></button>
@@ -3089,7 +3089,8 @@ function render() {
 
   renderSummaryBar();
   if (worldView) worldSync();
-  else if (termTab === 'conversation') renderConversation(); // working dots and permission cards follow the agent's state
+  chatUi.syncInbox(); // the top bar's Needs you count
+  if (!worldView && termTab === 'conversation') renderConversation(); // working dots and permission cards follow the agent's state
 }
 // Summary bar — 3-line layout: session bar, weekly bar, info/pace row. Its own function so the 30 s age/reset
 // refresh redraws just this, not the whole agent list.
@@ -4312,8 +4313,8 @@ function handleAgentMsg(msg) {
     case 'interrupted': showInterrupted(msg.agents); break;
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
-    case 'perm': { const a = agents.get(msg.id); if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
-    case 'permClear': { const a = agents.get(msg.id); if (askFlip && msg.id === selectedId && termTab === 'terminal') switchTermTab('conversation'); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
+    case 'perm': { const a = agents.get(msg.id); if (msg.id !== selectedId) setTimeout(() => chatUi.permToast(msg.id, msg.ask), 400); /* another agent: answer from a toast (after its menu has drawn) */ if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
+    case 'permClear': { chatUi.dropToast(msg.id); const a = agents.get(msg.id); if (askFlip && msg.id === selectedId && termTab === 'terminal') switchTermTab('conversation'); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
     case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; if (msg.id === selectedId && termTab === 'conversation' && !worldView) renderConversation(); } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
@@ -4456,7 +4457,7 @@ function handleAgentMsg(msg) {
     case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
     case 'clipboardImageSaved': chatComposer.onImageSaved(msg); break;
-    case 'agentSteps': case 'bgTail': chatUi.onMsg(msg); break;
+    case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': chatUi.onMsg(msg); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);

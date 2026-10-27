@@ -94,4 +94,31 @@ function matchFiles(files, q, max = 12) {
     .slice(0, max).map(r => r[1]);
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles };
+// git's unified diff → [{ file, add, del, created, deleted, rows: [{ t: ' '|'+'|'-'|'…', s }] }], hunks separated by a fold.
+function parseUnified(text) {
+  const files = []; let f = null;
+  for (const line of String(text || '').split('\n')) {
+    if (line.startsWith('diff --git ')) { const m = / b\/(.+)$/.exec(line); f = { file: m ? m[1] : line.slice(11), add: 0, del: 0, created: false, deleted: false, rows: [] }; files.push(f); continue; }
+    if (!f) continue;
+    if (line.startsWith('new file mode')) f.created = true;
+    else if (line.startsWith('deleted file mode')) f.deleted = true;
+    else if (line.startsWith('@@')) { if (f.rows.length) f.rows.push({ t: '…', s: '' }); }
+    else if (/^(---|\+\+\+|index |similarity|rename |old mode|new mode|Binary)/.test(line)) continue;
+    else if (line[0] === '+') { f.rows.push({ t: '+', s: line.slice(1) }); f.add++; }
+    else if (line[0] === '-') { f.rows.push({ t: '-', s: line.slice(1) }); f.del++; }
+    else if (line[0] === ' ') f.rows.push({ t: ' ', s: line.slice(1) });
+  }
+  return files;
+}
+
+// "main.js:2032", "src/a/b.ts:12:5", "C:\w\x.py:7" in a reply → [{ index, length, file, line }]. A name needs an
+// extension and the line a number, so "12:30" or "http://x:80" don't count.
+const FILE_REF = /(^|[\s(\[`'"*>])((?:[A-Za-z]:[\\/])?(?:[\w.@-]+[\\/])*[\w@-][\w.@-]*\.[A-Za-z][\w]{0,7}):(\d{1,6})(?::\d+)?(?=$|[\s)\]`'",.;:!?<*])/g;
+function fileRefs(text) {
+  const out = []; let m;
+  FILE_REF.lastIndex = 0;
+  while ((m = FILE_REF.exec(text))) { if (/^https?$/i.test(m[2])) continue; out.push({ index: m.index + m[1].length, length: m[0].length - m[1].length, file: m[2], line: +m[3] }); }
+  return out;
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs };

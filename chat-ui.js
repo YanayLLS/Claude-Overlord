@@ -21,6 +21,10 @@
     copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
     check: svg('<path d="m5 12 5 5 9-10"/>'),
     shield: svg('<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/>'),
+    diff: svg('<path d="M12 3v18"/><path d="M5 8h4M7 6v4"/><path d="M15 16h4"/><rect x="3" y="3" width="18" height="18" rx="2"/>'),
+    more: svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>'),
+    star: svg('<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>'),
+    inbox: svg('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>'),
     retry: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
     alert: svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
   };
@@ -37,7 +41,7 @@
       if (!mdLoading) mdLoading = true, window.docsUi.loadMd().then(() => { mdReady = true; cache = new WeakMap(); rerender(); }, () => {});
       return `<p class="plain">${escH(src)}</p>`;
     }
-    return window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_'); // relative links resolve against the agent's folder
+    return linkRefs(window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_')); // relative links resolve against the agent's folder
   }
   const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   // A prompt's images, numbered 1, 2, … in order, and its [Image #N] tags as chips with the same numbers (the k-th tag
@@ -49,14 +53,36 @@
   const thumbs = (srcs, nums = []) => srcs.length ? `<div class="imgs">${srcs.map((s, k) => `<span class="th"><img src="${escH(s)}" alt="" loading="lazy"><b>${escH(nums[k] || k + 1)}</b></span>`).join('')}</div>` : '';
   const promptSrcs = (ev) => (ev.images && ev.images.length ? ev.images : (ev.paths || []).map(fileUrl));
   // own: the prompt's own number → picture map (a not-yet-sent prompt numbers its images itself)
-  const tagChips = (text, own) => escH(text).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
+  const tagChips = (text, own) => escH(text).replace(/\[Pasted text #\d+ · (\d+) lines\]/g, (_, n) => `<span class="imgtag">¶ Pasted text · ${n} lines</span>`).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
   const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
   const clock = (ts) => { try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
 
-  function diffHtml(old, neu) {
+  function diffHtml(old, neu, file) {
     const d = lineDiff(old, neu);
-    const rows = d.rows.map(r => r.t === '…' ? '<div class="dl fold"><i></i><span>⋯</span></div>' : `<div class="dl ${r.t === '+' ? 'add' : r.t === '-' ? 'del' : ''}"><i>${r.t === ' ' ? '' : r.t}</i><span>${escH(r.s) || ' '}</span></div>`).join('');
-    return { html: `<div class="diff">${rows}</div>`, add: d.add, del: d.del };
+    return { html: rowsHtml(d.rows, file), add: d.add, del: d.del };
+  }
+  // Diff rows, each line coloured by the file's language (line by line: cheap, and right for almost every line).
+  const LANG = { js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript', json: 'json', css: 'css', scss: 'css', html: 'xml', xml: 'xml', vue: 'xml', svg: 'xml', md: 'markdown', py: 'python', sh: 'bash', ps1: 'powershell', yml: 'yaml', yaml: 'yaml', sql: 'sql', go: 'go', rs: 'rust', java: 'java', cs: 'csharp', c: 'c', h: 'c', cpp: 'cpp', ini: 'ini' };
+  function rowsHtml(rows, file) {
+    const ext = String(file || '').split('.').pop().toLowerCase(), lang = LANG[ext], hl = lang && window.hljs && hljs.getLanguage(lang);
+    const line = (s) => { if (!s) return ' '; if (hl) try { return hljs.highlight(s, { language: lang, ignoreIllegals: true }).value; } catch {} return escH(s); };
+    return `<div class="diff">${rows.map(r => r.t === '…' ? '<div class="dl fold"><i></i><span>⋯</span></div>' : `<div class="dl ${r.t === '+' ? 'add' : r.t === '-' ? 'del' : ''}"><i>${r.t === ' ' ? '' : r.t}</i><span>${line(r.s)}</span></div>`).join('')}</div>`;
+  }
+  // file:line references in a reply become links: click opens the file at that line, hover peeks at it. Only text
+  // outside tags is touched, and nothing inside code blocks or existing links.
+  function linkRefs(html) {
+    let skip = 0;
+    return html.split(/(<[^>]+>)/).map(seg => {
+      if (seg[0] === '<') { if (/^<(pre|a)[\s>]/i.test(seg)) skip++; else if (/^<\/(pre|a)>/i.test(seg)) skip = Math.max(0, skip - 1); return seg; }
+      if (skip || !/:\d/.test(seg)) return seg;
+      const refs = fileRefs(seg); if (!refs.length) return seg;
+      let out = '', at = 0;
+      for (const r of refs) {
+        const txt = seg.slice(r.index, r.index + r.length);
+        out += seg.slice(at, r.index) + `<a class="fileref" href="#" data-file="${r.file.replace(/"/g, '&quot;')}" data-line="${r.line}">${txt}</a>`; at = r.index + r.length;
+      }
+      return out + seg.slice(at);
+    }).join('');
   }
   function todoHtml(todos) {
     return '<ul class="todos">' + todos.map(t => `<li class="${escH(t.status)}">${t.status === 'completed' ? ICON.check : '<span class="box"></span>'}<span>${escH(t.text)}</span></li>`).join('') + '</ul>';
@@ -67,7 +93,7 @@
     const running = !done && !!ev.toolId, a = ev.args || {}, v = toolView(ev, running), err = !!(done && done.err);
     const out = done && done.text ? done.text.replace(/\s+$/, '') : '';
     let body = '', stat = '';
-    if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new); body = d.html; stat = `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (err && out) body += `<pre class="out">${escH(out)}</pre>`; }
+    if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new, a.file_path); body = d.html; stat = `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (err && out) body += `<pre class="out">${escH(out)}</pre>`; }
     else if (a.todos) body = `<div class="plan-card past">${todoHtml(a.todos)}</div>`; // the live plan card's frame, without its bar
     else if (a.plan) body = `<div class="md sub plan">${md(a.plan.replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div>`;
     else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o.label ?? o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
@@ -118,18 +144,38 @@
   const famOf = (m) => /opus/i.test(m) ? 'opus' : /haiku/i.test(m) ? 'haiku' : /fable|mythos/i.test(m) ? 'fable' : 'sonnet';
   const diffCache = new WeakMap();
   const editStat = (ev) => { let d = diffCache.get(ev); if (!d) { d = lineDiff(ev.args.old, ev.args.new); diffCache.set(ev, d); } return d; };
-  function footHtml(textAt, turn, sum) {
+  function footHtml(textAt, turn, sum, mark) {
     const meta = turn ? `<span class="tf-meta">${SPARK}Worked ${escH(dur(turn.ms))}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : '';
     let files = '', cost = '';
     if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
     if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
-    return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button>` : ''}${meta}${cost}${files}</div>`;
+    return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button>` : ''}${mark && mark.ts ? `<button class="act mark${mark.on ? ' on' : ''}" type="button" data-act="mark" data-ts="${escH(mark.ts)}" title="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-pressed="${mark.on}">${ICON.star}</button>` : ''}${meta}${cost}${files}</div>`;
   }
 
   // The transcript as blocks (one per message, tool run or turn footer), so paint can swap only what changed.
   // A turn's footer waits until the turn is over: its turn_duration line, or the next prompt.
-  function blocks(evs, doneBy, cwd) {
+  // A long session shows its last 10 turns; the ones before fold into one line ("Earlier: 14 turns · 38 files · $4.10")
+  // that opens them all.
+  // Bookmarks: a reply you star stays on the prompt rail for this session (kept per session, in this browser).
+  const markKey = (id) => { const a = agents.get(id); return (a && a.sessionId) || String(id); };
+  const allMarks = (() => { try { return JSON.parse(localStorage.getItem('chatMarks') || '{}'); } catch { return {}; } })();
+  const marksOf = (id) => new Set(allMarks[markKey(id)] || []);
+  function toggleMark(ts) { const k = markKey(selectedId), m = marksOf(selectedId); m.has(ts) ? m.delete(ts) : m.add(ts); allMarks[k] = [...m]; try { localStorage.setItem('chatMarks', JSON.stringify(allMarks)); } catch {} rerender(); }
+  const KEEP_TURNS = 10;
+  const expanded = new Set(); // agent ids whose earlier turns are open
+  function blocks(evs, doneBy, cwd, id) {
     const out = []; let run = [], textAt = -1, turn = null, open = false, lastPrompt = null, lastPromptAt = -1;
+    const promptsAt = []; evs.forEach((e, k) => { if (e.type === 'prompt') promptsAt.push(k); });
+    let start = 0;
+    if (!expanded.has(id) && promptsAt.length > KEEP_TURNS + 2) {
+      start = promptsAt[promptsAt.length - KEEP_TURNS];
+      const files = new Set(); let o = 0, cost = 0, m = '';
+      const u = { i: 0, o: 0, cr: 0, cw: 0 };
+      for (let k = 0; k < start; k++) { const e = evs[k]; if (e.u) { u.i += e.u.i; u.o += e.u.o; u.cr += e.u.cr; u.cw += e.u.cw; if (e.u.m && e.u.m !== '<synthetic>') m = e.u.m; } if (e.type === 'tool' && e.args && (e.args.old != null || e.args.new != null)) files.add(e.args.file_path || '?'); }
+      if (u.o && typeof calcCost === 'function') cost = calcCost({ modelFamily: famOf(m), inTok: u.i + u.cr + u.cw, outTok: u.o, cacheTok: u.cw, cacheRead: u.cr });
+      const n = promptsAt.filter(k => k < start).length;
+      out.push(`<button type="button" class="earlier" data-act="expand-earlier">${ICON.chev}<span>Earlier: ${n} turn${n > 1 ? 's' : ''}${files.size ? ` · ${files.size} file${files.size > 1 ? 's' : ''}` : ''}${cost ? ` · ${escH(fmtCost(cost))}` : ''}</span></button>`);
+    }
     const fresh = () => ({ files: new Set(), add: 0, del: 0, i: 0, o: 0, cr: 0, cw: 0, m: '', from: -1, to: -1 });
     let sum = fresh();
     const tally = (ev, i) => {
@@ -144,8 +190,10 @@
     tagSrc.clear(); for (const ev of evs) if (ev.type === 'prompt') { const ns = tagNums(ev.text); promptSrcs(ev).forEach((src, k) => { if (ns[k]) tagSrc.set(ns[k], src); }); }
     const flush = () => { if (run.length) out.push(groupHtml(run, doneBy, cwd)); run = []; };
     // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
-    const close = () => { flush(); if (open && turn) out.push(footHtml(textAt, turn, sum)); textAt = -1; turn = null; open = false; sum = fresh(); };
+    const mk = marksOf(id);
+    const close = () => { flush(); if (open && turn) out.push(footHtml(textAt, turn, sum, textAt >= 0 && evs[textAt].ts ? { ts: evs[textAt].ts, on: mk.has(evs[textAt].ts) } : null)); textAt = -1; turn = null; open = false; sum = fresh(); };
     evs.forEach((ev, i) => {
+      if (i < start) return;
       const t = ev.type;
       tally(ev, i);
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
@@ -173,7 +221,7 @@
     const n = perm.name || '', title = n === 'Bash' || n === 'PowerShell' ? 'Run this command?' : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n) ? 'Make this edit?' : /^Web/.test(n) ? 'Fetch this page?' : `Allow ${escH(n.replace(/^mcp__[^_]+__/, '')) || 'this action'}?`;
     const kind = toolView({ name: n }).kind, ev = lastTool(evs, n, doneBy), a = (ev && ev.args) || {};
     let what = `<pre>${escH(perm.status || n)}</pre>`;
-    if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new).html}`;
+    if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new, a.file_path).html}`;
     else if (a.command) what = `<pre>${escH(a.command)}</pre>${a.description ? `<p class="perm-desc">${escH(a.description)}</p>` : ''}`;
     else if (a.url || a.query) what = `<pre>${escH(a.url || a.query)}</pre>`;
     return `<div class="card perm"><div class="card-h">${ICON[kind] || ICON.shield}<span>${title}</span></div>${what}<div class="btns"><button class="primary" type="button" data-keys="1">Allow once<kbd>1</kbd></button><button type="button" data-keys="2">Always allow<kbd>2</kbd></button><button type="button" data-keys="esc">Deny<kbd>Esc</kbd></button></div></div>`;
@@ -241,7 +289,7 @@
     // agent has been idle a while without it showing up.
     for (const p of [...list]) {
       if (busy) p.busyAt = Date.now();
-      if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.text)) || (!busy && Date.now() - (p.busyAt || p.at) > 120000)) list.splice(list.indexOf(p), 1);
+      if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.match || p.text)) || (!busy && Date.now() - (p.busyAt || p.at) > 120000)) list.splice(list.indexOf(p), 1);
     }
     return list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
@@ -313,11 +361,32 @@
     const pct = s.ctxTok ? Math.min(100, Math.round(s.ctxTok / win * 100)) : 0, r = 7, c = 2 * Math.PI * r;
     const model = String(s.model || '').replace(/^claude-/, '').replace(/-(\d+)-(\d+).*$/, ' $1.$2').replace(/^\w/, x => x.toUpperCase());
     return (m ? `<button type="button" class="chip mode m-${m[1]}" data-act="mode" data-mode-cur="${escH(mode)}" aria-haspopup="menu" title="Permission mode">${ICON.shield}<span class="l">${m[0]}</span><span class="s">${m[2]}</span></button>` : '')
+      // Everything uncommitted in the folder, one click away.
+      + `<button type="button" class="chip icon" data-act="session-changes" title="Uncommitted changes in this folder">${ICON.diff}<span class="l">Changes</span></button>`
       + '<span class="grow"></span>'
       // Context left before auto-compact, once it matters (half used); click puts /compact in the box.
       + (pct >= 50 ? `<button type="button" class="chip ctx${pct > 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${((100 - pct) / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
-      + (model ? `<button type="button" class="chip model" data-act="model" aria-haspopup="menu" title="${escH(s.model)}">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</button>` : '');
+      + (model ? `<button type="button" class="chip model" data-act="model" aria-haspopup="menu" title="${escH(s.model)}">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</button>` : '')
+      + `<button type="button" class="chip icon" data-act="view-menu" aria-haspopup="menu" title="Text size and shortcuts">${ICON.more}</button>`;
   }
+  // ⋯ in the composer: text size (A− / A+, remembered) and the keyboard shortcuts.
+  const ZOOMS = [0.9, 1, 1.1, 1.2, 1.35];
+  let zoom = (() => { try { return +localStorage.getItem('chatZoom') || 1; } catch { return 1; } })();
+  const applyZoom = () => document.documentElement.style.setProperty('--chat-zoom', zoom);
+  applyZoom();
+  const SHORTCUTS = [['Enter', 'Send'], ['Shift+Enter', 'New line'], ['Esc', 'Stop the agent'], ['↑ / ↓', 'Your earlier prompts'], ['@', 'Mention a file'], ['/', 'Commands and skills'], ['Ctrl+F', 'Find in chat'], ['Ctrl+↑ / ↓', 'Jump between prompts'], ['Ctrl+`', 'Chat ↔ terminal'], ['1–9', 'Answer a question card'], ['J / K', 'Files in the changes panel']];
+  function openViewMenu(chip) {
+    if (document.getElementById('chat-view-menu')) return closeViewMenu();
+    const m = document.createElement('div'); m.id = 'chat-view-menu';
+    const draw = () => { m.innerHTML = `<div class="vm-row"><span>Text size</span><button type="button" data-z="-1" aria-label="Smaller">A−</button><b>${Math.round(zoom * 100)}%</b><button type="button" data-z="1" aria-label="Larger">A+</button></div><div class="vm-h">Shortcuts</div>${SHORTCUTS.map(([k, v]) => `<div class="vm-k"><span>${escH(v)}</span><kbd>${escH(k)}</kbd></div>`).join('')}`; };
+    draw();
+    m.addEventListener('click', (e) => { const b = e.target.closest('[data-z]'); if (!b) return; const i = Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + +b.dataset.z)); zoom = ZOOMS[i] || 1; try { localStorage.setItem('chatZoom', zoom); } catch {} applyZoom(); draw(); });
+    document.getElementById('term-order').appendChild(m);
+    const r = chip.getBoundingClientRect(), o = document.getElementById('term-order').getBoundingClientRect();
+    m.style.right = Math.max(0, o.right - r.right) + 'px';
+    setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!m.contains(e.target) && !e.target.closest('[data-act="view-menu"]')) closeViewMenu(); document.removeEventListener('mousedown', off, true); }, true), 0);
+  }
+  function closeViewMenu() { document.getElementById('chat-view-menu')?.remove(); }
 
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
   // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
@@ -340,7 +409,7 @@
     let list;
     if (!evs) list = ['<div class="chat-empty"><span class="loading"></span></div>'];
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
-    else list = blocks(evs, doneBy, a.cwd);
+    else list = blocks(evs, doneBy, a.cwd, id);
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
     const tail = (evs ? liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) : ''); // queued text waits under the spinner, as in the CLI
 
@@ -350,13 +419,14 @@
     if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); }
     const stuck = !fresh && !jumpOnce && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
     const old = el._blocks || [];
+    let newReply = null;
     for (let k = 0; k < list.length; k++) {
       if (old[k] === list[k]) continue;
       const tmp = document.createElement('div'); tmp.innerHTML = list[k];
       const node = tmp.firstElementChild || document.createElement('div');
       const cur = thread.children[k];
       if (cur) { keepOpen(cur, node); cur.replaceWith(node); }
-      else { if (!fresh) node.classList.add('enter'); if (!fresh && node.classList.contains('turnfoot') && prevBusy.get(id)) node.classList.add('landed'); thread.appendChild(node); }
+      else { if (!fresh) node.classList.add('enter'); if (!fresh && node.classList.contains('turnfoot') && prevBusy.get(id)) node.classList.add('landed'); thread.appendChild(node); if (!fresh && node.classList.contains('ai')) newReply = node; }
     }
     while (thread.children.length > list.length) thread.lastElementChild.remove();
     el._blocks = list;
@@ -372,7 +442,10 @@
     // The working line's elapsed time ticks once a second while the agent works and the view is open.
     if (busy && !tick) tick = setInterval(() => { if (!el.classList.contains('open')) { clearInterval(tick); tick = null; return; } rerender(); }, 1000);
     else if (!busy && tick) { clearInterval(tick); tick = null; }
-    if (!stuck) {
+    // A long reply that just arrived: land on its first line, to read it top-down (from then on you're "scrolled up",
+    // so the live ticks leave it there).
+    if (!stuck && newReply && newReply.offsetHeight > el.clientHeight * 0.6) el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24;
+    else if (!stuck) {
       el.scrollTop = el.scrollHeight;
       // Images grow the thread as they load: stay pinned to the bottom through that.
       for (const i of el.querySelectorAll('img')) if (!i.complete) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
@@ -396,13 +469,14 @@
   const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
   document.getElementById('term').appendChild(rail);
   function drawRail(el, evs) {
-    const ps = (evs || []).map((e, i) => [e, i]).filter(([e]) => e.type === 'prompt' || e.type === 'command');
-    const key = ps.map(([, i]) => i).join(',');
+    const mk = marksOf(selectedId); // bookmarked replies sit on the rail too, starred
+    const ps = (evs || []).map((e, i) => [e, i]).filter(([e]) => e.type === 'prompt' || e.type === 'command' || (e.type === 'text' && e.ts && mk.has(e.ts)));
+    const key = ps.map(([e, i]) => i + (e.type === 'text' ? '*' : '')).join(',');
     rail.classList.toggle('has', ps.length > 1);
     if (rail._k === key) return; rail._k = key;
-    const label = (t) => escH(String(t || '').replace(/\[Image #\d+\]/g, '🖼').replace(/\s+/g, ' ').trim().slice(0, 140) || '🖼');
-    rail.querySelector('.cr-dashes').innerHTML = ps.map(([, i]) => `<i data-i="${i}"></i>`).join('');
-    rail.querySelector('.cr-pop').innerHTML = ps.map(([e, i]) => `<div data-i="${i}">${label(e.text)}</div>`).join('');
+    const label = (t) => escH(String(t || '').replace(/\[Image #\d+\]/g, '🖼').replace(/[#*`>_]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) || '🖼');
+    rail.querySelector('.cr-dashes').innerHTML = ps.map(([e, i]) => `<i data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}></i>`).join('');
+    rail.querySelector('.cr-pop').innerHTML = ps.map(([e, i]) => `<div data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}>${e.type === 'text' ? '★ ' : ''}${label(e.text)}</div>`).join('');
     railActive(el);
   }
   // The prompt at the top of the view is the one lit.
@@ -415,8 +489,8 @@
   }
   rail.addEventListener('click', (e) => {
     const t = e.target.closest('[data-i]'); if (!t) return;
-    const m = document.querySelector(`#conversation .thread > [data-i="${t.dataset.i}"]`);
-    if (m) { m.scrollIntoView({ block: 'start', behavior: 'smooth' }); m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash'); }
+    const go = () => { const m = document.querySelector(`#conversation .thread > [data-i="${t.dataset.i}"]`); if (m) { m.scrollIntoView({ block: 'start', behavior: 'smooth' }); m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash'); } return !!m; };
+    if (!go()) { expanded.add(selectedId); rerender(); setTimeout(go, 50); } // it's in the folded earlier turns: open them first
   });
   rail.addEventListener('mouseenter', () => { const on = rail.querySelector('.cr-pop .on'); if (on) on.scrollIntoView({ block: 'nearest' }); });
 
@@ -452,6 +526,10 @@
       else if (act.dataset.act === 'turn-edits-inline') showEditsInline(evs || [], +act.dataset.from, +act.dataset.to);
       else if (act.dataset.act === 'mode') openModeMenu(act, act.dataset.modeCur);
       else if (act.dataset.act === 'model') openModelMenu(act);
+      else if (act.dataset.act === 'session-changes') openSessionChanges();
+      else if (act.dataset.act === 'view-menu') openViewMenu(act);
+      else if (act.dataset.act === 'expand-earlier') { expanded.add(selectedId); rerender(); }
+      else if (act.dataset.act === 'mark') toggleMark(act.dataset.ts);
       else { switchTermTab('terminal'); askFlip = true; const x = xterms.get(selectedId); if (x) x.terminal.focus(); }
       return;
     }
@@ -462,6 +540,8 @@
     if (cp) { const ev = evs && evs[+cp.closest('[data-i]').dataset.i]; if (ev) navigator.clipboard.writeText(ev.text).then(() => flash(cp)); return; }
     const more = e.target.closest('.more');
     if (more) { const b = more.previousElementSibling; b.classList.toggle('open'); more.textContent = b.classList.contains('open') ? 'Show less' : 'Show more'; return; }
+    const ref = e.target.closest('a.fileref'); // file:line → the file at that line in the editor
+    if (ref) { e.preventDefault(); peekEl.hidden = true; api.send({ type: 'openFileAt', cwd, file: ref.dataset.file, line: ref.dataset.line }); return; }
     const link = e.target.closest('a[href]'); if (!link) return;
     e.preventDefault();
     const c = classifyHref(link.dataset.href || link.getAttribute('href'), (cwd || '').replace(/\\/g, '/') + '/_');
@@ -485,39 +565,73 @@
   // ── A turn's changes at a glance: the files it touched on the left (+/−), the picked file's diff on the right,
   // every edit to that file stacked in order. ↑/↓ (or j/k) move between files, Esc closes, Open opens the file. ──
   function openChanges(evs, from, to, a) {
-    closeChanges();
     const doneBy = new Map(); for (const e of evs) if (e.type === 'tool_done') doneBy.set(e.toolId, e);
-    const files = new Map(); // path → { add, del, edits: [ev] }
+    const files = new Map(); // path → { path, add, del, created, sections: [{ label, rows }] }
     for (let i = Math.max(0, from); i <= to && i < evs.length; i++) {
       const e = evs[i], d = e.type === 'tool' && doneBy.get(e.toolId);
       if (!d || d.err || !e.args || (e.args.old == null && e.args.new == null)) continue;
       const p = e.args.file_path || e.args.notebook_path || '?', s = editStat(e);
-      if (!files.has(p)) files.set(p, { add: 0, del: 0, edits: [], created: e.name === 'Write' });
-      const f = files.get(p); f.add += s.add; f.del += s.del; f.edits.push(e);
+      if (!files.has(p)) files.set(p, { path: p, add: 0, del: 0, created: e.name === 'Write', sections: [] });
+      const f = files.get(p); f.add += s.add; f.del += s.del; f.sections.push({ rows: s.rows });
     }
-    if (!files.size) return;
-    const list = [...files.entries()], tot = list.reduce((t, [, f]) => ({ add: t.add + f.add, del: t.del + f.del }), { add: 0, del: 0 });
+    for (const f of files.values()) if (f.sections.length > 1) f.sections.forEach((x, j) => { x.label = `Edit ${j + 1} of ${f.sections.length}`; });
+    showChanges('This turn', [...files.values()], a, `<button type="button" class="cc-inline" data-inline="1">Show in chat</button>`, () => showEditsInline(evs, from, to));
+  }
+  // Everything uncommitted in the agent's folder (git diff HEAD + new files), in the same panel.
+  function openSessionChanges() {
+    const a = agents.get(selectedId); if (!a) return;
+    showChanges('Uncommitted', null, a); api.send({ type: 'gitDiff', id: selectedId, cwd: a.cwd });
+  }
+  function onGitDiff(msg) {
+    const p = document.getElementById('chat-changes'); if (!p || p.dataset.kind !== 'Uncommitted' || msg.id !== selectedId) return;
+    const files = parseUnified(msg.diff).map(f => ({ path: (msg.cwd || '').replace(/\\/g, '/') + '/' + f.file, add: f.add, del: f.del, created: f.created, deleted: f.deleted, sections: [{ rows: f.rows }] }));
+    for (const u of msg.untracked || []) { const rows = u.text.split('\n').map(s => ({ t: '+', s })); files.push({ path: (msg.cwd || '').replace(/\\/g, '/') + '/' + u.file, add: rows.length, del: 0, created: true, sections: [{ rows }] }); }
+    showChanges('Uncommitted', files, agents.get(selectedId), '', null, msg.error && !files.length ? `git: ${msg.error}` : 'Nothing uncommitted');
+  }
+  // The panel: files on the left (+/−), the picked file's diff on the right. ↑/↓ or j/k move, Esc closes. Per file:
+  // Open (at its first change), Copy diff, Whole file (the file as it is now, changed lines marked).
+  function showChanges(kind, list, a, extra = '', onInline = null, empty = '') {
+    closeChanges(true);
     const cwd = String((a && a.cwd) || '').replace(/\\/g, '/').toLowerCase();
     const rel = (p) => { const q = String(p).replace(/\\/g, '/'); return cwd && q.toLowerCase().startsWith(cwd + '/') ? q.slice(cwd.length + 1) : q; };
-    const panel = document.createElement('div'); panel.id = 'chat-changes'; panel.tabIndex = -1;
-    panel.innerHTML = `<div class="cc-h">${ICON.edit}<b>Changes</b><span class="cc-tot">${list.length} file${list.length > 1 ? 's' : ''} <b class="add">+${tot.add}</b> <b class="del">−${tot.del}</b></span><span class="grow"></span><button type="button" class="cc-inline" data-act="turn-edits-inline" data-from="${from}" data-to="${to}">Show in chat</button><button type="button" class="cc-x" aria-label="Close">×</button></div>`
-      + `<div class="cc-body"><div class="cc-files">${list.map(([p, f], k) => `<button type="button" class="cc-f" data-k="${k}" title="${escH(p)}"><span class="cc-n">${escH(baseName(p))}${f.created ? '<em>new</em>' : ''}</span><span class="cc-d">${escH(rel(p).split('/').slice(0, -1).join('/'))}</span><span class="cc-s"><b class="add">+${f.add}</b> <b class="del">−${f.del}</b></span></button>`).join('')}</div><div class="cc-diff"></div></div>`;
+    const panel = document.createElement('div'); panel.id = 'chat-changes'; panel.tabIndex = -1; panel.dataset.kind = kind;
+    const tot = (list || []).reduce((t, f) => ({ add: t.add + f.add, del: t.del + f.del }), { add: 0, del: 0 });
+    const head = `<div class="cc-h">${ICON.edit}<b>${escH(kind === 'This turn' ? 'Changes' : 'Uncommitted changes')}</b>${list ? `<span class="cc-tot">${list.length} file${list.length === 1 ? '' : 's'} <b class="add">+${tot.add}</b> <b class="del">−${tot.del}</b></span>` : ''}<span class="grow"></span>${extra}<button type="button" class="cc-x" aria-label="Close">×</button></div>`;
+    if (!list) panel.innerHTML = head + '<div class="cc-empty"><span class="loading"></span></div>';
+    else if (!list.length) panel.innerHTML = head + `<div class="cc-empty">${escH(empty || 'No changes')}</div>`;
+    else panel.innerHTML = head + `<div class="cc-body"><div class="cc-files">${list.map((f, k) => `<button type="button" class="cc-f" data-k="${k}" title="${escH(f.path)}"><span class="cc-n">${escH(baseName(f.path))}${f.created ? '<em>new</em>' : f.deleted ? '<em class="gone">deleted</em>' : ''}</span><span class="cc-d">${escH(rel(f.path).split('/').slice(0, -1).join('/'))}</span><span class="cc-s"><b class="add">+${f.add}</b> <b class="del">−${f.del}</b></span></button>`).join('')}</div><div class="cc-diff"></div></div>`;
     document.getElementById('term').appendChild(panel);
-    let cur = 0;
+    let cur = 0, whole = false;
+    const draw = () => {
+      const f = list[cur];
+      const tools = `<button type="button" class="cc-btn" data-copy="1">Copy diff</button><button type="button" class="cc-btn${whole ? ' on' : ''}" data-whole="1">Whole file</button><button type="button" class="cc-btn" data-open="1">Open</button>`;
+      panel.querySelector('.cc-diff').innerHTML = `<div class="cc-dh"><span class="mono">${escH(rel(f.path))}</span>${tools}</div>` + (whole ? '<div class="cc-whole"><span class="loading"></span></div>'
+        : f.sections.map(x => `${x.label ? `<div class="cc-sep">${escH(x.label)}</div>` : ''}${rowsHtml(x.rows, f.path)}`).join(''));
+      if (whole) api.send({ type: 'filePeek', cwd: a && a.cwd, file: f.path, line: 0, all: true, seq: 'whole:' + cur });
+      panel.querySelector('.cc-diff').scrollTop = 0;
+    };
     const pick = (k) => {
-      cur = (k + list.length) % list.length;
-      const [p, f] = list[cur];
+      if (!list || !list.length) return;
+      cur = (k + list.length) % list.length; whole = false;
       for (const b of panel.querySelectorAll('.cc-f')) b.classList.toggle('on', +b.dataset.k === cur);
       panel.querySelector('.cc-f.on')?.scrollIntoView({ block: 'nearest' });
-      panel.querySelector('.cc-diff').innerHTML = `<div class="cc-dh"><span class="mono">${escH(rel(p))}</span><button type="button" class="cc-open" data-open="${escH(p)}">Open</button></div>`
-        + f.edits.map((e, j) => `${f.edits.length > 1 ? `<div class="cc-sep">Edit ${j + 1} of ${f.edits.length}</div>` : ''}${diffHtml(e.args.old, e.args.new).html}`).join('');
-      panel.querySelector('.cc-diff').scrollTop = 0;
+      draw();
+    };
+    panel._whole = (msg) => { // the file as it is now, the lines this change added marked
+      if (!whole || msg.seq !== 'whole:' + cur) return;
+      const f = list[cur], added = new Set(f.sections.flatMap(x => x.rows.filter(r => r.t === '+').map(r => r.s)));
+      const rows = (msg.lines || []).map(s => ({ t: added.has(s) ? '+' : ' ', s }));
+      const box = panel.querySelector('.cc-whole'); if (box) box.outerHTML = rows.length ? rowsHtml(rows, f.path).replace('class="diff"', 'class="diff whole"') : `<div class="cc-empty">The file isn't there any more</div>`;
     };
     panel.addEventListener('click', (e) => {
       const b = e.target.closest('.cc-f'); if (b) return pick(+b.dataset.k);
       if (e.target.closest('.cc-x')) return closeChanges();
-      const o = e.target.closest('[data-open]'); if (o) return api.send({ type: 'docOpenWith', path: o.dataset.open });
-      const inl = e.target.closest('[data-act="turn-edits-inline"]'); if (inl) { closeChanges(); showEditsInline(evs, from, to); }
+      if (e.target.closest('[data-inline]') && onInline) { closeChanges(); return onInline(); }
+      const f = list && list[cur]; if (!f) return;
+      if (e.target.closest('[data-open]')) { const first = f.sections[0] && f.sections[0].rows.find(r => r.t === '+'); return api.send({ type: 'openFileAt', cwd: a && a.cwd, file: f.path, line: 1 }); }
+      if (e.target.closest('[data-whole]')) { whole = !whole; return draw(); }
+      const c = e.target.closest('[data-copy]');
+      if (c) { navigator.clipboard.writeText(f.sections.map(x => x.rows.map(r => (r.t === '…' ? '@@' : r.t) + r.s).join('\n')).join('\n@@\n')).then(() => { c.textContent = 'Copied'; setTimeout(() => { c.textContent = 'Copy diff'; }, 1200); }); }
     });
     panel.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeChanges(); }
@@ -526,7 +640,7 @@
     });
     pick(0); panel.focus();
   }
-  function closeChanges() { const p = document.getElementById('chat-changes'); if (p) { p.remove(); document.getElementById('term-order-input')?.focus(); } }
+  function closeChanges(keepFocus) { const p = document.getElementById('chat-changes'); if (p) { p.remove(); if (!keepFocus) document.getElementById('term-order-input')?.focus(); } }
   // The old way, still one click away: open that turn's edit rows in the thread and scroll to the first.
   function showEditsInline(evs, from, to) {
     let first = null;
@@ -535,6 +649,78 @@
       const g = d.parentElement.closest('details'); if (g) g.open = true; d.open = true; first = first || d;
     }
     if (first) first.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  // ── Another agent needs you: a toast you can answer from (Allow / Always / Deny, or the question's options read off
+  // that agent's terminal), so there's no switching for a quick yes. Gone once it's answered (permClear). ──
+  const toasts = document.createElement('div'); toasts.id = 'chat-toasts'; document.body.appendChild(toasts);
+  function permToast(id, ask) {
+    const a = agents.get(id); if (!a || worldView) return;
+    dropToast(id);
+    const t = [...a.tools.values()].find(x => x.perm) || {}, opts = ask ? menuOptions(id) : [];
+    const keysFor = (k) => { const n = id; [...Array(k).fill('\x1b[B'), '\r'].forEach((d, j) => setTimeout(() => api.send({ type: 'termInput', id: n, data: d }), j * 70)); };
+    const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id;
+    el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
+      + `<div class="ct-what">${escH(t.status || t.name || '')}</div>`
+      + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : '<button type="button" class="primary" data-k="1">Allow</button><button type="button" data-k="2">Always</button><button type="button" data-k="esc">Deny</button>'}<button type="button" data-open="1">Open</button></div>`;
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.classList.contains('ct-x')) return el.remove();
+      if (b.dataset.open) { el.remove(); focusAgent(id); return; }
+      if (b.dataset.k) api.send({ type: 'termInput', id, data: b.dataset.k === 'esc' ? '\x1b' : b.dataset.k });
+      if (b.dataset.pick) keysFor(+b.dataset.pick);
+      el.classList.add('done'); setTimeout(() => el.remove(), 300);
+    });
+    toasts.appendChild(el);
+  }
+  function dropToast(id) { for (const t of toasts.querySelectorAll(`.ctoast[data-id="${id}"]`)) t.remove(); }
+
+  // ── "Needs you" inbox in the top bar: every agent waiting on you (a question, a permission) or finished unseen ──
+  function syncInbox() {
+    const btn = document.getElementById('hdr-inbox'); if (!btn) return;
+    const items = [];
+    for (const [id, a] of agents) {
+      if (a.archived) continue;
+      const st = agentStatus(a), perm = [...a.tools.values()].find(t => t.perm);
+      if (perm) items.push({ id, a, kind: perm.perm === 'ask' ? 'question' : 'permission', what: perm.status || perm.name || '' });
+      else if (a.unread) items.push({ id, a, kind: 'done', what: a.preview || '' });
+      else if (st === 'crashed') items.push({ id, a, kind: 'crashed', what: 'Stopped' });
+    }
+    btn._items = items;
+    const urgent = items.filter(x => x.kind !== 'done').length;
+    btn.classList.toggle('has', items.length > 0); btn.classList.toggle('urgent', urgent > 0);
+    const n = btn.querySelector('b'); if (n) n.textContent = items.length ? String(items.length) : '';
+    if (document.getElementById('chat-inbox')) drawInbox();
+  }
+  function toggleInbox() { if (document.getElementById('chat-inbox')) return document.getElementById('chat-inbox').remove(); const m = document.createElement('div'); m.id = 'chat-inbox'; document.body.appendChild(m); drawInbox(); setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!m.contains(e.target) && !e.target.closest('#hdr-inbox')) m.remove(); document.removeEventListener('mousedown', off, true); }, true), 0); }
+  function drawInbox() {
+    const m = document.getElementById('chat-inbox'), btn = document.getElementById('hdr-inbox'); if (!m || !btn) return;
+    const items = btn._items || [], label = { question: 'Question', permission: 'Needs approval', done: 'Finished', crashed: 'Stopped' };
+    m.innerHTML = `<div class="ib-h">Needs you</div>` + (items.length ? items.map(x => `<button type="button" class="ib-i k-${x.kind}" data-id="${x.id}"><span class="ib-dot"></span><span class="ib-t"><b>${escH(x.a.title || 'Agent')}</b><small>${escH(label[x.kind])}${x.what ? ' · ' + escH(String(x.what).split('\n')[0].slice(0, 80)) : ''}</small></span></button>`).join('') : '<div class="ib-empty">All clear</div>');
+    const r = btn.getBoundingClientRect(); m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(8, innerWidth - r.right) + 'px';
+    m.onclick = (e) => { const b = e.target.closest('[data-id]'); if (!b) return; m.remove(); focusAgent(+b.dataset.id); if (termTab !== 'conversation') switchTermTab('conversation'); };
+  }
+
+  // ── file:line links: click opens the file at the line in your editor; resting on one peeks at those lines ──
+  let peekSeq = 0, peekFor = null, peekTimer = null;
+  const peekEl = document.createElement('div'); peekEl.id = 'chat-peek'; peekEl.hidden = true; document.body.appendChild(peekEl);
+  const conv = document.getElementById('conversation');
+  conv.addEventListener('mouseover', (e) => {
+    const r = e.target.closest('a.fileref'); if (!r || r === peekFor) return;
+    peekFor = r; clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => { const a = agents.get(selectedId); api.send({ type: 'filePeek', cwd: a && a.cwd, file: r.dataset.file, line: r.dataset.line, seq: ++peekSeq }); }, 350);
+  });
+  conv.addEventListener('mouseout', (e) => { const r = e.target.closest('a.fileref'); if (r && !r.contains(e.relatedTarget)) { peekFor = null; clearTimeout(peekTimer); peekEl.hidden = true; } });
+  function showPeek(msg) {
+    if (msg.seq !== peekSeq || !peekFor || !msg.lines || !msg.lines.length) return;
+    const rows = msg.lines.map((s, k) => ({ n: msg.start + k, s }));
+    const ext = String(msg.path).split('.').pop().toLowerCase(), lang = LANG[ext], hl = lang && window.hljs && hljs.getLanguage(lang);
+    const fmt = (s) => { if (hl) try { return hljs.highlight(s || ' ', { language: lang, ignoreIllegals: true }).value; } catch {} return escH(s) || ' '; };
+    peekEl.innerHTML = `<div class="pk-h">${escH(String(msg.path).replace(/\\/g, '/').split('/').slice(-2).join('/'))}<span>:${msg.line}</span></div><div class="pk-b">${rows.map(r => `<div class="pk-l${r.n === msg.line ? ' on' : ''}"><i>${r.n}</i><span>${fmt(r.s)}</span></div>`).join('')}</div>`;
+    const b = peekFor.getBoundingClientRect(); peekEl.hidden = false;
+    const h = peekEl.getBoundingClientRect();
+    peekEl.style.left = Math.max(8, Math.min(b.left, innerWidth - h.width - 8)) + 'px';
+    peekEl.style.top = (b.top - h.height - 8 > 8 ? b.top - h.height - 8 : b.bottom + 8) + 'px';
   }
 
   // ── A background shell's live output: a panel over the view, re-read every 2 s while it's open ──
@@ -566,6 +752,8 @@
     box.innerHTML = tools.length ? `<div class="as-h">${tools.length} step${tools.length > 1 ? 's' : ''}</div>` + tools.map(ev => toolRow(ev, doneBy.get(ev.toolId), '')).join('') : '<div class="as-h">No steps recorded</div>';
   }
   function onMsg(msg) {
+    if (msg.type === 'gitDiff') return onGitDiff(msg);
+    if (msg.type === 'filePeek') { if (String(msg.seq).startsWith('whole:')) { const p = document.getElementById('chat-changes'); if (p && p._whole) p._whole(msg); } else showPeek(msg); return; }
     if (msg.type === 'agentSteps') { steps.set(msg.toolId, msg.events || []); const d = document.querySelector(`#conversation details.trow.k-agent[data-tid="${CSS.escape(msg.toolId)}"]`); if (d && d.open) drawSteps(d, msg.events || []); }
     if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.textContent = msg.ok ? (msg.text || '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }
   }
@@ -640,5 +828,5 @@
   }
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { permToast, dropToast, syncInbox, toggleInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '') => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

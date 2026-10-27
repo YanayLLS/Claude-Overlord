@@ -1069,6 +1069,52 @@ function bgTail({ id, file }) {
   send({ type: 'bgTail', id, file, text, ok });
 }
 
+// A file named in a reply ("main.js:2032", "src/a/b.ts:12"): as written, under the agent's folder, or the one git file
+// whose path ends with it. Returns '' when it can't be pinned down.
+function resolveRef(cwd, file, cb) {
+  if (typeof file !== 'string' || !file || typeof cwd !== 'string') return cb('');
+  const f = file.replace(/\\/g, '/');
+  for (const p of [f, path.join(cwd, f)]) { try { if (path.isAbsolute(p) && fs.statSync(p).isFile()) return cb(p); } catch {} }
+  const pick = (files) => { const low = '/' + f.toLowerCase(), hits = files.filter(x => ('/' + x.toLowerCase()).endsWith(low)); cb(hits.length ? path.join(cwd, hits.sort((a, b) => a.length - b.length)[0]) : ''); };
+  const hit = chatFileCache.get(cwd);
+  if (hit && Date.now() - hit.at < 30000) return pick(hit.files);
+  execFile('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd, timeout: 10000, maxBuffer: 64 << 20, windowsHide: true }, (err, out) => {
+    const files = err ? [] : String(out).split('\n').map(s => s.trim()).filter(Boolean);
+    chatFileCache.set(cwd, { at: Date.now(), files }); pick(files);
+  });
+}
+// Open it at the line in VS Code (code --goto), else with the default app.
+function openFileAt({ cwd, file, line }) {
+  resolveRef(cwd, file, (p) => {
+    if (!p) return send({ type: 'toast', text: `Couldn't find ${file}` });
+    execFile('code', ['--goto', `${p}:${Math.max(1, parseInt(line, 10) || 1)}`], { shell: true, windowsHide: true, timeout: 15000 }, (err) => { if (err) shell.openPath(p); });
+  });
+}
+// A few lines around it, for the hover peek; with all, the whole file (capped), for the changes panel's Whole file.
+function filePeek({ cwd, file, line, seq, all: whole }) {
+  resolveRef(cwd, file, (p) => {
+    let lines = [], start = 0;
+    if (p) try { const all = fs.readFileSync(p, 'utf8').split(/\r?\n/), n = Math.max(1, parseInt(line, 10) || 1); if (whole) { start = 1; lines = all.slice(0, 5000).map(s => s.slice(0, 500)); } else { start = Math.max(1, n - 4); lines = all.slice(start - 1, n + 6).map(s => s.slice(0, 300)); } } catch {}
+    send({ type: 'filePeek', seq, path: p, start, line: parseInt(line, 10) || 0, lines });
+  });
+}
+// Everything the agent's folder has uncommitted (tracked changes against HEAD, plus new untracked files), for the
+// Chat view's session changes panel. Raw unified diff; the renderer parses it (chat-core.js parseUnified).
+function gitDiff({ id, cwd }) {
+  if (typeof cwd !== 'string' || !cwd) return;
+  const opts = { cwd, timeout: 20000, maxBuffer: 32 << 20, windowsHide: true };
+  execFile('git', ['diff', 'HEAD', '--no-color', '--unified=3', '--no-ext-diff'], opts, (err, out) => {
+    const diff = err ? '' : String(out).slice(0, 3 << 20);
+    execFile('git', ['ls-files', '--others', '--exclude-standard'], opts, (err2, out2) => {
+      const untracked = [];
+      for (const f of (err2 ? '' : String(out2)).split('\n').map(s => s.trim()).filter(Boolean).slice(0, 30)) {
+        try { const p = path.join(cwd, f), st = fs.statSync(p); if (st.size < 200000) untracked.push({ file: f, text: fs.readFileSync(p, 'utf8').split(/\r?\n/).slice(0, 400).join('\n') }); } catch {}
+      }
+      send({ type: 'gitDiff', id, cwd, diff, untracked, error: err ? String(err.message).slice(0, 200) : '' });
+    });
+  });
+}
+
 // @file suggestions for the Chat view's composer: the folder's git files (tracked + untracked, not ignored),
 // listed once per 30 s per folder, best matches first (chat-core.js matchFiles).
 const chatFileCache = new Map();
@@ -4562,6 +4608,9 @@ function handleIpc(msg) {
       break;
     }
     case 'agentSteps': agentSteps(msg); break;
+    case 'openFileAt': openFileAt(msg); break;
+    case 'filePeek': filePeek(msg); break;
+    case 'gitDiff': gitDiff(msg); break;
     case 'bgTail': bgTail(msg); break;
     case 'chatSend': chatSend(msg.id, Array.isArray(msg.parts) ? msg.parts : []); break;
     case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt

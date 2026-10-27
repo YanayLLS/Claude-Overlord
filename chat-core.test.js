@@ -21,6 +21,20 @@ test('@file matches rank name prefix, then name, then path, then fuzzy', () => {
   assert.strictEqual(matchFiles(files, '').length, 5);
 });
 
+test('a unified git diff splits into files with their rows and counts', () => {
+  const d = 'diff --git a/x.js b/x.js\nindex 1..2 100644\n--- a/x.js\n+++ b/x.js\n@@ -1,2 +1,2 @@\n a\n-b\n+B\n@@ -9 +9,2 @@\n z\n+y\ndiff --git a/n.md b/n.md\nnew file mode 100644\n--- /dev/null\n+++ b/n.md\n@@ -0,0 +1 @@\n+hi\n';
+  const [x, n] = require('./chat-core').parseUnified(d);
+  assert.deepStrictEqual([x.file, x.add, x.del, x.rows.map(r => r.t).join('')], ['x.js', 2, 1, ' -+… +']);
+  assert.deepStrictEqual([n.file, n.created, n.add], ['n.md', true, 1]);
+});
+
+test('file:line references are found, times and URLs are not', () => {
+  const { fileRefs } = require('./chat-core');
+  assert.deepStrictEqual(fileRefs('see main.js:2032 and `src/a.ts:12:5`.').map(r => [r.file, r.line]), [['main.js', 2032], ['src/a.ts', 12]]);
+  assert.deepStrictEqual(fileRefs('at 12:30, http://x.com:80 or v1.2:3'), []);
+  assert.deepStrictEqual(fileRefs('C:\\w\\x.py:7').map(r => r.file), ['C:\\w\\x.py']);
+});
+
 test('lineDiff marks changed lines and folds unchanged runs', () => {
   const old = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'].join('\n');
   const d = lineDiff(old, old.replace('e', 'E'));
