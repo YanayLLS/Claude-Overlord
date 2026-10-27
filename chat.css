@@ -634,3 +634,6 @@ body:not(.world-mode) #conversation .md a.pathref { display: inline-flex; align-
 body:not(.world-mode) #conversation .md a.pathref:hover { background: var(--hover-strong); color: var(--claude); }
 body:not(.world-mode) #conversation .md a.pathref .pr-dir { color: var(--dim); font-size: .92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body:not(.world-mode) #conversation .md a.pathref img { width: 1.4em; height: 1.4em; object-fit: cover; border-radius: 3px; align-self: center; margin: 0; }
+/* table columns keep their markdown alignment (:---: centre, ---: right) */
+body:not(.world-mode) #conversation .md :is(th, td)[align="center"] { text-align: center; }
+body:not(.world-mode) #conversation .md :is(th, td)[align="right"] { text-align: right; }
