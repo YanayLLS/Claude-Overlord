@@ -637,3 +637,9 @@ body:not(.world-mode) #conversation .md a.pathref img { width: 1.4em; height: 1.
 /* table columns keep their markdown alignment (:---: centre, ---: right) */
 body:not(.world-mode) #conversation .md :is(th, td)[align="center"] { text-align: center; }
 body:not(.world-mode) #conversation .md :is(th, td)[align="right"] { text-align: right; }
+/* a ```mermaid block drawn as its diagram; the source stays (hidden) for Copy */
+body:not(.world-mode) #conversation .md-code.drawn:not(.bad) pre { display: none; }
+body:not(.world-mode) #conversation .md-diagram { display: flex; justify-content: center; padding: 16px; overflow-x: auto; }
+body:not(.world-mode) #conversation .md-diagram svg { max-width: 100%; max-height: 360px; height: auto; }
+body:not(.world-mode) #conversation .md-code.drawn:not(.bad) .md-code-head span { font-size: 0; }
+body:not(.world-mode) #conversation .md-code.drawn:not(.bad) .md-code-head span::after { content: 'Diagram'; font-size: 11px; }

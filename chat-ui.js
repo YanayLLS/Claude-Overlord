@@ -555,6 +555,7 @@
     for (const at of [...autoRetry]) if (at <= now) { autoRetry.delete(at); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) api.send({ type: 'questPrompt', id, text: t.text }); }
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
+    drawDiagrams(el);
     syncJump(el);
   }
   // A replaced block keeps its open tool rows and expanded prompt.
@@ -570,6 +571,42 @@
   // ── Prompt rail, as on the terminal: a dash per prompt down the right edge, hover lists them, click jumps there ──
   const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
   document.getElementById('term').appendChild(rail);
+  // ```mermaid blocks in a reply draw as diagrams (flowchart, sequence, pie, xychart, gantt…). mermaid.min.js (2.5 MB)
+  // loads the first time one shows up; each source's SVG is kept, so a redrawn block doesn't render it again. The
+  // source stays under it, hidden, for Copy; a block that fails to parse stays code.
+  let mermaidLoad = null, mermaidSeq = 0;
+  const svgOf = new Map();
+  function drawDiagrams(el) {
+    const blocks = [...el.querySelectorAll('.md-code:not(.drawn)')].filter(b => b.querySelector('.md-code-head span')?.textContent === 'mermaid');
+    if (!blocks.length) return;
+    mermaidLoad ||= new Promise((res, rej) => { const s = document.createElement('script'); s.src = './mermaid.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+    mermaidLoad.then(async () => {
+      // Drawn in the app's own colours and UI font (a real font name: mermaid measures labels with it, so 'inherit' clips them).
+      const cs = getComputedStyle(document.documentElement), v = (n) => cs.getPropertyValue(n).trim();
+      const dark = (() => { const c = getComputedStyle(document.body).backgroundColor.match(/\d+/g) || [255, 255, 255]; return (+c[0] * 0.3 + +c[1] * 0.59 + +c[2] * 0.11) < 128; })();
+      const pal = ['#d97757', '#6a9bcc', '#788c5d', '#c46686', '#e0b04c', '#8e7cc3', '#4fa3a5', '#b0aea5'];
+      window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', htmlLabels: false, flowchart: { htmlLabels: false }, // HTML labels measure short in Electron and lose their last letter
+         fontFamily: getComputedStyle(document.body).fontFamily, themeVariables: {
+        darkMode: dark, fontSize: '14px', background: 'transparent', primaryColor: v('--surface1'), primaryBorderColor: v('--border-hi'), primaryTextColor: v('--text'),
+        secondaryColor: v('--surface0'), tertiaryColor: v('--surface0'), lineColor: v('--subtext'), textColor: v('--text'), mainBkg: v('--surface1'), nodeBorder: v('--border-hi'),
+        edgeLabelBackground: v('--bg'), actorBkg: v('--surface1'), actorBorder: v('--border-hi'), actorTextColor: v('--text'), signalColor: v('--subtext'), signalTextColor: v('--text'),
+        noteBkgColor: v('--surface0'), noteTextColor: v('--text'), pieStrokeColor: v('--bg'), pieOuterStrokeColor: v('--bg'), pieTitleTextColor: v('--text'), pieLegendTextColor: v('--text'), pieSectionTextColor: '#fff', pieOpacity: '1',
+        ...Object.fromEntries(pal.map((c, i) => ['pie' + (i + 1), c])),
+        xyChart: { backgroundColor: 'transparent', titleColor: v('--text'), xAxisLabelColor: v('--subtext'), yAxisLabelColor: v('--subtext'), xAxisTitleColor: v('--subtext'), yAxisTitleColor: v('--subtext'), xAxisLineColor: v('--border-hi'), yAxisLineColor: v('--border-hi'), xAxisTickColor: v('--border-hi'), yAxisTickColor: v('--border-hi'), plotColorPalette: pal.join(',') },
+      } });
+      for (const b of blocks) {
+        if (b.classList.contains('drawn')) continue;
+        const src = b.querySelector('code').textContent, key = (dark ? 'd:' : 'l:') + src;
+        try {
+          if (!svgOf.has(key)) svgOf.set(key, (await window.mermaid.render('chat-mm-' + ++mermaidSeq, src)).svg);
+          const fig = document.createElement('div'); fig.className = 'md-diagram'; fig.innerHTML = svgOf.get(key);
+          const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 80; // following the bottom: keep following as it grows
+          b.querySelector('pre').before(fig); b.classList.add('drawn');
+          if (atEnd) el.scrollTop = el.scrollHeight;
+        } catch { b.classList.add('drawn', 'bad'); document.getElementById('dchat-mm-' + mermaidSeq)?.remove(); } // mermaid leaves its error SVG in <body>
+      }
+    }, () => {});
+  }
   function drawRail(el, evs) {
     const mk = marksOf(selectedId); // bookmarked replies sit on the rail too, starred
     const ps = (evs || []).map((e, i) => [e, i]).filter(([e]) => e.type === 'prompt' || e.type === 'command' || (e.type === 'text' && e.ts && mk.has(e.ts)));
