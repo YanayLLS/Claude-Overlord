@@ -153,7 +153,7 @@
     }
     // Background agents still running (Agent/Task calls without a result).
     const bg = evs.filter(e => e.type === 'tool' && (e.name === 'Agent' || e.name === 'Task') && !doneBy.get(e.toolId));
-    if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<button type="button" class="bga" data-jump="${escH(e.toolId)}" title="Show this agent's call">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`).join('')}</div>`;
+    if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<button type="button" class="bga" data-jump="${escH(e.toolId)}" title="Show this agent's call">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`).join('')}</div>`;
     if (perm && perm.perm === 'ask') return h + askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm);
     if (perm) return h + permHtml(perm);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -165,7 +165,7 @@
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
       const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
-      return h + `<div class="working">${SPARK}<span class="shimmer">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span>${v ? `<span class="w-tool">${escH(v.verb)} <span class="mono">${escH(v.target)}</span></span>` : ''}<span class="w-hint">${meta}${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
+      return h + `<div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span>${v ? `<span class="w-tool">${escH(v.verb)} <span class="mono">${escH(v.target)}</span></span>` : ''}<span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
     }
     return h;
   }
@@ -197,6 +197,7 @@
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
   // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
   let prevBusy = new Map(), tick = null, jumpOnce = false;
+  const liveKey = (h) => h.replace(/(data-live="[^"]*">)[^<]*/g, '$1');
   function paint(el, id, a, evs, st) {
     const now = Date.now();
     const doneBy = new Map(); let mode = '';
@@ -233,7 +234,14 @@
     }
     while (thread.children.length > list.length) thread.lastElementChild.remove();
     el._blocks = list;
-    if (tailEl._h !== tail) { tailEl.innerHTML = tailEl._h = tail; }
+    // The live tail ticks every second (elapsed, the CLI's verb, agent timers). When only that text changed, swap the
+    // text in place: rebuilding would replay the slide-in and restart the spark and shimmer on every tick.
+    if (tailEl._h !== tail) {
+      const key = liveKey(tail);
+      if (tailEl._k === key) { const tmp = document.createElement('div'); tmp.innerHTML = tail; for (const n of tmp.querySelectorAll('[data-live]')) { const c = tailEl.querySelector(`[data-live="${CSS.escape(n.dataset.live)}"]`); if (c && c.textContent !== n.textContent) c.textContent = n.textContent; } }
+      else tailEl.innerHTML = tail;
+      tailEl._h = tail; tailEl._k = key;
+    }
     prevBusy.set(id, busy);
     // The working line's elapsed time ticks once a second while the agent works and the view is open.
     if (busy && !tick) tick = setInterval(() => { if (!el.classList.contains('open')) { clearInterval(tick); tick = null; return; } rerender(); }, 1000);
