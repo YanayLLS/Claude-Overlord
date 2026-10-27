@@ -180,6 +180,16 @@
       if (e.key === 'Escape') { e.preventDefault(); closeAt(); return; }
     }
     if (chat() && cardKey(e)) { e.preventDefault(); return; }
+    // A tag goes in one keystroke: Backspace right after "[Image #1]" (or Delete right before it) removes it whole.
+    if ((e.key === 'Backspace' || e.key === 'Delete') && t.selectionStart === t.selectionEnd) {
+      const at = t.selectionStart, before = t.value.slice(0, at), after = t.value.slice(at);
+      const m = e.key === 'Backspace' ? /\[(?:Image #\d+|Pasted text #\d+[^\]]*)\] ?$/.exec(before) : /^\[(?:Image #\d+|Pasted text #\d+[^\]]*)\] ?/.exec(after);
+      if (m) {
+        e.preventDefault();
+        t.value = e.key === 'Backspace' ? before.slice(0, m.index) + after : before + after.slice(m[0].length);
+        t.selectionStart = t.selectionEnd = e.key === 'Backspace' ? m.index : at; grow(t); pruneAtt(); return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); return; }
     if (!chat()) return;
     if (e.key === 'Escape' && order().classList.contains('busy')) { e.preventDefault(); chatUi.keys(['\x1b']); return; }

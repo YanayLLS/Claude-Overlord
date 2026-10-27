@@ -4457,7 +4457,7 @@ function handleAgentMsg(msg) {
     case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
     case 'clipboardImageSaved': chatComposer.onImageSaved(msg); break;
-    case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': chatUi.onMsg(msg); break;
+    case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': case 'gitReverted': chatUi.onMsg(msg); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);

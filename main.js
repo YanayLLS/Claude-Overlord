@@ -4615,10 +4615,20 @@ function handleIpc(msg) {
     case 'gitRevertFile': {
       const cwd = typeof msg.cwd === 'string' ? msg.cwd : '', f = typeof msg.file === 'string' ? msg.file : '';
       if (!cwd || !f || f.includes('..') || path.isAbsolute(f)) break;
+      let before = null; try { before = fs.readFileSync(path.join(cwd, f), 'utf8'); } catch {} // kept for Undo
       execFile('git', ['restore', '--source=HEAD', '--staged', '--worktree', '--', f], { cwd, timeout: 15000, windowsHide: true }, (err) => {
         if (err) send({ type: 'toast', text: `Couldn't revert ${f}: ${String(err.message).split('\n')[0].slice(0, 120)}` });
+        else send({ type: 'gitReverted', id: msg.id, cwd, file: f, content: before });
         gitDiff(msg);
       });
+      break;
+    }
+    // Undo of a Revert file: the content from just before it, written back (only inside that folder).
+    case 'restoreFileContent': {
+      const cwd = typeof msg.cwd === 'string' ? msg.cwd : '', f = typeof msg.file === 'string' ? msg.file : '';
+      if (!cwd || !f || f.includes('..') || path.isAbsolute(f) || typeof msg.content !== 'string') break;
+      try { fs.writeFileSync(path.join(cwd, f), msg.content, 'utf8'); } catch (e) { send({ type: 'toast', text: `Couldn't undo: ${e.message}` }); }
+      gitDiff(msg);
       break;
     }
     case 'bgTail': bgTail(msg); break;

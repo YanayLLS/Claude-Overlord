@@ -76,8 +76,10 @@
   function rowsHtml(rows, file) {
     const ext = String(file || '').split('.').pop().toLowerCase(), lang = LANG[ext], hl = lang && window.hljs && hljs.getLanguage(lang);
     const line = (s) => { if (!s) return ' '; if (hl) try { return hljs.highlight(s, { language: lang, ignoreIllegals: true }).value; } catch {} return escH(s); };
-    // Rows from git carry line numbers (a gutter) and hunk headers (a fold row with git's context, e.g. "function foo()").
-    const nums = rows.some(r => r.n != null), ln = (r) => nums ? `<em class="ln">${r.t === '…' ? '' : r.n ?? ''}</em>` : '';
+    // Rows from git carry line numbers, old and new in two columns (a removed line has only the old, an added one only
+    // the new), and hunk headers (a fold row: git's "@@ -1,3 +1,3 @@" and its context, e.g. "function foo()").
+    const nums = rows.some(r => r.n != null || r.o != null);
+    const ln = (r) => nums ? (r.t === '…' ? '<em class="ln"></em><em class="ln"></em>' : `<em class="ln">${r.o ?? ''}</em><em class="ln">${r.n ?? ''}</em>`) : '';
     return `<div class="diff${nums ? ' numbered' : ''}">${rows.map(r => r.t === '…' ? `<div class="dl fold">${ln(r)}<i></i><span>${r.s ? escH(r.s) : '⋯'}</span></div>` : `<div class="dl ${r.t === '+' ? 'add' : r.t === '-' ? 'del' : ''}">${ln(r)}<i>${r.t === ' ' ? '' : r.t}</i><span>${line(r.s)}</span></div>`).join('')}</div>`;
   }
   // file:line references in a reply become links: click opens the file at that line, hover peeks at it. Only text
@@ -649,7 +651,8 @@
     let cur = 0, whole = false;
     const draw = () => {
       const f = list[cur];
-      const tools = `${f.tracked ? '<button type="button" class="cc-btn danger" data-revert="1">Revert file</button>' : ''}<button type="button" class="cc-btn" data-path="1">Copy path</button><button type="button" class="cc-btn" data-copy="1">Copy diff</button><button type="button" class="cc-btn${whole ? ' on' : ''}" data-whole="1">Whole file</button><button type="button" class="cc-btn" data-open="1">Open</button>`;
+      // The file name keeps the room: Whole file and Open as words, copy path / copy diff as icons, Revert quiet until hovered.
+      const tools = `<button type="button" class="cc-btn${whole ? ' on' : ''}" data-whole="1" aria-pressed="${whole}">Whole file</button><button type="button" class="cc-btn" data-open="1">Open</button><button type="button" class="cc-btn ic-only" data-path="1" title="Copy path" aria-label="Copy path">${ICON.copy}</button><button type="button" class="cc-btn ic-only" data-copy="1" title="Copy diff" aria-label="Copy diff">${ICON.diff}</button>${f.tracked ? `<button type="button" class="cc-btn ic-only danger" data-revert="1" title="Revert file" aria-label="Revert file">${ICON.retry}</button>` : ''}`;
       panel.querySelector('.cc-diff').innerHTML = `<div class="cc-dh"><span class="mono">${escH(rel(f.path))}</span>${tools}</div>` + (whole ? '<div class="cc-whole"><span class="loading"></span></div>'
         : f.sections.map(x => `${x.label ? `<div class="cc-sep">${escH(x.label)}</div>` : ''}${rowsHtml(x.rows, f.path)}`).join(''));
       if (whole) api.send({ type: 'filePeek', cwd: a && a.cwd, file: f.path, line: 0, all: true, seq: 'whole:' + cur });
@@ -675,11 +678,11 @@
       const f = list && list[cur]; if (!f) return;
       if (e.target.closest('[data-open]')) { const first = f.sections[0] && f.sections[0].rows.find(r => r.t === '+'); return api.send({ type: 'openFileAt', cwd: a && a.cwd, file: f.path, line: 1 }); }
       if (e.target.closest('[data-whole]')) { whole = !whole; return draw(); }
-      if (e.target.closest('[data-path]')) { navigator.clipboard.writeText(f.path); return; }
+      const cp = e.target.closest('[data-path]'); if (cp) { navigator.clipboard.writeText(f.path).then(() => { cp.classList.add('done'); setTimeout(() => cp.classList.remove('done'), 1200); }); return; }
       // Revert: back to the last commit, after a confirm (it can't be undone from here). The panel then reloads.
       if (e.target.closest('[data-revert]') && f.tracked) { showConfirm(`Revert ${f.rel} to the last commit? This throws away its uncommitted changes.`, 'Revert').then(ok => { if (ok) api.send({ type: 'gitRevertFile', id: selectedId, cwd: a && a.cwd, file: f.rel }); }); return; }
       const c = e.target.closest('[data-copy]');
-      if (c) { navigator.clipboard.writeText(f.sections.map(x => x.rows.map(r => (r.t === '…' ? '@@' : r.t) + r.s).join('\n')).join('\n@@\n')).then(() => { c.textContent = 'Copied'; setTimeout(() => { c.textContent = 'Copy diff'; }, 1200); }); }
+      if (c) { navigator.clipboard.writeText(f.sections.map(x => x.rows.map(r => (r.t === '…' ? '@@' : r.t) + r.s).join('\n')).join('\n@@\n')).then(() => { c.classList.add('done'); setTimeout(() => c.classList.remove('done'), 1200); }); }
     });
     panel.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeChanges(); }
@@ -722,6 +725,10 @@
   function placeToasts() {
     const t = document.getElementById('term'), r = t && t.classList.contains('open') ? t.getBoundingClientRect() : null;
     toasts.style.right = (r ? Math.max(16, innerWidth - r.right + 16) : 16) + 'px';
+    // Docked just above the composer while the Chat view is open (out of the thread's way), else the window's top-right.
+    const o = document.getElementById('term-order'), ob = o && o.classList.contains('open') ? o.getBoundingClientRect() : null;
+    if (ob && ob.height) { toasts.style.top = 'auto'; toasts.style.bottom = Math.max(16, innerHeight - ob.top + 10) + 'px'; }
+    else { toasts.style.bottom = 'auto'; toasts.style.top = '56px'; }
     const shown = [...toasts.querySelectorAll('.ctoast')];
     shown.forEach((el, k) => { el.hidden = k >= 3; });
     let more = toasts.querySelector('.ct-more');
@@ -731,8 +738,13 @@
   function permToast(id, ask) {
     const a = agents.get(id); if (!a || worldView || !stillWaiting(id)) return;
     dropToast(id);
-    const t = [...a.tools.values()].find(x => x.perm) || {}, opts = ask ? menuOptions(id) : [];
-    const keysFor = (k) => { const n = id; [...Array(k).fill('\x1b[B'), '\r'].forEach((d, j) => setTimeout(() => api.send({ type: 'termInput', id: n, data: d }), j * 70)); };
+    const tools = [...a.tools.values()], t = tools.find(x => ask ? x.perm === 'ask' : x.perm === true) || tools.find(x => x.perm) || {}, opts = ask ? menuOptions(id) : [];
+    // Arrow down to the option, then Enter: each key its own write, and the Enter only if the question is still open.
+    const keysFor = (k) => {
+      const n = id;
+      for (let j = 0; j < k; j++) setTimeout(() => api.send({ type: 'termInput', id: n, data: '\x1b[B' }), j * 70);
+      setTimeout(() => { if (stillWaiting(n)) { api.send({ type: 'termInput', id: n, data: '\r' }); announce(`Answered ${a.title || 'the agent'}`); } }, k * 70);
+    };
     const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
     el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
       + `<div class="ct-what">${escH(t.status || t.name || '')}</div>`
@@ -826,6 +838,8 @@
   }
   function onMsg(msg) {
     if (msg.type === 'gitDiff') return onGitDiff(msg);
+    // Reverted: 10 seconds to take it back (git restore can't be undone, so main kept the file as it was).
+    if (msg.type === 'gitReverted') { if (typeof msg.content === 'string') showToast(`Reverted ${msg.file} · click to undo`, () => api.send({ type: 'restoreFileContent', id: msg.id, cwd: msg.cwd, file: msg.file, content: msg.content })); setTimeout(() => { const t = document.getElementById('toast'); if (t && /^Reverted /.test(t.textContent)) t.className = 'toast'; }, 10000); return; }
     if (msg.type === 'filePeek') { if (String(msg.seq).startsWith('whole:')) { const p = document.getElementById('chat-changes'); if (p && p._whole) p._whole(msg); } else showPeek(msg); return; }
     if (msg.type === 'agentSteps') { steps.set(msg.toolId, msg.events || []); const d = document.querySelector(`#conversation details.trow.k-agent[data-tid="${CSS.escape(msg.toolId)}"]`); if (d && d.open) drawSteps(d, msg.events || []); }
     if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.textContent = msg.ok ? (msg.text || '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }
@@ -858,7 +872,8 @@
       inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); } else if (e.key === 'Escape') { e.preventDefault(); closeFind(); } });
       bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.classList.contains('cf-x')) closeFind(); else stepFind(+b.dataset.d); });
     }
-    bar.hidden = false; const inp = bar.querySelector('input'); inp.focus(); inp.select(); if (inp.value) runFind(inp.value);
+    bar.hidden = false; document.getElementById('conversation').classList.add('finding'); // room above the thread so the bar never covers a match
+    const inp = bar.querySelector('input'); inp.focus(); inp.select(); if (inp.value) runFind(inp.value);
   }
   function runFind(q) {
     const root = document.querySelector('#conversation .thread'), ranges = [];
@@ -881,7 +896,7 @@
     const n = document.querySelector('#chat-find .cf-n'); if (n) n.textContent = all.length ? `${find.i + 1}/${all.length}` : (document.querySelector('#chat-find input').value ? '0' : '');
     if (cur) { const el = cur.startContainer.parentElement; let d = el.closest('details'); while (d) { d.open = true; d = d.parentElement.closest('details'); } el.scrollIntoView({ block: 'center' }); }
   }
-  function closeFind() { const bar = document.getElementById('chat-find'); if (bar) bar.hidden = true; if (window.CSS && CSS.highlights) { CSS.highlights.delete('chat-find'); CSS.highlights.delete('chat-find-cur'); } find = null; document.getElementById('term-order-input').focus(); }
+  function closeFind() { const bar = document.getElementById('chat-find'); if (bar) bar.hidden = true; document.getElementById('conversation').classList.remove('finding'); if (window.CSS && CSS.highlights) { CSS.highlights.delete('chat-find'); CSS.highlights.delete('chat-find-cur'); } find = null; document.getElementById('term-order-input').focus(); }
 
   // Ctrl+↑/↓: the previous / next of your prompts, like the terminal's prompt jump.
   function jumpPrompt(dir) {

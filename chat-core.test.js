@@ -25,7 +25,8 @@ test('a unified git diff splits into files with their rows and counts', () => {
   const d = 'diff --git a/x.js b/x.js\nindex 1..2 100644\n--- a/x.js\n+++ b/x.js\n@@ -1,2 +1,2 @@\n a\n-b\n+B\n@@ -9 +9,2 @@\n z\n+y\ndiff --git a/n.md b/n.md\nnew file mode 100644\n--- /dev/null\n+++ b/n.md\n@@ -0,0 +1 @@\n+hi\n';
   const [x, n] = require('./chat-core').parseUnified(d);
   assert.deepStrictEqual([x.file, x.add, x.del, x.rows.map(r => r.t).join('')], ['x.js', 2, 1, '… -+… +']);
-  assert.deepStrictEqual(x.rows.map(r => r.n), [1, 1, 2, 2, 9, 9, 10]); // line numbers from the hunk headers
+  assert.deepStrictEqual(x.rows.map(r => [r.o ?? null, r.n ?? null]), [[null, 1], [1, 1], [2, null], [null, 2], [null, 9], [9, 9], [null, 10]]); // old / new line numbers
+  assert.strictEqual(x.rows[0].s, '@@ -1,2 +1,2 @@'); // the hunk's range
   assert.deepStrictEqual([n.file, n.created, n.add], ['n.md', true, 1]);
 });
 

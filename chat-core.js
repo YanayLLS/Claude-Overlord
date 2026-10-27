@@ -105,11 +105,12 @@ function parseUnified(text) {
     const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/.exec(line);
     if (line.startsWith('new file mode')) f.created = true;
     else if (line.startsWith('deleted file mode')) f.deleted = true;
-    else if (h) { oldN = +h[1]; newN = +h[2]; f.rows.push({ t: '…', s: h[3] || '', n: newN }); }
+    else if (h) { oldN = +h[1]; newN = +h[2]; f.rows.push({ t: '…', s: line.replace(/^(@@[^@]*@@).*$/, '$1') + (h[3] ? ' ' + h[3] : ''), n: newN }); }
     else if (/^(---|\+\+\+|index |similarity|rename |old mode|new mode|Binary)/.test(line)) continue;
+    // o / n: the line's number in the old and the new file (a removed line has no new number, an added one no old).
     else if (line[0] === '+') { f.rows.push({ t: '+', s: line.slice(1), n: newN++ }); f.add++; }
-    else if (line[0] === '-') { f.rows.push({ t: '-', s: line.slice(1), n: oldN++ }); f.del++; }
-    else if (line[0] === ' ') { f.rows.push({ t: ' ', s: line.slice(1), n: newN++ }); oldN++; }
+    else if (line[0] === '-') { f.rows.push({ t: '-', s: line.slice(1), o: oldN++ }); f.del++; }
+    else if (line[0] === ' ') { f.rows.push({ t: ' ', s: line.slice(1), o: oldN++, n: newN++ }); }
   }
   return files;
 }

@@ -568,3 +568,24 @@ body:not(.world-mode) #chat-view-menu .vm-toggle i.on::after { transform: transl
 
 /* focus rings for keyboard use */
 body:not(.world-mode) #conversation :is(button, a, summary):focus-visible, body:not(.world-mode) #term-order :is(button, textarea):focus-visible, #chat-changes :is(button):focus-visible, #chat-toasts button:focus-visible { outline: 2px solid color-mix(in srgb, #d97757 70%, transparent); outline-offset: 2px; }
+
+/* ── Round 9 ── */
+/* two line-number columns (old, new) in git diffs */
+#chat-changes .diff.numbered .dl .ln { width: 38px; padding-right: 6px; }
+#chat-changes .diff.numbered .dl .ln + .ln { border-right: 1px solid var(--border); margin-right: 4px; }
+#chat-changes .diff .dl.fold span { font-family: 'Geist Mono', monospace; }
+/* diff header: the name keeps the room, icon buttons, Revert quiet until hovered */
+#chat-changes .cc-dh .mono { min-width: 120px; }
+#chat-changes .cc-btn.ic-only { width: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+#chat-changes .cc-btn.ic-only .ic { width: 14px; height: 14px; }
+#chat-changes .cc-btn.danger { color: var(--subtext); border-color: var(--border-hi); }
+#chat-changes .cc-btn.danger:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border-hi)); background: color-mix(in srgb, var(--red) 10%, transparent); }
+#chat-changes .cc-btn.done { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, var(--border-hi)); }
+/* the ⋯ count: a clear pill off the corner */
+body:not(.world-mode) #chat-chips .chip.icon.alert::after { top: -7px; right: -7px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; line-height: 18px; box-shadow: 0 0 0 2px var(--surface0); }
+/* reading: shorter gaps between short turns; room at the bottom for the jump button; room at the top while finding */
+body:not(.world-mode) #conversation .msg.user { margin: 12px 0 10px; }
+body:not(.world-mode) #conversation .turnfoot { margin: 0 0 2px; min-height: 24px; }
+body:not(.world-mode) #conversation.open { padding-bottom: 56px; }
+body:not(.world-mode) #conversation.finding .thread { padding-top: 52px; }
+body:not(.world-mode) #chat-chips { overflow: visible; } /* the ⋯ count pill sits off the corner */
