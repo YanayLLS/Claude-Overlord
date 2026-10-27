@@ -43,7 +43,9 @@
       if (!mdLoading) mdLoading = true, window.docsUi.loadMd().then(() => { mdReady = true; cache = new WeakMap(); rerender(); }, () => {});
       return `<p class="plain">${escH(src)}</p>`;
     }
-    return linkRefs(window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_')); // relative links resolve against the agent's folder
+    return linkRefs(window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_')) // relative links resolve against the agent's folder
+      // a bare claude.ai artifact URL reads as a short chip; the card drawn for it carries title and actions
+      .replace(/(<a [^>]*href="(https:\/\/claude\.ai\/[^"]*artifact\/([\w-]+))"[^>]*)>\2<\/a>/g, (_, open, url, aid) => `${open.replace('<a ', '<a class="art-link" title="' + url + '" ')}>claude.ai · ${aid.slice(0, 8)}</a>`);
   }
   const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   // A prompt's images, numbered 1, 2, … in order, and its [Image #N] tags as chips with the same numbers (the k-th tag
@@ -415,9 +417,13 @@
       const items = inboxItems().filter(x => x.id !== selectedId), label = { question: 'Question', permission: 'Needs approval', done: 'Finished', crashed: 'Stopped' };
       const split = document.getElementById('term').classList.contains('split');
       // A waiting agent can be answered right here: Allow / Deny, or the question's options read off its terminal.
-      const actions = (x) => x.kind === 'permission' ? `<span class="ib-a"><button type="button" class="primary" data-ans="${x.id}" data-k="1">Allow</button><button type="button" data-ans="${x.id}" data-k="esc">Deny</button></span>`
-        : x.kind === 'question' ? `<span class="ib-a">${menuOptions(x.id).slice(0, 3).map((o, k) => `<button type="button" data-ans="${x.id}" data-pick="${k}" title="${escH(o)}">${escH(o.length > 18 ? o.slice(0, 17) + '…' : o)}</button>`).join('')}</span>` : '';
-      m.innerHTML = (items.length ? `<div class="vm-h">Needs you</div>${items.map(x => `<div class="ib-row"><button type="button" class="ib-i k-${x.kind}" data-agent="${x.id}"><span class="ib-dot"></span><span class="ib-t"><b>${escH(x.a.title || 'Agent')}</b><small>${escH(label[x.kind])}${x.what ? ' · ' + escH(String(x.what).split('\n')[0].slice(0, 70)) : ''}</small></span></button>${actions(x)}</div>`).join('')}<div class="vm-sep"></div>` : '')
+      // Each row: who, what kind, how long it's waited; under it the full command or question (what you'd be agreeing to),
+      // then the answers, labelled with the agent's name for screen readers.
+      const who = (x) => escH(x.a.title || 'Agent');
+      const actions = (x) => x.kind === 'permission' ? `<span class="ib-a"><button type="button" role="menuitem" class="primary" data-ans="${x.id}" data-k="1" aria-label="Allow ${who(x)}">Allow</button><button type="button" role="menuitem" data-ans="${x.id}" data-k="esc" aria-label="Deny ${who(x)}">Deny</button></span>`
+        : x.kind === 'question' ? `<span class="ib-a">${menuOptions(x.id).slice(0, 3).map((o, k) => `<button type="button" role="menuitem" data-ans="${x.id}" data-pick="${k}" title="${escH(o)}" aria-label="Answer ${who(x)}: ${escH(o)}">${escH(o.length > 22 ? o.slice(0, 21) + '…' : o)}</button>`).join('')}</span>` : '';
+      const waited = (x) => x.kind === 'done' ? '' : ` · waiting ${escH(dur(Date.now() - x.since))}`;
+      m.innerHTML = (items.length ? `<div class="vm-h">Needs you</div>${items.map(x => `<div class="ib-row"><button type="button" role="menuitem" class="ib-i k-${x.kind}" data-agent="${x.id}" aria-label="Open ${who(x)}"><span class="ib-dot"></span><span class="ib-t"><b>${who(x)}</b><small>${escH(label[x.kind])}${waited(x)}</small></span></button>${x.what && x.kind !== 'done' && x.kind !== 'crashed' ? `<div class="ib-what" title="${escH(x.what)}">${escH(x.what)}</div>` : ''}${actions(x)}</div>`).join('')}<div class="vm-sep"></div>` : '')
         + `<div class="vm-row"><span>Text size</span><button type="button" data-z="-1" aria-label="Smaller">A−</button><b>${Math.round(zoom * 100)}%</b><button type="button" data-z="1" aria-label="Larger">A+</button></div>`
         + `<button type="button" class="vm-toggle" role="menuitemcheckbox" aria-checked="${split}" data-split="1"><span>Terminal beside the chat</span><i class="${split ? 'on' : ''}"></i></button>`
         + `<button type="button" class="vm-toggle" aria-expanded="${keysOpen}" data-keys-list="1"><span>Keyboard shortcuts</span>${ICON.chev}</button>`
@@ -436,6 +442,13 @@
       if (e.target.closest('[data-split]')) { toggleSplit(); draw(); return; }
       if (e.target.closest('[data-keys-list]')) { keysOpen = !keysOpen; draw(); return; }
       const b = e.target.closest('[data-z]'); if (!b) return; const i = Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + +b.dataset.z)); zoom = ZOOMS[i] || 1; try { localStorage.setItem('chatZoom', zoom); } catch {} applyZoom(); draw();
+    });
+    // ↑/↓ move between the menu's buttons, Home/End jump to the ends
+    m.addEventListener('keydown', (e) => {
+      const bs = [...m.querySelectorAll('button')], i = bs.indexOf(document.activeElement);
+      const to = e.key === 'ArrowDown' ? i + 1 : e.key === 'ArrowUp' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? bs.length - 1 : null;
+      if (to === null || !bs.length) return;
+      e.preventDefault(); bs[(to + bs.length) % bs.length].focus();
     });
     document.getElementById('term-order').appendChild(m);
     const r = chip.getBoundingClientRect(), o = document.getElementById('term-order').getBoundingClientRect();
@@ -805,8 +818,13 @@
       else if (a.unread) items.push({ id, a, kind: 'done', what: a.preview || '' });
       else if (st === 'crashed') items.push({ id, a, kind: 'crashed', what: 'Stopped' });
     }
-    return items;
+    // Oldest first: when each one started waiting is noted the first time it shows up here.
+    const now = Date.now(), seen = new Set(items.map(x => x.id + x.kind));
+    for (const x of items) { const k = x.id + x.kind; if (!waitSince.has(k)) waitSince.set(k, now); x.since = waitSince.get(k); }
+    for (const k of [...waitSince.keys()]) if (!seen.has(k)) waitSince.delete(k);
+    return items.sort((p, q) => (p.kind === 'done') - (q.kind === 'done') || p.since - q.since);
   }
+  const waitSince = new Map(); // agent id + kind → when it started waiting
   function syncInbox() {
     const chip = document.querySelector('#chat-chips [data-act="view-menu"]'); if (!chip) return;
     const n = inboxItems().filter(x => x.id !== selectedId && x.kind !== 'done').length;

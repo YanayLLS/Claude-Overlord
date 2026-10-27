@@ -989,6 +989,9 @@ function extractSpinnerText(id, data) {
           }
           return;
         }
+        // The CLI repaints only the shimmering letters of its verb, so a chunk can hold a fragment ("ai"). A whole
+        // spinner line starts with a capital and has its "…" ("Cogitating…"); anything else is a partial repaint.
+        if (!/^\p{Lu}/u.test(text) || !text.includes('…')) return;
         const a = agents.get(id);
         if (a && a.spinnerText !== text) {
           a.spinnerText = text;

@@ -620,3 +620,10 @@ body:not(.world-mode) #conversation .art-card .ac-b .ic-only { width: 32px; padd
 body:not(.world-mode) #conversation .art-card .ac-b .ic-only.done { color: var(--green); }
 /* claude.ai artifact links in a reply read as links to a page */
 body:not(.world-mode) #conversation .md a[href*="claude.ai/"][href*="artifact"] { padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, #d97757 12%, transparent); text-decoration: none; }
+
+/* ── Round 11 ── */
+/* ⋯ menu: the full command under its row, answers beside the name */
+body:not(.world-mode) #chat-view-menu .ib-row { flex-wrap: wrap; }
+body:not(.world-mode) #chat-view-menu .ib-what { order: 3; flex-basis: 100%; margin: -2px 8px 4px 30px; padding: 5px 8px; border-radius: 6px; background: var(--surface0); font-family: 'Geist Mono', monospace; font-size: 11px; line-height: 1.45; color: var(--subtext); white-space: pre-wrap; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* an artifact link in a reply: short chip, the card above carries the details */
+body:not(.world-mode) #conversation .md a.art-link { font-family: 'Geist Mono', monospace; font-size: .85em; }
