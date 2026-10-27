@@ -45,7 +45,9 @@
     }
     return linkRefs(window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_')) // relative links resolve against the agent's folder
       // a bare claude.ai artifact URL reads as a short chip; the card drawn for it carries title and actions
-      .replace(/(<a [^>]*href="(https:\/\/claude\.ai\/[^"]*artifact\/([\w-]+))"[^>]*)>\2<\/a>/g, (_, open, url, aid) => `${open.replace('<a ', '<a class="art-link" title="' + url + '" ')}>claude.ai · ${aid.slice(0, 8)}</a>`);
+      .replace(/(<a [^>]*href="(https:\/\/claude\.ai\/[^"]*artifact\/([\w-]+))"[^>]*)>\2<\/a>/g, (_, open, url, aid) => `${open.replace('<a ', '<a class="art-link" title="' + url + '" ')}>claude.ai · ${aid.slice(0, 8)}</a>`)
+      // `C:\…\live-0.png` in a reply: the file's name and folder as a link (an image opens in the preview)
+      .replace(/(?<!<pre>)<code>([^<]+)<\/code>/g, (m, t) => { const p = pathRef(t); return p ? `<a class="fileref pathref${p.img ? ' img' : ''}" href="#" data-file="${t.trim().replace(/"/g, '&quot;')}" data-line="0" title="${t.trim().replace(/"/g, '&quot;')}">${p.img ? `<img src="${escH(fileUrl(p.file.replace(/&amp;/g, '&')))}" alt="" loading="lazy">` : ''}<span>${escH(p.name)}</span>${p.dir ? `<span class="pr-dir">${escH(p.dir)}</span>` : ''}</a>` : m; });
   }
   const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   // A prompt's images, numbered 1, 2, … in order, and its [Image #N] tags as chips with the same numbers (the k-th tag
@@ -655,6 +657,7 @@
     const more = e.target.closest('.more');
     if (more) { const b = more.previousElementSibling; b.classList.toggle('open'); more.textContent = b.classList.contains('open') ? 'Show less' : 'Show more'; return; }
     const ref = e.target.closest('a.fileref'); // file:line → the file at that line in the editor
+    if (ref && ref.classList.contains('img')) { e.preventDefault(); lightbox(fileUrl(ref.dataset.file)); return; }
     if (ref) { e.preventDefault(); peekEl.hidden = true; api.send({ type: 'openFileAt', cwd, file: ref.dataset.file, line: ref.dataset.line }); return; }
     const link = e.target.closest('a[href]'); if (!link) return;
     e.preventDefault();
@@ -865,7 +868,7 @@
   const peekEl = document.createElement('div'); peekEl.id = 'chat-peek'; peekEl.hidden = true; document.body.appendChild(peekEl);
   const conv = document.getElementById('conversation');
   conv.addEventListener('mouseover', (e) => {
-    const r = e.target.closest('a.fileref'); if (!r || r === peekFor) return;
+    const r = e.target.closest('a.fileref'); if (!r || r === peekFor || r.classList.contains('img')) return; // an image has no lines to peek
     peekFor = r; clearTimeout(peekTimer);
     peekTimer = setTimeout(() => { const a = agents.get(selectedId); api.send({ type: 'filePeek', cwd: a && a.cwd, file: r.dataset.file, line: r.dataset.line, seq: ++peekSeq }); }, 350);
   });

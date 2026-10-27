@@ -126,4 +126,13 @@ function fileRefs(text) {
   return out;
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs };
+// A whole inline-code span that is one absolute file path ("C:\\w\\shot.png", "~/x/a.md", "/home/a/b.ts") → { file, name,
+// dir, img }: shown as the file's name with its folder, the full path on hover. Relative names stay code.
+function pathRef(text) {
+  const t = String(text || '').trim();
+  if (!/^(?:[A-Za-z]:[\\/]|~[\\/]|\/)[^\n<>"|?*]*[^\\/\s]\.[A-Za-z0-9]{1,8}$/.test(t)) return null;
+  const parts = t.split(/[\\/]/).filter(Boolean);
+  return { file: t, name: parts[parts.length - 1], dir: parts.length > 1 ? parts[parts.length - 2] : '', img: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(t) };
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef };

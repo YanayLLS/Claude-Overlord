@@ -46,3 +46,12 @@ test('lineDiff marks changed lines and folds unchanged runs', () => {
   assert.deepStrictEqual(d.rows.map(r => r.t).join(''), '    -+   …');
   assert.deepStrictEqual(lineDiff('', 'x\ny'), { rows: [{ t: '+', s: 'x' }, { t: '+', s: 'y' }], add: 2, del: 0 });
 });
+
+test('an absolute path in inline code becomes a file chip; relative names and prose stay code', () => {
+  const { pathRef } = require('./chat-core');
+  assert.deepStrictEqual(pathRef('C:\\Users\\y\\scratchpad\\chatshot\\live-0.png'), { file: 'C:\\Users\\y\\scratchpad\\chatshot\\live-0.png', name: 'live-0.png', dir: 'chatshot', img: true });
+  assert.deepStrictEqual(pathRef('~/.claude/x.md'), { file: '~/.claude/x.md', name: 'x.md', dir: '.claude', img: false });
+  assert.strictEqual(pathRef('chat-ui.js'), null);
+  assert.strictEqual(pathRef('npm run build'), null);
+  assert.strictEqual(pathRef('C:\\Work\\overlord'), null); // a folder: no extension
+});
