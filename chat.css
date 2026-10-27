@@ -301,3 +301,42 @@ body:not(.world-mode) #term-order.drop { border-color: var(--claude); box-shadow
 body:not(.world-mode) #term-order.open::before { bottom: calc(100% + 2px); }
 body:not(.world-mode) #term-order textarea { flex: none; clip-path: none; min-height: 26px; padding: 4px 4px 2px 2px; overflow-y: auto; }
 body:not(.world-mode) #term-order.open { padding: 14px 12px 10px 16px; }
+
+/* Numbered images: thumbnails carry the number their [Image #N] tag uses; tags in a sent prompt show as chips */
+body:not(.world-mode) #conversation .imgs .th { position: relative; display: inline-flex; }
+body:not(.world-mode) #conversation .imgs .th b, body:not(.world-mode) #chat-att .att b { position: absolute; left: 6px; top: 6px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: rgba(0,0,0,.65); color: #fff; font: 600 11px/18px 'Geist', sans-serif; text-align: center; pointer-events: none; }
+body:not(.world-mode) #conversation .imgtag { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px 0 4px; margin: 0 1px; border-radius: 6px; background: color-mix(in srgb, var(--claude) 16%, transparent); color: var(--text); font-size: .88em; font-weight: 500; vertical-align: 1px; white-space: nowrap; }
+body:not(.world-mode) #conversation .imgtag .ic { width: 12px; height: 12px; color: var(--claude); }
+body:not(.world-mode) #chat-att .att { position: relative; display: inline-flex; animation: chat-pop .35s var(--chat-ease); }
+body:not(.world-mode) #chat-att .att img { animation: none; }
+body:not(.world-mode) #chat-att .att.saving img { opacity: .5; }
+body:not(.world-mode) #chat-att .att-x { position: absolute; right: -6px; top: -6px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid var(--border-hi); background: var(--surface0); color: var(--text); font: 600 13px/1 'Geist', sans-serif; cursor: pointer; opacity: 0; transition: opacity .15s; }
+body:not(.world-mode) #chat-att .att:hover .att-x, body:not(.world-mode) #chat-att .att-x:focus-visible { opacity: 1; }
+body:not(.world-mode) #conversation button.imgtag { border: 0; font-family: inherit; cursor: zoom-in; padding: 1px 6px 1px 2px; }
+body:not(.world-mode) #conversation button.imgtag:hover { background: color-mix(in srgb, var(--claude) 28%, transparent); }
+body:not(.world-mode) #conversation button.imgtag img { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
+
+/* Mode menu above the mode chip */
+body:not(.world-mode) #chat-mode-menu { position: absolute; bottom: calc(100% + 8px); z-index: 3; min-width: 220px; padding: 6px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 10px 32px rgba(0,0,0,.35); animation: chat-in .16s var(--chat-ease); }
+body:not(.world-mode) #chat-mode-menu .mm-i { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; text-transform: none; letter-spacing: 0; clip-path: none; }
+body:not(.world-mode) #chat-mode-menu .mm-i:hover { background: var(--hover-strong); }
+body:not(.world-mode) #chat-mode-menu .mm-i .ic { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: var(--dim); }
+body:not(.world-mode) #chat-mode-menu .mm-i span { flex: 1; }
+body:not(.world-mode) #chat-mode-menu .mm-i.on .ic:last-child { color: var(--claude); }
+body:not(.world-mode) #chat-mode-menu .m-bypass .ic:first-child { color: #f87171; } body:not(.world-mode) #chat-mode-menu .m-accept .ic:first-child { color: var(--purple); } body:not(.world-mode) #chat-mode-menu .m-plan .ic:first-child { color: #2dd4bf; } body:not(.world-mode) #chat-mode-menu .m-auto .ic:first-child { color: var(--claude); }
+body:not(.world-mode) #chat-mode-menu .mm-k { padding: 6px 10px 2px; font-size: 11px; color: var(--dim); }
+body:not(.world-mode) #chat-chips .mode.m-auto .ic { color: var(--claude); }
+
+/* Prompt rail on the Chat view's right edge, like the terminal's */
+#chat-rail { display: none; }
+body:not(.world-mode) #term:has(#conversation.open) { position: relative; }
+body:not(.world-mode) #term:has(#conversation.open) #chat-rail.has { display: block; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 2; padding: 6px 4px 6px 14px; cursor: pointer; }
+#chat-rail .cr-dashes { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; max-height: 60vh; overflow: hidden; }
+#chat-rail .cr-dashes i { display: block; width: 10px; height: 2px; border-radius: 1px; background: var(--dim); opacity: .45; transition: width .15s, opacity .15s, background .15s; }
+#chat-rail:hover .cr-dashes i { opacity: .8; }
+#chat-rail .cr-dashes i.on { width: 18px; background: var(--claude); opacity: 1; }
+#chat-rail .cr-pop { display: none; position: absolute; right: calc(100% + 4px); top: 50%; transform: translateY(-50%); width: 340px; max-height: 60vh; overflow-y: auto; padding: 6px; border-radius: 14px; background: var(--pop, var(--surface0)); border: 1px solid var(--border-hi); box-shadow: 0 10px 32px rgba(0,0,0,.35); }
+#chat-rail:hover .cr-pop { display: block; }
+#chat-rail .cr-pop div { padding: 7px 10px; border-radius: 8px; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chat-rail .cr-pop div:hover, #chat-rail .cr-pop div.on { background: var(--hover-strong); }
+body:not(.world-mode) #conversation .msg.flash .bubble { animation: chat-flash 1.2s ease-out; }

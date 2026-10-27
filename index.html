@@ -4126,7 +4126,6 @@ api.on((msg) => {
   if (msg.type.startsWith('doc') && docsUi.onMsg(msg)) return; // markdown documents, docs-ui.js
   if (msg.type === 'catalog') { catalogUi.onMsg(msg); return; } // + / // popover, catalog-ui.js
   if (msg.type === 'imagePasted') {
-    chatComposer.onImagePasted(msg); // the Chat view's composer shows it as a thumbnail
     // ponytail: no inline thumbnail. Writing to xterm out-of-band desyncs the
     // TUI's own redraw (it does not know those rows exist) and scrambles the prompt.
     if (!msg.tagged) { showToast('Image pasted — path inserted'); return; }
@@ -4451,6 +4450,7 @@ function handleAgentMsg(msg) {
     case 'agentAccount': { const a = agents.get(msg.id); if (a) { a.account = msg.account; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = termAgentLabel(a); } break; }
     case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
+    case 'clipboardImageSaved': chatComposer.onImageSaved(msg); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);

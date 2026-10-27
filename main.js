@@ -1030,6 +1030,20 @@ let timelineAgentId = null;
 const TIMELINE_MAX_EVENTS = 1000;
 const parseLineForTimeline = (line) => timelineCore.parseLineForTimeline(line, fmtTool, isSystemMessage);
 
+// A Chat view prompt with images in place: its text and image paths go into the agent's prompt one after another, so
+// Claude turns each path into its [Image #N] right where the user put it; then Enter in its own write (the TUI
+// swallows an Enter written with a paste). Image parts must be existing image files.
+async function chatSend(id, parts) {
+  const t = terminals.get(id); if (!t || t._ovShell) return;
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  for (const p of parts.slice(0, 60)) {
+    if (typeof p.image === 'string' && /\.(png|jpe?g|gif|webp|bmp)$/i.test(p.image) && fs.existsSync(p.image)) { t.write('\x1b[200~' + p.image.replace(/\\/g, '/') + '\x1b[201~'); await wait(250); }
+    else if (typeof p.text === 'string' && p.text) { const s = '\x1b[200~' + p.text.replace(/\r\n?/g, '\n').slice(0, 200000) + '\x1b[201~'; writePtyChunked(t, s); await wait(Math.ceil(s.length / 1024) * 8 + 80); }
+  }
+  await wait(120);
+  try { t.write('\r'); } catch {}
+}
+
 // @file suggestions for the Chat view's composer: the folder's git files (tracked + untracked, not ignored),
 // listed once per 30 s per folder, best matches first (chat-core.js matchFiles).
 const chatFileCache = new Map();
@@ -4513,14 +4527,16 @@ function handleIpc(msg) {
     }
     case 'pollClickupNow': armClickupTimer(); break;
     case 'chatFiles': chatFiles(msg); break;
-    // The Chat view attaching an image file (dropped, or copied from Explorer): pasted into the agent's prompt the way
-    // the terminal does, so Claude turns it into [Image #N]; the ack lets the composer send only once it's in.
-    case 'attachImage': {
-      const t = terminals.get(msg.id), p = typeof msg.path === 'string' ? msg.path.replace(/\\/g, '/') : '';
-      if (t && !t._ovShell && p && /\.(png|jpe?g|gif|webp|bmp)$/i.test(p) && fs.existsSync(p)) { send({ type: 'imagePasted', id: msg.id, path: p, tagged: true }); t.write('\x1b[200~' + p + '\x1b[201~'); }
-      else send({ type: 'imagePasted', id: msg.id, path: '', failed: true });
+    // The Chat view's composer: a screenshot pasted there is saved to a file (as the terminal's Alt+V does) and its path
+    // returned; the image goes to the agent only when the prompt is sent, in the place its [Image #N] tag holds.
+    case 'saveClipboardImage': {
+      const img = clipboard.readImage();
+      let p = '';
+      if (!img.isEmpty()) { const dir = path.join(os.tmpdir(), 'overlord-clipboard'); fs.mkdirSync(dir, { recursive: true }); p = path.join(dir, `paste-${Date.now()}.png`); fs.writeFileSync(p, img.toPNG()); }
+      send({ type: 'clipboardImageSaved', id: msg.id, seq: msg.seq, path: p.replace(/\\/g, '/') });
       break;
     }
+    case 'chatSend': chatSend(msg.id, Array.isArray(msg.parts) ? msg.parts : []); break;
     case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;

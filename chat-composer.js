@@ -8,57 +8,77 @@
   let hist = -1, draft = '';
   const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('blank', !t.value.trim()); };
 
-  // ── Images: shown the moment they're pasted or dropped (straight from the clipboard / file), handed to the agent's
-  // prompt through main, which acks once it's in. A send made before every ack waits for them, so the image is
-  // always in the prompt before the text and Enter land. Kept per agent: each one's images sit in its own prompt.
-  const atts = new Map(); // agent id → { urls, waiting: Set<token>, queued: text to send once waiting empties | null }
-  const attOf = (id) => { if (!atts.has(id)) atts.set(id, { urls: [], waiting: new Set(), queued: null }); return atts.get(id); };
+  // ── Images: each pasted or dropped image puts an [Image #N] tag at the caret and a numbered thumbnail above the box,
+  // so a prompt can say "compare [Image #1] with [Image #2]". Nothing reaches the agent until Send: then the text and
+  // the images go into its prompt in order (main's chatSend), each image where its tag stands. Deleting a tag (or ✕
+  // on its thumbnail) drops that image. A screenshot is saved to a file by main first; Send waits for that.
+  const atts = new Map(); // agent id → { list: [{ n, url, path, saving }], next }
+  const attOf = (id) => { if (!atts.has(id)) atts.set(id, { list: [], next: 1 }); return atts.get(id); };
+  const TAG = /\[Image #(\d+)\]/g;
   function drawAtt() {
-    const a = atts.get(selectedId), urls = a ? a.urls : [];
-    document.getElementById('chat-att').innerHTML = urls.map(u => `<img src="${u}" alt="">`).join('');
-    order().classList.toggle('has-att', urls.length > 0);
+    const a = atts.get(selectedId), list = a ? a.list : [];
+    document.getElementById('chat-att').innerHTML = list.map(x => `<span class="att${x.saving ? ' saving' : ''}" data-n="${x.n}"><img src="${x.url}" alt=""><b>${x.n}</b><button type="button" class="att-x" title="Remove" aria-label="Remove image ${x.n}">×</button></span>`).join('');
+    order().classList.toggle('has-att', list.length > 0);
   }
+  // A tag deleted from the text drops its image (and its thumbnail).
+  function pruneAtt() {
+    const a = atts.get(selectedId); if (!a || !a.list.length) return;
+    const used = new Set([...box().value.matchAll(TAG)].map(m => +m[1]));
+    const keep = a.list.filter(x => used.has(x.n));
+    if (keep.length !== a.list.length) { a.list = keep; if (!keep.length) a.next = 1; drawAtt(); }
+  }
+  let saveSeq = 0; const saving = new Map(); // seq → attachment waiting for main's saved path
   function addFiles(files) {
     const id = selectedId; if (id == null) return false;
     let took = false;
     for (const f of files) {
       const p = api.getFilePath(f) || '';
       if (f.type && f.type.startsWith('image/')) {
-        const a = attOf(id), tok = {}; a.urls.push(URL.createObjectURL(f)); a.waiting.add(tok); took = true;
-        api.send(p ? { type: 'attachImage', id, path: p } : { type: 'pasteImage', id });
-        setTimeout(() => { if (a.waiting.delete(tok)) flush(id); }, 4000); // no ack in 4 s: don't hold the prompt forever
+        const a = attOf(id), x = { n: a.next++, url: URL.createObjectURL(f), path: p.replace(/\\/g, '/'), saving: !p };
+        a.list.push(x); took = true;
+        if (!p) { const seq = ++saveSeq; saving.set(seq, x); api.send({ type: 'saveClipboardImage', id, seq }); } // a screenshot: main saves it
+        insert(`[Image #${x.n}] `);
       } else if (p) { insert((/\s/.test(p) ? `"${p}"` : p) + ' '); took = true; } // any other file: its path, like the CLI
     }
     drawAtt();
     return took;
   }
-  // main's ack for one image (pasteImage / attachImage); a terminal-tab paste has nothing waiting and is ignored here.
-  function onImagePasted(msg) {
-    const a = atts.get(msg.id); if (!a || !a.waiting.size) return;
-    a.waiting.delete(a.waiting.values().next().value);
-    flush(msg.id);
+  function onImageSaved(msg) {
+    const x = saving.get(msg.seq); if (!x) return;
+    saving.delete(msg.seq); x.saving = false; x.path = msg.path || ''; drawAtt();
+    for (const id of [...queued.keys()]) flush(id);
   }
+  // The prompt as ordered parts: text, then each tagged image at its place. A tag whose image is gone stays as text.
+  function parts(text, list) {
+    const byN = new Map(list.map(x => [x.n, x])), out = []; let last = 0;
+    for (const m of text.matchAll(TAG)) { const x = byN.get(+m[1]); if (!x || !x.path) continue; if (m.index > last) out.push({ text: text.slice(last, m.index) }); out.push({ image: x.path }); last = m.index + m[0].length; }
+    if (last < text.length) out.push({ text: text.slice(last) });
+    return out;
+  }
+  // A send made while a screenshot is still being saved waits for it (shown as "Attaching…").
+  const queued = new Map(); // agent id → { text, list }
   function flush(id) {
-    const a = atts.get(id); if (!a || a.waiting.size || a.queued == null) return;
-    const text = a.queued; a.queued = null;
-    setTimeout(() => deliver(id, text), 150); // Claude turns the pasted path into [Image #N] in ~30 ms
+    const q = queued.get(id); if (!q || q.list.some(x => x.saving)) return;
+    queued.delete(id); deliver(id, q.text, q.list);
   }
-  // questPrompt pastes the text and sends Enter in its own write once the paste has landed: the TUI swallows an Enter
-  // written together with the text. An image-only prompt is just Enter on what's already in the agent's prompt.
-  function deliver(id, text) {
-    if (text) api.send({ type: 'questPrompt', id, text }); else api.send({ type: 'termInput', id, data: '\r' });
+  // Plain text goes as one paste (questPrompt); with images, main's chatSend lays text and images into the prompt in order.
+  function deliver(id, text, list) {
+    if (list.length) api.send({ type: 'chatSend', id, parts: parts(text, list) });
+    else api.send({ type: 'questPrompt', id, text });
     chatUi.releasePending(id);
     if (chat()) renderConversation();
   }
   function send() {
     const inp = box(), text = inp.value.trim(), id = selectedId; if (id == null) return;
-    const a = atts.get(id), imgs = a ? a.urls.splice(0) : [];
-    if (!text && !imgs.length) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
-    const held = !!(a && a.waiting.size);
-    if (chat()) chatUi.addPending(id, text, imgs, held);
+    pruneAtt();
+    const a = atts.get(id), list = a ? a.list.splice(0) : [];
+    if (a) a.next = 1;
+    if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
+    const held = list.some(x => x.saving);
+    if (chat()) chatUi.addPending(id, text, list.map(x => x.url), held);
     inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt();
-    if (held) { a.queued = text; if (chat()) renderConversation(); return; } // goes once main confirms the images are in
-    deliver(id, text);
+    if (held) { queued.set(id, { text, list }); if (chat()) renderConversation(); return; }
+    deliver(id, text, list);
   }
   function insert(text, andSend) {
     const t = box(), s = t.selectionStart ?? t.value.length;
@@ -153,5 +173,25 @@
   document.getElementById('chat-plus').addEventListener('click', (e) => { e.stopPropagation(); catalogUi.isOpen() ? catalogUi.close() : openPicker(); });
   document.getElementById('chat-plus').addEventListener('mousedown', (e) => e.stopPropagation()); // the picker's outside-click close would reopen it
   document.getElementById('chat-chips').addEventListener('click', (e) => chatUi.onClick(e, agents.get(selectedId), null));
-  window.chatComposer = { send, insert, onKey, onFiles, onImagePasted, drawAtt };
+  document.getElementById('term-order-input').addEventListener('input', pruneAtt);
+  // ✕ on a thumbnail removes the image and its tag; a click on the picture opens it full size (chat-ui.js).
+  document.getElementById('chat-att').addEventListener('click', (e) => {
+    const x = e.target.closest('.att-x'); if (!x) return;
+    e.stopPropagation();
+    const n = x.closest('.att').dataset.n, t = box();
+    t.value = t.value.split(`[Image #${n}] `).join('').split(`[Image #${n}]`).join(''); grow(t); pruneAtt(); t.focus();
+  }, true);
+  // Typing anywhere in the Chat view goes to the box, like the CLI's always-live prompt: a plain key pressed while
+  // focus isn't in another field moves focus here first, so the character lands in the box.
+  document.addEventListener('keydown', (e) => {
+    if (!chat() || selectedId == null || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+    const a = document.activeElement;
+    if (a && (a === box() || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable)) return;
+    if (document.querySelector('.chat-lightbox, #settings-overlay[style*="flex"], #search-overlay[style*="flex"]')) return;
+    if (order().classList.contains('dead')) return;
+    if (cardKey(e)) { e.preventDefault(); return; } // an open question/permission card takes 1–9 first, as in the terminal
+    box().focus();
+  }, true);
+
+  window.chatComposer = { send, insert, onKey, onFiles, onImageSaved, drawAtt };
 })();

@@ -25,7 +25,7 @@
   };
   // Claude's spark: turning while the agent works, popping once when a turn lands.
   const SPARK = '<svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l1.6 6.2 5.6-3.2-3.2 5.6 6.2 1.6-6.2 1.6 3.2 5.6-5.6-3.2L12 21.5l-1.6-6.2-5.6 3.2 3.2-5.6L1.8 12l6.2-1.6-3.2-5.6 5.6 3.2z"/></svg>';
-  const MODES = { bypassPermissions: ['Bypass permissions', 'bypass', 'Bypass'], acceptEdits: ['Accept edits', 'accept', 'Auto'], plan: ['Plan mode', 'plan', 'Plan'], default: ['Ask first', 'ask', 'Ask'] };
+  const MODES = { bypassPermissions: ['Bypass permissions', 'bypass', 'Bypass'], acceptEdits: ['Accept edits', 'accept', 'Edits'], plan: ['Plan mode', 'plan', 'Plan'], auto: ['Auto mode', 'auto', 'Auto'], default: ['Ask first', 'ask', 'Ask'] };
 
   // Events never change once received, so each renders once; tool rows again when their result lands.
   // The text cache is dropped when md-bundle arrives (replies first render as plain text).
@@ -39,6 +39,16 @@
     return window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_'); // relative links resolve against the agent's folder
   }
   const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
+  // A prompt's images, numbered 1, 2, … in order, and its [Image #N] tags as chips with the same numbers (the k-th tag
+  // is the k-th image), so "compare [Image #1] with [Image #2]" reads against the thumbnails above it.
+  // The CLI numbers images across the whole session, so a later prompt can say "[Image #12]" about an earlier one:
+  // tagSrc maps each number to its picture (filled in thread order), and a chip shows a small preview that opens it.
+  const tagSrc = new Map();
+  const tagNums = (text) => [...String(text || '').matchAll(/\[Image #(\d+)\]/g)].map(m => m[1]);
+  const thumbs = (srcs, nums = []) => srcs.length ? `<div class="imgs">${srcs.map((s, k) => `<span class="th"><img src="${escH(s)}" alt="" loading="lazy"><b>${escH(nums[k] || k + 1)}</b></span>`).join('')}</div>` : '';
+  const promptSrcs = (ev) => (ev.images && ev.images.length ? ev.images : (ev.paths || []).map(fileUrl));
+  // own: the prompt's own number → picture map (a not-yet-sent prompt numbers its images itself)
+  const tagChips = (text, own) => escH(text).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
   const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
   const clock = (ts) => { try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
 
@@ -85,13 +95,13 @@
     if (ev.type === 'images') h = `<div class="msg user imgs-only"><div class="imgs">${ev.paths.map(p => `<img src="${escH(fileUrl(p))}" alt="" loading="lazy">`).join('')}</div></div>`;
     else if (ev.type === 'prompt') {
       // Embedded images first; an image too big to embed shows from its file, via the path Claude Code wrote.
-      const srcs = (ev.images && ev.images.length ? ev.images : (ev.paths || []).map(fileUrl));
-      const imgs = srcs.map(src => `<img src="${escH(src)}" alt="" loading="lazy">`).join('');
-      const text = (ev.text || '').replace(/\s*\[Image #\d+\]\s*/g, ' ').trim();
+      const srcs = promptSrcs(ev);
+      const text = (ev.text || '').trim(), nums = tagNums(text);
+      const imgs = thumbs(srcs, nums);
       const long = text.length > 900 || text.split('\n').length > 14;
-      h = `<div class="msg user" data-i="${i}">${imgs ? `<div class="imgs">${imgs}</div>` : ''}${text ? `<div class="bubble${long ? ' long' : ''}">${escH(text)}</div>${long ? '<button class="more" type="button">Show more</button>' : ''}` : ''}</div>`;
+      h = `<div class="msg user" data-i="${i}">${imgs ? `<div class="imgs">${imgs}</div>` : ''}${text ? `<div class="bubble${long ? ' long' : ''}">${tagChips(text)}</div>${long ? '<button class="more" type="button">Show more</button>' : ''}` : ''}</div>`;
     } else if (ev.type === 'text') h = `<div class="msg ai" data-i="${i}"><div class="md">${md(ev.text, cwd)}</div></div>`;
-    else if (ev.type === 'command') h = `<div class="msg cmd"><span>${escH(ev.text)}</span></div>`;
+    else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${escH(ev.text)}</span></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
     else h = '';
@@ -108,6 +118,8 @@
   // A turn's footer waits until the turn is over: its turn_duration line, or the next prompt.
   function blocks(evs, doneBy, cwd) {
     const out = []; let run = [], textAt = -1, turn = null, open = false, lastPrompt = null;
+    // This agent's image numbers → pictures, so a later [Image #N] can show the image it means.
+    tagSrc.clear(); for (const ev of evs) if (ev.type === 'prompt') { const ns = tagNums(ev.text); promptSrcs(ev).forEach((src, k) => { if (ns[k]) tagSrc.set(ns[k], src); }); }
     const flush = () => { if (run.length) out.push(groupHtml(run, doneBy, cwd)); run = []; };
     // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
     const close = () => { flush(); if (open && turn) out.push(footHtml(textAt, turn)); textAt = -1; turn = null; open = false; };
@@ -176,18 +188,49 @@
   function pendingHtml(id, evs, busy) {
     const p = pending.get(id); if (!p) return '';
     const norm = (s) => String(s || '').replace(/\[Image #\d+\]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.text)) || Date.now() - p.at > 120000) { pending.delete(id); return ''; }
-    const imgs = p.imgs.length ? `<div class="imgs">${p.imgs.map(u => `<img src="${escH(u)}" alt="">`).join('')}</div>` : '';
-    return `<div class="msg user pending">${imgs}${p.text ? `<div class="bubble">${escH(p.text)}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : busy ? 'Queued' : 'Sending…'}</span></div>`;
+    // A prompt sent while the agent works can wait in the CLI's queue until the turn ends, so it only expires once the
+    // agent has been idle a while without it showing up.
+    if (busy) p.busyAt = Date.now();
+    if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.text)) || (!busy && Date.now() - (p.busyAt || p.at) > 120000)) { pending.delete(id); return ''; }
+    const imgs = thumbs(p.imgs, tagNums(p.text));
+    return `<div class="msg user pending">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, k) => [n, p.imgs[k]]).filter(e => e[1])))}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : busy ? 'Queued' : 'Sending…'}</span></div>`;
   }
 
-  // ── Composer chips: permission mode (click cycles it, like Shift+Tab), model · effort, context used ──
+  // ── Permission mode: read live from the CLI's footer ("bypass permissions on", "plan mode on", …), since the
+  // transcript only records it once per turn. Picking one in the menu presses Shift+Tab until the footer shows it. ──
+  const MODE_RE = [['bypassPermissions', /bypass\s*permissions\s*on/i], ['acceptEdits', /accept\s*edits\s*on/i], ['plan', /plan\s*mode\s*on/i], ['auto', /auto\s*mode\s*on/i]];
+  function liveMode(id) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active;
+    if (!b) return null;
+    let s = ''; for (let i = Math.max(0, b.length - 10); i < b.length; i++) s += (b.getLine(i)?.translateToString() || '') + ' ';
+    for (const [m, re] of MODE_RE) if (re.test(s)) return m;
+    return /for\s*shortcuts/i.test(s) ? 'default' : null; // the default mode's footer shows "? for shortcuts"
+  }
+  async function setMode(target) {
+    const id = selectedId; closeModeMenu();
+    for (let k = 0; k < 6 && liveMode(id) !== target; k++) { api.send({ type: 'termInput', id, data: '\x1b[Z' }); await new Promise(r => setTimeout(r, 300)); }
+    if (liveMode(id) !== target && typeof showToast === 'function') showToast(`${MODES[target][0]} isn't available for this agent`);
+    rerender();
+  }
+  function closeModeMenu() { document.getElementById('chat-mode-menu')?.remove(); }
+  function openModeMenu(chip, cur) {
+    if (document.getElementById('chat-mode-menu')) return closeModeMenu();
+    const m = document.createElement('div'); m.id = 'chat-mode-menu'; m.setAttribute('role', 'menu');
+    m.innerHTML = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'].map(k => `<button type="button" role="menuitemradio" aria-checked="${k === cur}" class="mm-i m-${MODES[k][1]}${k === cur ? ' on' : ''}" data-mode="${k}">${ICON.shield}<span>${MODES[k][0]}</span>${k === cur ? ICON.check : ''}</button>`).join('') + '<div class="mm-k"><kbd>Shift</kbd>+<kbd>Tab</kbd> cycles</div>';
+    document.getElementById('term-order').appendChild(m);
+    const r = chip.getBoundingClientRect(), o = document.getElementById('term-order').getBoundingClientRect();
+    m.style.left = (r.left - o.left) + 'px';
+    m.addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) setMode(b.dataset.mode); });
+    setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!m.contains(e.target) && !e.target.closest('.chip.mode')) { closeModeMenu(); } document.removeEventListener('mousedown', off, true); }, true), 0);
+  }
+
+  // ── Composer chips: permission mode (opens the mode menu), model · effort, context used ──
   function chipsHtml(a, mode) {
     const s = a.stats || {}, m = MODES[mode] || null;
     const win = typeof ctxWindow === 'function' ? ctxWindow(s.modelFamily, s.ctxTok) : 200000;
     const pct = s.ctxTok ? Math.min(100, Math.round(s.ctxTok / win * 100)) : 0, r = 7, c = 2 * Math.PI * r;
     const model = String(s.model || '').replace(/^claude-/, '').replace(/-(\d+)-(\d+).*$/, ' $1.$2').replace(/^\w/, x => x.toUpperCase());
-    return (m ? `<button type="button" class="chip mode m-${m[1]}" data-act="mode" title="Permission mode (Shift+Tab cycles)">${ICON.shield}<span class="l">${m[0]}</span><span class="s">${m[2]}</span></button>` : '')
+    return (m ? `<button type="button" class="chip mode m-${m[1]}" data-act="mode" data-mode-cur="${escH(mode)}" aria-haspopup="menu" title="Permission mode">${ICON.shield}<span class="l">${m[0]}</span><span class="s">${m[2]}</span></button>` : '')
       + '<span class="grow"></span>'
       // Context left before auto-compact, once it matters (half used); click puts /compact in the box.
       + (pct >= 50 ? `<button type="button" class="chip ctx${pct > 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${((100 - pct) / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
@@ -202,6 +245,7 @@
     const now = Date.now();
     const doneBy = new Map(); let mode = '';
     if (evs) for (const ev of evs) { if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev); else if (ev.type === 'mode') mode = ev.mode; }
+    mode = liveMode(id) || mode; // the footer is current; the transcript only notes the mode once per turn
     // The transcript outranks a stale "working": a turn whose end is the last thing written is over, whatever a
     // leftover per-call status in the list says.
     // (Covers "resuming" too: it can linger after Overlord reattaches an agent that has since finished.)
@@ -253,6 +297,7 @@
     }
     jumpOnce = false;
     for (const s of thread.querySelectorAll('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
+    drawRail(el, evs);
     syncJump(el);
   }
   // A replaced block keeps its open tool rows and expanded prompt.
@@ -262,8 +307,36 @@
     const b = cur.querySelector('.bubble.open'), nb = node.querySelector('.bubble.long');
     if (b && nb) { nb.classList.add('open'); nb.nextElementSibling.textContent = 'Show less'; }
   }
-  // The round "jump to latest" button over the composer, shown while you're scrolled up.
-  function syncJump(el) { const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 200); }
+  // The round "jump to latest" button over the composer, shown while you're scrolled up; the prompt rail follows too.
+  function syncJump(el) { const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 200); railActive(el); }
+
+  // ── Prompt rail, as on the terminal: a dash per prompt down the right edge, hover lists them, click jumps there ──
+  const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
+  document.getElementById('term').appendChild(rail);
+  function drawRail(el, evs) {
+    const ps = (evs || []).map((e, i) => [e, i]).filter(([e]) => e.type === 'prompt' || e.type === 'command');
+    const key = ps.map(([, i]) => i).join(',');
+    rail.classList.toggle('has', ps.length > 1);
+    if (rail._k === key) return; rail._k = key;
+    const label = (t) => escH(String(t || '').replace(/\[Image #\d+\]/g, '🖼').replace(/\s+/g, ' ').trim().slice(0, 140) || '🖼');
+    rail.querySelector('.cr-dashes').innerHTML = ps.map(([, i]) => `<i data-i="${i}"></i>`).join('');
+    rail.querySelector('.cr-pop').innerHTML = ps.map(([e, i]) => `<div data-i="${i}">${label(e.text)}</div>`).join('');
+    railActive(el);
+  }
+  // The prompt at the top of the view is the one lit.
+  function railActive(el) {
+    if (!rail.classList.contains('has')) return;
+    const top = el.getBoundingClientRect().top + 40; let on = null;
+    for (const u of el.querySelectorAll('.thread > .msg.user[data-i], .thread > .msg.cmd[data-i]')) { if (u.getBoundingClientRect().top <= top) on = u.dataset.i; else break; }
+    if (on == null) { const f = el.querySelector('.thread > .msg.user[data-i]'); on = f && f.dataset.i; }
+    for (const n of rail.querySelectorAll('[data-i]')) n.classList.toggle('on', n.dataset.i === on);
+  }
+  rail.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-i]'); if (!t) return;
+    const m = document.querySelector(`#conversation .thread > [data-i="${t.dataset.i}"]`);
+    if (m) { m.scrollIntoView({ block: 'start', behavior: 'smooth' }); m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash'); }
+  });
+  rail.addEventListener('mouseenter', () => { const on = rail.querySelector('.cr-pop .on'); if (on) on.scrollIntoView({ block: 'nearest' }); });
 
   // Keys typed into the agent's terminal one write at a time, so the TUI reads each as its own key press.
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
@@ -275,6 +348,8 @@
     if (k && selectedId != null) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
     const pick = e.target.closest('[data-pick]'); // question card: arrow down to the option, then Enter
     if (pick && selectedId != null) { keys([...Array(+pick.dataset.pick).fill('\x1b[B'), '\r']); pick.classList.add('picked'); return; }
+    const tag = e.target.closest('.imgtag[data-src]'); // an [Image #N] chip opens the image it names
+    if (tag) { lightbox(tag.dataset.src); return; }
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
     if (img) { lightbox(img.src); return; }
     const jump = e.target.closest('[data-jump]'); // a background agent's chip: open and show its call
@@ -284,7 +359,7 @@
     const act = e.target.closest('[data-act]');
     if (act) {
       if (act.dataset.act === 'resume') resumeSelected();
-      else if (act.dataset.act === 'mode') keys(['\x1b[Z']); // Shift+Tab: the CLI cycles its permission mode
+      else if (act.dataset.act === 'mode') openModeMenu(act, act.dataset.modeCur);
       else { switchTermTab('terminal'); askFlip = true; const x = xterms.get(selectedId); if (x) x.terminal.focus(); }
       return;
     }
