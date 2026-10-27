@@ -410,22 +410,29 @@
   const SHORTCUTS = [['Enter', 'Send'], ['Shift+Enter', 'New line'], ['Esc', 'Stop the agent'], ['↑ / ↓', 'Your earlier prompts'], ['@', 'Mention a file'], ['/', 'Commands and skills'], ['Ctrl+F', 'Find in chat'], ['Ctrl+↑ / ↓', 'Jump between prompts'], ['Ctrl+`', 'Chat ↔ terminal'], ['1–9', 'Answer a question card'], ['J / K', 'Files in the changes panel']];
   function openViewMenu(chip) {
     if (document.getElementById('chat-view-menu')) return closeViewMenu();
-    const m = document.createElement('div'); m.id = 'chat-view-menu'; m.setAttribute('role', 'menu');
+    const m = document.createElement('div'); m.id = 'chat-view-menu'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-label', 'Chat options');
     // Agents waiting on you (questions, approvals, finished unseen), then view settings, then the shortcuts.
     let keysOpen = false;
+    // Redrawing keeps keyboard focus on the same control (matched by its data-* and label), else the first one.
+    const fkey = (b) => b ? [...b.attributes].filter(t => t.name.startsWith('data-') || t.name === 'aria-label').map(t => t.name + '=' + t.value).join('&') : '';
     const draw = () => {
+      const had = m.contains(document.activeElement) ? fkey(document.activeElement) : null;
+      render();
+      if (had !== null) ([...m.querySelectorAll('button')].find(b => fkey(b) === had) || m.querySelector('button'))?.focus();
+    };
+    const render = () => {
       const items = inboxItems().filter(x => x.id !== selectedId), label = { question: 'Question', permission: 'Needs approval', done: 'Finished', crashed: 'Stopped' };
       const split = document.getElementById('term').classList.contains('split');
       // A waiting agent can be answered right here: Allow / Deny, or the question's options read off its terminal.
       // Each row: who, what kind, how long it's waited; under it the full command or question (what you'd be agreeing to),
       // then the answers, labelled with the agent's name for screen readers.
       const who = (x) => escH(x.a.title || 'Agent');
-      const actions = (x) => x.kind === 'permission' ? `<span class="ib-a"><button type="button" role="menuitem" class="primary" data-ans="${x.id}" data-k="1" aria-label="Allow ${who(x)}">Allow</button><button type="button" role="menuitem" data-ans="${x.id}" data-k="esc" aria-label="Deny ${who(x)}">Deny</button></span>`
-        : x.kind === 'question' ? `<span class="ib-a">${menuOptions(x.id).slice(0, 3).map((o, k) => `<button type="button" role="menuitem" data-ans="${x.id}" data-pick="${k}" title="${escH(o)}" aria-label="Answer ${who(x)}: ${escH(o)}">${escH(o.length > 22 ? o.slice(0, 21) + '…' : o)}</button>`).join('')}</span>` : '';
-      const waited = (x) => x.kind === 'done' ? '' : ` · waiting ${escH(dur(Date.now() - x.since))}`;
-      m.innerHTML = (items.length ? `<div class="vm-h">Needs you</div>${items.map(x => `<div class="ib-row"><button type="button" role="menuitem" class="ib-i k-${x.kind}" data-agent="${x.id}" aria-label="Open ${who(x)}"><span class="ib-dot"></span><span class="ib-t"><b>${who(x)}</b><small>${escH(label[x.kind])}${waited(x)}</small></span></button>${x.what && x.kind !== 'done' && x.kind !== 'crashed' ? `<div class="ib-what" title="${escH(x.what)}">${escH(x.what)}</div>` : ''}${actions(x)}</div>`).join('')}<div class="vm-sep"></div>` : '')
+      const actions = (x) => x.kind === 'permission' ? `<span class="ib-a"><button type="button" class="primary" data-ans="${x.id}" data-k="1" aria-label="Allow ${who(x)}">Allow</button><button type="button" data-ans="${x.id}" data-k="esc" aria-label="Deny ${who(x)}">Deny</button></span>`
+        : x.kind === 'question' ? `<span class="ib-a">${menuOptions(x.id).slice(0, 3).map((o, k) => `<button type="button" data-ans="${x.id}" data-pick="${k}" title="${escH(o)}" aria-label="Answer ${who(x)}: ${escH(o)}">${escH(o.length > 22 ? o.slice(0, 21) + '…' : o)}</button>`).join('')}</span>` : '';
+      const waited = (x) => x.kind === 'done' ? '' : ` · <span data-since="${x.since}">waiting ${escH(dur(Date.now() - x.since))}</span>`;
+      m.innerHTML = (items.length ? `<div class="vm-h">Needs you</div>${items.map(x => `<div class="ib-row"><button type="button" class="ib-i k-${x.kind}" data-agent="${x.id}" aria-label="Open ${who(x)}"><span class="ib-dot"></span><span class="ib-t"><b>${who(x)}</b><small>${escH(label[x.kind])}${waited(x)}</small></span></button>${x.what && x.kind !== 'done' && x.kind !== 'crashed' ? `<div class="ib-what" title="${escH(x.what)}">${escH(x.what)}</div>` : ''}${actions(x)}</div>`).join('')}<div class="vm-sep"></div>` : '')
         + `<div class="vm-row"><span>Text size</span><button type="button" data-z="-1" aria-label="Smaller">A−</button><b>${Math.round(zoom * 100)}%</b><button type="button" data-z="1" aria-label="Larger">A+</button></div>`
-        + `<button type="button" class="vm-toggle" role="menuitemcheckbox" aria-checked="${split}" data-split="1"><span>Terminal beside the chat</span><i class="${split ? 'on' : ''}"></i></button>`
+        + `<button type="button" class="vm-toggle" role="switch" aria-checked="${split}" data-split="1"><span>Terminal beside the chat</span><i class="${split ? 'on' : ''}"></i></button>`
         + `<button type="button" class="vm-toggle" aria-expanded="${keysOpen}" data-keys-list="1"><span>Keyboard shortcuts</span>${ICON.chev}</button>`
         + (keysOpen ? SHORTCUTS.map(([k, v]) => `<div class="vm-k"><span>${escH(v)}</span><kbd>${escH(k)}</kbd></div>`).join('') : '');
     };
@@ -435,7 +442,7 @@
       if (an) {
         const id = +an.dataset.ans; if (!stillWaiting(id)) { draw(); return; }
         if (an.dataset.k) api.send({ type: 'termInput', id, data: an.dataset.k === 'esc' ? '\x1b' : an.dataset.k });
-        else { const k = +an.dataset.pick; for (let j = 0; j < k; j++) setTimeout(() => api.send({ type: 'termInput', id, data: '\x1b[B' }), j * 70); setTimeout(() => { if (stillWaiting(id)) api.send({ type: 'termInput', id, data: '\r' }); }, k * 70); }
+        else pickOption(id, +an.dataset.pick);
         dropToast(id); setTimeout(draw, 400); return;
       }
       const ag = e.target.closest('[data-agent]'); if (ag) { closeViewMenu(); focusAgent(+ag.dataset.agent); return; }
@@ -453,9 +460,16 @@
     document.getElementById('term-order').appendChild(m);
     const r = chip.getBoundingClientRect(), o = document.getElementById('term-order').getBoundingClientRect();
     m.style.right = Math.max(0, o.right - r.right) + 'px';
-    setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!m.contains(e.target) && !e.target.closest('[data-act="view-menu"]')) closeViewMenu(); document.removeEventListener('mousedown', off, true); }, true), 0);
+    // Closes on a click outside or Esc (focus back to ⋯); "waiting 1m 4s" counts up while it's open.
+    const off = (e) => { if (!m.contains(e.target) && !e.target.closest('[data-act="view-menu"]')) closeViewMenu(); };
+    const esc = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeViewMenu(); chip.focus(); } };
+    const timer = setInterval(() => { for (const s of m.querySelectorAll('[data-since]')) s.textContent = 'waiting ' + dur(Date.now() - +s.dataset.since); }, 1000);
+    setTimeout(() => document.addEventListener('mousedown', off, true), 0);
+    m.addEventListener('keydown', esc);
+    m._close = () => { clearInterval(timer); document.removeEventListener('mousedown', off, true); };
+    m.querySelector('button')?.focus();
   }
-  function closeViewMenu() { document.getElementById('chat-view-menu')?.remove(); }
+  function closeViewMenu() { const m = document.getElementById('chat-view-menu'); if (m) { m._close?.(); m.remove(); } }
 
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
   // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
@@ -575,6 +589,8 @@
 
   // Keys typed into the agent's terminal one write at a time, so the TUI reads each as its own key press.
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
+  // Option k of an open question: its number key, as in the terminal, so it lands wherever the CLI's cursor sits.
+  function pickOption(id, k) { if (k < 9) api.send({ type: 'termInput', id, data: String(k + 1) }); }
 
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
@@ -582,7 +598,7 @@
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
     if (k && selectedId != null) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
     const pick = e.target.closest('[data-pick]'); // question card: arrow down to the option, then Enter
-    if (pick && selectedId != null) { keys([...Array(+pick.dataset.pick).fill('\x1b[B'), '\r']); pick.classList.add('picked'); return; }
+    if (pick && selectedId != null) { pickOption(selectedId, +pick.dataset.pick); pick.classList.add('picked'); return; }
     const tag = e.target.closest('.imgtag[data-src]'); // an [Image #N] chip opens the image it names
     if (tag) { lightbox(tag.dataset.src); return; }
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
@@ -784,12 +800,7 @@
     const a = agents.get(id); if (!a || worldView || !stillWaiting(id)) return;
     dropToast(id);
     const tools = [...a.tools.values()], t = tools.find(x => ask ? x.perm === 'ask' : x.perm === true) || tools.find(x => x.perm) || {}, opts = ask ? menuOptions(id) : [];
-    // Arrow down to the option, then Enter: each key its own write, and the Enter only if the question is still open.
-    const keysFor = (k) => {
-      const n = id;
-      for (let j = 0; j < k; j++) setTimeout(() => api.send({ type: 'termInput', id: n, data: '\x1b[B' }), j * 70);
-      setTimeout(() => { if (stillWaiting(n)) { api.send({ type: 'termInput', id: n, data: '\r' }); announce(`Answered ${a.title || 'the agent'}`); } }, k * 70);
-    };
+    const keysFor = (k) => { pickOption(id, k); announce(`Answered ${a.title || 'the agent'}`); };
     const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
     el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
       + `<div class="ct-what">${escH(t.status || t.name || '')}</div>`
