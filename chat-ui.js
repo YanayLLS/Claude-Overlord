@@ -449,6 +449,7 @@
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
     if (fresh && window.chatComposer) chatComposer.drawAtt(); // another agent: its own pending images
+    if (fresh && el._agent != null && el._agent !== id) onAgentSwitch(); el._agent = id;
     if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); }
     const stuck = !fresh && !jumpOnce && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
     const old = el._blocks || [];
@@ -888,6 +889,16 @@
     const top = el.getBoundingClientRect().top + 8, y = (u) => u.getBoundingClientRect().top;
     const target = dir < 0 ? [...us].reverse().find(u => y(u) < top - 4) : us.find(u => y(u) > top + 4);
     if (target) { target.scrollIntoView({ block: 'start', behavior: 'smooth' }); target.classList.remove('flash'); void target.offsetWidth; target.classList.add('flash'); }
+  }
+
+  // Another agent selected: what showed the old one's work follows the new one (Uncommitted changes reload for its
+  // folder) or closes (a turn's changes, a shell's output, find, the chip menus).
+  function onAgentSwitch() {
+    const p = document.getElementById('chat-changes');
+    if (p && p.dataset.kind === 'Uncommitted') openSessionChanges(); else if (p) closeChanges(true);
+    closeShell(); closeModeMenu(); closeViewMenu(); document.getElementById('model-ctx-menu')?.remove();
+    if (document.getElementById('chat-find') && !document.getElementById('chat-find').hidden) closeFind();
+    peekEl.hidden = true;
   }
 
   // ── Side by side: terminal left, chat right (chat.css #term.split); remembered ──
