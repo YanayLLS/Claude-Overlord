@@ -400,3 +400,37 @@ body:not(.world-mode) #conversation .q-x { border: 0; background: none; color: v
 body:not(.world-mode) #conversation .q-x:hover { color: var(--text); }
 body:not(.world-mode) #conversation .turnfoot { flex-wrap: wrap; row-gap: 4px; }
 body:not(.world-mode) #conversation .turnfoot > * { white-space: nowrap; }
+
+/* A turn's changes: files left, the picked file's diff right */
+#chat-changes { position: absolute; inset: 12px 12px 12px 12px; z-index: 6; display: flex; flex-direction: column; border-radius: 16px; border: 1px solid var(--border-hi); background: var(--bg); box-shadow: 0 20px 60px rgba(0,0,0,.45); outline: none; animation: chat-in .18s var(--chat-ease, ease-out); overflow: hidden; }
+#chat-changes .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#chat-changes .cc-h { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13.5px; }
+#chat-changes .cc-tot { color: var(--dim); font-size: 12.5px; }
+#chat-changes .grow { flex: 1; }
+#chat-changes .add { color: var(--green); font-weight: 500; } #chat-changes .del { color: var(--red); font-weight: 500; }
+#chat-changes .cc-inline, #chat-changes .cc-open { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-hi); background: none; color: var(--subtext); font: inherit; font-size: 12px; cursor: pointer; }
+#chat-changes .cc-inline:hover, #chat-changes .cc-open:hover { background: var(--hover-strong); color: var(--text); }
+#chat-changes .cc-x { width: 28px; height: 28px; border: 0; border-radius: 8px; background: none; color: var(--dim); font-size: 20px; cursor: pointer; }
+#chat-changes .cc-x:hover { background: var(--hover-strong); color: var(--text); }
+#chat-changes .cc-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); }
+#chat-changes .cc-files { overflow: auto; padding: 8px; border-right: 1px solid var(--border); }
+#chat-changes .cc-f { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+#chat-changes .cc-f:hover { background: var(--hover); }
+#chat-changes .cc-f.on { background: var(--hover-strong); box-shadow: inset 2px 0 0 var(--claude); }
+#chat-changes .cc-n { font-family: 'Geist Mono', monospace; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-changes .cc-n em { font-style: normal; font-family: 'Geist', sans-serif; font-size: 10px; margin-left: 6px; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+#chat-changes .cc-d { grid-column: 1; font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+#chat-changes .cc-s { grid-column: 2; grid-row: 1 / 3; align-self: center; font-family: 'Geist Mono', monospace; font-size: 11px; }
+#chat-changes .cc-diff { overflow: auto; padding: 10px 14px 18px; }
+#chat-changes .cc-dh { position: sticky; top: -10px; z-index: 1; display: flex; align-items: center; gap: 10px; margin: -10px -14px 10px; padding: 10px 14px; background: var(--bg); border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--subtext); }
+#chat-changes .cc-dh .mono { flex: 1; font-family: 'Geist Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-changes .cc-sep { margin: 14px 0 6px; font-size: 11px; color: var(--dim); letter-spacing: .02em; }
+#chat-changes .diff { max-height: none; overflow: visible; border-radius: 10px; border: 1px solid var(--border); background: var(--bg2); font-family: 'Geist Mono', monospace; font-size: 12px; line-height: 1.6; padding: 6px 0; margin-bottom: 8px; }
+#chat-changes .dl { display: flex; color: var(--subtext); padding-right: 12px; }
+#chat-changes .dl i { flex: none; width: 26px; text-align: center; font-style: normal; color: var(--dim); user-select: none; }
+#chat-changes .dl span { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#chat-changes .dl.add { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--text); } #chat-changes .dl.add i { color: var(--green); }
+#chat-changes .dl.del { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--text); } #chat-changes .dl.del i { color: var(--red); }
+#chat-changes .dl.fold { color: var(--dim); }
+@container (max-width: 640px) { #chat-changes .cc-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); } #chat-changes .cc-files { max-height: 30vh; border-right: 0; border-bottom: 1px solid var(--border); } }
+#chat-changes { container-type: inline-size; }

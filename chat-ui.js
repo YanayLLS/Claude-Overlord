@@ -448,14 +448,8 @@
       if (act.dataset.act === 'resume') resumeSelected();
       else if (act.dataset.act === 'retry') { const t = lastPrompt(); if (t) { api.send({ type: 'questPrompt', id: selectedId, text: t }); chatUi.addPending(selectedId, t); rerender(); } }
       else if (act.dataset.act === 'edit-prompt') chatComposer.insert(lastPrompt(), false);
-      else if (act.dataset.act === 'turn-edits') { // open every edit of that turn and bring the first into view
-        const from = +act.dataset.from, to = +act.dataset.to; let first = null;
-        for (const d of document.querySelectorAll('#conversation details.trow.k-edit')) {
-          const i = (evs || []).findIndex(x => x.toolId === d.dataset.tid); if (i < from || i > to) continue;
-          const g = d.parentElement.closest('details'); if (g) g.open = true; d.open = true; first = first || d;
-        }
-        if (first) first.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      }
+      else if (act.dataset.act === 'turn-edits') openChanges(evs || [], +act.dataset.from, +act.dataset.to, a);
+      else if (act.dataset.act === 'turn-edits-inline') showEditsInline(evs || [], +act.dataset.from, +act.dataset.to);
       else if (act.dataset.act === 'mode') openModeMenu(act, act.dataset.modeCur);
       else if (act.dataset.act === 'model') openModelMenu(act);
       else { switchTermTab('terminal'); askFlip = true; const x = xterms.get(selectedId); if (x) x.terminal.focus(); }
@@ -487,6 +481,61 @@
 
   // Opening a run of calls that had a failure opens the failed call too: "1 failed" should show which.
   document.getElementById('conversation').addEventListener('toggle', (e) => { const d = e.target; if (d.matches && d.matches('details.tgroup') && d.open) { const f = d.querySelector('details.trow.err'); if (f) f.open = true; } }, true);
+
+  // ── A turn's changes at a glance: the files it touched on the left (+/−), the picked file's diff on the right,
+  // every edit to that file stacked in order. ↑/↓ (or j/k) move between files, Esc closes, Open opens the file. ──
+  function openChanges(evs, from, to, a) {
+    closeChanges();
+    const doneBy = new Map(); for (const e of evs) if (e.type === 'tool_done') doneBy.set(e.toolId, e);
+    const files = new Map(); // path → { add, del, edits: [ev] }
+    for (let i = Math.max(0, from); i <= to && i < evs.length; i++) {
+      const e = evs[i], d = e.type === 'tool' && doneBy.get(e.toolId);
+      if (!d || d.err || !e.args || (e.args.old == null && e.args.new == null)) continue;
+      const p = e.args.file_path || e.args.notebook_path || '?', s = editStat(e);
+      if (!files.has(p)) files.set(p, { add: 0, del: 0, edits: [], created: e.name === 'Write' });
+      const f = files.get(p); f.add += s.add; f.del += s.del; f.edits.push(e);
+    }
+    if (!files.size) return;
+    const list = [...files.entries()], tot = list.reduce((t, [, f]) => ({ add: t.add + f.add, del: t.del + f.del }), { add: 0, del: 0 });
+    const cwd = String((a && a.cwd) || '').replace(/\\/g, '/').toLowerCase();
+    const rel = (p) => { const q = String(p).replace(/\\/g, '/'); return cwd && q.toLowerCase().startsWith(cwd + '/') ? q.slice(cwd.length + 1) : q; };
+    const panel = document.createElement('div'); panel.id = 'chat-changes'; panel.tabIndex = -1;
+    panel.innerHTML = `<div class="cc-h">${ICON.edit}<b>Changes</b><span class="cc-tot">${list.length} file${list.length > 1 ? 's' : ''} <b class="add">+${tot.add}</b> <b class="del">−${tot.del}</b></span><span class="grow"></span><button type="button" class="cc-inline" data-act="turn-edits-inline" data-from="${from}" data-to="${to}">Show in chat</button><button type="button" class="cc-x" aria-label="Close">×</button></div>`
+      + `<div class="cc-body"><div class="cc-files">${list.map(([p, f], k) => `<button type="button" class="cc-f" data-k="${k}" title="${escH(p)}"><span class="cc-n">${escH(baseName(p))}${f.created ? '<em>new</em>' : ''}</span><span class="cc-d">${escH(rel(p).split('/').slice(0, -1).join('/'))}</span><span class="cc-s"><b class="add">+${f.add}</b> <b class="del">−${f.del}</b></span></button>`).join('')}</div><div class="cc-diff"></div></div>`;
+    document.getElementById('term').appendChild(panel);
+    let cur = 0;
+    const pick = (k) => {
+      cur = (k + list.length) % list.length;
+      const [p, f] = list[cur];
+      for (const b of panel.querySelectorAll('.cc-f')) b.classList.toggle('on', +b.dataset.k === cur);
+      panel.querySelector('.cc-f.on')?.scrollIntoView({ block: 'nearest' });
+      panel.querySelector('.cc-diff').innerHTML = `<div class="cc-dh"><span class="mono">${escH(rel(p))}</span><button type="button" class="cc-open" data-open="${escH(p)}">Open</button></div>`
+        + f.edits.map((e, j) => `${f.edits.length > 1 ? `<div class="cc-sep">Edit ${j + 1} of ${f.edits.length}</div>` : ''}${diffHtml(e.args.old, e.args.new).html}`).join('');
+      panel.querySelector('.cc-diff').scrollTop = 0;
+    };
+    panel.addEventListener('click', (e) => {
+      const b = e.target.closest('.cc-f'); if (b) return pick(+b.dataset.k);
+      if (e.target.closest('.cc-x')) return closeChanges();
+      const o = e.target.closest('[data-open]'); if (o) return api.send({ type: 'docOpenWith', path: o.dataset.open });
+      const inl = e.target.closest('[data-act="turn-edits-inline"]'); if (inl) { closeChanges(); showEditsInline(evs, from, to); }
+    });
+    panel.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeChanges(); }
+      else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); pick(cur + 1); }
+      else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); pick(cur - 1); }
+    });
+    pick(0); panel.focus();
+  }
+  function closeChanges() { const p = document.getElementById('chat-changes'); if (p) { p.remove(); document.getElementById('term-order-input')?.focus(); } }
+  // The old way, still one click away: open that turn's edit rows in the thread and scroll to the first.
+  function showEditsInline(evs, from, to) {
+    let first = null;
+    for (const d of document.querySelectorAll('#conversation details.trow.k-edit')) {
+      const i = evs.findIndex(x => x.toolId === d.dataset.tid); if (i < from || i > to) continue;
+      const g = d.parentElement.closest('details'); if (g) g.open = true; d.open = true; first = first || d;
+    }
+    if (first) first.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
 
   // ── A background shell's live output: a panel over the view, re-read every 2 s while it's open ──
   let shellTimer = null;
