@@ -31,6 +31,7 @@ function makeSender({ getTerm, writeChunked = (t, s) => t.write(s), isImage = ()
     prompt: (id, text, eraseN = 0, onSubmit = null) => inOrder(id, async (cancelled) => {
       const t = getTerm(id); if (!t) return;
       await erase(t, eraseN);
+      if (cancelled()) return; // Esc while the leftover was being erased: nothing of it goes in
       const s = bracketed(String(text).replace(/\r\n?/g, '\n'));
       await put(id, t, s); await wait(pasteSettleMs(s.length));
       if (cancelled()) return; // Esc while it was going in: the CLI's own Esc handles what's in its box
@@ -52,9 +53,10 @@ function makeSender({ getTerm, writeChunked = (t, s) => t.write(s), isImage = ()
     // Just the leftover, in turn with the sends (Esc took a message back).
     erase: (id, n) => inOrder(id, async () => { const t = getTerm(id); if (t) await erase(t, n); }),
     // Esc: stop this agent's sends, then the Esc itself once no paste is half-written.
-    cancel: (id, esc = true) => {
+    // onEsc runs once the Esc is really written (a long paste can hold it back a second or more).
+    cancel: (id, esc = true, onEsc = null) => {
       gens.set(id, gen(id) + 1);
-      if (esc) Promise.resolve(writing.get(id)).then(() => { const t = getTerm(id); if (t) t.write('\x1b'); }).catch(() => {});
+      if (esc) Promise.resolve(writing.get(id)).then(() => { const t = getTerm(id); if (t) t.write('\x1b'); if (onEsc) onEsc(); }).catch(() => {});
     },
   };
 }

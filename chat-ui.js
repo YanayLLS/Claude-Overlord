@@ -617,6 +617,7 @@
     // for a long one: only long text is collapsed), with their images. Ones still waiting in main's queue weren't
     // touched and go on their own.
     let placeholders = (got.match(/\[Pasted text #\d+/g) || []).length;
+    if (sentOf(p).length > 800 && !got.includes(head(p))) placeholders--; // the cancelled one's own placeholder
     for (const o of list) {
       if (o.held || !sentOf(o)) continue;
       const had = got.includes(head(o)) || (sentOf(o).length > 800 && placeholders > 0 && placeholders--);
@@ -992,7 +993,13 @@
     // Main stops what it hasn't handed the CLI yet, then sends the Esc once no paste is half-written (straight to the
     // CLI it could land inside a long paste as text).
     api.send({ type: 'cliCancel', id });
-    if (!revert) { a._reverted = Date.now(); return rerender(); } // editing stops the turn itself: its new message stays, no "Interrupted"
+    if (!revert) {
+      // Editing stops the turn itself: its new message stays (the last one waiting), no "Interrupted". Earlier ones main
+      // had not handed over yet were just cancelled: they come back to the box, never lost.
+      const pend = pending.get(id) || [], keep = pend[pend.length - 1], others = pend.slice(0, -1).filter(p => !p.held);
+      if (others.length) { pending.set(id, pend.filter(p => p.held || p === keep)); appendDraft(id, others.map(p => p.match || p.text).join('\n\n')); }
+      a._reverted = Date.now(); return rerender();
+    }
     // Esc before Claude answered: as in the CLI, your messages come back to the box and leave the thread. Messages still
     // on their way come back at once. One the CLI already has comes back only if the CLI itself put it back in its box
     // (it does when nothing was answered yet); that box is then cleared, or it would ride along with the next send.
@@ -1006,7 +1013,7 @@
       if (back.length === 1 && back[0].restore) chatComposer.restoreDraft(id, back[0].restore);
       else appendDraft(id, back.map(p => p.match || p.text).join('\n\n'));
     }
-    if (lastMine && !a._takeBack) a._takeBack = setTimeout(() => { // one check per Esc burst: a second Esc doesn't take it back twice
+    if (lastMine && !a._takeBack) a._takeBack = afterEsc(id, () => { // one check per Esc burst: a second Esc doesn't take it back twice
       a._takeBack = null;
       // the CLI put it back in its box (as itself, or as its "[Pasted text]" placeholder when long): it's out of the conversation
       const x = typeof xterms !== 'undefined' && xterms.get(id), inBox = x && typeof readPromptBox === 'function' ? readPromptBox(x.terminal) : '';
@@ -1016,13 +1023,23 @@
       a._reverted = Date.now();
       setHides(a, [...hidesOf(a), { from: Date.parse(lastMine.ts), until: Date.now() }]);
       // in front of what's in that agent's box (anything still on its way, or what you've typed since), whichever agent is on screen
-      const cur = chatComposer.getDraft(id);
-      chatComposer.setDraft(id, cur.trim() ? lastMine.text + '\n\n' + cur : lastMine.text);
+      // its [Image #N] tags are the CLI's, not pictures this box holds: out, or they'd take the restored message's images
+      const cur = chatComposer.getDraft(id), mine = String(lastMine.text || '').replace(/\[Image #\d+\]\s*/g, '').trim();
+      chatComposer.setDraft(id, cur.trim() ? mine + '\n\n' + cur : mine);
       chatComposer.clearCliBox(id); rerender();
-    }, 700);
-    else if (back.length) setTimeout(() => chatComposer.clearCliBox(id), 700);
+    });
+    else if (back.length) afterEsc(id, () => chatComposer.clearCliBox(id));
     rerender();
   }
+  // Run fn 700 ms after main reports this agent's Esc was really written (a long paste in progress holds it back; the
+  // CLI needs a moment to put a message back in its box). Main not answering within 4 s: run it anyway.
+  const escWaiters = new Map(); // agent id → [fn]
+  function afterEsc(id, fn) {
+    const list = escWaiters.get(id) || []; list.push(fn); escWaiters.set(id, list);
+    setTimeout(() => { const l = escWaiters.get(id); if (l && l.includes(fn)) { l.splice(l.indexOf(fn), 1); fn(); } }, 4000);
+    return true;
+  }
+  function onEscSent(id) { const l = escWaiters.get(id) || []; escWaiters.delete(id); for (const fn of l) setTimeout(fn, 700); }
   // Text into an agent's reply box, after what's already there.
   function appendDraft(id, text) { const box = document.getElementById('term-order-input'), cur = id === selectedId ? box.value : ''; chatComposer.setDraft(id, cur.trim() ? cur.replace(/\s*$/, '\n') + text : text); }
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
@@ -1584,5 +1601,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

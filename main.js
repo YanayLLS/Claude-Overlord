@@ -4754,7 +4754,11 @@ function handleIpc(msg) {
     case 'dictateStart': dictateStart(); break;
     case 'dictateStop': dictateStop(); break;
     case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); cliSend.prompt(msg.id, text, +msg.erase || 0, () => markSessionSwitch(msg.id, text)); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
-    case 'cliCancel': cliSend.cancel(msg.id, msg.esc !== false); break; // Esc: stops the sends, then the Esc itself once no paste is half-written // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
+    case 'cliCancel': { // Esc: stops the sends, then the Esc itself once no paste is half-written; the page hears when it's out
+      const ag = agents.get(msg.id); if (ag && ag.ptyPerm) { clearPtyPerm(msg.id, ag); ag.permSent = false; send({ type: 'permClear', id: msg.id }); } // as an Esc typed into the terminal does
+      cliSend.cancel(msg.id, msg.esc !== false, () => send({ type: 'cliEscSent', id: msg.id }));
+      break;
+    } // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
