@@ -657,7 +657,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-hl mark.cmd { background: color-mix(in srgb, #d97757 16%, transparent); box-shadow: none; }
 /* in your own message: a file chip stands off the bubble, a /command or /skill in the brand colour */
 :root body :is(#conversation, #chat-shell) .bubble a.pathref { background: var(--bg); }
-:root body :is(#conversation, #chat-shell) .bubble .cmdtag { color: var(--claude); font-weight: 500; }
+:root body :is(#conversation, #chat-shell) .cmdtag { color: var(--claude); font-weight: 500; }
 /* A subagent's panel: task (folded), steps, result */
 #chat-shell.agentp { max-height: 70%; }
 #chat-shell .ap-b { overflow: auto; padding: 8px 12px 12px; }
@@ -757,3 +757,5 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation details.msg.peer .pr-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :root body #conversation details.msg.peer[open] > summary .ic:last-child { transform: rotate(90deg); }
 :root body #conversation details.msg.peer > .md { padding: 0 12px 10px; }
+/* Chips read the same in your messages and Claude's replies, whatever the text around them is set in */
+:root body :is(#conversation, #chat-shell) :is(.imgtag, a.plink) { font-family: 'Geist', 'Segoe UI', system-ui, sans-serif; font-size: 13px; }

@@ -41,13 +41,13 @@
   function md(src, cwd) {
     if (!mdReady) {
       if (!mdLoading) mdLoading = true, window.docsUi.loadMd().then(() => { mdReady = true; cache = new WeakMap(); rerender(); }, () => {});
-      return `<p class="plain">${escH(src)}</p>`;
+      return `<p class="plain">${inlineRich(escH(src))}</p>`;
     }
-    return linkRefs(window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_')) // relative links resolve against the agent's folder
+    return inlineRich(linkRefs(window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_')) // relative links resolve against the agent's folder
       // a bare claude.ai artifact URL reads as a short chip; the card drawn for it carries title and actions
       .replace(/(<a [^>]*href="(https:\/\/claude\.ai\/[^"]*artifact\/([\w-]+))"[^>]*)>\2<\/a>/g, (_, open, url, aid) => `${open.replace('<a ', '<a class="art-link" title="' + url + '" ')}>claude.ai · ${aid.slice(0, 8)}</a>`)
       // `C:\…\live-0.png` in a reply: the file's name and folder as a link (an image opens in the preview)
-      .replace(/(?<!<pre>)<code>([^<]+)<\/code>/g, (m, t) => pathChip(t) || m);
+      .replace(/(?<!<pre>)<code>([^<]+)<\/code>/g, (m, t) => pathChip(t) || m));
   }
   // An absolute file path (already HTML-escaped) as a chip: name and folder, the full path on hover, opens on click.
   function pathChip(t) {
@@ -67,7 +67,24 @@
   // own: the prompt's own number → picture map (a not-yet-sent prompt numbers its images itself)
   // A prompt as typed: its tags as chips, and a file path (quoted when it has spaces, as the box sends it) as a file chip.
   const PROMPT_PATH = /&quot;([A-Za-z]:[\\/][^&<\n]+?)&quot;|(?<![\w/])([A-Za-z]:[\\/][^\s&<]+)/g;
-  const tagChips = (text, own) => escH(text).replace(PROMPT_PATH, (m, q, u) => pathChip(q || u) || m).replace(/(^|\s)(\/[a-z][\w:-]*)(?=\s|$)/g, '$1<span class="cmdtag">$2</span>').replace(/\[Pasted text #(\d+) · (\d+) lines\]/g, (_, k, n) => `<button type="button" class="imgtag" data-pn="${k}">¶ Pasted text · ${n} lines</button>`).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
+  // ── One inline renderer for every message, yours or Claude's: a link (named by prettyLinks: a ClickUp task, "repo #N",
+  // a page's title), a file path as a file chip, [Image #N] as its picture, [Pasted text #N · …] as its chip, a /command
+  // tagged. It works on HTML-escaped text and leaves what's inside a link, code, a button or a kbd alone. ──
+  const URL_IN = /https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/g;
+  const imgChip = (n, own) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; };
+  const richText = (s, own) => s.replace(URL_IN, (u) => `<a href="${u}">${u}</a>`)
+    .replace(PROMPT_PATH, (m, q, u) => pathChip(q || u) || m)
+    .replace(/(^|\s)(\/[a-z][\w:-]*)(?=\s|$)/g, '$1<span class="cmdtag">$2</span>')
+    .replace(/\[Pasted text #(\d+) · (\d+) lines\]/g, (_, k, n) => `<button type="button" class="imgtag" data-pn="${k}">¶ Pasted text · ${n} lines</button>`)
+    .replace(/\[Image #(\d+)\]/g, (_, n) => imgChip(n, own));
+  function inlineRich(html, own) {
+    let depth = 0; // inside <a>, <code>, <pre>, <button>, <kbd>: left as it is
+    return html.split(/(<[^>]+>)/).map(p => {
+      if (p[0] === '<') { const m = /^<(\/?)(a|code|pre|button|kbd)\b/i.exec(p); if (m) depth = Math.max(0, depth + (m[1] ? -1 : 1)); return p; }
+      return depth || !p ? p : richText(p, own);
+    }).join('');
+  }
+  const tagChips = (text, own) => inlineRich(escH(text), own);
   // When a usage limit resets: "…|1761580800" (epoch seconds) or "resets 6pm" / "resets at 18:30" (the next such time).
   function resetOf(ev) {
     const t = String(ev.text || ''), ep = /\|(\d{10})\b/.exec(t); if (ep) return +ep[1] * 1000;
