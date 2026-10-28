@@ -87,21 +87,19 @@
     const q = queued.get(id); if (!q || q.list.some(x => x.saving)) return;
     queued.delete(id); deliver(id, q.text, q.list);
   }
-  // Plain text goes as one paste (questPrompt); with images, main's chatSend lays text and images into the prompt in order.
-  // Text left in the CLI's own box (a message Esc took back, a draft typed there) would ride along with what's sent from
-  // here, so it goes first: Backspace, which is safe mid-turn (Ctrl+C would stop the agent). Returns the ms to let it land.
-  function clearCliBox(id) {
+  // How much text sits in the CLI's own box right now (a message Esc took back, a draft typed there): main erases that
+  // many characters before the next send, in turn with its other sends, so it can't ride along. 0 while a dialog is up.
+  function cliLeftover(id) {
     const x = typeof xterms !== 'undefined' && xterms.get(id); if (!x || typeof readPromptBox !== 'function') return 0;
-    if (screenDialog(bufferRows(x.terminal.buffer.active, 40))) return 0; // a dialog is up: its keys aren't the prompt's
-    const left = readPromptBox(x.terminal); if (!left || !left.trim()) return 0;
-    api.send({ type: 'termInput', id, data: '\x05' + '\x7f'.repeat(left.length + left.split('\n').length + 2) }); // Ctrl+E: to its end, then erase it all
-    return 150;
+    if (screenDialog(bufferRows(x.terminal.buffer.active, 40))) return 0;
+    const left = readPromptBox(x.terminal); return left && left.trim() ? left.length + left.split('\n').length + 2 : 0;
   }
-  // Every message the chat hands an agent goes through here (the reply box, Retry, an edit, an auto-retry…): its CLI box
-  // is cleared first, then the message goes in as one paste.
+  const clearCliBox = (id) => { const n = cliLeftover(id); if (n) api.send({ type: 'cliErase', id, n }); };
+  // Every message the chat hands an agent goes through here (the reply box, Retry, an edit, an auto-retry…). Main sends
+  // them one at a time per agent; plain text is one paste, a message with images goes images first, then its text.
   function sendText(id, text, list = []) {
-    const go = () => { if (list.length) api.send({ type: 'chatSend', id, parts: parts(text, list) }); else api.send({ type: 'questPrompt', id, text }); };
-    const wait = clearCliBox(id); if (wait) setTimeout(go, wait); else go();
+    const erase = cliLeftover(id);
+    if (list.length) api.send({ type: 'chatSend', id, parts: parts(text, list), erase }); else api.send({ type: 'questPrompt', id, text, erase });
   }
   function deliver(id, text, list) {
     sendText(id, text, list);
@@ -114,11 +112,12 @@
     pruneAtt();
     const a = atts.get(id), shown = inp.value.trim(), text = expandLinks(expandPastes(inp.value, a), a).trim(), list = a ? a.list.splice(0) : [];
     const pastes = ((a && a.pastes) || []).slice(); // the sent bubble's paste chips open to their text
+    const restore = { shown: inp.value, list: list.slice(), pastes, files: ((a && a.files) || []).slice(), links: ((a && a.links) || []).slice() }; // all of it, should Esc take it back
     if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; a.links = []; }
     if (!text) { if (chat() && order().classList.contains('busy')) chatUi.stop(); return; } // empty + working: Stop
     if (chat() && /^\/resume$/.test(text) && !list.length) { inp.value = '/resume '; resumeCheck(inp); return; } // the CLI's picker is a full-screen dialog: list here
     const held = list.some(x => x.saving);
-    if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text, pastes); // shows the box as typed (paste chips), matches the full text
+    if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text, pastes, restore); // shows the box as typed (paste chips), matches the full text
     inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt(); saveDraft(id);
     if (held) { queued.set(id, { text, list }); if (chat()) renderConversation(); return; }
     // A question open in the CLI: typed text is your own answer, not the highlighted option. Its "Type something" /
@@ -278,6 +277,17 @@
       t.value = v; drafts.set(id, v); grow(t); saveDraft(id);
       api.send({ type: 'termInput', id, data: '\x03' }); // Ctrl+C with text in the box clears it, as in the CLI
     }
+  }
+  // A message Esc took back, into the box as it was typed: its text with its tags, and the images, pasted texts, files
+  // and links those tags stand for (numbered on from what's already there when the box wasn't empty).
+  function restoreDraft(id, r) {
+    const a = attOf(id), t = box(), had = id === draftFor ? t.value : drafts.get(id) || '';
+    if (had.trim()) { setDraft(id, had.replace(/\s*$/, '\n') + expandLinks(expandPastes(r.shown, r), r)); return; } // keep it simple beside other text: the full text
+    a.list = r.list.slice(); a.next = Math.max(0, ...a.list.map(x => x.n)) + 1;
+    a.pastes = r.pastes.slice(); a.nextP = Math.max(0, ...a.pastes.map(x => x.n)) + 1;
+    a.files = r.files.slice(); a.nextF = Math.max(0, ...a.files.map(x => x.n)) + 1;
+    a.links = r.links.slice();
+    setDraft(id, r.shown); drawAtt();
   }
   function setDraft(id, text) {
     drafts.set(id, text);
@@ -519,5 +529,5 @@
   box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();

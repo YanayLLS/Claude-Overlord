@@ -972,16 +972,18 @@
     // would ride along with the next message sent from here.
     const evs = visibleEvs(a, worldTl && worldTl.id === id ? worldTl.events : []), pend = pending.get(id) || [];
     let k = evs.length - 1; while (k >= 0 && /^(mode|images|interrupt)$/.test(evs[k].type)) k--;
-    const last = evs[k]; let text = '';
-    if (pend.length) { const p = pend.pop(); text = p.match || p.text; }
+    const last = evs[k]; let text = '', restoreAll = null;
+    const back = pend.filter(p => !p.held);
+    if (back.length) { pending.set(id, pend.filter(p => p.held)); if (back.length === 1 && back[0].restore) restoreAll = back[0].restore; else text = back.map(p => p.match || p.text).join('\n\n'); }
     else if (last && (last.type === 'prompt' || last.type === 'command') && last.ts && Date.now() - Date.parse(last.ts) < 120000) {
       text = last.text;
       try { const key = hideKey(a); localStorage.setItem(key, JSON.stringify([...hidesOf(a), { from: Date.parse(last.ts), until: Date.now() + 1000 }])); } catch {}
     }
-    if (text) {
+    if (text || restoreAll) {
       a._reverted = Date.now();
       const box = document.getElementById('term-order-input');
-      chatComposer.setDraft(id, box.value.trim() ? box.value.replace(/\s*$/, '\n') + text : text);
+      if (restoreAll) chatComposer.restoreDraft(id, restoreAll);
+      else chatComposer.setDraft(id, box.value.trim() ? box.value.replace(/\s*$/, '\n') + text : text);
       setTimeout(() => {
         chatComposer.clearCliBox(id);
       }, 800);
@@ -1547,5 +1549,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

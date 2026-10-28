@@ -140,6 +140,7 @@ const { themeOf, titleBarColors } = require('./theme-core');
 const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered, listSessions } = require('./recover-core');
+const { makeSender } = require('./send-queue');
 const { normalizePasteText } = require('./paste-core');
 const { KBD_SRC, hwndOf, cscPath, kbdExeName, kbdPowershell } = require('./kbd-core');
 const { migrateLegacy } = require('./state-dir');
@@ -1078,16 +1079,10 @@ function dictateStart() {
 // A Chat view prompt with images in place: its text and image paths go into the agent's prompt one after another, so
 // Claude turns each path into its [Image #N] right where the user put it; then Enter in its own write (the TUI
 // swallows an Enter written with a paste). Image parts must be existing image files.
-async function chatSend(id, parts) {
-  const t = terminals.get(id); if (!t || t._ovShell) return;
-  const wait = (ms) => new Promise(r => setTimeout(r, ms));
-  for (const p of parts.slice(0, 60)) {
-    if (typeof p.image === 'string' && /\.(png|jpe?g|gif|webp|bmp)$/i.test(p.image) && fs.existsSync(p.image)) { t.write('\x1b[200~' + p.image.replace(/\\/g, '/') + '\x1b[201~'); await wait(250); }
-    else if (typeof p.text === 'string' && p.text) { const s = '\x1b[200~' + p.text.replace(/\r\n?/g, '\n').slice(0, 200000) + '\x1b[201~'; writePtyChunked(t, s); await wait(Math.ceil(s.length / 1024) * 8 + 80); }
-  }
-  await wait(120);
-  try { t.write('\r'); } catch {}
-}
+// Messages handed to an agent's CLI (the Chat view, a quest): one at a time per agent, images first then the text as
+// one paste, text left in its box erased in turn (send-queue.js).
+const cliSend = makeSender({ getTerm: (id) => { const t = terminals.get(id); return t && !t._ovShell ? t : null; }, writeChunked: (t, s) => writePtyChunked(t, s),
+  isImage: (p) => /\.(png|jpe?g|gif|webp|bmp)$/i.test(p) && fs.existsSync(p), log: (m) => console.log('[Overlord] ' + m) });
 
 // A subagent's own steps for the Chat view: Claude Code keeps each one's transcript beside the session
 // (<session>/subagents/agent-<id>.jsonl, its .meta.json naming the Agent call that started it).
@@ -4744,10 +4739,11 @@ function handleIpc(msg) {
       break;
     }
     case 'bgTail': bgTail(msg); break;
-    case 'chatSend': chatSend(msg.id, Array.isArray(msg.parts) ? msg.parts : []); break;
+    case 'chatSend': cliSend.parts(msg.id, Array.isArray(msg.parts) ? msg.parts : [], +msg.erase || 0); break;
+    case 'cliErase': cliSend.erase(msg.id, +msg.n || 0); break; // leftover text in an agent's CLI box, in turn with its sends
     case 'dictateStart': dictateStart(); break;
     case 'dictateStop': dictateStop(); break;
-    case 'questPrompt': { const t = terminals.get(msg.id); if (t) sendPromptToTerm(t, String(msg.text || '').slice(0, 200000)); break; } // a quest handed to a running agent lands as one pasted prompt
+    case 'questPrompt': cliSend.prompt(msg.id, String(msg.text || '').slice(0, 200000), +msg.erase || 0); break; // in turn with the agent's other sends // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
