@@ -132,11 +132,11 @@
     else if (a.plan) body = `<div class="md sub plan">${md(a.plan.replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div>`;
     else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o.label ?? o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
     else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${escH(out)}</pre></div>` : ''}</div>`;
-    else if (v.kind === 'agent' && out) body = `<div class="md sub">${md(out, cwd)}</div>`;
     else if (out) body = `<pre class="out${err ? ' err' : ''}">${escH(out)}</pre>`;
     const cls = `trow k-${v.kind}${running ? ' running' : ''}${err ? ' err' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
     const head = `${ICON[v.kind] || ICON.tool}<span class="verb">${escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}${running && ev.ts ? `<span class="el" data-t="${Date.parse(ev.ts)}"></span>` : ''}`;
-    const h = body ? `<details class="${cls}" data-tid="${escH(ev.toolId || '')}"><summary>${head}${ICON.chev}</summary><div class="tbody">${body}</div></details>` : `<div class="${cls}"><div class="sumrow">${head}</div></div>`;
+    const h = v.kind === 'agent' ? `<div class="${cls}" data-agent-tid="${escH(ev.toolId || '')}" role="button" tabindex="0" title="Show its steps"><div class="sumrow">${head}${ICON.chev}</div></div>`
+      : body ? `<details class="${cls}" data-tid="${escH(ev.toolId || '')}"><summary>${head}${ICON.chev}</summary><div class="tbody">${body}</div></details>` : `<div class="${cls}"><div class="sumrow">${head}</div></div>`;
     toolCache.set(ev, [done, h]);
     return h;
   }
@@ -675,8 +675,8 @@
     if (art) { if (art.dataset.artOpen) api.send({ type: 'openUrl', url: art.dataset.artOpen }); else navigator.clipboard.writeText(art.dataset.artCopy).then(() => { art.classList.add('done'); setTimeout(() => art.classList.remove('done'), 1200); }); return; }
     const sh = e.target.closest('[data-bgout]'); // a background shell's chip: its live output
     if (sh) { openShell(sh.dataset.bgout, sh.dataset.bgname); return; }
-    const jump = e.target.closest('[data-jump]'); // a background agent's chip: open and show its call
-    if (jump) { const d = document.querySelector(`#conversation details[data-tid="${CSS.escape(jump.dataset.jump)}"]`); if (d) { const g = d.parentElement.closest('details'); if (g) g.open = true; d.open = true; d.scrollIntoView({ block: 'center', behavior: 'smooth' }); d.classList.remove('flash'); void d.offsetWidth; d.classList.add('flash'); } return; }
+    const ag = e.target.closest('[data-agent-tid], [data-jump]'); // an agent's row or chip: its steps in a panel
+    if (ag) { openAgent(ag.dataset.agentTid || ag.dataset.jump, evs || []); return; }
     const ins = e.target.closest('[data-insert]'); // composer chips: /compact, /model
     if (ins) { chatComposer.insert(ins.dataset.insert, false); return; }
     const act = e.target.closest('[data-act]');
@@ -988,20 +988,31 @@
   }
   function closeShell() { clearInterval(shellTimer); shellTimer = null; const d = document.getElementById('chat-shell'); if (d) { d.remove(); backFocus(); } }
 
-  // ── A subagent's own steps, fetched when its Agent row is opened ──
-  const steps = new Map(); // toolId → events
-  document.getElementById('conversation').addEventListener('toggle', (e) => {
-    const d = e.target; if (!d.matches || !d.matches('details.trow.k-agent') || !d.open) return;
-    const tid = d.dataset.tid; if (!tid) return;
-    if (steps.has(tid)) return drawSteps(d, steps.get(tid));
-    const evs = (worldTl && worldTl.id === selectedId) ? worldTl.events : [], done = evs.find(x => x.type === 'tool_done' && x.toolId === tid);
-    api.send({ type: 'agentSteps', id: selectedId, toolId: tid, agentId: done && done.agentId });
-  }, true);
-  function drawSteps(d, evs) {
-    let box = d.querySelector('.agent-steps'); if (!box) { box = document.createElement('div'); box.className = 'agent-steps'; d.querySelector('.tbody')?.prepend(box); }
+  // ── A subagent's steps in a panel over the view (like a background shell's output), re-read every 2 s while it runs ──
+  function openAgent(tid, evs) {
+    const call = evs.find(x => x.type === 'tool' && x.toolId === tid); if (!call) return;
+    closeShell();
+    const done = evs.find(x => x.type === 'tool_done' && x.toolId === tid), a = call.args || {}, name = a.description || a.subagent_type || 'Agent';
+    const d = document.createElement('div'); d.id = 'chat-shell'; d.className = 'agentp'; d.dataset.tid = tid; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', name); d.tabIndex = -1; returnTo = document.activeElement; trapFocus(d);
+    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShell(); } });
+    const out = done && done.text ? done.text.replace(/s+$/, '') : '';
+    d.innerHTML = `<div class="sh-h">${ICON.agent}<span>${escH(name)}</span>${done ? '' : '<span class="dot"></span>'}<button type="button" class="sh-x" aria-label="Close">×</button></div>`
+      + `<div class="ap-b">${a.prompt ? `<details class="ap-task"><summary>Task</summary><div class="md sub">${md(a.prompt, '')}</div></details>` : ''}<div class="agent-steps"><div class="as-h">Loading…</div></div>${out ? `<div class="ap-res"><div class="as-h">Result</div><div class="md sub">${md(out, '')}</div></div>` : ''}</div>`;
+    d.querySelector('.sh-x').onclick = closeShell;
+    d.addEventListener('click', (e) => { const r = e.target.closest('[data-agent-tid]'); if (r) e.stopPropagation(); }); // a nested agent's row stays put
+    document.getElementById('term').appendChild(d);
+    const pull = () => api.send({ type: 'agentSteps', id: selectedId, toolId: tid, agentId: done && done.agentId });
+    pull(); if (!done) shellTimer = setInterval(pull, 2000); d.focus();
+  }
+  document.getElementById('conversation').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-agent-tid]')) { e.preventDefault(); e.target.click(); } });
+  function drawSteps(evs) {
+    const box = document.querySelector('#chat-shell.agentp .agent-steps'); if (!box) return;
     const doneBy = new Map(); for (const ev of evs) if (ev.type === 'tool_done') doneBy.set(ev.toolId, ev);
-    const tools = evs.filter(ev => ev.type === 'tool');
-    box.innerHTML = tools.length ? `<div class="as-h">${tools.length} step${tools.length > 1 ? 's' : ''}</div>` + tools.map(ev => toolRow(ev, doneBy.get(ev.toolId), '')).join('') : '<div class="as-h">No steps recorded</div>';
+    const tools = evs.filter(ev => ev.type === 'tool'), atEnd = box.parentElement.scrollHeight - box.parentElement.scrollTop - box.parentElement.clientHeight < 40;
+    const open = new Set([...box.querySelectorAll('details[open]')].map(x => x.dataset.tid)); // a re-read keeps what you opened
+    box.innerHTML = tools.length ? `<div class="as-h">${tools.length} step${tools.length > 1 ? 's' : ''}</div>` + '<div class="tools">' + tools.map(ev => toolRow(ev, doneBy.get(ev.toolId), '')).join('') + '</div>' : '<div class="as-h">No steps yet</div>';
+    for (const x of box.querySelectorAll('details[data-tid]')) if (open.has(x.dataset.tid)) x.open = true;
+    if (atEnd) box.parentElement.scrollTop = box.parentElement.scrollHeight; // following a running agent
   }
   let undoRevert = null; // the latest Revert's undo, for Ctrl+Z while its toast shows
   document.addEventListener('keydown', (e) => { if (undoRevert && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/^(INPUT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName)) { e.preventDefault(); undoRevert(); } }, true);
@@ -1017,7 +1028,7 @@
       return;
     }
     if (msg.type === 'filePeek') { if (String(msg.seq).startsWith('whole:')) { const p = document.getElementById('chat-changes'); if (p && p._whole) p._whole(msg); } else showPeek(msg); return; }
-    if (msg.type === 'agentSteps') { steps.set(msg.toolId, msg.events || []); const d = document.querySelector(`#conversation details.trow.k-agent[data-tid="${CSS.escape(msg.toolId)}"]`); if (d && d.open) drawSteps(d, msg.events || []); }
+    if (msg.type === 'agentSteps') { const p = document.getElementById('chat-shell'); if (p && p.dataset.tid === msg.toolId) drawSteps(msg.events || []); }
     if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.textContent = msg.ok ? (msg.text || '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }
   }
 
