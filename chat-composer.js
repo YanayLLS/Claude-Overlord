@@ -107,6 +107,15 @@
     if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text, pastes); // shows the box as typed (paste chips), matches the full text
     inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt();
     if (held) { queued.set(id, { text, list }); if (chat()) renderConversation(); return; }
+    // A question open in the CLI: typed text is your own answer, not the highlighted option. Its "Type something" /
+    // "Other" choice takes it; with none, Esc closes the question (as in the CLI) and the text goes as a message.
+    const ask = chat() && !list.length ? chatUi.askState() : null;
+    if (ask && ask.dialog && ask.options.length >= 2 && !/^\d$/.test(text)) {
+      const free = ask.options.findIndex(o => /^(type something|other)\b/i.test(o.label));
+      if (free >= 0 && free < 9) { api.send({ type: 'termInput', id, data: String(free + 1) }); setTimeout(() => deliver(id, text, list), 400); }
+      else { api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => deliver(id, text, list), 600); }
+      return;
+    }
     deliver(id, text, list);
   }
   function insert(text, andSend) {
