@@ -283,7 +283,9 @@
   // message and everything after it are hidden from the thread from then on (the transcript keeps every branch). ──
   let editing = null; // { id, i, ts, text } while a bubble is being edited
   const hideKey = (a) => a && a.sessionId ? 'chatHide:' + a.sessionId : null;
-  const hidesOf = (a) => { try { return JSON.parse(localStorage.getItem(hideKey(a)) || '[]'); } catch { return []; } };
+  // Overlord keeps them with the agent (they outlive this window's storage); this window's copy covers the moment before main answers.
+  const hidesOf = (a) => { if (Array.isArray(a && a.chatHides) && a.chatHides.length) return a.chatHides; try { return JSON.parse(localStorage.getItem(hideKey(a)) || '[]'); } catch { return []; } };
+  const setHides = (a, rs) => { a.chatHides = rs; try { localStorage.setItem(hideKey(a), JSON.stringify(rs)); } catch {} api.send({ type: 'chatHides', id: [...agents].find(([, x]) => x === a)?.[0], hides: rs }); };
   // From a hidden prompt to the next prompt sent after the edit: every event in between goes.
   function visibleEvs(a, evs) {
     const rs = hideKey(a) ? hidesOf(a) : []; if (!rs.length) return evs;
@@ -298,7 +300,7 @@
   async function editResend(ev, text) {
     const id = selectedId, a = agents.get(id), k = hideKey(a); if (!a || !text) return;
     const range = { from: Date.parse(ev.ts), until: Date.now() };
-    const save = (rs) => { try { localStorage.setItem(k, JSON.stringify(rs)); } catch {} };
+    const save = (rs) => setHides(a, rs);
     save([...hidesOf(a), range]); chatUi.addPending(id, text); rerender();
     const busy = () => isWorkingStatus(agents.get(id)?.status) || document.getElementById('term-order').classList.contains('busy');
     if (busy()) { stop(false); await until(() => !busy(), 10000); await wait(600); }
@@ -977,7 +979,7 @@
     if (back.length) { pending.set(id, pend.filter(p => p.held)); if (back.length === 1 && back[0].restore) restoreAll = back[0].restore; else text = back.map(p => p.match || p.text).join('\n\n'); }
     else if (last && (last.type === 'prompt' || last.type === 'command') && last.ts && Date.now() - Date.parse(last.ts) < 120000) {
       text = last.text;
-      try { const key = hideKey(a); localStorage.setItem(key, JSON.stringify([...hidesOf(a), { from: Date.parse(last.ts), until: Date.now() + 1000 }])); } catch {}
+      setHides(a, [...hidesOf(a), { from: Date.parse(last.ts), until: Date.now() + 1000 }]);
     }
     if (text || restoreAll) {
       a._reverted = Date.now();

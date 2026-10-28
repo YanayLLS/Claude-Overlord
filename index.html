@@ -4219,6 +4219,7 @@ function handleAgentMsg(msg) {
       const isNew = !agents.has(msg.id);
       if (isNew && pendingPrefill && pendingPrefill.cwd === msg.cwd && Date.now() - pendingPrefill.at < 20000) { chatComposer.setDraft(msg.id, pendingPrefill.text); pendingPrefill = null; }
       if (msg.procAt) queueMicrotask(() => { const a = agents.get(msg.id); if (a) a.procAt = msg.procAt; });
+      if (Array.isArray(msg.chatHides) && msg.chatHides.length) queueMicrotask(() => { const a = agents.get(msg.id); if (a) a.chatHides = msg.chatHides; }); // what edits and take-backs hid
       if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', archived: msg.archived || false, archivedAt: msg.archivedAt || null, account: msg.account || null });
       if (msg.cwd) addKnownProject(msg.cwd);
       // An agent born from a quest's Attack on a building: the ticket is its from the first prompt.

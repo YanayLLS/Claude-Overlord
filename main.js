@@ -623,7 +623,7 @@ function sendFullState() {
   if (settings.prCache) send({ type: 'prList', ...settings.prCache, error: null });
   if (settings.actionsCache) send({ type: 'actionsList', runs: settings.actionsCache, error: null });
   for (const [id, a] of agents) {
-    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, archivedAt: a.archivedAt || null, account: a.account || null, procAt: (terminals.get(id) && terminals.get(id)._at) || null });
+    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, archivedAt: a.archivedAt || null, account: a.account || null, procAt: (terminals.get(id) && terminals.get(id)._at) || null, chatHides: a.chatHides || [] });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
@@ -1290,7 +1290,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, account: a.account || null, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, archivedAt: a.archivedAt || null, termSize: lastTermSize.get(a.id) || null, servers: [...(serverPorts.get(a.id) || [])] });
+    agentEntries.push({ chatHides: a.chatHides || [], cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, account: a.account || null, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, archivedAt: a.archivedAt || null, termSize: lastTermSize.get(a.id) || null, servers: [...(serverPorts.get(a.id) || [])] });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -1412,7 +1412,7 @@ function restoreAgents(state) {
       subToolIds: new Map(), subToolNames: new Map(),
       isWaiting: true, permSent: false, hadTools: false, turnTools: 0, claudeReady: false,
       lastText: lastText || '', lastPrompt: lastPrompt || '', title: title || '', aiTitle: entry.aiTitle || '', customName: customName || false,
-      promptHistory: entry.promptHistory || [], titlePending: false, createdAt: createdAt || Date.now(),
+      promptHistory: entry.promptHistory || [], chatHides: Array.isArray(entry.chatHides) ? entry.chatHides : [], titlePending: false, createdAt: createdAt || Date.now(),
       crashCount: 0, cronCount: entry.cronCount || 0, compacting: false, orphanAlive: false, agentName: agentName, spinnerText: '',
       archived: entry.archived || false, archivedAt: entry.archivedAt || null, account: entry.account || null,
       stats: savedStats,
@@ -4740,7 +4740,8 @@ function handleIpc(msg) {
     }
     case 'bgTail': bgTail(msg); break;
     case 'chatSend': cliSend.parts(msg.id, Array.isArray(msg.parts) ? msg.parts : [], +msg.erase || 0); break;
-    case 'cliErase': cliSend.erase(msg.id, +msg.n || 0); break; // leftover text in an agent's CLI box, in turn with its sends
+    case 'cliErase': cliSend.erase(msg.id, +msg.n || 0); break;
+    case 'chatHides': { const a = agents.get(msg.id); if (a && Array.isArray(msg.hides)) { a.chatHides = msg.hides.filter(r => r && Number.isFinite(r.from) && Number.isFinite(r.until)).slice(-200).map(r => ({ from: r.from, until: r.until })); saveState(); } break; } // what an edit or Esc took out of the chat // leftover text in an agent's CLI box, in turn with its sends
     case 'dictateStart': dictateStart(); break;
     case 'dictateStop': dictateStop(); break;
     case 'questPrompt': cliSend.prompt(msg.id, String(msg.text || '').slice(0, 200000), +msg.erase || 0); break; // in turn with the agent's other sends // a quest handed to a running agent lands as one pasted prompt
