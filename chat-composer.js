@@ -20,7 +20,7 @@
   // with a chip above it to peek (hover), expand back into the box (click) or drop (✕); Send puts the text back in.
   const PASTE = /\[Pasted text #(\d+)[^\]]*\]/g;
   const FILE = /\[File #(\d+)[^\]]*\]/g; // a pasted or dropped file: a chip, its full path on send
-  const escA = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const escA = escHtml; // chat-core.js
   function drawAtt() {
     syncDraft(); // called when the Chat view shows another agent: its own draft and images
     const a = atts.get(selectedId), list = a ? a.list : [], pastes = (a && a.pastes) || [], files = (a && a.files) || [];
@@ -182,7 +182,7 @@
   }
   function drawAt() {
     const l = atList();
-    const esc = (s) => String(s).replace(/[&<>]/g, '');
+    const esc = escHtml; // escaped, not stripped: "A&B.ts" kept its "&"
     // The typed part of each name is marked, so it's clear why it matched.
     const mark = (name) => {
       const ws = at.kind === 'resume' ? at.q.toLowerCase().split(/\s+/).filter(Boolean) : at.q ? [at.q.toLowerCase()] : [];
@@ -257,7 +257,7 @@
       t.value = ''; drafts.set(id, ''); if (a) { a.pastes = []; a.files = []; a.links = []; } grow(t); drawAtt(); saveDraft(id);
     } else if (from === 'terminal' && to === 'conversation') {
       if (typeof readPromptBox !== 'function' || t.value.trim()) return;
-      const b = x.terminal.buffer.active, rows = []; for (let y = Math.max(0, b.length - 40); y < b.length; y++) rows.push(b.getLine(y)?.translateToString(true) || '');
+      const rows = bufferRows(x.terminal.buffer.active, 40);
       if (screenDialog(rows)) return; // a dialog is up: its Ctrl+C would cancel it
       const v = readPromptBox(x.terminal);
       if (!v || !v.trim() || /^Try "/.test(v) || /^\d+\.\s/.test(v)) return; // the box's own hint, or a dialog's option
@@ -418,7 +418,7 @@
   // A link in the box reads as its name, in link colour: a ClickUp task by its real name, a GitHub PR as "repo #N",
   // anything else as site + path (chatUi.linkLabel). The box holds the name; Send puts the address back.
   // ponytail: a name edited by hand stops being a link (Backspace at its end removes it whole, as with the other tags).
-  const URL_RE = /https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/;
+  const URL_RE = chatUrlRe(); // chat-core.js: the thread reads links the same way
   function linkify(t) {
     const id = selectedId; if (id == null || !URL_RE.test(t.value)) return;
     const a = attOf(id), v = t.value; a.links ||= [];
@@ -453,7 +453,7 @@
     const a = typeof agents === 'undefined' ? null : agents.get(selectedId), names = new Set((catalog.get(a && a.cwd) || []).filter(i => i.insert && i.insert.startsWith('/')).map(i => i.insert.trim().split(/\s/)[0].toLowerCase()));
     if (a && !catalog.has(a.cwd) && !askedCat.has(a.cwd) && /(^|\s)\/[\w:-]/.test(v)) { askedCat.add(a.cwd); api.send({ type: 'catalog', cwd: a.cwd }); }
     const cmd = /(^|\s)(\/[\w:.-]+)/g, hasCmd = names.size && [...v.matchAll(cmd)].some(m => names.has(m[2].toLowerCase()));
-    const esc = (s) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const esc = escHtml;
     const toks = ((atts.get(typeof agents === 'undefined' ? null : selectedId) || {}).links || []).map(l => l.tok).filter(k => v.includes(k));
     // Link names are drawn by this layer in link colour, so the box's own text goes see-through while there are any.
     t.classList.toggle('hl-txt', toks.length > 0); hl.classList.toggle('txt', toks.length > 0);

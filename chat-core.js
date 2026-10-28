@@ -172,4 +172,20 @@ function screenDialog(rows) {
   return /\besc to (cancel|exit|go back|close)\b/i.test(tail) && !/esc to interrupt/i.test(tail);
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, liveReply, screenDialog };
+// ── Shared by the Chat view's thread (chat-ui.js) and reply box (chat-composer.js), so both read text the same way ──
+// A link as it's written in text: up to the first space, a closing bracket or quote, minus trailing punctuation.
+const CHAT_URL_SRC = 'https?:\\/\\/[^\\s<>"]*[^\\s<>".,;:!?)\\]\']';
+const chatUrlRe = (flags = '') => new RegExp(CHAT_URL_SRC, flags);
+function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// The last n rows of an xterm buffer as text; a row the terminal soft-wrapped joins the one before it when asked.
+function bufferRows(buf, n, joinWrapped = false) {
+  const rows = []; if (!buf) return rows;
+  for (let y = Math.max(0, buf.length - n); y < buf.length; y++) { const l = buf.getLine(y); if (!l) continue; const t = l.translateToString(true); if (joinWrapped && l.isWrapped && rows.length) rows[rows.length - 1] += t; else rows.push(t); }
+  return rows;
+}
+// The CLI working on a turn (not waiting on you, not idle).
+const isWorkingStatus = (s) => /^(active|resuming|settling)$/.test(s || '');
+// Arrow keys that move a CLI menu's selection by d rows.
+const arrowKeys = (d) => Array(Math.abs(d)).fill(d > 0 ? '\x1b[B' : '\x1b[A');
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, liveReply, screenDialog };

@@ -4,7 +4,7 @@
 // hands over the agent and its status, this file draws the thread, the live tail (working line, plan, background
 // agents, permission/question cards) and the composer's chips (mode, model, context).
 (function () {
-  const escH = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const escH = escHtml; // chat-core.js
   const svg = (d, cls = 'ic') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
   const ICON = {
     cmd: svg('<path d="m4 17 6-5-6-5"/><path d="M12 19h8"/>'),
@@ -70,9 +70,8 @@
   // ── One inline renderer for every message, yours or Claude's: a link (named by prettyLinks: a ClickUp task, "repo #N",
   // a page's title), a file path as a file chip, [Image #N] as its picture, [Pasted text #N · …] as its chip, a /command
   // tagged. It works on HTML-escaped text and leaves what's inside a link, code, a button or a kbd alone. ──
-  const URL_IN = /https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/g;
   const imgChip = (n, own) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; };
-  const richText = (s, own) => s.replace(URL_IN, (u) => `<a href="${u}">${u}</a>`)
+  const richText = (s, own) => s.replace(chatUrlRe('g'), (u) => `<a href="${u}">${u}</a>`)
     .replace(PROMPT_PATH, (m, q, u) => pathChip(q || u) || m)
     .replace(/(^|\s)(\/[a-z][\w:-]*)(?=\s|$)/g, '$1<span class="cmdtag">$2</span>')
     .replace(/\[Pasted text #(\d+) · (\d+) lines\]/g, (_, k, n) => `<button type="button" class="imgtag" data-pn="${k}">¶ Pasted text · ${n} lines</button>`)
@@ -179,7 +178,7 @@
       const long = text.length > 900 || text.split('\n').length > 14;
       h = `<div class="msg user" data-i="${i}">${imgs ? `<div class="imgs">${imgs}</div>` : ''}${text ? `<div class="bubble${long ? ' long' : ''}">${tagChips(text)}</div>${long ? '<button class="more" type="button">Show more</button>' : ''}` : ''}</div>`;
     } else if (ev.type === 'text') h = `<div class="msg ai" data-i="${i}"><div class="md">${md(ev.text, cwd)}</div></div>`;
-    else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${escH(ev.text).replace(/https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/g, (u) => `<a href="${u}">${u}</a>`)}</span></div>`;
+    else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${inlineRich(escH(ev.text))}</span></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
@@ -300,7 +299,7 @@
     const range = { from: Date.parse(ev.ts), until: Date.now() };
     const save = (rs) => { try { localStorage.setItem(k, JSON.stringify(rs)); } catch {} };
     save([...hidesOf(a), range]); chatUi.addPending(id, text); rerender();
-    const busy = () => /^(active|resuming|settling)$/.test(agents.get(id)?.status || '') || document.getElementById('term-order').classList.contains('busy');
+    const busy = () => isWorkingStatus(agents.get(id)?.status) || document.getElementById('term-order').classList.contains('busy');
     if (busy()) { stop(); await until(() => !busy(), 10000); await wait(600); }
     // Esc Esc opens the rewind list; pick this message (the newest one with its text), then "Restore conversation".
     const fail = (why) => { save(hidesOf(a).filter(r => r.from !== range.from || r.until !== range.until)); api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => api.send({ type: 'questPrompt', id, text }), 400); showToast(why + ': sent as a new message'); rerender(); };
@@ -310,7 +309,7 @@
     let j = -1; for (let q = rw.items.length - 1; q >= 0; q--) if (rw.items[q].label.replace(/\s+/g, ' ').toLowerCase().startsWith(head.slice(0, Math.min(head.length, rw.items[q].label.length)))) { j = q; break; }
     if (j < 0) j = rw.items.length - 2;
     if (j < 0) return fail("Couldn't find that message");
-    const d = j - rw.focus; for (let s = 0; s < Math.abs(d); s++) { api.send({ type: 'termInput', id, data: d > 0 ? '\x1b[B' : '\x1b[A' }); await wait(70); }
+    for (const k of arrowKeys(j - rw.focus)) { api.send({ type: 'termInput', id, data: k }); await wait(70); }
     api.send({ type: 'termInput', id, data: '\r' });
     const sa = await until(() => { const s = screenAsk(id); return s.dialog && s.options.length >= 2 ? s : null; });
     if (!sa) return fail("Rewind didn't ask what to restore");
@@ -349,9 +348,10 @@
   function menuOptions(id) { return screenAsk(id).options.map(o => o.label); }
   // The open question as the CLI draws it: the line above its menu, and each option with the lines under it. A question
   // isn't in the transcript until it's answered, so this is the only place it can be read from while it waits.
+  // The last n rows of an agent's terminal screen (chat-core.js bufferRows); null while it has no terminal yet.
+  const screenOf = (id, n, joinWrapped = false) => { const x = typeof xterms !== 'undefined' && xterms.get(id); return x && x.terminal ? bufferRows(x.terminal.buffer.active, n, joinWrapped) : null; };
   function screenAsk(id) {
-    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active, none = { question: '', options: [] }; if (!b) return none;
-    const rows = []; for (let i = Math.max(0, b.length - 40); i < b.length; i++) { const l = b.getLine(i), t = l ? l.translateToString(true) : ''; if (l && l.isWrapped && rows.length) rows[rows.length - 1] += t; else rows.push(t); } // a row the terminal wrapped is one line
+    const rows = screenOf(id, 40, true); if (!rows) return { question: '', options: [] }; // a row the terminal wrapped is one line
     const cut = (s) => s.replace(/^\s*[│┃|]?\s*/, '').split(/\s{3,}|[│┃┌└├┐┘┤╭╮╰╯─━✂]/)[0].trim(); // a left rule goes; a preview drawn beside isn't part of it
     const OPT = /^\s*[❯›>]?\s*(\d)\.\s+(.+?)\s*$/, options = []; let first = -1, focus = 0;
     // The focused option's preview, drawn in a box to the right of the menu: its column splits every row in two.
@@ -383,8 +383,7 @@
   // The CLI's rewind list (Esc Esc): each earlier prompt, the change made after it ("2 files changed +83") and which
   // one is selected. null when it isn't on screen.
   function screenRewind(id) {
-    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active; if (!b) return null;
-    const rows = []; for (let i = Math.max(0, b.length - 60); i < b.length; i++) rows.push(b.getLine(i)?.translateToString(true) || '');
+    const rows = screenOf(id, 60); if (!rows) return null;
     let i0 = -1; for (let i = rows.length - 1; i >= 0; i--) if (/^\s*Rewind\s*$/.test(rows[i])) { i0 = i; break; }
     if (i0 < 0 || !screenDialog(rows)) return null;
     const items = []; let focus = -1;
@@ -402,7 +401,7 @@
     return `<div class="card ask rewind"><div class="card-h">${ICON.undo || ICON.ask}<span>Rewind to before…</span></div><div class="choices">${rw.items.map((it, k) => `<button type="button" data-rw="${k}" class="${k === rw.focus ? 'focus' : ''}"><span class="ch-t"><b>${escH(it.label === '(current)' ? 'Now (keep everything)' : it.label)}</b>${it.meta ? `<small>${escH(it.meta)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-rwx="1"><span>Cancel</span></button></div></div>`;
   }
   // Pick rewind point k: the CLI's selection moves there, then Enter (its next menu, what to restore, is a question card).
-  function rewindPick(k) { const rw = screenRewind(selectedId); if (!rw) return; const d = k - rw.focus; keys([...Array(Math.abs(d)).fill(d > 0 ? '\x1b[B' : '\x1b[A'), '\r']); setTimeout(rerender, Math.abs(d) * 70 + 400); }
+  function rewindPick(k) { const rw = screenRewind(selectedId); if (!rw) return; const d = k - rw.focus; keys([...arrowKeys(d), '\r']); setTimeout(rerender, Math.abs(d) * 70 + 400); }
   function rewindStep(d) { const rw = screenRewind(selectedId); if (!rw) return false; keys([d > 0 ? '\x1b[B' : '\x1b[A']); setTimeout(rerender, 200); return true; }
   // A proposed plan waiting for approval: the plan itself, rendered, and the CLI's own choices as buttons.
   function planHtml(ev, cwd) {
@@ -475,7 +474,7 @@
   // Move the CLI's selection to option k (arrow keys); the card follows on its next look at the screen.
   function askMove(k) {
     const s = screenAsk(selectedId), d = k - s.focus; if (!s.options.length || !d) return;
-    keys(Array(Math.abs(d)).fill(d > 0 ? '\x1b[B' : '\x1b[A'));
+    keys(arrowKeys(d));
     setTimeout(rerender, Math.abs(d) * 70 + 200);
   }
   document.getElementById('conversation').addEventListener('mouseover', (e) => {
@@ -517,8 +516,7 @@
   // What Claude last printed before it quit (its terminal's last lines, Overlord's own "[Crashed…]" notes left out):
   // the reason, when there is one.
   function lastWords(id) {
-    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal.buffer.active; if (!b) return '';
-    const rows = []; for (let y = Math.max(0, b.length - 60); y < b.length; y++) rows.push(b.getLine(y)?.translateToString(true) || '');
+    const rows = screenOf(id, 60); if (!rows) return '';
     return rows.filter(r => r.trim() && !/^\[(Crashed|Session ended|Previous session)/.test(r.trim()) && !/^[─━\s]+$/.test(r)).slice(-8).join('\n');
   }
   function liveHtml(a, st, evs, doneBy, now) {
@@ -610,9 +608,8 @@
   // transcript only records it once per turn. Picking one in the menu presses Shift+Tab until the footer shows it. ──
   const MODE_RE = [['bypassPermissions', /bypass\s*permissions\s*on/i], ['acceptEdits', /accept\s*edits\s*on/i], ['plan', /plan\s*mode\s*on/i], ['auto', /auto\s*mode\s*on/i]];
   function liveMode(id) {
-    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active;
-    if (!b) return null;
-    let s = ''; for (let i = Math.max(0, b.length - 10); i < b.length; i++) s += (b.getLine(i)?.translateToString() || '') + ' ';
+    const rows = screenOf(id, 10); if (!rows) return null;
+    const s = rows.join(' ');
     for (const [m, re] of MODE_RE) if (re.test(s)) return m;
     return /for\s*shortcuts/i.test(s) ? 'default' : null; // the default mode's footer shows "? for shortcuts"
   }
@@ -739,9 +736,7 @@
   // The reply still being written, off the agent's terminal screen (chat-core.js liveReply), until the transcript has it.
   const squash = (t) => String(t || '').replace(/[\s*_`#>•-]+/g, '');
   function screenReply(id, evs) {
-    const x = typeof xterms !== 'undefined' && xterms.get(id); if (!x) return '';
-    const buf = x.terminal.buffer.active, rows = [];
-    for (let y = Math.max(0, buf.length - 300); y < buf.length; y++) { const l = buf.getLine(y); if (!l) continue; const t = l.translateToString(true); if (l.isWrapped && rows.length) rows[rows.length - 1] += t; else rows.push(t); }
+    const rows = screenOf(id, 300, true); if (!rows) return '';
     const t = liveReply(rows); if (!t) return '';
     const head = squash(t).slice(0, 60);
     for (let k = evs.length - 1; k >= 0 && evs[k].type !== 'prompt'; k--) if (evs[k].type === 'text' && squash(evs[k].text).includes(head)) return ''; // landed already
@@ -1320,12 +1315,18 @@
     peekEl.style.top = (b.top - h.height - 8 > 8 ? b.top - h.height - 8 : b.bottom + 8) + 'px';
   }
 
+  // One panel at a time over the view (a shell's output, a pasted text, an agent's steps): a dialog that keeps focus
+  // inside it and closes on Esc, a click outside, or its ×.
+  function newPanel(label) {
+    const d = document.createElement('div'); d.id = 'chat-shell'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', label); d.tabIndex = -1; returnTo = document.activeElement; trapFocus(d);
+    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShell(); } });
+    return d;
+  }
   // ── A background shell's live output: a panel over the view, re-read every 2 s while it's open ──
   let shellTimer = null;
   function openShell(file, name) {
     closeShell();
-    const d = document.createElement('div'); d.id = 'chat-shell'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Background shell output'); d.tabIndex = -1; returnTo = document.activeElement; trapFocus(d);
-    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShell(); } });
+    const d = newPanel('Background shell output');
     d.innerHTML = `<div class="sh-h">${ICON.cmd}<span>${escH(name)}</span><button type="button" class="sh-x" aria-label="Close">×</button></div><pre class="sh-out">…</pre>`;
     d.querySelector('.sh-x').onclick = closeShell; d.dataset.file = file;
     document.getElementById('term').appendChild(d);
@@ -1335,8 +1336,7 @@
   // Any text in the same panel (a pasted text's full content).
   function openText(name, text) {
     closeShell();
-    const d = document.createElement('div'); d.id = 'chat-shell'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', name); d.tabIndex = -1; returnTo = document.activeElement; trapFocus(d);
-    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShell(); } });
+    const d = newPanel(name);
     d.innerHTML = `<div class="sh-h">¶<span>${escH(name)}</span><button type="button" class="sh-x" aria-label="Close">×</button></div><pre class="sh-out"></pre>`;
     d.querySelector('.sh-out').textContent = text; d.querySelector('.sh-x').onclick = closeShell;
     document.getElementById('term').appendChild(d); d.focus();
@@ -1348,8 +1348,7 @@
     const call = evs.find(x => x.type === 'tool' && x.toolId === tid); if (!call) return;
     closeShell();
     const done = evs.find(x => x.type === 'tool_done' && x.toolId === tid), a = call.args || {}, name = a.description || a.subagent_type || 'Agent';
-    const d = document.createElement('div'); d.id = 'chat-shell'; d.className = 'agentp'; d.dataset.tid = tid; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', name); d.tabIndex = -1; returnTo = document.activeElement; trapFocus(d);
-    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShell(); } });
+    const d = newPanel(name); d.className = 'agentp'; d.dataset.tid = tid;
     // A background agent's call returns at once with the CLI's launch note (for the model, not you): it's still running.
     const bgRun = !!(done && done.agentId && /^Async agent launched/i.test(done.text || '') && !evs.some(x => x.type === 'bgdone' && x.taskId === done.agentId));
     const running = !done || bgRun, out = done && done.text && !/^Async agent launched/i.test(done.text) ? done.text.replace(/\s+$/, '') : '';
@@ -1478,7 +1477,7 @@
   // ── A CLI dialog the chat has no card for (double-Esc rewind, /config, /model, /permissions, /mcp…): the real terminal
   // floats over the chat while it's up, keys going to it, and goes away when the dialog closes. ──
   let peekOff = 0, screenSig = '';
-  const screenRows = (x, n) => { const b = x.terminal.buffer.active, out = []; for (let y = Math.max(0, b.length - n); y < b.length; y++) { const l = b.getLine(y); if (l) out.push(l.translateToString(true)); } return out; };
+  const screenRows = (x, n) => bufferRows(x.terminal.buffer.active, n);
   function peek(on) {
     const t = document.getElementById('term'), tc = document.getElementById('term-container'); if (!t || t.classList.contains('peek') === on) return;
     t.classList.toggle('peek', on);
