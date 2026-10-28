@@ -26,7 +26,7 @@
     const a = atts.get(selectedId), list = a ? a.list : [], pastes = (a && a.pastes) || [], files = (a && a.files) || [];
     document.getElementById('chat-att').innerHTML = list.map(x => `<span class="att${x.saving ? ' saving' : ''}" data-n="${x.n}"><img src="${x.url}" alt=""><b>${x.n}</b><button type="button" class="att-x" title="Remove" aria-label="Remove image ${x.n}">×</button></span>`).join('')
       + pastes.map(x => `<span class="att doc" data-p="${x.n}" title="${escA(x.text.split('\n').slice(0, 8).join('\n'))}"><span class="doc-i">¶</span><span class="doc-t"><b>Pasted text #${x.n}</b><small>${x.lines} lines · click to expand</small></span><button type="button" class="att-x" title="Remove" aria-label="Remove pasted text ${x.n}">×</button></span>`).join('')
-      + files.map(x => `<span class="att doc file" data-f="${x.n}" title="${escA(x.path)}"><span class="doc-i">${FILE_IC}</span><span class="doc-t"><b>${escA(x.name)}</b><small>${escA(x.dir || 'file')}</small></span><button type="button" class="att-x" title="Remove" aria-label="Remove ${escA(x.name)}">×</button></span>`).join('');
+      + files.map(x => `<span class="att doc file" data-f="${x.n}" title="${escA(x.path)}"><span class="doc-i">${FILE_IC}</span><span class="doc-t"><b>${escA(x.name)}</b><small>#${x.n} · ${escA(x.dir || 'file')}</small></span><button type="button" class="att-x" title="Remove" aria-label="Remove ${escA(x.name)}">×</button></span>`).join('');
     order().classList.toggle('has-att', list.length + pastes.length + files.length > 0);
   }
   // A tag deleted from the text drops its image or pasted text (and its chip).
@@ -41,14 +41,14 @@
     const x = { n: a.nextP++, text, lines: text.split('\n').length }; a.pastes.push(x);
     insert(`[Pasted text #${x.n} · ${x.lines} lines] `); drawAtt();
   }
-  // A file (not an image) by path: "[File #N · name]" in the text and a chip above, the quoted path when sent.
+  // A file (not an image) by path: "[File #N]" in the text and a chip above, the quoted path when sent.
   const FILE_IC = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
   function addFileRef(path) {
     const r = pathRef(path); if (!r) return false;
     const a = attOf(selectedId); a.files = a.files || []; a.nextF = a.nextF || 1;
     if (r.img) { a.list.push({ n: a.next, url: fileUrlOf(r.file), path: r.file.replace(/\\/g, '/') }); insert(`[Image #${a.next++}] `); return true; } // an image path: a thumbnail like a pasted image
     const x = { n: a.nextF++, path: r.file, name: r.name, dir: r.dir }; a.files.push(x);
-    insert(`[File #${x.n} · ${r.name}] `); return true;
+    insert(`[File #${x.n}] `); return true;
   }
   const fileUrlOf = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   const expandPastes = (text, a) => text.replace(PASTE, (m, n) => { const x = ((a && a.pastes) || []).find(p => p.n === +n); return x ? x.text : m; })
@@ -312,7 +312,7 @@
     hl.scrollTop = t.scrollTop;
   }
   box().addEventListener('input', syncHl); box().addEventListener('scroll', () => { hl.scrollTop = box().scrollTop; });
-  new ResizeObserver(syncHl).observe(box());
+  new ResizeObserver(syncHl).observe(box()); new ResizeObserver(syncHl).observe(order()); // chips above push the box down
 
   // ── Mic: dictation through Windows' offline recognizer (main.js runs dictate.ps1). Words go in at the caret as you
   // talk: the phrase still being spoken shows live and settles when the recognizer is sure. Typing, sending, Esc or
