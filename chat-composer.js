@@ -254,6 +254,8 @@
       t.value = ''; drafts.set(id, ''); if (a) { a.pastes = []; a.files = []; a.links = []; } grow(t); drawAtt(); saveDraft(id);
     } else if (from === 'terminal' && to === 'conversation') {
       if (typeof readPromptBox !== 'function' || t.value.trim()) return;
+      const ag = agents.get(id); // mid-turn, Ctrl+C would stop the agent: the text stays in the CLI
+      if (order().classList.contains('busy') || (ag && /^(active|resuming|settling|permission|question)$/.test(ag.status || ''))) return;
       const b = x.terminal.buffer.active, rows = []; for (let y = Math.max(0, b.length - 40); y < b.length; y++) rows.push(b.getLine(y)?.translateToString(true) || '');
       if (screenDialog(rows)) return; // a dialog is up: its Ctrl+C would cancel it
       const v = readPromptBox(x.terminal);
