@@ -62,9 +62,10 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
       return events.length ? events : null;
     }
     if (r.type === 'user') {
-      // Text a tool hands the model on its own (a skill's instructions after the Skill call): the CLI doesn't show it.
-      if (r.isMeta && r.sourceToolUseID) return null;
       const c = r.message?.content;
+      // Meta text the CLI hides: a skill's instructions (from the Skill tool or its /command), another session's note,
+      // a retry nudge. Only its "[Image: …]" lines matter here (they carry a pasted image's path).
+      if (r.isMeta && !/^\[Image: /.test(typeof c === 'string' ? c : Array.isArray(c) ? ((c.find(b => b.type === 'text') || {}).text || '') : '')) return null;
       if (Array.isArray(c)) {
         if (c.some(b => b.type === 'tool_result')) {
           const events = [];

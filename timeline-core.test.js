@@ -63,3 +63,9 @@ test('tool output from content blocks is joined, errors flagged', () => {
 test("a skill's instructions (a tool's own meta message) are not a prompt", () => {
   assert.strictEqual(parse({ type: 'user', isMeta: true, sourceToolUseID: 'toolu_1', message: { content: [{ type: 'text', text: '## Page contract — read before your first publish' }] } }), null);
 });
+
+test("a /skill command's body and other meta notes stay hidden; a meta [Image: …] line still counts", () => {
+  assert.strictEqual(parse({ type: 'user', isMeta: true, message: { content: [{ type: 'text', text: 'Base directory for this skill: C:/skills/ultra-fix-bug\n\n# Ultra Fix Bug' }] } }), null);
+  assert.strictEqual(parse({ type: 'user', isMeta: true, message: { content: 'Another Claude session sent a message' } }), null);
+  assert.ok(parse({ type: 'user', isMeta: true, message: { content: [{ type: 'text', text: '[Image: source: C:/x.png]' }] } }));
+});

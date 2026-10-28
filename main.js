@@ -1174,6 +1174,24 @@ function chatFiles({ id, cwd, q, seq }) {
   });
 }
 
+// A link's title for the Chat view, as a browser tab would show it: a GitHub PR or issue through gh (private repos too),
+// any other public https page's <title>. ClickUp pages need a login, so their names come from clickupTask instead.
+// Never localhost or a private address: links in replies are looked up without a click.
+const linkTitles = new Map(); // url → title ('' when there's none)
+function linkTitle({ url }) {
+  if (typeof url !== 'string' || !/^https:\/\//.test(url) || url.length > 2000) return;
+  if (linkTitles.has(url)) return send({ type: 'linkTitle', url, title: linkTitles.get(url) });
+  let host = ''; try { host = new URL(url).hostname; } catch { return; }
+  const done = (t) => { t = String(t || '').replace(/&(#x?[0-9a-f]+|amp|lt|gt|quot|apos|#39);/gi, (m, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[e.toLowerCase()] || (e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : +e.slice(1)) : m))).replace(/\s+/g, ' ').trim().slice(0, 140); linkTitles.set(url, t); send({ type: 'linkTitle', url, title: t }); };
+  if (/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1|0\.)/i.test(host) || !host.includes('.') || /clickup\.com$/i.test(host)) return done('');
+  const gh = host === 'github.com' && /^\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d+)/.exec(new URL(url).pathname);
+  if (gh) return execFile('gh', ['api', `repos/${gh[1]}/${gh[2]}/${gh[3] === 'pull' ? 'pulls' : 'issues'}/${gh[4]}`, '--jq', '.title'], { timeout: 10000, windowsHide: true }, (e, out) => done(e ? '' : out));
+  fetch(url, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': 'Mozilla/5.0 Overlord' } })
+    .then(r => r.ok && /html/i.test(r.headers.get('content-type') || '') ? r.text() : '')
+    .then(h => { const m = /<title[^>]*>([^<]{1,400})<\/title>/i.exec(String(h).slice(0, 300000)); done(m ? m[1] : ''); })
+    .catch(() => done(''));
+}
+
 // The Chat view's /resume list: the agent's other sessions in its project dir, named as Claude names them
 // (a /rename or ai-title beats the first prompt). The CLI's own picker is a full-screen dialog the chat can't show.
 function chatSessions({ id }) {
@@ -1530,7 +1548,7 @@ function restoreAgents(state) {
                   }
                 }
               }
-              if (r.type === 'user' && !(r.isMeta && r.sourceToolUseID)) {
+              if (r.type === 'user' && !r.isMeta) {
                 const c = r.message?.content;
                 let pTxt = '';
                 if (typeof c === 'string' && c.trim()) pTxt = c;
@@ -2201,7 +2219,7 @@ function parseLine(id, line) {
           if (applyAskRecord(a.askIds ||= new Set(), r) && !a.askIds.size) { a.permSent = false; send({ type: 'permClear', id }); }
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-          if (!isReminderOnly(txt) && !(r.isMeta && r.sourceToolUseID)) { // not a skill's own instructions
+          if (!isReminderOnly(txt) && !r.isMeta) { // not a skill's own instructions
             if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); }
             clrActivity(id); a.hadTools = false; a.turnTools = 0;
           }
@@ -4680,6 +4698,7 @@ function handleIpc(msg) {
     case 'pollClickupNow': armClickupTimer(); break;
     case 'chatFiles': chatFiles(msg); break;
     case 'chatSessions': chatSessions(msg); break;
+    case 'linkTitle': linkTitle(msg); break;
     // The Chat view's composer: a screenshot pasted there is saved to a file (as the terminal's Alt+V does) and its path
     // returned; the image goes to the agent only when the prompt is sent, in the place its [Image #N] tag holds.
     case 'saveClipboardImage': {

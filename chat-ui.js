@@ -384,7 +384,7 @@
     // agent has been idle a while without it showing up.
     for (const p of [...list]) {
       if (busy) p.busyAt = Date.now();
-      if (evs.some(e => e.type === 'prompt' && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.match || p.text)) || (!busy && Date.now() - (p.busyAt || p.at) > 120000)) list.splice(list.indexOf(p), 1);
+      if (evs.some(e => (e.type === 'prompt' || e.type === 'command') && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.match || p.text)) || (!busy && Date.now() - (p.busyAt || p.at) > 120000)) list.splice(list.indexOf(p), 1);
     }
     return list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
@@ -666,10 +666,15 @@
       return { kind: 'cu', id: cu, name: taskNames.get(cu) || 'ClickUp task', sub: 'ClickUp · ' + cu };
     }
     let p; try { p = new URL(u); } catch { return null; }
+    // The page's own title once main has it (a browser tab's: gh for a PR or issue, else the page's <title>).
+    if (!pageTitles.has(u) && /^https:/.test(u)) { pageTitles.set(u, ''); api.send({ type: 'linkTitle', url: u }); }
+    const title = pageTitles.get(u);
     const gh = p.hostname === 'github.com' && /^\/[^/]+\/([^/]+)\/(pull|issues)\/(\d+)/.exec(p.pathname);
-    if (gh) return { kind: 'gh', name: `${gh[1]} #${gh[3]}`, sub: gh[2] === 'pull' ? 'GitHub pull request' : 'GitHub issue' };
-    return { kind: 'web', name: p.hostname.replace(/^www\./, ''), sub: (p.pathname + p.search).replace(/^\/$/, '') || 'link' };
+    if (gh) return { kind: 'gh', name: title || `${gh[1]} #${gh[3]}`, sub: `${gh[1]} #${gh[3]}` };
+    return { kind: 'web', name: title || p.hostname.replace(/^www\./, '') + ((p.pathname + p.search).replace(/^\/$/, '').slice(0, 40)), sub: p.hostname };
   }
+  const pageTitles = new Map(); // url → page title ('' while asked or when it has none)
+  function onLinkTitle(msg) { if (pageTitles.get(msg.url) === msg.title) return; pageTitles.set(msg.url, msg.title || ''); if (msg.title) for (const fn of linkWaiters) fn(); }
   function onTask(msg) {
     if (!taskNames.has(msg.id) || taskNames.get(msg.id)) return;
     taskNames.set(msg.id, msg.task ? msg.task.name : null);
@@ -681,9 +686,9 @@
       if (a.textContent.trim() !== a.getAttribute('href') && a.textContent.trim() !== decodeURI(a.getAttribute('href'))) { a.dataset.pl = '0'; continue; }
       const l = linkLabel(a.getAttribute('href')); if (!l) { a.dataset.pl = '0'; continue; }
       a.dataset.pl = l.kind; if (l.id) a.dataset.cu = l.id; a.title = a.getAttribute('href');
-      a.classList.add('plink'); a.textContent = l.kind === 'web' ? l.name + (l.sub !== 'link' ? l.sub.slice(0, 40) + (l.sub.length > 40 ? '…' : '') : '') : l.name;
+      a.classList.add('plink'); a.textContent = l.name;
     }
-    for (const a of el.querySelectorAll('a.plink[data-cu]')) { const n = taskNames.get(a.dataset.cu); if (n && a.textContent !== n) a.textContent = n; }
+    for (const a of el.querySelectorAll('a.plink')) { const l = linkLabel(a.getAttribute('href')); if (l && a.textContent !== l.name) a.textContent = l.name; } // a title or name that came in since
   }
   linkWaiters.add(() => { const el = document.getElementById('conversation'); if (el) prettyLinks(el); });
   function drawDiagrams(el) {
@@ -1247,5 +1252,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { linkLabel, onTask, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

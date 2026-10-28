@@ -349,7 +349,6 @@
   // anything else as site + path (chatUi.linkLabel). The box holds the name; Send puts the address back.
   // ponytail: a name edited by hand stops being a link (Backspace at its end removes it whole, as with the other tags).
   const URL_RE = /https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/;
-  const pendingName = (l) => l.kind === 'cu' && l.name === 'ClickUp task';
   function linkify(t) {
     const id = selectedId; if (id == null || !URL_RE.test(t.value)) return;
     const a = attOf(id), v = t.value; a.links ||= [];
@@ -359,7 +358,7 @@
       if (end === v.length && end === t.selectionStart && !linkify.pasted) continue; // still being typed
       const l = chatUi.linkLabel(m[0]); if (!l) continue;
       let tok = l.name; for (let k = 2; a.links.some(x => x.tok === tok && x.url !== m[0]); k++) tok = `${l.name} (${k})`;
-      a.links.push({ tok, url: m[0], cu: pendingName(l) ? l.id : null });
+      a.links.push({ tok, url: m[0] });
       out += v.slice(last, m.index) + tok; last = end;
       if (caret >= end) caret += tok.length - m[0].length;
     }
@@ -367,15 +366,14 @@
     t.value = out + v.slice(last); t.selectionStart = t.selectionEnd = caret; grow(t);
   }
   const expandLinks = (text, a) => ((a && a.links) || []).reduce((s, l) => s.includes(l.tok) ? s.replace(l.tok, l.url) : s, text);
-  // A ClickUp name that was still loading: swap it in.
+  // A title that came in after the link was put in the box (the page's, or a ClickUp task's): swap it in.
   chatUi.linkWaiters.add(() => {
     const a = atts.get(selectedId), t = box(); if (!a || !a.links) return;
     for (const l of a.links) {
-      if (!l.cu) continue;
-      const n = chatUi.linkLabel(l.url); if (pendingName(n)) continue;
-      const i = t.value.indexOf(l.tok); l.cu = null;
-      if (i >= 0) { const s = t.selectionStart; t.value = t.value.slice(0, i) + n.name + t.value.slice(i + l.tok.length); if (s > i) t.selectionStart = t.selectionEnd = s + n.name.length - l.tok.length; }
-      l.tok = n.name;
+      const n = chatUi.linkLabel(l.url).name, i = t.value.indexOf(l.tok);
+      if (n === l.tok || i < 0 || a.links.some(x => x !== l && x.tok === n)) continue;
+      const s = t.selectionStart; t.value = t.value.slice(0, i) + n + t.value.slice(i + l.tok.length); if (s > i) t.selectionStart = t.selectionEnd = Math.max(i + n.length, s + n.length - l.tok.length);
+      l.tok = n;
     }
     grow(t);
   });
