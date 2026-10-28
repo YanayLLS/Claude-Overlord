@@ -742,3 +742,9 @@ body.world-mode #hdr-chat { display: none; }
 /* The reply box and the layer that draws its tags and links must lay text out identically, or lines wrap at different
    words and the caret drifts off the text. A textarea resets these to the browser's own; take the app's instead. */
 :root body #term-order textarea, :root body #chat-hl { letter-spacing: inherit; word-spacing: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; font-kerning: inherit; text-rendering: inherit; tab-size: inherit; }
+/* A sent message being edited: the bubble is the editor */
+:root body #conversation .msg.user.editing { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: min(100%, 640px); margin-left: auto; padding: 10px 12px; border-radius: 18px; background: var(--bubble, var(--hover)); border: 1px solid color-mix(in srgb, var(--claude) 40%, var(--border-hi)); }
+:root body #conversation .msg.user.editing .edit-ta { width: 100%; min-height: 44px; max-height: 320px; resize: none; border: 0; outline: none; background: none; color: var(--text); font: inherit; line-height: 1.55; }
+:root body #conversation .msg.user.editing .edit-btns { display: flex; gap: 6px; justify-content: flex-end; }
+:root body #conversation .msg.user.editing .edit-btns button { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border-hi); background: none; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
+:root body #conversation .msg.user.editing .edit-btns button.primary { background: var(--text); color: var(--bg); border-color: var(--text); }

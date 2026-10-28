@@ -247,6 +247,9 @@
   // and the CLI's prompt comes into the reply box. ponytail: a draft with images stays in the chat (the CLI can't take them as typed).
   function carryDraft(from, to) {
     const id = selectedId, x = typeof xterms !== 'undefined' && xterms.get(id), t = box(); if (!x) return;
+    // Only while the agent is idle: mid-turn each side keeps its own text, so a draft left in the CLI's box can't get
+    // merged into the next message sent from the chat.
+    const ag = agents.get(id); if (order().classList.contains('busy') || (ag && /^(active|resuming|settling|permission|question)$/.test(ag.status || ''))) return;
     if (from === 'conversation' && to === 'terminal') {
       const a = atts.get(id); if (a && a.list.length) return;
       const v = expandLinks(expandPastes(t.value, a), a); if (!v.trim()) return;
@@ -254,8 +257,6 @@
       t.value = ''; drafts.set(id, ''); if (a) { a.pastes = []; a.files = []; a.links = []; } grow(t); drawAtt(); saveDraft(id);
     } else if (from === 'terminal' && to === 'conversation') {
       if (typeof readPromptBox !== 'function' || t.value.trim()) return;
-      const ag = agents.get(id); // mid-turn, Ctrl+C would stop the agent: the text stays in the CLI
-      if (order().classList.contains('busy') || (ag && /^(active|resuming|settling|permission|question)$/.test(ag.status || ''))) return;
       const b = x.terminal.buffer.active, rows = []; for (let y = Math.max(0, b.length - 40); y < b.length; y++) rows.push(b.getLine(y)?.translateToString(true) || '');
       if (screenDialog(rows)) return; // a dialog is up: its Ctrl+C would cancel it
       const v = readPromptBox(x.terminal);

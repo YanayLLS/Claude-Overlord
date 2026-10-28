@@ -248,6 +248,8 @@
       if (t === 'prompt') lastPrompt = ev;
       if (t === 'turn') { turn = ev; return; }
       if (t === 'prompt' || t === 'command') close();
+      // Being edited: the bubble is the editor (the same html every redraw, so typing isn't lost).
+      if (t === 'prompt' && editing && editing.id === id && editing.i === i) { flush(); out.push(`<div class="msg user editing" data-i="${i}"><textarea class="edit-ta" rows="2" aria-label="Edit your message">${escH(editing.text)}</textarea><div class="edit-btns"><button type="button" data-act="edit-cancel">Cancel</button><button type="button" class="primary" data-act="edit-send">Send</button></div></div>`); return; }
       flush(); out.push(msgHtml(ev, i, cwd));
       if (t === 'text') { textAt = i; open = true; }
       // Your last prompt: Edit puts it back in the box, Retry sends it again.
@@ -258,6 +260,60 @@
     return out;
   }
 
+  // ── Editing a sent message, as in the Claude app: the bubble becomes an editor; Send stops the turn if it's running,
+  // rewinds the CLI to before that message (keeping the code as it is), and sends the new text in its place. The old
+  // message and everything after it are hidden from the thread from then on (the transcript keeps every branch). ──
+  let editing = null; // { id, i, ts, text } while a bubble is being edited
+  const hideKey = (a) => a && a.sessionId ? 'chatHide:' + a.sessionId : null;
+  const hidesOf = (a) => { try { return JSON.parse(localStorage.getItem(hideKey(a)) || '[]'); } catch { return []; } };
+  // From a hidden prompt to the next prompt sent after the edit: every event in between goes.
+  function visibleEvs(a, evs) {
+    const rs = hideKey(a) ? hidesOf(a) : []; if (!rs.length) return evs;
+    let hide = false;
+    return evs.filter(e => {
+      if ((e.type === 'prompt' || e.type === 'command') && e.ts) { const t = Date.parse(e.ts); hide = rs.some(r => t >= r.from && t < r.until); }
+      return !hide;
+    });
+  }
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  async function until(fn, ms = 4000) { for (let t = 0; t < ms; t += 150) { const v = fn(); if (v) return v; await wait(150); } return null; }
+  async function editResend(ev, text) {
+    const id = selectedId, a = agents.get(id), k = hideKey(a); if (!a || !text) return;
+    const range = { from: Date.parse(ev.ts), until: Date.now() };
+    const save = (rs) => { try { localStorage.setItem(k, JSON.stringify(rs)); } catch {} };
+    save([...hidesOf(a), range]); chatUi.addPending(id, text); rerender();
+    const busy = () => /^(active|resuming|settling)$/.test(agents.get(id)?.status || '') || document.getElementById('term-order').classList.contains('busy');
+    if (busy()) { stop(); await until(() => !busy(), 10000); await wait(600); }
+    // Esc Esc opens the rewind list; pick this message (the newest one with its text), then "Restore conversation".
+    const fail = (why) => { save(hidesOf(a).filter(r => r.from !== range.from || r.until !== range.until)); api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => api.send({ type: 'questPrompt', id, text }), 400); showToast(why + ': sent as a new message'); rerender(); };
+    api.send({ type: 'termInput', id, data: '\x1b' }); await wait(150); api.send({ type: 'termInput', id, data: '\x1b' });
+    const rw = await until(() => screenRewind(id)); if (!rw) return fail("Couldn't open rewind");
+    const head = String(ev.text || '').replace(/\s+/g, ' ').trim().slice(0, 30).toLowerCase();
+    let j = -1; for (let q = rw.items.length - 1; q >= 0; q--) if (rw.items[q].label.replace(/\s+/g, ' ').toLowerCase().startsWith(head.slice(0, Math.min(head.length, rw.items[q].label.length)))) { j = q; break; }
+    if (j < 0) j = rw.items.length - 2;
+    if (j < 0) return fail("Couldn't find that message");
+    const d = j - rw.focus; for (let s = 0; s < Math.abs(d); s++) { api.send({ type: 'termInput', id, data: d > 0 ? '\x1b[B' : '\x1b[A' }); await wait(70); }
+    api.send({ type: 'termInput', id, data: '\r' });
+    const sa = await until(() => { const s = screenAsk(id); return s.dialog && s.options.length >= 2 ? s : null; });
+    if (!sa) return fail("Rewind didn't ask what to restore");
+    let o = sa.options.findIndex(x => /^restore conversation$/i.test(x.label.trim()));
+    if (o < 0) o = sa.options.findIndex(x => /conversation/i.test(x.label) && !/code/i.test(x.label));
+    if (o < 0 || o > 8) return fail("Rewind offered no conversation restore");
+    api.send({ type: 'termInput', id, data: String(o + 1) });
+    await until(() => !screenAsk(id).dialog && !screenRewind(id), 3000); await wait(300);
+    // The CLI puts the old message back in its box: clear it (the agent is idle), then send the new one.
+    const x = typeof xterms !== 'undefined' && xterms.get(id);
+    if (x && typeof readPromptBox === 'function' && readPromptBox(x.terminal).trim()) { api.send({ type: 'termInput', id, data: '\x03' }); await wait(250); }
+    api.send({ type: 'questPrompt', id, text });
+  }
+
+  // In the editor: Enter sends, Shift+Enter is a new line, Esc cancels; it grows with its text.
+  document.getElementById('conversation').addEventListener('keydown', (e) => {
+    if (!e.target.matches || !e.target.matches('.edit-ta')) return;
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.target.closest('.msg').querySelector('[data-act="edit-send"]').click(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.target.closest('.msg').querySelector('[data-act="edit-cancel"]').click(); }
+  });
+  document.getElementById('conversation').addEventListener('input', (e) => { if (e.target.matches && e.target.matches('.edit-ta')) { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; } });
   // ── Live tail: what the CLI shows under the transcript ──
   const lastTool = (evs, name, doneBy) => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if (e.type === 'tool' && e.name === name) return doneBy && doneBy.get(e.toolId) ? null : e; if (e.type === 'prompt') return null; } return null; };
   // What's being approved, as the terminal shows it: an edit's diff, a command in full, a new file's content.
@@ -502,7 +558,8 @@
     // agent has been idle a while without it showing up.
     for (const p of [...list]) {
       if (busy) p.busyAt = Date.now();
-      if (evs.some(e => (e.type === 'prompt' || e.type === 'command') && e.ts && Date.parse(e.ts) >= p.at - 2000 && norm(e.text) === norm(p.match || p.text)) || (!busy && Date.now() - (p.busyAt || p.at) > 120000)) list.splice(list.indexOf(p), 1);
+      // Delivered once the transcript has it, or a message that contains it (the CLI sends any text left in its own box along).
+      if (evs.some(e => (e.type === 'prompt' || e.type === 'command') && e.ts && Date.parse(e.ts) >= p.at - 2000 && (norm(e.text) === norm(p.match || p.text) || (norm(p.match || p.text).length >= 8 && norm(e.text).includes(norm(p.match || p.text))))) || (!busy && Date.now() - (p.busyAt || p.at) > 30000)) list.splice(list.indexOf(p), 1);
     }
     return list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
@@ -677,6 +734,7 @@
   function announce(t) { if (srStatus.textContent !== t) srStatus.textContent = t; }
   function paint(el, id, a, evs, st) {
     const now = Date.now();
+    evs = evs && visibleEvs(a, evs); // a message you edited, and what answered it, are gone from the thread
     const doneBy = new Map(); let mode = '';
     if (evs) for (const ev of evs) { if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev); else if (ev.type === 'mode') mode = ev.mode; }
     mode = liveMode(id) || mode; // the footer is current; the transcript only notes the mode once per turn
@@ -932,7 +990,16 @@
       if (act.dataset.act === 'resume') resumeSelected();
       else if (act.dataset.act === 'copy-name') navigator.clipboard.writeText('@' + act.dataset.name).then(() => showToast(`Copied @${act.dataset.name}`), () => {});
       else if (act.dataset.act === 'retry') { const t = lastPrompt(); if (t) { api.send({ type: 'questPrompt', id: selectedId, text: t }); chatUi.addPending(selectedId, t); rerender(); } }
-      else if (act.dataset.act === 'edit-prompt') chatComposer.insert(lastPrompt(), false);
+      else if (act.dataset.act === 'edit-prompt') { // the bubble becomes its own editor
+        const i = +act.closest('[data-i]').dataset.i, ev = (evs || [])[i];
+        if (ev && ev.type === 'prompt') { editing = { id: selectedId, i, ts: ev.ts, text: ev.text }; rerender(); setTimeout(() => { const ta = document.querySelector('#conversation .msg.editing .edit-ta'); if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; ta.style.height = ta.scrollHeight + 'px'; } }, 30); }
+      }
+      else if (act.dataset.act === 'edit-cancel') { editing = null; rerender(); }
+      else if (act.dataset.act === 'edit-send') {
+        const ta = document.querySelector('#conversation .msg.editing .edit-ta'), text = ta ? ta.value.trim() : '', ev = editing && (evs || []).find(e => e.type === 'prompt' && e.ts === editing.ts);
+        editing = null;
+        if (ev && text && text !== String(ev.text).trim()) editResend(ev, text); else rerender();
+      }
       else if (act.dataset.act === 'turn-edits') openChanges(evs || [], +act.dataset.from, +act.dataset.to, a);
       else if (act.dataset.act === 'turn-edits-inline') showEditsInline(evs || [], +act.dataset.from, +act.dataset.to);
       else if (act.dataset.act === 'mode') openModeMenu(act, act.dataset.modeCur);
