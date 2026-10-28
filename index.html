@@ -4394,7 +4394,7 @@ function handleAgentMsg(msg) {
     case 'workflowList':
       renderRepoWorkflows(msg.repo, msg.workflows, msg.error);
       break;
-    case 'clickupTask': if (questOpen && questOpen.id === msg.id) { questOpen.body = msg.task; questOpen.error = msg.error || null; renderQuest(); } break;
+    case 'clickupTask': chatComposer.onTask(msg); if (questOpen && questOpen.id === msg.id) { questOpen.body = msg.task; questOpen.error = msg.error || null; renderQuest(); } break;
     case 'clickupMembers': questMembers = msg.members || []; if (mentionPick) mentionRender(); break;
     case 'clickupComments': if (questOpen && questOpen.id === msg.id) { questOpen.comments = msg.comments || (questOpen.comments || []); questOpen.commentsError = msg.error || null; renderQuest(); } break;
     case 'clickupCommentPosted': if (questOpen && questOpen.id === msg.id) { if (msg.error) showToast('Reply failed: ' + msg.error); else { questOpen.replyTo = null; questOpen.draft = ''; const ta = document.getElementById('q-reply-text'); if (ta) ta.innerHTML = ''; /* the box itself, or the re-render would keep what it finds there */ showToast('Reply posted'); } renderQuest(); } break;

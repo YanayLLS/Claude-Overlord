@@ -2111,6 +2111,17 @@ function parseLine(id, line) {
     if (a.pendingPrompt && recordHasPrompt(r, a.pendingPrompt.key, a.pendingPrompt.at)) a.pendingPrompt = null;
     // Ledger moved while at the prompt (e.g. a background task finished) → re-show status
     if (applyBgRecord(a.bgTasks ||= new Set(), r) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
+    // Esc: an interrupted turn writes no turn_duration, only this note — the agent is back at the prompt.
+    if (r.type === 'user' && !a.isWaiting) {
+      const c = r.message && r.message.content, t = typeof c === 'string' ? c : Array.isArray(c) ? ((c.find(b => b.type === 'text') || {}).text || '') : '';
+      if (/^\[Request interrupted by user/.test(t)) {
+        clrTimer(id, permTimers);
+        if (a.toolIds.size > 0) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
+        a.isWaiting = true; a.permSent = false; a.spinnerText = '';
+        send({ type: 'spinnerText', id, text: '' });
+        send({ type: 'status', id, status: shownStatus(a) });
+      }
+    }
     // Session rename. Claude Code persists /rename as a custom-title line, and
     // agents that rename themselves append the same line — so this is the one
     // source that covers both, and it's what /resume displays.

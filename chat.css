@@ -669,3 +669,25 @@ body.world-mode #hdr-chat { display: none; }
 #chat-shell .sh-h span.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--claude); animation: chat-pulse 1.4s ease-in-out infinite; }
 :root body #conversation [data-agent-tid] { cursor: pointer; }
 :root body #conversation [data-agent-tid] .sumrow:hover { background: var(--hover); }
+/* The reply still being written, read off the terminal until the transcript has it */
+:root body #conversation .live-reply { white-space: pre-wrap; color: var(--subtext); font-size: 14.5px; line-height: 1.6; margin: 0 0 10px; opacity: .85; animation: chat-in .2s var(--chat-ease); }
+/* A CLI dialog with no chat card (rewind, /config, /model…): the real terminal floats over the chat while it's up */
+:root body #term.peek > #term-container { display: block !important; position: absolute; left: 16px; right: 16px; top: 16px; bottom: 16px; z-index: 7; border-radius: 12px; border: 1px solid var(--border-hi); box-shadow: 0 16px 48px rgba(0,0,0,.35); overflow: hidden; animation: chat-in .18s var(--chat-ease); }
+#term-peek-x { display: none; }
+:root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 'Geist', sans-serif; cursor: pointer; }
+:root body #chat-hl mark.url { background: color-mix(in srgb, var(--accent, #7aa2f7) 12%, transparent); box-shadow: none; border-radius: 4px; text-decoration: underline; text-decoration-color: var(--accent, #7aa2f7); text-underline-offset: 3px; }
+/* A CLI dialog with no chat card (rewind, /config, /model…): the real terminal floats over the chat while it's up */
+:root body #term.peek > #term-container { display: block !important; position: absolute; left: 16px; right: 16px; top: 16px; bottom: 16px; z-index: 7; border-radius: 12px; border: 1px solid var(--border-hi); box-shadow: 0 16px 48px rgba(0,0,0,.35); overflow: hidden; animation: chat-in .18s var(--chat-ease); }
+#term-peek-x { display: none; }
+:root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 'Geist', sans-serif; cursor: pointer; }
+/* Links in the reply box: underlined in place, a chip each above it (a ClickUp task by name) */
+:root body #chat-hl mark.url { background: none; box-shadow: none; border-radius: 0; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--claude) 70%, transparent); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+:root body #chat-links { display: flex; gap: 6px; flex-wrap: wrap; }
+:root body #chat-links[hidden] { display: none; }
+:root body #chat-links .lk { display: inline-flex; align-items: center; gap: 8px; max-width: 320px; height: 40px; padding: 0 12px 0 8px; border-radius: 10px; border: 1px solid var(--border-hi); background: var(--bg2); color: var(--text); cursor: pointer; font: inherit; text-align: left; animation: chat-pop .35s var(--chat-ease); }
+:root body #chat-links .lk:hover { border-color: color-mix(in srgb, var(--claude) 45%, var(--border-hi)); }
+:root body #chat-links .lk-i { flex: none; width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; background: var(--hover); color: var(--subtext); }
+:root body #chat-links .lk.cu .lk-i { background: #7b68ee; color: #fff; }
+:root body #chat-links .lk-t { display: flex; flex-direction: column; min-width: 0; }
+:root body #chat-links .lk-t b { font-weight: 500; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root body #chat-links .lk-t small { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -69,3 +69,37 @@ test('dictated words go in at the caret with a space either side only where need
   assert.strictEqual(dictJoin('so', 'I think', ''), 'so I think');
   assert.strictEqual(dictJoin('check', 'API keys', ''), 'check API keys');
 });
+
+test('liveReply: the reply being written, read off the CLI screen above its spinner', () => {
+  const { liveReply } = require('./chat-core');
+  const screen = [
+    '> fix the scroll',
+    '',
+    '● Bash(git status)',
+    '  ⎿  On branch master',
+    '',
+    '● The chat lags because Claude writes a block to the',
+    '  transcript only once it is complete.',
+    '',
+    '✻ Cogitating… (12s · ↓ 300 tokens · esc to interrupt)',
+    '',
+    '────────────────',
+    '> ',
+  ];
+  assert.strictEqual(liveReply(screen), 'The chat lags because Claude writes a block to the\ntranscript only once it is complete.');
+  // the newest bullet is a tool call: nothing to preview
+  assert.strictEqual(liveReply(screen.slice(0, 5).concat(screen.slice(8))), '');
+  // no spinner: the turn is over, the transcript has it all
+  assert.strictEqual(liveReply(screen.slice(0, 8)), '');
+  // a reply from an earlier turn above the latest prompt is not this turn's
+  assert.strictEqual(liveReply(['● old answer', '', '> next question', '', '✶ Pondering… (2s · esc to interrupt)']), '');
+});
+
+test('screenDialog: a CLI dialog (rewind, /config, /model…) is up when its "Esc to …" footer is at the bottom', () => {
+  const { screenDialog } = require('./chat-core');
+  assert.strictEqual(screenDialog(['Rewind', '❯ fix the scroll', '  add a test', '', 'Enter to continue · Esc to exit', '']), true);
+  assert.strictEqual(screenDialog(['Select model', '❯ 1. Opus', '', 'Enter to confirm · Esc to cancel']), true);
+  // the normal prompt: a reply that mentions the footer text above the box doesn't count
+  assert.strictEqual(screenDialog(['● Press Esc to cancel the dialog.', '', '────', '> ', '────', '  ⏵⏵ bypass permissions on (shift+tab to cycle)']), false);
+  assert.strictEqual(screenDialog(['✻ Cogitating… (3s · esc to interrupt)', '────', '> ', '────']), false);
+});

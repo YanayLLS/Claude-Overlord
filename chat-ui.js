@@ -319,7 +319,7 @@
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
       const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
-      return h + `<div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
+      return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
     }
     return h;
   }
@@ -492,6 +492,17 @@
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
   // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
   let prevBusy = new Map(), tick = null, jumpOnce = false;
+  // The reply still being written, off the agent's terminal screen (chat-core.js liveReply), until the transcript has it.
+  const squash = (t) => String(t || '').replace(/[\s*_`#>•-]+/g, '');
+  function screenReply(id, evs) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id); if (!x) return '';
+    const buf = x.terminal.buffer.active, rows = [];
+    for (let y = Math.max(0, buf.length - 300); y < buf.length; y++) { const l = buf.getLine(y); if (!l) continue; const t = l.translateToString(true); if (l.isWrapped && rows.length) rows[rows.length - 1] += t; else rows.push(t); }
+    const t = liveReply(rows); if (!t) return '';
+    const head = squash(t).slice(0, 60);
+    for (let k = evs.length - 1; k >= 0 && evs[k].type !== 'prompt'; k--) if (evs[k].type === 'text' && squash(evs[k].text).includes(head)) return ''; // landed already
+    return t;
+  }
   const liveKey = (h) => h.replace(/(data-live="[^"]*">)[^<]*/g, '$1');
   const srStatus = document.createElement('div'); srStatus.id = 'chat-sr'; srStatus.setAttribute('role', 'status'); srStatus.setAttribute('aria-live', 'polite'); srStatus.className = 'sr-only'; document.body.appendChild(srStatus);
   function announce(t) { if (srStatus.textContent !== t) srStatus.textContent = t; }
@@ -503,7 +514,7 @@
     // The transcript outranks a stale "working": a turn whose end is the last thing written is over, whatever a
     // leftover per-call status in the list says.
     // (Covers "resuming" too: it can linger after Overlord reattaches an agent that has since finished.)
-    if (evs && (st === 'active' || st === 'settling' || st === 'resuming')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done' || t === 'images') continue; if (t === 'turn') st = 'waiting'; break; } }
+    if (evs && (st === 'active' || st === 'settling' || st === 'resuming')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done' || t === 'images') continue; if (t === 'turn' || t === 'interrupt') st = 'waiting'; break; } }
     const busy = st === 'active' || st === 'resuming';
     const order = document.getElementById('term-order');
     order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
@@ -544,6 +555,7 @@
       else tailEl.innerHTML = tail;
       tailEl._h = tail; tailEl._k = key;
     }
+    const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
     announce(st === 'question' ? 'The agent has a question' : st === 'permission' ? 'The agent needs approval' : busy ? 'The agent is working' : a.crashed === 'fatal' ? 'The agent stopped' : 'The agent is done');
     prevBusy.set(id, busy);
     // The working line's elapsed time ticks once a second while the agent works and the view is open.
@@ -1112,6 +1124,27 @@
     if (termTab === 'conversation') switchTermTab('conversation');
     if (typeof schedFit === 'function') setTimeout(schedFit, 50);
   }
+  // ── A CLI dialog the chat has no card for (double-Esc rewind, /config, /model, /permissions, /mcp…): the real terminal
+  // floats over the chat while it's up, keys going to it, and goes away when the dialog closes. ──
+  let peekOff = 0;
+  const screenRows = (x, n) => { const b = x.terminal.buffer.active, out = []; for (let y = Math.max(0, b.length - n); y < b.length; y++) { const l = b.getLine(y); if (l) out.push(l.translateToString(true)); } return out; };
+  function peek(on) {
+    const t = document.getElementById('term'), tc = document.getElementById('term-container'); if (!t || t.classList.contains('peek') === on) return;
+    t.classList.toggle('peek', on);
+    if (on) { tc.style.display = ''; showXterm(selectedId); if (typeof schedFit === 'function') schedFit(); setTimeout(() => xterms.get(selectedId)?.terminal.focus(), 60); }
+    else if (termTab === 'conversation') switchTermTab('conversation'); // back to the chat: terminal hidden, reply box focused
+  }
+  setInterval(() => {
+    const t = document.getElementById('term'), cv = document.getElementById('conversation');
+    const x = selectedId != null && typeof xterms !== 'undefined' && xterms.get(selectedId);
+    const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)));
+    if (up) { peekOff = 0; peek(true); return; }
+    if (t && t.classList.contains('peek') && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
+    peek(false);
+  }, 500);
+  { const px = document.createElement('button'); px.id = 'term-peek-x'; px.type = 'button'; px.title = 'Close (Esc)'; px.setAttribute('aria-label', 'Close'); px.textContent = '×';
+    px.onclick = () => api.send({ type: 'termInput', id: selectedId, data: '' }); document.getElementById('term')?.appendChild(px); } // Esc, as in the CLI: the dialog closes, then so does this
+
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
   window.chatUi = { permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '') => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };

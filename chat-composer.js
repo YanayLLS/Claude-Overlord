@@ -224,6 +224,7 @@
     return false;
   }
 
+  let lastEsc = 0;
   function onKey(e) {
     const t = e.target;
     if (at && at.files.length && chat()) {
@@ -245,6 +246,8 @@
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); return; }
     if (!chat()) return;
     if (e.key === 'Escape' && order().classList.contains('busy')) { e.preventDefault(); chatUi.keys(['\x1b']); return; }
+    // Esc Esc with an empty box, as in the CLI: its rewind picker (shown over the chat by chat-ui's dialog peek).
+    if (e.key === 'Escape' && !t.value) { e.preventDefault(); if (Date.now() - lastEsc < 600) { chatUi.keys(['\x1b', '\x1b']); lastEsc = 0; } else lastEsc = Date.now(); return; }
     // History, like the CLI: ↑ at the start of the box steps back through your prompts, ↓ comes forward again.
     const ps = prompts();
     // On the first line ↑ goes back, on the last line ↓ comes forward; the caret lands at the end of what's recalled.
@@ -333,16 +336,40 @@
   const hl = document.createElement('div'); hl.id = 'chat-hl'; hl.setAttribute('aria-hidden', 'true');
   box().before(hl);
   const askedCat = new Set(); // folders whose command list was asked for once
+  // Links in the box: underlined in place, and a chip above it each — a ClickUp task by its real name (Overlord's own
+  // board first, else one fetch), any other link by its site and path.
+  const URL_RE = /https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/;
+  const taskNames = new Map(); // ClickUp task id → name ('' while asked, null when it can't be read)
+  const cuTask = (u) => (/app\.clickup\.com\/t\/(?:\d+\/)?([\w-]+)/.exec(u) || [])[1];
+  function onTask(msg) { if (!taskNames.has(msg.id) || taskNames.get(msg.id)) return; taskNames.set(msg.id, msg.task ? msg.task.name : null); drawLinks(box().value, true); }
+  function drawLinks(v, force) {
+    let el = document.getElementById('chat-links');
+    if (!el) { el = document.createElement('div'); el.id = 'chat-links'; document.getElementById('chat-att').before(el); el.onclick = (e) => { const c = e.target.closest('[data-url]'); if (c) api.send({ type: 'openUrl', url: c.dataset.url }); }; }
+    const urls = [...new Set((v.match(new RegExp(URL_RE.source, 'g')) || []))].slice(0, 6);
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const html = urls.map(u => {
+      const id = cuTask(u); let name, sub;
+      if (id) {
+        const known = typeof clickupState !== 'undefined' && clickupState.tasks.find(t => t.id === id || t.customId === id);
+        if (known) taskNames.set(id, known.name);
+        if (!taskNames.has(id)) { taskNames.set(id, ''); api.send({ type: 'clickupTask', id }); }
+        name = taskNames.get(id) || (taskNames.get(id) === '' ? 'ClickUp task…' : 'ClickUp task'); sub = 'ClickUp · ' + id;
+      } else { let p; try { p = new URL(u); } catch { return ''; } name = p.hostname.replace(/^www\./, ''); sub = (p.pathname + p.search).replace(/^\/$/, '') || 'link'; }
+      return `<button type="button" class="lk${id ? ' cu' : ''}" data-url="${esc(u)}" title="${esc(u)}"><span class="lk-i">${id ? '✓' : '↗'}</span><span class="lk-t"><b>${esc(name)}</b><small>${esc(sub)}</small></span></button>`;
+    }).join('');
+    if (force || el._h !== html) { el.innerHTML = el._h = html; el.hidden = !html; }
+  }
   function syncHl() {
     const t = box(), v = t.value;
     // a /command or /skill this agent has (from its catalog) reads in the brand colour, like the CLI
     const a = typeof agents === 'undefined' ? null : agents.get(selectedId), names = new Set((catalog.get(a && a.cwd) || []).filter(i => i.insert && i.insert.startsWith('/')).map(i => i.insert.trim().split(/\s/)[0].toLowerCase()));
     if (a && !catalog.has(a.cwd) && !askedCat.has(a.cwd) && /(^|\s)\/[\w:-]/.test(v)) { askedCat.add(a.cwd); api.send({ type: 'catalog', cwd: a.cwd }); }
     const cmd = /(^|\s)(\/[\w:.-]+)/g, hasCmd = names.size && [...v.matchAll(cmd)].some(m => names.has(m[2].toLowerCase()));
-    if (!/\[(Image|Pasted text|File) #\d+/.test(v) && !hasCmd) { if (hl.innerHTML) hl.innerHTML = ''; hl.hidden = true; return; }
+    drawLinks(v);
+    if (!/\[(Image|Pasted text|File) #\d+/.test(v) && !hasCmd && !URL_RE.test(v)) { if (hl.innerHTML) hl.innerHTML = ''; hl.hidden = true; return; }
     hl.hidden = false;
     hl.innerHTML = v.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])).replace(/\[(?:Image #\d+|Pasted text #\d+[^\]]*|File #\d+[^\]]*)\]/g, m => `<mark>${m}</mark>`)
-      .replace(cmd, (m, sp, c) => names.has(c.toLowerCase()) ? `${sp}<mark class="cmd">${c}</mark>` : m) + '\n';
+      .replace(cmd, (m, sp, c) => names.has(c.toLowerCase()) ? `${sp}<mark class="cmd">${c}</mark>` : m).replace(new RegExp(URL_RE.source, 'g'), m => `<mark class="url">${m}</mark>`) + '\n';
     hl.style.top = t.offsetTop + 'px'; hl.style.left = t.offsetLeft + 'px'; hl.style.width = t.clientWidth + 'px'; hl.style.height = t.clientHeight + 'px';
     hl.scrollTop = t.scrollTop;
   }
@@ -385,5 +412,5 @@
   box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, onTask, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();

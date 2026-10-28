@@ -144,4 +144,32 @@ function dictJoin(pre, words, post) {
   return pre + (pre && !/\s$/.test(pre) ? ' ' : '') + words + (post && !/^\s/.test(post) ? ' ' : '') + post;
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin };
+// The reply Claude is still writing, read off the CLI's screen rows (the transcript only gets a block once it's done):
+// the newest "● text" block between the latest prompt and the working spinner. '' when there's none, it's a tool call,
+// or the turn is over. ponytail: plain text as the CLI drew it (its markdown already rendered); the transcript's
+// version replaces it as soon as the block lands.
+function liveReply(lines) {
+  let s = -1;
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 60); i--) if (/^\s*[·✢✳✶✻✽*]\s+\p{Lu}[^…]{0,40}…\s*\(/u.test(lines[i])) { s = i; break; }
+  if (s < 0) return '';
+  let b = -1;
+  for (let i = s - 1; i >= Math.max(0, s - 400); i--) {
+    if (/^\s*[●⏺]\s/.test(lines[i])) { b = i; break; }
+    if (/^>\s/.test(lines[i])) return ''; // the latest prompt: no reply yet this turn
+  }
+  if (b < 0) return '';
+  const first = lines[b].replace(/^\s*[●⏺]\s+/, '');
+  if (/^[A-Z][\w-]*(\(|$)/.test(first)) return ''; // "● Bash(…)", "● Read(…)": a call, its row is in the chat already
+  const body = [first, ...lines.slice(b + 1, s).map(l => l.replace(/^ {2}/, ''))];
+  while (body.length && !body[body.length - 1].trim()) body.pop();
+  return body.join('\n').trim();
+}
+
+// A full-screen CLI dialog (double-Esc rewind, /config, /model, /permissions, /mcp…) is up: its "Esc to cancel/exit"
+// footer is among the last rows. The normal prompt ends in its box and mode line instead.
+function screenDialog(rows) {
+  const tail = rows.filter(r => r.trim()).slice(-3).join('\n');
+  return /\besc to (cancel|exit|go back|close)\b/i.test(tail) && !/esc to interrupt/i.test(tail);
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, liveReply, screenDialog };
