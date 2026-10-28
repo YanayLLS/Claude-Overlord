@@ -774,3 +774,10 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .vers { display: flex; justify-content: flex-end; align-items: center; gap: 2px; margin: -8px 0 6px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
 :root body #conversation .vers .act { min-width: 22px; font-size: 15px; line-height: 1; }
 :root body #conversation .vers .act:disabled { opacity: .3; cursor: default; }
+/* Several questions at once: the steps, as the CLI's tab row */
+:root body #conversation .card.ask .ask-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+:root body #conversation .card.ask .ask-tabs span { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 6px; border-radius: 12px; border: 1px solid var(--border); font-size: 12px; color: var(--dim); }
+:root body #conversation .card.ask .ask-tabs i { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--hover-strong); font-style: normal; font-size: 10px; }
+:root body #conversation .card.ask .ask-tabs .ic { width: 14px; height: 14px; fill: none; stroke: var(--green, #2e9e5b); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+:root body #conversation .card.ask .ask-tabs .on { border-color: var(--claude); color: var(--text); font-weight: 600; }
+:root body #conversation .card.ask .ask-tabs .on i { background: var(--claude); color: #fff; }

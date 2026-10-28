@@ -3711,7 +3711,7 @@ function openTerm(id) {
   document.getElementById('term-name-chip').textContent = title; // no agentName prefix
   document.getElementById('term-agent-name').textContent = termAgentLabel(a);
   if (!xterms.has(id)) createXterm(id);
-  if (termTab === 'terminal') showXterm(id);
+  if (termTab === 'terminal' || document.getElementById('term').classList.contains('split')) showXterm(id); // side by side shows this agent's terminal too
   // Update prompt nav after xterm exists and buffer has time to populate
   setTimeout(() => updatePromptNav(), 150);
   // Load timeline if tab is active or agent changed

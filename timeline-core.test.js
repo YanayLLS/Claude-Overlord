@@ -125,3 +125,10 @@ test('a branch you left that got a reply is an earlier version of the message th
   assert.deepStrictEqual([...alts.keys()], ['new']);
   assert.deepStrictEqual(alts.get('new').map(ls => ls.map(l => JSON.parse(l).uuid)), [['old', 'oa']]);
 });
+
+test("the CLI's queue: what you typed while it works, and system notes kept for the order", () => {
+  const q = (op, content) => parse({ type: 'queue-operation', operation: op, timestamp: 't', ...(content != null && { content }) })[0];
+  assert.deepStrictEqual(q('enqueue', 'dont start yet'), { type: 'queue', ts: 't', op: 'enqueue', text: 'dont start yet', sys: false });
+  assert.strictEqual(q('enqueue', '<system-reminder>x').sys, true);
+  assert.strictEqual(q('dequeue').op, 'dequeue');
+});

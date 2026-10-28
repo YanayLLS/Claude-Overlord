@@ -224,7 +224,7 @@
   // Claude ended by asking you something: its choices (or Yes / No) as one-click answers under the reply.
   function qrHtml(evs) {
     for (let k = evs.length - 1; k >= 0; k--) {
-      const t = evs[k].type; if (t === 'turn' || t === 'mode' || t === 'tool_done' || t === 'images' || t === 'bgdone') continue;
+      const t = evs[k].type; if (t === 'turn' || t === 'mode' || t === 'tool_done' || t === 'images' || t === 'bgdone' || t === 'queue') continue;
       if (t !== 'text') return '';
       const o = quickReplies(evs[k].text); return o.length ? `<div class="qreplies">${o.map(x => `<button type="button" class="qr" data-qr="${escH(x)}">${escH(x)}</button>`).join('')}</div>` : '';
     }
@@ -291,7 +291,7 @@
       // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.
       if (t === 'tool' && ev.name === 'Artifact' && doneBy.get(ev.toolId) && doneBy.get(ev.toolId).artifactUrl) { flush(); out.push(artifactCard(ev, doneBy.get(ev.toolId).artifactUrl)); open = true; return; }
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
-      if (t === 'tool_done' || t === 'mode' || t === 'bgdone') return;
+      if (t === 'tool_done' || t === 'mode' || t === 'bgdone' || t === 'queue') return;
       // The "[Image: source: …]" record after a prompt: only shown when that prompt had no thumbnails of its own.
       if (t === 'images') { if (lastPrompt && ((lastPrompt.images || []).length || (lastPrompt.paths || []).length)) return; }
       if (t === 'prompt') lastPrompt = ev;
@@ -448,7 +448,10 @@
     // The question: the lines just above the menu (it can wrap, inside a left rule), up to a blank line.
     const q = [];
     for (let i = first - 1; i >= 0 && i >= first - 12; i--) { const t = cut(rows[i]); if (!t) { if (q.length) break; continue; } if (/[←→]|^\[[ x✓]?\]|^[☐☑✔]/.test(t)) break; q.unshift(t); }
-    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && dialog };
+    // Several questions at once: the CLI's tab row above them ("← [ ] Scope  ✓ Workspace  ✓ Submit →"), ticked once answered.
+    const tabRow = rows.slice(0, Math.max(0, first)).reverse().find(r => /\bSubmit\b/.test(r) && /\[[ x✓✔]?\]|[☐☒☑✓✔]/.test(r));
+    const tabs = tabRow ? [...tabRow.matchAll(/(\[[ x✓✔×]?\]|[☐☒☑✓✔])\s*(.+?)(?=\s{2,}|\s*(?:\[|[☐☒☑✓✔→])|\s*$)/g)].map(m => ({ done: !/^(\[ ?\]|☐)$/.test(m[1]), label: m[2].trim() })).filter(x => x.label && !/^Submit$/i.test(x.label)) : [];
+    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && dialog, tabs };
   }
   // The CLI's rewind list (Esc Esc): each earlier prompt, the change made after it ("2 files changed +83") and which
   // one is selected. null when it isn't on screen.
@@ -483,7 +486,10 @@
     const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
     const q = (s && s.question) || a.question || 'Claude has a question';
     if (askFor !== selectedId + '\n' + q) { askFor = selectedId + '\n' + q; askHover = null; askAsked = null; } // a new question starts from its focused option
-    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === s.focus ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div>${prevHtml(q, s)}</div></div>`
+    // Several questions: which one this is, which are answered (the CLI's tab row).
+    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40), at = (a.steps || []).findIndex(x => norm(x.q) === norm(q)), on = at >= 0 ? at : ((s && s.tabs) || []).findIndex(x => !x.done); // else the first one not answered
+    const tabs = s && s.tabs && s.tabs.length > 1 ? `<div class="ask-tabs">${s.tabs.map((x, k) => `<span class="${x.done ? 'done' : ''}${k === on ? ' on' : ''}">${x.done ? ICON.check : `<i>${k + 1}</i>`}${escH(x.label)}</span>`).join('')}</div>` : '';
+    return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === s.focus ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${opts.some(o => /^(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === q ? ' still' : ''}">`) + (lastAskQ = q, '');
   }
@@ -639,8 +645,27 @@
   const pending = new Map(); // agent id → [{ text, imgs, at, held, busyAt }]
   const norm = (s) => String(s || '').replace(/\[Image #\d+\]/g, ' ').replace(/\s+/g, ' ').trim();
   const usedPrompts = new Map(); // agent id → the transcript messages (by time) that already cleared a bubble
+  // What sits in the CLI's queue now (typed in the terminal, or anywhere): its bubbles, as the CLI shows them. One not
+  // taken by the end of a turn was dropped (a crash): only what came since the last turn counts. The chat's own waiting
+  // messages have their bubbles already.
+  function cliQueue(id, evs) {
+    let q = [];
+    for (const e of evs) {
+      if (e.type === 'turn') q = [];
+      else if (e.type !== 'queue') continue;
+      else if (e.op === 'enqueue') q.push(e);
+      else if (e.op === 'dequeue') q.shift();
+      else { const k = q.findIndex(x => x.text === e.text); if (k >= 0) q.splice(k, 1); }
+    }
+    // Each of the chat's own waiting bubbles stands for one entry: same text, or (its images and pastes read differently
+    // in the CLI) queued within seconds of it being sent.
+    const mine = [...(pending.get(id) || [])];
+    const own = (e) => { const t = e.text.trim(); let k = mine.findIndex(p => (p.match || p.text || '').trim() === t); if (k < 0) k = mine.findIndex(p => Math.abs(Date.parse(e.ts) - p.at) < 15000); return k >= 0 && !!mine.splice(k, 1); };
+    return q.filter(e => !e.sys && e.text.trim() && !own(e))
+      .map(e => `<div class="msg user pending cliq"><div class="bubble">${tagChips(e.text)}</div><span class="q">Queued</span></div>`).join('');
+  }
   function pendingHtml(id, evs, busy) {
-    const list = pending.get(id); if (!list || !list.length) return '';
+    const list = pending.get(id); if (!list || !list.length) return cliQueue(id, evs);
     // Each message sent from here becomes the next message of yours in the transcript, in the order sent, so they clear
     // in that order: the first one of yours written after a message was sent is that message, whatever the CLI made of its
     // text (its own image numbers, a long paste's wrapper, text left in its box…). Matching the text broke on each of those.
@@ -662,7 +687,7 @@
       const imgs = thumbs(p.imgs, tagNums(p.text));
       const queued = busy && !p.held;
       return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? 'Queued' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x" data-unqueue="${k}" title="Take back (the agent keeps working)">Cancel</button>` : ''}</span></div>`;
-    }).join('');
+    }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
   // the queued messages into the input; if that's what came up, Ctrl+C on the (non-empty) input clears it — it only
@@ -861,7 +886,7 @@
     // leftover per-call status in the list says.
     // (Covers "resuming" too: it can linger after Overlord reattaches an agent that has since finished.)
     // …unless a message of yours is on its way: that started a new turn the transcript hasn't written yet.
-    if (evs && !(pending.get(id) || []).some(p => !p.held) && (st === 'active' || st === 'settling' || st === 'resuming')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done' || t === 'images') continue; if (t === 'turn' || t === 'interrupt') st = 'waiting'; break; } }
+    if (evs && !(pending.get(id) || []).some(p => !p.held) && (st === 'active' || st === 'settling' || st === 'resuming')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done' || t === 'images' || t === 'queue') continue; if (t === 'turn' || t === 'interrupt') st = 'waiting'; break; } }
     // Esc: stopped now, as in the CLI, not when the transcript catches up. Should the agent still be at work 8 s later
     // (the Esc didn't land), it shows as working again.
     const stopped = !!(a._stopAt && now - a._stopAt < 8000 && (st === 'active' || st === 'settling' || st === 'resuming'));

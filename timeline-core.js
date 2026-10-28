@@ -13,7 +13,7 @@ function toolArgs(name, inp) {
   if (name === 'Edit') { if (inp.replace_all) o.all = true; o.old = cap(String(inp.old_string || ''), TL_DIFF_MAX); o.new = cap(String(inp.new_string || ''), TL_DIFF_MAX); }
   else if (name === 'MultiEdit' && Array.isArray(inp.edits)) { o.old = cap(inp.edits.map(e => e.old_string || '').join('\n'), TL_DIFF_MAX); o.new = cap(inp.edits.map(e => e.new_string || '').join('\n'), TL_DIFF_MAX); }
   else if (name === 'Write') { o.old = ''; o.new = cap(String(inp.content || ''), TL_DIFF_MAX); }
-  else if (name === 'AskUserQuestion' && Array.isArray(inp.questions) && inp.questions[0]) { const q = inp.questions[0]; o.question = cap(String(q.question || ''), 600); o.options = (q.options || []).map(x => ({ label: cap(String(x.label || ''), 200), desc: cap(String(x.description || ''), 300) })); }
+  else if (name === 'AskUserQuestion' && Array.isArray(inp.questions) && inp.questions[0]) { const q = inp.questions[0]; o.question = cap(String(q.question || ''), 600); o.options = (q.options || []).map(x => ({ label: cap(String(x.label || ''), 200), desc: cap(String(x.description || ''), 300) })); if (inp.questions.length > 1) o.steps = inp.questions.map(x => ({ h: cap(String(x.header || ''), 60), q: cap(String(x.question || ''), 600) })); }
   else if (name === 'ExitPlanMode' && typeof inp.plan === 'string') o.plan = cap(inp.plan, TL_TEXT_MAX);
   else if (name === 'Artifact') { for (const k of ['title', 'description', 'action', 'icon']) if (typeof inp[k] === 'string') o[k] = cap(inp[k], 400); }
   else if ((name === 'Agent' || name === 'Task') && typeof inp.prompt === 'string') o.prompt = cap(inp.prompt, TL_TEXT_MAX);
@@ -104,6 +104,13 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
       let p = r.attachment.prompt; if (p && !Array.isArray(p) && typeof p === 'object') p = p.content ?? p.text ?? '';
       const blocks = typeof p === 'string' ? [{ type: 'text', text: p }] : Array.isArray(p) ? p.map(b => typeof b === 'string' ? { type: 'text', text: b } : b).filter(b => b && typeof b === 'object') : [];
       return blocks.length ? promptEvents(ts, blocks, isSystemMessage) : null;
+    }
+    // A message typed while the agent works waits in the CLI's queue (shown under the transcript) until it's delivered:
+    // enqueue adds it, dequeue takes the oldest, remove takes it by its text. System notes queue too (kept, marked, so
+    // the order holds).
+    if (r.type === 'queue-operation' && /^(enqueue|dequeue|remove)$/.test(r.operation)) {
+      const text = typeof r.content === 'string' ? r.content : '';
+      return [{ type: 'queue', ts, op: r.operation, text: cap(text, TL_TEXT_MAX), sys: !text || isSystemMessage(text.trim()) }];
     }
     // The CLI's permission mode (bypass / accept edits / plan / ask), for the Chat view's mode chip.
     if (r.type === 'permission-mode' && typeof r.permissionMode === 'string') return [{ type: 'mode', ts, mode: r.permissionMode }];
