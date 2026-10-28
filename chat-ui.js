@@ -450,10 +450,13 @@
     // The question: the lines just above the menu (it can wrap, inside a left rule), up to a blank line.
     const q = [];
     for (let i = first - 1; i >= 0 && i >= first - 12; i--) { const t = cut(rows[i]); if (!t) { if (q.length) break; continue; } if (/[←→]|^\[[ x✓]?\]|^[☐☑✔]/.test(t)) break; q.unshift(t); }
+    // A menu with no "Esc to cancel" under it (the review before submitting several answers): open while its options,
+    // one marked ❯, are the last thing on screen.
+    const nb = rows.filter(r => r.trim()), menuLast = nb.length > 0 && OPT.test(nb[nb.length - 1]) && rows.some(r => /^\s*[❯›]\s*\d\.\s/.test(r));
     // Several questions at once: the CLI's tab row above them ("← [ ] Scope  ✓ Workspace  ✓ Submit →"), ticked once answered.
     const tabRow = rows.slice(0, Math.max(0, first)).reverse().find(r => /\bSubmit\b/.test(r) && /\[[ x✓✔]?\]|[☐☒☑✓✔]/.test(r));
     const tabs = tabRow ? [...tabRow.matchAll(/(\[[ x✓✔×]?\]|[☐☒☑✓✔])\s*(.+?)(?=\s{2,}|\s*(?:\[|[☐☒☑✓✔→])|\s*$)/g)].map(m => ({ done: !/^(\[ ?\]|☐)$/.test(m[1]), label: m[2].trim() })).filter(x => x.label && !/^Submit$/i.test(x.label)) : [];
-    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && dialog, tabs };
+    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && (dialog || menuLast), tabs };
   }
   // The CLI's rewind list (Esc Esc): each earlier prompt, the change made after it ("2 files changed +83") and which
   // one is selected. null when it isn't on screen.
@@ -483,13 +486,25 @@
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
     return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Ready to code? Here's the plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="choices">${labels.map((l, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(l)}</b></span></button>`).join('')}</div></div>`;
   }
+  // Which step of a several-question prompt the CLI is on: it only shows that by colour (the step's name on a filled
+  // background), and the question isn't in the transcript until it's answered. -1 when it can't tell.
+  function tabLit(id, labels) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id); if (!x || !labels.length) return -1;
+    const b = x.terminal.buffer.active;
+    for (let y = b.length - 1; y >= Math.max(0, b.length - 80); y--) {
+      const line = b.getLine(y), s = line && line.translateToString(true); if (!s || !/\bSubmit\b/.test(s)) continue;
+      for (let k = 0; k < labels.length; k++) { const c = s.indexOf(labels[k]) >= 0 && line.getCell(s.indexOf(labels[k])); if (c && (c.isInverse() || !c.isBgDefault())) return k; }
+      return -1;
+    }
+    return -1;
+  }
   function askHtml(ask, perm) {
     const s = screenAsk(selectedId); // the open question is only on screen until it's answered
     const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
     const q = (s && s.question) || a.question || 'Claude has a question';
     if (askFor !== selectedId + '\n' + q) { askFor = selectedId + '\n' + q; askHover = null; askAsked = null; askTyped = ''; } // a new question starts from its focused option
     // Several questions: which one this is, which are answered (the CLI's tab row).
-    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40), at = (a.steps || []).findIndex(x => norm(x.q) === norm(q)), on = at >= 0 ? at : ((s && s.tabs) || []).findIndex(x => !x.done); // else the first one not answered
+    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40), at = (a.steps || []).findIndex(x => norm(x.q) === norm(q)), lit = at >= 0 ? -1 : tabLit(selectedId, ((s && s.tabs) || []).map(x => x.label)), on = at >= 0 ? at : lit >= 0 ? lit : ((s && s.tabs) || []).findIndex(x => !x.done); // else the first one not answered
     const tabs = s && s.tabs && s.tabs.length > 1 ? `<div class="ask-tabs" data-on="${on}">${s.tabs.map((x, k) => `<span data-tab="${k}" class="${x.done ? 'done' : ''}${k === on ? ' on' : ''}">${x.done ? ICON.check : `<i>${k + 1}</i>`}${escH(x.label)}</span>`).join('')}</div>` : '';
     const stepKey = tabs ? 'steps:' + s.tabs.map(x => x.label).join('|') : q;
     return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${opts.some(o => /^(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
@@ -584,7 +599,7 @@
       if (e.key === 'Enter') {
         e.preventDefault(); const t = i.value.trim(), id = selectedId, k = +i.closest('[data-pick]').dataset.pick; if (!t) return;
         askTyped = ''; i.disabled = true; i.closest('.card')?.classList.add('picked-card');
-        api.send({ type: 'termInput', id, data: String(k + 1) }); setTimeout(() => chatComposer.sendText(id, t), 400);
+        askMove(k); setTimeout(() => chatComposer.sendText(id, t), 400); // its number would be typed into it once the CLI's cursor is there: move there, then the text
       } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); box.focus(); askStep(e.key === 'ArrowDown' ? 1 : -1); }
       else if (e.key === 'Escape') { e.preventDefault(); box.focus(); }
     });
@@ -665,7 +680,7 @@
       + bg.map(e => { const a2 = e.args || {};
         return `<button type="button" role="menuitem" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
     // A menu on the CLI's screen that main didn't flag (a question with previews, say): still a question card, not the raw terminal.
-    if (!perm) { const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw); const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + askHtml(null, null); }
+    if (!perm) { const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw); const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + askHtml(lastTool(evs, 'AskUserQuestion', doneBy), null); }
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${escH(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -946,7 +961,7 @@
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
     const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && !(a._reverted && now - a._reverted < 8000) && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
-    const tail = (evs ? stopNote + liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(evs)) : ''); // queued text waits under the spinner, as in the CLI
+    const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(evs)) : ''); // queued text waits above the spinner or an open question, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
@@ -1786,5 +1801,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

@@ -130,7 +130,7 @@
     const ask = chat() && !list.length ? chatUi.askState() : null;
     if (ask && ask.dialog && ask.options.length >= 2 && !/^\d$/.test(text)) {
       const free = ask.options.findIndex(o => /^(type something|other)\b/i.test(o.label));
-      if (free >= 0 && free < 9) { chatUi.dropPending(id); api.send({ type: 'termInput', id, data: String(free + 1) }); setTimeout(() => deliver(id, text, list), 400); } // an answer, not a message: no bubble waiting for it
+      if (free >= 0 && free < 9) { chatUi.dropPending(id); chatUi.askTo(free); setTimeout(() => deliver(id, text, list), 400); } // its cursor onto that row (its number would be typed in once there) // an answer, not a message: no bubble waiting for it
       else { api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => deliver(id, text, list), 600); }
       return;
     }
