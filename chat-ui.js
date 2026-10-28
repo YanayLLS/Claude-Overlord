@@ -859,12 +859,28 @@
     if (on == null) { const f = el.querySelector('.thread > .msg.user[data-i]'); on = f && f.dataset.i; }
     for (const n of rail.querySelectorAll('[data-i]')) n.classList.toggle('on', n.dataset.i === on);
   }
+  let scrubEnd = 0;
   rail.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-i]'); if (!t) return;
+    const t = e.target.closest('[data-i]'); if (!t || Date.now() - scrubEnd < 300) return;
     const go = () => { const m = document.querySelector(`#conversation .thread > [data-i="${t.dataset.i}"]`); if (m) { m.scrollIntoView({ block: 'start', behavior: 'smooth' }); m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash'); } return !!m; };
     if (!go()) { expanded.add(selectedId); rerender(); setTimeout(go, 50); } // it's in the folded earlier turns: open them first
   });
   rail.addEventListener('mouseenter', () => { const on = rail.querySelector('.cr-pop .on'); if (on) on.scrollIntoView({ block: 'nearest' }); });
+  // Drag along the dashes to scrub: the chat follows to each prompt the pointer passes, at once (no smooth scroll).
+  let scrub = null; // { last, moved } while the pointer is held on the rail
+  const scrubTo = (y) => {
+    const ds = [...rail.querySelectorAll('.cr-dashes [data-i]')]; if (!ds.length) return;
+    const d = ds.reduce((b, n) => { const r = n.getBoundingClientRect(), dy = Math.abs(r.top + r.height / 2 - y); return dy < b[0] ? [dy, n] : b; }, [Infinity, null])[1];
+    if (!d || d.dataset.i === scrub.last) return;
+    scrub.last = d.dataset.i; scrub.moved = true;
+    let m = document.querySelector(`#conversation .thread > [data-i="${d.dataset.i}"]`);
+    if (!m && !expanded.has(selectedId)) { expanded.add(selectedId); rerender(); m = document.querySelector(`#conversation .thread > [data-i="${d.dataset.i}"]`); } // folded earlier turns: open them
+    if (m) m.scrollIntoView({ block: 'start', behavior: 'auto' });
+  };
+  rail.querySelector('.cr-dashes').addEventListener('pointerdown', (e) => { if (e.button) return; scrub = { last: null, moved: false }; rail.setPointerCapture(e.pointerId); rail.classList.add('scrub'); scrubTo(e.clientY); e.preventDefault(); });
+  rail.addEventListener('pointermove', (e) => { if (scrub) scrubTo(e.clientY); });
+  const endScrub = () => { if (!scrub) return; const moved = scrub.moved; scrub = null; rail.classList.remove('scrub'); if (moved) scrubEnd = Date.now(); }; // the release isn't also a click
+  rail.addEventListener('pointerup', endScrub); rail.addEventListener('pointercancel', endScrub);
 
   // Keys typed into the agent's terminal one write at a time, so the TUI reads each as its own key press.
   // Stop the turn: Esc to the CLI, and the chat says so at once instead of waiting for the transcript.
