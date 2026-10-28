@@ -2167,7 +2167,9 @@ function showIconPicker(e, sessionId) {
 }
 
 // ── Timeline state ──
-let termTab = (() => { try { return localStorage.getItem('termTab') === 'conversation' ? 'conversation' : 'terminal'; } catch { return 'terminal'; } })(); // 'terminal' or 'conversation' (the Chat view)
+// 'terminal' or 'conversation' (the Chat view, the default). A new key, so the terminal remembered before chat became
+// the default doesn't keep it hidden.
+let termTab = (() => { try { return localStorage.getItem('termView') === 'terminal' ? 'terminal' : 'conversation'; } catch { return 'conversation'; } })();
 let askFlip = false; // the Chat view flipped to the terminal for a question menu; flips back once it's answered
 let timelineAgentId = null;
 
@@ -3870,7 +3872,7 @@ function jumpPrompt(dir) {
 // ── Terminal / conversation tabs ───────────────────────
 function switchTermTab(tab) {
   termTab = tab; askFlip = false;
-  try { localStorage.setItem('termTab', tab); } catch {}
+  try { localStorage.setItem('termView', tab); } catch {}
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
   document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
   document.getElementById('hdr-chat').classList.toggle('on', tab === 'conversation'); // the pane header is hidden outside world mode, so the top bar carries the toggle
