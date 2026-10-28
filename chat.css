@@ -133,10 +133,10 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .pc-bar { flex: 1; max-width: 120px; height: 4px; border-radius: 4px; background: var(--surface2); overflow: hidden; margin-left: auto; }
 :root body :is(#conversation, #chat-shell) .pc-bar i { display: block; height: 100%; border-radius: 4px; background: var(--claude); transition: width .5s var(--chat-ease); }
 :root body :is(#conversation, #chat-shell) .bg-agents { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-:root body :is(#conversation, #chat-shell) .bga { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border-hi); font-size: 12px; color: var(--subtext); }
-:root body :is(#conversation, #chat-shell) .bga-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:root body :is(#conversation, #chat-shell) .bga-t { color: var(--dim); font-family: 'Geist Mono', monospace; font-size: 11px; }
-:root body :is(#conversation, #chat-shell) .bga-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--claude); animation: chat-pulse 1.1s ease-in-out infinite; }
+:root body :is(#conversation, #chat-shell, #chat-bg) .bga { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border-hi); font-size: 12px; color: var(--subtext); }
+:root body :is(#conversation, #chat-shell, #chat-bg) .bga-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root body :is(#conversation, #chat-shell, #chat-bg) .bga-t { color: var(--dim); font-family: 'Geist Mono', monospace; font-size: 11px; }
+:root body :is(#conversation, #chat-shell, #chat-bg) .bga-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--claude); animation: chat-pulse 1.1s ease-in-out infinite; }
 :root body :is(#conversation, #chat-shell) .card { margin: 12px 0; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--surface0); font-size: 13.5px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
 :root body :is(#conversation, #chat-shell) .card-h { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
 :root body :is(#conversation, #chat-shell) .card p { margin: 0; color: var(--subtext); line-height: 1.5; }
@@ -220,7 +220,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .card.perm, :root body :is(#conversation, #chat-shell) .card.ask { animation: chat-in .3s var(--chat-ease) both, chat-glow 2.4s ease-in-out .3s 3; }
 :root body :is(#conversation, #chat-shell) .todos li.in_progress { font-weight: 500; }
 :root body :is(#conversation, #chat-shell) .todos li.in_progress .box { animation-iteration-count: 3; }
-:root body :is(#conversation, #chat-shell) .bga-dot { animation-iteration-count: 3; }
+:root body :is(#conversation, #chat-shell, #chat-bg) .bga-dot { animation-iteration-count: 3; }
 :root body :is(#conversation, #chat-shell) .chat-empty.hello .spark { animation: chat-pop .8s var(--chat-ease) both; }
 :root body :is(#conversation, #chat-shell) .md table { border: 1px solid var(--border); border-radius: 10px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
 :root body :is(#conversation, #chat-shell) .md th, :root body :is(#conversation, #chat-shell) .md td { padding: 8px 14px; }
@@ -239,8 +239,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .turnfoot:hover .act.copy, :root body :is(#conversation, #chat-shell) .turnfoot .act.copy:focus-visible { opacity: 1; }
 :root body :is(#conversation, #chat-shell) .md.sub.plan { font-family: var(--chat-serif); font-size: 15px; color: var(--text); }
 :root body :is(#conversation, #chat-shell) .el { flex: none; font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--dim); }
-:root body :is(#conversation, #chat-shell) button.bga { background: none; font: inherit; font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
-:root body :is(#conversation, #chat-shell) button.bga:hover { background: var(--hover-strong); border-color: var(--claude); }
+:root body :is(#conversation, #chat-shell, #chat-bg) button.bga { background: none; font: inherit; font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
+:root body :is(#conversation, #chat-shell, #chat-bg) button.bga:hover { background: var(--hover-strong); border-color: var(--claude); }
 :root body :is(#conversation, #chat-shell) details.flash > summary { animation: chat-flash 1.2s ease-out; }
 :root body :is(#conversation, #chat-shell) .thread > .msg.ai:has(+ .turnfoot.landed) .md { animation: chat-landed 1.6s ease-out; }
 :root body #chat-plus { border: 0; }
@@ -691,3 +691,22 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-links .lk-t { display: flex; flex-direction: column; min-width: 0; }
 :root body #chat-links .lk-t b { font-weight: 500; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root body #chat-links .lk-t small { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root body #chat-chips .chip.name { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--dim); }
+:root body #chat-chips .chip.name:hover { color: var(--text); }
+/* Background shells and subagents, docked at the top of the reply box */
+:root body #chat-bg { display: flex; gap: 6px; flex-wrap: wrap; }
+:root body #chat-bg[hidden] { display: none; }
+:root body #chat-bg .bga { padding: 3px 9px; font-size: 11.5px; max-width: 260px; }
+:root body #chat-bg .bga .ic { width: 13px; height: 13px; flex: none; }
+/* Their hover card */
+#chat-hover { position: fixed; z-index: 30; width: 300px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 10px 32px rgba(0,0,0,.25); font-size: 12px; color: var(--text); pointer-events: none; animation: chat-in .14s ease-out; }
+#chat-hover[hidden] { display: none; }
+#chat-hover .hv-h { display: flex; align-items: center; gap: 7px; }
+#chat-hover .hv-h .ic { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; }
+#chat-hover .hv-h b { font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-hover .hv-h span { color: var(--dim); font-family: 'Geist Mono', monospace; font-size: 11px; }
+#chat-hover .hv-k { margin-top: 4px; color: var(--dim); font-size: 11px; }
+#chat-hover .hv-task { margin-top: 6px; color: var(--subtext); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+#chat-hover .hv-cmd, #chat-hover .hv-live.out { margin: 6px 0 0; padding: 6px 8px; border-radius: 8px; background: var(--bg2); font-family: 'Geist Mono', monospace; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 64px; overflow: hidden; color: var(--subtext); }
+#chat-hover .hv-live { margin-top: 6px; color: var(--subtext); }
+#chat-hover .hv-foot { margin-top: 8px; font-size: 10.5px; color: var(--dim); }

@@ -288,6 +288,51 @@
     const q = a.question || (perm && perm.status) || 'Claude has a question';
     return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
   }
+  // ── Background shells and subagents, docked above the reply box: hover for a peek, click for the full panel ──
+  let dockHtml = '';
+  function drawDock() {
+    let el = document.getElementById('chat-bg');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'chat-bg'; el.setAttribute('aria-label', 'Running in the background');
+      document.getElementById('term-order').prepend(el);
+      el.addEventListener('click', (e) => {
+        const sh = e.target.closest('[data-bgout]'); if (sh) { hideHover(); return openShell(sh.dataset.bgout, sh.dataset.bgname); }
+        const ag = e.target.closest('[data-jump]'); if (ag) { hideHover(); openAgent(ag.dataset.jump, worldTl && worldTl.id === selectedId ? worldTl.events : []); }
+      });
+      el.addEventListener('mouseover', (e) => { const b = e.target.closest('.bga'); if (b && b !== hoverFor) showHover(b); });
+      el.addEventListener('mouseleave', hideHover);
+    }
+    // Only the timers tick: swap their text in place, so a hovered chip isn't rebuilt under the pointer.
+    const key = liveKey(dockHtml);
+    if (el._k === key) { const tmp = document.createElement('div'); tmp.innerHTML = dockHtml; for (const n of tmp.querySelectorAll('[data-live]')) { const c = el.querySelector(`[data-live="${CSS.escape(n.dataset.live)}"]`); if (c && c.textContent !== n.textContent) c.textContent = n.textContent; } }
+    else { el.innerHTML = dockHtml; el._k = key; if (hoverFor && !el.contains(hoverFor)) hideHover(); }
+    el.hidden = !dockHtml;
+  }
+  let hoverFor = null;
+  const hoverEl = document.createElement('div'); hoverEl.id = 'chat-hover'; hoverEl.hidden = true; hoverEl.setAttribute('role', 'tooltip'); document.body.appendChild(hoverEl);
+  function showHover(b) {
+    hoverFor = b;
+    const shell = b.matches('[data-bgout]'), name = b.querySelector('.bga-n').textContent, t = b.querySelector('.bga-t').textContent;
+    hoverEl.innerHTML = `<div class="hv-h">${shell ? ICON.cmd : ICON.agent}<b>${escH(name)}</b><span>${escH(t)}</span></div>`
+      + (shell ? (b.dataset.cmd && b.dataset.cmd !== name ? `<pre class="hv-cmd">${escH(b.dataset.cmd)}</pre>` : '') : `${b.dataset.kind ? `<div class="hv-k">${escH(b.dataset.kind)}</div>` : ''}${b.dataset.task ? `<div class="hv-task">${escH(b.dataset.task)}</div>` : ''}`)
+      + '<div class="hv-live">…</div><div class="hv-foot">Click for more</div>';
+    hoverEl.hidden = false;
+    const r = b.getBoundingClientRect(), h = hoverEl.getBoundingClientRect();
+    hoverEl.style.left = Math.max(8, Math.min(r.left, innerWidth - h.width - 8)) + 'px'; hoverEl.style.top = Math.max(8, r.top - h.height - 8) + 'px';
+    if (shell) api.send({ type: 'bgTail', id: selectedId, file: b.dataset.bgout });
+    else api.send({ type: 'agentSteps', id: selectedId, toolId: b.dataset.jump });
+  }
+  function hideHover() { hoverFor = null; hoverEl.hidden = true; }
+  // The live line of the hover card: a shell's last output lines, an agent's step count and latest step.
+  function hoverLive(msg) {
+    if (!hoverFor || hoverEl.hidden) return;
+    const box = hoverEl.querySelector('.hv-live'); if (!box) return;
+    if (msg.type === 'bgTail' && hoverFor.dataset.bgout === msg.file) { const ls = String(msg.text || '').split('\n').map(l => l.trimEnd()).filter(Boolean).slice(-3); box.className = 'hv-live out'; box.textContent = ls.length ? ls.join('\n') : 'No output yet'; }
+    if (msg.type === 'agentSteps' && hoverFor.dataset.jump === msg.toolId) {
+      const tools = (msg.events || []).filter(e => e.type === 'tool'), last = tools[tools.length - 1], v = last && toolView(last, true);
+      box.className = 'hv-live'; box.textContent = tools.length ? `${tools.length} step${tools.length > 1 ? 's' : ''} · ${v.verb}${v.target ? ' ' + v.target : ''}` : 'Starting…';
+    }
+  }
   function liveHtml(a, st, evs, doneBy, now) {
     const live = [...a.tools.values()].filter(t => !t.done), perm = live.find(t => t.perm);
     let h = '';
@@ -307,8 +352,12 @@
     const bg = evs.filter((e, k) => { if (k <= cut || e.type !== 'tool' || (e.name !== 'Agent' && e.name !== 'Task')) return false; const d = doneBy.get(e.toolId); return !d || (d.agentId && /background|launched/i.test(d.text) && !ended.has(d.agentId)); });
     // Background shells (Bash run_in_background) until their task-notification: a chip each, opening to the live output.
     const shells = evs.filter((e, k) => k > cut && e.type === 'tool' && doneBy.get(e.toolId) && doneBy.get(e.toolId).bgId && !ended.has(doneBy.get(e.toolId).bgId));
-    if (shells.length) h += `<div class="bg-agents">${shells.map(e => { const d = doneBy.get(e.toolId); return `<button type="button" class="bga bgsh" data-bgout="${escH(d.bgOut)}" data-bgname="${escH((e.args && (e.args.description || e.args.command)) || 'Background shell')}" title="Show its output">${ICON.cmd}<span class="bga-n">${escH((e.args && (e.args.description || e.args.command)) || 'Background shell')}</span><span class="bga-t" data-live="s${escH(e.toolId)}">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`; }).join('')}</div>`;
-    if (bg.length) h += `<div class="bg-agents">${bg.map(e => `<button type="button" class="bga" data-jump="${escH(e.toolId)}" title="Show this agent's call">${ICON.agent}<span class="bga-n">${escH((e.args && (e.args.description || e.args.subagent_type)) || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${e.ts ? escH(dur(now - Date.parse(e.ts))) : ''}</span><span class="bga-dot"></span></button>`).join('')}</div>`;
+    // Both dock above the reply box (paint puts dockHtml in #chat-bg), out of the scrolling thread.
+    const since = (e) => e.ts ? escH(dur(now - Date.parse(e.ts))) : '';
+    dockHtml = shells.map(e => { const d = doneBy.get(e.toolId), a2 = e.args || {}, name = a2.description || a2.command || 'Background shell';
+      return `<button type="button" class="bga bgsh" data-bgout="${escH(d.bgOut)}" data-bgname="${escH(name)}" data-cmd="${escH(a2.command || '')}">${ICON.cmd}<span class="bga-n">${escH(name)}</span><span class="bga-t" data-live="s${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('')
+      + bg.map(e => { const a2 = e.args || {};
+        return `<button type="button" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -410,6 +459,8 @@
       // Everything uncommitted in the folder, one click away.
       + `<button type="button" class="chip icon" data-act="session-changes" title="Uncommitted changes in this folder">${ICON.diff}<span class="l">Changes</span></button>`
       + '<span class="grow"></span>'
+      // Its @name, as the terminal shows it bottom-right: click copies it, to mention this agent (and its chat) elsewhere.
+      + (a.agentName ? `<button type="button" class="chip name" data-act="copy-name" data-name="${escH(a.agentName)}" title="Copy @${escH(a.agentName)}: mention it in another agent to share this chat">@${escH(a.agentName)}</button>` : '')
       // Context left before auto-compact, once it matters (half used); click puts /compact in the box.
       + (pct >= 50 ? `<button type="button" class="chip ctx${pct > 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${((100 - pct) / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
       + (model ? `<button type="button" class="chip model" data-act="model" aria-haspopup="menu" title="${escH(s.model)}">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</button>` : '')
@@ -524,6 +575,7 @@
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
     else list = blocks(evs, doneBy, a.cwd, id);
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
+    dockHtml = '';
     const tail = (evs ? liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) : ''); // queued text waits under the spinner, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
@@ -555,6 +607,7 @@
       else tailEl.innerHTML = tail;
       tailEl._h = tail; tailEl._k = key;
     }
+    drawDock();
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
     announce(st === 'question' ? 'The agent has a question' : st === 'permission' ? 'The agent needs approval' : busy ? 'The agent is working' : a.crashed === 'fatal' ? 'The agent stopped' : 'The agent is done');
     prevBusy.set(id, busy);
@@ -696,6 +749,7 @@
     if (act) {
       const lastPrompt = () => { for (let k = (evs || []).length - 1; k >= 0; k--) if (evs[k].type === 'prompt' && evs[k].text) return evs[k].text; return ''; };
       if (act.dataset.act === 'resume') resumeSelected();
+      else if (act.dataset.act === 'copy-name') navigator.clipboard.writeText('@' + act.dataset.name).then(() => showToast(`Copied @${act.dataset.name}`), () => {});
       else if (act.dataset.act === 'retry') { const t = lastPrompt(); if (t) { api.send({ type: 'questPrompt', id: selectedId, text: t }); chatUi.addPending(selectedId, t); rerender(); } }
       else if (act.dataset.act === 'edit-prompt') chatComposer.insert(lastPrompt(), false);
       else if (act.dataset.act === 'turn-edits') openChanges(evs || [], +act.dataset.from, +act.dataset.to, a);
@@ -1041,6 +1095,7 @@
       return;
     }
     if (msg.type === 'filePeek') { if (String(msg.seq).startsWith('whole:')) { const p = document.getElementById('chat-changes'); if (p && p._whole) p._whole(msg); } else showPeek(msg); return; }
+    if (msg.type === 'agentSteps' || msg.type === 'bgTail') hoverLive(msg);
     if (msg.type === 'agentSteps') { const p = document.getElementById('chat-shell'); if (p && p.dataset.tid === msg.toolId) drawSteps(msg.events || []); }
     if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.textContent = msg.ok ? (msg.text || '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }
   }
