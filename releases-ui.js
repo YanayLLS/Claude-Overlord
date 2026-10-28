@@ -572,8 +572,16 @@
   // Row actions for a repo of a release in flight (approvers): merge now / fix its checks / re-run its deploy
   function rowActs(r, need, notDeployed = []) {
     const st = state || {}, a = st.approvers || {};
-    if (!a.isApprover || (st.releaseAll && st.releaseAll.running) || st.teamRun) return '';
+    if (!a.isApprover || st.teamRun) return '';
     const d = `data-repo="${esc(r.repo)}" data-n="${esc(r.pr.number)}"`;
+    // Release all running here: a repo still queued for a later wave can ship now, out of order; the run skips it
+    if (st.releaseAll && st.releaseAll.running) {
+      const it = need && (st.releaseAll.items || {})[r.label];
+      if (!it || it.s !== 'queued') return '';
+      const k = 'm:' + r.repo + '#' + r.pr.number;
+      return armed === k ? `<button class="rl-row-btn armed${notDeployed.length ? ' risky' : ''}" data-act="rowMerge" ${d}${notDeployed.length ? ` title="${esc(`Not deployed yet: ${notDeployed.join(', ')}. This one may depend on them.`)}"` : ''}>${notDeployed.length ? '⚠ Ship before them?' : 'Confirm: ship'}</button>`
+        : `<button class="rl-row-btn" data-act="rowMerge" ${d} title="Merge and deploy it now instead of waiting for its wave">Ship now</button>`;
+    }
     if (need) {
       const k = 'm:' + r.repo + '#' + r.pr.number;
       const toDev = r.source && r.source !== r.target && isHotfixRow(r) ? `<button class="rl-row-btn" data-act="rowToDev" ${d} title="${esc(`Retarget to ${r.source} (it ships with the next release) and cancel this hotfix release${r.extraFromTarget ? `. ⚠ Its branch would bring ${r.extraFromTarget} commits ${r.source} doesn't have (branched off ${r.target}): close it and reopen from ${r.source} instead if that's not wanted` : ''}`)}">↪ To ${esc(r.source)}${r.extraFromTarget ? ` ⚠${r.extraFromTarget}` : ''}</button>` : '';

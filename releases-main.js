@@ -982,6 +982,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   if (etaTimer.unref) etaTimer.unref();
   const prOf = (repo, n) => { for (const m of (state.history && state.history.items) || []) { const r = m.repos.find(x => x.repo === repo && x.pr.number === Number(n)); if (r) return { m, r }; } return null; };
   // Merge one release PR now (same gate as everything else: approvers' signatures, then GitHub's own rules)
+  const shipNow = new Set(); // repo#n merged by hand from its row while Release all ran: the run doesn't merge it again
   async function mergeOne(repo, n) { return withBusy(`merge:${repo}#${n}`, 'Merging…', () => mergeOneNow(repo, n)); }
   async function mergeOneNow(repo, n) {
     await ensureApprovers();
@@ -991,11 +992,13 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     await loadTeamRun().catch(() => {});
     if (state.teamRun) return send({ type: 'toast', text: `@${state.teamRun.by} is running Release all: let it finish (or ask them to stop it) before merging by hand` });
     send({ type: 'toast', text: `Checking ${found ? found.r.label : repo} #${n} can merge…` });
-    if (state.releaseAll && state.releaseAll.running) return send({ type: 'toast', text: 'Release all is running here: stop it first' });
+    // Release all running here doesn't block this: it ships now, out of its wave, and the run skips it (shipNow)
     const gate = await mergeGate(`https://github.com/${repo}/pull/${n}`);
     if (!gate.ok) return send({ type: 'toast', text: `${label}: ${gate.reason}` });
     const res = await ghJson(['api', '-X', 'PUT', `repos/${repo}/pulls/${n}/merge`, '-f', 'merge_method=merge']);
     if (apiErr(res)) return send({ type: 'toast', text: `${label}: GitHub refused the merge (${apiErr(res)})` });
+    shipNow.add(repo.toLowerCase() + '#' + Number(n));
+    if (run) for (const R of run.rels.values()) if (R.items[label] && R.items[label].s === 'queued') markR(R, [label], { s: 'merged' }); // its row in the run: no longer waiting
     send({ type: 'toast', text: `${label} merged — its deploy starts now` });
     await reconcileHistory().catch(() => {});
     refreshRun().catch(() => {});
@@ -1211,6 +1214,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       for (const [R, wave] of slice) {
         for (const it of wave.filter(x => !x.manual)) {
           if (releaseAllStop || R.status !== 'running') break;
+          if (shipNow.has(it.repo.toLowerCase() + '#' + Number(it.pr.number))) { markR(R, [it.label], { s: 'merged' }); continue; } // shipped from its row already
           const gate = await mergeGate(it.pr.url);
           if (!gate.ok) { markR(R, [it.label], { s: 'held', why: gate.reason }); stopR(R, `${it.label}: ${gate.reason}`); break; }
           markR(R, [it.label], { s: 'merging' });
@@ -1222,6 +1226,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
             await new Promise(r => setTimeout(r, 30e3));
             res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
           }
+          if (apiErr(res) && shipNow.has(it.repo.toLowerCase() + '#' + Number(it.pr.number))) { markR(R, [it.label], { s: 'merged' }); continue; } // shipped from its row meanwhile
           // refused = this release stops here: its later waves depend on this one
           if (apiErr(res)) { markR(R, [it.label], { s: 'held', why: `GitHub refused the merge: ${apiErr(res)}` }); stopR(R, `${it.label}: GitHub refused the merge (${apiErr(res)}) — nothing after it was merged`); break; }
           markR(R, [it.label], { s: it.deploy && it.deploy !== 'manual' ? 'merged' : 'merged-hand' });
