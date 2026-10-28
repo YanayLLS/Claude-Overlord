@@ -1530,7 +1530,7 @@ function restoreAgents(state) {
                   }
                 }
               }
-              if (r.type === 'user') {
+              if (r.type === 'user' && !(r.isMeta && r.sourceToolUseID)) {
                 const c = r.message?.content;
                 let pTxt = '';
                 if (typeof c === 'string' && c.trim()) pTxt = c;
@@ -2201,7 +2201,7 @@ function parseLine(id, line) {
           if (applyAskRecord(a.askIds ||= new Set(), r) && !a.askIds.size) { a.permSent = false; send({ type: 'permClear', id }); }
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-          if (!isReminderOnly(txt)) {
+          if (!isReminderOnly(txt) && !(r.isMeta && r.sourceToolUseID)) { // not a skill's own instructions
             if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); }
             clrActivity(id); a.hadTools = false; a.turnTools = 0;
           }

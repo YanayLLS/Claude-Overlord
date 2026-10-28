@@ -62,6 +62,8 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
       return events.length ? events : null;
     }
     if (r.type === 'user') {
+      // Text a tool hands the model on its own (a skill's instructions after the Skill call): the CLI doesn't show it.
+      if (r.isMeta && r.sourceToolUseID) return null;
       const c = r.message?.content;
       if (Array.isArray(c)) {
         if (c.some(b => b.type === 'tool_result')) {

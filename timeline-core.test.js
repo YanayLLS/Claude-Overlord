@@ -59,3 +59,7 @@ test('tool output from content blocks is joined, errors flagged', () => {
   const [ev] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }] } });
   assert.deepStrictEqual(ev, { type: 'tool_done', ts: null, toolId: 't1', text: 'a\nb', err: true });
 });
+
+test("a skill's instructions (a tool's own meta message) are not a prompt", () => {
+  assert.strictEqual(parse({ type: 'user', isMeta: true, sourceToolUseID: 'toolu_1', message: { content: [{ type: 'text', text: '## Page contract — read before your first publish' }] } }), null);
+});
