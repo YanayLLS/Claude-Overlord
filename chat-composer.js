@@ -331,6 +331,7 @@
     const tail = document.querySelector('#conversation .tail');
     if (/^[1-9]$/.test(e.key)) { const b = tail && (tail.querySelector(`[data-pick="${+e.key - 1}"]`) || tail.querySelector(`[data-keys="${e.key}"]`) || tail.querySelectorAll('.choices button')[+e.key - 1]); if (b) { b.click(); return true; } }
     if (e.key === 'Escape') { const b = tail && tail.querySelector('[data-keys="esc"]'); if (b) { b.click(); return true; } }
+    if (e.key === 'Escape' && tail && tail.querySelector('.card.ask')) { chatUi.keys(['\x1b']); return true; } // an open question or plan: Esc closes it, as in the CLI
     // The rewind list: ↑/↓ move, Enter picks, Esc cancels, as in the CLI.
     if (tail && tail.querySelector('.card.rewind')) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') return chatUi.rewindStep(e.key === 'ArrowDown' ? 1 : -1);

@@ -793,3 +793,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.ask .ask-in:disabled { opacity: .6; }
 /* A permission read off the CLI's screen (its call isn't in the transcript yet) */
 :root body #conversation .card.perm pre.perm-screen { max-height: 260px; overflow: auto; font-size: 12px; line-height: 1.5; }
+/* Pick-several: each option's box, ticked as in the CLI */
+:root body #conversation .card.ask .chk { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; border-radius: 4px; border: 1.5px solid var(--dim); }
+:root body #conversation .card.ask .chk.on { background: var(--claude); border-color: var(--claude); }
+:root body #conversation .card.ask .chk .ic { width: 12px; height: 12px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+:root body #conversation .card.ask .choices .submit { justify-content: center; font-weight: 600; }

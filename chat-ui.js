@@ -522,6 +522,9 @@
     if (!planTexts.has(m[1])) { planTexts.set(m[1], ''); api.send({ type: 'filePeek', cwd: (a && a.cwd) || '', file: m[1], line: 1, all: true, seq: 'plan:' + m[1] }); }
     return planTexts.get(m[1]) || '';
   }
+  const isBox = (l) => /^\[.?\]\s/.test(String(l || ''));
+  // "[✔] Basil" → a ticked box and its name
+  const boxLabel = (l) => { const m = /^\[(.?)\]\s*(.*)$/.exec(String(l)); return m ? `<span class="chk${m[1].trim() ? ' on' : ''}" aria-hidden="true">${m[1].trim() ? ICON.check : ''}</span>${escH(m[2])}` : escH(l); };
   function askHtml(ask, perm) {
     const pl = planOnScreen(selectedId); if (pl) return planHtml({ args: { plan: pl } }, (agents.get(selectedId) || {}).cwd);
     const s = screenAsk(selectedId); // the open question is only on screen until it's answered
@@ -531,8 +534,10 @@
     // Several questions: which one this is, which are answered (the CLI's tab row).
     const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40), at = (a.steps || []).findIndex(x => norm(x.q) === norm(q)), lit = at >= 0 ? -1 : tabLit(selectedId, ((s && s.tabs) || []).map(x => x.label)), on = at >= 0 ? at : lit >= 0 ? lit : ((s && s.tabs) || []).findIndex(x => !x.done); // else the first one not answered
     const tabs = s && s.tabs && s.tabs.length > 1 ? `<div class="ask-tabs" data-on="${on}">${s.tabs.map((x, k) => `<span data-tab="${k}" class="${x.done ? 'done' : ''}${k === on ? ' on' : ''}">${x.done ? ICON.check : `<i>${k + 1}</i>`}${escH(x.label)}</span>`).join('')}</div>` : '';
+    // Pick-several: its options are boxes ("[ ] Cheese", "[✔] Basil"); a number toggles one, Submit sends them.
+    const multi = opts.some(o => isBox(o.label ?? o));
     const stepKey = tabs ? 'steps:' + s.tabs.map(x => x.label).join('|') : q;
-    return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${opts.some(o => /^(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
+    return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${boxLabel(o.label ?? o)}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : opts.some(o => /^(\[.?\]\s*)?(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
@@ -1273,6 +1278,8 @@
     if (tab) { askTab(+tab.dataset.tab - +tab.parentElement.dataset.on); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
     if (pick && e.target.closest('.ask-in')) return; // typing an answer in it
+    // A box of a pick-several question: its number toggles it, as in the CLI; the card stays for the rest and Submit.
+    if (pick && selectedId != null && isBox(menuOptions(selectedId)[+pick.dataset.pick])) { keys([String(+pick.dataset.pick + 1)]); setTimeout(rerender, 350); return; }
     // "Type something": the row becomes where you type, as in the CLI (its cursor goes there too).
     if (pick && selectedId != null && /^type something/i.test(menuOptions(selectedId)[+pick.dataset.pick] || '')) { askMove(+pick.dataset.pick); askFocusIn = true; rerender(); return; }
     if (pick && selectedId != null) { if ((stillWaiting(selectedId) || screenAsk(selectedId).dialog) && !pick.closest('.picked-card') && pickOption(selectedId, +pick.dataset.pick)) { pick.classList.add('picked'); pick.closest('.card')?.classList.add('picked-card'); } return; }
@@ -1318,6 +1325,12 @@
         const n = ev.alts.length, k = Math.max(0, Math.min(n, (ev._ver != null ? ev._ver : n) + +act.dataset.d));
         if (k === n) verView.delete(selectedId); else verView.set(selectedId, { ts: ev._ts || ev.ts, k });
         rerender();
+      }
+      else if (act.dataset.act === 'ask-submit') { // the CLI's Submit row sits under the boxes: go there, Enter
+        const s = screenAsk(selectedId), last = s.options.map(o => isBox(o.label)).lastIndexOf(true);
+        const onSubmit = (screenOf(selectedId, 30) || []).some(r => /^\s*[❯›]\s*Submit\s*$/.test(r));
+        const d = onSubmit ? 0 : last + 1 - askFocus(s); if (last < 0) return;
+        keys(arrowKeys(d).concat(['\r'])); askAhead = null; setTimeout(rerender, Math.abs(d) * 70 + 400);
       }
       else if (act.dataset.act === 'answer') { if (screenAsk(selectedId).options.length) document.getElementById('term-order-input').focus(); else switchTermTab('terminal'); } // your own words, from the reply box
       else if (act.dataset.act === 'undo-turn') undoTurn(evs || [], +act.dataset.from, +act.dataset.to, a);
