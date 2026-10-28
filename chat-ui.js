@@ -67,7 +67,7 @@
   // own: the prompt's own number → picture map (a not-yet-sent prompt numbers its images itself)
   // A prompt as typed: its tags as chips, and a file path (quoted when it has spaces, as the box sends it) as a file chip.
   const PROMPT_PATH = /&quot;([A-Za-z]:[\\/][^&<\n]+?)&quot;|(?<![\w/])([A-Za-z]:[\\/][^\s&<]+)/g;
-  const tagChips = (text, own) => escH(text).replace(PROMPT_PATH, (m, q, u) => pathChip(q || u) || m).replace(/(^|\s)(\/[a-z][\w:-]*)(?=\s|$)/g, '$1<span class="cmdtag">$2</span>').replace(/\[Pasted text #\d+ · (\d+) lines\]/g, (_, n) => `<span class="imgtag">¶ Pasted text · ${n} lines</span>`).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
+  const tagChips = (text, own) => escH(text).replace(PROMPT_PATH, (m, q, u) => pathChip(q || u) || m).replace(/(^|\s)(\/[a-z][\w:-]*)(?=\s|$)/g, '$1<span class="cmdtag">$2</span>').replace(/\[Pasted text #(\d+) · (\d+) lines\]/g, (_, k, n) => `<button type="button" class="imgtag" data-pn="${k}">¶ Pasted text · ${n} lines</button>`).replace(/\[Image #(\d+)\]/g, (_, n) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; });
   // When a usage limit resets: "…|1761580800" (epoch seconds) or "resets 6pm" / "resets at 18:30" (the next such time).
   function resetOf(ev) {
     const t = String(ev.text || ''), ep = /\|(\d{10})\b/.exec(t); if (ep) return +ep[1] * 1000;
@@ -162,7 +162,7 @@
       const long = text.length > 900 || text.split('\n').length > 14;
       h = `<div class="msg user" data-i="${i}">${imgs ? `<div class="imgs">${imgs}</div>` : ''}${text ? `<div class="bubble${long ? ' long' : ''}">${tagChips(text)}</div>${long ? '<button class="more" type="button">Show more</button>' : ''}` : ''}</div>`;
     } else if (ev.type === 'text') h = `<div class="msg ai" data-i="${i}"><div class="md">${md(ev.text, cwd)}</div></div>`;
-    else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${escH(ev.text)}</span></div>`;
+    else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${escH(ev.text).replace(/https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/g, (u) => `<a href="${u}">${u}</a>`)}</span></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
@@ -389,7 +389,7 @@
     return list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
       const queued = busy && !p.held;
-      return `<div class="msg user pending">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1])))}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? 'Queued' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x" data-unqueue="${k}" title="Take back (the agent keeps working)">Cancel</button>` : ''}</span></div>`;
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? 'Queued' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x" data-unqueue="${k}" title="Take back (the agent keeps working)">Cancel</button>` : ''}</span></div>`;
     }).join('');
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
@@ -632,6 +632,7 @@
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
     drawDiagrams(el);
+    prettyLinks(el);
     syncJump(el);
   }
   // A replaced block keeps its open tool rows and expanded prompt.
@@ -652,6 +653,39 @@
   // source stays under it, hidden, for Copy; a block that fails to parse stays code.
   let mermaidLoad = null, mermaidSeq = 0;
   const svgOf = new Map();
+  // ── A link's readable name: a ClickUp task by its real name (the board Overlord holds, else one fetch), a GitHub PR or
+  // issue as "repo #N", anything else as site + path. Shared by the thread and the reply box's link chips. ──
+  const taskNames = new Map(); // ClickUp task id → name ('' while asked, null when it can't be read)
+  const linkWaiters = new Set();
+  function linkLabel(u) {
+    const cu = (/app\.clickup\.com\/t\/(?:\d+\/)?([\w-]+)/.exec(u) || [])[1];
+    if (cu) {
+      const known = typeof clickupState !== 'undefined' && clickupState.tasks.find(t => t.id === cu);
+      if (known) taskNames.set(cu, known.name);
+      if (!taskNames.has(cu)) { taskNames.set(cu, ''); api.send({ type: 'clickupTask', id: cu }); }
+      return { kind: 'cu', id: cu, name: taskNames.get(cu) || 'ClickUp task', sub: 'ClickUp · ' + cu };
+    }
+    let p; try { p = new URL(u); } catch { return null; }
+    const gh = p.hostname === 'github.com' && /^\/[^/]+\/([^/]+)\/(pull|issues)\/(\d+)/.exec(p.pathname);
+    if (gh) return { kind: 'gh', name: `${gh[1]} #${gh[3]}`, sub: gh[2] === 'pull' ? 'GitHub pull request' : 'GitHub issue' };
+    return { kind: 'web', name: p.hostname.replace(/^www\./, ''), sub: (p.pathname + p.search).replace(/^\/$/, '') || 'link' };
+  }
+  function onTask(msg) {
+    if (!taskNames.has(msg.id) || taskNames.get(msg.id)) return;
+    taskNames.set(msg.id, msg.task ? msg.task.name : null);
+    for (const fn of linkWaiters) fn();
+  }
+  // Bare links in the thread (a reply's autolinks, a /command's arguments) read by name; hover shows the address.
+  function prettyLinks(el) {
+    for (const a of el.querySelectorAll('a[href^="http"]:not([data-pl])')) {
+      if (a.textContent.trim() !== a.getAttribute('href') && a.textContent.trim() !== decodeURI(a.getAttribute('href'))) { a.dataset.pl = '0'; continue; }
+      const l = linkLabel(a.getAttribute('href')); if (!l) { a.dataset.pl = '0'; continue; }
+      a.dataset.pl = l.kind; if (l.id) a.dataset.cu = l.id; a.title = a.getAttribute('href');
+      a.classList.add('plink'); a.textContent = l.kind === 'web' ? l.name + (l.sub !== 'link' ? l.sub.slice(0, 40) + (l.sub.length > 40 ? '…' : '') : '') : l.name;
+    }
+    for (const a of el.querySelectorAll('a.plink[data-cu]')) { const n = taskNames.get(a.dataset.cu); if (n && a.textContent !== n) a.textContent = n; }
+  }
+  linkWaiters.add(() => { const el = document.getElementById('conversation'); if (el) prettyLinks(el); });
   function drawDiagrams(el) {
     const blocks = [...el.querySelectorAll('.md-code:not(.drawn)')].filter(b => b.querySelector('.md-code-head span')?.textContent === 'mermaid');
     if (!blocks.length) return;
@@ -739,6 +773,8 @@
     if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
     const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
     if (art) { if (art.dataset.artOpen) api.send({ type: 'openUrl', url: art.dataset.artOpen }); else navigator.clipboard.writeText(art.dataset.artCopy).then(() => { art.classList.add('done'); setTimeout(() => art.classList.remove('done'), 1200); }); return; }
+    const pn = e.target.closest('[data-pn]'); // a pasted text's chip in a message on its way: its text in the panel
+    if (pn) { const k = pn.closest('[data-pk]'), p = k && (pending.get(selectedId) || [])[+k.dataset.pk], x = p && (p.pastes || []).find(y => y.n === +pn.dataset.pn); if (x) openText(`Pasted text #${x.n} · ${x.lines} lines`, x.text); return; }
     const sh = e.target.closest('[data-bgout]'); // a background shell's chip: its live output
     if (sh) { openShell(sh.dataset.bgout, sh.dataset.bgname); return; }
     const ag = e.target.closest('[data-agent-tid], [data-jump]'); // an agent's row or chip: its steps in a panel
@@ -1053,6 +1089,15 @@
     const pull = () => api.send({ type: 'bgTail', id: selectedId, file });
     pull(); shellTimer = setInterval(pull, 2000); d.focus();
   }
+  // Any text in the same panel (a pasted text's full content).
+  function openText(name, text) {
+    closeShell();
+    const d = document.createElement('div'); d.id = 'chat-shell'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', name); d.tabIndex = -1; returnTo = document.activeElement; trapFocus(d);
+    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShell(); } });
+    d.innerHTML = `<div class="sh-h">¶<span>${escH(name)}</span><button type="button" class="sh-x" aria-label="Close">×</button></div><pre class="sh-out"></pre>`;
+    d.querySelector('.sh-out').textContent = text; d.querySelector('.sh-x').onclick = closeShell;
+    document.getElementById('term').appendChild(d); d.focus();
+  }
   function closeShell() { clearInterval(shellTimer); shellTimer = null; const d = document.getElementById('chat-shell'); if (d) { d.remove(); backFocus(); } }
 
   // ── A subagent's steps in a panel over the view (like a background shell's output), re-read every 2 s while it runs ──
@@ -1202,5 +1247,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '') => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { linkLabel, onTask, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

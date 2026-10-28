@@ -710,3 +710,10 @@ body.world-mode #hdr-chat { display: none; }
 #chat-hover .hv-cmd, #chat-hover .hv-live.out { margin: 6px 0 0; padding: 6px 8px; border-radius: 8px; background: var(--bg2); font-family: 'Geist Mono', monospace; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 64px; overflow: hidden; color: var(--subtext); }
 #chat-hover .hv-live { margin-top: 6px; color: var(--subtext); }
 #chat-hover .hv-foot { margin-top: 8px; font-size: 10.5px; color: var(--dim); }
+/* A bare link in the thread, read by name (a ClickUp task, "repo #N", site + path); hover shows the address */
+:root body #conversation a.plink { text-decoration: none; padding: 1px 7px; border-radius: 6px; background: color-mix(in srgb, var(--claude) 9%, transparent); color: var(--text); font-weight: 500; white-space: nowrap; }
+:root body #conversation a.plink:hover { background: color-mix(in srgb, var(--claude) 18%, transparent); }
+:root body #conversation a.plink[data-pl="cu"]::before { content: '✓'; display: inline-block; width: 14px; height: 14px; margin-right: 5px; border-radius: 4px; background: #7b68ee; color: #fff; font-size: 9px; line-height: 14px; text-align: center; vertical-align: 1px; }
+:root body #conversation a.plink[data-pl="gh"]::before { content: '#'; margin-right: 3px; color: var(--dim); }
+:root body #conversation .msg.cmd a.plink { font-family: inherit; font-size: 12.5px; }
+:root body #chat-links .lk.gh .lk-i { background: var(--text); color: var(--bg); }

@@ -99,11 +99,12 @@
     micStop();
     pruneAtt();
     const a = atts.get(id), shown = inp.value.trim(), text = expandPastes(inp.value, a).trim(), list = a ? a.list.splice(0) : [];
+    const pastes = ((a && a.pastes) || []).slice(); // the sent bubble's paste chips open to their text
     if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; }
     if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
     if (chat() && /^\/resume$/.test(text) && !list.length) { inp.value = '/resume '; resumeCheck(inp); return; } // the CLI's picker is a full-screen dialog: list here
     const held = list.some(x => x.saving);
-    if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text); // shows the box as typed (paste chips), matches the full text
+    if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text, pastes); // shows the box as typed (paste chips), matches the full text
     inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt();
     if (held) { queued.set(id, { text, list }); if (chat()) renderConversation(); return; }
     deliver(id, text, list);
@@ -146,7 +147,11 @@
     if (at && at.kind === 'resume' && msg.id === selectedId) { at.files = resumeHits(msg.id, at.q); at.sel = 0; drawAt(); }
   }
   function onInput(e) {
-    if (!chat() || resumeCheck(e.target)) return;
+    if (!chat()) return;
+    // Typing brings the chat to its latest message, so you answer what you can see.
+    const c = document.getElementById('conversation');
+    if (c && c.scrollHeight - c.scrollTop - c.clientHeight > 40) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+    if (resumeCheck(e.target)) return;
     const m = atQuery(e.target), a = agents.get(selectedId);
     if (!m || !a) return closeAt();
     at = { kind: m.kind, start: m.start, q: m.q, files: at && at.kind === m.kind ? at.files : [], sel: 0 };
@@ -336,26 +341,18 @@
   const hl = document.createElement('div'); hl.id = 'chat-hl'; hl.setAttribute('aria-hidden', 'true');
   box().before(hl);
   const askedCat = new Set(); // folders whose command list was asked for once
-  // Links in the box: underlined in place, and a chip above it each — a ClickUp task by its real name (Overlord's own
-  // board first, else one fetch), any other link by its site and path.
+  // Links in the box: underlined in place, and a chip above it each, named by chatUi.linkLabel (a ClickUp task by its
+  // real name, a GitHub PR as "repo #N", anything else by site and path).
   const URL_RE = /https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/;
-  const taskNames = new Map(); // ClickUp task id → name ('' while asked, null when it can't be read)
-  const cuTask = (u) => (/app\.clickup\.com\/t\/(?:\d+\/)?([\w-]+)/.exec(u) || [])[1];
-  function onTask(msg) { if (!taskNames.has(msg.id) || taskNames.get(msg.id)) return; taskNames.set(msg.id, msg.task ? msg.task.name : null); drawLinks(box().value, true); }
+  chatUi.linkWaiters.add(() => drawLinks(box().value, true));
   function drawLinks(v, force) {
     let el = document.getElementById('chat-links');
     if (!el) { el = document.createElement('div'); el.id = 'chat-links'; document.getElementById('chat-att').before(el); el.onclick = (e) => { const c = e.target.closest('[data-url]'); if (c) api.send({ type: 'openUrl', url: c.dataset.url }); }; }
     const urls = [...new Set((v.match(new RegExp(URL_RE.source, 'g')) || []))].slice(0, 6);
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const html = urls.map(u => {
-      const id = cuTask(u); let name, sub;
-      if (id) {
-        const known = typeof clickupState !== 'undefined' && clickupState.tasks.find(t => t.id === id || t.customId === id);
-        if (known) taskNames.set(id, known.name);
-        if (!taskNames.has(id)) { taskNames.set(id, ''); api.send({ type: 'clickupTask', id }); }
-        name = taskNames.get(id) || (taskNames.get(id) === '' ? 'ClickUp task…' : 'ClickUp task'); sub = 'ClickUp · ' + id;
-      } else { let p; try { p = new URL(u); } catch { return ''; } name = p.hostname.replace(/^www\./, ''); sub = (p.pathname + p.search).replace(/^\/$/, '') || 'link'; }
-      return `<button type="button" class="lk${id ? ' cu' : ''}" data-url="${esc(u)}" title="${esc(u)}"><span class="lk-i">${id ? '✓' : '↗'}</span><span class="lk-t"><b>${esc(name)}</b><small>${esc(sub)}</small></span></button>`;
+      const l = chatUi.linkLabel(u); if (!l) return '';
+      return `<button type="button" class="lk ${l.kind}" data-url="${esc(u)}" title="${esc(u)}"><span class="lk-i">${l.kind === 'cu' ? '✓' : l.kind === 'gh' ? '#' : '↗'}</span><span class="lk-t"><b>${esc(l.name)}</b><small>${esc(l.sub)}</small></span></button>`;
     }).join('');
     if (force || el._h !== html) { el.innerHTML = el._h = html; el.hidden = !html; }
   }
@@ -412,5 +409,5 @@
   box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, onTask, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();
