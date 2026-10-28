@@ -939,6 +939,18 @@
   let peekSeq = 0, peekFor = null, peekTimer = null;
   const peekEl = document.createElement('div'); peekEl.id = 'chat-peek'; peekEl.hidden = true; document.body.appendChild(peekEl);
   const conv = document.getElementById('conversation');
+  // Opening a collapsed row (a summary click) whose contents run past the bottom scrolls it up to the top of the view,
+  // so what opened is in sight; checked again a moment later for content that loads in (a subagent's steps).
+  conv.addEventListener('click', (e) => {
+    const s = e.target.closest('summary'); if (!s) return;
+    const d = s.parentElement;
+    const fit = () => {
+      if (!d.open || !d.isConnected) return;
+      const v = conv.getBoundingClientRect(), r = d.getBoundingClientRect();
+      if (r.bottom > v.bottom - 8 && r.top > v.top + 8) conv.scrollBy({ top: r.top - v.top - 8, behavior: 'smooth' });
+    };
+    requestAnimationFrame(fit); setTimeout(fit, 450);
+  });
   conv.addEventListener('mouseover', (e) => {
     const r = e.target.closest('a.fileref'); if (!r || r === peekFor || r.classList.contains('img')) return; // an image has no lines to peek
     peekFor = r; clearTimeout(peekTimer);
