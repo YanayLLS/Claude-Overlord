@@ -570,12 +570,19 @@
   const norm = (s) => String(s || '').replace(/\[Image #\d+\]/g, ' ').replace(/\s+/g, ' ').trim();
   function pendingHtml(id, evs, busy) {
     const list = pending.get(id); if (!list || !list.length) return '';
-    // A prompt sent while the agent works can wait in the CLI's queue until the turn ends, so it only expires once the
-    // agent has been idle a while without it showing up.
-    for (const p of [...list]) {
+    // Each message sent from here becomes the next message of yours in the transcript, in the order sent, so they clear
+    // in that order: the first one of yours written after a message was sent is that message, whatever the CLI made of its
+    // text (its own image numbers, a long paste's wrapper, text left in its box…). Matching the text broke on each of those.
+    // One still being attached isn't sent yet. A message sent while the agent works can wait in the CLI's queue until the
+    // turn ends, so a leftover only expires once the agent has been idle a while without it showing up.
+    const yours = evs.filter(e => (e.type === 'prompt' || e.type === 'command') && e.ts).map(e => Date.parse(e.ts)).sort((x, y) => x - y);
+    let j = 0;
+    for (const p of [...list].sort((x, y) => x.at - y.at)) {
       if (busy) p.busyAt = Date.now();
-      // Delivered once the transcript has it, or a message that contains it (the CLI sends any text left in its own box along).
-      if (evs.some(e => (e.type === 'prompt' || e.type === 'command') && e.ts && Date.parse(e.ts) >= p.at - 2000 && (norm(e.text) === norm(p.match || p.text) || (norm(p.match || p.text).length >= 8 && norm(e.text).includes(norm(p.match || p.text))))) || (!busy && Date.now() - (p.busyAt || p.at) > 30000)) list.splice(list.indexOf(p), 1);
+      if (p.held) continue;
+      while (j < yours.length && yours[j] < p.at - 2000) j++;
+      if (j < yours.length) { j++; list.splice(list.indexOf(p), 1); continue; }
+      if (!busy && Date.now() - (p.busyAt || p.at) > 30000) list.splice(list.indexOf(p), 1);
     }
     return list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
