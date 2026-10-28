@@ -3877,6 +3877,7 @@ function jumpPrompt(dir) {
 
 // ── Terminal / conversation tabs ───────────────────────
 function switchTermTab(tab) {
+  if (tab !== termTab && selectedId != null) chatComposer.carryDraft(termTab, tab); // what you were typing comes along
   termTab = tab; askFlip = false;
   try { localStorage.setItem('termView', tab); } catch {}
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');

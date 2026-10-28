@@ -8,12 +8,15 @@
 
 const PROMPT_ROW_MARKER = /^\s*(?:❯|[│┃]\s+>\s)|^> /; // indented "> " is quoted output, not a prompt
 
+// A dialog's highlighted option ("> 1. Zoom-aware steps") wears the same marker; it was never a prompt.
+const MENU_ROW = /^\s*(?:❯|>)\s*\d+\.\s/;
+
 // rows: rendered buffer lines, baseY: index of the first row of the current
 // screen. Returns the buffer indices of submitted prompts, oldest first.
 function promptRows(rows, baseY) {
   const out = [];
   for (let i = 0; i < rows.length && i < baseY; i++) {
-    if (PROMPT_ROW_MARKER.test(rows[i])) out.push(i);
+    if (PROMPT_ROW_MARKER.test(rows[i]) && !MENU_ROW.test(rows[i])) out.push(i);
   }
   return out;
 }

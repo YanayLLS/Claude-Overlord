@@ -279,10 +279,23 @@
     const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active, none = { question: '', options: [] }; if (!b) return none;
     const rows = []; for (let i = Math.max(0, b.length - 40); i < b.length; i++) { const l = b.getLine(i), t = l ? l.translateToString(true) : ''; if (l && l.isWrapped && rows.length) rows[rows.length - 1] += t; else rows.push(t); } // a row the terminal wrapped is one line
     const cut = (s) => s.replace(/^\s*[│┃|]?\s*/, '').split(/\s{3,}|[│┃┌└├┐┘┤╭╮╰╯─━✂]/)[0].trim(); // a left rule goes; a preview drawn beside isn't part of it
-    const OPT = /^\s*[❯›>]?\s*(\d)\.\s+(.+?)\s*$/, options = []; let first = -1;
+    const OPT = /^\s*[❯›>]?\s*(\d)\.\s+(.+?)\s*$/, options = []; let first = -1, focus = 0;
+    // The focused option's preview, drawn in a box to the right of the menu: its column splits every row in two.
+    const top = rows.findIndex(r => OPT.test(r)), col = top < 0 ? -1 : Math.min(...rows.slice(top).map(r => { const k = r.search(/[┌╭]/); return k > 0 ? k : Infinity; }));
+    const preview = [], dialog = screenDialog(rows);
+    if (col > 0 && col < Infinity) {
+      let inBox = false;
+      for (let i = top; i < rows.length; i++) {
+        const s = rows[i].slice(col);
+        if (/^[┌╭]/.test(s)) inBox = true;
+        else if (/^[└╰]/.test(s)) { rows[i] = rows[i].slice(0, col); break; }
+        else if (inBox) preview.push(s.replace(/^[│┃├]\s?/, '').replace(/\s*[│┃┤]\s*$/, '').replace(/^[─━\s]*✂.*$/, '…'));
+        rows[i] = rows[i].slice(0, col); // the menu's side of the row
+      }
+    }
     rows.forEach((r, i) => {
       const m = OPT.exec(r);
-      if (m) { if (first < 0) first = i; options[+m[1] - 1] = { label: cut(m[2]), desc: '' }; return; }
+      if (m) { if (first < 0) first = i; options[+m[1] - 1] = { label: cut(m[2]), desc: '' }; if (/^\s*[❯›>]/.test(r)) focus = +m[1] - 1; return; }
       const last = options[options.length - 1], d = cut(r);
       if (!last || first < 0 || !d || !/^\s{3,}/.test(r) || /^(Enter|Esc|↑|Tab|Notes:)/.test(d)) return;
       if (/^\(.*\)$/.test(d) && !last.desc) last.label += ' ' + d; // "(Recommended)" wrapped under its label
@@ -291,7 +304,7 @@
     // The question: the lines just above the menu (it can wrap, inside a left rule), up to a blank line.
     const q = [];
     for (let i = first - 1; i >= 0 && i >= first - 12; i--) { const t = cut(rows[i]); if (!t) { if (q.length) break; continue; } if (/[←→]|^\[[ x✓]?\]|^[☐☑✔]/.test(t)) break; q.unshift(t); }
-    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), dialog: first >= 0 && screenDialog(rows) };
+    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && dialog };
   }
   // A proposed plan waiting for approval: the plan itself, rendered, and the CLI's own choices as buttons.
   function planHtml(ev, cwd) {
@@ -302,7 +315,8 @@
     const s = screenAsk(selectedId); // the open question is only on screen until it's answered
     const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
     const q = (s && s.question) || a.question || 'Claude has a question';
-    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
+    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => { const on = s.options.length && s.preview && k === s.focus; // the CLI shows the focused option's preview: so does the card
+      return `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${on ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}${on ? `<pre class="ask-prev">${escH(s.preview)}</pre>` : ''}</span></button>`; }).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
   }
   // ── Background shells and subagents: one small pill above the reply box ("10 agents · 1 shell"). Hover it for the list,
   // click to keep the list open; a row's hover card peeks, a click opens its full panel. ──
@@ -334,6 +348,17 @@
     else { pop.innerHTML = dockHtml; pop._k = key; if (hoverFor && !pop.contains(hoverFor)) hideHover(); }
     el.hidden = !dockHtml; if (!dockHtml) closeDock();
   }
+  // Hovering an option of a question with previews moves the CLI's selection there (arrow keys), so its preview shows.
+  let hovTimer = null;
+  document.getElementById('conversation').addEventListener('mouseover', (e) => {
+    const b = e.target.closest('.card.ask [data-hov]'); if (!b || b.classList.contains('focus')) return;
+    clearTimeout(hovTimer);
+    hovTimer = setTimeout(() => {
+      const s = screenAsk(selectedId), d = +b.dataset.pick - s.focus; if (!s.preview || !d) return;
+      keys(Array(Math.abs(d)).fill(d > 0 ? '\x1b[B' : '\x1b[A'));
+      setTimeout(rerender, 120 + Math.abs(d) * 70 + 150);
+    }, 180);
+  });
   function closeDock() { const el = document.getElementById('chat-bg'); if (el) { el.classList.remove('pinned'); el.querySelector('.bg-pill')?.setAttribute('aria-expanded', 'false'); } }
   let hoverFor = null;
   const hoverEl = document.createElement('div'); hoverEl.id = 'chat-hover'; hoverEl.hidden = true; hoverEl.setAttribute('role', 'tooltip'); document.body.appendChild(hoverEl);

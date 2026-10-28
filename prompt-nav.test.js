@@ -46,6 +46,7 @@ assert.strictEqual(nextNavIdx(2, 1, 2), 2);    // already at bottom → stay
 assert.strictEqual(nextNavIdx(29, -1, 2), 1);
 assert.strictEqual(nextNavIdx(-1, 1, 2), 2);
 
+assert.deepStrictEqual(promptRows(['> fix it', '', '> 1. Zoom-aware steps', '❯ 2. Fixed steps', '> '], 4), [0], 'a dialog option is not a prompt');
 console.log('prompt-nav: all assertions passed');
 
 // Renderer scripts share one global lexical scope: a `const` name declared by two

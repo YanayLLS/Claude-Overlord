@@ -206,6 +206,25 @@
     draftFor = selectedId;
   }
 
+  // Switching Chat ↔ Terminal keeps what you were typing: the reply box's text goes into the CLI's prompt (not sent),
+  // and the CLI's prompt comes into the reply box. ponytail: a draft with images stays in the chat (the CLI can't take them as typed).
+  function carryDraft(from, to) {
+    const id = selectedId, x = typeof xterms !== 'undefined' && xterms.get(id), t = box(); if (!x) return;
+    if (from === 'conversation' && to === 'terminal') {
+      const a = atts.get(id); if (a && a.list.length) return;
+      const v = expandLinks(expandPastes(t.value, a), a); if (!v.trim()) return;
+      api.send({ type: 'termInput', id, data: '\x1b[200~' + v.replace(/\r\n?/g, '\n') + '\x1b[201~' });
+      t.value = ''; drafts.set(id, ''); if (a) { a.pastes = []; a.files = []; a.links = []; } grow(t); drawAtt();
+    } else if (from === 'terminal' && to === 'conversation') {
+      if (typeof readPromptBox !== 'function' || t.value.trim()) return;
+      const b = x.terminal.buffer.active, rows = []; for (let y = Math.max(0, b.length - 40); y < b.length; y++) rows.push(b.getLine(y)?.translateToString(true) || '');
+      if (screenDialog(rows)) return; // a dialog is up: its Ctrl+C would cancel it
+      const v = readPromptBox(x.terminal);
+      if (!v || !v.trim() || /^Try "/.test(v) || /^\d+\.\s/.test(v)) return; // the box's own hint, or a dialog's option
+      t.value = v; drafts.set(id, v); grow(t);
+      api.send({ type: 'termInput', id, data: '\x03' }); // Ctrl+C with text in the box clears it, as in the CLI
+    }
+  }
   function setDraft(id, text) {
     drafts.set(id, text);
     if (draftFor === id) { const t = box(); t.value = text; grow(t); t.focus(); t.selectionStart = t.selectionEnd = text.length; }
@@ -435,5 +454,5 @@
   box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, carryDraft, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();
