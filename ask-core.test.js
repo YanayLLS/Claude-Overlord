@@ -68,3 +68,11 @@ test('only a dialog at the end of the settled screen counts (redrawn history doe
   assert.strictEqual(dialogAtEnd('last message quoted: ' + perm + box), null, 'input box back = no live dialog');
   assert.strictEqual(dialogAtEnd(perm + ' main ( ) twin-switch Reading useRelease… 19m 26s'), 'perm', 'agent status lines may follow a live dialog');
 });
+
+test('a plan waiting for approval is a live question (its footer is ctrl+g, not Esc to cancel)', () => {
+  const { dialogAtEnd } = require('./ask-core');
+  const plan = ' Claude has written up a plan and is ready to execute. Would you like to proceed? ❯ 1. Yes, and use auto mode 2. Yes, manually approve edits 3. Tell Claude what to change shift+tab to approve with this feedback ctrl+g to edit in Notepad.exe · ~\.claude\plans\plan-x.md';
+  assert.strictEqual(dialogAtEnd(plan), 'ask');
+  assert.strictEqual(dialogAtEnd(plan.replace(/\s/g, '')), 'ask', 'spaces drawn as cursor moves');
+  assert.strictEqual(dialogAtEnd(plan + ' ────── ❯ ────── ⏵⏵ auto mode on (shift+tab to cycle)'), null);
+});

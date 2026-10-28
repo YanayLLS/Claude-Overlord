@@ -791,3 +791,5 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.ask .ask-in { flex: 1; min-width: 0; height: 22px; padding: 0; border: 0; outline: 0; background: none; color: var(--text); font: inherit; font-size: 14px; }
 :root body #conversation .card.ask .ask-in::placeholder { color: var(--dim); }
 :root body #conversation .card.ask .ask-in:disabled { opacity: .6; }
+/* A permission read off the CLI's screen (its call isn't in the transcript yet) */
+:root body #conversation .card.perm pre.perm-screen { max-height: 260px; overflow: auto; font-size: 12px; line-height: 1.5; }

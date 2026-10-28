@@ -178,10 +178,13 @@ function screenDialog(rows) {
 const CHAT_URL_SRC = 'https?:\\/\\/[^\\s<>"]*[^\\s<>".,;:!?)\\]\']';
 const chatUrlRe = (flags = '') => new RegExp(CHAT_URL_SRC, flags);
 function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-// The last n rows of an xterm buffer as text; a row the terminal soft-wrapped joins the one before it when asked.
+// The last n rows the CLI drew, as text; a row the terminal soft-wrapped joins the one before it when asked. Blank rows
+// under them don't count: a fresh or short session draws at the top of a tall terminal, and its footer, menu or box
+// sat above "the last n rows" (the mode chip went missing, a mode switch pressed Shift+Tab blind).
 function bufferRows(buf, n, joinWrapped = false) {
   const rows = []; if (!buf) return rows;
-  for (let y = Math.max(0, buf.length - n); y < buf.length; y++) { const l = buf.getLine(y); if (!l) continue; const t = l.translateToString(true); if (joinWrapped && l.isWrapped && rows.length) rows[rows.length - 1] += t; else rows.push(t); }
+  let end = buf.length; while (end > 0) { const l = buf.getLine(end - 1); if (l && l.translateToString(true).trim()) break; end--; }
+  for (let y = Math.max(0, end - n); y < end; y++) { const l = buf.getLine(y); if (!l) continue; const t = l.translateToString(true); if (joinWrapped && l.isWrapped && rows.length) rows[rows.length - 1] += t; else rows.push(t); }
   return rows;
 }
 // The CLI working on a turn (not waiting on you, not idle).

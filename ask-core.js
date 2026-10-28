@@ -38,9 +38,12 @@ const questionDialogIn = (text) => QUESTION_DIALOG_RE.test(text || '');
 // Claude's input box (its "shift+tab to cycle" / "? for shortcuts" footer) is hidden while it
 // waits. The same text in redrawn history (/resume, resize) is followed by the input box.
 const INPUT_BOX_RE = /shift\s*\+\s*tab\s*to\s*cycle|\?\s*for\s*shortcuts/;
+// Plan approval ("Claude has written up a plan… Would you like to proceed? 1. Yes, and use auto mode…"): its
+// footer is a "ctrl+g to edit" line and the plan file, not "Esc to cancel".
+const PLAN_DIALOG_RE = /Would\s*you\s*like\s*to\s*proceed\s*\?[\s\S]{0,300}?1\.\s*Yes/;
 function dialogAtEnd(text) {
   const tail = String(text || '').slice(-3000);
-  for (const [kind, re] of [['ask', QUESTION_DIALOG_RE], ['perm', PERM_DIALOG_RE]]) {
+  for (const [kind, re] of [['ask', QUESTION_DIALOG_RE], ['ask', PLAN_DIALOG_RE], ['perm', PERM_DIALOG_RE]]) {
     let last = null;
     for (const m of tail.matchAll(new RegExp(re.source, 'g'))) last = m;
     if (!last) continue;

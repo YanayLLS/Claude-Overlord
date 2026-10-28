@@ -1117,7 +1117,7 @@ function bgTail({ id, file }) {
 // whose path ends with it. Returns '' when it can't be pinned down.
 function resolveRef(cwd, file, cb) {
   if (typeof file !== 'string' || !file || typeof cwd !== 'string') return cb('');
-  const f = file.replace(/\\/g, '/');
+  const f = file.replace(/\\/g, '/').replace(/^~(?=\/)/, () => os.homedir().replace(/\\/g, '/')); // "~\.claude\plans\x.md", as the CLI shows a plan's file
   for (const p of [f, path.join(cwd, f)]) { try { if (path.isAbsolute(p) && fs.statSync(p).isFile()) return cb(p); } catch {} }
   const pick = (files) => { const low = '/' + f.toLowerCase(), hits = files.filter(x => ('/' + x.toLowerCase()).endsWith(low)); cb(hits.length ? path.join(cwd, hits.sort((a, b) => a.length - b.length)[0]) : ''); };
   const hit = chatFileCache.get(cwd);

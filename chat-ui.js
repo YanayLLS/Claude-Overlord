@@ -398,10 +398,24 @@
     const n = perm.name || '', title = n === 'Bash' || n === 'PowerShell' ? 'Run this command?' : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(n) ? 'Make this edit?' : /^Web/.test(n) ? 'Fetch this page?' : `Allow ${escH(n.replace(/^mcp__[^_]+__/, '')) || 'this action'}?`;
     const kind = toolView({ name: n }).kind, ev = lastTool(evs, n, doneBy), a = (ev && ev.args) || {};
     let what = `<pre>${escH(perm.status || n)}</pre>`;
+    // The call isn't in the transcript until it's answered: what the CLI shows above its question is what's asked
+    // ("Edit file / hello.txt / the change", "Bash command / git push"), and its question is the card's title.
+    const sp = !ev && screenPerm(selectedId);
+    if (sp) return `<div class="card perm"><div class="card-h">${ICON[toolView({ name: /^bash|command/i.test(sp.body[0] || '') ? 'Bash' : /edit|write|create/i.test(sp.question) ? 'Edit' : '' }).kind] || ICON.shield}<span>${escH(sp.question)}</span></div>${sp.body.length ? `<pre class="perm-screen">${escH(sp.body.join('\n'))}</pre>` : ''}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
     if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new, a.file_path).html}`;
     else if (a.command) what = `<pre>${escH(a.command)}</pre>${a.description ? `<p class="perm-desc">${escH(a.description)}</p>` : ''}`;
     else if (a.url || a.query) what = `<pre>${escH(a.url || a.query)}</pre>`;
     return `<div class="card perm"><div class="card-h">${ICON[kind] || ICON.shield}<span>${title}</span></div>${what}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
+  }
+  // A permission dialog as the CLI draws it: its question ("Do you want to make this edit to hello.txt?") and the
+  // rows above it, up to the rule that opens the dialog, frame lines left out. null when none is on screen.
+  function screenPerm(id) {
+    const rows = screenOf(id, 50, true) || []; let q = -1;
+    for (let k = rows.length - 1; k >= 0 && k >= rows.length - 14; k--) if (/Do\s+you\s+want\s+to\b.*\?/.test(rows[k])) { q = k; break; }
+    if (q < 0) return null;
+    let top = q - 1; while (top >= 0 && !/^\s*─{10,}/.test(rows[top]) && q - top < 30) top--;
+    const body = rows.slice(top + 1, q).map(r => r.replace(/╌{3,}/g, '').replace(/^ /, '').replace(/\s+$/, '')).filter(r => r.trim() && !/^[\s─│]*$/.test(r) && !/^\s*Tip:/.test(r));
+    return { question: rows[q].trim(), body };
   }
   // The terminal's open menu ("❯ 1. Yes …  2. No …"), read off its last lines: the plan card's choices are exactly
   // the CLI's, whatever this version offers.
@@ -498,7 +512,18 @@
     }
     return -1;
   }
+  // A plan waiting for approval: the transcript has it only once answered, but the CLI names its file under the
+  // menu ("~\.claude\plans\x.md"): read it from there, so the card shows the plan itself.
+  const planTexts = new Map(); // file → its text ('' while asked)
+  function planOnScreen(id) {
+    const rows = screenOf(id, 40, true) || [], m = /(~?[\\/]?[^\s·]*\.claude[\\/]plans[\\/][\w.-]+\.md)/.exec(rows.join('\n'));
+    if (!m || !/would you like to proceed|plan/i.test(rows.join(' '))) return '';
+    const a = agents.get(id);
+    if (!planTexts.has(m[1])) { planTexts.set(m[1], ''); api.send({ type: 'filePeek', cwd: (a && a.cwd) || '', file: m[1], line: 1, all: true, seq: 'plan:' + m[1] }); }
+    return planTexts.get(m[1]) || '';
+  }
   function askHtml(ask, perm) {
+    const pl = planOnScreen(selectedId); if (pl) return planHtml({ args: { plan: pl } }, (agents.get(selectedId) || {}).cwd);
     const s = screenAsk(selectedId); // the open question is only on screen until it's answered
     const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
     const q = (s && s.question) || a.question || 'Claude has a question';
@@ -786,7 +811,7 @@
     const rows = screenOf(id, 10); if (!rows) return null;
     const s = rows.join(' ');
     for (const [m, re] of MODE_RE) if (re.test(s)) return m;
-    return /for\s*shortcuts/i.test(s) ? 'default' : null; // the default mode's footer shows "? for shortcuts"
+    return /for\s*shortcuts|for\s*agents|\/effort/i.test(s) ? 'default' : null; // the input box's footer with no mode named in it ("? for shortcuts", now "← for agents")
   }
   async function setMode(target) {
     const id = selectedId; closeModeMenu();
@@ -1685,6 +1710,7 @@
       setTimeout(() => { if (undoRevert === undo) undoRevert = null; const t = document.getElementById('toast'); if (t && /^(Reverted|Deleted) /.test(t.textContent)) t.className = 'toast'; }, 10000);
       return;
     }
+    if (msg.type === 'filePeek' && String(msg.seq).startsWith('plan:')) { const t = (msg.lines || []).join('\n').trim(); planTexts.set(String(msg.seq).slice(5), t || null); if (t) rerender(); return; } // null: unreadable, asked once
     if (msg.type === 'filePeek') { if (String(msg.seq).startsWith('whole:')) { const p = document.getElementById('chat-changes'); if (p && p._whole) p._whole(msg); } else showPeek(msg); return; }
     if (msg.type === 'agentSteps' || msg.type === 'bgTail') hoverLive(msg);
     if (msg.type === 'agentSteps') { const p = document.getElementById('chat-shell'); if (p && p.dataset.tid === msg.toolId) drawSteps(msg.events || []); }
@@ -1789,7 +1815,7 @@
     // else repaints: redraw whenever what it shows changed.
     if (x && termTab === 'conversation' && cv && cv.classList.contains('open')) {
       const sa = screenAsk(selectedId), rw = screenRewind(selectedId);
-      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length]);
+      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, liveMode(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
       if (sig !== screenSig) { screenSig = sig; rerender(); }
     }
     const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)) && screenAsk(selectedId).options.length < 2 && !screenRewind(selectedId)); // a question menu gets its card instead
