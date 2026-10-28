@@ -1839,7 +1839,7 @@ function scheduleSpare(cwd) {
     const args = process.platform === 'win32' ? `/c ${cmd}` : ['-c', cmd];
     try {
       const s = { id, sessionId, cwd, key: spareKey(cwd), buf: '', bornAt: Date.now(), exited: false, adopted: false };
-      s.proc = agentPty().spawn(shell, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env }) });
+      s.proc = agentPty().spawn(shell, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: cleanAgentEnv(feat.env) });
       s.proc.onData((d) => { if (!s.adopted) { s.buf += d; if (s.buf.length > SPARE_BUF_MAX * 2) s.buf = s.buf.slice(-SPARE_BUF_MAX); } });
       s.proc.onExit(() => { s.exited = true; if (spare === s) dropSpare(); });
       s.ttl = setTimeout(() => { if (spare === s) { flog('spare expired unadopted'); dropSpare(); } }, SPARE_TTL_MS);
@@ -1856,10 +1856,11 @@ function takeSpare(cwd) {
 // argPrompt: submitted by claude itself at boot — instant and never lost, unlike the
 // typed initialPrompt. Must already be shell-safe (see fixRunPlan). A spare is already
 // running, so it can't take one.
-function createAgent(folderPath, initialPrompt, argPrompt, noSubmit) {
+// team: turn on agent teams (only the team dialog's lead needs teammates)
+function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team) {
   const cwd = folderPath || os.homedir();
   protectClaudeConfig();
-  const warm = argPrompt ? null : takeSpare(cwd);
+  const warm = argPrompt || team ? null : takeSpare(cwd);
   const sessionId = warm ? warm.sessionId : crypto.randomUUID();
   const id = warm ? warm.id : nextId++;
   const agent = {
@@ -1886,7 +1887,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit) {
   send({ type: 'stats', id, stats: agent.stats });
   send({ type: 'focused', id });
 
-  const agentEnv = cleanAgentEnv({ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env });
+  const agentEnv = cleanAgentEnv(team ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env } : feat.env);
   try {
     const proc = warm ? warm.proc : agentPty().spawn(shell, shellArgs, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
@@ -5222,7 +5223,7 @@ function handleIpc(msg) {
     }
     case 'createTeam': {
       const teamPrompt = buildTeamPrompt(msg.task, msg.roles);
-      createAgent(msg.cwd, teamPrompt);
+      createAgent(msg.cwd, teamPrompt, undefined, false, true);
       break;
     }
     case 'focusTeamMember': {
