@@ -302,7 +302,8 @@
     // task-notification hasn't come yet.
     const ended = new Set(evs.filter(e => e.type === 'bgdone').map(e => e.taskId));
     // A crash or restart kills them without a notification; Overlord's resume prompt marks that point.
-    let cut = -1; evs.forEach((e, k) => { if (e.type === 'resumed') cut = k; });
+    // So does Claude's process ending: nothing launched before the current one still runs.
+    let cut = -1; evs.forEach((e, k) => { if (e.type === 'resumed' || (a.procAt && e.ts && Date.parse(e.ts) < a.procAt)) cut = k; });
     const bg = evs.filter((e, k) => { if (k <= cut || e.type !== 'tool' || (e.name !== 'Agent' && e.name !== 'Task')) return false; const d = doneBy.get(e.toolId); return !d || (d.agentId && /background|launched/i.test(d.text) && !ended.has(d.agentId)); });
     // Background shells (Bash run_in_background) until their task-notification: a chip each, opening to the live output.
     const shells = evs.filter((e, k) => k > cut && e.type === 'tool' && doneBy.get(e.toolId) && doneBy.get(e.toolId).bgId && !ended.has(doneBy.get(e.toolId).bgId));

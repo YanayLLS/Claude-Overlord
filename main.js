@@ -496,6 +496,12 @@ const devServers = new Map(); // worktree path -> { proc, port, url, repo } (per
 
 // /clear submitted: zero the context bar now. The new JSONL only appears on the next
 // prompt, and reassignAgentToFile() (which resets the rest of stats) runs then.
+// When an agent's Claude process started: background subagents launched before it died with the old one, so the
+// Chat view drops their "running" chips. An adopted pty (Overlord restarted around a live Claude) keeps its old start.
+function noteProcStart(id, proc, adopted) {
+  if (!proc._at && !adopted) proc._at = Date.now();
+  if (proc._at) send({ type: 'procStart', id, at: proc._at });
+}
 function markClear(id) {
   pendingClearAgents.add(id);
   const a = agents.get(id);
@@ -616,7 +622,7 @@ function sendFullState() {
   if (settings.prCache) send({ type: 'prList', ...settings.prCache, error: null });
   if (settings.actionsCache) send({ type: 'actionsList', runs: settings.actionsCache, error: null });
   for (const [id, a] of agents) {
-    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, archivedAt: a.archivedAt || null, account: a.account || null });
+    send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, archivedAt: a.archivedAt || null, account: a.account || null, procAt: (terminals.get(id) && terminals.get(id)._at) || null });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
@@ -1730,6 +1736,7 @@ function doSpawnTerminal(id, attached) {
   try {
     const proc = attached || agentPty().spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env, ...acctEnv }) });
     terminals.set(id, proc);
+    noteProcStart(id, proc, !!attached);
     // ponytail: an adopted pty's Remote Control state is unknown; assume the setting. Toggling off/on fixes a stray one.
     if (!attached || a.rc === undefined) a.rc = settings.remoteControl !== false;
     if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
@@ -1913,6 +1920,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team) {
   try {
     const proc = warm ? warm.proc : agentPty().spawn(shell, shellArgs, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
+    noteProcStart(id, proc, false);
     applyLastTermSize(id, proc);
     let promptSent = !initialPrompt || noSubmit;
     // noSubmit (prefix start): type it once, the moment claude paints its ❯ prompt — claude queues keys typed while it

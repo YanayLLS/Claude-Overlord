@@ -4200,8 +4200,10 @@ setTimeout(() => { if (!autoOpenDone && !autoOpenTimer) autoOpenFirstAgent(); },
 
 function handleAgentMsg(msg) {
   switch (msg.type) {
+    case 'procStart': { const a = agents.get(msg.id); if (a) { a.procAt = msg.at; scheduleRender(); } break; }
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
+      if (msg.procAt) queueMicrotask(() => { const a = agents.get(msg.id); if (a) a.procAt = msg.procAt; });
       if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', archived: msg.archived || false, archivedAt: msg.archivedAt || null, account: msg.account || null });
       if (msg.cwd) addKnownProject(msg.cwd);
       // An agent born from a quest's Attack on a building: the ticket is its from the first prompt.
