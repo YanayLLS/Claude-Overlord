@@ -437,9 +437,11 @@
         rows[i] = rows[i].slice(0, col); // the menu's side of the row
       }
     }
+    let rule = false; // a rule between options: what's under it ("Chat about this") is apart from the answers
     rows.forEach((r, i) => {
       const m = OPT.exec(r);
-      if (m) { if (first < 0) first = i; options[+m[1] - 1] = { label: cut(m[2]), desc: '' }; if (/^\s*[❯›>]/.test(r)) focus = +m[1] - 1; return; }
+      if (m) { if (first < 0) first = i; options[+m[1] - 1] = { label: cut(m[2]), desc: '', sep: rule && options.length > 0 }; rule = false; if (/^\s*[❯›>]/.test(r)) focus = +m[1] - 1; return; }
+      if (first >= 0 && /^\s*[─━]{3,}\s*$/.test(r)) { rule = true; return; }
       const last = options[options.length - 1], d = cut(r);
       if (!last || first < 0 || !d || !/^\s{3,}/.test(r) || /^(Enter|Esc|↑|Tab|Notes:)/.test(d)) return;
       if (/^\(.*\)$/.test(d) && !last.desc) last.label += ' ' + d; // "(Recommended)" wrapped under its label
@@ -488,10 +490,11 @@
     if (askFor !== selectedId + '\n' + q) { askFor = selectedId + '\n' + q; askHover = null; askAsked = null; } // a new question starts from its focused option
     // Several questions: which one this is, which are answered (the CLI's tab row).
     const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40), at = (a.steps || []).findIndex(x => norm(x.q) === norm(q)), on = at >= 0 ? at : ((s && s.tabs) || []).findIndex(x => !x.done); // else the first one not answered
-    const tabs = s && s.tabs && s.tabs.length > 1 ? `<div class="ask-tabs">${s.tabs.map((x, k) => `<span class="${x.done ? 'done' : ''}${k === on ? ' on' : ''}">${x.done ? ICON.check : `<i>${k + 1}</i>`}${escH(x.label)}</span>`).join('')}</div>` : '';
-    return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === s.focus ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${opts.some(o => /^(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
+    const tabs = s && s.tabs && s.tabs.length > 1 ? `<div class="ask-tabs" data-on="${on}">${s.tabs.map((x, k) => `<span data-tab="${k}" class="${x.done ? 'done' : ''}${k === on ? ' on' : ''}">${x.done ? ICON.check : `<i>${k + 1}</i>`}${escH(x.label)}</span>`).join('')}</div>` : '';
+    const stepKey = tabs ? 'steps:' + s.tabs.map(x => x.label).join('|') : q;
+    return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${opts.some(o => /^(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
-      .replace('<div class="card ask">', `<div class="card ask${lastAskQ === q ? ' still' : ''}">`) + (lastAskQ = q, '');
+      .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
   // ── Background shells and subagents: one small pill above the reply box ("10 agents · 1 shell"). Hover it for the list,
   // click to keep the list open; a row's hover card peeks, a click opens its full panel. ──
@@ -537,7 +540,7 @@
     if (!seen.some(Boolean)) return ''; // a question without previews
     // Drawn with the selected option's preview; a hover swaps only this pane's text (applyAskHover), never the card.
     const rows = Math.max(...seen.filter(Boolean).map(p => p.split('\n').length));
-    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${s.focus}" style="min-height:calc(${rows} * 1.5em + 18px)">${prevText(seen[s.focus])}</pre>`;
+    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${askFocus(s)}" style="min-height:calc(${rows} * 1.5em + 18px)">${prevText(seen[askFocus(s)])}</pre>`;
   }
   function applyAskHover() {
     const pane = document.querySelector('#conversation .card.ask .ask-prev'), card = pane && pane.closest('.card');
@@ -547,12 +550,28 @@
     const h = prevText(seen[k]); if (pane._h !== h) { pane.innerHTML = h; pane._h = h; }
   }
   // ↑/↓ from the reply box: one step, wrapping like the CLI's menu; the preview follows the selection.
-  function askStep(d) { const s = screenAsk(selectedId), n = s.options.length; if (!n) return false; askHover = null; askMove((s.focus + d + n) % n); return true; }
-  // Move the CLI's selection to option k (arrow keys); the card follows on its next look at the screen.
+  function askStep(d) { const s = screenAsk(selectedId), n = s.options.length; if (!n) return false; askHover = null; askMove((askFocus(s) + d + n) % n); return true; }
+  // Move the CLI's selection to option k (arrow keys). The card moves at once; until the CLI has redrawn, it (and the
+  // next press) go by where the cursor will be, not by a screen that's a step behind.
+  let askAhead = null; // { q, focus, at }
+  function askFocus(s) {
+    if (!askAhead || askAhead.q !== s.question || Date.now() - askAhead.at > 1500 || askAhead.focus === s.focus) { askAhead = null; return s.focus; }
+    return askAhead.focus;
+  }
   function askMove(k) {
-    const s = screenAsk(selectedId), d = k - s.focus; if (!s.options.length || !d) return;
+    const s = screenAsk(selectedId), d = k - askFocus(s); if (!s.options.length || !d) return;
     keys(arrowKeys(d));
+    askAhead = { q: s.question, focus: k, at: Date.now() };
+    for (const b of document.querySelectorAll('#conversation .card.ask .choices [data-pick]')) b.classList.toggle('focus', +b.dataset.pick === k);
+    const pane = document.querySelector('#conversation .card.ask .ask-prev'); if (pane) { pane.dataset.focus = k; applyAskHover(); }
     setTimeout(rerender, Math.abs(d) * 70 + 200);
+  }
+  // Several questions: ←/→ (or a click on its step) go to another one, as in the CLI's tab row.
+  function askTab(d) {
+    if (!d || !document.querySelector('#conversation .card.ask .ask-tabs')) return false;
+    keys(Array(Math.abs(d)).fill(d > 0 ? '\x1b[C' : '\x1b[D'));
+    askAhead = null; setTimeout(rerender, Math.abs(d) * 70 + 200); setTimeout(rerender, Math.abs(d) * 70 + 600);
+    return true;
   }
   document.getElementById('conversation').addEventListener('mouseover', (e) => {
     const b = e.target.closest('.card.ask [data-hov]');
@@ -1172,6 +1191,8 @@
   function pickOption(id, k) {
     const o = menuOptions(id)[k];
     if (k < 9 && (o === undefined || oneKey(o))) { api.send({ type: 'termInput', id, data: String(k + 1) }); return true; }
+    // "Type something": your answer goes in the reply box (sending it picks that option, then types it).
+    if (/^type something/i.test(o)) { if (selectedId !== id) focusAgent(id); if (termTab !== 'conversation') switchTermTab('conversation'); document.getElementById('term-order-input').focus(); return false; }
     focusAgent(id); switchTermTab('terminal'); return false; // answer it where it can be answered
   }
 
@@ -1184,6 +1205,8 @@
     if (k && selectedId != null) { if (stillWaiting(selectedId) && menuUp(selectedId)) keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
     const rw = e.target.closest('[data-rw], [data-rwx]'); // rewind card: a point, or Cancel (Esc, as in the CLI)
     if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
+    const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
+    if (tab) { askTab(+tab.dataset.tab - +tab.parentElement.dataset.on); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
     if (pick && selectedId != null) { if ((stillWaiting(selectedId) || screenAsk(selectedId).dialog) && !pick.closest('.picked-card') && pickOption(selectedId, +pick.dataset.pick)) { pick.classList.add('picked'); pick.closest('.card')?.classList.add('picked-card'); } return; }
     const tag = e.target.closest('.imgtag[data-src]'); // an [Image #N] chip opens the image it names
@@ -1229,6 +1252,7 @@
         if (k === n) verView.delete(selectedId); else verView.set(selectedId, { ts: ev._ts || ev.ts, k });
         rerender();
       }
+      else if (act.dataset.act === 'answer') { if (screenAsk(selectedId).options.length) document.getElementById('term-order-input').focus(); else switchTermTab('terminal'); } // your own words, from the reply box
       else if (act.dataset.act === 'undo-turn') undoTurn(evs || [], +act.dataset.from, +act.dataset.to, a);
       else if (act.dataset.act === 'turn-edits') openChanges(evs || [], +act.dataset.from, +act.dataset.to, a);
       else if (act.dataset.act === 'turn-edits-inline') showEditsInline(evs || [], +act.dataset.from, +act.dataset.to);
@@ -1736,5 +1760,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

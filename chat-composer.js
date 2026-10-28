@@ -256,7 +256,7 @@
     if (draftFor === selectedId) return;
     micStop(); // a take belongs to the agent it started on
     if (draftFor != null) drafts.set(draftFor, box().value);
-    box().value = drafts.has(selectedId) ? drafts.get(selectedId) : loadDraft(selectedId); grow(box()); hist = -1; closeAt();
+    { const t = box(); t.value = drafts.has(selectedId) ? drafts.get(selectedId) : loadDraft(selectedId); t.selectionStart = t.selectionEnd = t.value.length; grow(t); } hist = -1; // the caret at the draft's end, to type on closeAt();
     draftFor = selectedId;
   }
   box().addEventListener('input', () => saveDraft());
@@ -340,6 +340,8 @@
     // A question card: ↑/↓ move the selection, Enter picks it, as in the CLI's menu.
     if (tail && tail.querySelector('.card.ask [data-hov]')) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') return chatUi.askStep(e.key === 'ArrowDown' ? 1 : -1);
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return chatUi.askTab(e.key === 'ArrowRight' ? 1 : -1);
+      if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) return chatUi.askTab(e.shiftKey ? -1 : 1); // as in the CLI
       if (e.key === 'Enter' && !e.shiftKey) { const b = tail.querySelector('.card.ask .focus[data-pick]'); if (b) { b.click(); return true; } }
     }
     return false;

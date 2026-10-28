@@ -781,3 +781,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.ask .ask-tabs .ic { width: 14px; height: 14px; fill: none; stroke: var(--green, #2e9e5b); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 :root body #conversation .card.ask .ask-tabs .on { border-color: var(--claude); color: var(--text); font-weight: 600; }
 :root body #conversation .card.ask .ask-tabs .on i { background: var(--claude); color: #fff; }
+/* What's under the menu's rule ("Chat about this") sits apart from the answers */
+:root body #conversation .card.ask .choices button.sep { margin-top: 10px; position: relative; }
+:root body #conversation .card.ask .choices button.sep::before { content: ''; position: absolute; left: 0; right: 0; top: -7px; border-top: 1px solid var(--border); }
+:root body #conversation .card.ask .ask-tabs [data-tab] { cursor: pointer; }
+:root body #conversation .card.ask .ask-tabs [data-tab]:not(.on):hover { background: var(--hover-strong); color: var(--text); }
