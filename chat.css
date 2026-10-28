@@ -736,3 +736,6 @@ body.world-mode #hdr-chat { display: none; }
 /* Scrubbing the prompt rail: the hover list stays out of the way, the dashes take the drag */
 #chat-rail .cr-dashes { touch-action: none; cursor: ns-resize; }
 :root body #chat-rail.scrub .cr-pop { display: none !important; }
+/* An image chip in a message sits centred on the text line (its thumbnail is taller than the text, so baseline alignment lifted it) */
+:root body :is(#conversation, #chat-shell) button.imgtag { vertical-align: middle; line-height: 18px; margin-top: -2px; }
+:root body :is(#conversation, #chat-shell) button.imgtag img { display: block; }
