@@ -362,6 +362,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .agent-steps .as-h { font-size: 11px; color: var(--dim); margin: 2px 0 4px; }
 :root body #conversation button.bgsh { border-style: dashed; }
 :root body #chat-at.slash .at-i span.d { direction: ltr; flex: 1; }
+:root body #chat-at.resume .at-i b { font-family: inherit; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+:root body #chat-at.resume .at-i span { direction: ltr; flex: none; }
 
 /* A background shell's live output */
 #chat-shell { position: absolute; right: 24px; bottom: 120px; z-index: 5; width: min(640px, calc(100% - 48px)); max-height: 50%; display: flex; flex-direction: column; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 12px 40px rgba(0,0,0,.35); animation: chat-in .18s ease-out; }

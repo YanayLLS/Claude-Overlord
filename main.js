@@ -139,7 +139,7 @@ const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
 const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
 const { parseState } = require('./state-core');
-const { scanSessions, mergeRecovered } = require('./recover-core');
+const { scanSessions, mergeRecovered, listSessions } = require('./recover-core');
 const { normalizePasteText } = require('./paste-core');
 const { KBD_SRC, hwndOf, cscPath, kbdExeName, kbdPowershell } = require('./kbd-core');
 const { migrateLegacy } = require('./state-dir');
@@ -1153,6 +1153,15 @@ function chatFiles({ id, cwd, q, seq }) {
     chatFileCache.set(cwd, { at: Date.now(), files });
     reply(files);
   });
+}
+
+// The Chat view's /resume list: the agent's other sessions in its project dir, named as Claude names them
+// (a /rename or ai-title beats the first prompt). The CLI's own picker is a full-screen dialog the chat can't show.
+function chatSessions({ id }) {
+  const a = agents.get(id); if (!a || !a.jsonlFile) return;
+  const list = listSessions(path.dirname(a.jsonlFile), { exclude: path.basename(a.jsonlFile, '.jsonl') })
+    .map(({ file, ...x }) => { const n = readSessionTitle(file); return { ...x, title: n.custom || n.ai || x.title }; });
+  send({ type: 'chatSessions', id, sessions: list });
 }
 
 function getFullTimeline(id) {
@@ -4638,6 +4647,7 @@ function handleIpc(msg) {
     }
     case 'pollClickupNow': armClickupTimer(); break;
     case 'chatFiles': chatFiles(msg); break;
+    case 'chatSessions': chatSessions(msg); break;
     // The Chat view's composer: a screenshot pasted there is saved to a file (as the terminal's Alt+V does) and its path
     // returned; the image goes to the agent only when the prompt is sent, in the place its [Image #N] tag holds.
     case 'saveClipboardImage': {

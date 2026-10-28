@@ -3,7 +3,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { scanSessions, mergeRecovered } = require('./recover-core');
+const { scanSessions, mergeRecovered, listSessions } = require('./recover-core');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'recover-test-'));
 const proj = (slug) => { const d = path.join(root, slug); fs.mkdirSync(d, { recursive: true }); return d; };
@@ -60,6 +60,12 @@ assert.deepStrictEqual(state.settings.bookmarks.map(b => b.name), ['repo']);
 // merging again changes nothing
 assert.strictEqual(mergeRecovered(state, found), 0);
 assert.strictEqual(state.settings.bookmarks.length, 1);
+
+// /resume list: prompt-less transcripts and the current session are left out, titles are the first line
+write(repo, 'eee', [{ type: 'attachment', cwd: 'C:\Work\repo', attachment: { type: 'hook_success', content: ']0;repo' } }]);
+const listed = listSessions(repo, { exclude: 'bbb' }).map(s => [s.id, s.title]);
+assert.deepStrictEqual(listed.sort(), [['aaa', 'fix the login bug'], ['ddd', 'ancient']]);
+assert.strictEqual(listSessions(repo, { max: 1 }).length, 1);
 
 fs.rmSync(root, { recursive: true, force: true });
 console.log('recover-core: all tests passed');

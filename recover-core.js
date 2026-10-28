@@ -77,6 +77,21 @@ function scanSessions(projectsDir, days = 2, now = Date.now()) {
   return [...bySession.values()].sort((a, b) => a.createdAt - b.createdAt);
 }
 
+// One project dir's sessions for the Chat view's /resume list, newest first: only ones with a
+// prompt (a Remote Control link or a never-used agent leaves an empty transcript), capped at `max`.
+function listSessions(dir, { exclude = '', max = 50 } = {}) {
+  let names; try { names = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl') && f !== exclude + '.jsonl'); } catch { return []; }
+  const files = names.map(f => { try { const st = fs.statSync(path.join(dir, f)); return { f, mtime: st.mtimeMs, size: st.size }; } catch { return null; } })
+    .filter(x => x && x.size).sort((a, b) => b.mtime - a.mtime);
+  const out = [];
+  for (const x of files) {
+    if (out.length >= max) break;
+    let p; try { p = scanTranscript(path.join(dir, x.f)).prompt; } catch { continue; }
+    if (p) out.push({ id: path.basename(x.f, '.jsonl'), file: path.join(dir, x.f), title: p.split('\n')[0].slice(0, 120), mtime: x.mtime, size: x.size });
+  }
+  return out;
+}
+
 // Merge recovered sessions into a state blob. Existing agents always win; projects
 // and bookmarks are re-derived from the cwds because they lived in the same lost
 // settings blob. Returns how many agents were added.
@@ -99,4 +114,4 @@ function mergeRecovered(state, sessions) {
   return added.length;
 }
 
-module.exports = { scanSessions, mergeRecovered };
+module.exports = { scanSessions, mergeRecovered, listSessions };

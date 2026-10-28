@@ -4448,6 +4448,7 @@ function handleAgentMsg(msg) {
     }
     case 'timelineData': handleTimelineData(msg); break;
     case 'chatFiles': chatComposer.onFiles(msg); break;
+    case 'chatSessions': chatComposer.onSessions(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;

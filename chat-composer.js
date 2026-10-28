@@ -101,6 +101,7 @@
     const a = atts.get(id), shown = inp.value.trim(), text = expandPastes(inp.value, a).trim(), list = a ? a.list.splice(0) : [];
     if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; }
     if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
+    if (chat() && /^\/resume$/.test(text) && !list.length) { inp.value = '/resume '; resumeCheck(inp); return; } // the CLI's picker is a full-screen dialog: list here
     const held = list.some(x => x.saving);
     if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text); // shows the box as typed (paste chips), matches the full text
     inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt();
@@ -130,8 +131,22 @@
     const rank = (i) => { const n = i.name.toLowerCase(); return n.startsWith(lq) ? 0 : n.includes(lq) ? 1 : (i.desc || '').toLowerCase().includes(lq) ? 2 : -1; };
     return items.map(i => [rank(i), i]).filter(r => r[0] >= 0).sort((a, b) => a[0] - b[0] || a[1].name.length - b[1].name.length).slice(0, 12).map(r => r[1]);
   }
+  // "/resume <filter>": the agent's other sessions, newest first; picking one runs "/resume <id>".
+  const sessions = new Map(); // agent id → [{ id, title, mtime, size }]
+  const resumeHits = (id, q) => (sessions.get(id) || []).filter(x => x.title.toLowerCase().includes(q.toLowerCase()));
+  function resumeCheck(t) {
+    const m = /^\/resume\s+(.*)$/s.exec(t.value);
+    if (!m || !chat()) return false;
+    if (!at || at.kind !== 'resume') api.send({ type: 'chatSessions', id: selectedId });
+    at = { kind: 'resume', start: 0, q: m[1].trim(), files: resumeHits(selectedId, m[1].trim()), sel: 0 }; drawAt();
+    return true;
+  }
+  function onSessions(msg) {
+    sessions.set(msg.id, msg.sessions || []);
+    if (at && at.kind === 'resume' && msg.id === selectedId) { at.files = resumeHits(msg.id, at.q); at.sel = 0; drawAt(); }
+  }
   function onInput(e) {
-    if (!chat()) return;
+    if (!chat() || resumeCheck(e.target)) return;
     const m = atQuery(e.target), a = agents.get(selectedId);
     if (!m || !a) return closeAt();
     at = { kind: m.kind, start: m.start, q: m.q, files: at && at.kind === m.kind ? at.files : [], sel: 0 };
@@ -153,21 +168,25 @@
     const esc = (s) => String(s).replace(/[&<>]/g, '');
     // The typed part of each name is marked, so it's clear why it matched.
     const mark = (name) => { const j = at.q ? name.toLowerCase().indexOf(at.q.toLowerCase()) : -1; return j < 0 ? esc(name) : esc(name.slice(0, j)) + '<mark>' + esc(name.slice(j, j + at.q.length)) + '</mark>' + esc(name.slice(j + at.q.length)); };
+    const size = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
     const row = (f, k) => {
+      if (at.kind === 'resume') return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.title)}</b><span>${fmtTimeAgo(f.mtime)} · ${size(f.size)}</span></div>`;
       if (at.kind === '/') return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>/${mark(f.name)}</b><span class="d">${esc(f.desc || '')}</span></div>`;
       const i = f.lastIndexOf('/'); return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.slice(i + 1))}</b><span>${i > 0 ? esc(f.slice(0, i)) : ''}</span></div>`;
     };
     l.innerHTML = at && at.files.length ? at.files.map(row).join('') : '';
     l.classList.toggle('open', !!(at && at.files.length));
     l.classList.toggle('slash', !!(at && at.kind === '/'));
+    l.classList.toggle('resume', !!(at && at.kind === 'resume'));
     const sel = l.querySelector('.sel'); if (sel) sel.scrollIntoView({ block: 'nearest' });
   }
   function closeAt() { at = null; drawAt(); }
   function pickAt(k) {
     const t = box(), f = at && at.files[k]; if (!f) return closeAt();
+    if (at.kind === 'resume') { api.send({ type: 'termInput', id: selectedId, data: '/resume ' + f.id + '\r' }); t.value = ''; grow(t); return closeAt(); }
     const end = t.selectionStart, ins = at.kind === '/' ? f.insert : '@' + f + ' ';
     t.value = t.value.slice(0, at.start) + ins + t.value.slice(end); t.selectionStart = t.selectionEnd = at.start + ins.length;
-    closeAt(); grow(t); t.focus();
+    closeAt(); grow(t); t.focus(); resumeCheck(t);
   }
 
   // ── Drafts per agent: what you've typed stays with the agent it was for ──
@@ -350,5 +369,5 @@
   box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  window.chatComposer = { send, insert, onKey, onFiles, onSessions, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();
