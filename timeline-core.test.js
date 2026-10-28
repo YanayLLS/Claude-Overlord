@@ -81,3 +81,9 @@ test('a message sent mid-turn with an image (queued_command whose prompt is bloc
   assert.ok(evs[0].text.startsWith('also look at @Briar'));
   assert.strictEqual(evs[0].images.length, 1);
 });
+
+test('a mid-turn message of any shape or sender reads as a prompt; a system note does not', () => {
+  assert.strictEqual(parse({ type: 'attachment', attachment: { type: 'queued_command', prompt: { content: 'from a peer' } } })[0].text, 'from a peer');
+  assert.strictEqual(parse({ type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'teammate' }, prompt: ['plain', ' strings'] } })[0].text, 'plain strings');
+  assert.strictEqual(parse({ type: 'attachment', attachment: { type: 'queued_command', prompt: '<system-reminder>x</system-reminder>' } }), null);
+});

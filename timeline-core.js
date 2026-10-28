@@ -92,10 +92,11 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     }
     // A message typed while the agent was working: delivered mid-turn as an attachment, not a user record.
     // With images pasted, its prompt is a list of blocks (text and images), like a user record's content.
-    if (r.type === 'attachment' && r.attachment?.type === 'queued_command' && r.attachment.origin?.kind === 'human') {
-      const p = r.attachment.prompt;
-      if (typeof p === 'string') return promptEvents(ts, [{ type: 'text', text: p }], isSystemMessage);
-      if (Array.isArray(p)) return promptEvents(ts, p, isSystemMessage);
+    // Any shape, any sender: text, a list of blocks, or an object holding either. System notes still drop out in promptEvents.
+    if (r.type === 'attachment' && r.attachment?.type === 'queued_command' && r.attachment.origin?.kind !== 'agent') { // what the agent queues for itself isn't yours
+      let p = r.attachment.prompt; if (p && !Array.isArray(p) && typeof p === 'object') p = p.content ?? p.text ?? '';
+      const blocks = typeof p === 'string' ? [{ type: 'text', text: p }] : Array.isArray(p) ? p.map(b => typeof b === 'string' ? { type: 'text', text: b } : b).filter(b => b && typeof b === 'object') : [];
+      return blocks.length ? promptEvents(ts, blocks, isSystemMessage) : null;
     }
     // The CLI's permission mode (bypass / accept edits / plan / ask), for the Chat view's mode chip.
     if (r.type === 'permission-mode' && typeof r.permissionMode === 'string') return [{ type: 'mode', ts, mode: r.permissionMode }];
