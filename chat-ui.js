@@ -557,7 +557,6 @@
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
       const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
-      if (a._stopAt && now - a._stopAt < 5000) return h + `<div class="working stopping">${SPARK}<span data-live="v">Stopping…</span></div>`; // Esc lands at once, before the transcript says so
       return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
     }
     return h;
@@ -755,6 +754,10 @@
     // leftover per-call status in the list says.
     // (Covers "resuming" too: it can linger after Overlord reattaches an agent that has since finished.)
     if (evs && (st === 'active' || st === 'settling' || st === 'resuming')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done' || t === 'images') continue; if (t === 'turn' || t === 'interrupt') st = 'waiting'; break; } }
+    // Esc: stopped now, as in the CLI, not when the transcript catches up. Should the agent still be at work 8 s later
+    // (the Esc didn't land), it shows as working again.
+    const stopped = !!(a._stopAt && now - a._stopAt < 8000 && (st === 'active' || st === 'settling' || st === 'resuming'));
+    if (stopped) st = 'waiting';
     const busy = st === 'active' || st === 'resuming';
     const order = document.getElementById('term-order');
     order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
@@ -765,7 +768,10 @@
     else list = blocks(evs, doneBy, a.cwd, id);
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
     dockHtml = ''; dockCount = { agents: 0, shells: 0 };
-    const tail = (evs ? liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) : ''); // queued text waits under the spinner, as in the CLI
+    // Until the transcript writes its own interrupt note for this turn, the chat shows one.
+    const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
+    const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
+    const tail = (evs ? stopNote + liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) : ''); // queued text waits under the spinner, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
