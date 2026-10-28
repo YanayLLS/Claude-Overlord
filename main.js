@@ -512,16 +512,20 @@ function markClear(id) {
 // picked chat's existing JSONL — followPrompts() finds it from the next prompt.
 function markSessionSwitch(id, line) {
   // "/resume <id>" (the Chat view's session list) names the file: Claude appends to it in place, so no new file
-  // shows up to follow. Switch now, reading on from its end; the chat reloads its history.
+  // shows up to follow. Follow it once Claude has really resumed it (the file grows), reading on from there; the chat
+  // reloads its history. Not within 10 s: the CLI never switched, so the agent stays where it is.
   const m = /^\s*\/resume\s+([0-9a-f-]{36})\s*$/i.exec(line || ''), a = agents.get(id);
   const file = m && a && a.jsonlFile && path.join(path.dirname(a.jsonlFile), m[1] + '.jsonl');
   if (file && file !== a.jsonlFile && fs.existsSync(file)) {
-    setTimeout(() => {
-      if (!agents.has(id)) return;
-      let size = 0; try { size = fs.statSync(file).size; } catch {}
+    let start = 0; try { start = fs.statSync(file).size; } catch {}
+    const t0 = Date.now(), look = setInterval(() => {
+      let size = start; try { size = fs.statSync(file).size; } catch {}
+      if (!agents.has(id) || Date.now() - t0 > 10000) return clearInterval(look);
+      if (size <= start) return;
+      clearInterval(look);
       reassignAgentToFile(id, file, size);
       send({ type: 'timelineData', id, events: getFullTimeline(id), reset: true });
-    }, 1500);
+    }, 400);
     return;
   }
   if (sessionSwitchKind(line)) markClear(id);
@@ -2434,6 +2438,8 @@ function reassignAgentToFile(id, newFilePath, startAt = 0) {
   // Switch to new file
   const newSessionId = path.basename(newFilePath, '.jsonl');
   a.sessionId = newSessionId;
+  a.chatHides = []; // what the chat hid belonged to the old session
+  send({ type: 'sessionChanged', id, sessionId: newSessionId }); // the page files drafts and hidden messages by session
   a.jsonlFile = newFilePath;
   a.fileOffset = startAt; // >0: a followed prompt in a long transcript — skip its history (partial first line is dropped)
   a.lineBuffer = '';
@@ -4744,7 +4750,8 @@ function handleIpc(msg) {
     case 'chatHides': { const a = agents.get(msg.id); if (a && Array.isArray(msg.hides)) { a.chatHides = msg.hides.filter(r => r && Number.isFinite(r.from) && Number.isFinite(r.until)).slice(-200).map(r => ({ from: r.from, until: r.until })); saveState(); } break; } // what an edit or Esc took out of the chat // leftover text in an agent's CLI box, in turn with its sends
     case 'dictateStart': dictateStart(); break;
     case 'dictateStop': dictateStop(); break;
-    case 'questPrompt': cliSend.prompt(msg.id, String(msg.text || '').slice(0, 200000), +msg.erase || 0); break; // in turn with the agent's other sends // a quest handed to a running agent lands as one pasted prompt
+    case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); markSessionSwitch(msg.id, text); cliSend.prompt(msg.id, text, +msg.erase || 0); break; } // in turn with the agent's other sends; a /resume or /clear among them is followed
+    case 'cliCancel': cliSend.cancel(msg.id); break; // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;

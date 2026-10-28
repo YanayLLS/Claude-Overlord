@@ -4469,6 +4469,7 @@ function handleAgentMsg(msg) {
     case 'chatFiles': chatComposer.onFiles(msg); break;
     case 'chatSessions': chatComposer.onSessions(msg); break;
     case 'linkTitle': chatUi.onLinkTitle(msg); break;
+    case 'sessionChanged': { const a = agents.get(msg.id); if (a) { a.sessionId = msg.sessionId; a.chatHides = []; } break; } // after /clear or /resume: drafts and hidden messages are this session's
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;

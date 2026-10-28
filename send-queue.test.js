@@ -10,21 +10,33 @@ const { makeSender } = require('./send-queue');
   const send = makeSender({ getTerm: () => term, wait });
   const short = (s) => s.replace('\x1b[200~', '«').replace('\x1b[201~', '»').replace(/\x7f+/, (m) => `⌫${m.length}`).replace('\x05', '^E');
 
-  // Two messages sent back to back (the second while the first is still pasting) arrive whole, one after the other.
+  // Two messages sent back to back (the second while the first is still pasting) arrive whole, one after the other;
+  // a message's images stay where its text put them.
   const long = 'x'.repeat(5000);
-  const a = send.parts(1, [{ text: 'look: ' }, { text: long }, { image: 'C:/s/shot.png' }]);
+  const a = send.parts(1, [{ text: 'compare ' }, { image: 'C:/s/a.png' }, { text: ' with ' + long }, { image: 'C:/s/b.png' }]);
   const b = send.prompt(1, 'second message', 3);
   await Promise.all([a, b]);
   const seq = writes.map(([, s]) => short(s));
-  assert.deepStrictEqual(seq, ['«C:/s/shot.png»', `«look: ${long}»`, '\r', '^E⌫3', '«second message»', '\r'], 'image first, then all the text in one paste, Enter; only then the next message');
-  // Enter waits for a long paste to be taken in
-  const enterAt = writes[2][0], textAt = writes[1][0];
-  assert.ok(enterAt - textAt >= 400, 'a long paste gets time to settle before Enter');
+  assert.deepStrictEqual(seq, ['«compare »', '«C:/s/a.png»', `« with ${long}»`, '«C:/s/b.png»', '\r', '^E⌫3', '«second message»', '\r'], 'in order, whole, one message at a time');
+  // the long paste settles before the next paste lands on it
+  assert.ok(writes[3][0] - writes[2][0] >= 400, 'a long paste gets time to settle before the image after it');
 
   // Different agents don't wait on each other.
   writes.length = 0;
   await Promise.all([send.prompt(2, 'to two'), send.prompt(3, 'to three')]);
   assert.strictEqual(writes.filter(([, s]) => s === '\r').length, 2);
+
+  // Esc: what's still waiting is dropped, one being pasted is never submitted; later sends go as usual.
+  writes.length = 0;
+  const first = send.parts(4, [{ text: 'being pasted' }, { image: 'C:/s/c.png' }]);
+  const waiting = send.prompt(4, 'still waiting');
+  send.cancel(4);
+  const after = send.prompt(4, 'sent after Esc');
+  await Promise.all([first, waiting, after]);
+  const s4 = writes.map(([, s]) => short(s));
+  assert.ok(!s4.includes('«still waiting»'), 'a waiting message is dropped');
+  assert.deepStrictEqual(s4.filter(s => s === '\r').length, 1, 'only the message sent after Esc is submitted');
+  assert.ok(s4.includes('«sent after Esc»'));
 
   // A send that throws doesn't block the ones after it.
   const bad = makeSender({ getTerm: (id) => (id === 9 ? { write: () => { throw new Error('pty gone'); } } : term), wait });

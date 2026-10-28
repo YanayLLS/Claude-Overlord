@@ -125,7 +125,7 @@
     const ask = chat() && !list.length ? chatUi.askState() : null;
     if (ask && ask.dialog && ask.options.length >= 2 && !/^\d$/.test(text)) {
       const free = ask.options.findIndex(o => /^(type something|other)\b/i.test(o.label));
-      if (free >= 0 && free < 9) { api.send({ type: 'termInput', id, data: String(free + 1) }); setTimeout(() => deliver(id, text, list), 400); }
+      if (free >= 0 && free < 9) { chatUi.dropPending(id); api.send({ type: 'termInput', id, data: String(free + 1) }); setTimeout(() => deliver(id, text, list), 400); } // an answer, not a message: no bubble waiting for it
       else { api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => deliver(id, text, list), 600); }
       return;
     }
@@ -218,7 +218,7 @@
   function closeAt() { at = null; drawAt(); }
   function pickAt(k) {
     const t = box(), f = at && at.files[k]; if (!f) return closeAt();
-    if (at.kind === 'resume') { api.send({ type: 'termInput', id: selectedId, data: '/resume ' + f.id + '\r' }); t.value = ''; grow(t); return closeAt(); }
+    if (at.kind === 'resume') { sendText(selectedId, '/resume ' + f.id); t.value = ''; grow(t); return closeAt(); } // in turn with the agent's other sends, leftover box text erased first
     const end = t.selectionStart, ins = at.kind === '/' ? f.insert : '@' + f + ' ';
     t.value = t.value.slice(0, at.start) + ins + t.value.slice(end); t.selectionStart = t.selectionEnd = at.start + ins.length;
     closeAt(); grow(t); t.focus(); resumeCheck(t);
@@ -269,6 +269,7 @@
     const ag = agents.get(id); if (order().classList.contains('busy') || (ag && /^(active|resuming|settling|permission|question)$/.test(ag.status || ''))) return;
     if (from === 'conversation' && to === 'terminal') {
       const a = atts.get(id); if (a && a.list.length) return;
+      if (screenDialog(bufferRows(x.terminal.buffer.active, 40))) return; // a dialog is up: the draft would be typed into it
       const v = expandLinks(expandPastes(t.value, a), a); if (!v.trim()) return;
       api.send({ type: 'termInput', id, data: '\x1b[200~' + v.replace(/\r\n?/g, '\n') + '\x1b[201~' });
       t.value = ''; drafts.set(id, ''); if (a) { a.pastes = []; a.files = []; a.links = []; } grow(t); drawAtt(); saveDraft(id);
@@ -278,6 +279,7 @@
       if (screenDialog(rows)) return; // a dialog is up: its Ctrl+C would cancel it
       const v = readPromptBox(x.terminal);
       if (!v || !v.trim() || /^Try "/.test(v) || /^\d+\.\s/.test(v)) return; // the box's own hint, or a dialog's option
+      if (/\[(Pasted text|Image) #\d+/.test(v)) return; // a paste or image only the CLI holds: its placeholder alone would be sent
       t.value = v; drafts.set(id, v); grow(t); saveDraft(id);
       api.send({ type: 'termInput', id, data: '\x03' }); // Ctrl+C with text in the box clears it, as in the CLI
     }

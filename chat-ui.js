@@ -93,7 +93,7 @@
     if (d <= base) d.setDate(d.getDate() + 1);
     return d.getTime();
   }
-  const autoRetry = new Set(); let retryTimer = null; // reset times the user asked to retry at
+  const autoRetry = new Set(); let retryTimer = null; // "agentId:resetTime" the user asked to retry at
   const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
   const clock = (ts) => { try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
 
@@ -310,7 +310,6 @@
     const rw = await until(() => screenRewind(id)); if (!rw) return fail("Couldn't open rewind");
     const head = String(ev.text || '').replace(/\s+/g, ' ').trim().slice(0, 30).toLowerCase();
     let j = -1; for (let q = rw.items.length - 1; q >= 0; q--) if (rw.items[q].label.replace(/\s+/g, ' ').toLowerCase().startsWith(head.slice(0, Math.min(head.length, rw.items[q].label.length)))) { j = q; break; }
-    if (j < 0) j = rw.items.length - 2;
     if (j < 0) return fail("Couldn't find that message");
     for (const k of arrowKeys(j - rw.focus)) { api.send({ type: 'termInput', id, data: k }); await wait(70); }
     api.send({ type: 'termInput', id, data: '\r' });
@@ -568,6 +567,7 @@
   // Several can wait at once (each prompt you send while the agent works); each queued one has ✕ to take it back.
   const pending = new Map(); // agent id → [{ text, imgs, at, held, busyAt }]
   const norm = (s) => String(s || '').replace(/\[Image #\d+\]/g, ' ').replace(/\s+/g, ' ').trim();
+  const usedPrompts = new Map(); // agent id → the transcript messages (by time) that already cleared a bubble
   function pendingHtml(id, evs, busy) {
     const list = pending.get(id); if (!list || !list.length) return '';
     // Each message sent from here becomes the next message of yours in the transcript, in the order sent, so they clear
@@ -575,13 +575,16 @@
     // text (its own image numbers, a long paste's wrapper, text left in its box…). Matching the text broke on each of those.
     // One still being attached isn't sent yet. A message sent while the agent works can wait in the CLI's queue until the
     // turn ends, so a leftover only expires once the agent has been idle a while without it showing up.
-    const yours = evs.filter(e => (e.type === 'prompt' || e.type === 'command') && e.ts).map(e => Date.parse(e.ts)).sort((x, y) => x - y);
+    // A message of yours in the transcript clears one bubble only, ever: one that already cleared a bubble on an earlier
+    // redraw can't clear the next one too.
+    const used = usedPrompts.get(id) || new Set(); usedPrompts.set(id, used);
+    const yours = evs.filter(e => (e.type === 'prompt' || e.type === 'command') && e.ts && !used.has(e.ts)).map(e => e.ts).sort((x, y) => Date.parse(x) - Date.parse(y));
     let j = 0;
     for (const p of [...list].sort((x, y) => x.at - y.at)) {
       if (busy) p.busyAt = Date.now();
       if (p.held) continue;
-      while (j < yours.length && yours[j] < p.at - 2000) j++;
-      if (j < yours.length) { j++; list.splice(list.indexOf(p), 1); continue; }
+      while (j < yours.length && Date.parse(yours[j]) < p.at - 500) j++;
+      if (j < yours.length) { used.add(yours[j]); j++; list.splice(list.indexOf(p), 1); continue; }
       if (!busy && Date.now() - (p.busyAt || p.at) > 30000) list.splice(list.indexOf(p), 1);
     }
     return list.map((p, k) => {
@@ -603,11 +606,14 @@
     api.send({ type: 'termInput', id, data: '\x1b[A' }); await wait(350);
     const got = box();
     if (!got) return showToast('Already delivered to the agent');
-    if (!got.includes(norm(p.text))) { api.send({ type: 'termInput', id, data: '\x03' }); return showToast('Already delivered to the agent'); } // ↑ recalled history instead: clear it
-    api.send({ type: 'termInput', id, data: '\x03' }); await wait(250);
+    // What was really sent (not the box as typed, with its chips), by its start: a long one shows in the CLI as a
+    // "[Pasted text]" placeholder. Cleared with Backspace: the agent is working, and Ctrl+C would stop it.
+    const sentOf = (o) => o.match || o.text, head = (o) => norm(sentOf(o)).slice(0, 24), erase = () => api.send({ type: 'termInput', id, data: '\x05' + '\x7f'.repeat(got.length + 40) });
+    if (!got.includes(head(p)) && !/\[Pasted text/.test(got)) { erase(); return showToast('Already delivered to the agent'); } // ↑ recalled history instead: clear it
+    erase(); await wait(250);
     if (box()) return showToast("Couldn't clear the agent's prompt; check the terminal");
     list.splice(k, 1);
-    for (const o of list) if (!o.held && o.text && got.includes(norm(o.text))) { chatComposer.sendText(id, o.text); await wait(400); } // the rest go back in the queue
+    for (const o of list) if (!o.held && sentOf(o) && (got.includes(head(o)) || /\[Pasted text/.test(got))) { chatComposer.sendText(id, sentOf(o)); await wait(400); } // the rest go back in the queue
     rerender();
   }
 
@@ -831,8 +837,8 @@
     // Usage-limit cards: the countdown, Retry held until the reset, and the retry the user asked for once it's passed.
     for (const s of thread.querySelectorAll('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
     for (const b of thread.querySelectorAll('button[data-reset]')) b.disabled = +b.dataset.reset > now;
-    for (const c of thread.querySelectorAll('input[data-autoretry]')) c.checked = autoRetry.has(+c.dataset.autoretry);
-    for (const at of [...autoRetry]) if (at <= now) { autoRetry.delete(at); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); }
+    for (const c of thread.querySelectorAll('input[data-autoretry]')) c.checked = autoRetry.has(id + ':' + c.dataset.autoretry);
+    for (const key of [...autoRetry]) { const [aid, at] = key.split(':').map(Number); if (aid !== id || at > now) continue; autoRetry.delete(key); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); } // only this agent's: each agent remembers its own
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
     drawDiagrams(el);
@@ -974,31 +980,39 @@
   // Stop the turn: Esc to the CLI, and the chat says so at once instead of waiting for the transcript.
   function stop(revert = true) {
     const id = selectedId, a = agents.get(id); if (!a) return;
-    a._stopAt = Date.now(); keys(['\x1b']);
+    a._stopAt = Date.now();
+    api.send({ type: 'cliCancel', id }); // what main hasn't handed the CLI yet stays here, never sent behind Esc
+    keys(['\x1b']);
     if (!revert) { a._reverted = Date.now(); return rerender(); } // editing stops the turn itself: its new message stays, no "Interrupted"
-    // Esc before Claude answered anything (no text, no call since your message): as in the CLI, the message comes back
-    // to the box and leaves the thread. The CLI puts it back in its own box too: that's cleared once it has, or it
-    // would ride along with the next message sent from here.
+    // Esc before Claude answered: as in the CLI, your messages come back to the box and leave the thread. Messages still
+    // on their way come back at once. One the CLI already has comes back only if the CLI itself put it back in its box
+    // (it does when nothing was answered yet); that box is then cleared, or it would ride along with the next send.
     const evs = visibleEvs(a, worldTl && worldTl.id === id ? worldTl.events : []), pend = pending.get(id) || [];
     let k = evs.length - 1; while (k >= 0 && /^(mode|images|interrupt)$/.test(evs[k].type)) k--;
-    const last = evs[k]; let text = '', restoreAll = null;
+    const last = evs[k], lastMine = last && (last.type === 'prompt' || last.type === 'command') && last.ts && Date.now() - Date.parse(last.ts) < 120000 && !screenReply(id, evs) ? last : null;
     const back = pend.filter(p => !p.held);
-    if (back.length) { pending.set(id, pend.filter(p => p.held)); if (back.length === 1 && back[0].restore) restoreAll = back[0].restore; else text = back.map(p => p.match || p.text).join('\n\n'); }
-    else if (last && (last.type === 'prompt' || last.type === 'command') && last.ts && Date.now() - Date.parse(last.ts) < 120000) {
-      text = last.text;
-      setHides(a, [...hidesOf(a), { from: Date.parse(last.ts), until: Date.now() + 1000 }]);
+    if (back.length) {
+      pending.set(id, pend.filter(p => p.held)); a._reverted = Date.now();
+      if (back.length === 1 && back[0].restore && !lastMine) chatComposer.restoreDraft(id, back[0].restore);
+      else appendDraft(id, back.map(p => p.match || p.text).join('\n\n'));
     }
-    if (text || restoreAll) {
+    if (lastMine) setTimeout(() => {
+      // the CLI put it back in its box: it's not in the conversation any more
+      const x = typeof xterms !== 'undefined' && xterms.get(id), inBox = x && typeof readPromptBox === 'function' ? readPromptBox(x.terminal) : '';
+      const head = String(lastMine.text || '').replace(/\s+/g, ' ').trim().slice(0, 24).toLowerCase();
+      if (!head || !inBox.replace(/\s+/g, ' ').toLowerCase().includes(head)) return rerender();
       a._reverted = Date.now();
-      const box = document.getElementById('term-order-input');
-      if (restoreAll) chatComposer.restoreDraft(id, restoreAll);
-      else chatComposer.setDraft(id, box.value.trim() ? box.value.replace(/\s*$/, '\n') + text : text);
-      setTimeout(() => {
-        chatComposer.clearCliBox(id);
-      }, 800);
-    }
+      setHides(a, [...hidesOf(a), { from: Date.parse(lastMine.ts), until: Date.now() }]);
+      // before anything still on its way, in the order you sent them
+      const box = id === selectedId ? document.getElementById('term-order-input').value : '';
+      chatComposer.setDraft(id, box.trim() ? lastMine.text + '\n\n' + box : lastMine.text);
+      chatComposer.clearCliBox(id); rerender();
+    }, 700);
+    else if (back.length) setTimeout(() => chatComposer.clearCliBox(id), 700);
     rerender();
   }
+  // Text into an agent's reply box, after what's already there.
+  function appendDraft(id, text) { const box = document.getElementById('term-order-input'), cur = id === selectedId ? box.value : ''; chatComposer.setDraft(id, cur.trim() ? cur.replace(/\s*$/, '\n') + text : text); }
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
   // Option k of an open question: its number key, as in the terminal, so it lands wherever the CLI's cursor sits.
   // A multi-select box ("[ ] Postgres") only toggles and "Type something" waits for typing: those go to the terminal.
@@ -1025,7 +1039,7 @@
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
     if (img) { lightbox(img.src); return; }
     const ar = e.target.closest('input[data-autoretry]'); // "Retry when it resets"
-    if (ar) { const at = +ar.dataset.autoretry; ar.checked ? autoRetry.add(at) : autoRetry.delete(at); rerender(); return; }
+    if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; ar.checked ? autoRetry.add(key) : autoRetry.delete(key); rerender(); return; }
     const uq = e.target.closest('[data-unqueue]'); // ✕ on a queued prompt: take it back, the agent keeps working
     if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
     const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
@@ -1558,5 +1572,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
