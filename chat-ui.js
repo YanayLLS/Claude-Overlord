@@ -997,7 +997,11 @@
       // Editing stops the turn itself: its new message stays (the last one waiting), no "Interrupted". Earlier ones main
       // had not handed over yet were just cancelled: they come back to the box, never lost.
       const pend = pending.get(id) || [], keep = pend[pend.length - 1], others = pend.slice(0, -1).filter(p => !p.held);
-      if (others.length) { pending.set(id, pend.filter(p => p.held || p === keep)); appendDraft(id, others.map(p => p.match || p.text).join('\n\n')); }
+      if (others.length) {
+        pending.set(id, pend.filter(p => p.held || p === keep));
+        if (others.length === 1 && others[0].restore) chatComposer.restoreDraft(id, others[0].restore); // whole, images and all
+        else appendDraft(id, others.map(p => p.match || p.text).join('\n\n'));
+      }
       a._reverted = Date.now(); return rerender();
     }
     // Esc before Claude answered: as in the CLI, your messages come back to the box and leave the thread. Messages still
@@ -1020,11 +1024,13 @@
       const head = String(lastMine.text || '').replace(/\s+/g, ' ').trim().slice(0, 24).toLowerCase();
       const back2 = inBox.replace(/\s+/g, ' ').toLowerCase().includes(head) || (/^\s*\[Pasted text #\d+/.test(inBox) && String(lastMine.text || '').length > 200);
       if (!head || !back2) return rerender();
+      // its [Image #N] tags are the CLI's, not pictures this box holds: out, or they'd take the restored message's images
+      const mine = String(lastMine.text || '').replace(/\[Image #\d+\]\s*/g, '').trim();
+      if (!mine) return rerender(); // only an image: the CLI's box is all that still holds it, so it stays there and in the thread
       a._reverted = Date.now();
       setHides(a, [...hidesOf(a), { from: Date.parse(lastMine.ts), until: Date.now() }]);
       // in front of what's in that agent's box (anything still on its way, or what you've typed since), whichever agent is on screen
-      // its [Image #N] tags are the CLI's, not pictures this box holds: out, or they'd take the restored message's images
-      const cur = chatComposer.getDraft(id), mine = String(lastMine.text || '').replace(/\[Image #\d+\]\s*/g, '').trim();
+      const cur = chatComposer.getDraft(id);
       chatComposer.setDraft(id, cur.trim() ? mine + '\n\n' + cur : mine);
       chatComposer.clearCliBox(id); rerender();
     });
