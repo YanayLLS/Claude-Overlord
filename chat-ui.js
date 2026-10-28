@@ -518,8 +518,11 @@
     const fresh = el.dataset.for !== String(id) || !thread;
     if (fresh && window.chatComposer) chatComposer.drawAtt(); // another agent: its own pending images
     if (fresh && el._agent != null && el._agent !== id) onAgentSwitch(); el._agent = id;
-    if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); }
-    const stuck = !fresh && !jumpOnce && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
+    if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); el._shown = null; }
+    // The history landing after the loading spinner is opening the chat too: always at the bottom, nothing slides in
+    // (else the last reply counted as "just arrived" and a long one parked you at its first line).
+    const opening = fresh || (!!evs && el._shown !== id); if (evs) el._shown = id;
+    const stuck = !opening && !jumpOnce && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
     const old = el._blocks || [];
     let newReply = null;
     for (let k = 0; k < list.length; k++) {
@@ -528,7 +531,7 @@
       const node = tmp.firstElementChild || document.createElement('div');
       const cur = thread.children[k];
       if (cur) { keepOpen(cur, node); cur.replaceWith(node); }
-      else { if (!fresh) node.classList.add('enter'); if (!fresh && node.classList.contains('turnfoot') && prevBusy.get(id)) node.classList.add('landed'); thread.appendChild(node); if (!fresh && node.classList.contains('ai')) newReply = node; }
+      else { if (!opening) node.classList.add('enter'); if (!opening && node.classList.contains('turnfoot') && prevBusy.get(id)) node.classList.add('landed'); thread.appendChild(node); if (!opening && node.classList.contains('ai')) newReply = node; }
     }
     while (thread.children.length > list.length) thread.lastElementChild.remove();
     el._blocks = list;
