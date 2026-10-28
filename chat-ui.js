@@ -306,6 +306,30 @@
     for (let i = first - 1; i >= 0 && i >= first - 12; i--) { const t = cut(rows[i]); if (!t) { if (q.length) break; continue; } if (/[←→]|^\[[ x✓]?\]|^[☐☑✔]/.test(t)) break; q.unshift(t); }
     return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && dialog };
   }
+  // The CLI's rewind list (Esc Esc): each earlier prompt, the change made after it ("2 files changed +83") and which
+  // one is selected. null when it isn't on screen.
+  function screenRewind(id) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active; if (!b) return null;
+    const rows = []; for (let i = Math.max(0, b.length - 60); i < b.length; i++) rows.push(b.getLine(i)?.translateToString(true) || '');
+    let i0 = -1; for (let i = rows.length - 1; i >= 0; i--) if (/^\s*Rewind\s*$/.test(rows[i])) { i0 = i; break; }
+    if (i0 < 0 || !screenDialog(rows)) return null;
+    const items = []; let focus = -1;
+    for (const r of rows.slice(i0 + 1)) {
+      if (!r.trim() || /^\s*Restore the code/i.test(r)) continue;
+      if (/\besc to (cancel|exit)/i.test(r)) break;
+      const on = /^\s*❯\s/.test(r), t = r.replace(/^\s*❯?\s*/, '').trim(), last = items[items.length - 1];
+      if (!on && last && !last.meta && /^(\d+ files? changed|\S+\.\w+)(\s+[+-]\d+)+$/.test(t)) { last.meta = t; continue; }
+      if (on) focus = items.length;
+      items.push({ label: t, meta: '' });
+    }
+    return items.length ? { items, focus: Math.max(0, focus) } : null;
+  }
+  function rewindHtml(rw) {
+    return `<div class="card ask rewind"><div class="card-h">${ICON.undo || ICON.ask}<span>Rewind to before…</span></div><div class="choices">${rw.items.map((it, k) => `<button type="button" data-rw="${k}" class="${k === rw.focus ? 'focus' : ''}"><span class="ch-t"><b>${escH(it.label === '(current)' ? 'Now (keep everything)' : it.label)}</b>${it.meta ? `<small>${escH(it.meta)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-rwx="1"><span>Cancel</span></button></div></div>`;
+  }
+  // Pick rewind point k: the CLI's selection moves there, then Enter (its next menu, what to restore, is a question card).
+  function rewindPick(k) { const rw = screenRewind(selectedId); if (!rw) return; const d = k - rw.focus; keys([...Array(Math.abs(d)).fill(d > 0 ? '\x1b[B' : '\x1b[A'), '\r']); setTimeout(rerender, Math.abs(d) * 70 + 400); }
+  function rewindStep(d) { const rw = screenRewind(selectedId); if (!rw) return false; keys([d > 0 ? '\x1b[B' : '\x1b[A']); setTimeout(rerender, 200); return true; }
   // A proposed plan waiting for approval: the plan itself, rendered, and the CLI's own choices as buttons.
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
@@ -450,7 +474,7 @@
       + bg.map(e => { const a2 = e.args || {};
         return `<button type="button" role="menuitem" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
     // A menu on the CLI's screen that main didn't flag (a question with previews, say): still a question card, not the raw terminal.
-    if (!perm) { const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + askHtml(null, null); }
+    if (!perm) { const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw); const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + askHtml(null, null); }
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${escH(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -862,6 +886,8 @@
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
     // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
     if (k && selectedId != null) { if (stillWaiting(selectedId)) keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
+    const rw = e.target.closest('[data-rw], [data-rwx]'); // rewind card: a point, or Cancel (Esc, as in the CLI)
+    if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
     if (pick && selectedId != null) { if ((stillWaiting(selectedId) || screenAsk(selectedId).dialog) && !pick.closest('.picked-card') && pickOption(selectedId, +pick.dataset.pick)) { pick.classList.add('picked'); pick.closest('.card')?.classList.add('picked-card'); } return; }
     const tag = e.target.closest('.imgtag[data-src]'); // an [Image #N] chip opens the image it names
@@ -1335,7 +1361,7 @@
   }
   // ── A CLI dialog the chat has no card for (double-Esc rewind, /config, /model, /permissions, /mcp…): the real terminal
   // floats over the chat while it's up, keys going to it, and goes away when the dialog closes. ──
-  let peekOff = 0;
+  let peekOff = 0, screenSig = '';
   const screenRows = (x, n) => { const b = x.terminal.buffer.active, out = []; for (let y = Math.max(0, b.length - n); y < b.length; y++) { const l = b.getLine(y); if (l) out.push(l.translateToString(true)); } return out; };
   function peek(on) {
     const t = document.getElementById('term'), tc = document.getElementById('term-container'); if (!t || t.classList.contains('peek') === on) return;
@@ -1346,7 +1372,14 @@
   setInterval(() => {
     const t = document.getElementById('term'), cv = document.getElementById('conversation');
     const x = selectedId != null && typeof xterms !== 'undefined' && xterms.get(selectedId);
-    const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)) && screenAsk(selectedId).options.length < 2); // a question menu gets its card instead
+    // A card drawn from the screen (a question, the rewind list) follows it even while the agent is idle and nothing
+    // else repaints: redraw whenever what it shows changed.
+    if (x && termTab === 'conversation' && cv && cv.classList.contains('open')) {
+      const sa = screenAsk(selectedId), rw = screenRewind(selectedId);
+      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length]);
+      if (sig !== screenSig) { screenSig = sig; rerender(); }
+    }
+    const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)) && screenAsk(selectedId).options.length < 2 && !screenRewind(selectedId)); // a question menu gets its card instead
     if (up) { peekOff = 0; peek(true); return; }
     if (t && t.classList.contains('peek') && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
     peek(false);
@@ -1356,5 +1389,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) ag._stopAt = 0; jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) ag._stopAt = 0; jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
