@@ -38,6 +38,22 @@ const { makeSender } = require('./send-queue');
   assert.deepStrictEqual(s4.filter(s => s === '\r').length, 1, 'only the message sent after Esc is submitted');
   assert.ok(s4.includes('«sent after Esc»'));
 
+  // Esc while a long paste is still going in, piece by piece: the Esc lands after its last piece, never inside it;
+  // the cancelled message isn't submitted and its /clear isn't acted on, the next one's is.
+  writes.length = 0;
+  const pieces = [];
+  const chunky = makeSender({ getTerm: () => ({ write: (s) => pieces.push(s) }), wait, writeChunked: async (t, s) => { for (let i = 0; i < s.length; i += 1024) { t.write(s.slice(i, i + 1024)); await wait(8); } } });
+  const acted = [];
+  const big = chunky.prompt(5, '/clear ' + 'y'.repeat(4000), 0, () => acted.push('first'));
+  await null; await null; // the paste has started
+  chunky.cancel(5);
+  const next = chunky.prompt(5, '/clear', 0, () => acted.push('second'));
+  await Promise.all([big, next]); await new Promise(r => setTimeout(r, 0));
+  const escAt = pieces.indexOf('\x1b'), lastPiece = pieces.findIndex(p => p.includes('\x1b[201~'));
+  assert.ok(lastPiece >= 0 && escAt > lastPiece, 'the Esc comes after the whole paste');
+  assert.ok(pieces.slice(0, lastPiece).length >= 3, 'the first message really was mid-paste (several pieces) when Esc came');
+  assert.deepStrictEqual(acted, ['second'], 'only a message really sent has its command acted on');
+
   // A send that throws doesn't block the ones after it.
   const bad = makeSender({ getTerm: (id) => (id === 9 ? { write: () => { throw new Error('pty gone'); } } : term), wait });
   writes.length = 0;

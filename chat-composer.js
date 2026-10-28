@@ -295,6 +295,8 @@
     a.links = r.links.slice();
     setDraft(id, r.shown); drawAtt();
   }
+  // An agent's draft, on screen or not.
+  const getDraft = (id) => (id === draftFor ? box().value : drafts.get(id) || '');
   function setDraft(id, text) {
     drafts.set(id, text);
     if (draftFor === id) { const t = box(); t.value = text; grow(t); t.focus(); t.selectionStart = t.selectionEnd = text.length; }
@@ -535,5 +537,5 @@
   box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, getDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();

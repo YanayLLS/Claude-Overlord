@@ -613,7 +613,15 @@
     erase(); await wait(250);
     if (box()) return showToast("Couldn't clear the agent's prompt; check the terminal");
     list.splice(k, 1);
-    for (const o of list) if (!o.held && sentOf(o) && (got.includes(head(o)) || /\[Pasted text/.test(got))) { chatComposer.sendText(id, sentOf(o)); await wait(400); } // the rest go back in the queue
+    // The rest go back in the queue: only ones the CLI really had (by their start, or one "[Pasted text]" placeholder each
+    // for a long one: only long text is collapsed), with their images. Ones still waiting in main's queue weren't
+    // touched and go on their own.
+    let placeholders = (got.match(/\[Pasted text #\d+/g) || []).length;
+    for (const o of list) {
+      if (o.held || !sentOf(o)) continue;
+      const had = got.includes(head(o)) || (sentOf(o).length > 800 && placeholders > 0 && placeholders--);
+      if (had) { chatComposer.sendText(id, sentOf(o), (o.restore && o.restore.list) || []); await wait(400); }
+    }
     rerender();
   }
 
@@ -981,8 +989,9 @@
   function stop(revert = true) {
     const id = selectedId, a = agents.get(id); if (!a) return;
     a._stopAt = Date.now();
-    api.send({ type: 'cliCancel', id }); // what main hasn't handed the CLI yet stays here, never sent behind Esc
-    keys(['\x1b']);
+    // Main stops what it hasn't handed the CLI yet, then sends the Esc once no paste is half-written (straight to the
+    // CLI it could land inside a long paste as text).
+    api.send({ type: 'cliCancel', id });
     if (!revert) { a._reverted = Date.now(); return rerender(); } // editing stops the turn itself: its new message stays, no "Interrupted"
     // Esc before Claude answered: as in the CLI, your messages come back to the box and leave the thread. Messages still
     // on their way come back at once. One the CLI already has comes back only if the CLI itself put it back in its box
@@ -993,19 +1002,22 @@
     const back = pend.filter(p => !p.held);
     if (back.length) {
       pending.set(id, pend.filter(p => p.held)); a._reverted = Date.now();
-      if (back.length === 1 && back[0].restore && !lastMine) chatComposer.restoreDraft(id, back[0].restore);
+      // one comes back whole (images, pasted texts, files, links); several as their text, in order
+      if (back.length === 1 && back[0].restore) chatComposer.restoreDraft(id, back[0].restore);
       else appendDraft(id, back.map(p => p.match || p.text).join('\n\n'));
     }
-    if (lastMine) setTimeout(() => {
-      // the CLI put it back in its box: it's not in the conversation any more
+    if (lastMine && !a._takeBack) a._takeBack = setTimeout(() => { // one check per Esc burst: a second Esc doesn't take it back twice
+      a._takeBack = null;
+      // the CLI put it back in its box (as itself, or as its "[Pasted text]" placeholder when long): it's out of the conversation
       const x = typeof xterms !== 'undefined' && xterms.get(id), inBox = x && typeof readPromptBox === 'function' ? readPromptBox(x.terminal) : '';
       const head = String(lastMine.text || '').replace(/\s+/g, ' ').trim().slice(0, 24).toLowerCase();
-      if (!head || !inBox.replace(/\s+/g, ' ').toLowerCase().includes(head)) return rerender();
+      const back2 = inBox.replace(/\s+/g, ' ').toLowerCase().includes(head) || (/^\s*\[Pasted text #\d+/.test(inBox) && String(lastMine.text || '').length > 200);
+      if (!head || !back2) return rerender();
       a._reverted = Date.now();
       setHides(a, [...hidesOf(a), { from: Date.parse(lastMine.ts), until: Date.now() }]);
-      // before anything still on its way, in the order you sent them
-      const box = id === selectedId ? document.getElementById('term-order-input').value : '';
-      chatComposer.setDraft(id, box.trim() ? lastMine.text + '\n\n' + box : lastMine.text);
+      // in front of what's in that agent's box (anything still on its way, or what you've typed since), whichever agent is on screen
+      const cur = chatComposer.getDraft(id);
+      chatComposer.setDraft(id, cur.trim() ? lastMine.text + '\n\n' + cur : lastMine.text);
       chatComposer.clearCliBox(id); rerender();
     }, 700);
     else if (back.length) setTimeout(() => chatComposer.clearCliBox(id), 700);

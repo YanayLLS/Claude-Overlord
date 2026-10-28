@@ -3918,15 +3918,18 @@ function sendCatalog(cwd) {
   send({ type: 'catalog', cwd, items });
 }
 
+// Resolves once the last piece is written (the send queue sends Esc only after a paste is fully in).
 function writePtyChunked(proc, data, chunkSize = 1024) {
-  if (data.length <= chunkSize) { proc.write(data); return; }
-  let offset = 0;
-  (function next() {
-    if (offset >= data.length) return;
-    proc.write(data.slice(offset, offset + chunkSize));
-    offset += chunkSize;
-    if (offset < data.length) setTimeout(next, 8);
-  })();
+  return new Promise((resolve) => {
+    if (data.length <= chunkSize) { proc.write(data); return resolve(); }
+    let offset = 0;
+    (function next() {
+      if (offset >= data.length) return resolve();
+      proc.write(data.slice(offset, offset + chunkSize));
+      offset += chunkSize;
+      if (offset < data.length) setTimeout(next, 8); else resolve();
+    })();
+  });
 }
 
 function savePasteToFile(content) {
@@ -4750,8 +4753,8 @@ function handleIpc(msg) {
     case 'chatHides': { const a = agents.get(msg.id); if (a && Array.isArray(msg.hides)) { a.chatHides = msg.hides.filter(r => r && Number.isFinite(r.from) && Number.isFinite(r.until)).slice(-200).map(r => ({ from: r.from, until: r.until })); saveState(); } break; } // what an edit or Esc took out of the chat // leftover text in an agent's CLI box, in turn with its sends
     case 'dictateStart': dictateStart(); break;
     case 'dictateStop': dictateStop(); break;
-    case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); markSessionSwitch(msg.id, text); cliSend.prompt(msg.id, text, +msg.erase || 0); break; } // in turn with the agent's other sends; a /resume or /clear among them is followed
-    case 'cliCancel': cliSend.cancel(msg.id); break; // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
+    case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); cliSend.prompt(msg.id, text, +msg.erase || 0, () => markSessionSwitch(msg.id, text)); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
+    case 'cliCancel': cliSend.cancel(msg.id, msg.esc !== false); break; // Esc: stops the sends, then the Esc itself once no paste is half-written // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
