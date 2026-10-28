@@ -4303,8 +4303,7 @@ function handleAgentMsg(msg) {
             _doneTimers.delete(msg.id);
             if (a.status === 'waiting') {
         // Finished while you were looking elsewhere: a dot on its card until you open it, and (in the Chat view) a toast that jumps there.
-        if (msg.status === 'waiting' && was === 'active' && msg.id !== selectedId) { a.unread = true; if (termTab === 'conversation' && !worldView) chatUi.doneToast(msg.id, a.preview ? String(a.preview).split(/?
-/)[0].slice(0, 120) : ''); } // in the agent list, with the other agent toasts
+        if (msg.status === 'waiting' && was === 'active' && msg.id !== selectedId) { a.unread = true; if (termTab === 'conversation' && !worldView) chatUi.maybeDone(msg.id); } // in the agent list, and only once it has really finished
               a.doneConfirmed = true;
               playChime();
               flashAgentCard(msg.id);

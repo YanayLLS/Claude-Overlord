@@ -1251,6 +1251,19 @@
     toasts.prepend(el); placeToasts();
     setTimeout(() => { if (el.isConnected) { el.classList.add('done'); setTimeout(() => { el.remove(); placeToasts(); }, 300); } }, 6000);
   }
+  // Only an agent that has really finished gets the note: still idle 10 s after its turn ended (status flickers between
+  // steps don't count) and not reporting that it's still at work ("I AM WORKING", e.g. waiting on a run it started).
+  const doneTimers = new Map();
+  function maybeDone(id) {
+    clearTimeout(doneTimers.get(id));
+    doneTimers.set(id, setTimeout(() => {
+      doneTimers.delete(id);
+      const a = agents.get(id); if (!a || a.status !== 'waiting' || id === selectedId) return;
+      const p = String(a.preview || '');
+      if (/\bI AM WORKING\b/i.test(p)) return;
+      doneToast(id, p.split(/\r?\n/).map(l => l.trim()).filter(Boolean).find(l => !/^I AM (DONE|WORKING)|^I NEED YOU/i.test(l)) || '');
+    }, 10000));
+  }
   function dropToast(id) { for (const t of toasts.querySelectorAll(`.ctoast[data-id="${id}"]`)) t.remove(); placeToasts(); }
 
   // ── Needs you: every agent waiting on you (a question, a permission) or finished unseen. Listed in the ⋯ menu; the
@@ -1504,5 +1517,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { doneToast, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) ag._stopAt = 0; jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) ag._stopAt = 0; jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
