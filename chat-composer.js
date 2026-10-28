@@ -269,17 +269,17 @@
     drafts.set(id, text);
     if (draftFor === id) { const t = box(); t.value = text; grow(t); t.focus(); t.selectionStart = t.selectionEnd = text.length; }
   }
-  // The reply box keeps focus while the Chat view is open: a click on anything that isn't itself typed into (the thread,
-  // a chip, the agent list) hands it back, unless you selected text or a panel holds focus.
+  // Typing goes to the reply box while the Chat view is open: a printable key, with no Ctrl/Alt/Cmd, pressed while you're
+  // not in another field (renaming an agent, a search box, the terminal, an open menu or panel) lands in it. Clicks don't
+  // move focus, so nothing fights a field you just opened.
   const shown = () => chat() && selectedId != null && !!document.getElementById('conversation')?.classList.contains('open');
-  document.addEventListener('click', () => {
-    if (!shown()) return;
-    const ae = document.activeElement;
-    if (ae && (ae.matches('input, textarea, select, [contenteditable="true"]') || ae.closest('[role="dialog"], [role="menu"], [role="listbox"]'))) return;
-    if (String(getSelection() || '').trim()) return;
-    box().focus({ preventScroll: true });
-  });
-  window.addEventListener('focus', () => { if (shown() && (!document.activeElement || document.activeElement === document.body)) box().focus({ preventScroll: true }); });
+  document.addEventListener('keydown', (e) => {
+    if (!shown() || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.key.length !== 1) return;
+    const ae = document.activeElement, t = box();
+    if (ae === t || (ae && (ae.matches('input, textarea, select, [contenteditable="true"]') || ae.closest('.xterm, [role="dialog"], [role="menu"], [role="listbox"]')))) return;
+    if (typeof _renaming !== 'undefined' && _renaming) return;
+    t.focus({ preventScroll: true }); t.selectionStart = t.selectionEnd = t.value.length; // the key itself lands in the box
+  }, true);
 
   // With the box empty, a question or permission card takes the terminal's keys: 1–9 pick, Esc denies.
   function cardKey(e) {

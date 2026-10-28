@@ -2475,6 +2475,13 @@ function setTheme(name, persist = true) {
 document.getElementById('sel-theme').innerHTML = Object.entries(THEMES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
 document.getElementById('sel-theme').value = currentTheme;
 function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; if (agents.get(id)) agents.get(id).unread = false; if (agents.get(id)) hotCwd = agents.get(id).cwd; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
+// The Chat view's reply box takes focus, unless you're typing somewhere else (renaming an agent, the search box…):
+// a double-click to rename is two clicks, and the focus a click schedules would land after the rename box opened.
+function focusReplyBox() {
+  const ae = document.activeElement, box = document.getElementById('term-order-input');
+  if (_renaming || (ae && ae !== box && ae.matches('input, textarea, select, [contenteditable="true"]') && !ae.closest('.xterm'))) return;
+  box.focus();
+}
 function renameAgent(id, el) {
   const a = agents.get(id); if (!a) return;
   _renaming = true;
@@ -3709,7 +3716,7 @@ function openTerm(id) {
   setTimeout(() => updatePromptNav(), 150);
   // Load timeline if tab is active or agent changed
   if (termTab === 'conversation' && timelineAgentId !== id) loadTimeline(id); // switchTermTab loads it on the way in
-  if (termTab === 'conversation' && !worldView) setTimeout(() => document.getElementById('term-order-input').focus(), 60);
+  if (termTab === 'conversation' && !worldView) setTimeout(focusReplyBox, 60);
   render();
   // Re-focus terminal after render so keyboard input works immediately
   if (termTab === 'terminal') {
@@ -3897,7 +3904,7 @@ function switchTermTab(tab) {
     if (split && selectedId) { showXterm(selectedId); if (typeof schedFit === 'function') schedFit(); }
     if (selectedId && timelineAgentId !== selectedId) loadTimeline(selectedId);
     renderConversation();
-    setTimeout(() => document.getElementById('term-order-input').focus(), 0);
+    setTimeout(focusReplyBox, 0);
   }
   updatePromptNav();
   updateScrollBtn();
