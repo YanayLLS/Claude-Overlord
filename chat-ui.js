@@ -315,7 +315,9 @@
     const s = screenAsk(selectedId); // the open question is only on screen until it's answered
     const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
     const q = (s && s.question) || a.question || 'Claude has a question';
-    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === s.focus ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${prevHtml(q, s)}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
+    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === s.focus ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div>${prevHtml(q, s)}</div></div>`
+      .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
+      .replace('<div class="card ask">', `<div class="card ask${lastAskQ === q ? ' still' : ''}">`) + (lastAskQ = q, '');
   }
   // ── Background shells and subagents: one small pill above the reply box ("10 agents · 1 shell"). Hover it for the list,
   // click to keep the list open; a row's hover card peeks, a click opens its full panel. ──
@@ -352,14 +354,23 @@
   // options never move under the pointer.
   const previews = new Map(); // question → [preview per option]
   let askHover = null, askAsked = null;
+  let lastAskQ = null; // the same question redrawn doesn't slide in again
+  const prevText = (t) => t == null ? '<span class="ap-wait">…</span>' : t ? escH(t) : '<span class="ap-wait">No preview</span>';
   function prevHtml(q, s) {
     if (!s.options.length) return '';
     const seen = previews.get(q) || []; previews.set(q, seen);
     if (s.preview || seen[s.focus] == null) seen[s.focus] = /^No preview available$/i.test(s.preview) ? '' : s.preview;
     if (!seen.some(Boolean)) return ''; // a question without previews
-    const k = askHover != null && askHover < s.options.length ? askHover : s.focus, text = seen[k];
+    // Drawn with the selected option's preview; a hover swaps only this pane's text (applyAskHover), never the card.
     const rows = Math.max(...seen.filter(Boolean).map(p => p.split('\n').length));
-    return `<pre class="ask-prev" style="min-height:calc(${rows} * 1.5em + 18px)">${text == null ? '<span class="ap-wait">…</span>' : text ? escH(text) : '<span class="ap-wait">No preview</span>'}</pre>`;
+    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${s.focus}" style="min-height:calc(${rows} * 1.5em + 18px)">${prevText(seen[s.focus])}</pre>`;
+  }
+  function applyAskHover() {
+    const pane = document.querySelector('#conversation .card.ask .ask-prev'), card = pane && pane.closest('.card');
+    for (const b of document.querySelectorAll('#conversation .card.ask [data-hov]')) b.classList.toggle('hov', +b.dataset.pick === askHover);
+    if (!pane) return;
+    const seen = previews.get(pane.dataset.q) || [], k = askHover != null && card.querySelector(`[data-pick="${askHover}"]`) ? askHover : +pane.dataset.focus;
+    const h = prevText(seen[k]); if (pane._h !== h) { pane.innerHTML = h; pane._h = h; }
   }
   // ↑/↓ from the reply box: one step, wrapping like the CLI's menu; the preview follows the selection.
   function askStep(d) { const s = screenAsk(selectedId), n = s.options.length; if (!n) return false; askHover = null; askMove((s.focus + d + n) % n); return true; }
@@ -371,9 +382,9 @@
   }
   document.getElementById('conversation').addEventListener('mouseover', (e) => {
     const b = e.target.closest('.card.ask [data-hov]');
-    if (!b) { if (askHover != null && !e.target.closest('.card.ask .ask-prev')) { askHover = null; askAsked = null; rerender(); } return; } // off the options: the selected one's again
+    if (!b) { if (askHover != null && !e.target.closest('.card.ask .ask-prev')) { askHover = null; askAsked = null; applyAskHover(); } return; } // off the options: the selected one's again
     const k = +b.dataset.pick; if (askHover === k) return;
-    askHover = k; rerender();
+    askHover = k; applyAskHover();
     // Not seen yet: have the CLI show it, once per option.
     const s = screenAsk(selectedId), seen = previews.get(s.question) || [];
     if (seen.some(Boolean) && seen[k] == null && askAsked !== k) { askAsked = k; askMove(k); }
@@ -443,6 +454,7 @@
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
       const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
+      if (a._stopAt && now - a._stopAt < 5000) return h + `<div class="working stopping">${SPARK}<span data-live="v">Stopping…</span></div>`; // Esc lands at once, before the transcript says so
       return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
     }
     return h;
@@ -682,7 +694,7 @@
       else tailEl.innerHTML = tail;
       tailEl._h = tail; tailEl._k = key;
     }
-    drawDock();
+    drawDock(); applyAskHover(); // a hovered option keeps its preview through redraws
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
     announce(st === 'question' ? 'The agent has a question' : st === 'permission' ? 'The agent needs approval' : busy ? 'The agent is working' : a.crashed === 'fatal' ? 'The agent stopped' : 'The agent is done');
     prevBusy.set(id, busy);
@@ -824,6 +836,8 @@
   rail.addEventListener('mouseenter', () => { const on = rail.querySelector('.cr-pop .on'); if (on) on.scrollIntoView({ block: 'nearest' }); });
 
   // Keys typed into the agent's terminal one write at a time, so the TUI reads each as its own key press.
+  // Stop the turn: Esc to the CLI, and the chat says so at once instead of waiting for the transcript.
+  function stop() { const a = agents.get(selectedId); if (a) a._stopAt = Date.now(); keys(['\x1b']); rerender(); }
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
   // Option k of an open question: its number key, as in the terminal, so it lands wherever the CLI's cursor sits.
   // A multi-select box ("[ ] Postgres") only toggles and "Type something" waits for typing: those go to the terminal.
@@ -1331,9 +1345,9 @@
     peek(false);
   }, 500);
   { const px = document.createElement('button'); px.id = 'term-peek-x'; px.type = 'button'; px.title = 'Close (Esc)'; px.setAttribute('aria-label', 'Close'); px.textContent = '×';
-    px.onclick = () => api.send({ type: 'termInput', id: selectedId, data: '' }); document.getElementById('term')?.appendChild(px); } // Esc, as in the CLI: the dialog closes, then so does this
+    px.onclick = () => api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); document.getElementById('term')?.appendChild(px); } // Esc, as in the CLI: the dialog closes, then so does this
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) ag._stopAt = 0; jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

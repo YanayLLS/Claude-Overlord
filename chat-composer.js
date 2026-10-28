@@ -101,7 +101,7 @@
     const a = atts.get(id), shown = inp.value.trim(), text = expandLinks(expandPastes(inp.value, a), a).trim(), list = a ? a.list.splice(0) : [];
     const pastes = ((a && a.pastes) || []).slice(); // the sent bubble's paste chips open to their text
     if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; a.links = []; }
-    if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
+    if (!text) { if (chat() && order().classList.contains('busy')) chatUi.stop(); return; } // empty + working: Stop
     if (chat() && /^\/resume$/.test(text) && !list.length) { inp.value = '/resume '; resumeCheck(inp); return; } // the CLI's picker is a full-screen dialog: list here
     const held = list.some(x => x.saving);
     if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text, pastes); // shows the box as typed (paste chips), matches the full text
@@ -309,7 +309,7 @@
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); return; }
     if (!chat()) return;
-    if (e.key === 'Escape' && order().classList.contains('busy')) { e.preventDefault(); chatUi.keys(['\x1b']); return; }
+    if (e.key === 'Escape' && order().classList.contains('busy')) { e.preventDefault(); chatUi.stop(); return; }
     // Esc Esc with an empty box, as in the CLI: its rewind picker (shown over the chat by chat-ui's dialog peek).
     if (e.key === 'Escape' && !t.value) { e.preventDefault(); if (Date.now() - lastEsc < 600) { chatUi.keys(['\x1b', '\x1b']); lastEsc = 0; } else lastEsc = Date.now(); return; }
     // History, like the CLI: ↑ at the start of the box steps back through your prompts, ↓ comes forward again.
