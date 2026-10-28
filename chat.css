@@ -681,11 +681,6 @@ body.world-mode #hdr-chat { display: none; }
 :root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 'Geist', sans-serif; cursor: pointer; }
 :root body #chat-chips .chip.name { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--dim); }
 :root body #chat-chips .chip.name:hover { color: var(--text); }
-/* Background shells and subagents, docked at the top of the reply box */
-:root body #chat-bg { display: flex; gap: 6px; flex-wrap: wrap; }
-:root body #chat-bg[hidden] { display: none; }
-:root body #chat-bg .bga { padding: 3px 9px; font-size: 11.5px; max-width: 260px; }
-:root body #chat-bg .bga .ic { width: 13px; height: 13px; flex: none; }
 /* Their hover card */
 #chat-hover { position: fixed; z-index: 30; width: 300px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 10px 32px rgba(0,0,0,.25); font-size: 12px; color: var(--text); pointer-events: none; animation: chat-in .14s ease-out; }
 #chat-hover[hidden] { display: none; }
@@ -708,3 +703,16 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-hl.txt { color: var(--text); }
 :root body #chat-hl.txt mark { color: inherit; }
 :root body #chat-hl mark.lnk { background: none; box-shadow: none; border-radius: 0; color: var(--accent); }
+/* Background shells and subagents: one pill above the reply box; its list pops up on hover, stays on click */
+:root body #chat-bg { position: absolute; left: 14px; bottom: calc(100% + 8px); z-index: 3; }
+:root body #chat-bg[hidden] { display: none; }
+:root body #chat-bg .bg-pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); color: var(--subtext); font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+:root body #chat-bg .bg-pill:hover, :root body #chat-bg.pinned .bg-pill { color: var(--text); border-color: color-mix(in srgb, var(--claude) 45%, var(--border-hi)); }
+:root body #chat-bg .bg-pill .ic { width: 12px; height: 12px; transform: rotate(-90deg); opacity: .6; transition: transform .15s; }
+:root body #chat-bg.pinned .bg-pill .ic, :root body #chat-bg:hover .bg-pill .ic { transform: rotate(90deg); }
+:root body #chat-bg .bg-pop { display: none; position: absolute; left: 0; bottom: calc(100% + 6px); width: 320px; max-height: 340px; overflow: auto; padding: 6px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 10px 32px rgba(0,0,0,.3); animation: chat-in .14s ease-out; }
+:root body #chat-bg:hover .bg-pop, :root body #chat-bg.pinned .bg-pop { display: block; }
+:root body #chat-bg .bg-pop::after { content: ''; position: absolute; left: 0; right: 0; bottom: -8px; height: 8px; } /* bridges the gap to the pill so hover holds */
+:root body #chat-bg button.bga { display: flex; width: 100%; max-width: none; border: 0; border-radius: 8px; padding: 6px 8px; font-size: 12.5px; text-align: left; }
+:root body #chat-bg button.bga .bga-n { flex: 1; }
+:root body #chat-bg button.bga .ic { width: 14px; height: 14px; flex: none; }

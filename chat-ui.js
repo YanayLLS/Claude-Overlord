@@ -288,29 +288,40 @@
     const q = a.question || (perm && perm.status) || 'Claude has a question';
     return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
   }
-  // ── Background shells and subagents, docked above the reply box: hover for a peek, click for the full panel ──
-  let dockHtml = '';
+  // ── Background shells and subagents: one small pill above the reply box ("10 agents · 1 shell"). Hover it for the list,
+  // click to keep the list open; a row's hover card peeks, a click opens its full panel. ──
+  let dockHtml = '', dockCount = { agents: 0, shells: 0 };
   function drawDock() {
     let el = document.getElementById('chat-bg');
     if (!el) {
-      el = document.createElement('div'); el.id = 'chat-bg'; el.setAttribute('aria-label', 'Running in the background');
+      el = document.createElement('div'); el.id = 'chat-bg';
+      el.innerHTML = `<button type="button" class="bg-pill" aria-expanded="false" aria-haspopup="true"><span class="bga-dot"></span><span class="bg-n"></span>${ICON.chev}</button><div class="bg-pop" role="menu" aria-label="Running in the background"></div>`;
       document.getElementById('term-order').prepend(el);
+      const pill = el.querySelector('.bg-pill');
       el.addEventListener('click', (e) => {
-        const sh = e.target.closest('[data-bgout]'); if (sh) { hideHover(); return openShell(sh.dataset.bgout, sh.dataset.bgname); }
-        const ag = e.target.closest('[data-jump]'); if (ag) { hideHover(); openAgent(ag.dataset.jump, worldTl && worldTl.id === selectedId ? worldTl.events : []); }
+        if (e.target.closest('.bg-pill')) { const on = !el.classList.contains('pinned'); el.classList.toggle('pinned', on); pill.setAttribute('aria-expanded', on); return; }
+        const sh = e.target.closest('[data-bgout]'); if (sh) { hideHover(); closeDock(); return openShell(sh.dataset.bgout, sh.dataset.bgname); }
+        const ag = e.target.closest('[data-jump]'); if (ag) { hideHover(); closeDock(); openAgent(ag.dataset.jump, worldTl && worldTl.id === selectedId ? worldTl.events : []); }
       });
-      el.addEventListener('mouseover', (e) => { const b = e.target.closest('.bga'); if (b && b !== hoverFor) showHover(b); });
+      el.addEventListener('mouseover', (e) => { const b = e.target.closest('.bga'); if (b && b !== hoverFor) showHover(b, true); });
       el.addEventListener('mouseleave', hideHover);
+      document.addEventListener('mousedown', (e) => { if (!el.contains(e.target) && !e.target.closest('#chat-hover')) closeDock(); });
+      el.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el.classList.contains('pinned')) { e.stopPropagation(); closeDock(); pill.focus(); } });
     }
-    // Only the timers tick: swap their text in place, so a hovered chip isn't rebuilt under the pointer.
+    const pop = el.querySelector('.bg-pop'), n = el.querySelector('.bg-n');
+    const { agents: na, shells: ns } = dockCount;
+    const label = [na ? `${na} agent${na > 1 ? 's' : ''}` : '', ns ? `${ns} shell${ns > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+    if (n.textContent !== label) n.textContent = label;
+    // Only the timers tick: swap their text in place, so a hovered row isn't rebuilt under the pointer.
     const key = liveKey(dockHtml);
-    if (el._k === key) { const tmp = document.createElement('div'); tmp.innerHTML = dockHtml; for (const n of tmp.querySelectorAll('[data-live]')) { const c = el.querySelector(`[data-live="${CSS.escape(n.dataset.live)}"]`); if (c && c.textContent !== n.textContent) c.textContent = n.textContent; } }
-    else { el.innerHTML = dockHtml; el._k = key; if (hoverFor && !el.contains(hoverFor)) hideHover(); }
-    el.hidden = !dockHtml;
+    if (pop._k === key) { const tmp = document.createElement('div'); tmp.innerHTML = dockHtml; for (const x of tmp.querySelectorAll('[data-live]')) { const c = pop.querySelector(`[data-live="${CSS.escape(x.dataset.live)}"]`); if (c && c.textContent !== x.textContent) c.textContent = x.textContent; } }
+    else { pop.innerHTML = dockHtml; pop._k = key; if (hoverFor && !pop.contains(hoverFor)) hideHover(); }
+    el.hidden = !dockHtml; if (!dockHtml) closeDock();
   }
+  function closeDock() { const el = document.getElementById('chat-bg'); if (el) { el.classList.remove('pinned'); el.querySelector('.bg-pill')?.setAttribute('aria-expanded', 'false'); } }
   let hoverFor = null;
   const hoverEl = document.createElement('div'); hoverEl.id = 'chat-hover'; hoverEl.hidden = true; hoverEl.setAttribute('role', 'tooltip'); document.body.appendChild(hoverEl);
-  function showHover(b) {
+  function showHover(b, side) {
     hoverFor = b;
     const shell = b.matches('[data-bgout]'), name = b.querySelector('.bga-n').textContent, t = b.querySelector('.bga-t').textContent;
     hoverEl.innerHTML = `<div class="hv-h">${shell ? ICON.cmd : ICON.agent}<b>${escH(name)}</b><span>${escH(t)}</span></div>`
@@ -318,7 +329,8 @@
       + '<div class="hv-live">…</div><div class="hv-foot">Click for more</div>';
     hoverEl.hidden = false;
     const r = b.getBoundingClientRect(), h = hoverEl.getBoundingClientRect();
-    hoverEl.style.left = Math.max(8, Math.min(r.left, innerWidth - h.width - 8)) + 'px'; hoverEl.style.top = Math.max(8, r.top - h.height - 8) + 'px';
+    if (side) { const right = r.right + 8 + h.width < innerWidth; hoverEl.style.left = (right ? r.right + 8 : Math.max(8, r.left - h.width - 8)) + 'px'; hoverEl.style.top = Math.max(8, Math.min(r.top, innerHeight - h.height - 8)) + 'px'; } // beside a list row
+    else { hoverEl.style.left = Math.max(8, Math.min(r.left, innerWidth - h.width - 8)) + 'px'; hoverEl.style.top = Math.max(8, r.top - h.height - 8) + 'px'; }
     if (shell) api.send({ type: 'bgTail', id: selectedId, file: b.dataset.bgout });
     else api.send({ type: 'agentSteps', id: selectedId, toolId: b.dataset.jump });
   }
@@ -354,10 +366,11 @@
     const shells = evs.filter((e, k) => k > cut && e.type === 'tool' && doneBy.get(e.toolId) && doneBy.get(e.toolId).bgId && !ended.has(doneBy.get(e.toolId).bgId));
     // Both dock above the reply box (paint puts dockHtml in #chat-bg), out of the scrolling thread.
     const since = (e) => e.ts ? escH(dur(now - Date.parse(e.ts))) : '';
+    dockCount = { agents: bg.length, shells: shells.length };
     dockHtml = shells.map(e => { const d = doneBy.get(e.toolId), a2 = e.args || {}, name = a2.description || a2.command || 'Background shell';
-      return `<button type="button" class="bga bgsh" data-bgout="${escH(d.bgOut)}" data-bgname="${escH(name)}" data-cmd="${escH(a2.command || '')}">${ICON.cmd}<span class="bga-n">${escH(name)}</span><span class="bga-t" data-live="s${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('')
+      return `<button type="button" role="menuitem" class="bga bgsh" data-bgout="${escH(d.bgOut)}" data-bgname="${escH(name)}" data-cmd="${escH(a2.command || '')}">${ICON.cmd}<span class="bga-n">${escH(name)}</span><span class="bga-t" data-live="s${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('')
       + bg.map(e => { const a2 = e.args || {};
-        return `<button type="button" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
+        return `<button type="button" role="menuitem" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -575,7 +588,7 @@
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
     else list = blocks(evs, doneBy, a.cwd, id);
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
-    dockHtml = '';
+    dockHtml = ''; dockCount = { agents: 0, shells: 0 };
     const tail = (evs ? liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) : ''); // queued text waits under the spinner, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
