@@ -721,6 +721,33 @@
   }
   document.getElementById('chat-att').addEventListener('click', (e) => { const i = e.target.closest('img'); if (i) lightbox(i.src); });
 
+  // Resting on an image (thumbnail, [Image #N] chip, image path chip, a box attachment) shows it big above it, like
+  // the terminal's image tags; a click still opens it full size.
+  const imgPeek = document.createElement('img'); imgPeek.id = 'chat-imgpeek'; imgPeek.alt = ''; imgPeek.hidden = true; document.body.appendChild(imgPeek);
+  let imgFor = null, imgTimer = null;
+  const IMG_SEL = '#conversation .imgtag[data-src], #conversation .imgs img, #conversation a.fileref.img, #chat-att img';
+  const imgSrc = (el) => el.matches('.imgtag') ? el.dataset.src : el.matches('a.fileref') ? fileUrl(el.dataset.file) : el.src;
+  const hideImg = () => { imgFor = null; clearTimeout(imgTimer); imgPeek.hidden = true; };
+  document.addEventListener('mouseover', (e) => {
+    const el = e.target.closest && e.target.closest(IMG_SEL);
+    if (!el) { if (imgFor) hideImg(); return; }
+    if (el === imgFor || document.querySelector('.chat-lightbox')) return;
+    hideImg(); imgFor = el;
+    imgTimer = setTimeout(() => {
+      const show = () => {
+        if (imgFor !== el) return;
+        imgPeek.hidden = false;
+        const b = el.getBoundingClientRect(), w = imgPeek.offsetWidth, h = imgPeek.offsetHeight;
+        imgPeek.style.left = Math.max(8, Math.min(b.left, innerWidth - w - 8)) + 'px';
+        imgPeek.style.top = (b.top - h - 8 > 8 ? b.top - h - 8 : Math.min(b.bottom + 8, innerHeight - h - 8)) + 'px';
+      };
+      const src = imgSrc(el);
+      if (imgPeek.getAttribute('src') !== src) { imgPeek.onload = show; imgPeek.src = src; } else show();
+    }, 250);
+  });
+  document.addEventListener('mousedown', hideImg, true);
+  document.addEventListener('wheel', hideImg, { capture: true, passive: true });
+
   // Opening a run of calls that had a failure opens the failed call too: "1 failed" should show which.
   document.getElementById('conversation').addEventListener('toggle', (e) => { const d = e.target; if (d.matches && d.matches('details.tgroup') && d.open) { const f = d.querySelector('details.trow.err'); if (f) f.open = true; } }, true);
 

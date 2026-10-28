@@ -289,6 +289,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .msg.user.imgs-only { margin-top: -12px; }
 :root body #conversation .msg.user.pending .imgs img { opacity: .7; }
 :root body #term-order.drop { border-color: var(--claude); box-shadow: 0 0 0 4px color-mix(in srgb, var(--claude) 18%, transparent), 0 6px 24px rgba(0,0,0,.2); }
+#chat-imgpeek { position: fixed; z-index: 9999; max-width: min(560px, 60vw); max-height: min(420px, 60vh); border-radius: 10px; border: 1px solid var(--border-hi); background: var(--surface0); box-shadow: 0 12px 36px rgba(0,0,0,.4); pointer-events: none; animation: chat-in .12s ease-out; }
+#chat-imgpeek[hidden] { display: none; }
 .chat-lightbox { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 32px; background: rgba(0,0,0,.72); cursor: zoom-out; animation: chat-in .18s ease-out; }
 .chat-lightbox img { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
 
