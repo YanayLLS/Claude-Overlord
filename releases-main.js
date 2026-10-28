@@ -21,6 +21,8 @@ const { deployState, deploySkipped, checkRunning, newDeployFailures, parseSource
 const TICK_MS = 15 * 1000;              // the background loop wakes this often and runs whatever releasePeriods says is due
 const PERSIST_MS = 2 * 1000;            // releases.json is written this long after the last change (one write per burst)
 const RUN_TTL_MS = 24 * 3600 * 1000;   // release results older than this are dropped on load
+const RESUME_DELAY_MS = 20 * 1000;      // after a restart mid Release all, it resumes this long after startup…
+const RESUME_MS = 15 * 60 * 1000;       // …if its heartbeat is newer than this (an Overlord closed for longer waits for Resume)
 const RECHECK_MS = 60 * 1000;           // re-read release PRs' checks this often…
 const RECHECK_FOR_MS = 30 * 60 * 1000;  // …for this long after a run, until they settle
 const SIGN_POLL_MS = 30 * 1000;         // while a prod release waits for its 2nd signature, look this often…
@@ -53,10 +55,23 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   let state = { ...(saved.cache || {}), source: !saved.source || saved.source === OLD_SOURCE ? DEFAULT_SOURCE : saved.source, loading: false };
   if (state.releaseRun && (state.releaseRun.running || Date.now() - state.releaseRun.startedAt > RUN_TTL_MS)) state.releaseRun = null;
   // Overlord quit mid Release all: say so, offer Resume (it picks up with what's still open)
+  // …and when it was running right up to the quit (a restart, an update), it resumes by itself once the app has settled.
+  // A run stopped on purpose (⏹ Stop, a failure) isn't 'running', so it stays stopped.
+  const resumeAfterRestart = !!(state.releaseAll && state.releaseAll.running);
   if (state.releaseAll && state.releaseAll.running) state.releaseAll = { ...state.releaseAll, running: false, status: 'interrupted', detail: 'Overlord closed mid-release', manualWave: null };
   state.teamRun = null;
   delete state.branches; delete state.deployEta; // an older Overlord saved these; fetched fresh instead
   let inFlight = false, modalOpen = false;
+  if (resumeAfterRestart) setTimeout(async () => {
+    for (let i = 0; i < 12 && !state.config; i++) await new Promise(r => setTimeout(r, 10e3)); // the config loads after startup
+    if (!state.releaseAll || state.releaseAll.status !== 'interrupted') return; // resumed or started by hand meanwhile
+    // only a run that was alive moments ago: its shared heartbeat is recent and it's still marked running
+    const lock = await history.running().catch(() => null);
+    if (!lock || !lock.running || Date.now() - Date.parse(lock.beat) > RESUME_MS) return;
+    await history.load().catch(() => {});
+    send({ type: 'toast', text: 'Overlord restarted mid-release: Release all picks up where it stopped' });
+    releaseAll(state.releaseAll.id || null).catch(e => send({ type: 'toast', text: 'Release all failed: ' + (e.message || 'error') }));
+  }, RESUME_DELAY_MS);
 
   // A refresh, a deploy poll and a sign check each call persist(): one write per burst, and none when
   // nothing changed (the deploy poll usually sees the same runs). flush() is for main's before-quit.
