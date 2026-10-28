@@ -178,7 +178,8 @@
       const long = text.length > 900 || text.split('\n').length > 14;
       h = `<div class="msg user" data-i="${i}">${imgs ? `<div class="imgs">${imgs}</div>` : ''}${text ? `<div class="bubble${long ? ' long' : ''}">${tagChips(text)}</div>${long ? '<button class="more" type="button">Show more</button>' : ''}` : ''}</div>`;
     } else if (ev.type === 'text') h = `<div class="msg ai" data-i="${i}"><div class="md">${md(ev.text, cwd)}</div></div>`;
-    else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${inlineRich(escH(ev.text))}</span></div>`;
+    // A /command (a skill, /compact…) is something you sent: your message bubble, the command tinted as in the reply box.
+    else if (ev.type === 'command') h = `<div class="msg user" data-i="${i}"><div class="bubble">${tagChips(ev.text)}</div></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
@@ -202,7 +203,7 @@
   const diffCache = new WeakMap();
   const editStat = (ev) => { let d = diffCache.get(ev); if (!d) { d = lineDiff(ev.args.old, ev.args.new); diffCache.set(ev, d); } return d; };
   function footHtml(textAt, turn, sum, mark) {
-    const meta = turn ? `<span class="tf-meta">${SPARK}Worked ${escH(dur(turn.ms))}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : '';
+    const meta = turn ? `<span class="tf-meta">${SPARK}${Number.isFinite(turn.ms) && turn.ms > 0 ? 'Worked ' + escH(dur(turn.ms)) : 'Done'}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : ''; // a turn without its duration says Done, not "NaNh"
     let files = '', cost = '';
     if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
     if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
@@ -244,7 +245,7 @@
         if (sum.from < 0) sum.from = i; sum.to = i;
       }
     };
-    for (let k = evs.length - 1; k >= 0; k--) if (evs[k].type === 'prompt') { lastPromptAt = k; break; }
+    for (let k = evs.length - 1; k >= 0; k--) if (evs[k].type === 'prompt' || evs[k].type === 'command') { lastPromptAt = k; break; }
     // This agent's image numbers → pictures, so a later [Image #N] can show the image it means.
     tagSrc.clear(); for (const ev of evs) if (ev.type === 'prompt') { const ns = tagNums(ev.text); promptSrcs(ev).forEach((src, k) => { if (ns[k]) tagSrc.set(ns[k], src); }); }
     const flush = () => { if (run.length) out.push(groupHtml(run, doneBy, cwd)); run = []; };
@@ -266,7 +267,7 @@
       if (t === 'turn') { turn = ev; return; }
       if (t === 'prompt' || t === 'command') close();
       // Being edited: the bubble is the editor (the same html every redraw, so typing isn't lost).
-      if (t === 'prompt' && editing && editing.id === id && editing.i === i) { flush(); out.push(`<div class="msg user editing" data-i="${i}"><textarea class="edit-ta" rows="2" aria-label="Edit your message">${escH(editing.text)}</textarea><div class="edit-btns"><button type="button" data-act="edit-cancel">Cancel</button><button type="button" class="primary" data-act="edit-send">Send</button></div></div>`); return; }
+      if ((t === 'prompt' || t === 'command') && editing && editing.id === id && editing.i === i) { flush(); out.push(`<div class="msg user editing" data-i="${i}"><textarea class="edit-ta" rows="2" aria-label="Edit your message">${escH(editing.text)}</textarea><div class="edit-btns"><button type="button" data-act="edit-cancel">Cancel</button><button type="button" class="primary" data-act="edit-send">Send</button></div></div>`); return; }
       flush(); out.push(msgHtml(ev, i, cwd));
       if (t === 'text') { textAt = i; open = true; }
       // Your last prompt: Edit puts it back in the box, Retry sends it again.
@@ -975,7 +976,7 @@
     let k = evs.length - 1; while (k >= 0 && /^(mode|images|interrupt)$/.test(evs[k].type)) k--;
     const last = evs[k]; let text = '';
     if (pend.length) { const p = pend.pop(); text = p.match || p.text; }
-    else if (last && last.type === 'prompt' && last.ts && Date.now() - Date.parse(last.ts) < 120000) {
+    else if (last && (last.type === 'prompt' || last.type === 'command') && last.ts && Date.now() - Date.parse(last.ts) < 120000) {
       text = last.text;
       try { const key = hideKey(a); localStorage.setItem(key, JSON.stringify([...hidesOf(a), { from: Date.parse(last.ts), until: Date.now() + 1000 }])); } catch {}
     }
@@ -1031,17 +1032,17 @@
     if (ins) { chatComposer.insert(ins.dataset.insert, false); return; }
     const act = e.target.closest('[data-act]');
     if (act) {
-      const lastPrompt = () => { for (let k = (evs || []).length - 1; k >= 0; k--) if (evs[k].type === 'prompt' && evs[k].text) return evs[k].text; return ''; };
+      const lastPrompt = () => { for (let k = (evs || []).length - 1; k >= 0; k--) if ((evs[k].type === 'prompt' || evs[k].type === 'command') && evs[k].text) return evs[k].text; return ''; };
       if (act.dataset.act === 'resume') resumeSelected();
       else if (act.dataset.act === 'copy-name') navigator.clipboard.writeText('@' + act.dataset.name).then(() => showToast(`Copied @${act.dataset.name}`), () => {});
       else if (act.dataset.act === 'retry') { const t = lastPrompt(); if (t) { api.send({ type: 'questPrompt', id: selectedId, text: t }); chatUi.addPending(selectedId, t); rerender(); } }
       else if (act.dataset.act === 'edit-prompt') { // the bubble becomes its own editor
         const i = +act.closest('[data-i]').dataset.i, ev = (evs || [])[i];
-        if (ev && ev.type === 'prompt') { editing = { id: selectedId, i, ts: ev.ts, text: ev.text }; rerender(); setTimeout(() => { const ta = document.querySelector('#conversation .msg.editing .edit-ta'); if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; ta.style.height = ta.scrollHeight + 'px'; } }, 30); }
+        if (ev && (ev.type === 'prompt' || ev.type === 'command')) { editing = { id: selectedId, i, ts: ev.ts, text: ev.text }; rerender(); setTimeout(() => { const ta = document.querySelector('#conversation .msg.editing .edit-ta'); if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; ta.style.height = ta.scrollHeight + 'px'; } }, 30); }
       }
       else if (act.dataset.act === 'edit-cancel') { editing = null; rerender(); }
       else if (act.dataset.act === 'edit-send') {
-        const ta = document.querySelector('#conversation .msg.editing .edit-ta'), text = ta ? ta.value.trim() : '', ev = editing && (evs || []).find(e => e.type === 'prompt' && e.ts === editing.ts);
+        const ta = document.querySelector('#conversation .msg.editing .edit-ta'), text = ta ? ta.value.trim() : '', ev = editing && (evs || []).find(e => (e.type === 'prompt' || e.type === 'command') && e.ts === editing.ts);
         editing = null;
         if (ev && text && text !== String(ev.text).trim()) editResend(ev, text); else rerender();
       }
