@@ -259,6 +259,10 @@
   // Switching Chat ↔ Terminal keeps what you were typing: the reply box's text goes into the CLI's prompt (not sent),
   // and the CLI's prompt comes into the reply box. ponytail: a draft with images stays in the chat (the CLI can't take them as typed).
   function carryDraft(from, to) {
+    // The box must hold this agent's draft first: switching agent and view in one go (answering another agent's question
+    // in its terminal, opening the chat after picking an agent in the terminal) used to carry one agent's draft into the
+    // other's CLI, or another agent's CLI text into this one's draft.
+    syncDraft();
     const id = selectedId, x = typeof xterms !== 'undefined' && xterms.get(id), t = box(); if (!x) return;
     // Only while the agent is idle: mid-turn each side keeps its own text, so a draft left in the CLI's box can't get
     // merged into the next message sent from the chat.
