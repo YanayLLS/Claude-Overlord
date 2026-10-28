@@ -3913,6 +3913,7 @@ function fmtTs(ts) {
 function handleTimelineData(msg) {
   if (msg.id !== timelineAgentId) return;
   worldTl = { id: msg.id, events: (msg.events || []).slice() };
+  if (msg.reset) delete document.getElementById('conversation').dataset.for; // another session (/resume): drawn afresh, at the bottom
   if (termTab === 'conversation') renderConversation();
 }
 

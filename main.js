@@ -504,6 +504,19 @@ function markClear(id) {
 // A submitted line that moves the agent to a different session file. /resume lands in the
 // picked chat's existing JSONL — followPrompts() finds it from the next prompt.
 function markSessionSwitch(id, line) {
+  // "/resume <id>" (the Chat view's session list) names the file: Claude appends to it in place, so no new file
+  // shows up to follow. Switch now, reading on from its end; the chat reloads its history.
+  const m = /^\s*\/resume\s+([0-9a-f-]{36})\s*$/i.exec(line || ''), a = agents.get(id);
+  const file = m && a && a.jsonlFile && path.join(path.dirname(a.jsonlFile), m[1] + '.jsonl');
+  if (file && file !== a.jsonlFile && fs.existsSync(file)) {
+    setTimeout(() => {
+      if (!agents.has(id)) return;
+      let size = 0; try { size = fs.statSync(file).size; } catch {}
+      reassignAgentToFile(id, file, size);
+      send({ type: 'timelineData', id, events: getFullTimeline(id), reset: true });
+    }, 1500);
+    return;
+  }
   if (sessionSwitchKind(line)) markClear(id);
 }
 // Follow the prompt: remember what was submitted; if it doesn't show up in the agent's
