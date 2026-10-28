@@ -303,7 +303,7 @@
     const busy = () => isWorkingStatus(agents.get(id)?.status) || document.getElementById('term-order').classList.contains('busy');
     if (busy()) { stop(false); await until(() => !busy(), 10000); await wait(600); }
     // Esc Esc opens the rewind list; pick this message (the newest one with its text), then "Restore conversation".
-    const fail = (why) => { save(hidesOf(a).filter(r => r.from !== range.from || r.until !== range.until)); api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => api.send({ type: 'questPrompt', id, text }), 400); showToast(why + ': sent as a new message'); rerender(); };
+    const fail = (why) => { save(hidesOf(a).filter(r => r.from !== range.from || r.until !== range.until)); api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => chatComposer.sendText(id, text), 400); showToast(why + ': sent as a new message'); rerender(); };
     api.send({ type: 'termInput', id, data: '\x1b' }); await wait(150); api.send({ type: 'termInput', id, data: '\x1b' });
     const rw = await until(() => screenRewind(id)); if (!rw) return fail("Couldn't open rewind");
     const head = String(ev.text || '').replace(/\s+/g, ' ').trim().slice(0, 30).toLowerCase();
@@ -320,9 +320,7 @@
     api.send({ type: 'termInput', id, data: String(o + 1) });
     await until(() => !screenAsk(id).dialog && !screenRewind(id), 3000); await wait(300);
     // The CLI puts the old message back in its box: clear it (the agent is idle), then send the new one.
-    const x = typeof xterms !== 'undefined' && xterms.get(id);
-    if (x && typeof readPromptBox === 'function' && readPromptBox(x.terminal).trim()) { api.send({ type: 'termInput', id, data: '\x03' }); await wait(250); }
-    api.send({ type: 'questPrompt', id, text });
+    chatComposer.sendText(id, text);
   }
 
   // In the editor: Enter sends, Shift+Enter is a new line, Esc cancels; it grows with its text.
@@ -600,7 +598,7 @@
     api.send({ type: 'termInput', id, data: '\x03' }); await wait(250);
     if (box()) return showToast("Couldn't clear the agent's prompt; check the terminal");
     list.splice(k, 1);
-    for (const o of list) if (!o.held && o.text && got.includes(norm(o.text))) { api.send({ type: 'questPrompt', id, text: o.text }); await wait(400); } // the rest go back in the queue
+    for (const o of list) if (!o.held && o.text && got.includes(norm(o.text))) { chatComposer.sendText(id, o.text); await wait(400); } // the rest go back in the queue
     rerender();
   }
 
@@ -825,7 +823,7 @@
     for (const s of thread.querySelectorAll('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
     for (const b of thread.querySelectorAll('button[data-reset]')) b.disabled = +b.dataset.reset > now;
     for (const c of thread.querySelectorAll('input[data-autoretry]')) c.checked = autoRetry.has(+c.dataset.autoretry);
-    for (const at of [...autoRetry]) if (at <= now) { autoRetry.delete(at); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) api.send({ type: 'questPrompt', id, text: t.text }); }
+    for (const at of [...autoRetry]) if (at <= now) { autoRetry.delete(at); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); }
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
     drawDiagrams(el);
@@ -985,8 +983,7 @@
       const box = document.getElementById('term-order-input');
       chatComposer.setDraft(id, box.value.trim() ? box.value.replace(/\s*$/, '\n') + text : text);
       setTimeout(() => {
-        const x = typeof xterms !== 'undefined' && xterms.get(id);
-        if (x && typeof readPromptBox === 'function' && !isWorkingStatus(agents.get(id)?.status) && readPromptBox(x.terminal).trim()) api.send({ type: 'termInput', id, data: '\x03' });
+        chatComposer.clearCliBox(id);
       }, 800);
     }
     rerender();
@@ -1035,7 +1032,7 @@
       const lastPrompt = () => { for (let k = (evs || []).length - 1; k >= 0; k--) if ((evs[k].type === 'prompt' || evs[k].type === 'command') && evs[k].text) return evs[k].text; return ''; };
       if (act.dataset.act === 'resume') resumeSelected();
       else if (act.dataset.act === 'copy-name') navigator.clipboard.writeText('@' + act.dataset.name).then(() => showToast(`Copied @${act.dataset.name}`), () => {});
-      else if (act.dataset.act === 'retry') { const t = lastPrompt(); if (t) { api.send({ type: 'questPrompt', id: selectedId, text: t }); chatUi.addPending(selectedId, t); rerender(); } }
+      else if (act.dataset.act === 'retry') { const t = lastPrompt(); if (t) { chatComposer.sendText(selectedId, t); chatUi.addPending(selectedId, t); rerender(); } }
       else if (act.dataset.act === 'edit-prompt') { // the bubble becomes its own editor
         const i = +act.closest('[data-i]').dataset.i, ev = (evs || [])[i];
         if (ev && (ev.type === 'prompt' || ev.type === 'command')) { editing = { id: selectedId, i, ts: ev.ts, text: ev.text }; rerender(); setTimeout(() => { const ta = document.querySelector('#conversation .msg.editing .edit-ta'); if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; ta.style.height = ta.scrollHeight + 'px'; } }, 30); }

@@ -88,9 +88,23 @@
     queued.delete(id); deliver(id, q.text, q.list);
   }
   // Plain text goes as one paste (questPrompt); with images, main's chatSend lays text and images into the prompt in order.
+  // Text left in the CLI's own box (a message Esc took back, a draft typed there) would ride along with what's sent from
+  // here, so it goes first: Backspace, which is safe mid-turn (Ctrl+C would stop the agent). Returns the ms to let it land.
+  function clearCliBox(id) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id); if (!x || typeof readPromptBox !== 'function') return 0;
+    if (screenDialog(bufferRows(x.terminal.buffer.active, 40))) return 0; // a dialog is up: its keys aren't the prompt's
+    const left = readPromptBox(x.terminal); if (!left || !left.trim()) return 0;
+    api.send({ type: 'termInput', id, data: '\x05' + '\x7f'.repeat(left.length + left.split('\n').length + 2) }); // Ctrl+E: to its end, then erase it all
+    return 150;
+  }
+  // Every message the chat hands an agent goes through here (the reply box, Retry, an edit, an auto-retry…): its CLI box
+  // is cleared first, then the message goes in as one paste.
+  function sendText(id, text, list = []) {
+    const go = () => { if (list.length) api.send({ type: 'chatSend', id, parts: parts(text, list) }); else api.send({ type: 'questPrompt', id, text }); };
+    const wait = clearCliBox(id); if (wait) setTimeout(go, wait); else go();
+  }
   function deliver(id, text, list) {
-    if (list.length) api.send({ type: 'chatSend', id, parts: parts(text, list) });
-    else api.send({ type: 'questPrompt', id, text });
+    sendText(id, text, list);
     chatUi.releasePending(id);
     if (chat()) renderConversation();
   }
@@ -505,5 +519,5 @@
   box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, carryDraft, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();
