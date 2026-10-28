@@ -105,7 +105,7 @@
     if (chat() && /^\/resume$/.test(text) && !list.length) { inp.value = '/resume '; resumeCheck(inp); return; } // the CLI's picker is a full-screen dialog: list here
     const held = list.some(x => x.saving);
     if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text, pastes); // shows the box as typed (paste chips), matches the full text
-    inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt();
+    inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt(); saveDraft(id);
     if (held) { queued.set(id, { text, list }); if (chat()) renderConversation(); return; }
     // A question open in the CLI: typed text is your own answer, not the highlighted option. Its "Type something" /
     // "Other" choice takes it; with none, Esc closes the question (as in the CLI) and the text goes as a message.
@@ -207,13 +207,35 @@
 
   // ── Drafts per agent: what you've typed stays with the agent it was for ──
   const drafts = new Map(); let draftFor = null;
+  // An unsent draft outlives a restart: kept per conversation (its session id), with its pasted-text, file and link tags.
+  // ponytail: pasted images aren't kept (they're files main saved for this run); the text around them is.
+  const draftKey = (id) => { const a = typeof agents !== 'undefined' && agents.get(id); return a && a.sessionId ? 'chatDraft:' + a.sessionId : null; };
+  let saveTimer = null;
+  function saveDraft(id = selectedId) {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      const k = draftKey(id); if (!k) return;
+      const v = id === draftFor ? box().value : drafts.get(id) || '', a = atts.get(id) || {};
+      try { if (v.trim()) localStorage.setItem(k, JSON.stringify({ v, pastes: a.pastes || [], files: a.files || [], links: a.links || [] })); else localStorage.removeItem(k); } catch {}
+    }, 300);
+  }
+  function loadDraft(id) {
+    const k = draftKey(id); let d = null; try { d = k && JSON.parse(localStorage.getItem(k) || 'null'); } catch {}
+    if (!d || typeof d.v !== 'string') return '';
+    const a = attOf(id);
+    if (Array.isArray(d.pastes) && d.pastes.length) { a.pastes = d.pastes; a.nextP = Math.max(...d.pastes.map(x => x.n)) + 1; }
+    if (Array.isArray(d.files) && d.files.length) { a.files = d.files; a.nextF = Math.max(...d.files.map(x => x.n)) + 1; }
+    if (Array.isArray(d.links)) a.links = d.links;
+    return d.v;
+  }
   function syncDraft() {
     if (draftFor === selectedId) return;
     micStop(); // a take belongs to the agent it started on
     if (draftFor != null) drafts.set(draftFor, box().value);
-    box().value = drafts.get(selectedId) || ''; grow(box()); hist = -1; closeAt();
+    box().value = drafts.has(selectedId) ? drafts.get(selectedId) : loadDraft(selectedId); grow(box()); hist = -1; closeAt();
     draftFor = selectedId;
   }
+  box().addEventListener('input', () => saveDraft());
 
   // Switching Chat ↔ Terminal keeps what you were typing: the reply box's text goes into the CLI's prompt (not sent),
   // and the CLI's prompt comes into the reply box. ponytail: a draft with images stays in the chat (the CLI can't take them as typed).
@@ -223,14 +245,14 @@
       const a = atts.get(id); if (a && a.list.length) return;
       const v = expandLinks(expandPastes(t.value, a), a); if (!v.trim()) return;
       api.send({ type: 'termInput', id, data: '\x1b[200~' + v.replace(/\r\n?/g, '\n') + '\x1b[201~' });
-      t.value = ''; drafts.set(id, ''); if (a) { a.pastes = []; a.files = []; a.links = []; } grow(t); drawAtt();
+      t.value = ''; drafts.set(id, ''); if (a) { a.pastes = []; a.files = []; a.links = []; } grow(t); drawAtt(); saveDraft(id);
     } else if (from === 'terminal' && to === 'conversation') {
       if (typeof readPromptBox !== 'function' || t.value.trim()) return;
       const b = x.terminal.buffer.active, rows = []; for (let y = Math.max(0, b.length - 40); y < b.length; y++) rows.push(b.getLine(y)?.translateToString(true) || '');
       if (screenDialog(rows)) return; // a dialog is up: its Ctrl+C would cancel it
       const v = readPromptBox(x.terminal);
       if (!v || !v.trim() || /^Try "/.test(v) || /^\d+\.\s/.test(v)) return; // the box's own hint, or a dialog's option
-      t.value = v; drafts.set(id, v); grow(t);
+      t.value = v; drafts.set(id, v); grow(t); saveDraft(id);
       api.send({ type: 'termInput', id, data: '\x03' }); // Ctrl+C with text in the box clears it, as in the CLI
     }
   }
