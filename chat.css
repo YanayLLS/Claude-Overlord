@@ -675,22 +675,10 @@ body.world-mode #hdr-chat { display: none; }
 :root body #term.peek > #term-container { display: block !important; position: absolute; left: 16px; right: 16px; top: 16px; bottom: 16px; z-index: 7; border-radius: 12px; border: 1px solid var(--border-hi); box-shadow: 0 16px 48px rgba(0,0,0,.35); overflow: hidden; animation: chat-in .18s var(--chat-ease); }
 #term-peek-x { display: none; }
 :root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 'Geist', sans-serif; cursor: pointer; }
-:root body #chat-hl mark.url { background: color-mix(in srgb, var(--accent, #7aa2f7) 12%, transparent); box-shadow: none; border-radius: 4px; text-decoration: underline; text-decoration-color: var(--accent, #7aa2f7); text-underline-offset: 3px; }
 /* A CLI dialog with no chat card (rewind, /config, /model…): the real terminal floats over the chat while it's up */
 :root body #term.peek > #term-container { display: block !important; position: absolute; left: 16px; right: 16px; top: 16px; bottom: 16px; z-index: 7; border-radius: 12px; border: 1px solid var(--border-hi); box-shadow: 0 16px 48px rgba(0,0,0,.35); overflow: hidden; animation: chat-in .18s var(--chat-ease); }
 #term-peek-x { display: none; }
 :root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 'Geist', sans-serif; cursor: pointer; }
-/* Links in the reply box: underlined in place, a chip each above it (a ClickUp task by name) */
-:root body #chat-hl mark.url { background: none; box-shadow: none; border-radius: 0; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--claude) 70%, transparent); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
-:root body #chat-links { display: flex; gap: 6px; flex-wrap: wrap; }
-:root body #chat-links[hidden] { display: none; }
-:root body #chat-links .lk { display: inline-flex; align-items: center; gap: 8px; max-width: 320px; height: 40px; padding: 0 12px 0 8px; border-radius: 10px; border: 1px solid var(--border-hi); background: var(--bg2); color: var(--text); cursor: pointer; font: inherit; text-align: left; animation: chat-pop .35s var(--chat-ease); }
-:root body #chat-links .lk:hover { border-color: color-mix(in srgb, var(--claude) 45%, var(--border-hi)); }
-:root body #chat-links .lk-i { flex: none; width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; background: var(--hover); color: var(--subtext); }
-:root body #chat-links .lk.cu .lk-i { background: #7b68ee; color: #fff; }
-:root body #chat-links .lk-t { display: flex; flex-direction: column; min-width: 0; }
-:root body #chat-links .lk-t b { font-weight: 500; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-:root body #chat-links .lk-t small { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root body #chat-chips .chip.name { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--dim); }
 :root body #chat-chips .chip.name:hover { color: var(--text); }
 /* Background shells and subagents, docked at the top of the reply box */
@@ -715,4 +703,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation a.plink:hover { background: color-mix(in srgb, var(--claude) 18%, transparent); }
 :root body #conversation a.plink[data-pl="cu"]::before { content: '✓'; display: inline-block; width: 14px; height: 14px; margin-right: 5px; border-radius: 4px; background: #7b68ee; color: #fff; font-size: 9px; line-height: 14px; text-align: center; vertical-align: 1px; }
 :root body #conversation .msg.cmd a.plink { font-family: inherit; font-size: 12.5px; }
-:root body #chat-links .lk.gh .lk-i { background: var(--text); color: var(--bg); }
+/* A link in the reply box reads as its name in link colour: this layer draws the text, the box's own goes see-through */
+:root body #term-order-input.hl-txt { color: transparent; caret-color: var(--text); }
+:root body #chat-hl.txt { color: var(--text); }
+:root body #chat-hl.txt mark { color: inherit; }
+:root body #chat-hl mark.lnk { background: none; box-shadow: none; border-radius: 0; color: var(--accent); }

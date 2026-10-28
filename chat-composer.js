@@ -98,9 +98,9 @@
     const inp = box(), id = selectedId; if (id == null) return;
     micStop();
     pruneAtt();
-    const a = atts.get(id), shown = inp.value.trim(), text = expandPastes(inp.value, a).trim(), list = a ? a.list.splice(0) : [];
+    const a = atts.get(id), shown = inp.value.trim(), text = expandLinks(expandPastes(inp.value, a), a).trim(), list = a ? a.list.splice(0) : [];
     const pastes = ((a && a.pastes) || []).slice(); // the sent bubble's paste chips open to their text
-    if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; }
+    if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; a.links = []; }
     if (!text) { if (chat() && order().classList.contains('busy')) chatUi.keys(['\x1b']); return; } // empty + working: Stop
     if (chat() && /^\/resume$/.test(text) && !list.length) { inp.value = '/resume '; resumeCheck(inp); return; } // the CLI's picker is a full-screen dialog: list here
     const held = list.some(x => x.saving);
@@ -151,6 +151,8 @@
     // Typing brings the chat to its latest message, so you answer what you can see.
     const c = document.getElementById('conversation');
     if (c && c.scrollHeight - c.scrollTop - c.clientHeight > 40) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+    linkify.pasted = e.inputType === 'insertFromPaste';
+    if (linkify.pasted || /\s/.test(e.data || '') || e.inputType === 'insertLineBreak') { const was = e.target.value; linkify(e.target); if (e.target.value !== was) syncHl(); }
     if (resumeCheck(e.target)) return;
     const m = atQuery(e.target), a = agents.get(selectedId);
     if (!m || !a) return closeAt();
@@ -241,6 +243,8 @@
     // A tag goes in one keystroke: Backspace right after "[Image #1]" (or Delete right before it) removes it whole.
     if ((e.key === 'Backspace' || e.key === 'Delete') && t.selectionStart === t.selectionEnd) {
       const at = t.selectionStart, before = t.value.slice(0, at), after = t.value.slice(at);
+      const ln = ((atts.get(selectedId) || {}).links || []).find(l => e.key === 'Backspace' ? before.endsWith(l.tok) : after.startsWith(l.tok)); // a link's name goes whole
+      if (ln) { e.preventDefault(); const i = e.key === 'Backspace' ? at - ln.tok.length : at; t.value = t.value.slice(0, i) + t.value.slice(i + ln.tok.length); t.selectionStart = t.selectionEnd = i; grow(t); return; }
       const m = e.key === 'Backspace' ? /\[(?:Image #\d+|Pasted text #\d+[^\]]*)\] ?$/.exec(before) : /^\[(?:Image #\d+|Pasted text #\d+[^\]]*)\] ?/.exec(after);
       if (m) {
         e.preventDefault();
@@ -341,32 +345,56 @@
   const hl = document.createElement('div'); hl.id = 'chat-hl'; hl.setAttribute('aria-hidden', 'true');
   box().before(hl);
   const askedCat = new Set(); // folders whose command list was asked for once
-  // Links in the box: underlined in place, and a chip above it each, named by chatUi.linkLabel (a ClickUp task by its
-  // real name, a GitHub PR as "repo #N", anything else by site and path).
+  // A link in the box reads as its name, in link colour: a ClickUp task by its real name, a GitHub PR as "repo #N",
+  // anything else as site + path (chatUi.linkLabel). The box holds the name; Send puts the address back.
+  // ponytail: a name edited by hand stops being a link (Backspace at its end removes it whole, as with the other tags).
   const URL_RE = /https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/;
-  chatUi.linkWaiters.add(() => drawLinks(box().value, true));
-  function drawLinks(v, force) {
-    let el = document.getElementById('chat-links');
-    if (!el) { el = document.createElement('div'); el.id = 'chat-links'; document.getElementById('chat-att').before(el); el.onclick = (e) => { const c = e.target.closest('[data-url]'); if (c) api.send({ type: 'openUrl', url: c.dataset.url }); }; }
-    const urls = [...new Set((v.match(new RegExp(URL_RE.source, 'g')) || []))].slice(0, 6);
-    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const html = urls.map(u => {
-      const l = chatUi.linkLabel(u); if (!l) return '';
-      return `<button type="button" class="lk ${l.kind}" data-url="${esc(u)}" title="${esc(u)}"><span class="lk-i">${l.kind === 'cu' ? '✓' : l.kind === 'gh' ? '#' : '↗'}</span><span class="lk-t"><b>${esc(l.name)}</b><small>${esc(l.sub)}</small></span></button>`;
-    }).join('');
-    if (force || el._h !== html) { el.innerHTML = el._h = html; el.hidden = !html; }
+  const pendingName = (l) => l.kind === 'cu' && l.name === 'ClickUp task';
+  function linkify(t) {
+    const id = selectedId; if (id == null || !URL_RE.test(t.value)) return;
+    const a = attOf(id), v = t.value; a.links ||= [];
+    let out = '', last = 0, caret = t.selectionStart;
+    for (const m of v.matchAll(new RegExp(URL_RE.source, 'g'))) {
+      const end = m.index + m[0].length;
+      if (end === v.length && end === t.selectionStart && !linkify.pasted) continue; // still being typed
+      const l = chatUi.linkLabel(m[0]); if (!l) continue;
+      let tok = l.name; for (let k = 2; a.links.some(x => x.tok === tok && x.url !== m[0]); k++) tok = `${l.name} (${k})`;
+      a.links.push({ tok, url: m[0], cu: pendingName(l) ? l.id : null });
+      out += v.slice(last, m.index) + tok; last = end;
+      if (caret >= end) caret += tok.length - m[0].length;
+    }
+    if (!last) return;
+    t.value = out + v.slice(last); t.selectionStart = t.selectionEnd = caret; grow(t);
   }
+  const expandLinks = (text, a) => ((a && a.links) || []).reduce((s, l) => s.includes(l.tok) ? s.replace(l.tok, l.url) : s, text);
+  // A ClickUp name that was still loading: swap it in.
+  chatUi.linkWaiters.add(() => {
+    const a = atts.get(selectedId), t = box(); if (!a || !a.links) return;
+    for (const l of a.links) {
+      if (!l.cu) continue;
+      const n = chatUi.linkLabel(l.url); if (pendingName(n)) continue;
+      const i = t.value.indexOf(l.tok); l.cu = null;
+      if (i >= 0) { const s = t.selectionStart; t.value = t.value.slice(0, i) + n.name + t.value.slice(i + l.tok.length); if (s > i) t.selectionStart = t.selectionEnd = s + n.name.length - l.tok.length; }
+      l.tok = n.name;
+    }
+    grow(t);
+  });
   function syncHl() {
     const t = box(), v = t.value;
     // a /command or /skill this agent has (from its catalog) reads in the brand colour, like the CLI
     const a = typeof agents === 'undefined' ? null : agents.get(selectedId), names = new Set((catalog.get(a && a.cwd) || []).filter(i => i.insert && i.insert.startsWith('/')).map(i => i.insert.trim().split(/\s/)[0].toLowerCase()));
     if (a && !catalog.has(a.cwd) && !askedCat.has(a.cwd) && /(^|\s)\/[\w:-]/.test(v)) { askedCat.add(a.cwd); api.send({ type: 'catalog', cwd: a.cwd }); }
     const cmd = /(^|\s)(\/[\w:.-]+)/g, hasCmd = names.size && [...v.matchAll(cmd)].some(m => names.has(m[2].toLowerCase()));
-    drawLinks(v);
-    if (!/\[(Image|Pasted text|File) #\d+/.test(v) && !hasCmd && !URL_RE.test(v)) { if (hl.innerHTML) hl.innerHTML = ''; hl.hidden = true; return; }
+    const esc = (s) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const toks = ((atts.get(typeof agents === 'undefined' ? null : selectedId) || {}).links || []).map(l => l.tok).filter(k => v.includes(k));
+    // Link names are drawn by this layer in link colour, so the box's own text goes see-through while there are any.
+    t.classList.toggle('hl-txt', toks.length > 0); hl.classList.toggle('txt', toks.length > 0);
+    if (!/\[(Image|Pasted text|File) #\d+/.test(v) && !hasCmd && !toks.length) { if (hl.innerHTML) hl.innerHTML = ''; hl.hidden = true; return; }
     hl.hidden = false;
-    hl.innerHTML = v.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])).replace(/\[(?:Image #\d+|Pasted text #\d+[^\]]*|File #\d+[^\]]*)\]/g, m => `<mark>${m}</mark>`)
-      .replace(cmd, (m, sp, c) => names.has(c.toLowerCase()) ? `${sp}<mark class="cmd">${c}</mark>` : m).replace(new RegExp(URL_RE.source, 'g'), m => `<mark class="url">${m}</mark>`) + '\n';
+    let h = esc(v).replace(/\[(?:Image #\d+|Pasted text #\d+[^\]]*|File #\d+[^\]]*)\]/g, m => `<mark>${m}</mark>`)
+      .replace(cmd, (m, sp, c) => names.has(c.toLowerCase()) ? `${sp}<mark class="cmd">${c}</mark>` : m);
+    for (const k of toks.sort((x, y) => y.length - x.length)) h = h.split(esc(k)).join(`<mark class="lnk">${esc(k)}</mark>`);
+    hl.innerHTML = h + '\n';
     hl.style.top = t.offsetTop + 'px'; hl.style.left = t.offsetLeft + 'px'; hl.style.width = t.clientWidth + 'px'; hl.style.height = t.clientHeight + 'px';
     hl.scrollTop = t.scrollTop;
   }
