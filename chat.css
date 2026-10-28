@@ -786,3 +786,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.ask .choices button.sep::before { content: ''; position: absolute; left: 0; right: 0; top: -7px; border-top: 1px solid var(--border); }
 :root body #conversation .card.ask .ask-tabs [data-tab] { cursor: pointer; }
 :root body #conversation .card.ask .ask-tabs [data-tab]:not(.on):hover { background: var(--hover-strong); color: var(--text); }
+/* "Type something" as a field, while it's the selected option */
+:root body #conversation .card.ask .ask-typing { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--claude); background: var(--surface0, transparent); }
+:root body #conversation .card.ask .ask-in { flex: 1; min-width: 0; height: 22px; padding: 0; border: 0; outline: 0; background: none; color: var(--text); font: inherit; font-size: 14px; }
+:root body #conversation .card.ask .ask-in::placeholder { color: var(--dim); }
+:root body #conversation .card.ask .ask-in:disabled { opacity: .6; }

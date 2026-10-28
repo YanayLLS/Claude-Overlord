@@ -487,12 +487,12 @@
     const s = screenAsk(selectedId); // the open question is only on screen until it's answered
     const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
     const q = (s && s.question) || a.question || 'Claude has a question';
-    if (askFor !== selectedId + '\n' + q) { askFor = selectedId + '\n' + q; askHover = null; askAsked = null; } // a new question starts from its focused option
+    if (askFor !== selectedId + '\n' + q) { askFor = selectedId + '\n' + q; askHover = null; askAsked = null; askTyped = ''; } // a new question starts from its focused option
     // Several questions: which one this is, which are answered (the CLI's tab row).
     const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40), at = (a.steps || []).findIndex(x => norm(x.q) === norm(q)), on = at >= 0 ? at : ((s && s.tabs) || []).findIndex(x => !x.done); // else the first one not answered
     const tabs = s && s.tabs && s.tabs.length > 1 ? `<div class="ask-tabs" data-on="${on}">${s.tabs.map((x, k) => `<span data-tab="${k}" class="${x.done ? 'done' : ''}${k === on ? ' on' : ''}">${x.done ? ICON.check : `<i>${k + 1}</i>`}${escH(x.label)}</span>`).join('')}</div>` : '';
     const stepKey = tabs ? 'steps:' + s.tabs.map(x => x.label).join('|') : q;
-    return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${opts.some(o => /^(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
+    return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${opts.some(o => /^(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
@@ -565,6 +565,29 @@
     for (const b of document.querySelectorAll('#conversation .card.ask .choices [data-pick]')) b.classList.toggle('focus', +b.dataset.pick === k);
     const pane = document.querySelector('#conversation .card.ask .ask-prev'); if (pane) { pane.dataset.focus = k; applyAskHover(); }
     setTimeout(rerender, Math.abs(d) * 70 + 200);
+  }
+  // The "Type something" row as a text field (shown while it's the selected option). Redraws rebuild the card: the text
+  // lives here and goes back in. Reaching it (a click, its number, the arrows) puts the caret in it; Enter sends it as
+  // the answer (its number, then the text), ↑/↓ move on, Esc goes back to the reply box.
+  let askTyped = '', askFocusIn = false;
+  function keepAskInput() {
+    const i = document.querySelector('#conversation .card.ask .ask-in'); if (!i) return;
+    if (i.value !== askTyped) i.value = askTyped;
+    if (i._wired) return; i._wired = 1;
+    const box = document.getElementById('term-order-input'), ae = document.activeElement;
+    if (askFocusIn || ((ae === box || ae === document.body) && !box.value)) { i.focus(); i.selectionStart = i.selectionEnd = i.value.length; }
+    askFocusIn = false;
+    i.addEventListener('input', () => { askTyped = i.value; });
+    i.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.isComposing) return;
+      if (e.key === 'Enter') {
+        e.preventDefault(); const t = i.value.trim(), id = selectedId, k = +i.closest('[data-pick]').dataset.pick; if (!t) return;
+        askTyped = ''; i.disabled = true; i.closest('.card')?.classList.add('picked-card');
+        api.send({ type: 'termInput', id, data: String(k + 1) }); setTimeout(() => chatComposer.sendText(id, t), 400);
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); box.focus(); askStep(e.key === 'ArrowDown' ? 1 : -1); }
+      else if (e.key === 'Escape') { e.preventDefault(); box.focus(); }
+    });
   }
   // Several questions: ←/→ (or a click on its step) go to another one, as in the CLI's tab row.
   function askTab(d) {
@@ -955,7 +978,7 @@
       else tailEl.innerHTML = tail;
       tailEl._h = tail; tailEl._k = key; changed.push(tailEl);
     }
-    drawDock(); applyAskHover(); // a hovered option keeps its preview through redraws
+    drawDock(); applyAskHover(); keepAskInput(); // a hovered option keeps its preview through redraws, a typed answer its text
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
     announce(st === 'question' ? 'The agent has a question' : st === 'permission' ? 'The agent needs approval' : busy ? 'The agent is working' : a.crashed === 'fatal' ? 'The agent stopped' : 'The agent is done');
     prevBusy.set(id, busy);
@@ -1208,6 +1231,9 @@
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
     if (tab) { askTab(+tab.dataset.tab - +tab.parentElement.dataset.on); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
+    if (pick && e.target.closest('.ask-in')) return; // typing an answer in it
+    // "Type something": the row becomes where you type, as in the CLI (its cursor goes there too).
+    if (pick && selectedId != null && /^type something/i.test(menuOptions(selectedId)[+pick.dataset.pick] || '')) { askMove(+pick.dataset.pick); askFocusIn = true; rerender(); return; }
     if (pick && selectedId != null) { if ((stillWaiting(selectedId) || screenAsk(selectedId).dialog) && !pick.closest('.picked-card') && pickOption(selectedId, +pick.dataset.pick)) { pick.classList.add('picked'); pick.closest('.card')?.classList.add('picked-card'); } return; }
     const tag = e.target.closest('.imgtag[data-src]'); // an [Image #N] chip opens the image it names
     if (tag) { lightbox(tag.dataset.src); return; }
