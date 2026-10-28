@@ -1181,7 +1181,8 @@
     // on their way come back at once. One the CLI already has comes back only if the CLI itself put it back in its box
     // (it does when nothing was answered yet); that box is then cleared, or it would ride along with the next send.
     const evs = visibleEvs(a, worldTl && worldTl.id === id ? worldTl.events : []), pend = pending.get(id) || [];
-    let k = evs.length - 1; while (k >= 0 && /^(mode|images|interrupt)$/.test(evs[k].type)) k--;
+    // A tool call already under way doesn't count as an answer: the CLI still puts the message back (no text written yet).
+    let k = evs.length - 1; while (k >= 0 && /^(mode|images|interrupt|tool|tool_done|subtask|queue)$/.test(evs[k].type)) k--;
     const last = evs[k], lastMine = last && (last.type === 'prompt' || last.type === 'command') && last.ts && Date.now() - Date.parse(last.ts) < 120000 && !screenReply(id, evs) ? last : null;
     const back = pend.filter(p => !p.held);
     if (back.length) {

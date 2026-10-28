@@ -21,8 +21,17 @@ function boxInner(line) {
 function readPromptText(lines, cursorIdx) {
   const at = (i) => (i >= 0 && i < (lines || []).length ? lines[i] : undefined);
   if (boxInner(at(cursorIdx)) === null) {
-    // ponytail: no box (plain shell, or a Claude build that dropped it) — the
-    // cursor line alone is the best guess. Multi-line input there is rare.
+    // Today's CLI: no side borders, its box is the rows between two ──── rules. A message long enough to wrap
+    // spans several of them (reading only the cursor's row left the rest behind, and it rode along with the next send).
+    const rule = (s) => typeof s === 'string' && /^\s*─{10,}/.test(s);
+    let top = cursorIdx, bot = cursorIdx;
+    while (top > 0 && !rule(at(top - 1)) && cursorIdx - top < 40) top--;
+    while (bot < lines.length - 1 && !rule(at(bot + 1)) && bot - cursorIdx < 40) bot++;
+    if (!rule(at(cursorIdx)) && rule(at(top - 1)) && rule(at(bot + 1))) {
+      const rows = lines.slice(top, bot + 1), m = (rows[0] || '').match(MARKER);
+      if (m) return rows.map((r, i) => (i === 0 ? r.replace(MARKER, '') : r.replace(new RegExp(`^ {0,${m[0].length}}`), ''))).join('\n').trim();
+    }
+    // ponytail: no box (plain shell) — the cursor line alone is the best guess.
     const raw = at(cursorIdx);
     return typeof raw === 'string' ? raw.replace(MARKER, '').trim() : '';
   }

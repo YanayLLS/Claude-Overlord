@@ -69,3 +69,10 @@ assert.deepStrictEqual(promptSpan(['$ ls -la'], 0), { top: 0, startCol: 2, bot: 
 // empty prompt: nothing to mark
 assert.strictEqual(promptSpan(['────', '❯ ', '────'], 1), null);
 console.log('promptSpan ok');
+
+// Today's CLI: the box is the rows between two rules; a wrapped message is all of them, from either row
+const wrapped = ['● hi', '────────────────', '❯ Run this exact bash command in the foreground: node -e', '  "setTimeout(()=>1,20000)" ; then reply DONE.', '────────────────', '  ⏵⏵ auto mode'];
+assert.strictEqual(readPromptText(wrapped, 3), 'Run this exact bash command in the foreground: node -e\n"setTimeout(()=>1,20000)" ; then reply DONE.');
+assert.strictEqual(readPromptText(wrapped, 2), readPromptText(wrapped, 3));
+assert.strictEqual(readPromptText(['────────────', '❯ ', '────────────'], 1), '');
+console.log('ruled box ok');
