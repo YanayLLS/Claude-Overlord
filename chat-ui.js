@@ -1119,15 +1119,15 @@
   document.body.appendChild(toasts);
   const stillWaiting = (id) => { const a = agents.get(id); return !!(a && [...a.tools.values()].some(t => t.perm && !t.done)); };
   function placeToasts() {
-    const t = document.getElementById('term'), r = t && t.classList.contains('open') ? t.getBoundingClientRect() : null;
-    toasts.style.right = (r ? Math.max(16, innerWidth - r.right + 16) : 16) + 'px';
-    // Docked just above the composer while the Chat view is open (out of the thread's way), else the window's top-right.
-    const o = document.getElementById('term-order'), ob = o && o.classList.contains('open') ? o.getBoundingClientRect() : null;
-    // While toasts sit above the composer, the thread gets that much more room at the bottom so they never hide the
-    // newest message.
-    document.getElementById('conversation')?.style.setProperty('--toast-h', (ob && ob.height && toasts.childElementCount ? toasts.offsetHeight + 12 : 0) + 'px');
-    if (ob && ob.height) { toasts.style.top = 'auto'; toasts.style.bottom = Math.max(16, innerHeight - ob.top + 10) + 'px'; }
-    else { toasts.style.bottom = 'auto'; toasts.style.top = '56px'; }
+    // In the agent list on the left, just above its footer (PRs, releases, usage), as wide as the list: never over the
+    // chat. With the list hidden (world view without a roster), the window's top-right.
+    const col = document.getElementById('list-col'), cr = col && col.offsetWidth ? col.getBoundingClientRect() : null;
+    const foot = document.getElementById('list-foot'), fr = foot && foot.offsetHeight ? foot.getBoundingClientRect() : null;
+    document.getElementById('conversation')?.style.setProperty('--toast-h', '0px');
+    if (cr && cr.width > 160) {
+      toasts.style.left = (cr.left + 10) + 'px'; toasts.style.right = 'auto'; toasts.style.width = (cr.width - 20) + 'px';
+      toasts.style.top = 'auto'; toasts.style.bottom = (innerHeight - (fr ? fr.top : cr.bottom) + 10) + 'px';
+    } else { toasts.style.left = 'auto'; toasts.style.width = ''; toasts.style.right = '16px'; toasts.style.bottom = 'auto'; toasts.style.top = '56px'; }
     const shown = [...toasts.querySelectorAll('.ctoast')];
     shown.forEach((el, k) => { el.hidden = k >= 3; });
     let more = toasts.querySelector('.ct-more');
@@ -1156,6 +1156,8 @@
     });
     toasts.prepend(el); placeToasts();
   }
+  addEventListener('resize', placeToasts);
+  { const col = document.getElementById('list-col'); if (col) new ResizeObserver(() => { if (toasts.childElementCount) placeToasts(); }).observe(col); } // the list resized or hidden: follow it
   function dropToast(id) { for (const t of toasts.querySelectorAll(`.ctoast[data-id="${id}"]`)) t.remove(); placeToasts(); }
 
   // ── Needs you: every agent waiting on you (a question, a permission) or finished unseen. Listed in the ⋯ menu; the

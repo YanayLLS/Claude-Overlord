@@ -4482,7 +4482,7 @@ function handleAgentMsg(msg) {
         if (!a.peerPending.some(p => p.msgId === msg.msgId)) a.peerPending.push({ msgId: msg.msgId, fromPeer: msg.fromPeer, fromAgent: msg.fromAgent, fromUser: msg.fromUser, text: msg.text });
         scheduleRender();
       }
-      showToast(`✉ Message from ${msg.fromUser || msg.fromPeer} — click the ✉ badge to review`);
+      // No pop-up: the ✉ badge on its card in the agent list is the notice.
       break;
     }
     case 'peerMsgResolved': {
