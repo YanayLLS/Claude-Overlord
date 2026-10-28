@@ -2474,7 +2474,7 @@ function setTheme(name, persist = true) {
 }
 document.getElementById('sel-theme').innerHTML = Object.entries(THEMES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
 document.getElementById('sel-theme').value = currentTheme;
-function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; if (window.chatUi) chatUi.dropToast(id); /* its card shows now */ if (agents.get(id)) agents.get(id).unread = false; if (agents.get(id)) hotCwd = agents.get(id).cwd; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
+function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; if (agents.get(id)) agents.get(id).unread = false; if (agents.get(id)) hotCwd = agents.get(id).cwd; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
 // The Chat view's reply box takes focus, unless you're typing somewhere else (renaming an agent, the search box…):
 // a double-click to rename is two clicks, and the focus a click schedules would land after the rename box opened.
 function focusReplyBox() {
@@ -4051,7 +4051,8 @@ focusAgent = function(id) {
   const a = agents.get(id);
   if (!a) return;          // Agent was closed, ignore stale click
   if (a.archived) return;  // archived agents have no card — never open their terminal
-  selectedId = id;
+  selectedId = id; rememberAgent(); // opened again after a restart or reload
+  if (window.chatUi) chatUi.dropToast(id); // its card shows now
   api.send({ type: 'focusAgent', id });
   openTerm(id);
   // Scroll selected card into view (for keyboard nav with long lists)
@@ -4204,9 +4205,14 @@ api.on((msg) => {
 // On launch, restored agents arrive in a burst; once it settles, open the top card so the
 // terminal isn't empty. ponytail: 400ms debounce, fine unless restore is slower per agent.
 let autoOpenDone = false, autoOpenTimer = null;
+function rememberAgent() { const a = agents.get(selectedId); if (a) try { localStorage.setItem('overlord.lastAgent', JSON.stringify({ id: selectedId, sid: a.sessionId || '' })); } catch {} }
 function autoOpenFirstAgent() {
   autoOpenDone = true;
   if (selectedId != null) return;
+  // The agent you were on before a restart or reload (by its session; its id only survives a reload).
+  let last = null; try { last = JSON.parse(localStorage.getItem('overlord.lastAgent') || 'null'); } catch {}
+  const prev = last && ([...agents].find(([, a]) => last.sid && a.sessionId === last.sid && !a.archived) || (agents.get(last.id) && !agents.get(last.id).archived && [last.id]));
+  if (prev) return focusAgent(prev[0]);
   const card = document.querySelector('.agent[data-id]');
   if (card) focusAgent(+card.dataset.id); else closeTerm();
 }
@@ -4472,7 +4478,7 @@ function handleAgentMsg(msg) {
     case 'chatSessions': chatComposer.onSessions(msg); break;
     case 'linkTitle': chatUi.onLinkTitle(msg); break;
     case 'cliEscSent': chatUi.onEscSent(msg.id); break; // the Esc reached the CLI: Esc's take-back looks at its box now
-    case 'sessionChanged': { const a = agents.get(msg.id); if (a) { a.sessionId = msg.sessionId; a.chatHides = []; } break; } // after /clear or /resume: drafts and hidden messages are this session's
+    case 'sessionChanged': { const a = agents.get(msg.id); if (a) { a.sessionId = msg.sessionId; a.chatHides = []; if (msg.id === selectedId) rememberAgent(); } break; } // after /clear or /resume: drafts and hidden messages are this session's
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;
