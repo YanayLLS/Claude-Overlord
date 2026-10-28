@@ -1245,6 +1245,17 @@
   }
   addEventListener('resize', placeToasts);
   { const col = document.getElementById('list-col'); if (col) new ResizeObserver(() => { if (toasts.childElementCount) placeToasts(); }).observe(col); } // the list resized or hidden: follow it
+  // An agent that finished while you were elsewhere: a short note in the same stack (left, in the agent list), its last
+  // line under its name; a click opens it, and it goes by itself after a few seconds.
+  function doneToast(id, line) {
+    const a = agents.get(id); if (!a) return;
+    for (const t of toasts.querySelectorAll(`.ctoast.fin[data-id="${id}"]`)) t.remove();
+    const el = document.createElement('div'); el.className = 'ctoast fin'; el.dataset.id = id; el.setAttribute('role', 'status');
+    el.innerHTML = `<div class="ct-h">${ICON.check}<b>${escH(a.title || 'Agent')}</b><span>finished</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>${line ? `<div class="ct-what q">${escH(line)}</div>` : ''}`;
+    el.addEventListener('click', (e) => { el.remove(); placeToasts(); if (!e.target.closest('.ct-x')) focusAgent(id); });
+    toasts.prepend(el); placeToasts();
+    setTimeout(() => { if (el.isConnected) { el.classList.add('done'); setTimeout(() => { el.remove(); placeToasts(); }, 300); } }, 6000);
+  }
   function dropToast(id) { for (const t of toasts.querySelectorAll(`.ctoast[data-id="${id}"]`)) t.remove(); placeToasts(); }
 
   // ── Needs you: every agent waiting on you (a question, a permission) or finished unseen. Listed in the ⋯ menu; the
@@ -1494,5 +1505,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) ag._stopAt = 0; jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { doneToast, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) ag._stopAt = 0; jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

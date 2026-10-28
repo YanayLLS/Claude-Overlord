@@ -759,3 +759,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation details.msg.peer > .md { padding: 0 12px 10px; }
 /* Chips read the same in your messages and Claude's replies, whatever the text around them is set in */
 :root body :is(#conversation, #chat-shell) :is(.imgtag, a.plink) { font-family: 'Geist', 'Segoe UI', system-ui, sans-serif; font-size: 13px; }
+/* "Agent finished" in the agent-list stack: green check, one quiet line */
+#chat-toasts .ctoast.fin { border-color: color-mix(in srgb, var(--green, #4ade80) 45%, var(--border-hi)); cursor: pointer; }
+#chat-toasts .ctoast.fin .ct-h .ic { stroke: var(--green, #4ade80); }
+#chat-toasts .ctoast.fin .ct-what { margin-bottom: 0; }
