@@ -272,11 +272,26 @@
   }
   // The terminal's open menu ("❯ 1. Yes …  2. No …"), read off its last lines: the plan card's choices are exactly
   // the CLI's, whatever this version offers.
-  function menuOptions(id) {
-    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active; if (!b) return [];
-    const out = [];
-    for (let i = Math.max(0, b.length - 30); i < b.length; i++) { const m = /^\s*[❯›>]?\s*(\d)\.\s+(.+?)\s*$/.exec(b.getLine(i)?.translateToString() || ''); if (m) out[+m[1] - 1] = m[2]; }
-    return out.filter(Boolean);
+  function menuOptions(id) { return screenAsk(id).options.map(o => o.label); }
+  // The open question as the CLI draws it: the line above its menu, and each option with the lines under it. A question
+  // isn't in the transcript until it's answered, so this is the only place it can be read from while it waits.
+  function screenAsk(id) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal && x.terminal.buffer.active, none = { question: '', options: [] }; if (!b) return none;
+    const rows = []; for (let i = Math.max(0, b.length - 40); i < b.length; i++) { const l = b.getLine(i), t = l ? l.translateToString(true) : ''; if (l && l.isWrapped && rows.length) rows[rows.length - 1] += t; else rows.push(t); } // a row the terminal wrapped is one line
+    const cut = (s) => s.replace(/^\s*[│┃|]?\s*/, '').split(/\s{3,}|[│┃┌└├┐┘┤╭╮╰╯─━✂]/)[0].trim(); // a left rule goes; a preview drawn beside isn't part of it
+    const OPT = /^\s*[❯›>]?\s*(\d)\.\s+(.+?)\s*$/, options = []; let first = -1;
+    rows.forEach((r, i) => {
+      const m = OPT.exec(r);
+      if (m) { if (first < 0) first = i; options[+m[1] - 1] = { label: cut(m[2]), desc: '' }; return; }
+      const last = options[options.length - 1], d = cut(r);
+      if (!last || first < 0 || !d || !/^\s{3,}/.test(r) || /^(Enter|Esc|↑|Tab|Notes:)/.test(d)) return;
+      if (/^\(.*\)$/.test(d) && !last.desc) last.label += ' ' + d; // "(Recommended)" wrapped under its label
+      else last.desc = (last.desc ? last.desc + ' ' : '') + d;
+    });
+    // The question: the lines just above the menu (it can wrap, inside a left rule), up to a blank line.
+    const q = [];
+    for (let i = first - 1; i >= 0 && i >= first - 12; i--) { const t = cut(rows[i]); if (!t) { if (q.length) break; continue; } if (/[←→]|^\[[ x✓]?\]|^[☐☑✔]/.test(t)) break; q.unshift(t); }
+    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), dialog: first >= 0 && screenDialog(rows) };
   }
   // A proposed plan waiting for approval: the plan itself, rendered, and the CLI's own choices as buttons.
   function planHtml(ev, cwd) {
@@ -284,8 +299,9 @@
     return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Ready to code? Here's the plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="choices">${labels.map((l, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(l)}</b></span></button>`).join('')}</div></div>`;
   }
   function askHtml(ask, perm) {
-    const a = (ask && ask.args) || {}, opts = a.options || [];
-    const q = a.question || (perm && perm.status) || 'Claude has a question';
+    const s = screenAsk(selectedId); // the open question is only on screen until it's answered
+    const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
+    const q = (s && s.question) || a.question || 'Claude has a question';
     return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
   }
   // ── Background shells and subagents: one small pill above the reply box ("10 agents · 1 shell"). Hover it for the list,
@@ -371,6 +387,8 @@
       return `<button type="button" role="menuitem" class="bga bgsh" data-bgout="${escH(d.bgOut)}" data-bgname="${escH(name)}" data-cmd="${escH(a2.command || '')}">${ICON.cmd}<span class="bga-n">${escH(name)}</span><span class="bga-t" data-live="s${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('')
       + bg.map(e => { const a2 = e.args || {};
         return `<button type="button" role="menuitem" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
+    // A menu on the CLI's screen that main didn't flag (a question with previews, say): still a question card, not the raw terminal.
+    if (!perm) { const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + askHtml(null, null); }
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -780,7 +798,7 @@
     // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
     if (k && selectedId != null) { if (stillWaiting(selectedId)) keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
-    if (pick && selectedId != null) { if (stillWaiting(selectedId) && !pick.closest('.picked-card') && pickOption(selectedId, +pick.dataset.pick)) { pick.classList.add('picked'); pick.closest('.card')?.classList.add('picked-card'); } return; }
+    if (pick && selectedId != null) { if ((stillWaiting(selectedId) || screenAsk(selectedId).dialog) && !pick.closest('.picked-card') && pickOption(selectedId, +pick.dataset.pick)) { pick.classList.add('picked'); pick.closest('.card')?.classList.add('picked-card'); } return; }
     const tag = e.target.closest('.imgtag[data-src]'); // an [Image #N] chip opens the image it names
     if (tag) { lightbox(tag.dataset.src); return; }
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
@@ -1015,7 +1033,7 @@
     const tools = [...a.tools.values()], t = tools.find(x => ask ? x.perm === 'ask' : x.perm === true) || tools.find(x => x.perm) || {}, opts = ask ? quickOpts(id) : [];
     const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
     el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
-      + `<div class="ct-what">${escH(t.status || t.name || '')}</div>`
+      + (() => { const w = ask ? screenAsk(id).question : (t.status || t.name || ''); return w && !/^Waiting for your (answer|permission)$/i.test(w) ? `<div class="ct-what${ask ? ' q' : ''}">${escH(w)}</div>` : ''; })()
       + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : '<button type="button" class="primary" data-k="1">Allow</button><button type="button" data-k="2">Always</button><button type="button" data-k="esc">Deny</button>'}<button type="button" data-open="1">Open</button></div>`;
     el.addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
@@ -1125,15 +1143,23 @@
     const done = evs.find(x => x.type === 'tool_done' && x.toolId === tid), a = call.args || {}, name = a.description || a.subagent_type || 'Agent';
     const d = document.createElement('div'); d.id = 'chat-shell'; d.className = 'agentp'; d.dataset.tid = tid; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', name); d.tabIndex = -1; returnTo = document.activeElement; trapFocus(d);
     d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShell(); } });
-    const out = done && done.text ? done.text.replace(/s+$/, '') : '';
-    d.innerHTML = `<div class="sh-h">${ICON.agent}<span>${escH(name)}</span>${done ? '' : '<span class="dot"></span>'}<button type="button" class="sh-x" aria-label="Close">×</button></div>`
+    // A background agent's call returns at once with the CLI's launch note (for the model, not you): it's still running.
+    const bgRun = !!(done && done.agentId && /^Async agent launched/i.test(done.text || '') && !evs.some(x => x.type === 'bgdone' && x.taskId === done.agentId));
+    const running = !done || bgRun, out = done && done.text && !/^Async agent launched/i.test(done.text) ? done.text.replace(/\s+$/, '') : '';
+    d.innerHTML = `<div class="sh-h">${ICON.agent}<span>${escH(name)}</span>${running ? '<span class="dot"></span>' : ''}<button type="button" class="sh-x" aria-label="Close">×</button></div>`
       + `<div class="ap-b">${a.prompt ? `<details class="ap-task"><summary>Task</summary><div class="md sub">${md(a.prompt, '')}</div></details>` : ''}<div class="agent-steps"><div class="as-h">Loading…</div></div>${out ? `<div class="ap-res"><div class="as-h">Result</div><div class="md sub">${md(out, '')}</div></div>` : ''}</div>`;
     d.querySelector('.sh-x').onclick = closeShell;
     d.addEventListener('click', (e) => { const r = e.target.closest('[data-agent-tid]'); if (r) e.stopPropagation(); }); // a nested agent's row stays put
     document.getElementById('term').appendChild(d);
     const pull = () => api.send({ type: 'agentSteps', id: selectedId, toolId: tid, agentId: done && done.agentId });
-    pull(); if (!done) shellTimer = setInterval(pull, 2000); d.focus();
+    pull(); if (running) shellTimer = setInterval(pull, 2000); d.focus();
   }
+  // Any panel (shell output, an agent, a pasted text) closes on a click outside it, like a popover.
+  document.addEventListener('mousedown', (e) => {
+    const p = document.getElementById('chat-shell'); if (!p || p.contains(e.target)) return;
+    if (e.target.closest('#chat-bg, #chat-hover, [data-agent-tid], [data-jump], [data-bgout], [data-pn]')) return; // what opens one swaps it instead
+    closeShell();
+  });
   document.getElementById('conversation').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-agent-tid]')) { e.preventDefault(); e.target.click(); } });
   function drawSteps(evs) {
     const box = document.querySelector('#chat-shell.agentp .agent-steps'); if (!box) return;
@@ -1255,7 +1281,7 @@
   setInterval(() => {
     const t = document.getElementById('term'), cv = document.getElementById('conversation');
     const x = selectedId != null && typeof xterms !== 'undefined' && xterms.get(selectedId);
-    const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)));
+    const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)) && screenAsk(selectedId).options.length < 2); // a question menu gets its card instead
     if (up) { peekOff = 0; peek(true); return; }
     if (t && t.classList.contains('peek') && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
     peek(false);

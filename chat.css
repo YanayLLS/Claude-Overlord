@@ -716,3 +716,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-bg button.bga { display: flex; width: 100%; max-width: none; border: 0; border-radius: 8px; padding: 6px 8px; font-size: 12.5px; text-align: left; }
 :root body #chat-bg button.bga .bga-n { flex: 1; }
 :root body #chat-bg button.bga .ic { width: 14px; height: 14px; flex: none; }
+/* A waiting agent's toast: its name on one line, then the question itself, then its answers */
+#chat-toasts .ct-h b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-toasts .ct-h span { flex: none; }
+#chat-toasts .ct-what.q { font-family: inherit; font-size: 13px; color: var(--text); white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+#chat-toasts .ct-btns button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
