@@ -87,3 +87,14 @@ test('a mid-turn message of any shape or sender reads as a prompt; a system note
   assert.strictEqual(parse({ type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'teammate' }, prompt: ['plain', ' strings'] } })[0].text, 'plain strings');
   assert.strictEqual(parse({ type: 'attachment', attachment: { type: 'queued_command', prompt: '<system-reminder>x</system-reminder>' } }), null);
 });
+
+test("the CLI's image-size note and its compaction summary aren't messages", () => {
+  assert.strictEqual(parse({ type: 'user', isMeta: true, message: { content: [{ type: 'text', text: '[Image: original 2360x1640, displayed at 2000x1390. Multiply coordinates by 1.18 to map to original image.]' }] } }), null);
+  assert.strictEqual(parse({ type: 'user', message: { content: '[Image: original 2360x1640, displayed at 2000x1390.]' } }), null);
+  assert.strictEqual(parse({ type: 'user', isCompactSummary: true, message: { content: 'This session is being continued from a previous conversation…' } }), null);
+});
+
+test("another session's message is a note from it, not your bubble with raw tags", () => {
+  const [ev] = parse({ type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'peer' }, prompt: 'Another Claude session sent a message:\n<teammate-message teammate_id="bddfix" color="blue" summary="spec is stale">\nDetails here.\n</teammate-message>' } });
+  assert.deepStrictEqual([ev.type, ev.from, ev.summary, ev.text], ['peer', 'bddfix', 'spec is stale', 'Details here.']);
+});

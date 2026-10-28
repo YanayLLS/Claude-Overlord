@@ -748,3 +748,12 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .msg.user.editing .edit-btns { display: flex; gap: 6px; justify-content: flex-end; }
 :root body #conversation .msg.user.editing .edit-btns button { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border-hi); background: none; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
 :root body #conversation .msg.user.editing .edit-btns button.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+/* Another Claude session's message: one quiet line (who · what), opening to the full note */
+:root body #conversation details.msg.peer { margin: 6px 0; border-radius: 10px; border: 1px solid var(--border); background: var(--bg2); }
+:root body #conversation details.msg.peer > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; font-size: 13px; color: var(--subtext); min-width: 0; }
+:root body #conversation details.msg.peer > summary::-webkit-details-marker { display: none; }
+:root body #conversation details.msg.peer > summary .ic { width: 14px; height: 14px; flex: none; }
+:root body #conversation details.msg.peer .pr-from { flex: none; font-weight: 500; color: var(--text); }
+:root body #conversation details.msg.peer .pr-sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root body #conversation details.msg.peer[open] > summary .ic:last-child { transform: rotate(90deg); }
+:root body #conversation details.msg.peer > .md { padding: 0 12px 10px; }

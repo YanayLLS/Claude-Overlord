@@ -165,6 +165,7 @@
     else if (ev.type === 'command') h = `<div class="msg cmd" data-i="${i}"><span>${escH(ev.text).replace(/https?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]']/g, (u) => `<a href="${u}">${u}</a>`)}</span></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
+    else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.

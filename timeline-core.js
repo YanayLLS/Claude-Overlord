@@ -31,11 +31,14 @@ function promptEvents(ts, blocks, isSystemMessage) {
   // A background shell or agent finished: the CLI tells the model with a <task-notification>.
   if (/^<task-notification>/.test(txt)) { const id = /<task-id>([^<]+)<\/task-id>/.exec(txt), st = /<status>([^<]+)<\/status>/.exec(txt); return id ? [{ type: 'bgdone', ts, taskId: id[1].trim(), status: st ? st[1].trim() : '' }] : null; }
   if (isSystemMessage(txt)) return null;
+  // Another Claude session's message ("Another Claude session sent a message: <teammate-message …>"): a note from it.
+  const tm = /<teammate-message\b([^>]*)>([\s\S]*?)(?:<\/teammate-message>|$)/.exec(txt);
+  if (tm) { const at = (k) => (new RegExp(`${k}="([^"]*)"`).exec(tm[1]) || [])[1] || ''; return [{ type: 'peer', ts, from: at('teammate_id') || 'another session', summary: at('summary'), text: tm[2].trim() }]; }
   // Claude Code adds an "[Image: source: <path>]" line per pasted image (often as a record of its own). The path is kept:
   // an image too big to embed below still gets its thumbnail from the file.
   const paths = [...txt.matchAll(/\[Image: source: ([^\]]*)\]/g)].map(m => m[1].trim()).filter(Boolean);
   // A long paste comes back wrapped in <pasted_content id="…">…</pasted_content id="…">: what you sent is inside.
-  const text = txt.replace(/\[Image: source: [^\]]*\]/g, '').replace(/<\/?pasted_content(?:\s+id="[^"]*")?>\n?/g, '').trim();
+  const text = txt.replace(/\[Image: source: [^\]]*\]/g, '').replace(/\[Image: original \d+x\d+[^\]]*\]/g, '').replace(/<\/?pasted_content(?:\s+id="[^"]*")?>\n?/g, '').trim();
   if (!text && !blocks.some(b => b.type === 'image')) return paths.length ? [{ type: 'images', ts, paths }] : null;
   const images = blocks.filter(b => b.type === 'image' && b.source && b.source.type === 'base64' && (b.source.data || '').length <= TL_IMG_MAX)
     .map(b => `data:${b.source.media_type || 'image/png'};base64,${b.source.data}`);
@@ -66,7 +69,8 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
       const c = r.message?.content;
       // Meta text the CLI hides: a skill's instructions (from the Skill tool or its /command), another session's note,
       // a retry nudge. Only its "[Image: …]" lines matter here (they carry a pasted image's path).
-      if (r.isMeta && !/^\[Image: /.test(typeof c === 'string' ? c : Array.isArray(c) ? ((c.find(b => b.type === 'text') || {}).text || '') : '')) return null;
+      if (r.isMeta && !/^\[Image: source:/.test(typeof c === 'string' ? c : Array.isArray(c) ? ((c.find(b => b.type === 'text') || {}).text || '') : '')) return null;
+      if (r.isCompactSummary) return null; // the summary the CLI writes after compacting: the "Conversation compacted" divider stands for it
       if (Array.isArray(c)) {
         if (c.some(b => b.type === 'tool_result')) {
           const events = [];

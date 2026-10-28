@@ -1549,7 +1549,7 @@ function restoreAgents(state) {
                   }
                 }
               }
-              if (r.type === 'user' && !r.isMeta) {
+              if (r.type === 'user' && !r.isMeta && !r.isCompactSummary) {
                 const c = r.message?.content;
                 let pTxt = '';
                 if (typeof c === 'string' && c.trim()) pTxt = c;
@@ -2220,12 +2220,12 @@ function parseLine(id, line) {
           if (applyAskRecord(a.askIds ||= new Set(), r) && !a.askIds.size) { a.permSent = false; send({ type: 'permClear', id }); }
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
-          if (!isReminderOnly(txt) && !r.isMeta) { // not a skill's own instructions
+          if (!isReminderOnly(txt) && !r.isMeta && !r.isCompactSummary) { // not a skill's own instructions
             if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); }
             clrActivity(id); a.hadTools = false; a.turnTools = 0;
           }
         }
-      } else if (typeof c === 'string' && c.trim() && !isReminderOnly(c)) {
+      } else if (typeof c === 'string' && c.trim() && !isReminderOnly(c) && !r.isMeta && !r.isCompactSummary) {
         setPrompt(id, a, c);
         confirmPeerInjection(a, c.trim());
         clrActivity(id); a.hadTools = false; a.turnTools = 0;
