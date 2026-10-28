@@ -739,3 +739,6 @@ body.world-mode #hdr-chat { display: none; }
 /* An image chip in a message sits centred on the text line (its thumbnail is taller than the text, so baseline alignment lifted it) */
 :root body :is(#conversation, #chat-shell) button.imgtag { vertical-align: middle; line-height: 18px; margin-top: -2px; }
 :root body :is(#conversation, #chat-shell) button.imgtag img { display: block; }
+/* The reply box and the layer that draws its tags and links must lay text out identically, or lines wrap at different
+   words and the caret drifts off the text. A textarea resets these to the browser's own; take the app's instead. */
+:root body #term-order textarea, :root body #chat-hl { letter-spacing: inherit; word-spacing: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; font-kerning: inherit; text-rendering: inherit; tab-size: inherit; }
