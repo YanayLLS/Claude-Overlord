@@ -573,7 +573,7 @@
     if (b && nb) { nb.classList.add('open'); nb.nextElementSibling.textContent = 'Show less'; }
   }
   // The round "jump to latest" button over the composer, shown while you're scrolled up; the prompt rail follows too.
-  function syncJump(el) { const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 200); railActive(el); }
+  function syncJump(el) { const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 40); railActive(el); }
 
   // ── Prompt rail, as on the terminal: a dash per prompt down the right edge, hover lists them, click jumps there ──
   const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
