@@ -1173,13 +1173,27 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     } finally { if (run) run.pending--; }
   }
 
+  // Does repo `label`'s failure matter to what R still has to merge? Only if some of it comes later in the release order.
+  function blocksLater(R, label) {
+    const order = (state.config && state.config.releaseOrder) || [];
+    const at = (x) => { const i = order.findIndex(w => w.some(k => k === x.label || (x.repo && k.toLowerCase() === x.repo.toLowerCase()))); return i < 0 ? order.length : i; };
+    const failed = R.justMerged.find(x => x.label === label) || { label };
+    return R.waves.flat().some(x => at(x) > at(failed));
+  }
   async function runLoop() {
     // a release that merged minutes ago (a resume mid deploy-wait): its deploys first
     for (const R of run.rels.values()) if (R.justMerged.length) {
       progress({ status: 'deploying', detail: R.justMerged.map(x => x.label).join(', ') });
-      const bad = await waitDeploys(R.justMerged);
-      if (bad) { if (bad.label) markR(R, [bad.label], { s: 'failed' }); stopR(R, bad.detail, bad.url); }
-      else markR(R, R.justMerged.map(x => x.label), { s: 'deployed' });
+      // a failed deploy holds back only the waves that come after it in the release order: one in the last wave
+      // (back-office) has nothing waiting on it, so the rest goes on and its row stays failed
+      for (let pending = R.justMerged; pending.length;) {
+        const bad = await waitDeploys(pending);
+        if (!bad) { markR(R, pending.map(x => x.label), { s: 'deployed' }); break; }
+        if (bad.label) markR(R, [bad.label], { s: 'failed' });
+        if (!bad.label || blocksLater(R, bad.label)) { stopR(R, bad.detail, bad.url); break; }
+        send({ type: 'toast', text: `${bad.label}: deploy failed — nothing waits on it, the release goes on` });
+        pending = pending.filter(x => x.label !== bad.label);
+      }
     }
     for (;;) {
       const rels = [...run.rels.values()];
