@@ -110,7 +110,9 @@
     const inp = box(), id = selectedId; if (id == null) return;
     micStop();
     pruneAtt();
-    const a = atts.get(id), shown = inp.value.trim(), text = expandLinks(expandPastes(inp.value, a), a).trim(), list = a ? a.list.splice(0) : [];
+    // shown: the bubble while it waits. Its links go back to their addresses, so it renders them as links straight away,
+    // as the thread will (a pasted-text tag stays a chip).
+    const a = atts.get(id), shown = expandLinks(inp.value.trim(), a), text = expandLinks(expandPastes(inp.value, a), a).trim(), list = a ? a.list.splice(0) : [];
     const pastes = ((a && a.pastes) || []).slice(); // the sent bubble's paste chips open to their text
     const restore = { shown: inp.value, list: list.slice(), pastes, files: ((a && a.files) || []).slice(), links: ((a && a.links) || []).slice() }; // all of it, should Esc take it back
     if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; a.links = []; }
