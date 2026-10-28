@@ -300,7 +300,7 @@
     const save = (rs) => { try { localStorage.setItem(k, JSON.stringify(rs)); } catch {} };
     save([...hidesOf(a), range]); chatUi.addPending(id, text); rerender();
     const busy = () => isWorkingStatus(agents.get(id)?.status) || document.getElementById('term-order').classList.contains('busy');
-    if (busy()) { stop(); await until(() => !busy(), 10000); await wait(600); }
+    if (busy()) { stop(false); await until(() => !busy(), 10000); await wait(600); }
     // Esc Esc opens the rewind list; pick this message (the newest one with its text), then "Restore conversation".
     const fail = (why) => { save(hidesOf(a).filter(r => r.from !== range.from || r.until !== range.until)); api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => api.send({ type: 'questPrompt', id, text }), 400); showToast(why + ': sent as a new message'); rerender(); };
     api.send({ type: 'termInput', id, data: '\x1b' }); await wait(150); api.send({ type: 'termInput', id, data: '\x1b' });
@@ -753,7 +753,8 @@
     // The transcript outranks a stale "working": a turn whose end is the last thing written is over, whatever a
     // leftover per-call status in the list says.
     // (Covers "resuming" too: it can linger after Overlord reattaches an agent that has since finished.)
-    if (evs && (st === 'active' || st === 'settling' || st === 'resuming')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done' || t === 'images') continue; if (t === 'turn' || t === 'interrupt') st = 'waiting'; break; } }
+    // …unless a message of yours is on its way: that started a new turn the transcript hasn't written yet.
+    if (evs && !(pending.get(id) || []).some(p => !p.held) && (st === 'active' || st === 'settling' || st === 'resuming')) { for (let k = evs.length - 1; k >= 0; k--) { const t = evs[k].type; if (t === 'mode' || t === 'tool_done' || t === 'images') continue; if (t === 'turn' || t === 'interrupt') st = 'waiting'; break; } }
     // Esc: stopped now, as in the CLI, not when the transcript catches up. Should the agent still be at work 8 s later
     // (the Esc didn't land), it shows as working again.
     const stopped = !!(a._stopAt && now - a._stopAt < 8000 && (st === 'active' || st === 'settling' || st === 'resuming'));
@@ -770,7 +771,7 @@
     dockHtml = ''; dockCount = { agents: 0, shells: 0 };
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
-    const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
+    const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && !(a._reverted && now - a._reverted < 8000) && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
     const tail = (evs ? stopNote + liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) : ''); // queued text waits under the spinner, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
@@ -963,7 +964,32 @@
 
   // Keys typed into the agent's terminal one write at a time, so the TUI reads each as its own key press.
   // Stop the turn: Esc to the CLI, and the chat says so at once instead of waiting for the transcript.
-  function stop() { const a = agents.get(selectedId); if (a) a._stopAt = Date.now(); keys(['\x1b']); rerender(); }
+  function stop(revert = true) {
+    const id = selectedId, a = agents.get(id); if (!a) return;
+    a._stopAt = Date.now(); keys(['\x1b']);
+    if (!revert) { a._reverted = Date.now(); return rerender(); } // editing stops the turn itself: its new message stays, no "Interrupted"
+    // Esc before Claude answered anything (no text, no call since your message): as in the CLI, the message comes back
+    // to the box and leaves the thread. The CLI puts it back in its own box too: that's cleared once it has, or it
+    // would ride along with the next message sent from here.
+    const evs = visibleEvs(a, worldTl && worldTl.id === id ? worldTl.events : []), pend = pending.get(id) || [];
+    let k = evs.length - 1; while (k >= 0 && /^(mode|images|interrupt)$/.test(evs[k].type)) k--;
+    const last = evs[k]; let text = '';
+    if (pend.length) { const p = pend.pop(); text = p.match || p.text; }
+    else if (last && last.type === 'prompt' && last.ts && Date.now() - Date.parse(last.ts) < 120000) {
+      text = last.text;
+      try { const key = hideKey(a); localStorage.setItem(key, JSON.stringify([...hidesOf(a), { from: Date.parse(last.ts), until: Date.now() + 1000 }])); } catch {}
+    }
+    if (text) {
+      a._reverted = Date.now();
+      const box = document.getElementById('term-order-input');
+      chatComposer.setDraft(id, box.value.trim() ? box.value.replace(/\s*$/, '\n') + text : text);
+      setTimeout(() => {
+        const x = typeof xterms !== 'undefined' && xterms.get(id);
+        if (x && typeof readPromptBox === 'function' && !isWorkingStatus(agents.get(id)?.status) && readPromptBox(x.terminal).trim()) api.send({ type: 'termInput', id, data: '\x03' });
+      }, 800);
+    }
+    rerender();
+  }
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
   // Option k of an open question: its number key, as in the terminal, so it lands wherever the CLI's cursor sits.
   // A multi-select box ("[ ] Postgres") only toggles and "Type something" waits for typing: those go to the terminal.
@@ -1523,5 +1549,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) ag._stopAt = 0; jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
