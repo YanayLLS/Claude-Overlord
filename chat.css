@@ -311,12 +311,12 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) button.imgtag img { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
 
 /* Mode menu above the mode chip */
-:root body #chat-mode-menu { position: absolute; bottom: calc(100% + 8px); z-index: 3; min-width: 220px; padding: 6px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 10px 32px rgba(0,0,0,.35); animation: chat-in .16s var(--chat-ease); }
-:root body #chat-mode-menu .mm-i { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; text-transform: none; letter-spacing: 0; clip-path: none; }
-:root body #chat-mode-menu .mm-i:hover { background: var(--hover-strong); }
-:root body #chat-mode-menu .mm-i .ic { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: var(--dim); }
-:root body #chat-mode-menu .mm-i span { flex: 1; }
-:root body #chat-mode-menu .mm-i.on .ic:last-child { color: var(--claude); }
+:root body :is(#chat-mode-menu, #chat-fwd-menu) { position: absolute; bottom: calc(100% + 8px); z-index: 3; min-width: 220px; padding: 6px; border-radius: 14px; border: 1px solid var(--border-hi); background: var(--pop, var(--surface0)); box-shadow: 0 10px 32px rgba(0,0,0,.35); animation: chat-in .16s var(--chat-ease); }
+:root body :is(#chat-mode-menu, #chat-fwd-menu) .mm-i { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; text-transform: none; letter-spacing: 0; clip-path: none; }
+:root body :is(#chat-mode-menu, #chat-fwd-menu) .mm-i:hover { background: var(--hover-strong); }
+:root body :is(#chat-mode-menu, #chat-fwd-menu) .mm-i .ic { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: var(--dim); }
+:root body :is(#chat-mode-menu, #chat-fwd-menu) .mm-i span { flex: 1; }
+:root body :is(#chat-mode-menu, #chat-fwd-menu) .mm-i.on .ic:last-child { color: var(--claude); }
 :root body #chat-mode-menu .m-bypass .ic:first-child { color: #f87171; } :root body #chat-mode-menu .m-accept .ic:first-child { color: var(--purple); } :root body #chat-mode-menu .m-plan .ic:first-child { color: #2dd4bf; } :root body #chat-mode-menu .m-auto .ic:first-child { color: var(--claude); }
 :root body #chat-mode-menu .mm-k { padding: 6px 10px 2px; font-size: 11px; color: var(--dim); }
 :root body #chat-chips .mode.m-auto .ic { color: var(--claude); }
@@ -760,3 +760,8 @@ body.world-mode #hdr-chat { display: none; }
 #chat-toasts .ctoast.fin { border-color: color-mix(in srgb, var(--green, #4ade80) 45%, var(--border-hi)); cursor: pointer; }
 #chat-toasts .ctoast.fin .ct-h .ic { stroke: var(--green, #4ade80); }
 #chat-toasts .ctoast.fin .ct-what { margin-bottom: 0; }
+:root body #chat-fwd-menu { position: fixed; bottom: auto; z-index: 50; max-height: 320px; overflow-y: auto; }
+:root body #chat-fwd-menu .mm-k { padding: 6px 10px 4px; font-size: 11px; color: var(--dim); }
+:root body #chat-fwd-menu .mm-i small { color: var(--dim); font-size: 11px; }
+/* A long chat is thousands of nodes: blocks off screen skip rendering (their size is remembered once seen). The newest stay as they are. */
+:root body #conversation .thread > :not(:nth-last-child(-n+6)) { content-visibility: auto; contain-intrinsic-size: auto 160px; }

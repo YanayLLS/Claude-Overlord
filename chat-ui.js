@@ -27,6 +27,7 @@
     more: svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>'),
     star: svg('<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>'),
     inbox: svg('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>'),
+    fwd: svg('<path d="m15 5 6 6-6 6"/><path d="M21 11H9a6 6 0 0 0-6 6v2"/>'),
     retry: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
     alert: svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
   };
@@ -36,11 +37,11 @@
 
   // Events never change once received, so each renders once; tool rows again when their result lands.
   // The text cache is dropped when md-bundle arrives (replies first render as plain text).
-  let toolCache = new WeakMap();
+  let toolCache = new WeakMap(), groupCache = new WeakMap();
   let cache = new WeakMap(), mdReady = !!window.marked, mdLoading = false, rerender = () => {};
   function md(src, cwd) {
     if (!mdReady) {
-      if (!mdLoading) mdLoading = true, window.docsUi.loadMd().then(() => { mdReady = true; cache = new WeakMap(); toolCache = new WeakMap(); rerender(); }, () => {});
+      if (!mdLoading) mdLoading = true, window.docsUi.loadMd().then(() => { mdReady = true; cache = new WeakMap(); toolCache = new WeakMap(); groupCache = new WeakMap(); rerender(); }, () => {});
       return `<p class="plain">${inlineRich(escH(src))}</p>`;
     }
     return inlineRich(linkRefs(window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_')) // relative links resolve against the agent's folder
@@ -96,7 +97,8 @@
   }
   const autoRetry = new Set(); let retryTimer = null; // "agentId:resetTime" the user asked to retry at
   const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
-  const clock = (ts) => { try { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
+  const clocks = new Map(); // formatting a time is slow, and every footer shows one on every redraw
+  const clock = (ts) => { let c = clocks.get(ts); if (c == null) { try { c = new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { c = ''; } clocks.set(ts, c); } return c; };
 
   function diffHtml(old, neu, file) {
     const d = lineDiff(old, neu);
@@ -159,13 +161,15 @@
   }
   // A run of calls between two messages: one call shows as itself; more fold into one summary line.
   function groupHtml(tools, doneBy, cwd) {
+    const gc = groupCache.get(tools[0]); if (gc && gc[0] === tools.length && gc[1] === cwd) return gc[2]; // a finished run never changes
     const rows = tools.map(ev => toolRow(ev, doneBy.get(ev.toolId), cwd));
-    if (tools.length === 1) return `<div class="tools">${rows[0]}</div>`;
+    const done = (h) => { if (tools.every(ev => !ev.toolId || doneBy.get(ev.toolId))) groupCache.set(tools[0], [tools.length, cwd, h]); return h; };
+    if (tools.length === 1) return done(`<div class="tools">${rows[0]}</div>`);
     const errs = tools.filter(ev => (doneBy.get(ev.toolId) || {}).err).length;
     // While a call runs the line names it ("Running npm test"), with a dot; once all are done, the summary.
     const live = [...tools].reverse().find(ev => ev.toolId && !doneBy.get(ev.toolId)), lv = live && toolView(live, true);
     const label = lv ? `${escH(lv.verb)}${lv.target ? ` <span class="mono">${escH(lv.target)}</span>` : ''}` : escH(groupSummary(tools));
-    return `<div class="tools"><details class="tgroup${live ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary>${live ? '<span class="dot"></span>' : ''}<span class="gl">${label}</span><span class="gl gs">${tools.length} actions</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`;
+    return done(`<div class="tools"><details class="tgroup${live ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary>${live ? '<span class="dot"></span>' : ''}<span class="gl">${label}</span><span class="gl gs">${tools.length} actions</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`);
   }
 
   function msgHtml(ev, i, cwd) {
@@ -210,7 +214,7 @@
     if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
     if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
     // What happened first (always in the same place), then the actions, which hide on older turns until hovered.
-    const acts = (textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button>` : '') + (mark && mark.ts ? `<button class="act mark${mark.on ? ' on' : ''}" type="button" data-act="mark" data-ts="${escH(mark.ts)}" title="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-label="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-pressed="${mark.on}">${ICON.star}</button>` : '');
+    const acts = (textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button><button class="act" type="button" data-act="fwd" title="Send to another agent" aria-label="Send to another agent">${ICON.fwd}</button>` : '') + (mark && mark.ts ? `<button class="act mark${mark.on ? ' on' : ''}" type="button" data-act="mark" data-ts="${escH(mark.ts)}" title="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-label="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-pressed="${mark.on}">${ICON.star}</button>` : '');
     return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${meta}${files}${cost}${acts ? `<span class="tf-acts">${acts}</span>` : ''}</div>`;
   }
 
@@ -276,7 +280,8 @@
       flush(); out.push(msgHtml(ev, i, cwd));
       if (t === 'text') { textAt = i; open = true; }
       // Your last prompt: Edit puts it back in the box, Retry sends it again.
-      if (i === lastPromptAt && ev.text) out.push(`<div class="uacts" data-i="${i}"><button type="button" class="act" data-act="edit-prompt" title="Edit">${ICON.edit}</button><button type="button" class="act" data-act="retry" title="Send again">${ICON.retry}</button></div>`);
+      // Any message of yours: Edit (rewinds to it), send it to another agent; the last one also Retry.
+      if ((t === 'prompt' || t === 'command') && ev.text) out.push(`<div class="uacts" data-i="${i}"><button type="button" class="act" data-act="edit-prompt" title="Edit">${ICON.edit}</button><button type="button" class="act" data-act="fwd" title="Send to another agent">${ICON.fwd}</button>${i === lastPromptAt ? `<button type="button" class="act" data-act="retry" title="Send again">${ICON.retry}</button>` : ''}</div>`);
     });
     flush(); if (turn) close();
     for (let k = out.length - 1; k >= 0; k--) if (out[k].startsWith('<div class="turnfoot"')) { out[k] = out[k].replace('<div class="turnfoot"', '<div class="turnfoot latest"'); break; }
@@ -306,17 +311,31 @@
     const id = selectedId, a = agents.get(id), k = hideKey(a); if (!a || !text) return;
     const range = { from: Date.parse(ev.ts), until: Date.now() };
     const save = (rs) => setHides(a, rs);
+    // Which of the CLI's rewind entries it is: the same words sent again later sit below it in that list.
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase(), head = norm(ev.text).slice(0, 30);
+    const same = (s) => { const l = norm(s); return !!l && !!head && (l.startsWith(head.slice(0, l.length)) || head.startsWith(l.replace(/…$/, ''))); };
+    const all = visibleEvs(a, (worldTl && worldTl.id === id && worldTl.events) || []), at = all.indexOf(ev);
+    let later = at < 0 ? 0 : all.slice(at + 1).filter(e => (e.type === 'prompt' || e.type === 'command') && same(e.text)).length;
     save([...hidesOf(a), range]); chatUi.addPending(id, text); rerender();
     const busy = () => isWorkingStatus(agents.get(id)?.status) || document.getElementById('term-order').classList.contains('busy');
     if (busy()) { stop(false); await until(() => !busy(), 10000); await wait(600); }
     // Esc Esc opens the rewind list; pick this message (the newest one with its text), then "Restore conversation".
     const fail = (why) => { save(hidesOf(a).filter(r => r.from !== range.from || r.until !== range.until)); api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => chatComposer.sendText(id, text), 400); showToast(why + ': sent as a new message'); rerender(); };
     api.send({ type: 'termInput', id, data: '\x1b' }); await wait(150); api.send({ type: 'termInput', id, data: '\x1b' });
-    const rw = await until(() => screenRewind(id)); if (!rw) return fail("Couldn't open rewind");
-    const head = String(ev.text || '').replace(/\s+/g, ' ').trim().slice(0, 30).toLowerCase();
-    let j = -1; for (let q = rw.items.length - 1; q >= 0; q--) if (rw.items[q].label.replace(/\s+/g, ' ').toLowerCase().startsWith(head.slice(0, Math.min(head.length, rw.items[q].label.length)))) { j = q; break; }
-    if (j < 0) return fail("Couldn't find that message");
-    for (const k of arrowKeys(j - rw.focus)) { api.send({ type: 'termInput', id, data: k }); await wait(70); }
+    let rw = await until(() => screenRewind(id)); if (!rw) return fail("Couldn't open rewind");
+    // On screen already: straight to it. Else up from "(current)" one entry at a time (the list scrolls), past `later`
+    // entries with the same words.
+    let j = -1; for (let q = rw.items.length - 1, n = later; q >= 0; q--) if (same(rw.items[q].label) && n-- === 0) { j = q; break; }
+    if (j >= 0) { for (const k of arrowKeys(j - rw.focus)) { api.send({ type: 'termInput', id, data: k }); await wait(70); } }
+    else for (let step = 0, stuck = 0, sig = ''; ; step++) {
+      const it = rw.items[rw.focus];
+      if (it && same(it.label) && later-- === 0) break;
+      const s = rw.focus + '|' + (it && it.label);
+      if (step > 200 || (s === sig && ++stuck > 4)) return fail("Couldn't find that message");
+      if (s !== sig) { sig = s; stuck = 0; }
+      api.send({ type: 'termInput', id, data: '\x1b[A' }); await wait(90);
+      rw = screenRewind(id) || rw;
+    }
     api.send({ type: 'termInput', id, data: '\r' });
     const sa = await until(() => { const s = screenAsk(id); return s.dialog && s.options.length >= 2 ? s : null; });
     if (!sa) return fail("Rewind didn't ask what to restore");
@@ -666,6 +685,19 @@
     const h = m.getBoundingClientRect();
     m.style.top = Math.max(8, r.top - h.height - 8) + 'px'; m.style.left = Math.max(8, Math.min(r.right - h.width, innerWidth - h.width - 8)) + 'px';
   }
+  // Send a message (yours or a reply) to another agent: it arrives there as your message.
+  function openFwdMenu(btn, text) {
+    document.getElementById('chat-fwd-menu')?.remove();
+    const list = [...agents].filter(([k, x]) => k !== selectedId && !x.archived && !x.dead);
+    const m = document.createElement('div'); m.id = 'chat-fwd-menu'; m.setAttribute('role', 'menu');
+    m.innerHTML = '<div class="mm-k">Send to</div>' + (list.length ? list.map(([k, x]) => `<button type="button" role="menuitem" class="mm-i" data-to="${k}">${ICON.agent}<span>${escH(x.title || 'Agent')} <small>${escH(String(x.cwd || '').split(/[\\/]/).pop())}</small></span></button>`).join('') : '<div class="mm-k">No other agents</div>');
+    document.body.appendChild(m);
+    const r = btn.getBoundingClientRect(), h = m.offsetHeight;
+    m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8)) + 'px';
+    m.style.top = (r.bottom + 6 + h > innerHeight ? Math.max(8, r.top - 6 - h) : r.bottom + 6) + 'px';
+    m.addEventListener('click', (e) => { const b = e.target.closest('[data-to]'); if (!b) return; const to = +b.dataset.to; m.remove(); chatComposer.sendText(to, text); chatUi.addPending(to, text); showToast('Sent to ' + ((agents.get(to) || {}).title || 'the agent')); });
+    setTimeout(() => document.addEventListener('mousedown', function off(e) { if (!m.contains(e.target)) m.remove(); document.removeEventListener('mousedown', off, true); }, true), 0);
+  }
   function closeModeMenu() { document.getElementById('chat-mode-menu')?.remove(); }
   function openModeMenu(chip, cur) {
     if (document.getElementById('chat-mode-menu')) return closeModeMenu();
@@ -824,12 +856,13 @@
     const opening = fresh || (!!evs && el._shown !== id); if (evs) el._shown = id;
     const stuck = !opening && !jumpOnce && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
     const old = el._blocks || [];
-    let newReply = null;
+    let newReply = null; const changed = []; // only these get the link, image and diagram passes below (a long chat is thousands of nodes)
     for (let k = 0; k < list.length; k++) {
       if (old[k] === list[k]) continue;
       const tmp = document.createElement('div'); tmp.innerHTML = list[k];
       const node = tmp.firstElementChild || document.createElement('div');
       const cur = thread.children[k];
+      changed.push(node);
       if (cur) { keepOpen(cur, node); cur.replaceWith(node); }
       else { if (!opening) node.classList.add('enter'); if (!opening && node.classList.contains('turnfoot') && prevBusy.get(id)) node.classList.add('landed'); thread.appendChild(node); if (!opening && node.classList.contains('ai')) newReply = node; }
     }
@@ -841,7 +874,7 @@
       const key = liveKey(tail);
       if (tailEl._k === key) { const tmp = document.createElement('div'); tmp.innerHTML = tail; for (const n of tmp.querySelectorAll('[data-live]')) { const c = tailEl.querySelector(`[data-live="${CSS.escape(n.dataset.live)}"]`); if (c && c.textContent !== n.textContent) c.textContent = n.textContent; } }
       else tailEl.innerHTML = tail;
-      tailEl._h = tail; tailEl._k = key;
+      tailEl._h = tail; tailEl._k = key; changed.push(tailEl);
     }
     drawDock(); applyAskHover(); // a hovered option keeps its preview through redraws
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
@@ -856,19 +889,21 @@
     else if (!stuck) {
       el.scrollTop = el.scrollHeight;
       // Images grow the thread as they load: stay pinned to the bottom through that.
-      for (const i of el.querySelectorAll('img')) if (!i.complete && !i._pin && (i._pin = 1)) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
+      for (const i of changed.flatMap(n => [...n.querySelectorAll('img')])) if (!i.complete && !i._pin && (i._pin = 1)) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
     }
     jumpOnce = false;
-    for (const s of thread.querySelectorAll('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
+    // What ticks (running calls, usage-limit cards) is in the last few blocks.
+    const recent = [...thread.children].slice(-12), inRecent = (sel) => recent.flatMap(n => [...n.querySelectorAll(sel)]);
+    for (const s of inRecent('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
     // Usage-limit cards: the countdown, Retry held until the reset, and the retry the user asked for once it's passed.
-    for (const s of thread.querySelectorAll('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
-    for (const b of thread.querySelectorAll('button[data-reset]')) b.disabled = +b.dataset.reset > now;
-    for (const c of thread.querySelectorAll('input[data-autoretry]')) c.checked = autoRetry.has(id + ':' + c.dataset.autoretry);
+    for (const s of inRecent('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
+    for (const b of inRecent('button[data-reset]')) b.disabled = +b.dataset.reset > now;
+    for (const c of inRecent('input[data-autoretry]')) c.checked = autoRetry.has(id + ':' + c.dataset.autoretry);
     for (const key of [...autoRetry]) { const [aid, at] = key.split(':').map(Number); if (aid !== id || at > now) continue; autoRetry.delete(key); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); } // only this agent's: each agent remembers its own
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
-    drawDiagrams(el);
-    prettyLinks(el);
+    drawDiagrams(changed);
+    prettyLinks(changed);
     syncJump(el);
   }
   // A replaced block keeps its open tool rows and expanded prompt.
@@ -879,7 +914,9 @@
     if (b && nb) { nb.classList.add('open'); nb.nextElementSibling.textContent = 'Show less'; }
   }
   // The round "jump to latest" button over the composer, shown while you're scrolled up; the prompt rail follows too.
-  function syncJump(el) { const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 40); railActive(el); }
+  // Scroll fires many times a frame: the measuring waits for the next frame, once.
+  let jumpRaf = 0;
+  function syncJump(el) { if (!jumpRaf) jumpRaf = requestAnimationFrame(() => { jumpRaf = 0; const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 40); railActive(el); }); }
 
   // ── Prompt rail, as on the terminal: a dash per prompt down the right edge, hover lists them, click jumps there ──
   const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
@@ -919,18 +956,19 @@
     for (const fn of linkWaiters) fn();
   }
   // Bare links in the thread (a reply's autolinks, a /command's arguments) read by name; hover shows the address.
-  function prettyLinks(el) {
-    for (const a of el.querySelectorAll('a[href^="http"]:not([data-pl])')) {
+  // roots: the blocks just drawn; a title that came in later relabels the whole chat (relabel).
+  function prettyLinks(roots, relabel) {
+    for (const a of roots.flatMap(r => [...r.querySelectorAll('a[href^="http"]:not([data-pl])')])) {
       if (a.textContent.trim() !== a.getAttribute('href') && a.textContent.trim() !== (() => { try { return decodeURI(a.getAttribute('href')); } catch { return ''; } })()) { a.dataset.pl = '0'; continue; }
       const l = linkLabel(a.getAttribute('href')); if (!l) { a.dataset.pl = '0'; continue; }
       a.dataset.pl = l.kind; if (l.id) a.dataset.cu = l.id; a.title = a.getAttribute('href') + (l.sub.startsWith('Connect') ? '\n' + l.sub : '');
       a.classList.add('plink'); a.textContent = l.name;
     }
-    for (const a of el.querySelectorAll('a.plink')) { const l = linkLabel(a.getAttribute('href')); if (l && a.textContent !== l.name) a.textContent = l.name; } // a title or name that came in since
+    if (relabel) for (const a of roots.flatMap(r => [...r.querySelectorAll('a.plink')])) { const l = linkLabel(a.getAttribute('href')); if (l && a.textContent !== l.name) a.textContent = l.name; } // a title or name that came in since
   }
-  linkWaiters.add(() => { const el = document.getElementById('conversation'); if (el) prettyLinks(el); });
-  function drawDiagrams(el) {
-    const blocks = [...el.querySelectorAll('.md-code:not(.drawn)')].filter(b => b.querySelector('.md-code-head span')?.textContent === 'mermaid');
+  linkWaiters.add(() => { const el = document.getElementById('conversation'); if (el) prettyLinks([el], true); });
+  function drawDiagrams(roots) {
+    const blocks = roots.flatMap(r => [...r.querySelectorAll('.md-code:not(.drawn)')]).filter(b => b.querySelector('.md-code-head span')?.textContent === 'mermaid');
     if (!blocks.length) return;
     mermaidLoad ||= new Promise((res, rej) => { const s = document.createElement('script'); s.src = './mermaid.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
     mermaidLoad.then(async () => {
@@ -965,7 +1003,7 @@
     const ps = (evs || []).map((e, i) => [e, i]).filter(([e]) => e.type === 'prompt' || e.type === 'command' || (e.type === 'text' && e.ts && mk.has(e.ts)));
     const key = ps.map(([e, i]) => i + (e.type === 'text' ? '*' : '')).join(',');
     rail.classList.toggle('has', ps.length > 1);
-    if (rail._k === key) return; rail._k = key;
+    if (rail._k === key) return; rail._k = key; rail._on = undefined; // new dashes: light the current one again
     const label = (t) => escH(String(t || '').replace(/\[Image #\d+\]/g, '🖼').replace(/[#*`>_]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) || '🖼');
     rail.querySelector('.cr-dashes').innerHTML = ps.map(([e, i]) => `<i data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}></i>`).join('');
     rail.querySelector('.cr-pop').innerHTML = ps.map(([e, i]) => `<div data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}>${e.type === 'text' ? '★ ' : ''}${label(e.text)}</div>`).join('');
@@ -977,6 +1015,7 @@
     const top = el.getBoundingClientRect().top + 40; let on = null;
     for (const u of el.querySelectorAll('.thread > .msg.user[data-i], .thread > .msg.cmd[data-i]')) { if (u.getBoundingClientRect().top <= top) on = u.dataset.i; else break; }
     if (on == null) { const f = el.querySelector('.thread > .msg.user[data-i]'); on = f && f.dataset.i; }
+    if (rail._on === on) return; rail._on = on; // same prompt as last time: nothing to move
     for (const n of rail.querySelectorAll('[data-i]')) n.classList.toggle('on', n.dataset.i === on);
   }
   let scrubEnd = 0;
@@ -1115,6 +1154,7 @@
         const i = +act.closest('[data-i]').dataset.i, ev = (evs || [])[i];
         if (ev && (ev.type === 'prompt' || ev.type === 'command')) { editing = { id: selectedId, i, ts: ev.ts, text: ev.text }; rerender(); setTimeout(() => { const ta = document.querySelector('#conversation .msg.editing .edit-ta'); if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; ta.style.height = ta.scrollHeight + 'px'; } }, 30); }
       }
+      else if (act.dataset.act === 'fwd') { const ev = (evs || [])[+act.closest('[data-i]').dataset.i]; if (ev && ev.text) openFwdMenu(act, ev.text); }
       else if (act.dataset.act === 'edit-cancel') { editing = null; rerender(); }
       else if (act.dataset.act === 'edit-send') {
         const ta = document.querySelector('#conversation .msg.editing .edit-ta'), text = ta ? ta.value.trim() : '', ev = editing && (evs || []).find(e => (e.type === 'prompt' || e.type === 'command') && e.ts === editing.ts);
