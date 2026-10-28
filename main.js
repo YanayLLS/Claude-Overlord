@@ -939,6 +939,7 @@ function wsDecodeFrame(buffer) {
 function setPrompt(id, a, text) {
   // Skip system/internal messages — they're not real user prompts
   if (isSystemMessage(text)) return;
+  text = String(text).replace(/<\/?pasted_content(?:\s+id="[^"]*")?>\n?/g, '').trim(); // a long paste's wrapper isn't part of it
   a.lastPrompt = text.length > PREVIEW_MAX ? text.slice(0, PREVIEW_MAX) + '\u2026' : text;
   const brief = text.length > PROMPT_BRIEF_MAX ? text.slice(0, PROMPT_BRIEF_MAX) : text;
   a.promptHistory.push(brief);

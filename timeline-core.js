@@ -34,7 +34,8 @@ function promptEvents(ts, blocks, isSystemMessage) {
   // Claude Code adds an "[Image: source: <path>]" line per pasted image (often as a record of its own). The path is kept:
   // an image too big to embed below still gets its thumbnail from the file.
   const paths = [...txt.matchAll(/\[Image: source: ([^\]]*)\]/g)].map(m => m[1].trim()).filter(Boolean);
-  const text = txt.replace(/\[Image: source: [^\]]*\]/g, '').trim();
+  // A long paste comes back wrapped in <pasted_content id="…">…</pasted_content id="…">: what you sent is inside.
+  const text = txt.replace(/\[Image: source: [^\]]*\]/g, '').replace(/<\/?pasted_content(?:\s+id="[^"]*")?>\n?/g, '').trim();
   if (!text && !blocks.some(b => b.type === 'image')) return paths.length ? [{ type: 'images', ts, paths }] : null;
   const images = blocks.filter(b => b.type === 'image' && b.source && b.source.type === 'base64' && (b.source.data || '').length <= TL_IMG_MAX)
     .map(b => `data:${b.source.media_type || 'image/png'};base64,${b.source.data}`);

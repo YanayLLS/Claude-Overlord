@@ -416,6 +416,13 @@
       box.className = 'hv-live'; box.textContent = tools.length ? `${tools.length} step${tools.length > 1 ? 's' : ''} · ${v.verb}${v.target ? ' ' + v.target : ''}` : 'Starting…';
     }
   }
+  // What Claude last printed before it quit (its terminal's last lines, Overlord's own "[Crashed…]" notes left out):
+  // the reason, when there is one.
+  function lastWords(id) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id), b = x && x.terminal.buffer.active; if (!b) return '';
+    const rows = []; for (let y = Math.max(0, b.length - 60); y < b.length; y++) rows.push(b.getLine(y)?.translateToString(true) || '');
+    return rows.filter(r => r.trim() && !/^\[(Crashed|Session ended|Previous session)/.test(r.trim()) && !/^[─━\s]+$/.test(r)).slice(-8).join('\n');
+  }
   function liveHtml(a, st, evs, doneBy, now) {
     const live = [...a.tools.values()].filter(t => !t.done), perm = live.find(t => t.perm);
     let h = '';
@@ -446,7 +453,7 @@
     if (!perm) { const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + askHtml(null, null); }
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
-    if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Process exited after ${a.crashCount}/${a.crashMax} attempts.</p><div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
+    if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${escH(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
     if (a.compacting) return h + `<div class="working">${SPARK}<span class="shimmer">Compacting conversation…</span></div>`;
     if (st === 'active' || st === 'resuming') {
       // The CLI's own playful verb ("Cogitating…") when it has one; elapsed; the Esc hint. The call in flight already

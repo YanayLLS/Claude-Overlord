@@ -69,3 +69,8 @@ test("a /skill command's body and other meta notes stay hidden; a meta [Image: â
   assert.strictEqual(parse({ type: 'user', isMeta: true, message: { content: 'Another Claude session sent a message' } }), null);
   assert.ok(parse({ type: 'user', isMeta: true, message: { content: [{ type: 'text', text: '[Image: source: C:/x.png]' }] } }));
 });
+
+test('a long paste reads as what was sent, without its <pasted_content> wrapper', () => {
+  const [ev] = parse({ type: 'user', message: { content: '\n\n<pasted_content id="4f68">\ni cant run localhost:3002\nline 2\n</pasted_content id="4f68">\n' } });
+  assert.strictEqual(ev.text, 'i cant run localhost:3002\nline 2');
+});

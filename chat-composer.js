@@ -143,7 +143,8 @@
   }
   // "/resume <filter>": the agent's other sessions, newest first; picking one runs "/resume <id>".
   const sessions = new Map(); // agent id → [{ id, title, mtime, size }]
-  const resumeHits = (id, q) => (sessions.get(id) || []).filter(x => x.title.toLowerCase().includes(q.toLowerCase()));
+  // Every word typed, in any order ("flow assign" finds "Flow Editor | Assign bookmarks…").
+  const resumeHits = (id, q) => { const ws = q.toLowerCase().split(/\s+/).filter(Boolean); return (sessions.get(id) || []).filter(x => ws.every(w => x.title.toLowerCase().includes(w))); };
   function resumeCheck(t) {
     const m = /^\/resume\s+(.*)$/s.exec(t.value);
     if (!m || !chat()) return false;
@@ -183,7 +184,12 @@
     const l = atList();
     const esc = (s) => String(s).replace(/[&<>]/g, '');
     // The typed part of each name is marked, so it's clear why it matched.
-    const mark = (name) => { const j = at.q ? name.toLowerCase().indexOf(at.q.toLowerCase()) : -1; return j < 0 ? esc(name) : esc(name.slice(0, j)) + '<mark>' + esc(name.slice(j, j + at.q.length)) + '</mark>' + esc(name.slice(j + at.q.length)); };
+    const mark = (name) => {
+      const ws = at.kind === 'resume' ? at.q.toLowerCase().split(/\s+/).filter(Boolean) : at.q ? [at.q.toLowerCase()] : [];
+      const on = new Array(name.length).fill(false), lo = name.toLowerCase();
+      for (const w of ws) for (let j = lo.indexOf(w); j >= 0; j = lo.indexOf(w, j + w.length)) for (let k = j; k < j + w.length; k++) on[k] = true;
+      let o = ''; for (let k = 0; k < name.length; k++) o += (on[k] && !on[k - 1] ? '<mark>' : '') + esc(name[k]) + (on[k] && !on[k + 1] ? '</mark>' : ''); return o;
+    };
     const size = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
     const row = (f, k) => {
       if (at.kind === 'resume') return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.title)}</b><span>${fmtTimeAgo(f.mtime)} · ${size(f.size)}</span></div>`;
