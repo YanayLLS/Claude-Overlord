@@ -315,8 +315,7 @@
     const s = screenAsk(selectedId); // the open question is only on screen until it's answered
     const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
     const q = (s && s.question) || a.question || 'Claude has a question';
-    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => { const on = s.options.length && s.preview && k === s.focus; // the CLI shows the focused option's preview: so does the card
-      return `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${on ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}${on ? `<pre class="ask-prev">${escH(s.preview)}</pre>` : ''}</span></button>`; }).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
+    return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === s.focus ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${prevHtml(q, s)}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div></div>`;
   }
   // ── Background shells and subagents: one small pill above the reply box ("10 agents · 1 shell"). Hover it for the list,
   // click to keep the list open; a row's hover card peeks, a click opens its full panel. ──
@@ -348,16 +347,36 @@
     else { pop.innerHTML = dockHtml; pop._k = key; if (hoverFor && !pop.contains(hoverFor)) hideHover(); }
     el.hidden = !dockHtml; if (!dockHtml) closeDock();
   }
-  // Hovering an option of a question with previews moves the CLI's selection there (arrow keys), so its preview shows.
-  let hovTimer = null;
+  // A question's previews: the CLI draws only the selected option's, so each one is kept once seen. The card shows the
+  // hovered option's (else the selected one's) in its own space under the options, as tall as the tallest seen, so the
+  // options never move under the pointer.
+  const previews = new Map(); // question → [preview per option]
+  let askHover = null, askAsked = null;
+  function prevHtml(q, s) {
+    if (!s.options.length) return '';
+    const seen = previews.get(q) || []; previews.set(q, seen);
+    if (s.preview || seen[s.focus] == null) seen[s.focus] = /^No preview available$/i.test(s.preview) ? '' : s.preview;
+    if (!seen.some(Boolean)) return ''; // a question without previews
+    const k = askHover != null && askHover < s.options.length ? askHover : s.focus, text = seen[k];
+    const rows = Math.max(...seen.filter(Boolean).map(p => p.split('\n').length));
+    return `<pre class="ask-prev" style="min-height:calc(${rows} * 1.5em + 18px)">${text == null ? '<span class="ap-wait">…</span>' : text ? escH(text) : '<span class="ap-wait">No preview</span>'}</pre>`;
+  }
+  // ↑/↓ from the reply box: one step, wrapping like the CLI's menu; the preview follows the selection.
+  function askStep(d) { const s = screenAsk(selectedId), n = s.options.length; if (!n) return false; askHover = null; askMove((s.focus + d + n) % n); return true; }
+  // Move the CLI's selection to option k (arrow keys); the card follows on its next look at the screen.
+  function askMove(k) {
+    const s = screenAsk(selectedId), d = k - s.focus; if (!s.options.length || !d) return;
+    keys(Array(Math.abs(d)).fill(d > 0 ? '\x1b[B' : '\x1b[A'));
+    setTimeout(rerender, Math.abs(d) * 70 + 200);
+  }
   document.getElementById('conversation').addEventListener('mouseover', (e) => {
-    const b = e.target.closest('.card.ask [data-hov]'); if (!b || b.classList.contains('focus')) return;
-    clearTimeout(hovTimer);
-    hovTimer = setTimeout(() => {
-      const s = screenAsk(selectedId), d = +b.dataset.pick - s.focus; if (!s.preview || !d) return;
-      keys(Array(Math.abs(d)).fill(d > 0 ? '\x1b[B' : '\x1b[A'));
-      setTimeout(rerender, 120 + Math.abs(d) * 70 + 150);
-    }, 180);
+    const b = e.target.closest('.card.ask [data-hov]');
+    if (!b) { if (askHover != null && !e.target.closest('.card.ask .ask-prev')) { askHover = null; askAsked = null; rerender(); } return; } // off the options: the selected one's again
+    const k = +b.dataset.pick; if (askHover === k) return;
+    askHover = k; rerender();
+    // Not seen yet: have the CLI show it, once per option.
+    const s = screenAsk(selectedId), seen = previews.get(s.question) || [];
+    if (seen.some(Boolean) && seen[k] == null && askAsked !== k) { askAsked = k; askMove(k); }
   });
   function closeDock() { const el = document.getElementById('chat-bg'); if (el) { el.classList.remove('pinned'); el.querySelector('.bg-pill')?.setAttribute('aria-expanded', 'false'); } }
   let hoverFor = null;
@@ -1316,5 +1335,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { askStep, linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = []) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, at: Date.now() }); jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

@@ -247,6 +247,11 @@
     const tail = document.querySelector('#conversation .tail');
     if (/^[1-9]$/.test(e.key)) { const b = tail && (tail.querySelector(`[data-pick="${+e.key - 1}"]`) || tail.querySelector(`[data-keys="${e.key}"]`) || tail.querySelectorAll('.choices button')[+e.key - 1]); if (b) { b.click(); return true; } }
     if (e.key === 'Escape') { const b = tail && tail.querySelector('[data-keys="esc"]'); if (b) { b.click(); return true; } }
+    // A question card: ↑/↓ move the selection, Enter picks it, as in the CLI's menu.
+    if (tail && tail.querySelector('.card.ask [data-hov]')) {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') return chatUi.askStep(e.key === 'ArrowDown' ? 1 : -1);
+      if (e.key === 'Enter' && !e.shiftKey) { const b = tail.querySelector('.card.ask .focus[data-pick]'); if (b) { b.click(); return true; } }
+    }
     return false;
   }
 

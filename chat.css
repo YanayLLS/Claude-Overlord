@@ -724,3 +724,4 @@ body.world-mode #hdr-chat { display: none; }
 /* A question option's preview (the box the CLI draws beside the focused option) */
 :root body #conversation .card.ask .choices button.focus { border-color: color-mix(in srgb, var(--claude) 45%, var(--border-hi)); }
 :root body #conversation .card.ask .ask-prev { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--border); font-family: 'Geist Mono', monospace; font-size: 11.5px; line-height: 1.5; color: var(--subtext); white-space: pre; overflow-x: auto; text-align: left; }
+:root body #conversation .card.ask .ask-prev .ap-wait { color: var(--dim); font-family: inherit; }
