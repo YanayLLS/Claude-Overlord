@@ -74,3 +74,10 @@ test('a long paste reads as what was sent, without its <pasted_content> wrapper'
   const [ev] = parse({ type: 'user', message: { content: '\n\n<pasted_content id="4f68">\ni cant run localhost:3002\nline 2\n</pasted_content id="4f68">\n' } });
   assert.strictEqual(ev.text, 'i cant run localhost:3002\nline 2');
 });
+
+test('a message sent mid-turn with an image (queued_command whose prompt is blocks) is a prompt', () => {
+  const evs = parse({ type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'human' }, prompt: [{ type: 'text', text: 'also look at @Briar [Image #22] it doesnt resume' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] } });
+  assert.strictEqual(evs[0].type, 'prompt');
+  assert.ok(evs[0].text.startsWith('also look at @Briar'));
+  assert.strictEqual(evs[0].images.length, 1);
+});

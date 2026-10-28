@@ -91,8 +91,11 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
       if (typeof c === 'string' && c.trim()) return promptEvents(ts, [{ type: 'text', text: c }], isSystemMessage);
     }
     // A message typed while the agent was working: delivered mid-turn as an attachment, not a user record.
-    if (r.type === 'attachment' && r.attachment?.type === 'queued_command' && r.attachment.origin?.kind === 'human' && typeof r.attachment.prompt === 'string') {
-      return promptEvents(ts, [{ type: 'text', text: r.attachment.prompt }], isSystemMessage);
+    // With images pasted, its prompt is a list of blocks (text and images), like a user record's content.
+    if (r.type === 'attachment' && r.attachment?.type === 'queued_command' && r.attachment.origin?.kind === 'human') {
+      const p = r.attachment.prompt;
+      if (typeof p === 'string') return promptEvents(ts, [{ type: 'text', text: p }], isSystemMessage);
+      if (Array.isArray(p)) return promptEvents(ts, p, isSystemMessage);
     }
     // The CLI's permission mode (bypass / accept edits / plan / ask), for the Chat view's mode chip.
     if (r.type === 'permission-mode' && typeof r.permissionMode === 'string') return [{ type: 'mode', ts, mode: r.permissionMode }];
