@@ -2255,6 +2255,15 @@ function registerKnownJsonl(projectDir, filePath) {
   known.add(filePath);
 }
 
+// A transcript holding a prompt or a reply (its first 256 KB), not only hooks and bookkeeping.
+function hasTurnRecord(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    try { const buf = Buffer.alloc(Math.min(256 * 1024, fs.fstatSync(fd).size)); fs.readSync(fd, buf, 0, buf.length, 0); return /^\{[^\n]*"type":"(user|assistant)"/m.test(buf.toString('utf-8')); }
+    finally { fs.closeSync(fd); }
+  } catch { return false; }
+}
+
 function scanForNewJsonlFiles() {
   // Group agents by projectDir
   const byDir = new Map(); // projectDir -> [agentId, ...]
@@ -2282,6 +2291,11 @@ function scanForNewJsonlFiles() {
       }
       if (candidates.length === 1) {
         targetId = candidates[0];
+        // Not after a /clear, a file with no prompt or reply yet isn't a new chat: /remote-control writes its own
+        // bridge file (hooks, "remote-control is active") while the conversation goes on in the old one, and
+        // following it blanked the card and froze the Chat view. Looked at again on the next scan.
+        // ponytail: re-reads a bridge file's head every scan; it stays a few KB.
+        if (!pendingClearAgents.has(targetId) && !hasTurnRecord(file)) { known.delete(file); continue; }
       } else if (candidates.length > 1) {
         // Primary: use pendingClearAgents to identify which agent ran /clear
         for (const id of candidates) {
