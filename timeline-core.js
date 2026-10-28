@@ -10,7 +10,7 @@ const ARG_KEYS = ['file_path', 'notebook_path', 'command', 'description', 'patte
 function toolArgs(name, inp) {
   const o = {};
   for (const k of ARG_KEYS) if (typeof inp[k] === 'string') o[k] = cap(inp[k], 2000);
-  if (name === 'Edit') { o.old = cap(String(inp.old_string || ''), TL_DIFF_MAX); o.new = cap(String(inp.new_string || ''), TL_DIFF_MAX); }
+  if (name === 'Edit') { if (inp.replace_all) o.all = true; o.old = cap(String(inp.old_string || ''), TL_DIFF_MAX); o.new = cap(String(inp.new_string || ''), TL_DIFF_MAX); }
   else if (name === 'MultiEdit' && Array.isArray(inp.edits)) { o.old = cap(inp.edits.map(e => e.old_string || '').join('\n'), TL_DIFF_MAX); o.new = cap(inp.edits.map(e => e.new_string || '').join('\n'), TL_DIFF_MAX); }
   else if (name === 'Write') { o.old = ''; o.new = cap(String(inp.content || ''), TL_DIFF_MAX); }
   else if (name === 'AskUserQuestion' && Array.isArray(inp.questions) && inp.questions[0]) { const q = inp.questions[0]; o.question = cap(String(q.question || ''), 600); o.options = (q.options || []).map(x => ({ label: cap(String(x.label || ''), 200), desc: cap(String(x.description || ''), 300) })); }
@@ -127,16 +127,28 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
 // The CLI shows only the branch that leads to the newest message: drop each prompt off that path, and all that followed it.
 // Tool results off the path stay (parallel tool calls branch too); only a typed prompt starts an abandoned branch.
 const isPromptRec = (r) => r.type === 'user' && !r.isMeta && !(Array.isArray(r.message?.content) && r.message.content.some(b => b.type === 'tool_result'));
-function activeLines(lines) {
+// Also the earlier versions of a message: each branch you left (an edit, a rewind) that got a reply, as its lines, keyed
+// by the uuid of the message on the path that took its place (the one with the same parent). { lines, alts: Map }.
+function branches(lines) {
   const recs = lines.map(l => { try { return JSON.parse(l); } catch { return null; } });
   const by = new Map(); let leaf = null;
   for (const r of recs) if (r && r.uuid && !r.isSidechain) { by.set(r.uuid, r); if (r.type === 'user' || r.type === 'assistant') leaf = r; }
-  if (!leaf) return lines;
+  if (!leaf) return { lines, alts: new Map() };
   const path = new Set();
   for (let r = leaf; r && !path.has(r.uuid); r = by.get(r.parentUuid || r.logicalParentUuid)) path.add(r.uuid);
-  const drop = new Set();
-  for (const r of recs) if (r && r.uuid && !path.has(r.uuid) && (drop.has(r.parentUuid) || (path.has(r.parentUuid) && isPromptRec(r)))) drop.add(r.uuid);
-  return drop.size ? lines.filter((l, i) => !(recs[i] && drop.has(recs[i].uuid))) : lines;
+  const drop = new Map(), byRoot = new Map(), answered = new Set(); // dropped uuid → the abandoned prompt that started its branch
+  recs.forEach((r, i) => {
+    if (!r || !r.uuid || r.isSidechain || path.has(r.uuid)) return;
+    const root = drop.get(r.parentUuid) || (path.has(r.parentUuid) && isPromptRec(r) ? r.uuid : null); if (!root) return;
+    drop.set(r.uuid, root); (byRoot.get(root) || byRoot.set(root, []).get(root)).push(lines[i]);
+    if (r.type === 'assistant') answered.add(root);
+  });
+  if (!drop.size) return { lines, alts: new Map() };
+  const sib = new Map(); for (const r of recs) if (r && path.has(r.uuid) && isPromptRec(r) && r.parentUuid) sib.set(r.parentUuid, r.uuid);
+  const alts = new Map();
+  for (const [k, ls] of byRoot) { const to = answered.has(k) && sib.get(by.get(k).parentUuid); if (to) (alts.get(to) || alts.set(to, []).get(to)).push(ls.slice(0, 400)); }
+  return { lines: lines.filter((l, i) => !(recs[i] && drop.has(recs[i].uuid))), alts };
 }
+const activeLines = (lines) => branches(lines).lines;
 
-module.exports = { parseLineForTimeline, toolArgs, activeLines, isPromptRec };
+module.exports = { parseLineForTimeline, toolArgs, activeLines, branches, isPromptRec };

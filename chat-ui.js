@@ -28,6 +28,7 @@
     star: svg('<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>'),
     inbox: svg('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>'),
     fwd: svg('<path d="m15 5 6 6-6 6"/><path d="M21 11H9a6 6 0 0 0-6 6v2"/>'),
+    undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
     retry: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
     alert: svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
   };
@@ -208,13 +209,34 @@
   const famOf = (m) => /opus/i.test(m) ? 'opus' : /haiku/i.test(m) ? 'haiku' : /fable|mythos/i.test(m) ? 'fable' : 'sonnet';
   const diffCache = new WeakMap();
   const editStat = (ev) => { let d = diffCache.get(ev); if (!d) { d = lineDiff(ev.args.old, ev.args.new); diffCache.set(ev, d); } return d; };
+  // An edit Undo can put back exactly: an Edit whose texts weren't cut short and that didn't delete outright
+  // (a Write or MultiEdit has no exact way back).
+  const undoable = (ev) => ev.name === 'Edit' && ev.args.new && ![ev.args.old, ev.args.new].some(s => s.length > 5000 && s.endsWith('…'));
+  function undoTurn(evs, from, to, a) {
+    const done = new Map(evs.filter(e => e.type === 'tool_done').map(e => [e.toolId, e]));
+    const eds = evs.slice(from, to + 1).filter(e => e.type === 'tool' && e.args && (e.args.old != null || e.args.new != null) && done.get(e.toolId) && !done.get(e.toolId).err);
+    if (!eds.length || !eds.every(undoable)) return;
+    const files = new Set(eds.map(e => e.args.file_path));
+    showConfirm(`Undo this turn's ${eds.length} edit${eds.length > 1 ? 's' : ''} in ${files.size} file${files.size > 1 ? 's' : ''}?`, 'Undo edits').then(ok => {
+      if (ok) api.send({ type: 'undoTurn', id: selectedId, cwd: a && a.cwd, edits: eds.map(e => ({ file: e.args.file_path, old: e.args.old, new: e.args.new, all: !!e.args.all })) });
+    });
+  }
+  // Claude ended by asking you something: its choices (or Yes / No) as one-click answers under the reply.
+  function qrHtml(evs) {
+    for (let k = evs.length - 1; k >= 0; k--) {
+      const t = evs[k].type; if (t === 'turn' || t === 'mode' || t === 'tool_done' || t === 'images' || t === 'bgdone') continue;
+      if (t !== 'text') return '';
+      const o = quickReplies(evs[k].text); return o.length ? `<div class="qreplies">${o.map(x => `<button type="button" class="qr" data-qr="${escH(x)}">${escH(x)}</button>`).join('')}</div>` : '';
+    }
+    return '';
+  }
   function footHtml(textAt, turn, sum, mark) {
     const meta = turn ? `<span class="tf-meta">${SPARK}${Number.isFinite(turn.ms) && turn.ms > 0 ? 'Worked ' + escH(dur(turn.ms)) : 'Done'}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : ''; // a turn without its duration says Done, not "NaNh"
     let files = '', cost = '';
     if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
     if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
     // What happened first (always in the same place), then the actions, which hide on older turns until hovered.
-    const acts = (textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button><button class="act" type="button" data-act="fwd" title="Send to another agent" aria-label="Send to another agent">${ICON.fwd}</button>` : '') + (mark && mark.ts ? `<button class="act mark${mark.on ? ' on' : ''}" type="button" data-act="mark" data-ts="${escH(mark.ts)}" title="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-label="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-pressed="${mark.on}">${ICON.star}</button>` : '');
+    const acts = (textAt >= 0 ? `<button class="act copy" type="button" title="Copy reply" aria-label="Copy reply">${ICON.copy}</button><button class="act" type="button" data-act="fwd" title="Send to another agent" aria-label="Send to another agent">${ICON.fwd}</button>` : '') + (sum && sum.files.size && sum.undo ? `<button class="act" type="button" data-act="undo-turn" data-from="${sum.from}" data-to="${sum.to}" title="Undo this turn's edits" aria-label="Undo this turn's edits">${ICON.undo}</button>` : '') + (mark && mark.ts ? `<button class="act mark${mark.on ? ' on' : ''}" type="button" data-act="mark" data-ts="${escH(mark.ts)}" title="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-label="${mark.on ? 'Remove bookmark' : 'Bookmark this reply'}" aria-pressed="${mark.on}">${ICON.star}</button>` : '');
     return `<div class="turnfoot"${textAt >= 0 ? ` data-i="${textAt}"` : ''}>${meta}${files}${cost}${acts ? `<span class="tf-acts">${acts}</span>` : ''}</div>`;
   }
 
@@ -244,13 +266,14 @@
       const n = promptsAt.filter(k => k < start).length;
       out.push(`<button type="button" class="earlier" data-act="expand-earlier">${ICON.chev}<span>Earlier: ${n} turn${n > 1 ? 's' : ''}${files.size ? ` · ${files.size} file${files.size > 1 ? 's' : ''}` : ''}${cost ? ` · ${escH(fmtCost(cost))}` : ''}</span></button>`);
     }
-    const fresh = () => ({ files: new Set(), add: 0, del: 0, i: 0, o: 0, cr: 0, cw: 0, m: '', from: -1, to: -1 });
+    const fresh = () => ({ files: new Set(), add: 0, del: 0, i: 0, o: 0, cr: 0, cw: 0, m: '', from: -1, to: -1, undo: true });
     let sum = fresh();
     const tally = (ev, i) => {
       if (once(ev)) { sum.i += ev.u.i; sum.o += ev.u.o; sum.cr += ev.u.cr; sum.cw += ev.u.cw; if (ev.u.m && ev.u.m !== '<synthetic>') sum.m = ev.u.m; }
       if (ev.type === 'tool' && ev.args && (ev.args.old != null || ev.args.new != null) && doneBy.get(ev.toolId) && !doneBy.get(ev.toolId).err) {
         const d = editStat(ev); sum.files.add(ev.args.file_path || ev.args.notebook_path || '?'); sum.add += d.add; sum.del += d.del;
         if (sum.from < 0) sum.from = i; sum.to = i;
+        if (!undoable(ev)) sum.undo = false;
       }
     };
     for (let k = evs.length - 1; k >= 0; k--) if (evs[k].type === 'prompt' || evs[k].type === 'command') { lastPromptAt = k; break; }
@@ -280,8 +303,11 @@
       flush(); out.push(msgHtml(ev, i, cwd));
       if (t === 'text') { textAt = i; open = true; }
       // Your last prompt: Edit puts it back in the box, Retry sends it again.
-      // Any message of yours: Edit (rewinds to it), send it to another agent; the last one also Retry.
-      if ((t === 'prompt' || t === 'command') && ev.text) out.push(`<div class="uacts" data-i="${i}"><button type="button" class="act" data-act="edit-prompt" title="Edit">${ICON.edit}</button><button type="button" class="act" data-act="fwd" title="Send to another agent">${ICON.fwd}</button>${i === lastPromptAt ? `<button type="button" class="act" data-act="retry" title="Send again">${ICON.retry}</button>` : ''}</div>`);
+      // Any message of yours: Edit (rewinds to it), send it to another agent; the last one also Retry. An earlier
+      // version is only to read.
+      if ((t === 'prompt' || t === 'command') && ev.text && ev._ver == null) out.push(`<div class="uacts" data-i="${i}"><button type="button" class="act" data-act="edit-prompt" title="Edit">${ICON.edit}</button><button type="button" class="act" data-act="fwd" title="Send to another agent">${ICON.fwd}</button>${i === lastPromptAt ? `<button type="button" class="act" data-act="retry" title="Send again">${ICON.retry}</button>` : ''}</div>`);
+      // A message with earlier versions: ‹ 1/2 › switches which one the thread shows from here on.
+      if ((t === 'prompt' || t === 'command') && ev.alts && ev.alts.length) { const n = ev.alts.length + 1, k = ev._ver != null ? ev._ver + 1 : n; out.push(`<div class="vers" data-i="${i}"><button type="button" class="act" data-act="ver" data-d="-1" aria-label="Earlier version"${k > 1 ? '' : ' disabled'}>‹</button><span>${k}/${n}</span><button type="button" class="act" data-act="ver" data-d="1" aria-label="Later version"${k < n ? '' : ' disabled'}>›</button></div>`); }
     });
     flush(); if (turn) close();
     for (let k = out.length - 1; k >= 0; k--) if (out[k].startsWith('<div class="turnfoot"')) { out[k] = out[k].replace('<div class="turnfoot"', '<div class="turnfoot latest"'); break; }
@@ -297,6 +323,15 @@
   const hidesOf = (a) => { if (Array.isArray(a && a.chatHides) && a.chatHides.length) return a.chatHides; try { return JSON.parse(localStorage.getItem(hideKey(a)) || '[]'); } catch { return []; } };
   const setHides = (a, rs) => { a.chatHides = rs; try { localStorage.setItem(hideKey(a), JSON.stringify(rs)); } catch {} api.send({ type: 'chatHides', id: [...agents].find(([, x]) => x === a)?.[0], hides: rs }); };
   // From a hidden prompt to the next prompt sent after the edit: every event in between goes.
+  // An earlier version on view: the thread from that message on is that branch (read-only; the CLI is on the latest).
+  const verView = new Map(), altEvs = new WeakMap(); // agent id → { ts, k } · a branch → its events, the first one versioned
+  function viewEvs(a, evs) {
+    const v = visibleEvs(a, evs), vv = verView.get(selectedId); if (!vv) return v;
+    const at = v.findIndex(e => e.ts === vv.ts && e.alts && e.alts[vv.k]); if (at < 0) { verView.delete(selectedId); return v; }
+    const alt = v[at].alts[vv.k];
+    if (!altEvs.has(alt)) altEvs.set(alt, [{ ...alt[0], alts: v[at].alts, _ver: vv.k, _ts: vv.ts }, ...alt.slice(1)]);
+    return v.slice(0, at).concat(altEvs.get(alt));
+  }
   function visibleEvs(a, evs) {
     const rs = hideKey(a) ? hidesOf(a) : []; if (!rs.length) return evs;
     let hide = false;
@@ -818,7 +853,7 @@
   function announce(t) { if (srStatus.textContent !== t) srStatus.textContent = t; }
   function paint(el, id, a, evs, st) {
     const now = Date.now();
-    evs = evs && visibleEvs(a, evs); // a message you edited, and what answered it, are gone from the thread
+    evs = evs && viewEvs(a, evs); // a message you edited, and what answered it, are gone from the thread (or shown as a version)
     const doneBy = new Map(); let mode = '';
     if (evs) for (const ev of evs) { if (ev.type === 'tool_done' && ev.toolId) doneBy.set(ev.toolId, ev); else if (ev.type === 'mode') mode = ev.mode; }
     mode = liveMode(id) || mode; // the footer is current; the transcript only notes the mode once per turn
@@ -844,7 +879,7 @@
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
     const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && !(a._reverted && now - a._reverted < 8000) && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
-    const tail = (evs ? stopNote + liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) : ''); // queued text waits under the spinner, as in the CLI
+    const tail = (evs ? stopNote + liveHtml(a, st, evs, doneBy, now) + pendingHtml(id, evs, busy) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(evs)) : ''); // queued text waits under the spinner, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
@@ -1117,7 +1152,7 @@
 
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
-    if (a && evs) evs = visibleEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
+    if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
     // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
@@ -1144,6 +1179,8 @@
     if (ag) { openAgent(ag.dataset.agentTid || ag.dataset.jump, evs || []); return; }
     const ins = e.target.closest('[data-insert]'); // composer chips: /compact, /model
     if (ins) { chatComposer.insert(ins.dataset.insert, false); return; }
+    const qr = e.target.closest('[data-qr]'); // a one-click answer: sent as your message (into the box beside a draft)
+    if (qr) { const box = document.getElementById('term-order-input'); if (box.value.trim()) chatComposer.insert(qr.dataset.qr, false); else { box.value = qr.dataset.qr; sendOrder(); } return; }
     const act = e.target.closest('[data-act]');
     if (act) {
       const lastPrompt = () => { for (let k = (evs || []).length - 1; k >= 0; k--) if ((evs[k].type === 'prompt' || evs[k].type === 'command') && evs[k].text) return evs[k].text; return ''; };
@@ -1161,6 +1198,13 @@
         editing = null;
         if (ev && text && text !== String(ev.text).trim()) editResend(ev, text); else rerender();
       }
+      else if (act.dataset.act === 'ver') {
+        const ev = (evs || [])[+act.closest('[data-i]').dataset.i]; if (!ev || !ev.alts) return;
+        const n = ev.alts.length, k = Math.max(0, Math.min(n, (ev._ver != null ? ev._ver : n) + +act.dataset.d));
+        if (k === n) verView.delete(selectedId); else verView.set(selectedId, { ts: ev._ts || ev.ts, k });
+        rerender();
+      }
+      else if (act.dataset.act === 'undo-turn') undoTurn(evs || [], +act.dataset.from, +act.dataset.to, a);
       else if (act.dataset.act === 'turn-edits') openChanges(evs || [], +act.dataset.from, +act.dataset.to, a);
       else if (act.dataset.act === 'turn-edits-inline') showEditsInline(evs || [], +act.dataset.from, +act.dataset.to);
       else if (act.dataset.act === 'mode') openModeMenu(act, act.dataset.modeCur);

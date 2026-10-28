@@ -765,3 +765,12 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-fwd-menu .mm-i small { color: var(--dim); font-size: 11px; }
 /* A long chat is thousands of nodes: blocks off screen skip rendering (their size is remembered once seen). The newest stay as they are. */
 :root body #conversation .thread > :not(:nth-last-child(-n+6)) { content-visibility: auto; contain-intrinsic-size: auto 160px; }
+/* One-click answers to the question a reply ended with */
+:root body #conversation .qreplies { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; animation: chat-in .2s var(--chat-ease); }
+:root body #conversation .qr { height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--border-hi); background: none; color: var(--text); font: inherit; font-size: 13px; text-transform: none; letter-spacing: 0; clip-path: none; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root body #conversation .qr:hover { background: var(--hover-strong); border-color: var(--claude); }
+:root body #conversation .qr:active { transform: scale(.97); }
+/* ‹ 1/2 › under a message with earlier versions */
+:root body #conversation .vers { display: flex; justify-content: flex-end; align-items: center; gap: 2px; margin: -8px 0 6px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+:root body #conversation .vers .act { min-width: 22px; font-size: 15px; line-height: 1; }
+:root body #conversation .vers .act:disabled { opacity: .3; cursor: default; }

@@ -1206,11 +1206,16 @@ function getFullTimeline(id) {
   if (!a || !fs.existsSync(a.jsonlFile)) return [];
   try {
     const content = fs.readFileSync(a.jsonlFile, 'utf-8');
-    const lines = timelineCore.activeLines(content.split('\n').filter(l => l.trim()));
+    // Only the branch the CLI is on; the ones you left with a reply ride on the message that replaced them (its versions).
+    const { lines, alts } = timelineCore.branches(content.split('\n').filter(l => l.trim()));
+    const parseAll = (ls) => ls.flatMap(l => parseLineForTimeline(l) || []);
     const events = [];
     for (const line of lines) {
       const parsed = parseLineForTimeline(line);
-      if (parsed) events.push(...parsed);
+      if (!parsed) continue;
+      const u = alts.size && (/"uuid":"([^"]+)"/.exec(line) || [])[1], alt = u && alts.get(u), p = alt && parsed.find(e => e.type === 'prompt' || e.type === 'command');
+      if (p) p.alts = alt.map(parseAll).filter(x => x.length);
+      events.push(...parsed);
     }
     // Return last N events if too many
     return events.length > TIMELINE_MAX_EVENTS ? events.slice(-TIMELINE_MAX_EVENTS) : events;
@@ -4733,6 +4738,19 @@ function handleIpc(msg) {
     case 'filePeek': filePeek(msg); break;
     case 'gitDiff': gitDiff(msg); break;
     // The Chat view's Revert file (after the user confirmed): back to HEAD, staged and working copy; then a fresh diff.
+    // The Chat view's "Undo this turn's edits" (after the user confirmed): every edit put back, or none (chat-core undoEdits).
+    case 'undoTurn': {
+      const cwd = typeof msg.cwd === 'string' ? msg.cwd : '', edits = Array.isArray(msg.edits) ? msg.edits : [];
+      const abs = (f) => path.isAbsolute(f) ? f : path.join(cwd, f), files = new Map();
+      for (const e of edits) { const f = abs(String(e.file || '')); if (!files.has(f)) { try { files.set(f, fs.readFileSync(f, 'utf8')); } catch { files.set(f, null); } } }
+      // A file with Windows line ends: the edit's text is matched with them.
+      const crlf = (f, s) => files.get(f) && files.get(f).includes('\r\n') && !String(s).includes('\r') ? String(s).replace(/\n/g, '\r\n') : String(s);
+      const r = require('./chat-core').undoEdits(new Map([...files].filter(([, c]) => c != null)), edits.map(e => { const f = abs(String(e.file || '')); return { file: f, old: crlf(f, e.old), new: crlf(f, e.new), all: !!e.all }; }));
+      if (r.error) { send({ type: 'toast', text: `Couldn't undo: ${r.error}` }); break; }
+      try { for (const [f, c] of r.files) if (c !== files.get(f)) fs.writeFileSync(f, c); send({ type: 'toast', text: `Undid ${edits.length} edit${edits.length > 1 ? 's' : ''} in ${r.files.size} file${r.files.size > 1 ? 's' : ''}` }); }
+      catch (e) { send({ type: 'toast', text: `Couldn't undo: ${e.message}` }); }
+      break;
+    }
     case 'gitRevertFile': {
       const cwd = typeof msg.cwd === 'string' ? msg.cwd : '', f = typeof msg.file === 'string' ? msg.file : '';
       if (!cwd || !f || f.includes('..') || path.isAbsolute(f)) break;

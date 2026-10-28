@@ -189,4 +189,39 @@ const isWorkingStatus = (s) => /^(active|resuming|settling)$/.test(s || '');
 // Arrow keys that move a CLI menu's selection by d rows.
 const arrowKeys = (d) => Array(Math.abs(d)).fill(d > 0 ? '\x1b[B' : '\x1b[A');
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, liveReply, screenDialog };
+// Undo a turn's edits: its Edit calls, newest first, each putting old_string back where new_string is. All or nothing:
+// any edit that can't be put back exactly (its text changed since, or shows up twice) stops it, and nothing is written.
+// files: path → content now. Returns { files } with the contents to write, or { error }.
+function undoEdits(files, edits) {
+  const out = new Map(files);
+  for (const e of [...edits].reverse()) {
+    let c = out.get(e.file); const name = baseName(e.file);
+    if (c == null) return { error: `${name} is gone` };
+    const n = e.new ? c.split(e.new).length - 1 : 0;
+    if (!n) return { error: `${name} changed since` };
+    if (n > 1 && !e.all) return { error: `${name}: the edit shows up ${n} times` };
+    c = e.all ? c.split(e.new).join(e.old) : c.replace(e.new, () => e.old);
+    out.set(e.file, c);
+  }
+  return { files: out };
+}
+
+// A reply that ends asking you something → one-click answers: the choices it listed around the question
+// ("1. **Edit any message.** …" → "Edit any message"), else Yes / No for a short yes-or-no question. [] when it didn't ask.
+function quickReplies(text) {
+  const lines = String(text || '').replace(/```[\s\S]*?```/g, '').split('\n').map(l => l.trim())
+    .filter(l => l && !/^I AM (DONE|WORKING)\b/.test(l));
+  let q = -1; for (let k = lines.length - 1; k >= Math.max(0, lines.length - 4); k--) if (/\?\s*\**\s*$/.test(lines[k])) { q = k; break; }
+  if (q < 0) return [];
+  const item = /^(?:\d+[.)]|[-*•])\s+(.+)$/, clean = (s) => s.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
+  const label = (s) => { s = clean(s); const b = /^\*\*(.+?)\*\*/.exec(s); if (b) s = b[1]; const cut = s.split(/\s[—–-]\s|:\s|\.\s/)[0].replace(/[.:]$/, ''); return cut.length > 60 ? cut.slice(0, 58) + '…' : cut; };
+  const run = (from, step) => { const out = []; for (let k = from; k >= 0 && k < lines.length; k += step) { const m = item.exec(lines[k]); if (!m) break; out.push(label(lines[k].replace(/^(?:\d+[.)]|[-*•])\s+/, '').startsWith('**') ? lines[k].replace(/^(?:\d+[.)]|[-*•])\s+/, '') : m[1])); } return step < 0 ? out.reverse() : out; };
+  let opts = run(q + 1, 1);
+  for (let k = q - 1; opts.length < 2 && k >= q - 3 && k >= 0; k--) if (item.test(lines[k])) opts = run(k, -1); // a line or two may sit between the list and the question
+  if (opts.length >= 2 && opts.length <= 8) return [...new Set(opts)];
+  const ask = clean(lines[q]).replace(/^I NEED YOU:\s*/, '');
+  if (ask.length <= 80 && !/\b(which|what|how|where|why|when|who)\b/i.test(ask) && !/\bor\b/i.test(ask)) return ['Yes', 'No'];
+  return [];
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, liveReply, screenDialog, quickReplies, undoEdits };

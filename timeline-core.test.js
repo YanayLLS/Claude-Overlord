@@ -110,3 +110,18 @@ test('a message taken back or rewound past drops out with all that followed it; 
   ];
   assert.deepStrictEqual(activeLines(lines).map(l => JSON.parse(l).uuid), ['p1', 'a1', 'r1', 'r2', 'new', 'na']);
 });
+
+test('a branch you left that got a reply is an earlier version of the message that replaced it', () => {
+  const { branches } = require('./timeline-core');
+  const R = (uuid, parentUuid, type, content, x) => JSON.stringify({ uuid, parentUuid, type, message: { content }, ...x });
+  const lines = [
+    R('p1', null, 'user', 'first'), R('a1', 'p1', 'assistant', [{ type: 'text', text: 'hi' }]),
+    R('old', 'a1', 'user', 'make it red'), R('oa', 'old', 'assistant', [{ type: 'text', text: 'red' }]),
+    R('gone', 'a1', 'user', 'never answered'),
+    R('new', 'a1', 'user', 'make it blue'), R('na', 'new', 'assistant', [{ type: 'text', text: 'blue' }]),
+  ];
+  const { lines: kept, alts } = branches(lines);
+  assert.deepStrictEqual(kept.map(l => JSON.parse(l).uuid), ['p1', 'a1', 'new', 'na']);
+  assert.deepStrictEqual([...alts.keys()], ['new']);
+  assert.deepStrictEqual(alts.get('new').map(ls => ls.map(l => JSON.parse(l).uuid)), [['old', 'oa']]);
+});
