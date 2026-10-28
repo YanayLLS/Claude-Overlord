@@ -62,7 +62,8 @@
       if (f.type && f.type.startsWith('image/')) {
         const a = attOf(id), x = { n: a.next++, url: URL.createObjectURL(f), path: p.replace(/\\/g, '/'), saving: !p };
         a.list.push(x); took = true;
-        if (!p) { const seq = ++saveSeq; saving.set(seq, x); api.send({ type: 'saveClipboardImage', id, seq }); } // a screenshot: main saves it
+        // No file on disk (a screenshot, an image dragged from a page): main saves its bytes, not whatever the clipboard holds.
+        if (!p) { const seq = ++saveSeq; saving.set(seq, x); f.arrayBuffer().then(b => api.send({ type: 'saveClipboardImage', id, seq, data: new Uint8Array(b), ext: (f.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '') }), () => api.send({ type: 'saveClipboardImage', id, seq })); }
         insert(`[Image #${x.n}] `);
       } else if (p) { if (!addFileRef(p)) insert((/\s/.test(p) ? `"${p}"` : p) + ' '); took = true; } // any other file: a chip (a folder: its path, like the CLI)
     }
@@ -82,10 +83,12 @@
     return out;
   }
   // A send made while a screenshot is still being saved waits for it (shown as "Attaching…").
-  const queued = new Map(); // agent id → { text, list }
+  // Sends after it wait behind it, so they go in the order you sent them.
+  const queued = new Map(); // agent id → [{ text, list }]
   function flush(id) {
-    const q = queued.get(id); if (!q || q.list.some(x => x.saving)) return;
-    queued.delete(id); deliver(id, q.text, q.list);
+    const q = queued.get(id) || [];
+    while (q.length && !q[0].list.some(x => x.saving)) { const m = q.shift(); deliver(id, m.text, m.list); }
+    if (!q.length) queued.delete(id);
   }
   // How much text sits in the CLI's own box right now (a message Esc took back, a draft typed there): main erases that
   // many characters before the next send, in turn with its other sends, so it can't ride along. 0 while a dialog is up.
@@ -118,10 +121,10 @@
     if (a) { a.next = 1; a.pastes = []; a.nextP = 1; a.files = []; a.nextF = 1; a.links = []; }
     if (!text) { if (chat() && order().classList.contains('busy')) chatUi.stop(); return; } // empty + working: Stop
     if (chat() && /^\/resume$/.test(text) && !list.length) { inp.value = '/resume '; resumeCheck(inp); return; } // the CLI's picker is a full-screen dialog: list here
-    const held = list.some(x => x.saving);
+    const held = list.some(x => x.saving) || queued.has(id); // behind one still attaching, it waits too
     if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text, pastes, restore); // shows the box as typed (paste chips), matches the full text
-    inp.value = ''; inp.style.height = ''; hist = -1; order().classList.add('blank'); drawAtt(); saveDraft(id);
-    if (held) { queued.set(id, { text, list }); if (chat()) renderConversation(); return; }
+    inp.value = ''; inp.style.height = ''; syncHl(); hist = -1; order().classList.add('blank'); drawAtt(); saveDraft(id);
+    if (held) { (queued.get(id) || queued.set(id, []).get(id)).push({ text, list }); if (chat()) renderConversation(); return; }
     // A question open in the CLI: typed text is your own answer, not the highlighted option. Its "Type something" /
     // "Other" choice takes it; with none, Esc closes the question (as in the CLI) and the text goes as a message.
     const ask = chat() && !list.length ? chatUi.askState() : null;
@@ -290,7 +293,12 @@
   // and links those tags stand for (numbered on from what's already there when the box wasn't empty).
   function restoreDraft(id, r) {
     const a = attOf(id), t = box(), had = id === draftFor ? t.value : drafts.get(id) || '';
-    if (had.trim()) { setDraft(id, had.replace(/\s*$/, '\n') + expandLinks(expandPastes(r.shown, r), r)); return; } // keep it simple beside other text: the full text
+    if (had.trim()) { // keep it simple beside other text: the full text, its images numbered on after the box's own
+      const nn = new Map(r.list.map(x => [x.n, a.next++]));
+      a.list.push(...r.list.map(x => ({ ...x, n: nn.get(x.n) })));
+      const text = expandLinks(expandPastes(r.shown, r), r).replace(/\[Image #(\d+)\]/g, (m, n) => nn.has(+n) ? `[Image #${nn.get(+n)}]` : m);
+      setDraft(id, had.replace(/\s*$/, '\n') + text); drawAtt(); return;
+    }
     a.list = r.list.slice(); a.next = Math.max(0, ...a.list.map(x => x.n)) + 1;
     a.pastes = r.pastes.slice(); a.nextP = Math.max(0, ...a.pastes.map(x => x.n)) + 1;
     a.files = r.files.slice(); a.nextF = Math.max(0, ...a.files.map(x => x.n)) + 1;
@@ -312,6 +320,8 @@
     const ae = document.activeElement, t = box();
     if (ae === t || (ae && (ae.matches('input, textarea, select, [contenteditable="true"]') || ae.closest('.xterm, [role="dialog"], [role="menu"], [role="listbox"]')))) return;
     if (typeof _renaming !== 'undefined' && _renaming) return;
+    if (document.querySelector('.chat-lightbox, #settings-overlay[style*="flex"], #search-overlay[style*="flex"]') || order().classList.contains('dead')) return;
+    if (cardKey(e)) { e.preventDefault(); return; } // an open question/permission card takes 1–9 first, as in the terminal
     t.focus({ preventScroll: true }); t.selectionStart = t.selectionEnd = t.value.length; // the key itself lands in the box
   }, true);
 
@@ -338,6 +348,7 @@
   let lastEsc = 0;
   function onKey(e) {
     const t = e.target;
+    if (e.isComposing || e.keyCode === 229) return; // an IME's own Enter, arrows and Backspace
     if (at && at.files.length && chat()) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); at.sel = (at.sel + (e.key === 'ArrowDown' ? 1 : at.files.length - 1)) % at.files.length; drawAt(); return; }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickAt(at.sel); return; }
@@ -349,7 +360,7 @@
       const at = t.selectionStart, before = t.value.slice(0, at), after = t.value.slice(at);
       const ln = ((atts.get(selectedId) || {}).links || []).find(l => e.key === 'Backspace' ? before.endsWith(l.tok) : after.startsWith(l.tok)); // a link's name goes whole
       if (ln) { e.preventDefault(); const i = e.key === 'Backspace' ? at - ln.tok.length : at; t.value = t.value.slice(0, i) + t.value.slice(i + ln.tok.length); t.selectionStart = t.selectionEnd = i; grow(t); return; }
-      const m = e.key === 'Backspace' ? /\[(?:Image #\d+|Pasted text #\d+[^\]]*)\] ?$/.exec(before) : /^\[(?:Image #\d+|Pasted text #\d+[^\]]*)\] ?/.exec(after);
+      const m = e.key === 'Backspace' ? /\[(?:Image #\d+|(?:Pasted text|File) #\d+[^\]]*)\] ?$/.exec(before) : /^\[(?:Image #\d+|(?:Pasted text|File) #\d+[^\]]*)\] ?/.exec(after);
       if (m) {
         e.preventDefault();
         t.value = e.key === 'Backspace' ? before.slice(0, m.index) + after : before + after.slice(m[0].length);
@@ -434,15 +445,6 @@
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); e.stopPropagation(); chatUi.jumpPrompt(e.key === 'ArrowUp' ? -1 : 1); }
   }, true);
 
-  document.addEventListener('keydown', (e) => {
-    if (!chat() || selectedId == null || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
-    const a = document.activeElement;
-    if (a && (a === box() || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable)) return;
-    if (document.querySelector('.chat-lightbox, #settings-overlay[style*="flex"], #search-overlay[style*="flex"]')) return;
-    if (order().classList.contains('dead')) return;
-    if (cardKey(e)) { e.preventDefault(); return; } // an open question/permission card takes 1–9 first, as in the terminal
-    box().focus();
-  }, true);
 
   // The box's [Image #N] / [Pasted text #N · …] tags read as chips: a layer behind the textarea draws the same text, the
   // tags in a tint, transparent otherwise, kept on the textarea's size and scroll.
@@ -453,6 +455,8 @@
   // anything else as site + path (chatUi.linkLabel). The box holds the name; Send puts the address back.
   // ponytail: a name edited by hand stops being a link (Backspace at its end removes it whole, as with the other tags).
   const URL_RE = chatUrlRe(); // chat-core.js: the thread reads links the same way
+  // The name sits between invisible marks, so the same words typed in your own text are never taken for the link.
+  const LW = String.fromCharCode(0x2060), mkTok = (n) => LW + n + LW;
   function linkify(t) {
     const id = selectedId; if (id == null || !URL_RE.test(t.value)) return;
     const a = attOf(id), v = t.value; a.links ||= [];
@@ -461,7 +465,7 @@
       const end = m.index + m[0].length;
       if (end === v.length && end === t.selectionStart && !linkify.pasted) continue; // still being typed
       const l = chatUi.linkLabel(m[0]); if (!l) continue;
-      let tok = l.name; for (let k = 2; a.links.some(x => x.tok === tok && x.url !== m[0]); k++) tok = `${l.name} (${k})`;
+      let tok = mkTok(l.name); for (let k = 2; a.links.some(x => x.tok === tok && x.url !== m[0]); k++) tok = mkTok(`${l.name} (${k})`);
       a.links.push({ tok, url: m[0] });
       out += v.slice(last, m.index) + tok; last = end;
       if (caret >= end) caret += tok.length - m[0].length;
@@ -469,12 +473,12 @@
     if (!last) return;
     t.value = out + v.slice(last); t.selectionStart = t.selectionEnd = caret; grow(t);
   }
-  const expandLinks = (text, a) => ((a && a.links) || []).reduce((s, l) => s.includes(l.tok) ? s.replace(l.tok, l.url) : s, text);
+  const expandLinks = (text, a) => ((a && a.links) || []).reduce((s, l) => s.includes(l.tok) ? s.replace(l.tok, l.url) : s, text).split(LW).join('');
   // A title that came in after the link was put in the box (the page's, or a ClickUp task's): swap it in.
   chatUi.linkWaiters.add(() => {
     const a = atts.get(selectedId), t = box(); if (!a || !a.links) return;
     for (const l of a.links) {
-      const n = chatUi.linkLabel(l.url).name, i = t.value.indexOf(l.tok);
+      const n = mkTok(chatUi.linkLabel(l.url).name), i = t.value.indexOf(l.tok);
       if (n === l.tok || i < 0 || a.links.some(x => x !== l && x.tok === n)) continue;
       const s = t.selectionStart; t.value = t.value.slice(0, i) + n + t.value.slice(i + l.tok.length); if (s > i) t.selectionStart = t.selectionEnd = Math.max(i + n.length, s + n.length - l.tok.length);
       l.tok = n;
@@ -536,7 +540,7 @@
   }
   if (mic) mic.addEventListener('click', micToggle);
   // Typing takes over from the mic (Esc just stops it); sending or switching agent ends the take too.
-  box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
+  box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
   window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, getDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };

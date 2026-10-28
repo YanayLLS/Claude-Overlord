@@ -2474,7 +2474,7 @@ function setTheme(name, persist = true) {
 }
 document.getElementById('sel-theme').innerHTML = Object.entries(THEMES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
 document.getElementById('sel-theme').value = currentTheme;
-function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; if (agents.get(id)) agents.get(id).unread = false; if (agents.get(id)) hotCwd = agents.get(id).cwd; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
+function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; if (window.chatUi) chatUi.dropToast(id); /* its card shows now */ if (agents.get(id)) agents.get(id).unread = false; if (agents.get(id)) hotCwd = agents.get(id).cwd; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
 // The Chat view's reply box takes focus, unless you're typing somewhere else (renaming an agent, the search box…):
 // a double-click to rename is two clicks, and the focus a click schedules would land after the rename box opened.
 function focusReplyBox() {
@@ -4235,6 +4235,7 @@ function handleAgentMsg(msg) {
       break;
     }
     case 'agentArchived': {
+      chatUi.dropToast(msg.id); // its toasts go with it
       const a = agents.get(msg.id);
       if (a) {
         a.archived = true;
@@ -4263,6 +4264,7 @@ function handleAgentMsg(msg) {
       break;
     }
     case 'agentClosed': {
+      chatUi.dropToast(msg.id);
       const closedCwd = agents.get(msg.id)?.cwd || '(unknown)';
       agents.delete(msg.id); destroyXterm(msg.id);
       refreshArchiveModal(closedCwd);

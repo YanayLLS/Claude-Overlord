@@ -98,3 +98,15 @@ test("another session's message is a note from it, not your bubble with raw tags
   const [ev] = parse({ type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'peer' }, prompt: 'Another Claude session sent a message:\n<teammate-message teammate_id="bddfix" color="blue" summary="spec is stale">\nDetails here.\n</teammate-message>' } });
   assert.deepStrictEqual([ev.type, ev.from, ev.summary, ev.text], ['peer', 'bddfix', 'spec is stale', 'Details here.']);
 });
+
+test('a message taken back or rewound past drops out with all that followed it; parallel tool results stay', () => {
+  const { activeLines } = require('./timeline-core');
+  const R = (uuid, parentUuid, type, content, x) => JSON.stringify({ uuid, parentUuid, type, message: { content }, ...x });
+  const lines = [
+    R('p1', null, 'user', 'first'), R('a1', 'p1', 'assistant', [{ type: 'tool_use', id: 't1' }]),
+    R('r1', 'a1', 'user', [{ type: 'tool_result', tool_use_id: 't1' }]), R('r2', 'a1', 'user', [{ type: 'tool_result', tool_use_id: 't2' }]),
+    R('old', 'r1', 'user', 'make it red'), R('m', 'old', 'user', 'skill text', { isMeta: true }), R('oa', 'm', 'assistant', [{ type: 'text', text: 'red' }]),
+    R('new', 'r1', 'user', 'make it blue'), R('na', 'new', 'assistant', [{ type: 'text', text: 'blue' }]),
+  ];
+  assert.deepStrictEqual(activeLines(lines).map(l => JSON.parse(l).uuid), ['p1', 'a1', 'r1', 'r2', 'new', 'na']);
+});

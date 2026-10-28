@@ -103,3 +103,12 @@ test('screenDialog: a CLI dialog (rewind, /config, /model…) is up when its "Es
   assert.strictEqual(screenDialog(['● Press Esc to cancel the dialog.', '', '────', '> ', '────', '  ⏵⏵ bypass permissions on (shift+tab to cycle)']), false);
   assert.strictEqual(screenDialog(['✻ Cogitating… (3s · esc to interrupt)', '────', '> ', '────']), false);
 });
+
+test('in a hunk, a removed "-- x" or an added "++i" is a change, not a header', () => {
+  const [f] = require('./chat-core').parseUnified('diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n--- old rule\n+++i\n same');
+  assert.deepStrictEqual([f.add, f.del, f.rows.map(r => r.t).join('')], [1, 1, '…-+ ']);
+});
+
+test('a run of only Artifact calls still has a summary', () => {
+  assert.strictEqual(groupSummary([{ type: 'tool', name: 'Artifact', args: { action: 'list' } }, { type: 'tool', name: 'Artifact', args: { action: 'read' } }]), 'Used 2 Artifacts calls');
+});

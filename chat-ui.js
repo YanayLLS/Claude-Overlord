@@ -36,11 +36,11 @@
 
   // Events never change once received, so each renders once; tool rows again when their result lands.
   // The text cache is dropped when md-bundle arrives (replies first render as plain text).
-  const toolCache = new WeakMap();
+  let toolCache = new WeakMap();
   let cache = new WeakMap(), mdReady = !!window.marked, mdLoading = false, rerender = () => {};
   function md(src, cwd) {
     if (!mdReady) {
-      if (!mdLoading) mdLoading = true, window.docsUi.loadMd().then(() => { mdReady = true; cache = new WeakMap(); rerender(); }, () => {});
+      if (!mdLoading) mdLoading = true, window.docsUi.loadMd().then(() => { mdReady = true; cache = new WeakMap(); toolCache = new WeakMap(); rerender(); }, () => {});
       return `<p class="plain">${inlineRich(escH(src))}</p>`;
     }
     return inlineRich(linkRefs(window.docsUi.toHtml(src, (cwd || '').replace(/\\/g, '/') + '/_')) // relative links resolve against the agent's folder
@@ -71,7 +71,8 @@
   // a page's title), a file path as a file chip, [Image #N] as its picture, [Pasted text #N · …] as its chip, a /command
   // tagged. It works on HTML-escaped text and leaves what's inside a link, code, a button or a kbd alone. ──
   const imgChip = (n, own) => { const s = (own && own.get(n)) || tagSrc.get(n); return s ? `<button type="button" class="imgtag" data-src="${escH(s)}" title="Image #${n}"><img src="${escH(s)}" alt="">#${n}</button>` : `<span class="imgtag">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>')}#${n}</span>`; };
-  const richText = (s, own) => s.replace(chatUrlRe('g'), (u) => `<a href="${u}">${u}</a>`)
+  // The text is escaped: a quote or bracket after a link is an entity now, and ends it.
+  const richText = (s, own) => s.replace(chatUrlRe('g'), (m) => { const k = m.search(/&(quot|#39|lt|gt);/), u = k < 0 ? m : m.slice(0, k); return /^https?:\/\/./.test(u) ? `<a href="${u}">${u}</a>` + m.slice(u.length) : m; })
     .replace(PROMPT_PATH, (m, q, u) => pathChip(q || u) || m)
     .replace(/(^|\s)(\/[a-z][\w:-]*)(?=\s|$)/g, '$1<span class="cmdtag">$2</span>')
     .replace(/\[Pasted text #(\d+) · (\d+) lines\]/g, (_, k, n) => `<button type="button" class="imgtag" data-pn="${k}">¶ Pasted text · ${n} lines</button>`)
@@ -168,7 +169,8 @@
   }
 
   function msgHtml(ev, i, cwd) {
-    let h = cache.get(ev); if (h != null) return h;
+    const c = cache.get(ev); if (c && c[0] === i) return c[1]; // data-i is in the html: an event that moved (hidden ones, the list trimmed) redraws
+    let h;
     if (ev.type === 'images') h = `<div class="msg user imgs-only"><div class="imgs">${ev.paths.map(p => `<img src="${escH(fileUrl(p))}" alt="" loading="lazy">`).join('')}</div></div>`;
     else if (ev.type === 'prompt') {
       // Embedded images first; an image too big to embed shows from its file, via the path Claude Code wrote.
@@ -194,7 +196,7 @@
       h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert">${'<div class="card-h">' + ICON.alert}<span>${limit ? 'Usage limit reached' : 'Request failed'}</span></div><p>${escH(ev.text)}</p><div class="btns"><button type="button" data-act="retry">Retry</button></div></div></div>`;
     }
     else h = '';
-    if (mdReady || ev.type !== 'text') cache.set(ev, h);
+    if (mdReady || ev.type !== 'text') cache.set(ev, [i, h]);
     return h;
   }
   // Under a finished turn: copy its last reply · how long it worked · when it finished — the CLI's "Cogitated for 42s".
@@ -225,13 +227,15 @@
   const expanded = new Set(); // agent ids whose earlier turns are open
   function blocks(evs, doneBy, cwd, id) {
     const out = []; let run = [], textAt = -1, turn = null, open = false, lastPrompt = null, lastPromptAt = -1;
+    // The CLI writes one record per block of a reply, each with the whole reply's usage: count each reply once.
+    const seenU = new Set(), once = (e) => e.u && !(e.u.id && (seenU.has(e.u.id) || !seenU.add(e.u.id)));
     const promptsAt = []; evs.forEach((e, k) => { if (e.type === 'prompt') promptsAt.push(k); });
     let start = 0;
     if (!expanded.has(id) && promptsAt.length > KEEP_TURNS + 2) {
       start = promptsAt[promptsAt.length - KEEP_TURNS];
       const files = new Set(); let o = 0, cost = 0, m = '';
       const u = { i: 0, o: 0, cr: 0, cw: 0 };
-      for (let k = 0; k < start; k++) { const e = evs[k]; if (e.u) { u.i += e.u.i; u.o += e.u.o; u.cr += e.u.cr; u.cw += e.u.cw; if (e.u.m && e.u.m !== '<synthetic>') m = e.u.m; } if (e.type === 'tool' && e.args && (e.args.old != null || e.args.new != null)) files.add(e.args.file_path || '?'); }
+      for (let k = 0; k < start; k++) { const e = evs[k]; if (once(e)) { u.i += e.u.i; u.o += e.u.o; u.cr += e.u.cr; u.cw += e.u.cw; if (e.u.m && e.u.m !== '<synthetic>') m = e.u.m; } if (e.type === 'tool' && e.args && (e.args.old != null || e.args.new != null)) files.add(e.args.file_path || '?'); }
       if (u.o && typeof calcCost === 'function') cost = calcCost({ modelFamily: famOf(m), inTok: u.i + u.cr + u.cw, outTok: u.o, cacheTok: u.cw, cacheRead: u.cr });
       const n = promptsAt.filter(k => k < start).length;
       out.push(`<button type="button" class="earlier" data-act="expand-earlier">${ICON.chev}<span>Earlier: ${n} turn${n > 1 ? 's' : ''}${files.size ? ` · ${files.size} file${files.size > 1 ? 's' : ''}` : ''}${cost ? ` · ${escH(fmtCost(cost))}` : ''}</span></button>`);
@@ -239,7 +243,7 @@
     const fresh = () => ({ files: new Set(), add: 0, del: 0, i: 0, o: 0, cr: 0, cw: 0, m: '', from: -1, to: -1 });
     let sum = fresh();
     const tally = (ev, i) => {
-      if (ev.u) { sum.i += ev.u.i; sum.o += ev.u.o; sum.cr += ev.u.cr; sum.cw += ev.u.cw; if (ev.u.m && ev.u.m !== '<synthetic>') sum.m = ev.u.m; }
+      if (once(ev)) { sum.i += ev.u.i; sum.o += ev.u.o; sum.cr += ev.u.cr; sum.cw += ev.u.cw; if (ev.u.m && ev.u.m !== '<synthetic>') sum.m = ev.u.m; }
       if (ev.type === 'tool' && ev.args && (ev.args.old != null || ev.args.new != null) && doneBy.get(ev.toolId) && !doneBy.get(ev.toolId).err) {
         const d = editStat(ev); sum.files.add(ev.args.file_path || ev.args.notebook_path || '?'); sum.add += d.add; sum.del += d.del;
         if (sum.from < 0) sum.from = i; sum.to = i;
@@ -251,7 +255,7 @@
     const flush = () => { if (run.length) out.push(groupHtml(run, doneBy, cwd)); run = []; };
     // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
     const mk = marksOf(id);
-    const close = () => { flush(); if (open && turn) out.push(footHtml(textAt, turn, sum, textAt >= 0 && evs[textAt].ts ? { ts: evs[textAt].ts, on: mk.has(evs[textAt].ts) } : null)); textAt = -1; turn = null; open = false; sum = fresh(); };
+    const close = () => { flush(); if (!turn) return; if (open) out.push(footHtml(textAt, turn, sum, textAt >= 0 && evs[textAt].ts ? { ts: evs[textAt].ts, on: mk.has(evs[textAt].ts) } : null)); textAt = -1; turn = null; open = false; sum = fresh(); };
     evs.forEach((ev, i) => {
       if (i < start) return;
       const t = ev.type;
@@ -265,6 +269,7 @@
       if (t === 'images') { if (lastPrompt && ((lastPrompt.images || []).length || (lastPrompt.paths || []).length)) return; }
       if (t === 'prompt') lastPrompt = ev;
       if (t === 'turn') { turn = ev; return; }
+      if (t === 'interrupt') { flush(); textAt = -1; open = false; sum = fresh(); } // a stopped turn gets no footer; the next one counts afresh
       if (t === 'prompt' || t === 'command') close();
       // Being edited: the bubble is the editor (the same html every redraw, so typing isn't lost).
       if ((t === 'prompt' || t === 'command') && editing && editing.id === id && editing.i === i) { flush(); out.push(`<div class="msg user editing" data-i="${i}"><textarea class="edit-ta" rows="2" aria-label="Edit your message">${escH(editing.text)}</textarea><div class="edit-btns"><button type="button" data-act="edit-cancel">Cancel</button><button type="button" class="primary" data-act="edit-send">Send</button></div></div>`); return; }
@@ -319,7 +324,8 @@
     if (o < 0) o = sa.options.findIndex(x => /conversation/i.test(x.label) && !/code/i.test(x.label));
     if (o < 0 || o > 8) return fail("Rewind offered no conversation restore");
     api.send({ type: 'termInput', id, data: String(o + 1) });
-    await until(() => !screenAsk(id).dialog && !screenRewind(id), 3000); await wait(300);
+    if (!(await until(() => !screenAsk(id).dialog && !screenRewind(id), 3000))) return fail("Rewind didn't finish"); // never paste into its menu
+    await wait(300);
     // The CLI puts the old message back in its box: clear it (the agent is idle), then send the new one.
     chatComposer.sendText(id, text);
   }
@@ -341,11 +347,21 @@
     if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new, a.file_path).html}`;
     else if (a.command) what = `<pre>${escH(a.command)}</pre>${a.description ? `<p class="perm-desc">${escH(a.description)}</p>` : ''}`;
     else if (a.url || a.query) what = `<pre>${escH(a.url || a.query)}</pre>`;
-    return `<div class="card perm"><div class="card-h">${ICON[kind] || ICON.shield}<span>${title}</span></div>${what}<div class="btns"><button class="primary" type="button" data-keys="1">Allow once<kbd>1</kbd></button><button type="button" data-keys="2">Always allow<kbd>2</kbd></button><button type="button" data-keys="esc">Deny<kbd>Esc</kbd></button></div></div>`;
+    return `<div class="card perm"><div class="card-h">${ICON[kind] || ICON.shield}<span>${title}</span></div>${what}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
   }
   // The terminal's open menu ("❯ 1. Yes …  2. No …"), read off its last lines: the plan card's choices are exactly
   // the CLI's, whatever this version offers.
   function menuOptions(id) { return screenAsk(id).options.map(o => o.label); }
+  // A permission's keys go only to a menu that's really on screen (a slow tool can look like one waiting for you).
+  // A permission menu starts "1. Yes" (a numbered list in Claude's reply doesn't).
+  const permMenu = (id) => { const o = menuOptions(id); return o.length >= 2 && /^yes\b/i.test(o[0]) ? o : null; };
+  const menuUp = (id) => !!permMenu(id);
+  // Its buttons are the menu's own choices (a Yes/No prompt has no "always"); the usual ones before it has drawn.
+  function permBtns(id, attr, kbd) {
+    const o = permMenu(id), list = o ? o.slice(0, 4).map((l, k) => [String(k + 1), l.length > 42 ? l.slice(0, 40) + '…' : l]) : [['1', 'Allow once'], ['2', 'Always allow']];
+    const b = (k, l, j) => `<button type="button"${j ? '' : ' class="primary"'} ${attr}="${k}" title="${escH(l)}">${escH(l)}${kbd ? `<kbd>${k === 'esc' ? 'Esc' : k}</kbd>` : ''}</button>`;
+    return list.map(([k, l], j) => b(k, l, j)).join('') + (list.some(([, l]) => /^no\b/i.test(l)) ? '' : b('esc', 'Deny', 1));
+  }
   // The open question as the CLI draws it: the line above its menu, and each option with the lines under it. A question
   // isn't in the transcript until it's answered, so this is the only place it can be read from while it waits.
   // The last n rows of an agent's terminal screen (chat-core.js bufferRows); null while it has no terminal yet.
@@ -412,6 +428,7 @@
     const s = screenAsk(selectedId); // the open question is only on screen until it's answered
     const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
     const q = (s && s.question) || a.question || 'Claude has a question';
+    if (askFor !== selectedId + '\n' + q) { askFor = selectedId + '\n' + q; askHover = null; askAsked = null; } // a new question starts from its focused option
     return `<div class="card ask"><div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === s.focus ? 'focus' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(o.label ?? o)}</b>${o.desc ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button></div>${prevHtml(q, s)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === q ? ' still' : ''}">`) + (lastAskQ = q, '');
@@ -450,7 +467,7 @@
   // hovered option's (else the selected one's) in its own space under the options, as tall as the tallest seen, so the
   // options never move under the pointer.
   const previews = new Map(); // question → [preview per option]
-  let askHover = null, askAsked = null;
+  let askHover = null, askAsked = null, askFor = '';
   let lastAskQ = null; // the same question redrawn doesn't slide in again
   const prevText = (t) => t == null ? '<span class="ap-wait">…</span>' : t ? escH(t) : '<span class="ap-wait">No preview</span>';
   function prevHtml(q, s) {
@@ -717,7 +734,7 @@
       const an = e.target.closest('[data-ans]'); // answering a waiting agent from the menu: only while it still waits
       if (an) {
         const id = +an.dataset.ans; if (!stillWaiting(id)) { draw(); return; }
-        if (an.dataset.k) api.send({ type: 'termInput', id, data: an.dataset.k === 'esc' ? '\x1b' : an.dataset.k });
+        if (an.dataset.k) { if (!menuUp(id)) { draw(); return; } api.send({ type: 'termInput', id, data: an.dataset.k === 'esc' ? '\x1b' : an.dataset.k }); }
         else if (!pickOption(id, +an.dataset.pick)) { closeViewMenu(); return; }
         // the row says what went through for a moment, then drops off the list
         const said = an.dataset.k === 'esc' ? 'Denied' : an.dataset.k ? 'Allowed' : 'Answered: ' + (an.title || an.textContent);
@@ -839,7 +856,7 @@
     else if (!stuck) {
       el.scrollTop = el.scrollHeight;
       // Images grow the thread as they load: stay pinned to the bottom through that.
-      for (const i of el.querySelectorAll('img')) if (!i.complete) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
+      for (const i of el.querySelectorAll('img')) if (!i.complete && !i._pin && (i._pin = 1)) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
     }
     jumpOnce = false;
     for (const s of thread.querySelectorAll('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
@@ -904,7 +921,7 @@
   // Bare links in the thread (a reply's autolinks, a /command's arguments) read by name; hover shows the address.
   function prettyLinks(el) {
     for (const a of el.querySelectorAll('a[href^="http"]:not([data-pl])')) {
-      if (a.textContent.trim() !== a.getAttribute('href') && a.textContent.trim() !== decodeURI(a.getAttribute('href'))) { a.dataset.pl = '0'; continue; }
+      if (a.textContent.trim() !== a.getAttribute('href') && a.textContent.trim() !== (() => { try { return decodeURI(a.getAttribute('href')); } catch { return ''; } })()) { a.dataset.pl = '0'; continue; }
       const l = linkLabel(a.getAttribute('href')); if (!l) { a.dataset.pl = '0'; continue; }
       a.dataset.pl = l.kind; if (l.id) a.dataset.cu = l.id; a.title = a.getAttribute('href') + (l.sub.startsWith('Connect') ? '\n' + l.sub : '');
       a.classList.add('plink'); a.textContent = l.name;
@@ -1061,10 +1078,11 @@
 
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
+    if (a && evs) evs = visibleEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
     // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
-    if (k && selectedId != null) { if (stillWaiting(selectedId)) keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
+    if (k && selectedId != null) { if (stillWaiting(selectedId) && menuUp(selectedId)) keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
     const rw = e.target.closest('[data-rw], [data-rwx]'); // rewind card: a point, or Cancel (Esc, as in the CLI)
     if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
@@ -1307,19 +1325,19 @@
     else if (more) more.remove();
   }
   function permToast(id, ask) {
-    const a = agents.get(id); if (!a || worldView || !stillWaiting(id)) return;
+    const a = agents.get(id); if (!a || worldView || id === selectedId || !stillWaiting(id)) return; // the one on screen shows its own card
     dropToast(id);
     const tools = [...a.tools.values()], t = tools.find(x => ask ? x.perm === 'ask' : x.perm === true) || tools.find(x => x.perm) || {}, opts = ask ? quickOpts(id) : [];
     const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
     el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
       + (() => { const w = ask ? screenAsk(id).question : (t.status || t.name || ''); return w && !/^Waiting for your (answer|permission)$/i.test(w) ? `<div class="ct-what${ask ? ' q' : ''}">${escH(w)}</div>` : ''; })()
-      + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : '<button type="button" class="primary" data-k="1">Allow</button><button type="button" data-k="2">Always</button><button type="button" data-k="esc">Deny</button>'}<button type="button" data-open="1">Open</button></div>`;
+      + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : permBtns(id, 'data-k')}<button type="button" data-open="1">Open</button></div>`;
     el.addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.classList.contains('ct-x')) { el.remove(); return placeToasts(); }
       if (b.dataset.open) { el.remove(); placeToasts(); focusAgent(id); return; }
       if (!stillWaiting(id)) { el.remove(); placeToasts(); return; } // answered elsewhere already: never type into a live prompt
-      if (b.dataset.k) api.send({ type: 'termInput', id, data: b.dataset.k === 'esc' ? '\x1b' : b.dataset.k });
+      if (b.dataset.k) { if (!menuUp(id)) { el.remove(); placeToasts(); return; } api.send({ type: 'termInput', id, data: b.dataset.k === 'esc' ? '\x1b' : b.dataset.k }); }
       if (b.dataset.pick && !pickOption(id, +b.dataset.pick)) { el.remove(); placeToasts(); return; }
       if (b.dataset.pick) announce(`Answered ${a.title || 'the agent'}`);
       const said = b.dataset.k === 'esc' ? 'Denied' : b.dataset.k ? 'Allowed' : 'Answered: ' + b.textContent;
@@ -1581,8 +1599,10 @@
   // floats over the chat while it's up, keys going to it, and goes away when the dialog closes. ──
   let peekOff = 0, screenSig = '';
   const screenRows = (x, n) => bufferRows(x.terminal.buffer.active, n);
+  let termPeekFor = null; // the agent whose terminal the overlay shows: switching agents shows the new one's, or none
   function peek(on) {
-    const t = document.getElementById('term'), tc = document.getElementById('term-container'); if (!t || t.classList.contains('peek') === on) return;
+    const t = document.getElementById('term'), tc = document.getElementById('term-container'); if (!t || (t.classList.contains('peek') === on && (!on || termPeekFor === selectedId))) return;
+    termPeekFor = on ? selectedId : null;
     t.classList.toggle('peek', on);
     if (on) { tc.style.display = ''; showXterm(selectedId); if (typeof schedFit === 'function') schedFit(); setTimeout(() => xterms.get(selectedId)?.terminal.focus(), 60); }
     else if (termTab === 'conversation') switchTermTab('conversation'); // back to the chat: terminal hidden, reply box focused
@@ -1599,7 +1619,7 @@
     }
     const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)) && screenAsk(selectedId).options.length < 2 && !screenRewind(selectedId)); // a question menu gets its card instead
     if (up) { peekOff = 0; peek(true); return; }
-    if (t && t.classList.contains('peek') && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
+    if (t && t.classList.contains('peek') && termPeekFor === selectedId && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
     peek(false);
   }, 500);
   { const px = document.createElement('button'); px.id = 'term-peek-x'; px.type = 'button'; px.title = 'Close (Esc)'; px.setAttribute('aria-label', 'Close'); px.textContent = '×';

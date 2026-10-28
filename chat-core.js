@@ -46,7 +46,8 @@ function groupSummary(evs) {
   if (n('ask')) parts.push('asked ' + pl(n('ask'), 'a question', 'questions'));
   if (n('plan')) parts.push('proposed a plan');
   if (n('tool')) parts.push('used ' + pl(n('tool'), 'a tool', 'tools'));
-  const s = parts.join(', ');
+  if (n('artifact')) parts.push('used ' + pl(n('artifact'), 'Artifacts', 'Artifacts calls'));
+  const s = parts.join(', ') || pl(evs.length, 'used a tool', 'tools used');
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -99,15 +100,15 @@ function matchFiles(files, q, max = 12) {
 // Rows carry their line number (n: the new file's, or the old file's for a removed line); each hunk opens with a fold
 // row holding git's context ("function foo()") and its first line.
 function parseUnified(text) {
-  const files = []; let f = null, oldN = 0, newN = 0;
+  const files = []; let f = null, oldN = 0, newN = 0, hunk = false; // in a hunk, "--- x" is a removed "-- x", not a header
   for (const line of String(text || '').split('\n')) {
-    if (line.startsWith('diff --git ')) { const m = / b\/(.+)$/.exec(line); f = { file: m ? m[1] : line.slice(11), add: 0, del: 0, created: false, deleted: false, rows: [] }; files.push(f); continue; }
+    if (line.startsWith('diff --git ')) { const m = / b\/(.+)$/.exec(line); f = { file: m ? m[1] : line.slice(11), add: 0, del: 0, created: false, deleted: false, rows: [] }; files.push(f); hunk = false; continue; }
     if (!f) continue;
     const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/.exec(line);
     if (line.startsWith('new file mode')) f.created = true;
     else if (line.startsWith('deleted file mode')) f.deleted = true;
-    else if (h) { oldN = +h[1]; newN = +h[2]; f.rows.push({ t: '…', s: line.replace(/^(@@[^@]*@@).*$/, '$1') + (h[3] ? ' ' + h[3] : ''), n: newN }); }
-    else if (/^(---|\+\+\+|index |similarity|rename |old mode|new mode|Binary)/.test(line)) continue;
+    else if (h) { hunk = true; oldN = +h[1]; newN = +h[2]; f.rows.push({ t: '…', s: line.replace(/^(@@[^@]*@@).*$/, '$1') + (h[3] ? ' ' + h[3] : ''), n: newN }); }
+    else if (!hunk && /^(---|\+\+\+|index |similarity|rename |old mode|new mode|Binary)/.test(line)) continue;
     // o / n: the line's number in the old and the new file (a removed line has no new number, an added one no old).
     else if (line[0] === '+') { f.rows.push({ t: '+', s: line.slice(1), n: newN++ }); f.add++; }
     else if (line[0] === '-') { f.rows.push({ t: '-', s: line.slice(1), o: oldN++ }); f.del++; }

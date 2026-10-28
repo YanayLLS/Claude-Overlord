@@ -1206,7 +1206,7 @@ function getFullTimeline(id) {
   if (!a || !fs.existsSync(a.jsonlFile)) return [];
   try {
     const content = fs.readFileSync(a.jsonlFile, 'utf-8');
-    const lines = content.split('\n').filter(l => l.trim());
+    const lines = timelineCore.activeLines(content.split('\n').filter(l => l.trim()));
     const events = [];
     for (const line of lines) {
       const parsed = parseLineForTimeline(line);
@@ -1625,6 +1625,10 @@ function handleTermExit(id, exitCode) {
   const hadBg = a.bgTasks?.size > 0;
   a.bgTasks?.clear(); // background shells/agents die with the Claude process
   a.claudeReady = false; // peer messages queue until a new pty shows Claude's prompt
+  // A permission or question that was up died with it: no card, toast or "Needs you" left to answer into the next CLI.
+  clrTimer(id, permTimers); clearPtyPerm(id, a); a.askIds?.clear();
+  if (a.toolIds.size) { a.toolIds.clear(); a.toolStatuses.clear(); a.toolNames.clear(); a.subToolIds.clear(); a.subToolNames.clear(); send({ type: 'toolsClear', id }); }
+  if (a.permSent) { a.permSent = false; send({ type: 'permClear', id }); }
   if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
   // If we're retrying due to --resume failure, don't treat as crash or send termExit
   if (a._resumeFailed && a._resumeRetrying) { a._resumeRetrying = false; return; }
@@ -2117,15 +2121,23 @@ function readLines(id) {
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
     if (lines.some(l => l.trim())) a.crashed = false;
     // Only turn progress ends a pending ask/permission — queued notifications, attachments etc. do not
-    if (!a.askIds?.size && lines.some(movesTurn)) { clrTimer(id, permTimers); clearPtyPerm(id, a); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
+    // Another subagent's progress isn't an answer to the dialog on screen (answering it goes through handleTermInput).
+    if (!a.askIds?.size && lines.some(l => movesTurn(l) && !(a.ptyPerm && /"type":"progress"/.test(l)))) { clrTimer(id, permTimers); clearPtyPerm(id, a); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
     for (const line of lines) { if (line.trim()) parseLine(id, line); }
   } catch (e) { logToRenderer(`[readLines] Agent ${id} error: ${e.message} — file: ${a.jsonlFile}`); }
 }
 
 function parseLine(id, line) {
   const a = agents.get(id); if (!a) return;
+  let branched = false;
   try {
     const r = JSON.parse(line);
+    // A prompt whose parent came before this turn: you rewound or took a message back, so the chat redraws from the branch now in use.
+    if (r.uuid && !r.isSidechain) {
+      const seen = a.turnUuids ||= new Set();
+      if (timelineCore.isPromptRec(r)) { if (r.parentUuid && seen.size && !seen.has(r.parentUuid)) branched = true; seen.clear(); }
+      seen.add(r.uuid);
+    }
     if (a.pendingPrompt && recordHasPrompt(r, a.pendingPrompt.key, a.pendingPrompt.at)) a.pendingPrompt = null;
     // Ledger moved while at the prompt (e.g. a background task finished) → re-show status
     if (applyBgRecord(a.bgTasks ||= new Set(), r) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
@@ -2292,7 +2304,8 @@ function parseLine(id, line) {
     }
   } catch {}
   // Emit timeline events for the focused agent
-  if (id === timelineAgentId) {
+  if (id === timelineAgentId && branched) send({ type: 'timelineData', id, events: getFullTimeline(id) });
+  else if (id === timelineAgentId) {
     const tlEvents = parseLineForTimeline(line);
     if (tlEvents) for (const ev of tlEvents) send({ type: 'timelineEvent', id, event: ev });
   }
@@ -4707,9 +4720,11 @@ function handleIpc(msg) {
     // The Chat view's composer: a screenshot pasted there is saved to a file (as the terminal's Alt+V does) and its path
     // returned; the image goes to the agent only when the prompt is sent, in the place its [Image #N] tag holds.
     case 'saveClipboardImage': {
-      const img = clipboard.readImage();
       let p = '';
-      if (!img.isEmpty()) { const dir = path.join(os.tmpdir(), 'overlord-clipboard'); fs.mkdirSync(dir, { recursive: true }); p = path.join(dir, `paste-${Date.now()}.png`); fs.writeFileSync(p, img.toPNG()); }
+      const dir = path.join(os.tmpdir(), 'overlord-clipboard');
+      if (msg.data && msg.data.length) { fs.mkdirSync(dir, { recursive: true }); p = path.join(dir, `paste-${Date.now()}.${/^[a-z0-9]{1,5}$/i.test(msg.ext || '') ? msg.ext : 'png'}`); fs.writeFileSync(p, Buffer.from(msg.data)); } // the image itself
+      const img = p ? null : clipboard.readImage();
+      if (img && !img.isEmpty()) { fs.mkdirSync(dir, { recursive: true }); p = path.join(dir, `paste-${Date.now()}.png`); fs.writeFileSync(p, img.toPNG()); }
       send({ type: 'clipboardImageSaved', id: msg.id, seq: msg.seq, path: p.replace(/\\/g, '/') });
       break;
     }

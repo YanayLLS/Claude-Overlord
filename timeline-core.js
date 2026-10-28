@@ -2,6 +2,8 @@
 // Pure: main.js passes its tool labeller (fmtTool) and its system-message test.
 const TL_TEXT_MAX = 20000, TL_OUT_MAX = 4000, TL_DIFF_MAX = 6000, TL_IMG_MAX = 400000;
 const cap = (t, n) => t.length > n ? t.slice(0, n) + '…' : t;
+// A command's output keeps its end too: a failing test run or a build says what happened last.
+const capEnds = (t, n) => t.length > n ? t.slice(0, n * 0.4) + '\n…\n' + t.slice(-n * 0.6) : t;
 
 // What the Chat view shows for a call besides fmtTool's label: its target, a command, an edit's before/after.
 const ARG_KEYS = ['file_path', 'notebook_path', 'command', 'description', 'pattern', 'path', 'glob', 'url', 'query', 'subagent_type', 'skill'];
@@ -14,6 +16,7 @@ function toolArgs(name, inp) {
   else if (name === 'AskUserQuestion' && Array.isArray(inp.questions) && inp.questions[0]) { const q = inp.questions[0]; o.question = cap(String(q.question || ''), 600); o.options = (q.options || []).map(x => ({ label: cap(String(x.label || ''), 200), desc: cap(String(x.description || ''), 300) })); }
   else if (name === 'ExitPlanMode' && typeof inp.plan === 'string') o.plan = cap(inp.plan, TL_TEXT_MAX);
   else if (name === 'Artifact') { for (const k of ['title', 'description', 'action', 'icon']) if (typeof inp[k] === 'string') o[k] = cap(inp[k], 400); }
+  else if ((name === 'Agent' || name === 'Task') && typeof inp.prompt === 'string') o.prompt = cap(inp.prompt, TL_TEXT_MAX);
   else if (name === 'TodoWrite' && Array.isArray(inp.todos)) o.todos = inp.todos.map(t => ({ text: cap(String(t.content || ''), 300), status: t.status }));
   return o;
 }
@@ -62,7 +65,7 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
       }
       // The record's token use rides on its first event, so the Chat view can total a turn's tokens and cost.
       const u = r.message.usage;
-      if (events.length && u) events[0].u = { m: r.message.model || '', i: u.input_tokens || 0, o: u.output_tokens || 0, cr: u.cache_read_input_tokens || 0, cw: u.cache_creation_input_tokens || 0 };
+      if (events.length && u) events[0].u = { ...(r.message.id && { id: r.message.id }), m: r.message.model || '', i: u.input_tokens || 0, o: u.output_tokens || 0, cr: u.cache_read_input_tokens || 0, cw: u.cache_creation_input_tokens || 0 };
       return events.length ? events : null;
     }
     if (r.type === 'user') {
@@ -77,7 +80,7 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
           for (const b of c) {
             if (b.type === 'tool_result' && b.tool_use_id) {
               const out = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.filter(x => x.type === 'text').map(x => x.text || '').join('\n') : '';
-              const ev = { type: 'tool_done', ts, toolId: b.tool_use_id, text: cap(out, TL_OUT_MAX), err: !!b.is_error };
+              const ev = { type: 'tool_done', ts, toolId: b.tool_use_id, text: capEnds(out, TL_OUT_MAX), err: !!b.is_error };
               // A background shell: its task id and the file its output streams to.
               const bg = /running in background with ID: (\w+)\. Output is being written to: (.+?\.output)/.exec(out);
               if (bg) { ev.bgId = bg[1]; ev.bgOut = bg[2]; }
@@ -120,4 +123,20 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
   return null;
 }
 
-module.exports = { parseLineForTimeline, toolArgs };
+// A message you took back (Esc) or rewound past stays in the transcript, on a branch off the conversation.
+// The CLI shows only the branch that leads to the newest message: drop each prompt off that path, and all that followed it.
+// Tool results off the path stay (parallel tool calls branch too); only a typed prompt starts an abandoned branch.
+const isPromptRec = (r) => r.type === 'user' && !r.isMeta && !(Array.isArray(r.message?.content) && r.message.content.some(b => b.type === 'tool_result'));
+function activeLines(lines) {
+  const recs = lines.map(l => { try { return JSON.parse(l); } catch { return null; } });
+  const by = new Map(); let leaf = null;
+  for (const r of recs) if (r && r.uuid && !r.isSidechain) { by.set(r.uuid, r); if (r.type === 'user' || r.type === 'assistant') leaf = r; }
+  if (!leaf) return lines;
+  const path = new Set();
+  for (let r = leaf; r && !path.has(r.uuid); r = by.get(r.parentUuid || r.logicalParentUuid)) path.add(r.uuid);
+  const drop = new Set();
+  for (const r of recs) if (r && r.uuid && !path.has(r.uuid) && (drop.has(r.parentUuid) || (path.has(r.parentUuid) && isPromptRec(r)))) drop.add(r.uuid);
+  return drop.size ? lines.filter((l, i) => !(recs[i] && drop.has(recs[i].uuid))) : lines;
+}
+
+module.exports = { parseLineForTimeline, toolArgs, activeLines, isPromptRec };
