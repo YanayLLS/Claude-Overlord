@@ -781,7 +781,9 @@
       const known = typeof clickupState !== 'undefined' && clickupState.tasks.find(t => t.id === cu);
       if (known) taskNames.set(cu, known.name);
       if (!taskNames.has(cu)) { taskNames.set(cu, ''); api.send({ type: 'clickupTask', id: cu }); }
-      return { kind: 'cu', id: cu, name: taskNames.get(cu) || 'ClickUp task', sub: 'ClickUp · ' + cu };
+      // Its name needs ClickUp connected in Overlord (the page is behind a login); until then its id tells links apart.
+      const cmt = /[?&]comment=/.test(u) ? ' · comment' : '', n = taskNames.get(cu);
+      return { kind: 'cu', id: cu, name: (n || 'ClickUp ' + cu) + cmt, sub: n ? 'ClickUp · ' + cu : n === null && typeof clickupHasToken !== 'undefined' && !clickupHasToken ? 'Connect ClickUp in Settings to show its name' : 'ClickUp' };
     }
     let p; try { p = new URL(u); } catch { return null; }
     // The page's own title once main has it (a browser tab's: gh for a PR or issue, else the page's <title>).
@@ -803,7 +805,7 @@
     for (const a of el.querySelectorAll('a[href^="http"]:not([data-pl])')) {
       if (a.textContent.trim() !== a.getAttribute('href') && a.textContent.trim() !== decodeURI(a.getAttribute('href'))) { a.dataset.pl = '0'; continue; }
       const l = linkLabel(a.getAttribute('href')); if (!l) { a.dataset.pl = '0'; continue; }
-      a.dataset.pl = l.kind; if (l.id) a.dataset.cu = l.id; a.title = a.getAttribute('href');
+      a.dataset.pl = l.kind; if (l.id) a.dataset.cu = l.id; a.title = a.getAttribute('href') + (l.sub.startsWith('Connect') ? '\n' + l.sub : '');
       a.classList.add('plink'); a.textContent = l.name;
     }
     for (const a of el.querySelectorAll('a.plink')) { const l = linkLabel(a.getAttribute('href')); if (l && a.textContent !== l.name) a.textContent = l.name; } // a title or name that came in since
