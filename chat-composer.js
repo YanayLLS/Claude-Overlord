@@ -199,6 +199,22 @@
     draftFor = selectedId;
   }
 
+  function setDraft(id, text) {
+    drafts.set(id, text);
+    if (draftFor === id) { const t = box(); t.value = text; grow(t); t.focus(); t.selectionStart = t.selectionEnd = text.length; }
+  }
+  // The reply box keeps focus while the Chat view is open: a click on anything that isn't itself typed into (the thread,
+  // a chip, the agent list) hands it back, unless you selected text or a panel holds focus.
+  const shown = () => chat() && selectedId != null && !!document.getElementById('conversation')?.classList.contains('open');
+  document.addEventListener('click', () => {
+    if (!shown()) return;
+    const ae = document.activeElement;
+    if (ae && (ae.matches('input, textarea, select, [contenteditable="true"]') || ae.closest('[role="dialog"], [role="menu"], [role="listbox"]'))) return;
+    if (String(getSelection() || '').trim()) return;
+    box().focus({ preventScroll: true });
+  });
+  window.addEventListener('focus', () => { if (shown() && (!document.activeElement || document.activeElement === document.body)) box().focus({ preventScroll: true }); });
+
   // With the box empty, a question or permission card takes the terminal's keys: 1–9 pick, Esc denies.
   function cardKey(e) {
     if (box().value) return false;
@@ -369,5 +385,5 @@
   box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onSessions, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();

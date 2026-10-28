@@ -2193,7 +2193,13 @@ let pendingCwd = null;
 let _promptCloseTimer = null;
 function browseAndAdd() { api.send({ type: 'browseFolder' }); }
 function addAgent(cwd) { hotCwd = cwd; api.send({ type: 'createAgent', cwd }); }
-function addAgentWithPrefix(cwd, p) { hotCwd = cwd; api.send({ type: 'createAgent', cwd, prompt: p + ' ', prefill: true }); }
+// In the Chat view the prefix waits in the chat's reply box (typed into the terminal, the chat never saw it).
+let pendingPrefill = null; // { cwd, text, at } until its agent is created
+function addAgentWithPrefix(cwd, p) {
+  hotCwd = cwd;
+  if (termTab !== 'conversation') return api.send({ type: 'createAgent', cwd, prompt: p + ' ', prefill: true });
+  pendingPrefill = { cwd, text: p + ' ', at: Date.now() }; api.send({ type: 'createAgent', cwd });
+}
 // ── Prompt prefixes: the + Agent chevron starts an agent with a saved prefix typed in (not sent) ──
 // ponytail: popover lives on <body>, so list re-renders don't wipe what's being typed
 // Saved in Overlord's state.json with the other settings (localStorage lost them on a crash)
@@ -2229,7 +2235,7 @@ function renderPrefixPop(pop) {
     + '<input class="pp-new" placeholder="New prefix, e.g. /fix-bug — Enter to add">';
   pop.querySelectorAll('.pp-go').forEach(b => b.onclick = () => {
     const p = list[b.dataset.i];
-    api.send(p ? { type: 'createAgent', cwd: pop.dataset.cwd, prompt: p + ' ', prefill: true } : { type: 'createAgent', cwd: pop.dataset.cwd });
+    if (p) addAgentWithPrefix(pop.dataset.cwd, p); else api.send({ type: 'createAgent', cwd: pop.dataset.cwd });
     pop.remove();
   });
   pop.querySelectorAll('.pp-star').forEach(b => b.onclick = () => { const p = list[b.dataset.star]; setDefaultPrefix(p === def ? '' : p); renderPrefixPop(pop); });
@@ -4203,6 +4209,7 @@ function handleAgentMsg(msg) {
     case 'procStart': { const a = agents.get(msg.id); if (a) { a.procAt = msg.at; scheduleRender(); } break; }
     case 'agentCreated': {
       const isNew = !agents.has(msg.id);
+      if (isNew && pendingPrefill && pendingPrefill.cwd === msg.cwd && Date.now() - pendingPrefill.at < 20000) { chatComposer.setDraft(msg.id, pendingPrefill.text); pendingPrefill = null; }
       if (msg.procAt) queueMicrotask(() => { const a = agents.get(msg.id); if (a) a.procAt = msg.procAt; });
       if (isNew) agents.set(msg.id, { cwd: msg.cwd, status: 'idle', tools: new Map(), subTools: new Map(), prompt: '', prompts: [], promptNavIdx: -1, preview: '', spinnerText: '', stats: null, title: msg.title || '', customName: msg.customName || false, sessionId: msg.sessionId, createdAt: msg.createdAt || Date.now(), activeAt: null, servers: new Map(), compacting: false, agentName: msg.agentName || '', archived: msg.archived || false, archivedAt: msg.archivedAt || null, account: msg.account || null });
       if (msg.cwd) addKnownProject(msg.cwd);
