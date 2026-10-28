@@ -507,7 +507,6 @@
     const order = document.getElementById('term-order');
     order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
     const chips = document.getElementById('chat-chips'); if (chips) { const ch = chipsHtml(a, mode); if (chips._h !== ch) chips.innerHTML = chips._h = ch; }
-    document.getElementById('term').classList.toggle('chat-new', !!evs && !evs.length);
     let list;
     if (!evs) list = ['<div class="chat-empty"><span class="loading"></span></div>'];
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];

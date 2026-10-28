@@ -156,11 +156,9 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .choices .other { color: var(--subtext); }
 :root body #conversation .chat-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; color: var(--dim); font-size: 15px; }
 :root body #conversation .chat-empty.hello { font-family: var(--chat-serif); font-size: 28px; color: var(--text); gap: 16px; flex-direction: row; }
+:root body #conversation .thread:has(> .chat-empty) { flex: 1; display: flex; } /* the greeting centred above the composer */
 :root body #conversation .chat-empty.hello .spark { width: 30px; height: 30px; animation: chat-spin 6s linear infinite; }
 :root body #conversation .loading { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-hi); border-top-color: var(--dim); animation: chat-spin 1s linear infinite; }
-/* An empty session: the greeting and the composer sit together in the middle, as on Claude's new-chat screen */
-:root body #term.chat-new #conversation.open { flex: 0 0 auto; margin-top: auto; padding-bottom: 20px; }
-:root body #term.chat-new #term-order.open { margin-bottom: auto; }
 
 @keyframes chat-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes chat-in-right { from { opacity: 0; transform: translate(12px, 4px) scale(.98); } to { opacity: 1; transform: none; } }
