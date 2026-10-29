@@ -1834,6 +1834,7 @@
     const near = k >= 0 && (Date.now() - jump.at < 1000 || Math.abs(y(jump.el) - top) < 40);
     const target = near ? us[k + dir] : dir < 0 ? [...us].reverse().find(u => y(u) < top - 24) : us.find(u => y(u) > top + 24);
     if (target) jump = { el: target, at: Date.now() };
+    else if (dir > 0) { jump = { el: null, at: 0 }; el.scrollTop = el.scrollHeight; return; } // past your last message: the bottom
     // At once, then again as the messages above get their real height (off-screen ones only have an estimate): a smooth
     // scroll landed off by up to a screen, and the next press picked that same message again.
     const align = (n) => { el.scrollTop += y(target) - el.getBoundingClientRect().top; if (n) requestAnimationFrame(() => align(n - 1)); };
