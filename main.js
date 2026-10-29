@@ -1061,23 +1061,12 @@ let timelineAgentId = null;
 const TIMELINE_MAX_EVENTS = 1000;
 const parseLineForTimeline = (line) => timelineCore.parseLineForTimeline(line, fmtTool, isSystemMessage);
 
-// The Chat view's mic: dictate.ps1 runs Windows' speech recognizer on the default microphone and streams its
-// phrases back as 'dictation' messages. One take at a time; it runs at low priority and dies with the app.
-let dictateProc = null;
-function dictateStop() { if (dictateProc) { try { dictateProc.kill(); } catch {} dictateProc = null; } }
-function dictateStart() {
-  dictateStop();
-  const script = fs.readFileSync(path.join(__dirname, 'dictate.ps1'), 'utf8'); // read through asar; powershell can't
-  const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
-  dictateProc = p;
-  try { os.setPriority(p.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch {}
-  let buf = '';
-  p.stdout.on('data', (d) => {
-    buf += d; let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); try { const m = JSON.parse(line); if (m.privacy) shell.openExternal('ms-settings:privacy-speech'); send({ type: 'dictation', t: m.t, text: m.text }); } catch {} }
-  });
-  p.on('exit', () => { if (dictateProc === p) { dictateProc = null; send({ type: 'dictation', t: 'end' }); } });
-  p.on('error', (e) => send({ type: 'dictation', t: 'error', text: e.message }));
+// The Chat view's mic: the page records a take and sends it here as a 16 kHz WAV; whisper.js turns it into text,
+// which goes back as a 'dictation' message for the take's id.
+function dictateTake(msg) {
+  const say = (t, text) => send({ type: 'dictation', take: msg.take, t, text });
+  require('./whisper').transcribe(path.join(app.getPath('userData'), 'whisper'), Buffer.from(msg.wav), (text) => say('status', text))
+    .then((text) => say('final', text), (e) => say('error', e.message));
 }
 
 // A Chat view prompt with images in place: its text and image paths go into the agent's prompt one after another, so
@@ -4803,8 +4792,7 @@ function handleIpc(msg) {
     case 'chatSend': cliSend.parts(msg.id, Array.isArray(msg.parts) ? msg.parts : [], +msg.erase || 0); break;
     case 'cliErase': cliSend.erase(msg.id, +msg.n || 0); break;
     case 'chatHides': { const a = agents.get(msg.id); if (a && Array.isArray(msg.hides)) { a.chatHides = msg.hides.filter(r => r && Number.isFinite(r.from) && Number.isFinite(r.until)).slice(-200).map(r => ({ from: r.from, until: r.until })); saveState(); } break; } // what an edit or Esc took out of the chat // leftover text in an agent's CLI box, in turn with its sends
-    case 'dictateStart': dictateStart(); break;
-    case 'dictateStop': dictateStop(); break;
+    case 'dictate': dictateTake(msg); break;
     case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); cliSend.prompt(msg.id, text, +msg.erase || 0, () => markSessionSwitch(msg.id, text)); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
     case 'cliCancel': { // Esc: stops the sends, then the Esc itself once no paste is half-written; the page hears when it's out
       const ag = agents.get(msg.id); if (ag && ag.ptyPerm) { clearPtyPerm(msg.id, ag); ag.permSent = false; send({ type: 'permClear', id: msg.id }); } // as an Esc typed into the terminal does
@@ -6398,7 +6386,6 @@ const UPDATE_CHECK_MS = 5 * 60 * 1000;
 let _checkUpdates = null, _lastUpdateCheck = 0;
 function checkUpdatesNow() { if (!_checkUpdates) return; _lastUpdateCheck = Date.now(); _checkUpdates(); }
 app.on('before-quit', () => {
-  dictateStop();
   clearTimeout(_spareTimer); dropSpare();
   try { releases.flush(); } catch {} // releases.json writes are debounced 2 s
   if (remoteServer) { try { remoteServer.close(); } catch {} }

@@ -139,6 +139,15 @@ function pathRef(text) {
 // Dictated words dropped in at the caret: a space before them unless the text there already ends in whitespace, and one
 // after unless what follows starts with it. The recognizer capitalises every phrase, so mid-sentence its first letter
 // goes lower case (not "I" or an acronym like "API").
+// A recorded take as a 16-bit mono WAV file (what whisper reads): the 44-byte header, then each sample clamped to ±1.
+function wavBytes(samples, rate) {
+  const b = new ArrayBuffer(44 + samples.length * 2), v = new DataView(b), str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); str(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) { const x = Math.max(-1, Math.min(1, samples[i])); v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
+  return b;
+}
+
 function dictJoin(pre, words, post) {
   if (!words) return pre + post;
   if (pre.trim() && !/[.!?:]\s*$|\n\s*$/.test(pre) && !/^(I\b|[A-Z]{2,})/.test(words)) words = words[0].toLowerCase() + words.slice(1);
@@ -209,4 +218,4 @@ function undoEdits(files, edits) {
   return { files: out };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, liveReply, screenDialog, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, wavBytes, liveReply, screenDialog, undoEdits };

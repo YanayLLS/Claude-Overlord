@@ -70,6 +70,15 @@ test('dictated words go in at the caret with a space either side only where need
   assert.strictEqual(dictJoin('check', 'API keys', ''), 'check API keys');
 });
 
+test('a recorded take becomes a 16-bit mono WAV whisper can read', () => {
+  const { wavBytes } = require('./chat-core');
+  const v = new DataView(wavBytes(new Float32Array([0, 1, -1, 2]), 16000));
+  assert.strictEqual(v.byteLength, 44 + 8);
+  assert.strictEqual(String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3)), 'RIFF');
+  assert.strictEqual(v.getUint32(24, true), 16000);
+  assert.deepStrictEqual([0, 1, 2, 3].map((i) => v.getInt16(44 + i * 2, true)), [0, 32767, -32768, 32767]); // 2 clamps to 1
+});
+
 test('liveReply: the reply being written, read off the CLI screen above its spinner', () => {
   const { liveReply } = require('./chat-core');
   const screen = [

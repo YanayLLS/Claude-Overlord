@@ -505,40 +505,55 @@
   box().addEventListener('input', syncHl); box().addEventListener('scroll', () => { hl.scrollTop = box().scrollTop; });
   new ResizeObserver(syncHl).observe(box()); new ResizeObserver(syncHl).observe(order()); // chips above push the box down
 
-  // ── Mic: dictation through Windows' speech recognizer (main.js runs dictate.ps1). Words go in at the caret as you
-  // talk: the phrase still being spoken shows live and settles when the recognizer is sure. Typing, sending, Esc or
-  // switching agent ends the take; what was written stays. ──
+  // ── Mic: records a take from the default microphone; click again (or Enter) and whisper on this machine (main.js →
+  // whisper.js) writes it in at the caret. Esc throws the take away. A take still transcribing when you switch agent
+  // lands in that agent's draft. ──
   const mic = document.getElementById('chat-mic');
+  let takes = 0; const pending = new Map(); // take number → agent id, while whisper works on it
   function drawMic() {
     if (!mic) return;
-    mic.classList.toggle('on', !!dict); mic.classList.toggle('live', !!(dict && dict.live));
+    mic.classList.toggle('on', !!dict || pending.size > 0); mic.classList.toggle('live', !!dict);
     mic.setAttribute('aria-pressed', String(!!dict));
-    mic.title = dict ? 'Stop dictating (Esc)' : 'Dictate (Ctrl+Shift+M)';
+    mic.title = dict ? 'Stop and write it in (Enter) · Esc to discard' : pending.size ? 'Writing what you said…' : 'Dictate (Ctrl+Shift+M)';
   }
-  function micStart() {
-    const t = box();
-    dict = { id: selectedId, pre: t.value.slice(0, t.selectionStart), post: t.value.slice(t.selectionEnd), said: '', live: false };
-    api.send({ type: 'dictateStart' }); drawMic(); t.focus();
+  async function micStart() {
+    const d = dict = { id: selectedId, chunks: [] };
+    drawMic(); box().focus();
+    try {
+      d.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      if (dict !== d) return d.stream.getTracks().forEach((k) => k.stop()); // stopped before the mic opened
+      d.ctx = new AudioContext({ sampleRate: 16000 }); // whisper's rate; the browser resamples
+      const node = d.ctx.createScriptProcessor(4096, 1, 1); // ponytail: deprecated but tiny; AudioWorklet if it goes away
+      node.onaudioprocess = (e) => d.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      d.ctx.createMediaStreamSource(d.stream).connect(node); node.connect(d.ctx.destination);
+    } catch (e) { if (dict === d) { dict = null; drawMic(); } showToast('Mic: ' + e.message); }
   }
-  function micStop() { if (!dict) return; dict = null; api.send({ type: 'dictateStop' }); drawMic(); }
-  function micToggle() { dict ? micStop() : micStart(); }
-  function onDictation(m) {
-    if (!dict) return;
-    if (dict.id !== selectedId) return micStop();
-    if (m.t === 'ready') dict.live = true;
-    else if (m.t === 'hyp' || m.t === 'final') {
-      const words = (dict.said + ' ' + m.text).trim(), t = box();
-      if (m.t === 'final') dict.said = words;
-      t.value = dictJoin(dict.pre, words, dict.post);
-      const at = t.value.length - dict.post.length; t.setSelectionRange(at, at);
-      t.dispatchEvent(new Event('input')); // grows the box and redraws its state like typing would
-    } else if (m.t === 'error') { showToast('Mic: ' + m.text); dict = null; }
-    else if (m.t === 'end') dict = null;
+  function micStop(discard) {
+    const d = dict; if (!d) return; dict = null;
+    if (d.stream) d.stream.getTracks().forEach((k) => k.stop()); if (d.ctx) d.ctx.close();
+    const n = d.chunks.reduce((s, c) => s + c.length, 0);
+    if (!discard && n > 16000 * 0.3) { // under a third of a second is a mis-click
+      const all = new Float32Array(n); let o = 0; for (const c of d.chunks) { all.set(c, o); o += c.length; }
+      pending.set(++takes, d.id); api.send({ type: 'dictate', take: takes, wav: wavBytes(all, 16000) });
+    }
     drawMic();
   }
+  function micToggle() { dict ? micStop() : micStart(); }
+  function onDictation(m) {
+    const id = pending.get(m.take); if (id === undefined) return;
+    if (m.t === 'status') return showToast(m.text);
+    pending.delete(m.take); drawMic();
+    if (m.t === 'error') return showToast('Mic: ' + m.text);
+    if (!m.text) return showToast('Mic: no words heard');
+    if (id !== selectedId) { drafts.set(id, dictJoin(drafts.has(id) ? drafts.get(id) : loadDraft(id), m.text, '')); return; }
+    const t = box(), pre = t.value.slice(0, t.selectionStart), post = t.value.slice(t.selectionEnd);
+    t.value = dictJoin(pre, m.text, post);
+    const at = t.value.length - post.length; t.setSelectionRange(at, at); t.focus();
+    t.dispatchEvent(new Event('input')); // grows the box and redraws its state like typing would
+  }
   if (mic) mic.addEventListener('click', micToggle);
-  // Typing takes over from the mic (Esc just stops it); sending or switching agent ends the take too.
-  box().addEventListener('keydown', (e) => { if (!dict) return; if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); micStop(); } else if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete' || e.key === 'Enter') micStop(); }, true);
+  // While recording, Enter writes the take in instead of sending; Esc throws it away.
+  box().addEventListener('keydown', (e) => { if (!dict || (e.key !== 'Escape' && e.key !== 'Enter')) return; e.preventDefault(); e.stopImmediatePropagation(); micStop(e.key === 'Escape'); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
   window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, getDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
