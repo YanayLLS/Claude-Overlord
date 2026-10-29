@@ -151,8 +151,8 @@
     else if (a.todos) body = `<div class="plan-card past">${todoHtml(a.todos)}</div>`; // the live plan card's frame, without its bar
     else if (a.plan) body = `<div class="md sub plan">${md(a.plan.replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div>`;
     else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o.label ?? o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
-    else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${escH(out)}</pre></div>` : ''}</div>`;
-    else if (out) body = `<pre class="out${err ? ' err' : ''}">${escH(out)}</pre>`;
+    else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${termHtml(out)}</pre></div>` : ''}</div>`;
+    else if (out) body = `<pre class="out${err ? ' err' : ''}">${termHtml(out)}</pre>`;
     const cls = `trow k-${v.kind}${running ? ' running' : ''}${err ? ' err' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
     const head = `${ICON[v.kind] || ICON.tool}<span class="verb">${escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}${running && ev.ts ? `<span class="el" data-t="${Date.parse(ev.ts)}"></span>` : ''}`;
     const h = v.kind === 'agent' ? `<div class="${cls}" data-agent-tid="${escH(ev.toolId || '')}" role="button" tabindex="0" title="Show its steps"><div class="sumrow">${head}${ICON.chev}</div></div>`
@@ -604,13 +604,19 @@
   const previews = new Map(); // question → [preview per option]
   let askHover = null, askAsked = null, askFor = '';
   let lastAskQ = null; // the same question redrawn doesn't slide in again
-  const prevText = (t) => t == null ? '<span class="ap-wait">…</span>' : t ? escH(t) : '<span class="ap-wait">No preview</span>';
+  // A preview in its colours: a ```diff one (or the CLI's cut of one, its "+" lines) with added / removed lines coloured.
+  const prevText = (t) => {
+    if (t == null) return '<span class="ap-wait">…</span>';
+    if (!t) return '<span class="ap-wait">No preview</span>';
+    const fence = /^```([\w-]*)\n?/.exec(t), body = String(t).replace(/^```[\w-]*\n?/, '').replace(/\n?```\s*$/, '');
+    return termHtml(body, { diff: fence ? fence[1] === 'diff' : /^\+/m.test(body) });
+  };
   function prevHtml(q, s, args) {
     if (!s.options.length) return '';
     const seen = previews.get(q) || []; previews.set(q, seen);
     // The transcript has them whole when the question is in it: those, not the CLI's cut-down box.
     const key = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase(), full = ((args && args.prevs) || []).find(x => key(x.q) === key(q));
-    if (full) full.p.forEach((p, k) => { seen[k] = p.replace(/^```[\w-]*\n?/, '').replace(/\n?```\s*$/, ''); });
+    if (full) full.p.forEach((p, k) => { seen[k] = p; }); // its ``` fence stays: prevText reads its language
     else if (s.preview || seen[s.focus] == null) seen[s.focus] = /^No preview available$/i.test(s.preview) ? '' : s.preview;
     if (!seen.some(Boolean)) return ''; // a question without previews
     // Drawn with the selected option's preview; a hover swaps only this pane's text (applyAskHover), never the card.
@@ -706,7 +712,7 @@
   function hoverLive(msg) {
     if (!hoverFor || hoverEl.hidden) return;
     const box = hoverEl.querySelector('.hv-live'); if (!box) return;
-    if (msg.type === 'bgTail' && hoverFor.dataset.bgout === msg.file) { const ls = String(msg.text || '').split('\n').map(l => l.trimEnd()).filter(Boolean).slice(-3); box.className = 'hv-live out'; box.textContent = ls.length ? ls.join('\n') : 'No output yet'; }
+    if (msg.type === 'bgTail' && hoverFor.dataset.bgout === msg.file) { const ls = termHtml(msg.text || '').split('\n').filter(l => l.replace(/<[^>]+>/g, '').trim()).slice(-3); box.className = 'hv-live out'; box.innerHTML = ls.length ? ls.join('\n') : 'No output yet'; } // its last lines, in their colours
     if (msg.type === 'agentSteps' && hoverFor.dataset.jump === msg.toolId) {
       const tools = (msg.events || []).filter(e => e.type === 'tool'), last = tools[tools.length - 1], v = last && toolView(last, true);
       box.className = 'hv-live'; box.textContent = tools.length ? `${tools.length} step${tools.length > 1 ? 's' : ''} · ${v.verb}${v.target ? ' ' + v.target : ''}` : 'Starting…';
@@ -748,7 +754,7 @@
     if (!perm) { const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw); const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + askHtml(lastTool(evs, 'AskUserQuestion', doneBy), null); }
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
-    if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${escH(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
+    if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${termHtml(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
     if (a.compacting) return h + `<div class="working">${SPARK}<span class="shimmer">Compacting conversation…</span></div>`;
     if (st === 'active' || st === 'resuming') {
       // The CLI's own playful verb ("Cogitating…") when it has one; elapsed; the Esc hint. The call in flight already
@@ -1804,7 +1810,7 @@
     if (msg.type === 'filePeek') { if (String(msg.seq).startsWith('whole:')) { const p = document.getElementById('chat-changes'); if (p && p._whole) p._whole(msg); } else showPeek(msg); return; }
     if (msg.type === 'agentSteps' || msg.type === 'bgTail') hoverLive(msg);
     if (msg.type === 'agentSteps') { const p = document.getElementById('chat-shell'); if (p && p.dataset.tid === msg.toolId) drawSteps(msg.events || []); }
-    if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.textContent = msg.ok ? (msg.text || '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }
+    if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.innerHTML = msg.ok ? (msg.text ? termHtml(msg.text) : '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }
   }
 
   // ── "Ask about this": select text in a reply and a small button quotes it into the composer ──

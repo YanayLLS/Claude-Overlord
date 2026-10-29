@@ -187,6 +187,53 @@ function screenDialog(rows) {
 const CHAT_URL_SRC = 'https?:\\/\\/[^\\s<>"]*[^\\s<>".,;:!?)\\]\']';
 const chatUrlRe = (flags = '') => new RegExp(CHAT_URL_SRC, flags);
 function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+// Terminal text (a command's output, a background shell's log, a preview) as HTML that keeps its colours: ANSI SGR codes
+// become spans, every other control code is dropped, and a diff (a unified one, or opts.diff) gets its lines coloured.
+// One for every block of raw text the chat shows.
+function termHtml(text, opts = {}) {
+  const hex = (r, g, b) => '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+  const c256 = (n) => { if (n >= 232) { const v = 8 + (n - 232) * 10; return hex(v, v, v); } n -= 16; const c = (x) => (x ? 55 + x * 40 : 0); return hex(c(Math.floor(n / 36)), c(Math.floor(n / 6) % 6), c(n % 6)); };
+  const st = { fg: null, rgb: null, b: false, dim: false, i: false, u: false };
+  const sgr = (ps) => {
+    for (let k = 0; k < ps.length; k++) {
+      const n = ps[k];
+      if (n === 0) Object.assign(st, { fg: null, rgb: null, b: false, dim: false, i: false, u: false });
+      else if (n === 1) st.b = true; else if (n === 2) st.dim = true; else if (n === 3) st.i = true; else if (n === 4) st.u = true;
+      else if (n === 22) st.b = st.dim = false; else if (n === 23) st.i = false; else if (n === 24) st.u = false;
+      else if (n >= 30 && n <= 37) { st.fg = n - 30; st.rgb = null; } else if (n >= 90 && n <= 97) { st.fg = n - 82; st.rgb = null; } else if (n === 39) st.fg = st.rgb = null;
+      else if (n === 38 || n === 48) { // 256-colour or true colour; a background one is skipped
+        const fg = n === 38;
+        if (ps[k + 1] === 5) { const v = ps[k + 2]; k += 2; if (fg && v != null) { if (v < 16) { st.fg = v; st.rgb = null; } else { st.rgb = c256(v); st.fg = null; } } }
+        else if (ps[k + 1] === 2) { const [r, g, b] = ps.slice(k + 2, k + 5); k += 4; if (fg) { st.rgb = `rgb(${r},${g},${b})`; st.fg = null; } }
+      }
+    }
+  };
+  const open = () => {
+    const cls = [st.fg != null ? 'ansi-fg' + st.fg : '', st.b ? 'ansi-b' : '', st.dim ? 'ansi-dim' : '', st.i ? 'ansi-i' : '', st.u ? 'ansi-u' : ''].filter(Boolean).join(' ');
+    return cls || st.rgb ? `<span${cls ? ` class="${cls}"` : ''}${st.rgb ? ` style="color:${st.rgb}"` : ''}>` : '';
+  };
+  const lines = String(text ?? '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\r\n/g, '\n').split('\n')
+    .map(l => { const p = l.split('\r').filter(Boolean); return p.length ? p[p.length - 1] : ''; }); // a carriage return draws over the line
+  const plain = lines.map(l => l.replace(/\x1b\[[0-9;?]*[@-~]/g, ''));
+  const diff = opts.diff || plain.some(l => /^(@@ |diff --git )/.test(l));
+  return lines.map((l, k) => {
+    let out = '', inSpan = false, coloured = false;
+    for (const part of l.split(/(\x1b\[[0-9;?]*[@-~])/)) {
+      const m = /^\x1b\[([0-9;]*)m$/.exec(part);
+      if (m) { sgr(m[1] === '' ? [0] : m[1].split(';').map(x => +x || 0)); coloured = true; if (inSpan) out += '</span>'; const o = open(); out += o; inSpan = !!o; continue; }
+      if (/^\x1b/.test(part)) continue; // cursor moves, erases: nothing to show
+      const t = part.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+      if (t && !inSpan && !out) { const o = open(); out += o; inSpan = !!o; }
+      out += escHtml(t);
+    }
+    if (inSpan) out += '</span>';
+    out = out.replace(/<span[^>]*><\/span>/g, '');
+    if (!diff || coloured) return out;
+    const p = plain[k], cls = /^(@@|\+\+\+ |--- |diff --git )/.test(p) ? 'd-hunk' : /^\+/.test(p) ? 'd-add' : /^-/.test(p) ? 'd-del' : '';
+    return cls ? `<span class="${cls}">${out}</span>` : out;
+  }).join('\n');
+}
 // The last n rows the CLI drew, as text; a row the terminal soft-wrapped joins the one before it when asked. Blank rows
 // under them don't count: a fresh or short session draws at the top of a tall terminal, and its footer, menu or box
 // sat above "the last n rows" (the mode chip went missing, a mode switch pressed Shift+Tab blind).
@@ -218,4 +265,4 @@ function undoEdits(files, edits) {
   return { files: out };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, wavBytes, liveReply, screenDialog, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, wavBytes, liveReply, screenDialog, undoEdits };

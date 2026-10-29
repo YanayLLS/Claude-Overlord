@@ -131,3 +131,15 @@ test("undoing a turn puts each edit back, newest first, or nothing at all", () =
   assert.match(undoEdits(new Map([['a.js', 'y y']]), [{ file: 'a.js', old: 'x', new: 'y' }]).error, /2 times/);
   assert.strictEqual(undoEdits(new Map([['a.js', 'y y']]), [{ file: 'a.js', old: 'x', new: 'y', all: true }]).files.get('a.js'), 'x x');
 });
+
+test('terminal text keeps its colours: ANSI codes become spans, other control codes go, diffs are coloured', () => {
+  const { termHtml } = require('./chat-core');
+  assert.strictEqual(termHtml('\u001b[31m✖ No <tests>\u001b[0m done'), '<span class="ansi-fg1">✖ No &lt;tests&gt;</span> done');
+  assert.strictEqual(termHtml('\u001b[1;32mok\u001b[22m still green\u001b[39m plain'), '<span class="ansi-fg2 ansi-b">ok</span><span class="ansi-fg2"> still green</span> plain');
+  assert.strictEqual(termHtml('\u001b[38;5;208mo\u001b[38;2;10;20;30mr\u001b[m'), '<span style="color:#ff8700">o</span><span style="color:rgb(10,20,30)">r</span>');
+  assert.strictEqual(termHtml('a\u001b[2Kb\u001b]0;title\u0007c\r\nd'), 'abc\nd'); // cursor moves and titles out, CRLF as one line
+  assert.strictEqual(termHtml('\u001b[2m  - navigating\u001b[22m'), '<span class="ansi-dim">  - navigating</span>');
+  assert.strictEqual(termHtml('@@ -1 +1 @@\n-old\n+new\n same'), '<span class="d-hunk">@@ -1 +1 @@</span>\n<span class="d-del">-old</span>\n<span class="d-add">+new</span>\n same');
+  assert.strictEqual(termHtml('- a list item\n+ not a diff'), '- a list item\n+ not a diff'); // no hunk: plain
+  assert.strictEqual(termHtml('+ added\n  kept', { diff: true }), '<span class="d-add">+ added</span>\n  kept');
+});
