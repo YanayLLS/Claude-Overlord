@@ -353,6 +353,8 @@
     if (e.isComposing || e.keyCode === 229) return; // an IME's own Enter, arrows and Backspace
     if (at && at.files.length && chat()) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); at.sel = (at.sel + (e.key === 'ArrowDown' ? 1 : at.files.length - 1)) % at.files.length; drawAt(); return; }
+      // A command: Enter runs it, as in the CLI (completed first when only part is typed); Tab only completes it.
+      if (e.key === 'Enter' && !e.shiftKey && at.kind === '/') { e.preventDefault(); pickAt(at.sel); send(); return; }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickAt(at.sel); return; }
       if (e.key === 'Escape') { e.preventDefault(); closeAt(); return; }
     }
