@@ -1213,14 +1213,14 @@ function getFullTimeline(id) {
     let events = [];
     for (let want = 16 << 20; ; want *= 4) {
       const from = Math.max(0, st.size - want);
-      events = timelineFrom(readTail(a.jsonlFile, from, st.size), from > 0);
+      events = timelineFrom(readRange(a.jsonlFile, from, st.size), from > 0);
       if (!from || events.length >= TIMELINE_MAX_EVENTS) break;
     }
     tlCache.set(id, { file: a.jsonlFile, size: st.size, mtimeMs: st.mtimeMs, events });
     return events;
   } catch { return []; }
 }
-function readTail(file, from, to) {
+function readRange(file, from, to) {
   const fd = fs.openSync(file, 'r');
   try { const b = Buffer.alloc(to - from); fs.readSync(fd, b, 0, b.length, from); return b.toString('utf-8'); } finally { fs.closeSync(fd); }
 }

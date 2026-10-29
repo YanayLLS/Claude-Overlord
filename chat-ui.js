@@ -1824,11 +1824,20 @@
   function closeFind() { const bar = document.getElementById('chat-find'); if (bar) bar.hidden = true; document.getElementById('conversation').classList.remove('finding'); if (window.CSS && CSS.highlights) { CSS.highlights.delete('chat-find'); CSS.highlights.delete('chat-find-cur'); } find = null; document.getElementById('term-order-input').focus(); }
 
   // Ctrl+↑/↓: the previous / next of your prompts, like the terminal's prompt jump.
+  let jump = { el: null, at: 0 };
   function jumpPrompt(dir) {
     const el = document.getElementById('conversation'), us = [...el.querySelectorAll('.thread > .msg.user[data-i], .thread > .msg.cmd[data-i]')]; if (!us.length) return;
     const top = el.getBoundingClientRect().top + 8, y = (u) => u.getBoundingClientRect().top;
-    const target = dir < 0 ? [...us].reverse().find(u => y(u) < top - 4) : us.find(u => y(u) > top + 4);
-    if (target) { target.scrollIntoView({ block: 'start', behavior: 'smooth' }); target.classList.remove('flash'); void target.offsetWidth; target.classList.add('flash'); }
+    // From the message the last jump went to (still at the top, or still scrolling there), else from what's at the top:
+    // measuring alone picks that same message again, it sits right at the line.
+    const k = jump.el && Date.now() - jump.at < 4000 ? us.indexOf(jump.el) : -1;
+    const near = k >= 0 && (Date.now() - jump.at < 1000 || Math.abs(y(jump.el) - top) < 40);
+    const target = near ? us[k + dir] : dir < 0 ? [...us].reverse().find(u => y(u) < top - 24) : us.find(u => y(u) > top + 24);
+    if (target) jump = { el: target, at: Date.now() };
+    // At once, then again as the messages above get their real height (off-screen ones only have an estimate): a smooth
+    // scroll landed off by up to a screen, and the next press picked that same message again.
+    const align = (n) => { el.scrollTop += y(target) - el.getBoundingClientRect().top; if (n) requestAnimationFrame(() => align(n - 1)); };
+    if (target) { align(3); target.classList.remove('flash'); void target.offsetWidth; target.classList.add('flash'); }
   }
 
   // Another agent selected: what showed the old one's work follows the new one (Uncommitted changes reload for its

@@ -252,6 +252,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-at .at-i { display: flex; align-items: baseline; gap: 10px; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; min-width: 0; }
 :root body #chat-at .at-i b { font-weight: 500; color: var(--text); font-family: 'Geist Mono', monospace; font-size: 12.5px; white-space: nowrap; }
 :root body #chat-at .at-i span { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+:root body #chat-at .at-i.at-empty { cursor: default; } :root body #chat-at .at-i.at-empty span { direction: ltr; }
 :root body #chat-at .at-i.sel, :root body #chat-at .at-i:hover { background: var(--hover-strong); }
 /* Narrow composer: chips shrink to their essentials */
 :root body #term-order.open { container-type: inline-size; }

@@ -212,8 +212,9 @@
       if (at.kind === '/') return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>/${mark(f.name)}</b><span class="d">${esc(f.desc || '')}</span></div>`;
       const i = f.lastIndexOf('/'); return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.slice(i + 1))}</b><span>${i > 0 ? esc(f.slice(0, i)) : ''}</span></div>`;
     };
-    l.innerHTML = at && at.files.length ? at.files.map(row).join('') : '';
-    l.classList.toggle('open', !!(at && at.files.length));
+    l.innerHTML = at && at.files.length ? at.files.map(row).join('')
+      : at && at.kind === 'resume' ? `<div class="at-i at-empty"><span>${!sessions.has(selectedId) ? 'Loading sessions…' : at.q ? 'No session matches' : 'No other sessions here'}</span></div>` : ''; // never a blank list
+    l.classList.toggle('open', !!(at && (at.files.length || at.kind === 'resume')));
     l.classList.toggle('slash', !!(at && at.kind === '/'));
     l.classList.toggle('resume', !!(at && at.kind === 'resume'));
     const sel = l.querySelector('.sel'); if (sel) sel.scrollIntoView({ block: 'nearest' });
