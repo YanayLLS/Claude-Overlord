@@ -784,7 +784,12 @@ body.world-mode #hdr-chat { display: none; }
 /* What's under the menu's rule ("Chat about this") sits apart from the answers */
 :root body #conversation .card.ask .choices button.sep { margin-top: 10px; position: relative; }
 :root body #conversation .card.ask .choices button.sep::before { content: ''; position: absolute; left: 0; right: 0; top: -7px; border-top: 1px solid var(--border); }
-:root body #conversation .card.ask .ask-tabs [data-tab] { cursor: pointer; }
+:root body #conversation .card.ask .ask-tabs [data-tab] { cursor: pointer; user-select: none; }
+:root body #conversation .card.ask .ask-tabs .sub { padding: 0 10px; }
+:root body #conversation .card.ask .ask-review { display: grid; gap: 2px; margin: 0 0 10px; font-size: 13px; }
+:root body #conversation .card.ask .ask-review .warn { color: var(--amber, #b7791f); margin-bottom: 4px; }
+:root body #conversation .card.ask .ask-review .rq { color: var(--dim); margin-top: 4px; }
+:root body #conversation .card.ask .ask-review .ans { color: var(--text); font-weight: 600; padding-left: 12px; }
 :root body #conversation .card.ask .ask-tabs [data-tab]:not(.on):hover { background: var(--hover-strong); color: var(--text); }
 /* "Type something" as a field, while it's the selected option */
 :root body #conversation .card.ask .ask-typing { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--claude); background: var(--surface0, transparent); }

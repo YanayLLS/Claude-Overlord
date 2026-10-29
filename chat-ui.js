@@ -435,7 +435,8 @@
   // The last n rows of an agent's terminal screen (chat-core.js bufferRows); null while it has no terminal yet.
   const screenOf = (id, n, joinWrapped = false) => { const x = typeof xterms !== 'undefined' && xterms.get(id); return x && x.terminal ? bufferRows(x.terminal.buffer.active, n, joinWrapped) : null; };
   function screenAsk(id) {
-    const rows = screenOf(id, 40, true); if (!rows) return { question: '', options: [] }; // a row the terminal wrapped is one line
+    let rows = screenOf(id, 40, true); if (!rows) return { question: '', options: [] }; // a row the terminal wrapped is one line
+    rows = rows.flatMap(r => { const m = /^(\s*[─━]{20,})(.*\S.*)$/.exec(r); return m ? [m[1], m[2]] : [r]; }); // a full-width rule the next row wrapped onto ("───  4. Chat about this") is two rows
     const cut = (s) => s.replace(/^\s*[│┃|]?\s*/, '').split(/\s{3,}|[│┃┌└├┐┘┤╭╮╰╯─━✂]/)[0].trim(); // a left rule goes; a preview drawn beside isn't part of it
     const OPT = /^\s*[❯›>]?\s*(\d)\.\s+(.+?)\s*$/, options = []; let first = -1, focus = 0;
     // The focused option's preview, drawn in a box to the right of the menu: its column splits every row in two.
@@ -463,7 +464,7 @@
     });
     // The question: the lines just above the menu (it can wrap, inside a left rule), up to a blank line.
     const q = [];
-    for (let i = first - 1; i >= 0 && i >= first - 12; i--) { const t = cut(rows[i]); if (!t) { if (q.length) break; continue; } if (/[←→]|^\[[ x✓]?\]|^[☐☑✔]/.test(t)) break; q.unshift(t); }
+    for (let i = first - 1; i >= 0 && i >= first - 12; i--) { const t = cut(/^\s*[│┃]/.test(rows[i]) ? rows[i].replace(/\s*[│┃]\s*/g, ' ') : rows[i]); /* inside a left rule, a wrapped row's own rule ("…Raw│ .glb…") is a space */ if (!t) { if (q.length) break; continue; } if (/[←→]|^\[[ x✓]?\]|^[☐☑✔]/.test(t)) break; q.unshift(t); }
     // A menu with no "Esc to cancel" under it (the review before submitting several answers): open while its options,
     // one marked ❯, are the last thing on screen.
     const nb = rows.filter(r => r.trim()), menuLast = nb.length > 0 && OPT.test(nb[nb.length - 1]) && rows.some(r => /^\s*[❯›]\s*\d\.\s/.test(r));
@@ -532,12 +533,21 @@
     const q = (s && s.question) || a.question || 'Claude has a question';
     if (askFor !== selectedId + '\n' + q) { askFor = selectedId + '\n' + q; askHover = null; askAsked = null; askTyped = ''; } // a new question starts from its focused option
     // Several questions: which one this is, which are answered (the CLI's tab row).
-    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40), at = (a.steps || []).findIndex(x => norm(x.q) === norm(q)), lit = at >= 0 ? -1 : tabLit(selectedId, ((s && s.tabs) || []).map(x => x.label)), on = at >= 0 ? at : lit >= 0 ? lit : ((s && s.tabs) || []).findIndex(x => !x.done); // else the first one not answered
-    const tabs = s && s.tabs && s.tabs.length > 1 ? `<div class="ask-tabs" data-on="${on}">${s.tabs.map((x, k) => `<span data-tab="${k}" class="${x.done ? 'done' : ''}${k === on ? ' on' : ''}">${x.done ? ICON.check : `<i>${k + 1}</i>`}${escH(x.label)}</span>`).join('')}</div>` : '';
+    // The review before sending several answers ("Ready to submit your answers?"): the Submit step, with the answers given.
+    const review = !!(s && s.tabs && s.tabs.length > 1) && /submit your answers/i.test(q);
+    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40), at = (a.steps || []).findIndex(x => norm(x.q) === norm(q)), lit = at >= 0 || review ? -1 : tabLit(selectedId, ((s && s.tabs) || []).map(x => x.label)), on = review ? s.tabs.length : at >= 0 ? at : lit >= 0 ? lit : ((s && s.tabs) || []).findIndex(x => !x.done); // else the first one not answered
+    const tabs = s && s.tabs && s.tabs.length > 1 ? `<div class="ask-tabs" data-on="${on < 0 ? s.tabs.length : on}">${s.tabs.map((x, k) => `<span data-tab="${k}" class="${x.done ? 'done' : ''}${k === on ? ' on' : ''}">${x.done ? ICON.check : `<i>${k + 1}</i>`}${escH(x.label)}</span>`).join('')}<span data-tab="${s.tabs.length}" class="sub${on < 0 || on >= s.tabs.length ? ' on' : ''}">Submit</span></div>` : ''; // the CLI's last step: review and send
     // Pick-several: its options are boxes ("[ ] Cheese", "[✔] Basil"); a number toggles one, Submit sends them.
     const multi = opts.some(o => isBox(o.label ?? o));
     const stepKey = tabs ? 'steps:' + s.tabs.map(x => x.label).join('|') : q;
-    return `<div class="card ask">${tabs}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${boxLabel(o.label ?? o)}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : opts.some(o => /^(\[.?\]\s*)?(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
+    // The review's body, as the CLI draws it: "⚠ You have not answered all questions", then "● question" / "→ answer".
+    let rv = '';
+    if (review) {
+      const rows = screenOf(selectedId, 40, true) || [], from = rows.findIndex(r => /review your answers/i.test(r)), to = rows.findIndex((r, i) => i > from && /submit your answers/i.test(r));
+      const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.trim()).filter(Boolean) : [];
+      rv = body.length ? `<div class="ask-review">${body.map(r => /^⚠/.test(r) ? `<div class="warn">${escH(r.replace(/^⚠\s*/, ''))}</div>` : /^→/.test(r) ? `<div class="ans">${escH(r.replace(/^→\s*/, ''))}</div>` : `<div class="rq">${escH(r.replace(/^●\s*/, ''))}</div>`).join('')}</div>` : '';
+    }
+    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${boxLabel(o.label ?? o)}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
@@ -637,7 +647,9 @@
   // Several questions: ←/→ (or a click on its step) go to another one, as in the CLI's tab row.
   function askTab(d) {
     if (!d || !document.querySelector('#conversation .card.ask .ask-tabs')) return false;
-    keys(Array(Math.abs(d)).fill(d > 0 ? '\x1b[C' : '\x1b[D'));
+    // On "Type something" the CLI's ←/→ move the caret in its text: step off it first, or the step never changes.
+    const s = screenAsk(selectedId), o = s.options[askFocus(s)], off = /^type something/i.test((o && (o.label ?? o)) || '');
+    keys([...(off ? ['\x1b[A'] : []), ...Array(Math.abs(d)).fill(d > 0 ? '\x1b[C' : '\x1b[D')]);
     askAhead = null; setTimeout(rerender, Math.abs(d) * 70 + 200); setTimeout(rerender, Math.abs(d) * 70 + 600);
     return true;
   }
