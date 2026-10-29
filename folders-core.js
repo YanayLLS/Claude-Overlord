@@ -42,14 +42,14 @@ function moveFolder(list, id, targetId, after) {
 }
 
 // Split a project's already-ordered [id, agent] rows into folders (in folder order) and loose rows.
-function splitByFolder(list, rows) {
+function splitByFolder(list, rows, keyOf = a => a.agentName) {
   const byName = new Map();
   for (const f of list || []) for (const n of f.agents) byName.set(n, f.id);
   const folders = (list || []).map(f => ({ folder: f, rows: [] }));
   const idx = new Map(folders.map((g, i) => [g.folder.id, i]));
   const loose = [];
   for (const row of rows) {
-    const fid = byName.get(row[1].agentName);
+    const fid = byName.get(keyOf(row[1]));
     if (fid != null) folders[idx.get(fid)].rows.push(row); else loose.push(row);
   }
   return { folders, loose };

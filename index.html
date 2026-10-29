@@ -2125,13 +2125,15 @@ function onCardDrop(e, dropId, cwd) {
   agentOrderMap[cwd] = ids.map(i => agents.get(i)?.agentName).filter(Boolean);
   saveAgentOrder();
   // Dropped next to an agent: it joins that agent's folder (or leaves folders, next to a loose one).
-  const list = agentFolders[cwd], dragName = agents.get(_dragId)?.agentName;
-  if (list && dragName) setFolders(cwd, setFolder(list, dragName, folderOf(list, agents.get(dropId)?.agentName)?.id ?? null));
+  const list = agentFolders[cwd], dragKey = folderKey(agents.get(_dragId));
+  if (list && dragKey) setFolders(cwd, setFolder(list, dragKey, folderOf(list, folderKey(agents.get(dropId)))?.id ?? null));
   onCardDragEnd();
   render();
 }
 
 // ── Folders inside a project: membership by agentName; order inside a folder is still the drag order ──
+// An agent restored without a name (two saved with the same one) goes by its session id instead.
+function folderKey(a) { return a ? a.agentName || (a.sessionId ? 's:' + a.sessionId : '') : ''; }
 // ponytail: localStorage like the drag order — per-window UI, not config.
 const agentFolders = JSON.parse(localStorage.getItem('overlord-folders-v1') || '{}'); // cwd -> [{ id, name, agents }]
 let _dragFolder = null, _pendingFolder = null; // folder id being dragged; folder a just-requested agent goes into
@@ -2143,17 +2145,25 @@ function setCollapsed(key, on) {
   if (on) collapsedGroups.add(key); else collapsedGroups.delete(key);
   localStorage.setItem('collapsedGroups', JSON.stringify([...collapsedGroups]));
 }
-function toggleAgentFolder(fid) { if (_renaming) return; setCollapsed('folder:' + fid, !collapsedGroups.has('folder:' + fid)); render(); }
+let _folderClickT = null, _folderToggledAt = 0;
+function folderClick(e, fid) {
+  if (e.detail > 1) return;
+  clearTimeout(_folderClickT);
+  if (e.target.closest('.folder-name')) _folderClickT = setTimeout(() => { _folderClickT = null; toggleAgentFolder(fid); }, 250);
+  else toggleAgentFolder(fid);
+}
+function toggleAgentFolder(fid) { _folderToggledAt = Date.now(); return toggleAgentFolderNow(fid); }
+function toggleAgentFolderNow(fid) { if (_renaming) return; setCollapsed('folder:' + fid, !collapsedGroups.has('folder:' + fid)); render(); }
 function createFolder(cwd, agentId) {
-  const r = newFolder(agentFolders[cwd], 'New folder'), name = agents.get(agentId)?.agentName;
+  const r = newFolder(agentFolders[cwd], 'New folder'), name = folderKey(agents.get(agentId));
   setFolders(cwd, name ? setFolder(r.list, name, r.id) : r.list);
   setCollapsed(cwd, false);
   render();
   renameFolderInline(cwd, r.id);
 }
 function moveAgentToFolder(id, fid) {
-  const a = agents.get(id); if (!a || !a.agentName) return;
-  setFolders(a.cwd, setFolder(agentFolders[a.cwd], a.agentName, fid));
+  const a = agents.get(id); if (!folderKey(a)) return;
+  setFolders(a.cwd, setFolder(agentFolders[a.cwd], folderKey(a), fid));
   render();
 }
 function addAgentToFolder(cwd, fid) { _pendingFolder = { cwd, fid, at: Date.now() }; addAgent(cwd); }
@@ -2179,12 +2189,16 @@ function renameFolderInline(cwd, fid) {
   el.appendChild(input);
   input.focus(); input.select();
 }
-// Double-click on the name: the first click already folded/unfolded it — put that back, then rename.
+// Double-click on the name renames. The first click's fold is still waiting — drop it; if a slow
+// double-click let it through already, put it back.
 function folderNameDblDown(e, cwd, fid) {
   if (e.detail !== 2) return;
   e.preventDefault(); e.stopPropagation();
-  setCollapsed('folder:' + fid, !collapsedGroups.has('folder:' + fid));
-  e.currentTarget.closest('.folder').classList.toggle('collapsed');
+  if (_folderClickT) { clearTimeout(_folderClickT); _folderClickT = null; }
+  else if (Date.now() - _folderToggledAt < 800) {
+    setCollapsed('folder:' + fid, !collapsedGroups.has('folder:' + fid));
+    e.currentTarget.closest('.folder').classList.toggle('collapsed');
+  }
   renameFolderInline(cwd, fid);
 }
 function showFolderMenu(e, cwd, fid) {
@@ -2228,13 +2242,12 @@ function onFolderDrop(e, fid, cwd) {
 }
 // Into folder `fid` (null = out of folders), last in it.
 function dropAgentInto(cwd, fid) {
-  const name = agents.get(_dragId)?.agentName;
-  if (name) {
+  const name = agents.get(_dragId)?.agentName, key = folderKey(agents.get(_dragId));
+  if (key) {
     const groupEl = document.querySelector(`.group[data-cwd="${CSS.escape(cwd)}"]`);
     const names = groupEl ? [...groupEl.querySelectorAll('.agent[data-id]')].map(c => agents.get(Number(c.dataset.id))?.agentName).filter(Boolean) : [];
-    agentOrderMap[cwd] = names.filter(n => n !== name).concat(name);
-    saveAgentOrder();
-    setFolders(cwd, setFolder(agentFolders[cwd], name, fid));
+    if (name) { agentOrderMap[cwd] = names.filter(n => n !== name).concat(name); saveAgentOrder(); }
+    setFolders(cwd, setFolder(agentFolders[cwd], key, fid));
   }
   onCardDragEnd();
   render();
@@ -2242,7 +2255,7 @@ function dropAgentInto(cwd, fid) {
 // The project header takes an agent back out of its folder.
 function onGroupDragOver(e, cwd) {
   const a = agents.get(_dragId);
-  if (!a || _dragCwd !== cwd || !folderOf(agentFolders[cwd], a.agentName)) return;
+  if (!a || _dragCwd !== cwd || !folderOf(agentFolders[cwd], folderKey(a))) return;
   e.preventDefault();
   e.currentTarget.classList.add('drop-into');
 }
@@ -2260,7 +2273,7 @@ function folderHeaderHtml(f, rows, safeCwd) {
   const ask = collapsed && rows.some(([, a]) => needsAnswer(a));
   const fid = escAttr(f.id);
   return `<div class="folder${collapsed ? ' collapsed' : ''}${hidden ? ' has-selected' : ''}${ask ? ' asks' : ''}" data-folder="${fid}">
-    <div class="folder-header" draggable="true" onclick="if(event.detail<2)toggleAgentFolder('${fid}')" oncontextmenu="event.preventDefault();event.stopPropagation();showFolderMenu(event,'${safeCwd}','${fid}')" ondragstart="onFolderDragStart(event,'${fid}','${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onFolderDragOver(event,'${fid}','${safeCwd}')" ondragleave="onFolderDragLeave(event)" ondrop="onFolderDrop(event,'${fid}','${safeCwd}')">
+    <div class="folder-header" draggable="true" onclick="folderClick(event,'${fid}')" oncontextmenu="event.preventDefault();event.stopPropagation();showFolderMenu(event,'${safeCwd}','${fid}')" ondragstart="onFolderDragStart(event,'${fid}','${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onFolderDragOver(event,'${fid}','${safeCwd}')" ondragleave="onFolderDragLeave(event)" ondrop="onFolderDrop(event,'${fid}','${safeCwd}')">
       <span class="group-chevron">&#x25BC;</span>
       <svg class="folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7A1.5 1.5 0 0 1 5 5.5h4.4l2 2H19A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z"/></svg>
       <span class="folder-name" title="Double-click to rename" onmousedown="folderNameDblDown(event,'${safeCwd}','${fid}')">${esc(f.name)}</span>
@@ -2401,8 +2414,11 @@ function duplicateAgent(id) {
   const a = agents.get(id);
   if (!a) return;
   showPromptOverlay(a.cwd, a.prompt || '');
+  _promptFolder = folderOf(agentFolders[a.cwd], folderKey(a))?.id || null; // the copy goes in the same folder
 }
+let _promptFolder = null;
 function showPromptOverlay(cwd, prefill) {
+  _promptFolder = null;
   if (_promptCloseTimer) { clearTimeout(_promptCloseTimer); _promptCloseTimer = null; }
   pendingCwd = cwd;
   document.getElementById('prompt-cwd').textContent = cwd;
@@ -2426,6 +2442,7 @@ function closePromptOverlay() {
 function submitPrompt() {
   if (!pendingCwd) return;
   const prompt = document.getElementById('prompt-input').value.trim();
+  if (_promptFolder) _pendingFolder = { cwd: pendingCwd, fid: _promptFolder, at: Date.now() };
   api.send({ type: 'createAgent', cwd: pendingCwd, prompt: prompt || undefined });
   closePromptOverlay();
 }
@@ -2664,7 +2681,7 @@ function runAsItems(a, id) {
 function termAgentLabel(a) { return [a.agentName ? '@' + a.agentName : '', a.account ? 'as ' + a.account : ''].filter(Boolean).join(' · '); }
 function showAgentMenu(e, id) {
   const a = agents.get(id);
-  const folders = (a && agentFolders[a.cwd]) || [], cur = a && folderOf(folders, a.agentName);
+  const folders = (a && agentFolders[a.cwd]) || [], cur = a && folderOf(folders, folderKey(a));
   showCtxMenu(e, [
     { label: 'Rename', action: () => { const el = document.querySelector(`.agent[data-id="${id}"] .agent-name`); if (el) renameAgent(id, el); } },
     ...(a && a.customName ? [{ label: 'Clear custom name', action: () => clearCustomName(id) }] : []),
@@ -2675,7 +2692,7 @@ function showAgentMenu(e, id) {
     ...runAsItems(a, id),
     { sep: true },
     ...folders.filter(f => f !== cur).map(f => ({ label: 'Move to ' + f.name, action: () => moveAgentToFolder(id, f.id) })),
-    ...(a && a.agentName ? [{ label: 'New folder with this agent', action: () => createFolder(a.cwd, id) }] : []),
+    ...(folderKey(a) ? [{ label: 'New folder with this agent', action: () => createFolder(a.cwd, id) }] : []),
     ...(cur ? [{ label: 'Remove from folder', action: () => moveAgentToFolder(id, null) }] : []),
     { sep: true },
     { label: 'Archive', action: () => archiveAgent(id) },
@@ -3253,7 +3270,7 @@ function render() {
 
       return html + `</div>`;
     };
-    const split = splitByFolder(agentFolders[cwd], sortedItems);
+    const split = splitByFolder(agentFolders[cwd], sortedItems, folderKey);
     for (const { folder, rows } of split.folders) {
       if (filterText && !rows.length) continue;
       html += folderHeaderHtml(folder, rows, safeCwd) + rows.map(rowHtml).join('') + `</div></div>`;
@@ -4416,7 +4433,8 @@ function handleAgentMsg(msg) {
       // A brand-new agent may get a closed agent's name: it must not inherit that agent's folder.
       // (Restart keeps its folder: the new agent is created under a fresh name, then renamed back.)
       if (isNew && Date.now() - (msg.createdAt || 0) < 60000 && msg.agentName && folderOf(agentFolders[msg.cwd], msg.agentName)) setFolders(msg.cwd, setFolder(agentFolders[msg.cwd], msg.agentName, null));
-      if (isNew && _pendingFolder && _pendingFolder.cwd === msg.cwd && msg.agentName && Date.now() - _pendingFolder.at < 20000) {
+      if (_pendingFolder && Date.now() - _pendingFolder.at >= 5000) _pendingFolder = null;
+      if (isNew && _pendingFolder && _pendingFolder.cwd === msg.cwd && msg.agentName && Date.now() - _pendingFolder.at < 5000) { // main answers at once; older = that start failed
         setFolders(msg.cwd, setFolder(agentFolders[msg.cwd], msg.agentName, _pendingFolder.fid));
         setCollapsed('folder:' + _pendingFolder.fid, false);
         _pendingFolder = null;
