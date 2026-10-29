@@ -113,20 +113,6 @@ test('a run of only Artifact calls still has a summary', () => {
   assert.strictEqual(groupSummary([{ type: 'tool', name: 'Artifact', args: { action: 'list' } }, { type: 'tool', name: 'Artifact', args: { action: 'read' } }]), 'Used 2 Artifacts calls');
 });
 
-test('a reply ending in a question gets one-click answers', () => {
-  const { quickReplies } = require('./chat-core');
-  assert.deepStrictEqual(quickReplies('Pick one:\n1. **Edit any message.** Rewinds to it.\n2. **Forward.** To another agent.\n\nWhich first?'), ['Edit any message', 'Forward']);
-  assert.deepStrictEqual(quickReplies('Pushed nothing yet.\n\nI NEED YOU: push v1.203.5?'), ['Yes', 'No']);
-  assert.deepStrictEqual(quickReplies('Which branch should I use?'), []);
-  assert.deepStrictEqual(quickReplies('Done, all tests pass.\n\nI AM DONE'), []);
-  assert.deepStrictEqual(quickReplies('Should I use one of these?\n- Postgres\n- SQLite'), ['Postgres', 'SQLite']);
-});
-
-test('the list may sit a line or two above the question', () => {
-  const { quickReplies } = require('./chat-core');
-  assert.deepStrictEqual(quickReplies('Ideas:\n\n1. **Edit any earlier message.** Today only the latest.\n2. **Earlier versions.** A switch.\n\nI would build 1 first.\n\nI NEED YOU: which ones to build?'), ['Edit any earlier message', 'Earlier versions']);
-});
-
 test("undoing a turn puts each edit back, newest first, or nothing at all", () => {
   const { undoEdits } = require('./chat-core');
   const files = new Map([['a.js', 'let x = 3;\nlet y = 2;\n']]);

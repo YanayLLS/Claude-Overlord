@@ -209,22 +209,4 @@ function undoEdits(files, edits) {
   return { files: out };
 }
 
-// A reply that ends asking you something → one-click answers: the choices it listed around the question
-// ("1. **Edit any message.** …" → "Edit any message"), else Yes / No for a short yes-or-no question. [] when it didn't ask.
-function quickReplies(text) {
-  const lines = String(text || '').replace(/```[\s\S]*?```/g, '').split('\n').map(l => l.trim())
-    .filter(l => l && !/^I AM (DONE|WORKING)\b/.test(l));
-  let q = -1; for (let k = lines.length - 1; k >= Math.max(0, lines.length - 4); k--) if (/\?\s*\**\s*$/.test(lines[k])) { q = k; break; }
-  if (q < 0) return [];
-  const item = /^(?:\d+[.)]|[-*•])\s+(.+)$/, clean = (s) => s.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
-  const label = (s) => { s = clean(s); const b = /^\*\*(.+?)\*\*/.exec(s); if (b) s = b[1]; const cut = s.split(/\s[—–-]\s|:\s|\.\s/)[0].replace(/[.:]$/, ''); return cut.length > 60 ? cut.slice(0, 58) + '…' : cut; };
-  const run = (from, step) => { const out = []; for (let k = from; k >= 0 && k < lines.length; k += step) { const m = item.exec(lines[k]); if (!m) break; out.push(label(lines[k].replace(/^(?:\d+[.)]|[-*•])\s+/, '').startsWith('**') ? lines[k].replace(/^(?:\d+[.)]|[-*•])\s+/, '') : m[1])); } return step < 0 ? out.reverse() : out; };
-  let opts = run(q + 1, 1);
-  for (let k = q - 1; opts.length < 2 && k >= q - 3 && k >= 0; k--) if (item.test(lines[k])) opts = run(k, -1); // a line or two may sit between the list and the question
-  if (opts.length >= 2 && opts.length <= 8) return [...new Set(opts)];
-  const ask = clean(lines[q]).replace(/^I NEED YOU:\s*/, '');
-  if (ask.length <= 80 && !/\b(which|what|how|where|why|when|who)\b/i.test(ask) && !/\bor\b/i.test(ask)) return ['Yes', 'No'];
-  return [];
-}
-
-if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, liveReply, screenDialog, quickReplies, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, liveReply, screenDialog, undoEdits };

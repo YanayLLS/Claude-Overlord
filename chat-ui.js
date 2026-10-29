@@ -222,11 +222,20 @@
     });
   }
   // Claude ended by asking you something: its choices (or Yes / No) as one-click answers under the reply.
-  function qrHtml(evs) {
-    for (let k = evs.length - 1; k >= 0; k--) {
-      const t = evs[k].type; if (t === 'turn' || t === 'mode' || t === 'tool_done' || t === 'images' || t === 'bgdone' || t === 'queue') continue;
-      if (t !== 'text') return '';
-      const o = quickReplies(evs[k].text); return o.length ? `<div class="qreplies">${o.map(x => `<button type="button" class="qr" data-qr="${escH(x)}">${escH(x)}</button>`).join('')}</div>` : '';
+  // Claude's own suggestion for your next message: the CLI draws it greyed in its empty input box once a turn ends
+  // (it isn't in the transcript). One click sends it, as Enter on it does in the CLI.
+  function qrHtml() {
+    const s = cliSuggestion(selectedId);
+    return s ? `<div class="qreplies"><button type="button" class="qr" data-qr="${escH(s)}">${escH(s)}</button></div>` : '';
+  }
+  function cliSuggestion(id) {
+    const x = typeof xterms !== 'undefined' && xterms.get(id); if (!x) return '';
+    const b = x.terminal.buffer.active;
+    for (let y = b.length - 1; y >= Math.max(0, b.length - 12); y--) {
+      const l = b.getLine(y), s = l && l.translateToString(true), m = s && /^(\s*[❯>]\s+)(\S.*?)\s*$/.exec(s); if (!m) continue;
+      const c = l.getCell(m[1].length); // greyed: the CLI's placeholder, not text you typed
+      if (!c || !(c.isDim() || !c.isFgDefault())) return '';
+      return /^Try "/.test(m[2]) ? '' : m[2]; // "Try …" is its idle hint, not a suggestion
     }
     return '';
   }
@@ -1040,7 +1049,7 @@
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
     const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && !(a._reverted && now - a._reverted < 8000) && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
-    const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(evs)) : ''); // queued text waits above the spinner or an open question, as in the CLI
+    const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml()) : ''); // queued text waits above the spinner or an open question, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
@@ -1887,7 +1896,7 @@
     // else repaints: redraw whenever what it shows changed.
     if (x && termTab === 'conversation' && cv && cv.classList.contains('open')) {
       const sa = screenAsk(selectedId), rw = screenRewind(selectedId);
-      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, liveMode(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
+      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, liveMode(selectedId), cliSuggestion(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
       if (sig !== screenSig) { screenSig = sig; rerender(); }
     }
     const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)) && screenAsk(selectedId).options.length < 2 && !screenRewind(selectedId)); // a question menu gets its card instead
