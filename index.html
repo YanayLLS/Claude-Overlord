@@ -2572,7 +2572,7 @@ function focusNextPerm() {
 }
 // Select the previous (-1) / next (1) agent in the visible list order, wrapping. False if the list is empty.
 function cycleAgent(dir) {
-  const ids = [...document.querySelectorAll('#list .agent[data-id]')].map(el => Number(el.dataset.id));
+  const ids = [...document.querySelectorAll('#list .agent[data-id]')].filter(el => !el.closest('.folder.collapsed')).map(el => Number(el.dataset.id));
   if (!ids.length) return false;
   const idx = selectedId !== null ? ids.indexOf(selectedId) : -1;
   const next = dir < 0
@@ -4404,6 +4404,9 @@ function handleAgentMsg(msg) {
         agentOrderMap[msg.cwd] = agentOrderMap[msg.cwd].filter(x => x !== msg.agentName).concat(msg.agentName);
         saveAgentOrder();
       }
+      // A brand-new agent may get a closed agent's name: it must not inherit that agent's folder.
+      // (Restart keeps its folder: the new agent is created under a fresh name, then renamed back.)
+      if (isNew && Date.now() - (msg.createdAt || 0) < 60000 && msg.agentName && folderOf(agentFolders[msg.cwd], msg.agentName)) setFolders(msg.cwd, setFolder(agentFolders[msg.cwd], msg.agentName, null));
       if (isNew && _pendingFolder && _pendingFolder.cwd === msg.cwd && msg.agentName && Date.now() - _pendingFolder.at < 20000) {
         setFolders(msg.cwd, setFolder(agentFolders[msg.cwd], msg.agentName, _pendingFolder.fid));
         setCollapsed('folder:' + _pendingFolder.fid, false);
@@ -4444,8 +4447,7 @@ function handleAgentMsg(msg) {
     }
     case 'agentClosed': {
       chatUi.dropToast(msg.id);
-      const closedCwd = agents.get(msg.id)?.cwd || '(unknown)', closedName = agents.get(msg.id)?.agentName;
-      if (closedName && folderOf(agentFolders[closedCwd], closedName)) setFolders(closedCwd, setFolder(agentFolders[closedCwd], closedName, null)); // names get reused
+      const closedCwd = agents.get(msg.id)?.cwd || '(unknown)';
       agents.delete(msg.id); destroyXterm(msg.id);
       refreshArchiveModal(closedCwd);
       lastTermDataAt.delete(msg.id); agentEffort.delete(msg.id); _worldIdleSince.delete(msg.id); lastStatsKey.delete(msg.id); pastedImages.delete(msg.id); { const dt = _doneTimers.get(msg.id); if (dt) { clearTimeout(dt); _doneTimers.delete(msg.id); } } // per-agent bookkeeping goes with the agent
