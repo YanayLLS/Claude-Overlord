@@ -141,6 +141,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-approve:disabled { opacity:.6; cursor:default; }
 .pr-fix, .pr-fix:hover { background:var(--red,#f38ba8); }
 .pr-fix:hover { filter:brightness(1.1); }
+.pr-split { display:inline-flex; gap:1px; }
+.pr-split > .pr-fix:first-child { border-radius:4px 0 0 4px; }
+.pr-later { border-radius:0 4px 4px 0; padding:3px 6px; opacity:.7; }
+.pr-row:has(.pr-later.on) .pr-actions { display:flex; }
+.pr-later.on, .pr-later.on:hover { opacity:1; background:var(--yellow,#f9e2af); box-shadow:inset 0 0 0 1px rgba(0,0,0,.25); }
 .pr-behind { color:var(--peach,#fab387); font-weight:600; }
 .pr-mute { background:var(--bg2,#313244); color:var(--text); }
 .pr-mute:hover { background:var(--border); }
@@ -4589,7 +4594,7 @@ function handleAgentMsg(msg) {
       break;
     case 'prList': {
       if (msg.error) { prState.error = msg.error; prState.errorCode = msg.errorCode || null; }
-      else { prState.prs = msg.prs || []; prState.extra = msg.extraPrs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; prApplyPending();
+      else { prState.prs = msg.prs || []; prState.extra = msg.extraPrs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; prApplyPending(); prRunFixLater();
         for (const url of prHeatMs.keys()) if (!prState.prs.some(p => p.url === url)) prHeatMs.delete(url); } // merged/closed PRs don't keep their heat forever
       renderPrBadge();
       refreshOpenDropdown('pr-dropdown', prDropdownHtml);
@@ -6320,7 +6325,29 @@ function dtHeadHtml(cols) {
 function prFixBtn(p, k) {
   const conflict = prBranchAction(p) === 'conflict';
   const title = conflict ? `New agent merges ${escapeHtml(p.baseRef)} in, resolves the conflicts, then fixes any red checks until it's green` : "New agent reads the failed checks, pushes fixes to this PR and watches until it's green";
-  return `<button class="pr-approve pr-fix" title="${title}" onclick="event.stopPropagation();fixPr('${k}')">🔧 Fix</button>`;
+  const fix = `<button class="pr-approve pr-fix" title="${title}" onclick="event.stopPropagation();fixPr('${k}')">🔧 Fix</button>`;
+  if (p.checks !== 'pending') return fix;
+  // Still testing: the ⏱ half toggles a Fix that starts once the checks finish (prRunFixLater).
+  const on = !!prFixLater && prFixLater.has(p.key); // var: a render before this script part ran sees undefined
+  return `<span class="pr-split">${fix}<button class="pr-approve pr-fix pr-later${on ? ' on' : ''}" title="${on ? 'Fixes when the checks finish (click to cancel)' : 'Fix when the checks finish'}" onclick="event.stopPropagation();prFixLaterToggle('${k}')">⏱</button></span>`;
+}
+
+// PRs to fix once their checks finish, kept across restarts.
+var prFixLater = new Set((() => { try { return JSON.parse(localStorage.getItem('prFixLater') || '[]'); } catch { return []; } })());
+const prFixLaterSave = () => { try { localStorage.setItem('prFixLater', JSON.stringify([...prFixLater])); } catch {} };
+function prFixLaterToggle(key) {
+  prFixLater.has(key) ? prFixLater.delete(key) : prFixLater.add(key); prFixLaterSave();
+  refreshOpenDropdown('pr-dropdown', prDropdownHtml);
+}
+// Each PR list update: a queued PR whose checks are done gets its Fix if anything is red, else it's dropped.
+function prRunFixLater() {
+  for (const key of prFixLater) {
+    const p = prState.prs.find(x => x.key === key);
+    if (p ? p.checks === 'pending' : (prState.failedRepos || []).length) continue; // a repo that failed to load isn't a closed PR
+    prFixLater.delete(key);
+    if (p && (p.checks === 'fail' || p.failed || prBranchAction(p) === 'conflict')) api.send({ type: 'fixPr', pr: p });
+  }
+  prFixLaterSave();
 }
 
 function fixPr(key) {
