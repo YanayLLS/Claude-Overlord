@@ -141,8 +141,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-approve:disabled { opacity:.6; cursor:default; }
 .pr-fix, .pr-fix:hover { background:var(--red,#f38ba8); }
 .pr-fix:hover { filter:brightness(1.1); }
-.pr-conflictbtn { background:#f38ba8; }
-.pr-conflictbtn:hover { background:#f17497; }
 .pr-behind { color:var(--peach,#fab387); font-weight:600; }
 .pr-mute { background:var(--bg2,#313244); color:var(--text); }
 .pr-mute:hover { background:var(--border); }
@@ -6230,17 +6228,13 @@ function prRowHtml(p, dim) {
   // Red checks (or some already failed while others run): an agent fixes and pushes to the PR until green (main.js fixPr).
   // a release PR whose failures are all checks GitHub doesn't require (UNSTABLE, not BLOCKED): nothing to fix there
   const advisoryOnly = p.mergeState === 'UNSTABLE' && window.releasesUi && releasesUi.isReleasePr(p.repo, p.headRef, p.baseRef);
-  const fixBtn = !dim && !advisoryOnly && (p.checks === 'fail' || p.failed)
-    ? `<button class="pr-approve pr-fix" title="New agent reads the failed checks, pushes fixes to this PR and watches until it's green" onclick="event.stopPropagation();fixPr('${k}')">🔧 Fix</button>` : '';
-  const act = prBranchAction(p); // pr-behind.js
-  const updBtn = act === 'conflict'
-    ? `<button class="pr-approve pr-conflictbtn" title="Conflicts with ${escapeHtml(p.baseRef)} — resolve them on GitHub, then update" onclick="event.stopPropagation();openPr('${u}/conflicts')">⚠ Conflicts</button>`
-    : '';
+  // One Fix for everything: conflicts get resolved first, then the checks (actions-core.js fixPrPlan).
+  const fixBtn = !dim && (prBranchAction(p) === 'conflict' || (!advisoryOnly && (p.checks === 'fail' || p.failed))) ? prFixBtn(p, k) : ''; // pr-behind.js
   // Main action sits in its own always-visible column; the rest wait for hover.
-  // Mine but can't merge → the button that unblocks it (Fix/Conflicts) takes the column instead.
-  const unblock = p.mine && !mi.enabled && (fixBtn || updBtn);
+  // Mine but can't merge → Fix takes the column instead.
+  const unblock = p.mine && !mi.enabled && fixBtn;
   const mainBtn = unblock || prActionBtn(p, u);
-  const extra = unblock ? (unblock === fixBtn ? updBtn : fixBtn) : fixBtn + updBtn;
+  const extra = unblock ? '' : fixBtn;
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions">${extra}${snoozeBtn}${muteBtn}${archBtn}</div>`
     + `<span class="pr-ci ${p.checks || 'none'}" title="Checks: ${escapeHtml(p.checks || 'none')}"></span>`
@@ -6321,6 +6315,12 @@ function prDropdownHead() {
 // Column labels starting with '>' are numeric: right-aligned.
 function dtHeadHtml(cols) {
   return `<div class="dt-head">${cols.map(c => c[0] === '>' ? `<span class="dt-n">${c.slice(1)}</span>` : `<span>${c}</span>`).join('')}</div>`;
+}
+
+function prFixBtn(p, k) {
+  const conflict = prBranchAction(p) === 'conflict';
+  const title = conflict ? `New agent merges ${escapeHtml(p.baseRef)} in, resolves the conflicts, then fixes any red checks until it's green` : "New agent reads the failed checks, pushes fixes to this PR and watches until it's green";
+  return `<button class="pr-approve pr-fix" title="${title}" onclick="event.stopPropagation();fixPr('${k}')">🔧 Fix</button>`;
 }
 
 function fixPr(key) {
@@ -7750,8 +7750,7 @@ function worldSnapshot() {
   // The ship's action buttons are the PR dropdown's own buttons (same gating, same handlers), just shown in the selection bar.
   const prWorldActions = (p) => {
     const u = p.url.replace(/'/g, "\\'"), k = p.key.replace(/'/g, "\\'"), act = prBranchAction(p); // pr-behind.js
-    const upd = act === 'conflict' ? `<button class="pr-approve pr-conflictbtn" title="Conflicts with ${escapeHtml(p.baseRef)} — resolve them on GitHub, then update" onclick="event.stopPropagation();openPr('${u}/conflicts')">⚠ Conflicts</button>`
- : '';
+    const upd = act === 'conflict' || p.checks === 'fail' || p.failed ? prFixBtn(p, k) : '';
     return upd + prActionBtn(p, u)
       + `<button class="pr-approve pr-snooze" title="Snooze for a while" onclick="event.stopPropagation();openSnooze('${k}',this)">⏰ Snooze</button>`
       + `<button class="pr-approve pr-mute" title="Mute — stop counting/notifying until unmuted" onclick="event.stopPropagation();mutePr('${k}')">🔕 Mute</button>`

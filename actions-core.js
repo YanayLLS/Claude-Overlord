@@ -122,7 +122,7 @@ function pickCheckout(repo, infos, worktreeDirs) {
 // Env branches: never pushed to directly, a fix goes in by PR (same list as the PR panel's release filter).
 const ENV_BRANCH = /^(dev|develop|alpha|staging|master|main|production|prod(-.*)?)$/i;
 
-// Plan for "Fix" on a PR with failing checks: a normal agent, no new worktree, in the checkout (or worktree)
+// Plan for "Fix" on a PR with failing checks or conflicts (conflicts get resolved first): a normal agent, no new worktree, in the checkout (or worktree)
 // already on the PR's branch — else the repo's main checkout, told to switch to it. It loops — read the
 // failed logs, fix or rerun, push to the PR, watch — until green.
 function fixPrPlan(pr, infos, worktreeDirs) {
@@ -148,8 +148,12 @@ function fixPrPlan(pr, infos, worktreeDirs) {
   const skill = /(^|\/)frontlineio-frontend$/i.test(repo)
     ? `This repo has a pr-green skill with the CI and BDD diagnosis steps - invoke it first and follow it (a BDD container that exits early hides its real error in the run log in S3, the skill says where). `
     + `Once one full BDD run has finished, every push slims the PR body's bdd block to that run's reds and flakies, plus the scopes the code changed since that run can reach, with a note under the block (pr-dev skill step 5b) - re-testing what CI already proved green on the same code is not a check, so this is not loosening one. ` : '';
-  const prompt = `PR #${n} in ${repo} (${head} into ${base}) has failing checks: ${pr.url} - get it green. `
+  const conflict = pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY';
+  const red = pr.checks === 'fail' || pr.failed || !conflict;
+  const what = [conflict && `conflicts with ${base}`, red && 'has failing checks'].filter(Boolean).join(' and ');
+  const prompt = `PR #${n} in ${repo} (${head} into ${base}) ${what}: ${pr.url} - get it mergeable and green. `
     + where + skill
+    + (conflict ? `Conflicts first: git fetch origin, git merge origin/${base} (never rebase), resolve every conflict keeping the intent of both sides, run the tests beside each conflicted file, commit with one line per file saying what was kept, and ${push}. Then go on to the checks. ` : '')
     + `You are authorized to commit and push fixes without asking - do not stop to ask for confirmation, a fix that is not pushed does not count. `
     + `Never end your turn while any check is still pending or red - keep a background watcher running and act on what it reports. `
     + `Loop until every check passes: `

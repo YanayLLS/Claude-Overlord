@@ -164,6 +164,12 @@ const { fixPrPlan } = require('./actions-core');
   assert.ok(fixPrPlan({ ...pr, repo: 'LLSLtd/frontlineio-frontend' }, [{ dir: 'C:/x/f', repo: 'LLSLtd/frontlineio-frontend', branch: 'yanay-features' }], []).prompt.includes('slims the PR body'));
   assert.ok(fixPrPlan({ ...pr, repo: 'LLSLtd/frontlineio-frontend' }, [{ dir: 'C:/x/f', repo: 'LLSLtd/frontlineio-frontend', branch: 'yanay-features' }], []).prompt.includes('pr-green skill'));
   assert.ok(/never merge/i.test(p.prompt));
+  // one Fix for everything: a conflicting PR merges its base in and resolves first, then the checks loop
+  assert.ok(!p.prompt.includes('Conflicts first'));
+  const cf = fixPrPlan({ ...pr, mergeable: 'CONFLICTING' }, infos, []);
+  assert.ok(cf.prompt.includes('conflicts with dev') && cf.prompt.includes('Conflicts first') && cf.prompt.includes('git merge origin/dev'));
+  assert.ok(!cf.prompt.includes('failing checks'));
+  assert.ok(fixPrPlan({ ...pr, mergeState: 'DIRTY', checks: 'fail' }, infos, []).prompt.includes('conflicts with dev and has failing checks'));
   assert.ok(!/["&|<>^%!$`\;\n]/.test(fixPrPlan({ ...pr, url: 'x"&$(rm)`;|<>' }, infos, []).prompt));
   // a release PR's head is an env branch: no direct push, a fix PR into it instead
   const rel = fixPrPlan({ ...pr, headRef: 'dev', baseRef: 'alpha' }, infos, []);
