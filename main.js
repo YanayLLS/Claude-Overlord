@@ -1061,7 +1061,7 @@ let timelineAgentId = null;
 const TIMELINE_MAX_EVENTS = 1000;
 const parseLineForTimeline = (line) => timelineCore.parseLineForTimeline(line, fmtTool, isSystemMessage);
 
-// The Chat view's mic: dictate.ps1 runs Windows' offline recognizer on the default microphone and streams its
+// The Chat view's mic: dictate.ps1 runs Windows' speech recognizer on the default microphone and streams its
 // phrases back as 'dictation' messages. One take at a time; it runs at low priority and dies with the app.
 let dictateProc = null;
 function dictateStop() { if (dictateProc) { try { dictateProc.kill(); } catch {} dictateProc = null; } }
@@ -1074,7 +1074,7 @@ function dictateStart() {
   let buf = '';
   p.stdout.on('data', (d) => {
     buf += d; let nl;
-    while ((nl = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); try { const m = JSON.parse(line); send({ type: 'dictation', t: m.t, text: m.text }); } catch {} }
+    while ((nl = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); try { const m = JSON.parse(line); if (m.privacy) shell.openExternal('ms-settings:privacy-speech'); send({ type: 'dictation', t: m.t, text: m.text }); } catch {} }
   });
   p.on('exit', () => { if (dictateProc === p) { dictateProc = null; send({ type: 'dictation', t: 'end' }); } });
   p.on('error', (e) => send({ type: 'dictation', t: 'error', text: e.message }));

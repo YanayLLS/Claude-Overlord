@@ -505,7 +505,7 @@
   box().addEventListener('input', syncHl); box().addEventListener('scroll', () => { hl.scrollTop = box().scrollTop; });
   new ResizeObserver(syncHl).observe(box()); new ResizeObserver(syncHl).observe(order()); // chips above push the box down
 
-  // ── Mic: dictation through Windows' offline recognizer (main.js runs dictate.ps1). Words go in at the caret as you
+  // ── Mic: dictation through Windows' speech recognizer (main.js runs dictate.ps1). Words go in at the caret as you
   // talk: the phrase still being spoken shows live and settles when the recognizer is sure. Typing, sending, Esc or
   // switching agent ends the take; what was written stays. ──
   const mic = document.getElementById('chat-mic');
