@@ -466,6 +466,8 @@
       const m = OPT.exec(r);
       if (m) { if (first < 0) first = i; options[+m[1] - 1] = { label: cut(m[2]), desc: '', sep: rule && options.length > 0 }; rule = false; if (/^\s*[❯›>]/.test(r)) focus = +m[1] - 1; return; }
       if (first >= 0 && /^\s*[─━]{3,}\s*$/.test(r)) { rule = true; return; }
+      // With previews the CLI drops "Type something" and draws "Chat about this" under the rule without a number.
+      if (first >= 0 && rule && /^\s*[❯›>]?\s*Chat about this\s*$/i.test(r)) { options[options.length] = { label: 'Chat about this', desc: '', sep: true, bare: true }; if (/^\s*[❯›>]/.test(r)) focus = options.length - 1; rule = false; return; }
       const last = options[options.length - 1], d = cut(r);
       if (!last || first < 0 || !d || !/^\s{3,}/.test(r) || /^(Enter|Esc|↑|Tab|Notes:)/.test(d)) return;
       if (/^\(.*\)$/.test(d) && !last.desc) last.label += ' ' + d; // "(Recommended)" wrapped under its label
@@ -484,7 +486,7 @@
     // just above "Chat about this": it is still that row, holding your text.
     const opts = options.filter(Boolean);
     for (const o of opts) { const m = /^(.*?)\s*[✔✓√]$/.exec(o.label); if (m && m[1]) { o.label = m[1]; o.chosen = true; } }
-    const chat = opts.findIndex(o => o.sep && /^chat about this/i.test(o.label)), t = chat > 0 && opts[chat - 1];
+    const chat = opts.findIndex(o => o.sep && /^chat about this/i.test(o.label)), t = chat > 0 && !opts[chat].bare && opts[chat - 1]; // with previews (a bare "Chat about this") there's no typing row
     if (t && !opts.some(o => /^(type something|other)\b/i.test(o.label)) && !isBox(t.label)) { t.typed = t.label; t.label = 'Type something.'; }
     return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: opts, focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && (dialog || menuLast), tabs };
   }
@@ -562,7 +564,7 @@
       const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.trim()).filter(Boolean) : [];
       rv = body.length ? `<div class="ask-review">${body.map(r => /^⚠/.test(r) ? `<div class="warn">${escH(r.replace(/^⚠\s*/, ''))}</div>` : /^→/.test(r) ? `<div class="ans">${escH(r.replace(/^→\s*/, ''))}</div>` : `<div class="rq">${escH(r.replace(/^●\s*/, ''))}</div>`).join('')}</div>` : '';
     }
-    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
+    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
@@ -603,10 +605,13 @@
   let askHover = null, askAsked = null, askFor = '';
   let lastAskQ = null; // the same question redrawn doesn't slide in again
   const prevText = (t) => t == null ? '<span class="ap-wait">…</span>' : t ? escH(t) : '<span class="ap-wait">No preview</span>';
-  function prevHtml(q, s) {
+  function prevHtml(q, s, args) {
     if (!s.options.length) return '';
     const seen = previews.get(q) || []; previews.set(q, seen);
-    if (s.preview || seen[s.focus] == null) seen[s.focus] = /^No preview available$/i.test(s.preview) ? '' : s.preview;
+    // The transcript has them whole when the question is in it: those, not the CLI's cut-down box.
+    const key = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase(), full = ((args && args.prevs) || []).find(x => key(x.q) === key(q));
+    if (full) full.p.forEach((p, k) => { seen[k] = p.replace(/^```[\w-]*\n?/, '').replace(/\n?```\s*$/, ''); });
+    else if (s.preview || seen[s.focus] == null) seen[s.focus] = /^No preview available$/i.test(s.preview) ? '' : s.preview;
     if (!seen.some(Boolean)) return ''; // a question without previews
     // Drawn with the selected option's preview; a hover swaps only this pane's text (applyAskHover), never the card.
     const rows = Math.max(...seen.filter(Boolean).map(p => p.split('\n').length));
@@ -1323,6 +1328,13 @@
   const oneKey = (o) => !/^\s*(\[[ x✓✔]?\]|[☐☑◯◉○●])/i.test(o) && !/^type something/i.test(o);
   const quickOpts = (id) => { const o = menuOptions(id); return o.every(oneKey) ? o : o.some(x => !oneKey(x) && /^\s*(\[|[☐☑◯◉○●])/.test(x)) ? [] : o.filter(oneKey); };
   function pickOption(id, k) {
+    const s = screenAsk(id), so = s.options[k];
+    // With previews beside the options a number only moves the selection, and "Chat about this" has no number: go
+    // there with the arrows, then Enter.
+    if (so && (s.preview || so.bare)) {
+      const d = k - s.focus; [...arrowKeys(d), '\r'].forEach((key, n) => setTimeout(() => api.send({ type: 'termInput', id, data: key }), n * 70));
+      return true;
+    }
     const o = menuOptions(id)[k];
     if (k < 9 && (o === undefined || oneKey(o))) { api.send({ type: 'termInput', id, data: String(k + 1) }); return true; }
     // "Type something": your answer goes in the reply box (sending it picks that option, then types it).

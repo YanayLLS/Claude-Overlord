@@ -132,3 +132,11 @@ test("the CLI's queue: what you typed while it works, and system notes kept for 
   assert.strictEqual(q('enqueue', '<system-reminder>x').sys, true);
   assert.strictEqual(q('dequeue').op, 'dequeue');
 });
+
+test('a question keeps each option\'s whole preview, per question', () => {
+  const qs = [{ question: 'How?', header: 'A', options: [{ label: 'X', preview: '```diff\n+ one\n  two\n```' }, { label: 'Y', preview: 'just y' }] }, { question: 'Also?', header: 'B', multiSelect: true, options: [{ label: 'P' }, { label: 'Q' }] }];
+  const [ev] = parse({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: { questions: qs } }] } });
+  assert.deepStrictEqual(ev.args.prevs, [{ q: 'How?', p: ['```diff\n+ one\n  two\n```', 'just y'] }]);
+  const [plain] = parse({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: { questions: [qs[1]] } }] } });
+  assert.strictEqual(plain.args.prevs, undefined);
+});
