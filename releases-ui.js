@@ -1426,10 +1426,12 @@
         + (s.localOnly ? `<div class="rl-local" title="It isn't on GitHub yet, so teammates can't see this board. Commit and push it to share.">Local config, not pushed yet · <code>${esc(s.localOnly)}</code></div>` : '');
     }
     const prev = modal.querySelector('.rl-body'), top = prev ? prev.scrollTop : 0, left = prev ? prev.scrollLeft : 0;
+    const prevRepos = modal.querySelector('.rl-rel-repos'), reposTop = prevRepos ? prevRepos.scrollTop : 0; // the picker's own repo list scrolls too
     const height = modal.offsetHeight;
     modal.innerHTML = h + '</div>';
     const body = modal.querySelector('.rl-body');
     if (body) { body.scrollTop = top; body.scrollLeft = left; }
+    const repos = modal.querySelector('.rl-rel-repos'); if (repos) repos.scrollTop = reposTop;
     if (body && toToday && modal.querySelector('.rl-tlx')) { body.scrollLeft = body.scrollWidth; toToday = false; }
     // keep the clicked cell visible above the drawer
     const drawer = modal.querySelector('.rl-detail'), selCell = modal.querySelector('.rl-cell.sel');

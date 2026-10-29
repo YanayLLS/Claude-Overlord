@@ -592,7 +592,8 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-next.rl-back, .rl-next.rl-back b { color:var(--yellow); }
 
 /* the Release tab: the run, the cards and the picker sit in the page, not in a popover */
-.rl-reltab .rl-rel-pop, .rl-reltab .rl-rel-pop.rl-rr { position:static; width:auto; max-width:620px; max-height:none; overflow:visible; margin:0 0 14px; box-shadow:none; animation:none; }
+.rl-reltab .rl-rel-pop, .rl-reltab .rl-rel-pop.rl-rr { position:static; width:auto; max-height:none; overflow:visible; margin:0 0 14px; padding:0; border:0; border-radius:0; background:none; box-shadow:none; animation:none; }
+.rl-reltab .rl-rel-repos { max-height:none; overflow:visible; }
 .rl-reltab .rl-rel-pop .rl-rel-actions { position:static; margin:12px 0 0; padding:10px 0 0; background:none; border-radius:0; }
 .rl-reltab-new { margin-top:4px; }
 /* a deploying repo's pill fills as its deploy goes (vs its last good run) */
