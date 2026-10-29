@@ -972,6 +972,15 @@
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
   // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
   let prevBusy = new Map(), tick = null, jumpOnce = false;
+  // After you send: the bottom for a moment, through what still grows the thread (its bubble, markdown, images, blocks
+  // getting their real height). Scrolling up yourself lets go.
+  let pinUntil = 0;
+  function pinBottom() {
+    pinUntil = Date.now() + 2000; const el = document.getElementById('conversation');
+    if (!el._pinWired) { el._pinWired = 1; el.addEventListener('wheel', (e) => { if (e.deltaY < 0) pinUntil = 0; }, { passive: true }); }
+    const f = () => { if (Date.now() >= pinUntil || !el.classList.contains('open')) return; el.scrollTop = el.scrollHeight; requestAnimationFrame(f); };
+    requestAnimationFrame(f);
+  }
   // The reply still being written, off the agent's terminal screen (chat-core.js liveReply), until the transcript has it.
   const squash = (t) => String(t || '').replace(/[\s*_`#>•-]+/g, '');
   function screenReply(id, evs) {
@@ -999,6 +1008,16 @@
     // (the Esc didn't land), it shows as working again.
     const stopped = !!(a._stopAt && now - a._stopAt < 8000 && (st === 'active' || st === 'settling' || st === 'resuming'));
     if (stopped) st = 'waiting';
+    // The CLI's own screen outranks a stale "working" too (seen after a resume): no spinner ("esc to interrupt") for 3 s
+    // while nothing of yours is on its way, and it isn't working.
+    // A Claude that died mid-turn (crash, app or PC restart) leaves its last spinner frozen on screen, but a working one
+    // redraws it at least every second: nothing from its terminal for 10 s, or its terminal gone, and it isn't working.
+    if ((st === 'active' || st === 'resuming') && !(pending.get(id) || []).some(p => !p.held)) {
+      const rows = screenOf(id, 14, true), heard = typeof lastTermDataAt !== 'undefined' ? lastTermDataAt.get(id) || 0 : now;
+      if (a.dead || (a.crashed !== 'resuming' && now - heard > 10000)) st = 'waiting';
+      else if (rows && rows.length && !/esc to interrupt|…\s*\(/i.test(rows.join('\n'))) { if (!a._idleSeen) a._idleSeen = now; if (now - a._idleSeen > 3000) st = 'waiting'; }
+      else a._idleSeen = 0;
+    } else a._idleSeen = 0;
     const busy = st === 'active' || st === 'resuming';
     const order = document.getElementById('term-order');
     order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
@@ -1022,7 +1041,7 @@
     // The history landing after the loading spinner is opening the chat too: always at the bottom, nothing slides in
     // (else the last reply counted as "just arrived" and a long one parked you at its first line).
     const opening = fresh || (!!evs && el._shown !== id); if (evs) el._shown = id;
-    const stuck = !opening && !jumpOnce && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
+    const stuck = !opening && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
     const old = el._blocks || [];
     let newReply = null; const changed = []; // only these get the link, image and diagram passes below (a long chat is thousands of nodes)
     for (let k = 0; k < list.length; k++) {
@@ -1053,7 +1072,7 @@
     else if (!busy && tick) { clearInterval(tick); tick = null; }
     // A long reply that just arrived: land on its first line, to read it top-down (from then on you're "scrolled up",
     // so the live ticks leave it there).
-    if (!stuck && newReply && newReply.offsetHeight > el.clientHeight * 0.6) el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24;
+    if (!stuck && !jumpOnce && Date.now() >= pinUntil && newReply && newReply.offsetHeight > el.clientHeight * 0.6) el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24;
     else if (!stuck) {
       el.scrollTop = el.scrollHeight;
       // Images grow the thread as they load: stay pinned to the bottom through that.
@@ -1862,5 +1881,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
