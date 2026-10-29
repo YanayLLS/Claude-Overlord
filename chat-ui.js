@@ -233,8 +233,8 @@
     const b = x.terminal.buffer.active;
     for (let y = b.length - 1; y >= Math.max(0, b.length - 12); y--) {
       const l = b.getLine(y), s = l && l.translateToString(true), m = s && /^(\s*[❯>]\s+)(\S.*?)\s*$/.exec(s); if (!m) continue;
-      const c = l.getCell(m[1].length); // greyed: the CLI's placeholder, not text you typed
-      if (!c || !(c.isDim() || !c.isFgDefault())) return '';
+      const c = l.getCell(m[1].length); // dimmed: the CLI's suggestion, not text you typed (that's bright, coloured for a /command)
+      if (!c || !c.isDim()) return '';
       return /^Try "/.test(m[2]) ? '' : m[2]; // "Try …" is its idle hint, not a suggestion
     }
     return '';
@@ -1296,7 +1296,14 @@
       chatComposer.setDraft(id, cur.trim() ? mine + '\n\n' + cur : mine);
       chatComposer.clearCliBox(id); rerender();
     });
-    else if (back.length) afterEsc(id, () => chatComposer.clearCliBox(id));
+    else if (back.length) afterEsc(id, () => {
+      // It may have reached the CLI after all (Esc right after Enter): the CLI then puts it back in its own box and the
+      // transcript still writes it. It's back in yours already, so it leaves the thread too.
+      const x = typeof xterms !== 'undefined' && xterms.get(id), inBox = x && typeof readPromptBox === 'function' ? readPromptBox(x.terminal) : '';
+      const head = String(back[0].match || back[0].text || '').replace(/\s+/g, ' ').trim().slice(0, 24).toLowerCase();
+      if (head && inBox.replace(/\s+/g, ' ').toLowerCase().includes(head)) setHides(a, [...hidesOf(a), { from: Math.min(...back.map(p => p.at)) - 1000, until: Date.now() }]);
+      chatComposer.clearCliBox(id); rerender();
+    });
     rerender();
   }
   // Run fn 700 ms after main reports this agent's Esc was really written (a long paste in progress holds it back; the

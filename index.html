@@ -3767,7 +3767,9 @@ function readPromptBox(terminal) {
   const lines = [];
   for (let y = from; y <= to; y++) {
     const ln = buf.getLine(y);
-    lines.push(ln ? ln.translateToString(true) : '');
+    // Claude's suggested next prompt sits dimmed in the empty box: not text you typed.
+    const s = ln ? ln.translateToString(true) : '', m = /^(\s*[❯>]\s+)\S/.exec(s), c = m && ln.getCell(m[1].length);
+    lines.push(c && c.isDim() ? m[1].trimEnd() : s);
   }
   return readPromptText(lines, cursorAbs - from);
 }
