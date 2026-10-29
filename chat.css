@@ -26,6 +26,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .msg.user.enter { animation-name: chat-in-right; }
 :root body :is(#conversation, #chat-shell) .turnfoot.landed .spark { animation: chat-pop .7s var(--chat-ease) both; }
 :root body :is(#conversation, #chat-shell) .tail > * { animation: chat-in .3s var(--chat-ease) both; }
+:root body :is(#conversation, #chat-shell) .tail > .still { animation: none; } /* opening a chat: the tail is already there */
 
 /* Your prompts */
 :root body :is(#conversation, #chat-shell) .msg.user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin: 26px 0 20px; }

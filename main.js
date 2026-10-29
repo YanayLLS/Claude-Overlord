@@ -1201,13 +1201,33 @@ function chatSessions({ id }) {
   send({ type: 'chatSessions', id, sessions: list });
 }
 
+// Switching agents asks for this each time, and a session file can be 100+ MB: parse only its end (enough for the last
+// TIMELINE_MAX_EVENTS), and keep the result until the file changes.
+const tlCache = new Map(); // id → { file, size, mtimeMs, events }
 function getFullTimeline(id) {
   const a = agents.get(id);
-  if (!a || !fs.existsSync(a.jsonlFile)) return [];
+  if (!a || !a.jsonlFile || !fs.existsSync(a.jsonlFile)) return [];
   try {
-    const content = fs.readFileSync(a.jsonlFile, 'utf-8');
+    const st = fs.statSync(a.jsonlFile), c = tlCache.get(id);
+    if (c && c.file === a.jsonlFile && c.size === st.size && c.mtimeMs === st.mtimeMs) return c.events;
+    let events = [];
+    for (let want = 16 << 20; ; want *= 4) {
+      const from = Math.max(0, st.size - want);
+      events = timelineFrom(readTail(a.jsonlFile, from, st.size), from > 0);
+      if (!from || events.length >= TIMELINE_MAX_EVENTS) break;
+    }
+    tlCache.set(id, { file: a.jsonlFile, size: st.size, mtimeMs: st.mtimeMs, events });
+    return events;
+  } catch { return []; }
+}
+function readTail(file, from, to) {
+  const fd = fs.openSync(file, 'r');
+  try { const b = Buffer.alloc(to - from); fs.readSync(fd, b, 0, b.length, from); return b.toString('utf-8'); } finally { fs.closeSync(fd); }
+}
+function timelineFrom(content, cut) {
+    const all = content.split('\n'); if (cut) all.shift(); // the first line was cut through
     // Only the branch the CLI is on; the ones you left with a reply ride on the message that replaced them (its versions).
-    const { lines, alts } = timelineCore.branches(content.split('\n').filter(l => l.trim()));
+    const { lines, alts } = timelineCore.branches(all.filter(l => l.trim()));
     const parseAll = (ls) => ls.flatMap(l => parseLineForTimeline(l) || []);
     const events = [];
     for (const line of lines) {
@@ -1219,7 +1239,6 @@ function getFullTimeline(id) {
     }
     // Return last N events if too many
     return events.length > TIMELINE_MAX_EVENTS ? events.slice(-TIMELINE_MAX_EVENTS) : events;
-  } catch { return []; }
 }
 
 function globalSearch(query) {
@@ -2039,7 +2058,7 @@ function closeAgent(id) {
   if (browserRegistry) browserRegistry.destroy(id);
   if (mcpServer) mcpServer.revokeToken(id);
   removeAgentConfig(id);
-  agents.delete(id);
+  agents.delete(id); tlCache.delete(id);
   send({ type: 'agentClosed', id });
   saveState();
 }

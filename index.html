@@ -3913,8 +3913,11 @@ function switchTermTab(tab) {
 }
 
 // The agent's event feed (prompts, replies, tools) — the world view's Conversation tab reads it.
+// Back to an agent: its thread as last seen paints at once; the fresh one from main replaces it when it comes.
+const tlSeen = new Map(); // id → events, the last few agents shown
 function loadTimeline(id) {
   timelineAgentId = id;
+  const seen = tlSeen.get(id); if (seen) { worldTl = { id, events: seen }; if (termTab === 'conversation') renderConversation(); }
   api.send({ type: 'setTimelineAgent', id });
   api.send({ type: 'getTimeline', id });
 }
@@ -3927,6 +3930,7 @@ function fmtTs(ts) {
 function handleTimelineData(msg) {
   if (msg.id !== timelineAgentId) return;
   worldTl = { id: msg.id, events: (msg.events || []).slice() };
+  tlSeen.delete(msg.id); tlSeen.set(msg.id, worldTl.events); if (tlSeen.size > 12) tlSeen.delete(tlSeen.keys().next().value); // live events push into this same array
   if (msg.reset) delete document.getElementById('conversation').dataset.for; // another session (/resume): drawn afresh, at the bottom
   if (termTab === 'conversation') renderConversation();
 }
