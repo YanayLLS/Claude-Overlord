@@ -782,7 +782,16 @@
     // A message of yours in the transcript clears one bubble only, ever: one that already cleared a bubble on an earlier
     // redraw can't clear the next one too.
     const used = usedPrompts.get(id) || new Set(); usedPrompts.set(id, used);
-    const yours = evs.filter(e => (e.type === 'prompt' || e.type === 'command') && e.ts && !used.has(e.ts)).map(e => e.ts).sort((x, y) => Date.parse(x) - Date.parse(y));
+    const mineEvs = evs.filter(e => (e.type === 'prompt' || e.type === 'command') && e.ts && !used.has(e.ts));
+    // Same text first, though: a bubble whose message never reached the CLI (an Esc while "Sending…") would otherwise take
+    // the next message's place, and that one would show twice (in the thread, and still "Queued").
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 80);
+    for (const p of [...list].sort((x, y) => x.at - y.at)) {
+      if (p.held) continue;
+      const e = mineEvs.find(e => !used.has(e.ts) && Date.parse(e.ts) >= p.at - 500 && norm(e.text) && norm(e.text) === norm(p.match || p.text));
+      if (e) { used.add(e.ts); list.splice(list.indexOf(p), 1); }
+    }
+    const yours = mineEvs.filter(e => !used.has(e.ts)).map(e => e.ts).sort((x, y) => Date.parse(x) - Date.parse(y));
     let j = 0;
     for (const p of [...list].sort((x, y) => x.at - y.at)) {
       if (busy) p.busyAt = Date.now();
@@ -1891,5 +1900,5 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

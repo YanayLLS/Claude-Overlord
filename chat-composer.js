@@ -373,7 +373,7 @@
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); return; }
     if (!chat()) return;
-    if (e.key === 'Escape' && order().classList.contains('busy')) { e.preventDefault(); chatUi.stop(); return; }
+    if (e.key === 'Escape' && (order().classList.contains('busy') || chatUi.sending(selectedId))) { e.preventDefault(); chatUi.stop(); return; } // working, or a message still "Sending…": it comes back to the box
     // Esc Esc with an empty box, as in the CLI: its rewind picker (shown over the chat by chat-ui's dialog peek).
     if (e.key === 'Escape' && !t.value) { e.preventDefault(); if (Date.now() - lastEsc < 600) { chatUi.keys(['\x1b', '\x1b']); lastEsc = 0; } else lastEsc = Date.now(); return; }
     // ↑/↓ scroll the chat (inside a draft of several lines they move the caret until its first / last line).
