@@ -4053,6 +4053,8 @@ focusAgent = function(id) {
   if (a.archived) return;  // archived agents have no card — never open their terminal
   selectedId = id; rememberAgent(); // opened again after a restart or reload
   if (window.chatUi) chatUi.dropToast(id); // its card shows now
+  // Its draft is where this view shows it: a draft that went into its CLI's box (Chat → CLI) comes back to the reply box, and the other way round.
+  if (window.chatComposer) chatComposer.carryDraft(termTab === 'terminal' ? 'conversation' : 'terminal', termTab);
   api.send({ type: 'focusAgent', id });
   openTerm(id);
   // Scroll selected card into view (for keyboard nav with long lists)

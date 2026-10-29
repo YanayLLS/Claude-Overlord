@@ -471,7 +471,13 @@
     // Several questions at once: the CLI's tab row above them ("← [ ] Scope  ✓ Workspace  ✓ Submit →"), ticked once answered.
     const tabRow = rows.slice(0, Math.max(0, first)).reverse().find(r => /\bSubmit\b/.test(r) && /\[[ x✓✔]?\]|[☐☒☑✓✔]/.test(r));
     const tabs = tabRow ? [...tabRow.matchAll(/(\[[ x✓✔×]?\]|[☐☒☑✓✔])\s*(.+?)(?=\s{2,}|\s*(?:\[|[☐☒☑✓✔→])|\s*$)/g)].map(m => ({ done: !/^(\[ ?\]|☐)$/.test(m[1]), label: m[2].trim() })).filter(x => x.label && !/^Submit$/i.test(x.label)) : [];
-    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: options.filter(Boolean), focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && (dialog || menuLast), tabs };
+    // An answer you already gave is ticked ("Small fix ✔"). A typed one replaces "Type something." in its row, the one
+    // just above "Chat about this": it is still that row, holding your text.
+    const opts = options.filter(Boolean);
+    for (const o of opts) { const m = /^(.*?)\s*[✔✓√]$/.exec(o.label); if (m && m[1]) { o.label = m[1]; o.chosen = true; } }
+    const chat = opts.findIndex(o => o.sep && /^chat about this/i.test(o.label)), t = chat > 0 && opts[chat - 1];
+    if (t && !opts.some(o => /^(type something|other)\b/i.test(o.label)) && !isBox(t.label)) { t.typed = t.label; t.label = 'Type something.'; }
+    return { question: q.join(' ').replace(/^[?❓\s]+/, ''), options: opts, focus, preview: preview.join('\n').replace(/\s+$/, ''), dialog: first >= 0 && (dialog || menuLast), tabs };
   }
   // The CLI's rewind list (Esc Esc): each earlier prompt, the change made after it ("2 files changed +83") and which
   // one is selected. null when it isn't on screen.
@@ -547,7 +553,7 @@
       const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.trim()).filter(Boolean) : [];
       rv = body.length ? `<div class="ask-review">${body.map(r => /^⚠/.test(r) ? `<div class="warn">${escH(r.replace(/^⚠\s*/, ''))}</div>` : /^→/.test(r) ? `<div class="ans">${escH(r.replace(/^→\s*/, ''))}</div>` : `<div class="rq">${escH(r.replace(/^●\s*/, ''))}</div>`).join('')}</div>` : '';
     }
-    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${boxLabel(o.label ?? o)}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
+    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
@@ -627,6 +633,8 @@
   let askTyped = '', askFocusIn = false;
   function keepAskInput() {
     const i = document.querySelector('#conversation .card.ask .ask-in'); if (!i) return;
+    const row = screenAsk(selectedId).options[+i.closest('[data-pick]').dataset.pick] || {};
+    if (!i._wired && !askTyped && row.typed) askTyped = row.typed; // an answer typed before: it's there to edit
     if (i.value !== askTyped) i.value = askTyped;
     if (i._wired) return; i._wired = 1;
     const box = document.getElementById('term-order-input'), ae = document.activeElement;
@@ -639,7 +647,8 @@
       if (e.key === 'Enter') {
         e.preventDefault(); const t = i.value.trim(), id = selectedId, k = +i.closest('[data-pick]').dataset.pick; if (!t) return;
         askTyped = ''; i.disabled = true; i.closest('.card')?.classList.add('picked-card');
-        askMove(k); setTimeout(() => chatComposer.sendText(id, t), 400); // its number would be typed into it once the CLI's cursor is there: move there, then the text
+        const old = (screenAsk(id).options[k] || {}).typed || ''; // the CLI's row still holds it: erase it, then type the new one
+        askMove(k); setTimeout(() => { if (old) keys(Array(old.length).fill('\x7f')); setTimeout(() => chatComposer.sendText(id, t), old ? old.length * 70 + 300 : 0); }, 400); // keys go out ~70ms apart // its number would be typed into it once the CLI's cursor is there: move there, then the text
       } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); box.focus(); askStep(e.key === 'ArrowDown' ? 1 : -1); }
       else if (e.key === 'Escape') { e.preventDefault(); box.focus(); }
     });
