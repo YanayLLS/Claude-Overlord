@@ -1,0 +1,44 @@
+/* ── Folders inside a project group ── */
+.folder { display: flex; flex-direction: column; gap: 1px; border-radius: var(--r); }
+.folder-header { position: relative; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px 0 6px;
+  border-radius: var(--r); cursor: pointer; user-select: none; }
+.folder-header:hover { background: var(--hover); }
+.folder-header .group-chevron { width: 12px; height: 12px; }
+.folder-icon { width: 15px; height: 15px; flex-shrink: 0; fill: rgba(var(--ink),.07); stroke: var(--dim); stroke-width: 1.6; stroke-linejoin: round; }
+.folder-name { font-size: 12px; font-weight: 600; color: var(--subtext); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-header:hover .folder-name { color: var(--text); }
+.folder-count { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.folder-rename { font: inherit; font-size: 12px; font-weight: 600; color: var(--text); background: var(--surface0);
+  border: 1px solid var(--accent); border-radius: var(--r-sm); outline: none; padding: 1px 5px; width: 160px; }
+
+/* Collapsed: what's going on inside, as status pips */
+.folder-pips { display: flex; gap: 8px; margin-left: 4px; }
+.folder-pip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--subtext); font-variant-numeric: tabular-nums; }
+.folder-pip i { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.folder-pip[data-st="active"] i { background: var(--accent); animation: pulse 2s ease-in-out infinite; }
+.folder-pip[data-st="waiting"] i { background: var(--green); }
+.folder-pip[data-st="permission"] i { background: var(--yellow); }
+.folder.has-selected > .folder-header { background: var(--surface1); }
+.folder.has-selected > .folder-header .folder-name { color: var(--text); }
+.folder.asks > .folder-header { box-shadow: inset 2px 0 0 var(--peach); }
+
+/* Hover actions: + agent, menu */
+.folder-actions { margin-left: auto; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.folder-header:hover .folder-actions { opacity: 1; }
+.folder-actions button { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  font: inherit; font-size: 14px; line-height: 1; color: var(--dim); background: none; border: none; border-radius: var(--r-sm); cursor: pointer; }
+.folder-actions button:hover { background: var(--hover-strong); color: var(--text); }
+
+/* Agents inside: indented one step under the folder's own line */
+.folder-agents { display: flex; flex-direction: column; gap: 1px; margin-left: 13px; padding-left: 6px; border-left: 1px solid rgba(var(--ink),.06); }
+.folder.collapsed > .folder-agents { display: none; }
+.folder.collapsed .group-chevron::before { transform: rotate(-45deg); }
+.folder-empty { height: 28px; display: flex; align-items: center; padding-left: 10px; font-size: 11px; color: var(--dim);
+  border: 1px dashed rgba(var(--ink),.1); border-radius: var(--r); margin: 2px 0 4px; }
+
+/* Drag and drop */
+.folder.dragging { opacity: .35; }
+.folder-header.drop-into, .folder-empty.drop-into { background: rgba(124,140,255,.12); box-shadow: inset 0 0 0 1px var(--accent); color: var(--text); }
+.folder-header.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
+.folder-header.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
+.group-header.drop-into { box-shadow: inset 0 0 0 1px var(--accent); background: rgba(124,140,255,.08); }
