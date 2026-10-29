@@ -2968,12 +2968,21 @@ function deriveName(prompt) {
 function agentStatus(a) {
   if (a.crashed === 'fatal') return 'crashed';
   if (a.crashed === 'resuming') return 'resuming';
-  for (const t of a.tools.values()) { if (t.perm) return 'permission'; if (!t.done) return 'active'; }
+  for (const t of a.tools.values()) { if (t.perm) return 'permission'; if (!t.done) return silent(a) ? 'idle' : 'active'; }
   if (a.status === 'waiting') return a.doneConfirmed ? 'waiting' : 'settling';
-  if (a.spinnerText) return 'active';
-  if (a.status === 'active') return 'active';
+  if (a.spinnerText || a.status === 'active') return silent(a) ? 'idle' : 'active';
   return 'idle';
 }
+// A working Claude redraws its spinner at least every second. One whose terminal has said nothing for 10 s (it crashed,
+// or the app or PC restarted mid-turn) isn't working, whatever its last status said.
+const _bootAt = Date.now();
+function silent(a) {
+  if (a._id == null) for (const [k, v] of agents) if (v === a) a._id = k;
+  let heard; try { heard = lastTermDataAt.get(a._id); } catch { return false; } // declared further down: not yet while the page loads
+  return !!a.dead || Date.now() - (heard || _bootAt) > 10000;
+}
+// …and the list shows it once it goes quiet: nothing else re-renders a silent agent.
+setInterval(() => { for (const a of agents.values()) { const s = agentStatus(a); if (a._lastSt !== s) { const was = a._lastSt; a._lastSt = s; if (was !== undefined) scheduleRender(); } } }, 3000);
 
 // True only when the agent is blocked on a chat answer (AskUserQuestion / ExitPlanMode),
 // not on a plain tool permission prompt.

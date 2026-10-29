@@ -6,7 +6,6 @@
   let dict = null; // the mic's take in progress: { id, pre, post, said, live } (see Mic below)
   const order = () => document.getElementById('term-order');
   const chat = () => termTab === 'conversation';
-  let hist = -1, draft = '';
   const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('blank', !t.value.trim()); syncHl(); };
 
   // ── Images: each pasted or dropped image puts an [Image #N] tag at the caret and a numbered thumbnail above the box,
@@ -123,7 +122,7 @@
     if (chat() && /^\/resume$/.test(text) && !list.length) { inp.value = '/resume '; resumeCheck(inp); return; } // the CLI's picker is a full-screen dialog: list here
     const held = list.some(x => x.saving) || queued.has(id); // behind one still attaching, it waits too
     if (chat()) chatUi.addPending(id, shown, list.map(x => x.url), held, text, pastes, restore); // shows the box as typed (paste chips), matches the full text
-    inp.value = ''; inp.style.height = ''; syncHl(); hist = -1; order().classList.add('blank'); drawAtt(); saveDraft(id);
+    inp.value = ''; inp.style.height = ''; syncHl(); order().classList.add('blank'); drawAtt(); saveDraft(id);
     if (held) { (queued.get(id) || queued.set(id, []).get(id)).push({ text, list }); if (chat()) renderConversation(); return; }
     // A question open in the CLI: typed text is your own answer, not the highlighted option. Its "Type something" /
     // "Other" choice takes it; with none, Esc closes the question (as in the CLI) and the text goes as a message.
@@ -144,7 +143,6 @@
   }
   const openPicker = () => catalogUi.open({ anchor: order(), insert, focus: () => box().focus() });
 
-  function prompts() { const a = agents.get(selectedId); return ((a && a.prompts) || []).map(p => typeof p === 'string' ? p : (p && p.text) || '').filter(Boolean); }
   // ── @file suggestions: typing @name lists matching files in the agent's folder; ↑/↓ pick, Enter/Tab insert ──
   // …and "/name" anywhere at a word start lists matching commands and skills (the + picker's catalog), as the CLI does.
   let at = null, atSeq = 0; // { kind: '@' | '/', start, q, files, sel } while the list is open
@@ -256,7 +254,7 @@
     if (draftFor === selectedId) return;
     micStop(); // a take belongs to the agent it started on
     if (draftFor != null) drafts.set(draftFor, box().value);
-    { const t = box(); t.value = drafts.has(selectedId) ? drafts.get(selectedId) : loadDraft(selectedId); t.selectionStart = t.selectionEnd = t.value.length; grow(t); } hist = -1; // the caret at the draft's end, to type on closeAt();
+    { const t = box(); t.value = drafts.has(selectedId) ? drafts.get(selectedId) : loadDraft(selectedId); t.selectionStart = t.selectionEnd = t.value.length; grow(t); } // the caret at the draft's end, to type on closeAt();
     draftFor = selectedId;
   }
   box().addEventListener('input', () => saveDraft());
@@ -375,16 +373,10 @@
     if (e.key === 'Escape' && order().classList.contains('busy')) { e.preventDefault(); chatUi.stop(); return; }
     // Esc Esc with an empty box, as in the CLI: its rewind picker (shown over the chat by chat-ui's dialog peek).
     if (e.key === 'Escape' && !t.value) { e.preventDefault(); if (Date.now() - lastEsc < 600) { chatUi.keys(['\x1b', '\x1b']); lastEsc = 0; } else lastEsc = Date.now(); return; }
-    // History, like the CLI: ↑ at the start of the box steps back through your prompts, ↓ comes forward again.
-    const ps = prompts();
-    // On the first line ↑ goes back, on the last line ↓ comes forward; the caret lands at the end of what's recalled.
+    // ↑/↓ scroll the chat (inside a draft of several lines they move the caret until its first / last line).
     const firstLine = !t.value.slice(0, t.selectionStart).includes('\n'), lastLine = !t.value.slice(t.selectionEnd).includes('\n');
-    const recall = (v) => { t.value = v; grow(t); t.selectionStart = t.selectionEnd = v.length; };
-    if (e.key === 'ArrowUp' && firstLine && ps.length && hist < ps.length - 1) {
-      e.preventDefault(); if (hist < 0) draft = t.value;
-      hist++; recall(ps[ps.length - 1 - hist]);
-    } else if (e.key === 'ArrowDown' && hist >= 0 && lastLine) {
-      e.preventDefault(); hist--; recall(hist < 0 ? draft : ps[ps.length - 1 - hist]);
+    if (!e.shiftKey && !e.altKey && ((e.key === 'ArrowUp' && firstLine) || (e.key === 'ArrowDown' && lastLine))) {
+      e.preventDefault(); document.getElementById('conversation').scrollBy({ top: e.key === 'ArrowUp' ? -80 : 80 });
     }
   }
   // Pasted files: a screenshot goes through main like Alt+V in the terminal; an image file copied in Explorer is attached
