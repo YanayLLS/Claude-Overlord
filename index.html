@@ -3428,6 +3428,9 @@ function createXterm(id) {
   terminal.loadAddon(searchAddon);
   terminal.loadAddon(imageAddon);
   terminal.open(el);
+  // Opened in a hidden panel (the chat view) it measures 80x24, and the CLI squeezed to that cuts its question
+  // previews ("✂ 14 lines hidden"): start at the last real terminal size instead (sendResize keeps it).
+  if (!el.clientHeight) { try { const sz = JSON.parse(localStorage.getItem('termSize') || 'null') || { cols: 120, rows: 50 }; if (sz.cols > 0 && sz.rows > 0) terminal.resize(sz.cols, sz.rows); } catch {} }
   // Hebrew/Arabic the right way round. xterm has no bidi; its spans are forced to storage order
   // (bidi-override, CSS above — in Electron a Hebrew run merges into one span and Chromium's own
   // bidi would flip it). Claude Code already writes its prose, the typed prompt, tool-call headers
@@ -3888,6 +3891,7 @@ function sendResize(id, x) {
   const next = { cols: x.terminal.cols, rows: x.terminal.rows };
   if (!shouldSendResize(x._sentSize, next)) return; // term-size-core.js
   x._sentSize = next;
+  if (x.el && x.el.clientHeight) try { localStorage.setItem('termSize', JSON.stringify(next)); } catch {} // a measured size: what a hidden terminal opens at
   clearTimeout(x._resizeTimer);
   x._resizeTimer = setTimeout(() => api.send({ type: 'termResize', id, ...next }), RESIZE_SETTLE_MS);
 }
