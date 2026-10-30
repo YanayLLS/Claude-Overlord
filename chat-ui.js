@@ -481,10 +481,10 @@
     for (let i = first - 1; i >= 0 && i >= first - 12; i--) { const t = cut(/^\s*[│┃]/.test(rows[i]) ? rows[i].replace(/\s*[│┃]\s*/g, ' ') : rows[i]); /* inside a left rule, a wrapped row's own rule ("…Raw│ .glb…") is a space */ if (!t) { if (q.length) break; continue; } if (/[←→]|^\[[ x✓]?\]|^[☐☑✔]/.test(t)) break; q.unshift(t); }
     // A menu with no "Esc to cancel" under it (the review before submitting several answers): open while its options,
     // one marked ❯, are the last thing on screen.
-    const nb = rows.filter(r => r.trim()), menuLast = nb.length > 0 && OPT.test(nb[nb.length - 1]) && rows.some(r => /^\s*[❯›]\s*\d\.\s/.test(r));
+    const nb = rows.filter(r => r.trim()), menuLast = nb.length > 0 && OPT.test(nb[nb.length - 1]) && rows.some(r => /^\s*[❯›>]\s*\d\.\s/.test(r));
     // Several questions at once: the CLI's tab row above them ("← [ ] Scope  ✓ Workspace  ✓ Submit →"), ticked once answered.
-    const tabRow = rows.slice(0, Math.max(0, first)).reverse().find(r => /\bSubmit\b/.test(r) && /\[[ x✓✔]?\]|[☐☒☑✓✔]/.test(r));
-    const tabs = tabRow ? [...tabRow.matchAll(/(\[[ x✓✔×]?\]|[☐☒☑✓✔])\s*(.+?)(?=\s{2,}|\s*(?:\[|[☐☒☑✓✔→])|\s*$)/g)].map(m => ({ done: !/^(\[ ?\]|☐)$/.test(m[1]), label: m[2].trim() })).filter(x => x.label && !/^Submit$/i.test(x.label)) : [];
+    const tabRow = rows.slice(0, Math.max(0, first)).reverse().find(r => /\bSubmit\b/.test(r) && /\[[ x×✓✔]?\]|[☐☒☑✓✔√]/.test(r)); // without TERM the CLI draws "[×] Panel  √ Submit"
+    const tabs = tabRow ? [...tabRow.matchAll(/(\[[ x✓✔×]?\]|[☐☒☑✓✔])\s*(.+?)(?=\s{2,}|\s*(?:\[|[☐☒☑✓✔√→])|\s*$)/g)].map(m => ({ done: !/^(\[ ?\]|☐)$/.test(m[1]), label: m[2].trim() })).filter(x => x.label && !/^Submit$/i.test(x.label)) : [];
     // An answer you already gave is ticked ("Small fix ✔"). A typed one replaces "Type something." in its row, the one
     // just above "Chat about this": it is still that row, holding your text.
     const opts = options.filter(Boolean);
@@ -503,7 +503,7 @@
     for (const r of rows.slice(i0 + 1)) {
       if (!r.trim() || /^\s*Restore the code/i.test(r)) continue;
       if (/\besc to (cancel|exit)/i.test(r)) break;
-      const on = /^\s*❯\s/.test(r), t = r.replace(/^\s*❯?\s*/, '').trim(), last = items[items.length - 1];
+      const on = /^\s*[❯>]\s/.test(r), t = r.replace(/^\s*[❯>]?\s*/, '').trim(), last = items[items.length - 1];
       if (!on && last && !last.meta && /^(\d+ files? changed|\S+\.\w+)(\s+[+-]\d+)+$/.test(t)) { last.meta = t; continue; }
       if (on) focus = items.length;
       items.push({ label: t, meta: '' });
@@ -564,7 +564,8 @@
     let rv = '';
     if (review) {
       const rows = screenOf(selectedId, 40, true) || [], from = rows.findIndex(r => /review your answers/i.test(r)), to = rows.findIndex((r, i) => i > from && /submit your answers/i.test(r));
-      const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.trim()).filter(Boolean) : [];
+      // a question can sit in a left rule and wrap: its next row ("│   tool right away?") continues it
+      const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.replace(/^\s*[│┃]/, '').trim()).filter(Boolean).reduce((acc, r) => { if (acc.length && !/^[●⚠→]/.test(r)) acc[acc.length - 1] += ' ' + r; else acc.push(r); return acc; }, []) : [];
       rv = body.length ? `<div class="ask-review">${body.map(r => /^⚠/.test(r) ? `<div class="warn">${escH(r.replace(/^⚠\s*/, ''))}</div>` : /^→/.test(r) ? `<div class="ans">${escH(r.replace(/^→\s*/, ''))}</div>` : `<div class="rq">${escH(r.replace(/^●\s*/, ''))}</div>`).join('')}</div>` : '';
     }
     return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div></div>`
@@ -1334,7 +1335,7 @@
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
   // Option k of an open question: its number key, as in the terminal, so it lands wherever the CLI's cursor sits.
   // A multi-select box ("[ ] Postgres") only toggles and "Type something" waits for typing: those go to the terminal.
-  const oneKey = (o) => !/^\s*(\[[ x✓✔]?\]|[☐☑◯◉○●])/i.test(o) && !/^type something/i.test(o);
+  const oneKey = (o) => !/^\s*(\[[ x×✓✔√]?\]|[☐☑◯◉○●])/i.test(o) && !/^type something/i.test(o);
   const quickOpts = (id) => { const o = menuOptions(id); return o.every(oneKey) ? o : o.some(x => !oneKey(x) && /^\s*(\[|[☐☑◯◉○●])/.test(x)) ? [] : o.filter(oneKey); };
   function pickOption(id, k) {
     const s = screenAsk(id), so = s.options[k];
@@ -1414,7 +1415,7 @@
       }
       else if (act.dataset.act === 'ask-submit') { // the CLI's Submit row sits under the boxes: go there, Enter
         const s = screenAsk(selectedId), last = s.options.map(o => isBox(o.label)).lastIndexOf(true);
-        const onSubmit = (screenOf(selectedId, 30) || []).some(r => /^\s*[❯›]\s*Submit\s*$/.test(r));
+        const onSubmit = (screenOf(selectedId, 30) || []).some(r => /^\s*[❯›>]\s*Submit\s*$/.test(r));
         const d = onSubmit ? 0 : last + 1 - askFocus(s); if (last < 0) return;
         keys(arrowKeys(d).concat(['\r'])); askAhead = null; setTimeout(rerender, Math.abs(d) * 70 + 400);
       }
