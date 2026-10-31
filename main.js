@@ -3135,7 +3135,8 @@ async function fixChat(msg) {
   const a = agents.get(msg.id); if (!a || !mainWindow) return;
   const dir = path.join(os.tmpdir(), 'overlord-fixchat', String(Date.now())); fs.mkdirSync(dir, { recursive: true });
   const f = (n) => path.join(dir, n);
-  fs.writeFileSync(f('chat.png'), (await mainWindow.webContents.capturePage(msg.rect)).toPNG());
+  const z = mainWindow.webContents.getZoomFactor(), r = msg.rect; // rect is CSS px, capturePage wants DIP (app zoom)
+  fs.writeFileSync(f('chat.png'), (await mainWindow.webContents.capturePage({ x: Math.round(r.x * z), y: Math.round(r.y * z), width: Math.round(r.width * z), height: Math.round(r.height * z) })).toPNG());
   const page = `<!doctype html><meta charset="utf-8"><body style="margin:0;overflow:hidden;background:${msg.bg}"><pre style="margin:0;padding:8px;display:inline-block;color:${msg.fg};font:13px/1.2 'Cascadia Mono',Consolas,monospace">${msg.cli || ''}</pre></body>`;
   fs.writeFileSync(f('cli.html'), page); fs.writeFileSync(f('cli.txt'), msg.cliText || ''); fs.writeFileSync(f('chat.html'), msg.chatHtml || '');
   const w = new BrowserWindow({ show: false, width: Math.ceil((msg.cols || 120) * 8 + 24), height: Math.ceil((msg.rows || 40) * 15.6 + 24), webPreferences: { offscreen: true } });
@@ -3149,7 +3150,9 @@ async function fixChat(msg) {
     `Look at both pictures and list every difference: missing, extra or wrong text, state, options, colours, layout. Find each one's root cause in the renderer (chat-ui.js, chat-core.js, timeline-core.js, chat.css, index.html) and fix it so this case renders like the terminal from now on. Pure logic gets a test in chat-core.test.js or timeline-core.test.js.`,
     `That agent is live: never type into, resume or fork its session. Other agents edit this repo: commit only your own lines, bump package.json, don't push.`,
   ].filter(Boolean).join('\n');
-  createAgent(APP_DIR, '\x1b[200~' + prompt + '\x1b[201~');
+  fs.writeFileSync(f('prompt.md'), prompt);
+  // argPrompt: claude submits it at boot - a prompt typed into a warm spare got lost. Shell-safe: no quotes, tmp path has no spaces.
+  createAgent(APP_DIR, null, `Read ${p('prompt.md')} and do what it says.`);
 }
 
 async function startFixAgent(planFor, target) {
