@@ -4389,7 +4389,7 @@ api.on((msg) => {
     // write() is async: the button must be recomputed after the data lands, or baseY is stale.
     x.terminal.write(msg.data, () => {
       if (atBottom) x.terminal.scrollToBottom();
-      if (msg.id === selectedId) updateScrollBtn();
+      if (msg.id === selectedId) { updateScrollBtn(); window.chatUi && chatUi.onTerm(msg.id); }
     });
     const ag = agents.get(msg.id);
     if (ag && ag.dead) { ag.dead = null; if (msg.id === selectedId) updateDeadOverlay(); scheduleRender(); } // terminal is talking again

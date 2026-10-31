@@ -1379,11 +1379,11 @@
     const rw = e.target.closest('[data-rw], [data-rwx]'); // rewind card: a point, or Cancel (Esc, as in the CLI)
     if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
-    if (tab) { askTab(+tab.dataset.tab - +tab.parentElement.dataset.on); return; }
+    if (tab) { if (askTab(+tab.dataset.tab - +tab.parentElement.dataset.on)) for (const t of tab.parentElement.children) t.classList.toggle('on', t === tab); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
     if (pick && e.target.closest('.ask-in')) return; // typing an answer in it
     // A box of a pick-several question: its number toggles it, as in the CLI; the card stays for the rest and Submit.
-    if (pick && selectedId != null && isBox(menuOptions(selectedId)[+pick.dataset.pick])) { keys([String(+pick.dataset.pick + 1)]); setTimeout(rerender, 350); return; }
+    if (pick && selectedId != null && isBox(menuOptions(selectedId)[+pick.dataset.pick])) { keys([String(+pick.dataset.pick + 1)]); const c = pick.querySelector('.chk'); if (c) { c.classList.toggle('on'); c.innerHTML = c.classList.contains('on') ? ICON.check : ''; } setTimeout(rerender, 350); return; }
     // "Type something": the row becomes where you type, as in the CLI (its cursor goes there too).
     if (pick && selectedId != null && /^type something/i.test(menuOptions(selectedId)[+pick.dataset.pick] || '')) { askMove(+pick.dataset.pick); askFocusIn = true; rerender(); return; }
     if (pick && selectedId != null) { if ((stillWaiting(selectedId) || screenAsk(selectedId).dialog) && !pick.closest('.picked-card') && pickOption(selectedId, +pick.dataset.pick)) { pick.classList.add('picked'); pick.closest('.card')?.classList.add('picked-card'); } return; }
@@ -1955,5 +1955,8 @@
 
   try { if (localStorage.getItem('chatSplit') === '1') { document.getElementById('term').classList.add('split'); document.getElementById('hdr-split')?.classList.add('on'); } } catch {}
 
-  window.chatUi = { sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  // The CLI repainted under an open question card: redraw it next frame, not on a timer (clicks felt slow).
+  let askTick = 0;
+  const onTerm = (id) => { if (id === selectedId && !askTick && document.querySelector('#conversation .card.ask')) askTick = requestAnimationFrame(() => { askTick = 0; rerender(); }); };
+  window.chatUi = { onTerm, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
