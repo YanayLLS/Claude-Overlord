@@ -290,4 +290,7 @@ function cellsHtml(buf, from, to, theme = {}) {
   return out.join('\n');
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, wavBytes, liveReply, screenDialog, undoEdits };
+// The CLI's "[Crashed — auto-resuming 1/3...]" while Overlord restarts a crashed Claude; '' otherwise.
+const crashLine = (a) => a && a.crashed === 'resuming' ? `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…` : '';
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, wavBytes, liveReply, screenDialog, undoEdits };

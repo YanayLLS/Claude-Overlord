@@ -759,6 +759,8 @@
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${termHtml(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
+    // Shown even when the turn had ended: the transcript can't say Claude died at the prompt.
+    if (crashLine(a)) return h + `<div class="working crash">${ICON.alert}<span>${escH(crashLine(a))}</span></div>`;
     if (a.compacting) return h + `<div class="working">${SPARK}<span class="shimmer">Compacting conversation…</span></div>`;
     if (st === 'active' || st === 'resuming') {
       // The CLI's own playful verb ("Cogitating…") when it has one; elapsed; the Esc hint. The call in flight already

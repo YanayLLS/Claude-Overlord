@@ -152,3 +152,10 @@ test('a terminal buffer pictured as HTML: colours, bold, inverse, wide character
   assert.strictEqual(cellsHtml(buf, 0, 2, { red: '#f00', background: '#000', foreground: '#ccc' }),
     '<span style="color:#f00;font-weight:bold">&gt;</span> a&lt;中\n<span style="color:#000;background:#ccc">S</span><span style="color:#112233">x</span>');
 });
+
+test('a Claude being auto-resumed after a crash reads like the CLI line', () => {
+  const { crashLine } = require('./chat-core');
+  assert.strictEqual(crashLine({ crashed: 'resuming', crashCount: 1, crashMax: 3 }), 'Crashed — auto-resuming 1/3…');
+  assert.strictEqual(crashLine({ crashed: 'fatal', crashCount: 3, crashMax: 3 }), '');
+  assert.strictEqual(crashLine({ crashed: null }), '');
+});
