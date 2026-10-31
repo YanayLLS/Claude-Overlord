@@ -960,7 +960,8 @@
         + `<div class="vm-row"><span>Text size</span><button type="button" data-z="-1" aria-label="Smaller">A−</button><b>${Math.round(zoom * 100)}%</b><button type="button" data-z="1" aria-label="Larger">A+</button></div>`
         + `<button type="button" class="vm-toggle" role="switch" aria-checked="${split}" data-split="1"><span>Terminal beside the chat</span><i class="${split ? 'on' : ''}"></i></button>`
         + `<button type="button" class="vm-toggle" aria-expanded="${keysOpen}" data-keys-list="1"><span>Keyboard shortcuts</span>${ICON.chev}</button>`
-        + (keysOpen ? SHORTCUTS.map(([k, v]) => `<div class="vm-k"><span>${escH(v)}</span><kbd>${escH(k)}</kbd></div>`).join('') : '');
+        + (keysOpen ? SHORTCUTS.map(([k, v]) => `<div class="vm-k"><span>${escH(v)}</span><kbd>${escH(k)}</kbd></div>`).join('') : '')
+        + `<div class="vm-sep"></div><button type="button" class="vm-toggle" data-fixchat="1" title="An agent compares this chat with its terminal and fixes the renderer"><span>Fix chat</span>${ICON.chev}</button>`;
     };
     draw();
     m.addEventListener('click', (e) => {
@@ -977,6 +978,7 @@
       const ag = e.target.closest('[data-agent]'); if (ag) { closeViewMenu(); focusAgent(+ag.dataset.agent); return; }
       if (e.target.closest('[data-split]')) { toggleSplit(); draw(); return; }
       if (e.target.closest('[data-keys-list]')) { keysOpen = !keysOpen; draw(); return; }
+      if (e.target.closest('[data-fixchat]')) { closeViewMenu(); fixChat(); return; }
       const b = e.target.closest('[data-z]'); if (!b) return; const i = Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom) + +b.dataset.z)); zoom = ZOOMS[i] || 1; try { localStorage.setItem('chatZoom', zoom); } catch {} applyZoom(); draw();
     });
     // ↑/↓ move between the menu's buttons, Home/End jump to the ends
@@ -1001,6 +1003,19 @@
     m.querySelector('button')?.focus();
   }
   function closeViewMenu() { const m = document.getElementById('chat-view-menu'); if (m) { m._close?.(); m.remove(); } }
+  // Fix chat: this chat as shown, and its terminal pictured from its buffer (its panel stays hidden), go to a new
+  // agent in Overlord's own repo that finds why they differ and fixes the renderer (main.js fixChat).
+  function fixChat() {
+    const id = selectedId, x = xterms.get(id), conv = document.getElementById('conversation');
+    if (!x || !conv) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => { // the menu is gone from the picture
+      const b = x.terminal.buffer.active, r = conv.getBoundingClientRect(), th = x.terminal.options.theme || {};
+      api.send({ type: 'fixChat', id,
+        rect: { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
+        cli: cellsHtml(b, b.baseY, b.baseY + x.terminal.rows, th), bg: th.background || '#000', fg: th.foreground || '#ccc', cols: x.terminal.cols, rows: x.terminal.rows,
+        cliText: (screenOf(id, 400) || []).join('\n'), chatHtml: conv.outerHTML.slice(-500000) });
+    }));
+  }
 
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
   // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.

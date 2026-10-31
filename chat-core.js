@@ -265,4 +265,29 @@ function undoEdits(files, edits) {
   return { files: out };
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, wavBytes, liveReply, screenDialog, undoEdits };
+// Rows [from, to) of an xterm buffer as coloured HTML, the way the terminal draws them (Fix chat pictures the CLI from
+// this while its panel is hidden). theme: xterm's ({ red, brightRed, …, foreground, background }).
+function cellsHtml(buf, from, to, theme = {}) {
+  const names = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+  const pal = [...names, ...names.map(n => 'bright' + n[0].toUpperCase() + n.slice(1))].map(n => theme[n] || '#888');
+  const c256 = (n) => { if (n < 16) return pal[n]; if (n > 231) { const v = 8 + (n - 232) * 10; return `rgb(${v},${v},${v})`; } n -= 16; const s = (v) => v ? 55 + v * 40 : 0; return `rgb(${s(Math.floor(n / 36))},${s(Math.floor(n / 6) % 6)},${s(n % 6)})`; };
+  const col = (rgb, p, v) => rgb ? '#' + v.toString(16).padStart(6, '0') : p ? c256(v) : '';
+  const out = [];
+  for (let y = from; y < to; y++) {
+    const line = buf.getLine(y); if (!line) continue;
+    let row = '', key = '', run = '';
+    const flush = () => { if (run) row += key ? `<span style="${key}">${escHtml(run)}</span>` : escHtml(run); run = ''; };
+    for (let x = 0; x < line.length; x++) {
+      const c = line.getCell(x); if (!c || !c.getWidth()) continue; // the second half of a wide character
+      let fg = col(c.isFgRGB(), c.isFgPalette(), c.getFgColor()), bg = col(c.isBgRGB(), c.isBgPalette(), c.getBgColor());
+      if (c.isInverse()) [fg, bg] = [bg || theme.background || '#000', fg || theme.foreground || '#ccc'];
+      const k = [fg && 'color:' + fg, bg && 'background:' + bg, c.isBold() && 'font-weight:bold', c.isDim() && 'opacity:.6', c.isItalic() && 'font-style:italic', c.isUnderline() && 'text-decoration:underline'].filter(Boolean).join(';');
+      if (k !== key) { flush(); key = k; }
+      run += c.getChars() || ' ';
+    }
+    flush(); out.push(row);
+  }
+  return out.join('\n');
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, wavBytes, liveReply, screenDialog, undoEdits };

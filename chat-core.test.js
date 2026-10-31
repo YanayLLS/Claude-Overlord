@@ -143,3 +143,12 @@ test('terminal text keeps its colours: ANSI codes become spans, other control co
   assert.strictEqual(termHtml('- a list item\n+ not a diff'), '- a list item\n+ not a diff'); // no hunk: plain
   assert.strictEqual(termHtml('+ added\n  kept', { diff: true }), '<span class="d-add">+ added</span>\n  kept');
 });
+
+test('a terminal buffer pictured as HTML: colours, bold, inverse, wide characters once', () => {
+  const { cellsHtml } = require('./chat-core');
+  const cell = (ch, o = {}) => ({ getWidth: () => o.w ?? 1, getChars: () => ch, isFgRGB: () => !!o.rgb, isFgPalette: () => o.fg != null, getFgColor: () => o.rgb ?? o.fg ?? 0, isBgRGB: () => false, isBgPalette: () => false, getBgColor: () => 0, isInverse: () => !!o.inv, isBold: () => !!o.b, isDim: () => false, isItalic: () => false, isUnderline: () => false });
+  const row = (cells) => ({ length: cells.length, getCell: (x) => cells[x] });
+  const buf = { getLine: (y) => [row([cell('>', { fg: 1, b: true }), cell(' '), cell('a<'), cell('中', { w: 2 }), cell('', { w: 0 })]), row([cell('S', { inv: true }), cell('x', { rgb: 0x112233 })])][y] };
+  assert.strictEqual(cellsHtml(buf, 0, 2, { red: '#f00', background: '#000', foreground: '#ccc' }),
+    '<span style="color:#f00;font-weight:bold">&gt;</span> a&lt;中\n<span style="color:#000;background:#ccc">S</span><span style="color:#112233">x</span>');
+});

@@ -3127,6 +3127,31 @@ async function fixActionRun(run) { return startFixAgent(fixRunPlan, run); }
 // pushes fixes to the PR until its checks are green (actions-core.js fixPrPlan).
 async function fixPr(pr) { return startFixAgent(fixPrPlan, pr); }
 
+// Fix chat (the chat's ⋯ menu): the chat as shown and its terminal (pictured offscreen from the renderer's buffer
+// HTML, so the user sees nothing) are saved, and a new agent in Overlord's repo finds why they differ and fixes the
+// renderer.
+async function fixChat(msg) {
+  if (app.isPackaged) return send({ type: 'toast', text: 'Fix chat needs Overlord run from its source checkout' });
+  const a = agents.get(msg.id); if (!a || !mainWindow) return;
+  const dir = path.join(os.tmpdir(), 'overlord-fixchat', String(Date.now())); fs.mkdirSync(dir, { recursive: true });
+  const f = (n) => path.join(dir, n);
+  fs.writeFileSync(f('chat.png'), (await mainWindow.webContents.capturePage(msg.rect)).toPNG());
+  const page = `<!doctype html><meta charset="utf-8"><body style="margin:0;overflow:hidden;background:${msg.bg}"><pre style="margin:0;padding:8px;display:inline-block;color:${msg.fg};font:13px/1.2 'Cascadia Mono',Consolas,monospace">${msg.cli || ''}</pre></body>`;
+  fs.writeFileSync(f('cli.html'), page); fs.writeFileSync(f('cli.txt'), msg.cliText || ''); fs.writeFileSync(f('chat.html'), msg.chatHtml || '');
+  const w = new BrowserWindow({ show: false, width: Math.ceil((msg.cols || 120) * 8 + 24), height: Math.ceil((msg.rows || 40) * 15.6 + 24), webPreferences: { offscreen: true } });
+  try { await w.loadFile(f('cli.html')); await new Promise(r => setTimeout(r, 300)); fs.writeFileSync(f('cli.png'), (await w.webContents.capturePage()).toPNG()); } finally { w.destroy(); }
+  const p = (n) => f(n).replace(/\\/g, '/');
+  const prompt = [
+    `Overlord's chat view renders agent "${a.title || a.agentName || 'Agent'}" differently from its terminal. Find why and fix the renderer.`,
+    `- Terminal (the truth): ${p('cli.png')}, its text (last 400 rows): ${p('cli.txt')}`,
+    `- Chat view as shown: ${p('chat.png')}, its DOM: ${p('chat.html')}`,
+    a.jsonlFile ? `- Transcript: ${a.jsonlFile.replace(/\\/g, '/')}` : '',
+    `Look at both pictures and list every difference: missing, extra or wrong text, state, options, colours, layout. Find each one's root cause in the renderer (chat-ui.js, chat-core.js, timeline-core.js, chat.css, index.html) and fix it so this case renders like the terminal from now on. Pure logic gets a test in chat-core.test.js or timeline-core.test.js.`,
+    `That agent is live: never type into, resume or fork its session. Other agents edit this repo: commit only your own lines, bump package.json, don't push.`,
+  ].filter(Boolean).join('\n');
+  createAgent(APP_DIR, '\x1b[200~' + prompt + '\x1b[201~');
+}
+
 async function startFixAgent(planFor, target) {
   // The last actions poll already walked every checkout; rescan only if it missed this repo.
   const wts = (settings.worktrees || []).map(w => w.path);
@@ -4370,6 +4395,7 @@ function handleIpc(msg) {
   switch (msg.type) {
     case 'continueInterrupted': continueInterrupted(msg.ids || []); break;
     case 'createAgent': createAgent(msg.cwd, msg.prompt, undefined, !!msg.prefill); break;
+    case 'fixChat': fixChat(msg).catch(e => { flog('fixChat failed:', e); send({ type: 'toast', text: 'Fix chat failed: ' + (e.message || 'error') }); }); break;
     case 'listBranches': {
       wt.listBranches(msg.repo)
         .then(branches => send({ type: 'branchList', repo: msg.repo, branches, error: null }))
