@@ -165,3 +165,13 @@ test('the mic hint is the project and the code-ish words on screen, newest first
   assert.strictEqual(dictVocab('overlord', 'Fix the bug in chat-composer.js then useState and the API. See https://x.io/a_b now. chat-composer.js again'), 'overlord, chat-composer.js, API, useState');
   assert.strictEqual(dictVocab('', 'nothing here'), '');
 });
+
+test('ToolSearch reads as the CLI shows it: Calling <server>, and its folded screen line is no live reply', () => {
+  const { liveReply } = require('./chat-core');
+  const q = 'select:mcp__overlord-browser__browser_eval,mcp__overlord-browser__browser_screenshot';
+  assert.deepStrictEqual(toolView({ name: 'ToolSearch', args: { query: q } }, true), { kind: 'tool', verb: 'Calling', target: 'overlord-browser', mono: false });
+  assert.strictEqual(toolView({ name: 'ToolSearch', args: { query: 'select:Monitor' } }).target, 'Monitor');
+  const screen = ['> [Image #4]  now i open it', '  ⎿  [Image #4]', '', '● Calling overlord-browser… (ctrl+o to expand)', '', '✽ Processing… (16s · ↓ 753 tokens)'];
+  assert.strictEqual(liveReply(screen), '');
+  assert.strictEqual(liveReply(['● Read 3 files (ctrl+o to expand)', '✽ Processing… (2s)']), '');
+});

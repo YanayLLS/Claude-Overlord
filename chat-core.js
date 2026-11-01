@@ -23,6 +23,8 @@ function toolView(ev, running) {
     case 'AskUserQuestion': return { kind: 'ask', verb: v('Asked', 'Asking'), target: a.question || '', mono: false };
     case 'ExitPlanMode': return { kind: 'plan', verb: v('Proposed a plan', 'Proposing a plan'), target: '', mono: false };
     case 'Artifact': return a.title || a.file_path ? { kind: 'artifact', verb: v('Published', 'Publishing'), target: a.title || baseName(a.file_path), mono: !a.title } : { kind: 'artifact', verb: v('Used Artifacts', 'Using Artifacts'), target: a.action || '', mono: false };
+    // Loading deferred tools: the CLI says "Calling overlord-browser…" (the MCP servers named in "select:…"), not ToolSearch.
+    case 'ToolSearch': { const sv = [...new Set([...String(a.query || '').matchAll(/mcp__([^_]+(?:_[^_]+)*?)__/g)].map(m => m[1]))]; return { kind: 'tool', verb: v('Called', 'Calling'), target: sv.join(', ') || String(a.query || '').replace(/^select:/, ''), mono: false }; }
     case 'Skill': return { kind: 'tool', verb: v('Used skill', 'Using skill'), target: a.skill || '', mono: true };
     default: return { kind: 'tool', verb: n.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '').replace(/_/g, ' ') || 'Tool', target: '', mono: false };
   }
@@ -176,6 +178,8 @@ function liveReply(lines) {
   if (b < 0) return '';
   const first = lines[b].replace(/^\s*[●⏺]\s+/, '');
   if (/^[A-Z][\w-]*(\(|$)/.test(first)) return ''; // "● Bash(…)", "● Read(…)": a call, its row is in the chat already
+  // "● Calling overlord-browser… (ctrl+o to expand)", "● Read 3 files (ctrl+o to expand)": calls the CLI folded into one line
+  if (/\(ctrl\+o to expand\)\s*$/.test(first)) return '';
   const body = [first, ...lines.slice(b + 1, s).map(l => l.replace(/^ {2}/, ''))];
   while (body.length && !body[body.length - 1].trim()) body.pop();
   return body.join('\n').trim();

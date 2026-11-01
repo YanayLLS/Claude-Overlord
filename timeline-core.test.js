@@ -147,3 +147,20 @@ test('the CLI\'s recap, notices and what a compaction restored show as notes', (
   assert.deepStrictEqual(parse({ type: 'attachment', attachment: { type: 'file', displayPath: 'a\b.ts', content: { file: { numLines: 149 } } } }), [{ type: 'note', ts: null, kind: 'sub', text: 'Read a\b.ts (149 lines)' }]);
   assert.deepStrictEqual(parse({ type: 'attachment', attachment: { type: 'invoked_skills', skills: [{ name: 'pr-green' }] } }), [{ type: 'note', ts: null, kind: 'sub', text: 'Skills restored (pr-green)' }]);
 });
+
+test('freshUsage: one reply split across records is counted once', () => {
+  const { freshUsage } = require('./timeline-core');
+  const seen = new Set(), msg = { id: 'msg_1', usage: { output_tokens: 617 } };
+  assert.deepStrictEqual(freshUsage(msg, seen), { output_tokens: 617 });
+  assert.strictEqual(freshUsage({ ...msg }, seen), null);
+  assert.strictEqual(freshUsage({ usage: { output_tokens: 5 } }, seen).output_tokens, 5); // no id: counted
+  assert.strictEqual(freshUsage({ id: 'x' }, seen), null);
+});
+
+test('watchedEnd: a full read stops where the live watcher is, so no line reaches the chat twice', () => {
+  const { watchedEnd } = require('./timeline-core');
+  assert.strictEqual(watchedEnd(1000, 900, ''), 900);
+  assert.strictEqual(watchedEnd(1000, 900, '{"a":"é"'), 900 - 9); // partial line, in bytes
+  assert.strictEqual(watchedEnd(1000, 0, ''), 1000); // watcher not started
+  assert.strictEqual(watchedEnd(500, 900, ''), 500); // file replaced
+});

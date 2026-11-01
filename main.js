@@ -1216,15 +1216,17 @@ function getFullTimeline(id) {
   const a = agents.get(id);
   if (!a || !a.jsonlFile || !fs.existsSync(a.jsonlFile)) return [];
   try {
-    const st = fs.statSync(a.jsonlFile), c = tlCache.get(id);
-    if (c && c.file === a.jsonlFile && c.size === st.size && c.mtimeMs === st.mtimeMs) return c.events;
+    // Only what the live watcher has read: the lines after it reach the chat as timelineEvents, so reading them here too
+    // showed them twice (a pasted image appeared two times).
+    const st = fs.statSync(a.jsonlFile), c = tlCache.get(id), end = timelineCore.watchedEnd(st.size, a.fileOffset, a.lineBuffer);
+    if (c && c.file === a.jsonlFile && c.size === end && c.mtimeMs === st.mtimeMs) return c.events;
     let events = [];
     for (let want = 16 << 20; ; want *= 4) {
-      const from = Math.max(0, st.size - want);
-      events = timelineFrom(readRange(a.jsonlFile, from, st.size), from > 0);
+      const from = Math.max(0, end - want);
+      events = timelineFrom(readRange(a.jsonlFile, from, end), from > 0);
       if (!from || events.length >= TIMELINE_MAX_EVENTS) break;
     }
-    tlCache.set(id, { file: a.jsonlFile, size: st.size, mtimeMs: st.mtimeMs, events });
+    tlCache.set(id, { file: a.jsonlFile, size: end, mtimeMs: st.mtimeMs, events });
     return events;
   } catch { return []; }
 }
@@ -1553,11 +1555,11 @@ function restoreAgents(state) {
       if (!entry.stats && fs.existsSync(agent.jsonlFile)) {
         try {
           const content = fs.readFileSync(agent.jsonlFile, 'utf-8');
-          const lines = content.split('\n').filter(l => l.trim());
+          const lines = content.split('\n').filter(l => l.trim()), seenU = new Set();
           for (const line of lines) {
             try {
               const r = JSON.parse(line);
-              if (r.type === 'assistant' && r.message?.usage) {
+              if (r.type === 'assistant' && timelineCore.freshUsage(r.message, seenU)) {
                 if (r.message.model) { agent.stats.modelFamily = modelFamily(r.message.model); agent.stats.model = r.message.model; }
                 if (r.effort) agent.stats.effort = r.effort;
                 const u = r.message.usage;
@@ -2211,7 +2213,7 @@ function parseLine(id, line) {
       // Extract usage/model regardless of content format (matches restore logic)
       if (r.message?.model) { a.stats.modelFamily = modelFamily(r.message.model); a.stats.model = r.message.model; }
       if (r.effort) a.stats.effort = r.effort; // Claude Code stamps the live /effort level on each assistant entry
-      const u = r.message?.usage;
+      const u = timelineCore.freshUsage(r.message, a._usageIds ||= new Set());
       if (u) { a.stats.inTok += u.input_tokens || 0; a.stats.outTok += u.output_tokens || 0; a.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); a.stats.cacheTok += u.cache_creation_input_tokens || 0; a.stats.cacheRead += u.cache_read_input_tokens || 0; send({ type: 'stats', id, stats: a.stats }); }
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {

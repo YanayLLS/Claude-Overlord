@@ -167,4 +167,18 @@ function branches(lines) {
 }
 const activeLines = (lines) => branches(lines).lines;
 
-module.exports = { parseLineForTimeline, toolArgs, activeLines, branches, isPromptRec };
+// One API reply is written as several records (thinking, text, each tool call), each repeating the reply's usage:
+// counted once per message id. Returns the usage to add, or null.
+function freshUsage(msg, seen) {
+  const u = msg && msg.usage; if (!u) return null;
+  if (msg.id) { if (seen.has(msg.id)) return null; seen.add(msg.id); }
+  return u;
+}
+
+// Where the live watcher has read a transcript up to (its partial last line excluded): a full read stops there.
+function watchedEnd(size, fileOffset, lineBuffer) {
+  if (!(fileOffset > 0) || fileOffset > size) return size;
+  return Math.max(0, fileOffset - Buffer.byteLength(lineBuffer || ''));
+}
+
+module.exports = { parseLineForTimeline, toolArgs, activeLines, branches, isPromptRec, freshUsage, watchedEnd };
