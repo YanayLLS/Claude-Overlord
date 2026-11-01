@@ -63,11 +63,12 @@ function serverUrl(dir, onProgress) {
   return s.url;
 }
 
-async function transcribe(dir, wav, onProgress) {
+async function transcribe(dir, wav, onProgress, prompt) { // prompt: the take's text before this stretch, for context
   const url = await serverUrl(dir, onProgress);
   const form = new FormData();
   form.append('file', new Blob([wav], { type: 'audio/wav' }), 'take.wav');
   form.append('response_format', 'text');
+  if (prompt) form.append('prompt', prompt);
   const r = await fetch(url + '/inference', { method: 'POST', body: form });
   if (!r.ok) throw new Error(`speech engine: ${r.status}`);
   return cleanText(await r.text());

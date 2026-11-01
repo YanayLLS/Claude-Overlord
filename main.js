@@ -1065,7 +1065,7 @@ const parseLineForTimeline = (line) => timelineCore.parseLineForTimeline(line, f
 // which goes back as a 'dictation' message for the take's id.
 function dictateTake(msg) {
   const say = (t, text) => send({ type: 'dictation', take: msg.take, t, text });
-  require('./whisper').transcribe(path.join(app.getPath('userData'), 'whisper'), Buffer.from(msg.wav), (text) => say('status', text))
+  require('./whisper').transcribe(path.join(app.getPath('userData'), 'whisper'), Buffer.from(msg.wav), (text) => say('status', text), msg.prompt)
     .then((text) => say('final', text), (e) => say('error', e.message));
 }
 

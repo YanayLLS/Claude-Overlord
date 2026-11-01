@@ -505,13 +505,15 @@
   box().addEventListener('input', syncHl); box().addEventListener('scroll', () => { hl.scrollTop = box().scrollTop; });
   new ResizeObserver(syncHl).observe(box()); new ResizeObserver(syncHl).observe(order()); // chips above push the box down
 
-  // ── Mic: records from the default microphone and writes as you talk. About once a second what you've said since the
-  // last pause goes to whisper on this machine (main.js → whisper.js) and shows live; each pause settles that phrase.
+  // ── Mic: records from the default microphone and writes as you talk. About once a second the whole take so far goes
+  // to whisper on this machine (main.js → whisper.js) and shows live; stopping transcribes the take once more and
+  // settles it. Whisper needs the whole sentence to get words right, so a take is only cut for length: at the first
+  // pause after 20 s (whisper reads 30 s at most), with the text before it passed along as context.
   // The words live in their own stretch of the box, so typing beside them is never overwritten. Click again or Enter
   // stops (what's still being transcribed finishes); Esc stops and drops the unsettled phrase. A take that's still
   // finishing when you switch agent writes into that agent's draft. ──
   const mic = document.getElementById('chat-mic');
-  const RATE = 16000, LOUD = 0.012, PAUSE = 3; // ponytail: fixed loudness gate (RMS) and 3 quiet chunks (~0.75 s) end a phrase
+  const RATE = 16000, LOUD = 0.012, PAUSE = 3; // ponytail: fixed loudness gate (RMS); 3 quiet chunks (~0.75 s) is a pause
   let reqs = 0; const sent = new Map(), finishing = new Set(); // request number → { d, kind, seg }; takes stopped but still writing
   function drawMic() {
     if (!mic) return;
@@ -536,16 +538,16 @@
     t.value = before + mid + after; t.setSelectionRange(ss, se);
     t.dispatchEvent(new Event('input')); // grows the box and redraws its state like typing would
   }
-  function ask(d, kind, from, to) { d.busy = true; sent.set(++reqs, { d, kind, seg: d.seg }); api.send({ type: 'dictate', take: reqs, wav: wavBytes(slice(d, from, to), RATE) }); }
-  function settle(d) { // the phrase so far becomes final; silence alone is dropped
+  function ask(d, kind, from, to, seg) { d.busy = true; sent.set(++reqs, { d, kind, seg }); api.send({ type: 'dictate', take: reqs, wav: wavBytes(slice(d, from, to), RATE), prompt: d.said.slice(-200) }); }
+  function settle(d) { // the stretch so far becomes final; silence alone is dropped
     if (d.speech && d.total - d.from > RATE * 0.3) d.q.push({ from: d.from, to: d.total, seg: d.seg });
     d.seg++; d.from = d.total; d.speech = false; d.quiet = 0;
   }
   function pump(d) {
     if (d.busy) return;
     const f = d.q.shift();
-    if (f) { d.busy = true; sent.set(++reqs, { d, kind: 'final', seg: f.seg }); api.send({ type: 'dictate', take: reqs, wav: wavBytes(slice(d, f.from, f.to), RATE) }); return; }
-    if (d.open && d.speech && d.total - d.from > RATE * 0.5 && Date.now() - d.asked > 700) { d.asked = Date.now(); return ask(d, 'hyp', d.from, d.total); }
+    if (f) return ask(d, 'final', f.from, f.to, f.seg);
+    if (d.open && d.speech && d.total - d.from > RATE * 0.5 && Date.now() - d.asked > 700) { d.asked = Date.now(); return ask(d, 'hyp', d.from, d.total, d.seg); }
     if (!d.open) { finishing.delete(d); drawMic(); }
   }
   async function micStart() {
@@ -561,10 +563,10 @@
         if (!d.open) return;
         const x = new Float32Array(e.inputBuffer.getChannelData(0)); d.chunks.push(x); d.total += x.length;
         let sq = 0; for (const v of x) sq += v * v;
-        if (Math.sqrt(sq / x.length) > LOUD) { d.speech = true; d.quiet = 0; }
-        else if (d.speech && ++d.quiet >= PAUSE) settle(d);
+        if (Math.sqrt(sq / x.length) > LOUD) { d.speech = true; d.quiet = 0; } else d.quiet++;
         if (!d.speech) d.from = Math.max(d.from, d.total - 8192); // keep half a second before the first word
-        if (d.total - d.from > RATE * 20) settle(d); // no pause in 20 s: settle anyway, whisper reads 30 s at most
+        const long = d.total - d.from;
+        if ((long > RATE * 20 && d.quiet >= PAUSE) || long > RATE * 28) settle(d);
         pump(d);
       };
       d.ctx.createMediaStreamSource(d.stream).connect(node); node.connect(d.ctx.destination);
