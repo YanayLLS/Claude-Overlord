@@ -1073,6 +1073,7 @@ function dictateSetup() {
 }
 function dictateTake(msg) {
   const say = (t, text) => send({ type: 'dictation', take: msg.take, t, text });
+  try { fs.writeFileSync(path.join(WHISPER_DIR(), 'last-take.wav'), Buffer.from(msg.wav)); } catch {} // the last take only, to replay when words come out wrong
   require('./whisper').transcribe(WHISPER_DIR(), Buffer.from(msg.wav)).then((text) => say('final', text), (e) => say('error', e.message));
 }
 
