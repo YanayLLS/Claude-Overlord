@@ -651,10 +651,21 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-mic { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin-right: 6px; padding: 0; border: 0; border-radius: 10px; background: none; color: var(--dim); cursor: pointer; clip-path: none; text-transform: none; }
 :root body #chat-mic svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 :root body #chat-mic:hover { background: var(--hover-strong); color: var(--text); }
-:root body #chat-mic.on { color: #fff; background: var(--claude); }
-:root body #chat-mic.live { animation: mic-pulse 1.6s ease-in-out infinite; }
-@keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--claude) 45%, transparent); } 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--claude) 0%, transparent); } }
-@media (prefers-reduced-motion: reduce) { :root body #chat-mic.live { animation: none; } }
+:root body #chat-mic .stop { display: none; fill: currentColor; stroke: none; }
+/* recording: the mic is a stop button (filled square) and the box is a live level meter with a timer */
+:root body #chat-mic.on { color: var(--bg); background: var(--text); }
+:root body #chat-mic.on:hover { background: color-mix(in srgb, var(--text) 85%, var(--bg)); color: var(--bg); }
+:root body #chat-mic.on svg:not(.stop) { display: none; }
+:root body #chat-mic.on .stop { display: block; }
+:root body #chat-mic.busy { pointer-events: none; opacity: .5; }
+:root body #chat-voice { display: none; align-items: center; gap: 12px; height: 26px; padding: 0 4px 0 0; color: var(--text); }
+:root body #chat-voice canvas { flex: 1; min-width: 0; height: 22px; color: var(--text); }
+:root body #chat-voice .t { flex: none; font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+:root body #term-order.voice #chat-voice { display: flex; }
+:root body #term-order.voice textarea { display: none; }
+:root body #term-order.voice-busy #chat-voice canvas { opacity: .3; transition: opacity .3s; }
+:root body #term-order.voice-busy #chat-voice .t { animation: voice-shimmer 1.2s ease-in-out infinite; }
+@keyframes voice-shimmer { 50% { opacity: .4; } }
 /* reply box: a file chip's icon; a known /command or /skill tinted like the CLI */
 :root body #chat-att .att.file .doc-i svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
 :root body #chat-att .att.file { cursor: pointer; }
