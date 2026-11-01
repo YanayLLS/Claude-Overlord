@@ -552,6 +552,7 @@
   }
   async function micStart() {
     const d = dict = { id: selectedId, chunks: [], bars: [], t0: Date.now() };
+    const cv = voice.querySelector('canvas'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); voice.querySelector('.t').textContent = '0:00'; // not the last take's bars
     drawMic(); box().focus();
     try {
       d.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } }); // whisper reads raw speech better than Chrome's cleaned-up version
@@ -560,7 +561,8 @@
       const src = d.ctx.createMediaStreamSource(d.stream), node = d.ctx.createScriptProcessor(4096, 1, 1); // ponytail: deprecated but tiny; AudioWorklet if it goes away
       node.onaudioprocess = (e) => d.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
       d.an = d.ctx.createAnalyser(); d.an.fftSize = 512;
-      src.connect(node); src.connect(d.an); node.connect(d.ctx.destination);
+      const mute = d.ctx.createGain(); mute.gain.value = 0; // the recorder only runs when wired to the speakers; silence that, it hummed
+      src.connect(node); src.connect(d.an); node.connect(mute); mute.connect(d.ctx.destination);
       meter(d);
     } catch (e) { if (dict === d) { dict = null; drawMic(); } showToast('Mic: ' + e.message); }
   }
