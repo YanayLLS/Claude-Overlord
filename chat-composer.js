@@ -3,7 +3,7 @@
 // skills/commands picker, a pasted image goes to the agent's prompt as [Image #N] and shows here as a thumbnail.
 (function () {
   const box = () => document.getElementById('term-order-input');
-  let dict = null; // the mic's take in progress: { id, pre, post, said, live } (see Mic below)
+  let dict = null; // the mic's take while it's recording (see Mic below)
   const order = () => document.getElementById('term-order');
   const chat = () => termTab === 'conversation';
   const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; order().classList.toggle('blank', !t.value.trim()); syncHl(); };
@@ -505,54 +505,89 @@
   box().addEventListener('input', syncHl); box().addEventListener('scroll', () => { hl.scrollTop = box().scrollTop; });
   new ResizeObserver(syncHl).observe(box()); new ResizeObserver(syncHl).observe(order()); // chips above push the box down
 
-  // ── Mic: records a take from the default microphone; click again (or Enter) and whisper on this machine (main.js →
-  // whisper.js) writes it in at the caret. Esc throws the take away. A take still transcribing when you switch agent
-  // lands in that agent's draft. ──
+  // ── Mic: records from the default microphone and writes as you talk. About once a second what you've said since the
+  // last pause goes to whisper on this machine (main.js → whisper.js) and shows live; each pause settles that phrase.
+  // The words live in their own stretch of the box, so typing beside them is never overwritten. Click again or Enter
+  // stops (what's still being transcribed finishes); Esc stops and drops the unsettled phrase. A take that's still
+  // finishing when you switch agent writes into that agent's draft. ──
   const mic = document.getElementById('chat-mic');
-  let takes = 0; const pending = new Map(); // take number → agent id, while whisper works on it
+  const RATE = 16000, LOUD = 0.012, PAUSE = 3; // ponytail: fixed loudness gate (RMS) and 3 quiet chunks (~0.75 s) end a phrase
+  let reqs = 0; const sent = new Map(), finishing = new Set(); // request number → { d, kind, seg }; takes stopped but still writing
   function drawMic() {
     if (!mic) return;
-    mic.classList.toggle('on', !!dict || pending.size > 0); mic.classList.toggle('live', !!dict);
+    mic.classList.toggle('on', !!dict || finishing.size > 0); mic.classList.toggle('live', !!dict);
     mic.setAttribute('aria-pressed', String(!!dict));
-    mic.title = dict ? 'Stop and write it in (Enter) · Esc to discard' : pending.size ? 'Writing what you said…' : 'Dictate (Ctrl+Shift+M)';
+    mic.title = dict ? 'Stop (Enter) · Esc drops the last phrase' : finishing.size ? 'Writing what you said…' : 'Dictate (Ctrl+Shift+M)';
+  }
+  function slice(d, from, to) {
+    const out = new Float32Array(to - from); let o = 0;
+    for (const c of d.chunks) { const s0 = Math.max(from - o, 0), s1 = Math.min(to - o, c.length); if (s1 > s0) out.set(c.subarray(s0, s1), o + s0 - from); o += c.length; if (o >= to) break; }
+    return out;
+  }
+  // Puts the take's words in its stretch of the box (or of its agent's draft when another agent is open).
+  function render(d) {
+    const words = (d.said + ' ' + d.hyp).trim(), here = d.id === selectedId, t = box();
+    const cur = here ? t.value : drafts.has(d.id) ? drafts.get(d.id) : loadDraft(d.id);
+    const before = cur.slice(0, d.at), after = cur.slice(d.at + d.len), full = dictJoin(before, words, after);
+    const mid = full.slice(before.length, full.length - after.length), grew = mid.length - d.len, end = d.at + d.len;
+    d.len = mid.length;
+    if (!here) return drafts.set(d.id, before + mid + after);
+    const [ss, se] = [t.selectionStart, t.selectionEnd].map((p) => p >= end ? p + grew : p);
+    t.value = before + mid + after; t.setSelectionRange(ss, se);
+    t.dispatchEvent(new Event('input')); // grows the box and redraws its state like typing would
+  }
+  function ask(d, kind, from, to) { d.busy = true; sent.set(++reqs, { d, kind, seg: d.seg }); api.send({ type: 'dictate', take: reqs, wav: wavBytes(slice(d, from, to), RATE) }); }
+  function settle(d) { // the phrase so far becomes final; silence alone is dropped
+    if (d.speech && d.total - d.from > RATE * 0.3) d.q.push({ from: d.from, to: d.total, seg: d.seg });
+    d.seg++; d.from = d.total; d.speech = false; d.quiet = 0;
+  }
+  function pump(d) {
+    if (d.busy) return;
+    const f = d.q.shift();
+    if (f) { d.busy = true; sent.set(++reqs, { d, kind: 'final', seg: f.seg }); api.send({ type: 'dictate', take: reqs, wav: wavBytes(slice(d, f.from, f.to), RATE) }); return; }
+    if (d.open && d.speech && d.total - d.from > RATE * 0.5 && Date.now() - d.asked > 700) { d.asked = Date.now(); return ask(d, 'hyp', d.from, d.total); }
+    if (!d.open) { finishing.delete(d); drawMic(); }
   }
   async function micStart() {
-    const d = dict = { id: selectedId, chunks: [] };
-    drawMic(); box().focus();
+    const t = box();
+    const d = dict = { id: selectedId, chunks: [], total: 0, from: 0, seg: 0, speech: false, quiet: 0, q: [], busy: false, asked: 0, open: true, said: '', hyp: '', hypSeg: 0, at: t.selectionStart, len: t.selectionEnd - t.selectionStart };
+    drawMic(); t.focus();
     try {
       d.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (dict !== d) return d.stream.getTracks().forEach((k) => k.stop()); // stopped before the mic opened
-      d.ctx = new AudioContext({ sampleRate: 16000 }); // whisper's rate; the browser resamples
+      d.ctx = new AudioContext({ sampleRate: RATE }); // whisper's rate; the browser resamples
       const node = d.ctx.createScriptProcessor(4096, 1, 1); // ponytail: deprecated but tiny; AudioWorklet if it goes away
-      node.onaudioprocess = (e) => d.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      node.onaudioprocess = (e) => {
+        if (!d.open) return;
+        const x = new Float32Array(e.inputBuffer.getChannelData(0)); d.chunks.push(x); d.total += x.length;
+        let sq = 0; for (const v of x) sq += v * v;
+        if (Math.sqrt(sq / x.length) > LOUD) { d.speech = true; d.quiet = 0; }
+        else if (d.speech && ++d.quiet >= PAUSE) settle(d);
+        if (!d.speech) d.from = Math.max(d.from, d.total - 8192); // keep half a second before the first word
+        if (d.total - d.from > RATE * 20) settle(d); // no pause in 20 s: settle anyway, whisper reads 30 s at most
+        pump(d);
+      };
       d.ctx.createMediaStreamSource(d.stream).connect(node); node.connect(d.ctx.destination);
     } catch (e) { if (dict === d) { dict = null; drawMic(); } showToast('Mic: ' + e.message); }
   }
-  function micStop(discard) {
-    const d = dict; if (!d) return; dict = null;
+  function micStop(drop) {
+    const d = dict; if (!d) return; dict = null; d.open = false;
     if (d.stream) d.stream.getTracks().forEach((k) => k.stop()); if (d.ctx) d.ctx.close();
-    const n = d.chunks.reduce((s, c) => s + c.length, 0);
-    if (!discard && n > 16000 * 0.3) { // under a third of a second is a mis-click
-      const all = new Float32Array(n); let o = 0; for (const c of d.chunks) { all.set(c, o); o += c.length; }
-      pending.set(++takes, d.id); api.send({ type: 'dictate', take: takes, wav: wavBytes(all, 16000) });
-    }
-    drawMic();
+    if (drop) { d.seg++; d.hyp = ''; render(d); } else settle(d);
+    finishing.add(d); pump(d); drawMic();
   }
   function micToggle() { dict ? micStop() : micStart(); }
   function onDictation(m) {
-    const id = pending.get(m.take); if (id === undefined) return;
+    const r = sent.get(m.take); if (!r) return;
     if (m.t === 'status') return showToast(m.text);
-    pending.delete(m.take); drawMic();
-    if (m.t === 'error') return showToast('Mic: ' + m.text);
-    if (!m.text) return showToast('Mic: no words heard');
-    if (id !== selectedId) { drafts.set(id, dictJoin(drafts.has(id) ? drafts.get(id) : loadDraft(id), m.text, '')); return; }
-    const t = box(), pre = t.value.slice(0, t.selectionStart), post = t.value.slice(t.selectionEnd);
-    t.value = dictJoin(pre, m.text, post);
-    const at = t.value.length - post.length; t.setSelectionRange(at, at); t.focus();
-    t.dispatchEvent(new Event('input')); // grows the box and redraws its state like typing would
+    sent.delete(m.take); const d = r.d; d.busy = false;
+    if (m.t === 'error') showToast('Mic: ' + m.text);
+    else if (r.kind === 'final') { d.said = (d.said + ' ' + m.text).trim(); if (d.hypSeg <= r.seg) d.hyp = ''; render(d); }
+    else if (r.seg === d.seg) { d.hyp = m.text; d.hypSeg = r.seg; render(d); } // a guess for a phrase that's since settled is stale
+    pump(d);
   }
   if (mic) mic.addEventListener('click', micToggle);
-  // While recording, Enter writes the take in instead of sending; Esc throws it away.
+  // While recording, Enter stops instead of sending; Esc stops and drops the phrase still being spoken.
   box().addEventListener('keydown', (e) => { if (!dict || (e.key !== 'Escape' && e.key !== 'Enter')) return; e.preventDefault(); e.stopImmediatePropagation(); micStop(e.key === 'Escape'); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 

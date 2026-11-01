@@ -6415,6 +6415,7 @@ const UPDATE_CHECK_MS = 5 * 60 * 1000;
 let _checkUpdates = null, _lastUpdateCheck = 0;
 function checkUpdatesNow() { if (!_checkUpdates) return; _lastUpdateCheck = Date.now(); _checkUpdates(); }
 app.on('before-quit', () => {
+  try { require('./whisper').stop(); } catch {}
   clearTimeout(_spareTimer); dropSpare();
   try { releases.flush(); } catch {} // releases.json writes are debounced 2 s
   if (remoteServer) { try { remoteServer.close(); } catch {} }
