@@ -33,3 +33,9 @@ test('a download resumes from its .part and is refused when the bytes do not mat
     assert.ok(!fs.existsSync(f + '2.part') && !fs.existsSync(f + '2')); // thrown away, so the next try starts clean
   } finally { srv.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('only English, or Hebrew it is sure of, keeps its language; the rest is written as English', () => {
+  const { keepLanguage } = require('./whisper');
+  assert.ok(keepLanguage('english', 0.4) && keepLanguage('hebrew', 0.93) && keepLanguage(undefined));
+  assert.ok(!keepLanguage('hebrew', 0.6) && !keepLanguage('german', 0.99));
+});

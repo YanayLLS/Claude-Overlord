@@ -1,8 +1,8 @@
 // Speech to text for the Chat view's mic. Locally: whisper.cpp. With an NVIDIA GPU it runs the large-v3-turbo model on
-// CUDA (~1.3 GB, once), any language; otherwise small.en on the CPU (~200 MB), English. Both download into userData the
+// CUDA (~1.3 GB, once); otherwise small on the CPU (~200 MB). Both hear English and Hebrew. Both download into userData the
 // first time the mic is used, with progress, resumable, checked against pinned SHA-256s. whisper-server keeps the model
-// loaded, at low priority, for 5 idle minutes. A CUDA build that won't start (driver too old) falls back to the CPU kit
-// for good. With an OpenAI (sk-…) or Groq (gsk_…) key in Settings, takes go to that cloud instead.
+// loaded, at low priority, for 5 idle minutes. A CUDA build that won't start twice running (driver too old, GPU busy)
+// falls back to the CPU kit for a day, then tries the GPU again. With an OpenAI (sk-…) or Groq (gsk_…) key in Settings, takes go to that cloud instead.
 const fs = require('fs'), path = require('path'), os = require('os'), net = require('net'), crypto = require('crypto');
 const { spawn } = require('child_process');
 
@@ -10,12 +10,13 @@ const SYS = (exe) => path.join(process.env.SystemRoot || 'C:\\Windows', 'System3
 const REL = 'https://github.com/ggml-org/whisper.cpp/releases/download/b5454/', HF = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/';
 const KITS = {
   cuda: { bin: 'cuda', zip: REL + 'whisper-bin-win-cuda-12.4.0-x64.zip', zipSha: 'afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a',
-    model: 'ggml-large-v3-turbo-q5_0.bin', modelSha: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2', threads: 4, lang: 'auto' },
-  cpu: { bin: 'cpu', zip: REL + 'whisper-bin-x64.zip', zipSha: '6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb', // ponytail: English-only model; ggml-small-q5_1 if CPU users need Hebrew
-    model: 'ggml-small.en-q5_1.bin', modelSha: 'bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30', threads: Math.min(8, os.availableParallelism ? os.availableParallelism() : os.cpus().length), lang: 'en' },
+    model: 'ggml-large-v3-turbo-q5_0.bin', modelSha: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2', threads: 4 },
+  cpu: { bin: 'cpu', zip: REL + 'whisper-bin-x64.zip', zipSha: '6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb',
+    model: 'ggml-small-q5_1.bin', modelSha: 'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb', threads: Math.min(8, os.availableParallelism ? os.availableParallelism() : os.cpus().length) },
 };
 const GPU = fs.existsSync(SYS('nvidia-smi.exe')); // NVIDIA's driver puts it there
-const kit = (dir) => GPU && !fs.existsSync(path.join(dir, 'cpu-only')) ? KITS.cuda : KITS.cpu;
+const DAY = 24 * 3600 * 1000, cpuOnly = (dir) => { try { return Date.now() - fs.statSync(path.join(dir, 'cpu-only')).mtimeMs < DAY; } catch { return false; } };
+const kit = (dir) => GPU && !cpuOnly(dir) ? KITS.cuda : KITS.cpu;
 const IDLE_MS = 5 * 60 * 1000;
 
 const low = (p) => { try { os.setPriority(p.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch {} return p; };
@@ -68,6 +69,7 @@ function ensure(dir, onProgress = () => {}) {
       fs.rmSync(zip, { force: true });
     }
     if (!installed(dir)) throw new Error('speech engine download is incomplete');
+    fs.rmSync(path.join(dir, 'ggml-small.en-q5_1.bin'), { force: true }); // the English-only model before 1.212.2
     return p;
   })().finally(() => { ready = null; }));
 }
@@ -76,7 +78,7 @@ const freePort = () => new Promise((res, rej) => { const s = net.createServer().
 
 async function start(dir, s, onProgress) {
   const { server: exe, model } = await ensure(dir, onProgress), k = kit(dir), port = await freePort();
-  const proc = s.proc = low(spawn(exe, ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-t', String(k.threads), '-l', k.lang, '-nt'], { windowsHide: true, stdio: 'ignore' }));
+  const proc = s.proc = low(spawn(exe, ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-t', String(k.threads), '-l', 'auto', '-nt'], { windowsHide: true, stdio: 'ignore' }));
   proc.on('exit', () => { if (server === s && s.proc === proc && s.up) server = null; }); // dying while it starts is start()'s to handle (the CPU fallback)
   const url = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 300; i++) { // the model loads in 1-3 s
@@ -93,19 +95,25 @@ function serverUrl(dir, onProgress) {
   clearTimeout(idle); idle = setTimeout(stop, IDLE_MS);
   if (server) return server.url;
   const s = server = { proc: null };
-  s.url = start(dir, s, onProgress).catch((e) => {
-    if (!e.died || kit(dir) !== KITS.cuda) throw e;
-    // The CUDA build won't run here (a driver older than CUDA 12.4): use the CPU kit from now on, and free the GPU kit's space.
-    fs.writeFileSync(path.join(dir, 'cpu-only'), '');
-    for (const f of ['cuda', KITS.cuda.model]) fs.rmSync(path.join(dir, f), { recursive: true, force: true });
-    return start(dir, s, onProgress);
-  });
+  const gpuDied = (e) => e.died && kit(dir) === KITS.cuda;
+  s.url = start(dir, s, onProgress)
+    .catch((e) => { if (!gpuDied(e)) throw e; return start(dir, s, onProgress); }) // once can be the GPU busy for a moment
+    .catch((e) => {
+      if (!gpuDied(e)) throw e;
+      // Twice: the CUDA build won't run here (a driver older than CUDA 12.4, or no VRAM free). The CPU kit for a day; the GPU kit stays.
+      fs.writeFileSync(path.join(dir, 'cpu-only'), '');
+      return start(dir, s, onProgress);
+    });
   s.url.catch(() => { if (server === s) stop(); });
   return s.url;
 }
 
 // Installs if needed and loads the model, so the first take after this is quick.
 const warm = (dir, onProgress) => serverUrl(dir, onProgress).then(() => {});
+
+// Auto-detect is for English and Hebrew. English with an accent can be heard as Hebrew or some third language, so only a
+// sure Hebrew stays Hebrew; the rest is written as English.
+const keepLanguage = (lang, p) => !lang || lang === 'english' || (lang === 'hebrew' && p >= 0.8);
 
 // hint: words whisper can't guess from sound alone (names, files on screen); it spells what it hears their way.
 async function transcribe(dir, wav, hint = '') {
@@ -121,8 +129,7 @@ async function transcribe(dir, wav, hint = '') {
     return r.json();
   };
   let j = await ask();
-  // Auto-detect is for English and Hebrew; an accent heard as some third language means English.
-  if (kit(dir).lang === 'auto' && !/^(english|hebrew)$/.test(j.detected_language || 'english')) j = await ask('en');
+  if (!keepLanguage(j.detected_language, j.detected_language_probability)) j = await ask('en');
   return cleanText(j.text || '', hint);
 }
 
@@ -147,4 +154,4 @@ function remove(dir) {
   return n;
 }
 
-module.exports = { transcribe, transcribeCloud, warm, installed, cleanText, stop, remove, download };
+module.exports = { keepLanguage, transcribe, transcribeCloud, warm, installed, cleanText, stop, remove, download };
