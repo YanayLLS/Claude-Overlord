@@ -260,6 +260,7 @@
   const marksOf = (id) => new Set(allMarks[markKey(id)] || []);
   function toggleMark(ts) { const k = markKey(selectedId), m = marksOf(selectedId); m.has(ts) ? m.delete(ts) : m.add(ts); allMarks[k] = [...m]; try { localStorage.setItem('chatMarks', JSON.stringify(allMarks)); } catch {} rerender(); }
   const KEEP_TURNS = 10;
+  const foldAt = new Map(); let holdFold = null; // id → first event shown last paint; the agent being read scrolled up
   const expanded = new Set(); // agent ids whose earlier turns are open
   function blocks(evs, doneBy, cwd, id) {
     const out = []; let run = [], textAt = -1, turn = null, open = false, lastPrompt = null, lastPromptAt = -1;
@@ -267,8 +268,11 @@
     const seenU = new Set(), once = (e) => e.u && !(e.u.id && (seenU.has(e.u.id) || !seenU.add(e.u.id)));
     const promptsAt = []; evs.forEach((e, k) => { if (e.type === 'prompt') promptsAt.push(k); });
     let start = 0;
-    if (!expanded.has(id) && promptsAt.length > KEEP_TURNS + 2) {
-      start = promptsAt[promptsAt.length - KEEP_TURNS];
+    if (!expanded.has(id) && promptsAt.length > KEEP_TURNS + 2) start = promptsAt[promptsAt.length - KEEP_TURNS];
+    // Scrolled up reading: new turns don't fold the one you're on into "Earlier" (it vanished and the view jumped).
+    if (holdFold === id && foldAt.has(id)) start = Math.min(start, foldAt.get(id));
+    foldAt.set(id, start);
+    if (start) {
       const files = new Set(); let o = 0, cost = 0, m = '';
       const u = { i: 0, o: 0, cr: 0, cw: 0 };
       for (let k = 0; k < start; k++) { const e = evs[k]; if (once(e)) { u.i += e.u.i; u.o += e.u.o; u.cr += e.u.cr; u.cw += e.u.cw; if (e.u.m && e.u.m !== '<synthetic>') m = e.u.m; } if (e.type === 'tool' && e.args && (e.args.old != null || e.args.new != null)) files.add(e.args.file_path || '?'); }
@@ -1077,7 +1081,7 @@
     let list;
     if (!evs) list = ['<div class="chat-empty"><span class="loading"></span></div>'];
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
-    else list = blocks(evs, doneBy, a.cwd, id);
+    else { holdFold = el.dataset.for === String(id) && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40 ? id : null; list = blocks(evs, doneBy, a.cwd, id); }
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
     dockHtml = ''; dockCount = { agents: 0, shells: 0 };
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
@@ -1094,6 +1098,11 @@
     // (else the last reply counted as "just arrived" and a long one parked you at its first line).
     const opening = fresh || (!!evs && el._shown !== id); if (evs) el._shown = id;
     const stuck = !opening && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
+    // Scrolled up reading: the message at the top of the view stays put whatever changes above it (a new turn folds the
+    // oldest into "Earlier", blocks get rebuilt).
+    const keyOf = (n) => n && (n.dataset.i || (n.querySelector('[data-i]') || {}).dataset?.i);
+    let anchor = null;
+    if (stuck) { const top = el.getBoundingClientRect().top; for (const n of thread.children) { const r = n.getBoundingClientRect(); if (r.bottom > top && keyOf(n)) { anchor = { i: keyOf(n), y: r.top }; break; } } }
     const old = el._blocks || [];
     let newReply = null; const changed = []; // only these get the link, image and diagram passes below (a long chat is thousands of nodes)
     for (let k = 0; k < list.length; k++) {
@@ -1107,6 +1116,7 @@
     }
     while (thread.children.length > list.length) thread.lastElementChild.remove();
     el._blocks = list;
+    if (anchor) { const n = [...thread.children].find(c => keyOf(c) === anchor.i); if (n) el.scrollTop += n.getBoundingClientRect().top - anchor.y; }
     // The live tail ticks every second (elapsed, the CLI's verb, agent timers). When only that text changed, swap the
     // text in place: rebuilding would replay the slide-in and restart the spark and shimmer on every tick.
     if (tailEl._h !== tail) {
