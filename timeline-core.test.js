@@ -140,3 +140,10 @@ test('a question keeps each option\'s whole preview, per question', () => {
   const [plain] = parse({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: { questions: [qs[1]] } }] } });
   assert.strictEqual(plain.args.prevs, undefined);
 });
+
+test('the CLI\'s recap, notices and what a compaction restored show as notes', () => {
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'away_summary', content: 'Getting PR green.' }), [{ type: 'note', ts: null, kind: 'recap', text: 'Getting PR green.' }]);
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'informational', content: 'Compacted while idle' }), [{ type: 'note', ts: null, text: 'Compacted while idle' }]);
+  assert.deepStrictEqual(parse({ type: 'attachment', attachment: { type: 'file', displayPath: 'a\b.ts', content: { file: { numLines: 149 } } } }), [{ type: 'note', ts: null, kind: 'sub', text: 'Read a\b.ts (149 lines)' }]);
+  assert.deepStrictEqual(parse({ type: 'attachment', attachment: { type: 'invoked_skills', skills: [{ name: 'pr-green' }] } }), [{ type: 'note', ts: null, kind: 'sub', text: 'Skills restored (pr-green)' }]);
+});

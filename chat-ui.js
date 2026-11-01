@@ -189,6 +189,7 @@
     else if (ev.type === 'command') h = `<div class="msg user" data-i="${i}"><div class="bubble">${tagChips(ev.text)}</div></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
+    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
@@ -307,6 +308,7 @@
       if (t === 'turn') { turn = ev; return; }
       if (t === 'interrupt') { flush(); textAt = -1; open = false; sum = fresh(); } // a stopped turn gets no footer; the next one counts afresh
       if (t === 'prompt' || t === 'command') close();
+      if ((t === 'compact' || t === 'note') && turn) close(); // after a finished turn, its footer comes first, as in the CLI
       // Being edited: the bubble is the editor (the same html every redraw, so typing isn't lost).
       if ((t === 'prompt' || t === 'command') && editing && editing.id === id && editing.i === i) { flush(); out.push(`<div class="msg user editing" data-i="${i}"><textarea class="edit-ta" rows="2" aria-label="Edit your message">${escH(editing.text)}</textarea><div class="edit-btns"><button type="button" data-act="edit-cancel">Cancel</button><button type="button" class="primary" data-act="edit-send">Send</button></div></div>`); return; }
       flush(); out.push(msgHtml(ev, i, cwd));

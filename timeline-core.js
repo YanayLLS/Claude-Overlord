@@ -118,6 +118,12 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     // The CLI's permission mode (bypass / accept edits / plan / ask), for the Chat view's mode chip.
     if (r.type === 'permission-mode' && typeof r.permissionMode === 'string') return [{ type: 'mode', ts, mode: r.permissionMode }];
     if (r.type === 'system' && r.subtype === 'compact_boundary') return [{ type: 'compact', ts }];
+    // Lines the CLI prints between turns: its "※ recap:", a notice ("Compacted while idle…", "x is idle"), and what a
+    // compaction put back ("⎿ Read file (n lines)", "⎿ Skills restored (…)").
+    if (r.type === 'system' && r.subtype === 'away_summary' && r.content) return [{ type: 'note', ts, kind: 'recap', text: cap(String(r.content), 2000) }];
+    if (r.type === 'system' && r.subtype === 'informational' && r.content) return [{ type: 'note', ts, text: cap(String(r.content), 2000) }];
+    if (r.type === 'attachment' && r.attachment?.type === 'file' && r.attachment.displayPath) { const n = r.attachment.content?.file?.numLines; return [{ type: 'note', ts, kind: 'sub', text: `Read ${r.attachment.displayPath}${n ? ` (${n} lines)` : ''}` }]; }
+    if (r.type === 'attachment' && r.attachment?.type === 'invoked_skills' && r.attachment.skills?.length) return [{ type: 'note', ts, kind: 'sub', text: `Skills restored (${r.attachment.skills.map(s => s.name).join(', ')})` }];
     if (r.type === 'system' && r.subtype === 'turn_duration') {
       return [{ type: 'turn', ts, text: `Turn completed (${Math.round((r.durationMs || 0) / 1000)}s)`, ms: r.durationMs || 0 }];
     }
