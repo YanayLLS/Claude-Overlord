@@ -18,7 +18,12 @@ const paths = (dir) => ({ server: path.join(dir, KIT.bin, 'Release', 'whisper-se
 const installed = (dir) => { const p = paths(dir); return fs.existsSync(p.server) && fs.existsSync(p.model); };
 
 // What whisper writes for silence or noise rather than words: "[BLANK_AUDIO]", "(wind blowing)", "[Music]".
-function cleanText(s) { return s.replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim(); }
+// A lone "-" or "..." is silence too, and a line opened with "- " is whisper writing dialogue. Nothing but
+// punctuation left means no words.
+function cleanText(s) {
+  s = s.replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/^\s*[-–—]+\s*/gm, '').replace(/\s+/g, ' ').trim();
+  return /[\p{L}\p{N}]/u.test(s) ? s : '';
+}
 
 // Downloads to file, reporting bytes as they arrive.
 async function download(url, file, onBytes) {
