@@ -625,7 +625,7 @@ function logToRenderer(...args) {
 // the ClickUp API token stays in the main process, only its presence is reported.
 // The header is 44 CSS px; the window buttons Windows draws over it are device px, so scale them with the UI zoom.
 function titleBarOverlay(theme) { return { ...titleBarColors(theme), height: Math.round(44 * (settings.zoom || 100) / 100) }; }
-function publicSettings() { const { clickupToken, prCache, actionsCache, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken }; }
+function publicSettings() { const { clickupToken, dictationKey, prCache, actionsCache, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken, dictationHasKey: !!dictationKey }; }
 function sendFullState() {
   send({ type: 'settings', settings: publicSettings() });
   for (const [p, sv] of devServers) send({ type: 'wtServer', path: p, running: true, port: sv.port, url: sv.url });
@@ -1071,18 +1071,21 @@ const parseLineForTimeline = (line) => timelineCore.parseLineForTimeline(line, f
 
 // The Chat view's mic: the page records a take and sends it here as a 16 kHz WAV; whisper.js turns it into text,
 // which goes back as a 'dictation' message for the take's id. 'dictateSetup' installs the engine the first time (the
-// mic shows its progress) and loads it, so the take after is quick.
+// mic shows its progress) and loads it, so the take after is quick; 'dictateWarm' reloads it as each take starts (it
+// unloads after 5 idle minutes). With a cloud key in Settings (settings.dictationKey) takes go there and nothing installs.
 const WHISPER_DIR = () => path.join(app.getPath('userData'), 'whisper');
 function dictateSetup() {
   const w = require('./whisper');
+  if (settings.dictationKey) return send({ type: 'dictation', setup: true, ready: true });
   if (w.installed(WHISPER_DIR())) { send({ type: 'dictation', setup: true, ready: true }); return w.warm(WHISPER_DIR()).catch(() => {}); } // loads while you talk
   w.warm(WHISPER_DIR(), (pct) => send({ type: 'dictation', setup: true, pct }))
     .then(() => send({ type: 'dictation', setup: true, ready: true }), (e) => send({ type: 'dictation', setup: true, error: e.message }));
 }
 function dictateTake(msg) {
   const say = (t, text) => send({ type: 'dictation', take: msg.take, t, text });
-  try { fs.writeFileSync(path.join(WHISPER_DIR(), 'last-take.wav'), Buffer.from(msg.wav)); } catch {} // the last take only, to replay when words come out wrong
-  require('./whisper').transcribe(WHISPER_DIR(), Buffer.from(msg.wav)).then((text) => say('final', text), (e) => say('error', e.message));
+  const w = require('./whisper'), wav = Buffer.from(msg.wav), hint = String(msg.hint || '').slice(0, 600);
+  try { fs.writeFileSync(path.join(WHISPER_DIR(), 'last-take.wav'), wav); } catch {} // the last take only, to replay when words come out wrong; gone at quit
+  (settings.dictationKey ? w.transcribeCloud(settings.dictationKey, wav, hint) : w.transcribe(WHISPER_DIR(), wav, hint)).then((text) => say('final', text), (e) => say('error', e.message));
 }
 
 // A Chat view prompt with images in place: its text and image paths go into the agent's prompt one after another, so
@@ -4839,6 +4842,8 @@ function handleIpc(msg) {
     case 'chatHides': { const a = agents.get(msg.id); if (a && Array.isArray(msg.hides)) { a.chatHides = msg.hides.filter(r => r && Number.isFinite(r.from) && Number.isFinite(r.until)).slice(-200).map(r => ({ from: r.from, until: r.until })); saveState(); } break; } // what an edit or Esc took out of the chat // leftover text in an agent's CLI box, in turn with its sends
     case 'dictate': dictateTake(msg); break;
     case 'dictateSetup': dictateSetup(); break;
+    case 'dictateWarm': if (!settings.dictationKey && require('./whisper').installed(WHISPER_DIR())) require('./whisper').warm(WHISPER_DIR()).catch(() => {}); break;
+    case 'dictateRemove': { const n = require('./whisper').remove(WHISPER_DIR()); send({ type: 'dictation', setup: true, reset: true, toast: n ? `Speech engine removed (${(n / 1e9).toFixed(1)} GB freed)` : 'Speech engine is not installed' }); break; }
     case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); cliSend.prompt(msg.id, text, +msg.erase || 0, () => markSessionSwitch(msg.id, text)); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
     case 'cliCancel': { // Esc: stops the sends, then the Esc itself once no paste is half-written; the page hears when it's out
       const ag = agents.get(msg.id); if (ag && ag.ptyPerm) { clearPtyPerm(msg.id, ag); ag.permSent = false; send({ type: 'permClear', id: msg.id }); } // as an Esc typed into the terminal does
@@ -5034,6 +5039,7 @@ function handleIpc(msg) {
       if ('worldEnabled' in msg.settings) armClickupTimer();
       if ('remoteControl' in msg.settings) syncRemoteControl();
       if (msg.settings.englishOnFocus) kbdHelper(() => {}); // build the helper now so the next focus switches at once
+      if ('dictationKey' in msg.settings) { settings.dictationKey = String(msg.settings.dictationKey || '').trim() || null; saveState(); send({ type: 'settings', settings: publicSettings() }); send({ type: 'dictation', setup: true, reset: true, toast: settings.dictationKey ? 'Dictation: cloud' : 'Dictation: this computer' }); } // the mic re-checks the engine on its next click
       break;
     case 'uiZoom': // the header scales with the UI, so the native window buttons must too
       settings.zoom = Math.max(60, Math.min(200, Number(msg.zoom) || 100));
@@ -6432,7 +6438,7 @@ const UPDATE_CHECK_MS = 5 * 60 * 1000;
 let _checkUpdates = null, _lastUpdateCheck = 0;
 function checkUpdatesNow() { if (!_checkUpdates) return; _lastUpdateCheck = Date.now(); _checkUpdates(); }
 app.on('before-quit', () => {
-  try { require('./whisper').stop(); } catch {}
+  try { require('./whisper').stop(); fs.rmSync(path.join(WHISPER_DIR(), 'last-take.wav'), { force: true }); } catch {}
   clearTimeout(_spareTimer); dropSpare();
   try { releases.flush(); } catch {} // releases.json writes are debounced 2 s
   if (remoteServer) { try { remoteServer.close(); } catch {} }

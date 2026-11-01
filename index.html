@@ -1351,6 +1351,11 @@ button:focus-visible { outline-offset:0; }
         <span>Switch the keyboard to English when Overlord gets focus (Windows)</span>
       </label>
       <div class="settings-hint">Coming back from a Hebrew window, the first words typed to an agent land in English. Shortcuts (Ctrl+V, Ctrl+W, Ctrl+F…) work under any layout regardless.</div>
+      <div class="settings-field">
+        <div class="field-title">Dictation</div>
+        <div class="field-row"><input type="password" id="inp-dict-key" placeholder="This computer · paste an OpenAI or Groq key for cloud" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();api.send({ type: 'saveSettings', settings: { dictationKey: this.value } });this.value='';}" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" /><button class="settings-btn" type="button" id="dict-local-btn" style="display:none" onclick="api.send({ type: 'saveSettings', settings: { dictationKey: '' } })">Use this computer</button><button class="settings-btn" type="button" onclick="api.send({ type: 'dictateRemove' })">Remove engine</button></div>
+      </div>
+      <div class="settings-hint">With a key, the mic's recordings go to OpenAI (sk-…) or Groq (gsk_…).</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
         <span>Prompt autocomplete (ghost text)</span>
@@ -5251,6 +5256,7 @@ function applySettings(s) {
   }
   if (s.remoteControl !== undefined) document.getElementById('chk-remote-control').checked = s.remoteControl;
   if (s.englishOnFocus !== undefined) document.getElementById('chk-english-focus').checked = s.englishOnFocus;
+  if (s.dictationHasKey !== undefined) { document.getElementById('inp-dict-key').placeholder = s.dictationHasKey ? 'Cloud key saved · paste a new one to replace it' : 'This computer · paste an OpenAI or Groq key for cloud'; document.getElementById('dict-local-btn').style.display = s.dictationHasKey ? '' : 'none'; }
   if (s.notifications !== undefined) {
     notificationsEnabled = s.notifications;
     const chk = document.getElementById('chk-notif');

@@ -148,6 +148,12 @@ function wavBytes(samples, rate) {
   return b;
 }
 
+// Words whisper can't guess from sound alone, for its prompt: the project's name and the code-ish words on screen (file
+// names, camelCase, snake_case, kebab-case, acronyms), newest first, so it spells what it hears their way.
+function dictVocab(project, text) {
+  const code = (text.replace(/\bhttps?:\/\/\S+/g, ' ').match(/[A-Za-z][\w.-]*\w/g) || []).reverse().filter((w) => /[a-z][A-Z]|[._-][A-Za-z]|^[A-Z]{2,}$/.test(w));
+  return [...new Set([project, ...code].filter(Boolean))].slice(0, 25).join(', ');
+}
 function dictJoin(pre, words, post) {
   if (!words) return pre + post;
   if (pre.trim() && !/[.!?:]\s*$|\n\s*$/.test(pre) && !/^(I\b|[A-Z]{2,})/.test(words)) words = words[0].toLowerCase() + words.slice(1);
@@ -293,4 +299,4 @@ function cellsHtml(buf, from, to, theme = {}) {
 // The CLI's "[Crashed — auto-resuming 1/3...]" while Overlord restarts a crashed Claude; '' otherwise.
 const crashLine = (a) => a && a.crashed === 'resuming' ? `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…` : '';
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, wavBytes, liveReply, screenDialog, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, undoEdits };

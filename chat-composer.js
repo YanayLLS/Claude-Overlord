@@ -553,7 +553,7 @@
   async function micStart() {
     const d = dict = { id: selectedId, chunks: [], bars: [], t0: Date.now() };
     const cv = voice.querySelector('canvas'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); voice.querySelector('.t').textContent = '0:00'; // not the last take's bars
-    drawMic(); box().focus();
+    drawMic(); box().focus(); api.send({ type: 'dictateWarm' }); // the engine unloads when idle; it loads again while you talk
     try {
       d.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } }); // whisper reads raw speech better than Chrome's cleaned-up version
       if (dict !== d) return d.stream.getTracks().forEach((k) => k.stop()); // stopped before the mic opened
@@ -572,7 +572,9 @@
     const n = d.chunks.reduce((s, c) => s + c.length, 0);
     if (!discard && n > 16000 * 0.3) { // under a third of a second is a mis-click
       const all = new Float32Array(n); let o = 0; for (const c of d.chunks) { all.set(c, o); o += c.length; }
-      pending.set(++takes, d.id); api.send({ type: 'dictate', take: takes, wav: wavBytes(all, 16000) });
+      if (!all.some((v) => Math.abs(v) > 0.02)) { showToast('Mic: nothing heard. Is the right mic the default?'); drawMic(); return box().focus(); } // whisper turns silence into "you"
+      const a = agents.get(d.id), shell = document.getElementById('chat-shell');
+      pending.set(++takes, d.id); api.send({ type: 'dictate', take: takes, wav: wavBytes(all, 16000), hint: dictVocab(a && a.cwd ? baseName(a.cwd) : '', shell ? shell.textContent.slice(-4000) : '') });
     }
     drawMic(); box().focus();
   }
@@ -584,7 +586,8 @@
   function onDictation(m) {
     if (m.setup) {
       const downloaded = engine && engine.pct != null;
-      if (m.error) { engine = null; showToast('Mic: ' + m.error); }
+      if (m.reset) { engine = null; if (m.toast) showToast(m.toast); }
+      else if (m.error) { engine = null; showToast('Mic: ' + m.error); }
       else if (m.ready) { engine = 'ready'; if (downloaded) { mic.classList.remove('pop'); void mic.offsetWidth; mic.classList.add('pop'); } else micStart(); } // after a download it waits for your click
       else engine = { pct: m.pct };
       return drawMic();

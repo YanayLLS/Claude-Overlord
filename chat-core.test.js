@@ -159,3 +159,9 @@ test('a Claude being auto-resumed after a crash reads like the CLI line', () => 
   assert.strictEqual(crashLine({ crashed: 'fatal', crashCount: 3, crashMax: 3 }), '');
   assert.strictEqual(crashLine({ crashed: null }), '');
 });
+
+test('the mic hint is the project and the code-ish words on screen, newest first, without plain words or links', () => {
+  const { dictVocab } = require('./chat-core');
+  assert.strictEqual(dictVocab('overlord', 'Fix the bug in chat-composer.js then useState and the API. See https://x.io/a_b now. chat-composer.js again'), 'overlord, chat-composer.js, API, useState');
+  assert.strictEqual(dictVocab('', 'nothing here'), '');
+});
