@@ -4134,8 +4134,12 @@ function handleTimelineData(msg) {
 
 function handleTimelineEvent(msg) {
   if (msg.id !== timelineAgentId) return;
-  if (worldTl && worldTl.id === msg.id) { worldTl.events.push(msg.event); if (worldTl.events.length > TL_MAX_EVENTS) worldTl.events.splice(0, worldTl.events.length - TL_MAX_EVENTS); if (termTab === 'conversation') renderConversation(); }
+  if (worldTl && worldTl.id === msg.id) { worldTl.events.push(msg.event); if (worldTl.events.length > TL_MAX_EVENTS) worldTl.events.splice(0, worldTl.events.length - TL_MAX_EVENTS); if (termTab === 'conversation') scheduleConv(); }
 }
+// A burst of events (a restart reading a transcript's backlog) paints once per frame, not once per event: each paint
+// walks the whole thread, so the chat redrew for seconds.
+let _convPending = false;
+function scheduleConv() { if (!_convPending) { _convPending = true; requestAnimationFrame(() => { _convPending = false; if (termTab === 'conversation') renderConversation(); }); } }
 
 // ── Global Search ──
 let _searchTimer = null;
@@ -4556,7 +4560,7 @@ function handleAgentMsg(msg) {
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
     case 'perm': { const a = agents.get(msg.id); if (msg.id !== selectedId) setTimeout(() => chatUi.permToast(msg.id, msg.ask), 400); /* another agent: answer from a toast (after its menu has drawn) */ if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
     case 'permClear': { chatUi.dropToast(msg.id); const a = agents.get(msg.id); if (askFlip && msg.id === selectedId && termTab === 'terminal') switchTermTab('conversation'); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
-    case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; if (msg.id === selectedId && termTab === 'conversation') renderConversation(); } break; }
+    case 'spinnerText': { const a = agents.get(msg.id); if (a && a.spinnerText !== msg.text) { a.spinnerText = msg.text; const el = document.querySelector(`.agent[data-id="${msg.id}"] .status-verb`); if (el && agentStatus(a) === 'active') el.textContent = msg.text; if (msg.id === selectedId && termTab === 'conversation') scheduleConv(); } break; }
     case 'preview': { const a = agents.get(msg.id); if (a) { a.preview = msg.text; scheduleRender(); } break; }
     case 'prompt': { const a = agents.get(msg.id); if (a) { a.prompt = msg.text; if (selectedId === msg.id) { const t = a.customName ? a.title : msg.text; const np = a.agentName ? a.agentName + ' \u2014 ' : ''; document.getElementById('term-title').textContent = np + t + ' \u2014 ' + pathLabel(a.cwd || ''); document.getElementById('term-name-chip').textContent = t; } scheduleRender(); } break; }
     case 'promptHistory': { const a = agents.get(msg.id); if (a) { a.prompts = msg.prompts; a.promptNavIdx = -1; /* -1 = at bottom; the buffer scan owns the real range */ if (selectedId === msg.id) updatePromptNav(); } break; }
