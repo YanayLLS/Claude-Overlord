@@ -12,7 +12,7 @@ if %errorlevel% neq 0 (
 
 if not exist "node_modules\" (
     echo Installing dependencies...
-    call npm install
+    call npm install --no-save
     if !errorlevel! neq 0 (
         echo.
         echo [ERROR] npm install failed.

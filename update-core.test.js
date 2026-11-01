@@ -1,6 +1,6 @@
 // Run: node update-core.test.js
 const assert = require('assert');
-const { hasTrackedChanges, pullBlocker, needsInstall, updateLabel } = require('./update-core');
+const { hasTrackedChanges, pullBlocker, needsInstall, updateLabel, npmRewriteOnly } = require('./update-core');
 
 // ── hasTrackedChanges ─────────────────────────────────
 assert.strictEqual(hasTrackedChanges(''), false);
@@ -31,6 +31,15 @@ assert.strictEqual(needsInstall(['package-lock.json']), true);
 assert.strictEqual(needsInstall(['scripts/package.json']), true); // nested workspace counts
 // a lookalike name must not trigger a reinstall
 assert.strictEqual(needsInstall(['docs/my-package.json']), false);
+
+// ── npmRewriteOnly: npm install re-sorted / re-synced it, nothing a person wrote
+const head = '{"name":"o","version":"1.2.0","devDependencies":{"b":"^1","a":"^2"}}';
+assert.strictEqual(npmRewriteOnly('package.json', head, JSON.stringify({ name: 'o', version: '1.2.0', devDependencies: { a: '^2', b: '^1' } }, null, 2) + '\n'), true); // sorted + reformatted
+assert.strictEqual(npmRewriteOnly('package.json', head, '{"name":"o","version":"1.3.0","devDependencies":{"b":"^1","a":"^2"}}'), false); // real edit kept
+assert.strictEqual(npmRewriteOnly('package.json', head, '{"name":"o","version":"1.2.0","devDependencies":{"b":"^1","a":"^2","c":"^1"}}'), false); // added dep kept
+assert.strictEqual(npmRewriteOnly('package.json', head, 'not json'), false);
+assert.strictEqual(npmRewriteOnly('package-lock.json', '{}', '{"anything":1}'), true); // lock is npm output
+assert.strictEqual(npmRewriteOnly('main.js', 'a', 'a'), false);
 
 // ── updateLabel ───────────────────────────────────────
 assert.strictEqual(updateLabel(0), null);

@@ -28,6 +28,19 @@ function needsInstall(changedFiles) {
   return (changedFiles || []).some(f => /(^|\/)(package\.json|package-lock\.json)$/.test(f.trim()));
 }
 
+// The update's own `npm install` rewrites these (lock re-synced to the new
+// version, deps re-sorted), which used to block every next update as
+// "uncommitted changes". The lock is pure npm output; package.json only counts
+// as npm's when it parses to the same thing as HEAD, so a real edit still blocks.
+function npmRewriteOnly(file, headText, workText) {
+  if (file === 'package-lock.json') return true;
+  if (file !== 'package.json') return false;
+  const canon = (v) => Array.isArray(v) ? v.map(canon)
+    : v && typeof v === 'object' ? Object.keys(v).sort().reduce((o, k) => (o[k] = canon(v[k]), o), {}) : v;
+  try { return JSON.stringify(canon(JSON.parse(headText))) === JSON.stringify(canon(JSON.parse(workText))); }
+  catch { return false; }
+}
+
 // Button label. Null means show nothing at all.
 function updateLabel(behind) {
   const n = Number(behind) || 0;
@@ -36,5 +49,5 @@ function updateLabel(behind) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { hasTrackedChanges, pullBlocker, needsInstall, updateLabel };
+  module.exports = { hasTrackedChanges, pullBlocker, needsInstall, updateLabel, npmRewriteOnly };
 }

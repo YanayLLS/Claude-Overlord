@@ -126,7 +126,7 @@ async function releaseChanges(from, to) {
 // ── Git self-update (source checkouts) ────────────────
 // Packaged builds update through electron-updater above. People who run the
 // repo directly via start.bat get nothing from that, so offer them a pull.
-const { pullBlocker, needsInstall } = require('./update-core');
+const { pullBlocker, needsInstall, npmRewriteOnly } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./pr-eta');
 const { sessionSwitchKind } = require('./resume-core');
@@ -188,6 +188,14 @@ async function doGitPull() {
   gitUpdateBusy = true;
   const fail = (m) => { gitUpdateBusy = false; send({ type: 'gitUpdateResult', ok: false, error: m }); };
   try {
+    // Undo what our own npm install rewrote last time, so it can't block this pull.
+    for (const f of ['package.json', 'package-lock.json']) {
+      const d = await gitCmd(['diff', '--quiet', 'HEAD', '--', f]);
+      if (d.ok) continue; // unchanged
+      const head = await gitCmd(['show', 'HEAD:' + f]);
+      let work = ''; try { work = fs.readFileSync(path.join(APP_DIR, f), 'utf8'); } catch {}
+      if (head.ok && npmRewriteOnly(f, head.out, work)) await gitCmd(['checkout', 'HEAD', '--', f]);
+    }
     const status = await gitCmd(['status', '--porcelain']);
     if (!status.ok) return fail('Could not read git status: ' + status.err);
     const ahead = await gitCmd(['rev-list', '--count', 'origin/master..HEAD']);
@@ -208,7 +216,7 @@ async function doGitPull() {
       send({ type: 'gitUpdateProgress', text: 'Installing dependencies…' });
       const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
       const install = await new Promise((resolve) => {
-        execFile(npm, ['install'], { cwd: APP_DIR, timeout: 300000, windowsHide: true, shell: process.platform === 'win32' },
+        execFile(npm, ['install', '--no-save'], { cwd: APP_DIR, timeout: 300000, windowsHide: true, shell: process.platform === 'win32' },
           (err, so, se) => resolve({ ok: !err, err: String(se || err && err.message || '') }));
       });
       if (!install.ok) {
