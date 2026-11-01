@@ -658,6 +658,16 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-mic.on svg:not(.stop) { display: none; }
 :root body #chat-mic.on .stop { display: block; }
 :root body #chat-mic.busy { pointer-events: none; opacity: .5; }
+/* first use: the engine downloads, the mic is a progress ring with the percent, then pops back ready */
+:root body #chat-mic .ring, :root body #chat-mic .pct { display: none; }
+:root body #chat-mic.dl { position: relative; cursor: progress; color: var(--text); }
+:root body #chat-mic.dl > svg:not(.ring) { display: none; }
+:root body #chat-mic.dl .ring { display: block; position: absolute; inset: 2px; width: 28px; height: 28px; transform: rotate(-90deg); fill: none; stroke-width: 2.5; }
+:root body #chat-mic.dl .ring circle { stroke: var(--border-hi); }
+:root body #chat-mic.dl .ring .p { stroke: var(--claude); stroke-linecap: round; transition: stroke-dasharray .3s; }
+:root body #chat-mic.dl .pct { display: block; font: 600 9px/1 'Geist Mono', monospace; font-variant-numeric: tabular-nums; }
+:root body #chat-mic.pop { animation: mic-pop .45s cubic-bezier(.3, 1.6, .5, 1); color: var(--text); }
+@keyframes mic-pop { 0% { transform: scale(.6); } 100% { transform: scale(1); } }
 :root body #chat-voice { display: none; align-items: center; gap: 12px; height: 26px; padding: 0 4px 0 0; color: var(--text); }
 :root body #chat-voice canvas { flex: 1; min-width: 0; height: 22px; color: var(--text); }
 :root body #chat-voice .t { flex: none; font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }

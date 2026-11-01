@@ -510,7 +510,10 @@
   // take in at the caret: one pass over the full take reads far better than live guesses. Esc throws the take away. A
   // take still transcribing when you switch agent lands in that agent's draft. ──
   const mic = document.getElementById('chat-mic');
-  if (mic) mic.insertAdjacentHTML('beforeend', '<svg class="stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>');
+  if (mic) mic.insertAdjacentHTML('beforeend', '<svg class="stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg><svg class="ring" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13"/><circle class="p" cx="16" cy="16" r="13"/></svg><b class="pct"></b>');
+  // The engine downloads the first time the mic is used (main.js 'dictateSetup'): the mic shows the progress, then
+  // pops back ready. When it's already on disk the take starts at once and the engine loads while you talk.
+  let engine = null; // null: not checked yet · { pct }: downloading · 'ready'
   box().insertAdjacentHTML('beforebegin', '<div id="chat-voice" aria-live="polite"><canvas></canvas><span class="t"></span></div>');
   const voice = document.getElementById('chat-voice'), BAR = 50; // a new bar every 50 ms
   let takes = 0; const pending = new Map(); // take number → agent id, while whisper works on it
@@ -519,7 +522,9 @@
     order().classList.toggle('voice', !!dict || busy); order().classList.toggle('voice-busy', busy);
     if (busy) voice.querySelector('.t').textContent = 'Transcribing…';
     if (!mic) return;
-    mic.classList.toggle('on', !!dict); mic.classList.toggle('busy', busy);
+    const dl = engine && engine !== 'ready' && engine.pct != null;
+    mic.classList.toggle('on', !!dict); mic.classList.toggle('busy', busy); mic.classList.toggle('dl', !!dl);
+    if (dl) { mic.querySelector('.ring .p').setAttribute('stroke-dasharray', `${(engine.pct || 0) * 0.8168} 81.68`); mic.querySelector('.pct').textContent = engine.pct == null ? '' : engine.pct; mic.title = `Downloading speech engine… ${engine.pct || 0}%`; mic.setAttribute('aria-label', mic.title); return; }
     mic.setAttribute('aria-pressed', String(!!dict)); mic.setAttribute('aria-label', dict ? 'Stop dictating' : 'Dictate');
     mic.title = dict ? 'Stop and write it in (Enter) · Esc to discard' : busy ? 'Writing what you said…' : 'Dictate (Ctrl+Shift+M)';
   }
@@ -549,7 +554,7 @@
     const d = dict = { id: selectedId, chunks: [], bars: [], t0: Date.now() };
     drawMic(); box().focus();
     try {
-      d.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      d.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } }); // whisper reads raw speech better than Chrome's cleaned-up version
       if (dict !== d) return d.stream.getTracks().forEach((k) => k.stop()); // stopped before the mic opened
       d.ctx = new AudioContext({ sampleRate: 16000 }); // whisper's rate; the browser resamples
       const src = d.ctx.createMediaStreamSource(d.stream), node = d.ctx.createScriptProcessor(4096, 1, 1); // ponytail: deprecated but tiny; AudioWorklet if it goes away
@@ -569,8 +574,19 @@
     }
     drawMic(); box().focus();
   }
-  function micToggle() { dict ? micStop() : micStart(); }
+  function micToggle() {
+    if (dict) return micStop();
+    if (engine === 'ready') return micStart();
+    if (!engine) { engine = {}; api.send({ type: 'dictateSetup' }); drawMic(); } // the reply starts the take, or shows the download
+  }
   function onDictation(m) {
+    if (m.setup) {
+      const downloaded = engine && engine.pct != null;
+      if (m.error) { engine = null; showToast('Mic: ' + m.error); }
+      else if (m.ready) { engine = 'ready'; if (downloaded) { mic.classList.remove('pop'); void mic.offsetWidth; mic.classList.add('pop'); } else micStart(); } // after a download it waits for your click
+      else engine = { pct: m.pct };
+      return drawMic();
+    }
     const id = pending.get(m.take); if (id === undefined) return;
     if (m.t === 'status') return showToast(m.text);
     pending.delete(m.take); drawMic();

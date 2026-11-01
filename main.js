@@ -1062,11 +1062,18 @@ const TIMELINE_MAX_EVENTS = 1000;
 const parseLineForTimeline = (line) => timelineCore.parseLineForTimeline(line, fmtTool, isSystemMessage);
 
 // The Chat view's mic: the page records a take and sends it here as a 16 kHz WAV; whisper.js turns it into text,
-// which goes back as a 'dictation' message for the take's id.
+// which goes back as a 'dictation' message for the take's id. 'dictateSetup' installs the engine the first time (the
+// mic shows its progress) and loads it, so the take after is quick.
+const WHISPER_DIR = () => path.join(app.getPath('userData'), 'whisper');
+function dictateSetup() {
+  const w = require('./whisper');
+  if (w.installed(WHISPER_DIR())) { send({ type: 'dictation', setup: true, ready: true }); return w.warm(WHISPER_DIR()).catch(() => {}); } // loads while you talk
+  w.warm(WHISPER_DIR(), (pct) => send({ type: 'dictation', setup: true, pct }))
+    .then(() => send({ type: 'dictation', setup: true, ready: true }), (e) => send({ type: 'dictation', setup: true, error: e.message }));
+}
 function dictateTake(msg) {
   const say = (t, text) => send({ type: 'dictation', take: msg.take, t, text });
-  require('./whisper').transcribe(path.join(app.getPath('userData'), 'whisper'), Buffer.from(msg.wav), (text) => say('status', text), msg.prompt)
-    .then((text) => say('final', text), (e) => say('error', e.message));
+  require('./whisper').transcribe(WHISPER_DIR(), Buffer.from(msg.wav)).then((text) => say('final', text), (e) => say('error', e.message));
 }
 
 // A Chat view prompt with images in place: its text and image paths go into the agent's prompt one after another, so
@@ -4822,6 +4829,7 @@ function handleIpc(msg) {
     case 'cliErase': cliSend.erase(msg.id, +msg.n || 0); break;
     case 'chatHides': { const a = agents.get(msg.id); if (a && Array.isArray(msg.hides)) { a.chatHides = msg.hides.filter(r => r && Number.isFinite(r.from) && Number.isFinite(r.until)).slice(-200).map(r => ({ from: r.from, until: r.until })); saveState(); } break; } // what an edit or Esc took out of the chat // leftover text in an agent's CLI box, in turn with its sends
     case 'dictate': dictateTake(msg); break;
+    case 'dictateSetup': dictateSetup(); break;
     case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); cliSend.prompt(msg.id, text, +msg.erase || 0, () => markSessionSwitch(msg.id, text)); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
     case 'cliCancel': { // Esc: stops the sends, then the Esc itself once no paste is half-written; the page hears when it's out
       const ag = agents.get(msg.id); if (ag && ag.ptyPerm) { clearPtyPerm(msg.id, ag); ag.permSent = false; send({ type: 'permClear', id: msg.id }); } // as an Esc typed into the terminal does
