@@ -405,6 +405,11 @@
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.target.closest('.msg').querySelector('[data-act="edit-send"]').click(); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.target.closest('.msg').querySelector('[data-act="edit-cancel"]').click(); }
   });
+  // At the bottom and the chat's box shrinks (the reply box grows a line as you type): stay at the bottom. It slid off
+  // and back on every key, flashing the jump button.
+  { const c = document.getElementById('conversation'); let end = true;
+    c.addEventListener('scroll', () => { end = c.scrollHeight - c.scrollTop - c.clientHeight < 40; }, { passive: true });
+    new ResizeObserver(() => { if (end && c.classList.contains('open')) c.scrollTop = c.scrollHeight; }).observe(c); }
   document.getElementById('conversation').addEventListener('input', (e) => { if (e.target.matches && e.target.matches('.edit-ta')) { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; } });
   // ── Live tail: what the CLI shows under the transcript ──
   const lastTool = (evs, name, doneBy) => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if (e.type === 'tool' && e.name === name) return doneBy && doneBy.get(e.toolId) ? null : e; if (e.type === 'prompt') return null; } return null; };
