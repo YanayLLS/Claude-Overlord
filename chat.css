@@ -750,7 +750,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.ask .choices button.focus { border-color: color-mix(in srgb, var(--claude) 45%, var(--border-hi)); }
 :root body #conversation .card.ask .ask-prev { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--border); font-family: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.2; color: var(--subtext); white-space: pre; overflow-x: auto; text-align: left; }
 :root body #conversation .card.ask .ask-prev .ap-wait { color: var(--dim); font-family: inherit; }
-:root body #conversation .card.ask .ask-prev { container-type: inline-size; max-height: none; }
+:root body #conversation .card.ask .ask-prev { container-type: inline-size; max-height: none; min-height: 220px; }
 :root body #conversation .card.ask .ask-prev .ap-in { display: block; font-size: clamp(10px, calc(100cqw / (var(--cols) * 0.6)), 12.5px); }
 :root body #conversation .card.ask .ask-prev .w2 { display: inline-block; width: 2ch; text-align: center; }
 :root body #conversation .card.ask .ask-prev :is(.d-add, .d-del) { display: inline-block; min-width: 100%; margin: 0 -10px; padding: 0 10px; box-sizing: content-box; }

@@ -646,12 +646,17 @@
     // hover never resizes the card (it moved the options under the mouse and the hover flickered between them).
     const f = askFocus(s), pk = s.options[f] && s.options[f].bare ? s.pf : f; // "Chat about this" has none: the CLI keeps the last option's
     const panes = s.options.map((o, k) => o.bare ? '' : `<div class="ap-pane${k === pk ? ' on' : ''}" data-k="${k}">${prevText(seen[k])}</div>`).join('');
-    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${pk}">${panes}</pre>`;
+    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${pk}"${paneH.has(q) ? ` style="min-height:${paneH.get(q)}px"` : ''}>${panes}</pre>`;
   }
+  // While a question is open the transcript doesn't have it yet: its previews come off the CLI's screen one at a time as
+  // the selection reaches them. The pane keeps the tallest it has been for this question, so a new one may grow the card
+  // once but nothing ever shrinks it back (the chat is pinned to its bottom: a resize moved the options under the mouse).
+  const paneH = new Map();
   function applyAskHover() {
     const pane = document.querySelector('#conversation .card.ask .ask-prev'), card = pane && pane.closest('.card');
     for (const b of document.querySelectorAll('#conversation .card.ask [data-hov]')) b.classList.toggle('hov', +b.dataset.pick === askHover);
     if (!pane) return;
+    { const q = pane.dataset.q, h = pane.offsetHeight; if (h > (paneH.get(q) || 0)) { if (paneH.size > 20) paneH.clear(); paneH.set(q, h); pane.style.minHeight = h + 'px'; } }
     const k = askHover != null && card.querySelector(`[data-pick="${askHover}"]:not([data-bare])`) ? askHover : +pane.dataset.focus; // hovering "Chat about this" keeps the pane
     if (!pane.querySelector(`.ap-pane[data-k="${k}"]`)) return;
     for (const p of pane.children) p.classList.toggle('on', +p.dataset.k === k);
