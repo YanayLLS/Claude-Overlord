@@ -8,7 +8,7 @@
 <style>
 /* world.css stays eager: besides the island it carries "world off" base rules for shared markup (#term-order, #conversation,
    #term-dossier…) — loading it lazily once left the order bar unstyled in the plain view. 63 KB of CSS is not worth that. */
-/* Window blurred or hidden: decorative animations stop painting. Nothing relies on animationend for logic
+/* Window hidden (minimized / covered): decorative animations stop painting. Nothing relies on animationend for logic
    (done-flash only clears its own class), so pausing is safe; focus/visibility restores them where they were. */
 body.bg *, body.bg *::before, body.bg *::after { animation-play-state:paused !important; }
 :root {
@@ -3420,11 +3420,11 @@ blinkCaret();
 document.addEventListener('keydown', (e) => { if (e.target.classList && e.target.classList.contains('xterm-helper-textarea')) blinkCaret(); }, true);
 // One switch for "nobody's looking": body.bg pauses CSS animations (see the style block), the caret clock, the
 // status-line and summary tickers. Everything resumes on focus or when the tab is visible again.
-// Window focus comes from main (BrowserWindow focus/blur): document.hasFocus() goes false while you work
-// inside an embedded preview view, and the list beside it would freeze.
+// Hidden only, not blurred: a blurred window is often on your other screen, and a paused entry animation
+// (chat-in starts at opacity 0) kept new chat messages invisible until you clicked the window.
 let winFocused = true;
 function onBgChange() {
-  const bg = document.hidden || !winFocused;
+  const bg = document.hidden;
   if (bg === document.body.classList.contains('bg')) return;
   document.body.classList.toggle('bg', bg);
   blinkCaret();
