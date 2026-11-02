@@ -3342,11 +3342,17 @@ function renderSummaryBar() {
   }
 
   // One compact meter per cap: label + % on top, a hairline bar below; reset time lives in the tooltip.
+  // A faint layer behind the fill shows how much of the window (5h session / 7d week) has passed.
   function usageMeterHTML(label, pct, resetTs, includeDate, extra = '', key = '') {
     const cls = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
+    const win = includeDate ? 7 * 86400000 : 5 * 3600000;
+    const now = Date.now();
+    const timePct = resetTs ? Math.max(0, Math.min(100, (1 - (resetTs - now) / win) * 100)) : null;
+    // Burn-rate colors need this login's history, which only the main account has.
+    const grad = key && resetTs ? usageFillGradient(usageHist, key, resetTs - win, resetTs, pct, now) : null; // usage-core.js
     return `<div class="usage-meter"${key ? ` data-meter="${escAttr(key)}"` : ''}>
       <div class="um-top"><span class="um-label">${label}${extra}</span><span class="um-pct ${cls}">${Math.round(pct)}%</span></div>
-      <div class="um-track"><div class="um-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
+      <div class="um-track">${timePct != null ? `<div class="um-time" style="width:${timePct}%"></div>` : ''}<div class="um-fill ${cls}" style="width:${Math.min(pct, 100)}%${grad ? `;background:${grad}` : ''}"></div></div>
     </div>`;
   }
 
@@ -3374,6 +3380,16 @@ function renderSummaryBar() {
     // Per-model weekly caps (Fable, Opus, …) get their own meter.
     for (const m of u.modelWeekly || []) {
       barHtml += usageMeterHTML(modelLabel(m.model), m.pct, m.reset || u.weeklyReset, true, '', usageView ? '' : 'm:' + m.model);
+    }
+    // Extra usage credits, as how much more of a week they buy past 100% (credits ÷ what 100% of this week cost).
+    if (u.extra) {
+      const cap = usageView ? null : usageCapacity(usageCost.w, u.weekly); // usage-core.js
+      const pct = u.extra.left != null && cap ? u.extra.left / cap * 100 : null;
+      const val = u.extra.left == null ? '∞' : pct == null ? 'on' : `+${Math.round(pct)}%`;
+      barHtml += `<div class="usage-meter extra" title="${escAttr(pct == null ? 'Extra usage on: keeps going past 100%' : `Extra credits ≈ ${Math.round(pct)}% more of a week past 100%`)}">
+        <div class="um-top"><span class="um-label">Extra</span><span class="um-pct">${val}</span></div>
+        <div class="um-track"><div class="um-fill" style="width:${pct == null ? 100 : Math.min(pct, 100)}%"></div></div>
+      </div>`;
     }
     if (u.fetchedAt) {
       const ago = Math.round((Date.now() - u.fetchedAt) / 1000);
@@ -4538,6 +4554,8 @@ function handleAgentMsg(msg) {
         a.status = msg.status;
         a.crashed = null;
         if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now();
+        // Finished while you were looking elsewhere: a dot on its card until you open it, and (in the Chat view) a toast that jumps there.
+        if (msg.status === 'waiting' && was === 'active' && msg.id !== selectedId) { a.unread = true; if (termTab === 'conversation' && !worldView) chatUi.maybeDone(msg.id); } // in the agent list, and only once it has really finished
         if (msg.status === 'waiting') {
           a.activeAt = null; a.tools.clear(); a.subTools.clear(); a.spinnerText = '';
         }
@@ -4548,8 +4566,6 @@ function handleAgentMsg(msg) {
           _doneTimers.set(msg.id, setTimeout(() => {
             _doneTimers.delete(msg.id);
             if (a.status === 'waiting') {
-        // Finished while you were looking elsewhere: a dot on its card until you open it, and (in the Chat view) a toast that jumps there.
-        if (msg.status === 'waiting' && was === 'active' && msg.id !== selectedId) { a.unread = true; if (termTab === 'conversation' && !worldView) chatUi.maybeDone(msg.id); } // in the agent list, and only once it has really finished
               a.doneConfirmed = true;
               playChime();
               flashAgentCard(msg.id);
@@ -4718,6 +4734,9 @@ function handleAgentMsg(msg) {
     case 'nextSuggest': chatUi.onNextSuggest(msg); break;
     case 'cliEscSent': chatUi.onEscSent(msg.id); break; // the Esc reached the CLI: Esc's take-back looks at its box now
     case 'sessionChanged': { const a = agents.get(msg.id); if (a) { a.sessionId = msg.sessionId; a.chatHides = []; if (msg.id === selectedId) rememberAgent(); } break; } // after /clear or /resume: drafts and hidden messages are this session's
+    case 'dictation': chatComposer.onDictation(msg); break;
+    case 'clipboardImageSaved': chatComposer.onImageSaved(msg); break;
+    case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': case 'gitReverted': chatUi.onMsg(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;
@@ -4728,9 +4747,6 @@ function handleAgentMsg(msg) {
     case 'agentAccount': { const a = agents.get(msg.id); if (a) { a.account = msg.account; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = termAgentLabel(a); } break; }
     case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
-    case 'dictation': chatComposer.onDictation(msg); break;
-    case 'clipboardImageSaved': chatComposer.onImageSaved(msg); break;
-    case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': case 'gitReverted': chatUi.onMsg(msg); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);
@@ -4955,6 +4971,8 @@ let currentUsage = null;
 let usageCost = {}; // meter key -> $ this window would cost at API list prices (main, api-cost.js)
 function handleUsage(usage) {
   currentUsage = usage;
+  // The bar colors each slice by burn rate, so it needs the history as fresh as the reading.
+  api.send({ type: 'getUsageHistory', since: usageHistAll ? 0 : Date.now() - 8 * 86400000 });
   scheduleRender();
 }
 function refreshUsage() { api.send({ type: 'fetchUsage' }); }
@@ -5053,6 +5071,7 @@ function closeUsageModal() { usageModalKey = null; document.getElementById('usag
 function handleUsageHistory(points, since) {
   usageHist = points || [];
   usageHistAll = !since;
+  scheduleRender();
   if (usageTipEl && usageTipEl.isConnected) showUsageTip(usageTipEl);
   renderUsageModal();
 }

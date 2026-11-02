@@ -143,4 +143,30 @@ assert.strictEqual(parseOauthUsage(null), null);
 assert.deepStrictEqual(parseOauthUsage({ five_hour: { utilization: 5 }, seven_day: null }), { hourly: 5 }); // partial answers still count
 { const u = parseOauthUsage({ seven_day: { utilization: 1 }, limits: [{ kind: 'weekly_scoped', percent: 7, scope: { model: { id: 'opus-x', display_name: null } } }] }); assert.deepStrictEqual(u.modelWeekly, [{ model: 'opus-x', pct: 7, reset: 0 }]); }
 
+// ── parseExtraUsage: credits left past 100%, null when off
+{
+  const { parseExtraUsage } = require('./usage-core');
+  const usd = c => ({ amount_minor: c, currency: 'USD', exponent: 2 });
+  assert.strictEqual(parseExtraUsage({ spend: { enabled: false, balance: null }, extra_usage: { is_enabled: false } }), null);
+  assert.deepStrictEqual(parseExtraUsage({ spend: { enabled: true, balance: usd(25000) } }), { left: 250 });
+  assert.deepStrictEqual(parseExtraUsage({ spend: { enabled: true, limit: usd(10000), used: usd(4000) } }), { left: 60 });
+  assert.deepStrictEqual(parseExtraUsage({ spend: { enabled: true } }), { left: null });
+  assert.deepStrictEqual(parseExtraUsage({ extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 1000, decimal_places: 2 } }), { left: 40 });
+  assert.strictEqual(parseOauthUsage({ seven_day: { utilization: 1 }, spend: { enabled: false } }).extra, undefined);
+  assert.deepStrictEqual(parseOauthUsage({ seven_day: { utilization: 1 }, spend: { enabled: true, balance: usd(100) } }).extra, { left: 1 });
+}
+
 console.log('ok — all usage-core checks passed');
+
+// ── usageFillGradient: each slice of the used % colored by its burn rate vs an even pace
+{
+  const { usageFillGradient } = require('./usage-core');
+  const H = 3600000, span = 5 * H;
+  // 0→10% over 1h (half pace: calm), then 10→40% over 1h (1.5x... 30%/h vs 20%/h pace = 1.5x → 25% red)
+  const g = usageFillGradient([{ t: H, h: 10 }], 'h', 0, span, 40, 2 * H);
+  assert.ok(g.includes('var(--red) 0%, var(--accent)) 0.0%') && g.includes('25.0%'), g);
+  assert.ok(g.includes('var(--red) 25%'), g);
+  // 3x pace or more → fully red
+  assert.ok(usageFillGradient([], 'h', 0, span, 60, H).includes('var(--red) 100%'));
+  assert.strictEqual(usageFillGradient([], 'h', 0, span, 0, H), null);
+}

@@ -341,9 +341,12 @@ body.pr-open #pr-fire .pr-fire-cta { display: none; }
 .um-pct.warn { color: var(--yellow); } .um-pct.danger { color: var(--red); }
 .um-pace { margin-left: 6px; font-size: 10px; font-weight: 600; }
 .um-pace.pace-ok { color: var(--green); } .um-pace.pace-warn { color: var(--yellow); } .um-pace.pace-over { color: var(--red); }
-.um-track { height: 3px; border-radius: 999px; background: var(--surface1); overflow: hidden; }
-.um-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width .4s; }
+.um-track { position: relative; height: 3px; border-radius: 999px; background: var(--surface1); overflow: hidden; }
+.um-time { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: color-mix(in srgb, var(--text) 18%, transparent); }
+.um-fill { position: relative; height: 100%; border-radius: 999px; background: var(--accent); transition: width .4s; }
 .um-fill.warn { background: var(--yellow); } .um-fill.danger { background: var(--red); }
+.usage-meter.extra .um-pct { color: var(--cyan); }
+.usage-meter.extra .um-fill { background: linear-gradient(90deg, var(--cyan), var(--accent)); box-shadow: 0 0 6px var(--cyan); }
 .usage-empty { font-size: 11px; color: var(--dim); padding: 2px 4px; }
 
 /* ── App tooltip (tooltip.js): dark bubble, arrow pointing at the element ── */

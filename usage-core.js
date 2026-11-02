@@ -48,7 +48,26 @@ function parseOauthUsage(json) {
     modelWeekly.push({ model: String(name).toLowerCase(), pct: p, reset: iso(l.resets_at) });
   }
   if (modelWeekly.length) usage.modelWeekly = modelWeekly.sort((a, b) => a.model.localeCompare(b.model));
+  const extra = parseExtraUsage(j);
+  if (extra) usage.extra = extra;
   return (usage.hourly != null || usage.weekly != null) ? usage : null;
+}
+
+// Extra usage (paid credits that carry on past 100%): { left } in USD, left null when uncapped/unknown.
+// null when it's off. "spend" money is { amount_minor, exponent }; extra_usage is the older shape.
+// ponytail: the enabled shape is a guess (only seen disabled); verify fields once an account has it on.
+function parseExtraUsage(j) {
+  const money = m => m && m.amount_minor != null ? m.amount_minor / 10 ** (m.exponent ?? 2) : null;
+  const s = j && j.spend, e = j && j.extra_usage;
+  if (s && s.enabled) {
+    const bal = money(s.balance), lim = money(s.limit) ?? money(s.cap), used = money(s.used) || 0;
+    return { left: bal != null ? bal : lim != null ? Math.max(0, lim - used) : null };
+  }
+  if (e && e.is_enabled) {
+    const div = 10 ** (e.decimal_places ?? 2);
+    return { left: e.monthly_limit != null ? Math.max(0, (e.monthly_limit - (e.used_credits || 0)) / div) : null };
+  }
+  return null;
 }
 
 // "fable" -> "Fable" for the row label. Model ids are lowercase in headers.
@@ -188,6 +207,23 @@ function usageChartSvg(points, key, start, end, W = 280, H = 110) {
   return s + '</svg>';
 }
 
+// Fill gradient for one meter's bar: each slice of the used % is colored by how fast it was used,
+// accent at (or under) an even pace across the window, linearly redder up to 3x pace and beyond.
+function usageFillGradient(points, key, start, end, pct, now) {
+  if (!(pct > 0)) return null;
+  const pts = (points || []).filter(p => p.t > start && p.t < now && p[key] != null && p[key] <= pct).map(p => ({ t: p.t, v: p[key] }));
+  pts.unshift({ t: start, v: 0 }); pts.push({ t: now, v: pct });
+  const pace = 100 / (end - start), stops = [];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], dv = b.v - a.v;
+    if (dv <= 0 || b.t <= a.t) continue;
+    const heat = Math.round(Math.max(0, Math.min(1, (dv / (b.t - a.t) / pace - 1) / 2)) * 100);
+    const c = `color-mix(in srgb, var(--red) ${heat}%, var(--accent))`;
+    stops.push(`${c} ${(a.v / pct * 100).toFixed(1)}%`, `${c} ${(b.v / pct * 100).toFixed(1)}%`);
+  }
+  return stops.length ? `linear-gradient(90deg, ${stops.join(', ')})` : null;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseModelWeekly, parseOauthUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageCapacity, pastUnstamped, stampWindowCosts, usageChartSvg, MODEL_7D_RE };
+  module.exports = { parseModelWeekly, parseOauthUsage, parseExtraUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageCapacity, pastUnstamped, stampWindowCosts, usageChartSvg, usageFillGradient, MODEL_7D_RE };
 }
