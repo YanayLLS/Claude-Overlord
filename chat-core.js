@@ -137,6 +137,13 @@ function pathRef(text) {
   const parts = t.split(/[\\/]/).filter(Boolean);
   return { file: t, name: parts[parts.length - 1], dir: parts.length > 1 ? parts[parts.length - 2] : '', img: /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(t) };
 }
+// A path relative to the agent's folder ("src/x.js", "..\a\b.md"): at least one folder, so `a.cwd` stays code.
+function relPathRef(text) {
+  const t = String(text || '').trim();
+  if (!/^(?:\.{1,2}[\\/])*[\w.@-]+(?:[\\/][\w.@-]+)+\.[A-Za-z0-9]{1,8}$/.test(t)) return null;
+  const parts = t.split(/[\\/]/).filter(Boolean);
+  return { file: t, name: parts[parts.length - 1], dir: parts[parts.length - 2] || '', img: false }; // ponytail: no image thumb, its file:// url needs the agent's folder
+}
 
 // Dictated words dropped in at the caret: a space before them unless the text there already ends in whitespace, and one
 // after unless what follows starts with it. The recognizer capitalises every phrase, so mid-sentence its first letter
@@ -340,4 +347,4 @@ function sketchHtml(src) {
 // The CLI's "[Crashed — auto-resuming 1/3...]" while Overlord restarts a crashed Claude; '' otherwise.
 const crashLine = (a) => a && a.crashed === 'resuming' ? `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…` : '';
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, undoEdits };

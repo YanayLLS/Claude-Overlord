@@ -51,12 +51,13 @@
       // `C:\…\live-0.png` in a reply: the file's name and folder as a link (an image opens in the preview)
       .replace(/(?<!<pre>)<code>([^<]+)<\/code>/g, (m, t) => pathChip(t) || m));
   }
-  // An absolute file path (already HTML-escaped) as a chip: name and folder, the full path on hover, opens on click.
+  // An absolute file path (or one under the agent's folder, already HTML-escaped) as a chip: name and folder, the full path on hover, opens on click.
   function pathChip(t) {
-    const p = pathRef(t); if (!p) return '';
+    const p = pathRef(t) || relPathRef(t); if (!p) return '';
     const raw = p.file.replace(/&amp;/g, '&'), attr = escH(raw);
-    return `<a class="fileref pathref${p.img ? ' img' : ''}" href="#" data-file="${attr}" data-line="0" title="${attr}">${p.img ? `<img src="${escH(fileUrl(raw))}" alt="" loading="lazy">` : ''}<span>${escH(p.name)}</span>${p.dir ? `<span class="pr-dir">${escH(p.dir)}</span>` : ''}<span class="pr-reveal" role="button" title="Show in folder"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg></span></a>`;
+    return `<a class="fileref pathref${p.img ? ' img' : ''}" href="#" data-file="${attr}" data-line="0" title="${attr}">${p.img ? `<img src="${escH(fileUrl(raw))}" alt="" loading="lazy">` : ''}<span>${escH(p.name)}</span>${p.dir ? `<span class="pr-dir">${escH(p.dir)}</span>` : ''}${REVEAL}</a>`;
   }
+  const REVEAL = '<span class="pr-reveal" role="button" title="Show in folder"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg></span>';
   const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   // A prompt's images, numbered 1, 2, … in order, and its [Image #N] tags as chips with the same numbers (the k-th tag
   // is the k-th image), so "compare [Image #1] with [Image #2]" reads against the thumbnails above it.
@@ -127,7 +128,7 @@
       let out = '', at = 0;
       for (const r of refs) {
         const txt = seg.slice(r.index, r.index + r.length);
-        out += seg.slice(at, r.index) + `<a class="fileref" href="#" data-file="${r.file.replace(/"/g, '&quot;')}" data-line="${r.line}">${txt}</a>`; at = r.index + r.length;
+        out += seg.slice(at, r.index) + `<a class="fileref" href="#" data-file="${r.file.replace(/"/g, '&quot;')}" data-line="${r.line}">${txt}${REVEAL}</a>`; at = r.index + r.length;
       }
       return out + seg.slice(at);
     }).join('');
@@ -1511,7 +1512,7 @@
     if (cp) { const ev = evs && evs[+cp.closest('[data-i]').dataset.i]; if (ev) navigator.clipboard.writeText(ev.text).then(() => flash(cp)); return; }
     const more = e.target.closest('.more');
     if (more) { const b = more.previousElementSibling; b.classList.toggle('open'); more.textContent = b.classList.contains('open') ? 'Show less' : 'Show more'; return; }
-    if (e.target.closest('.pr-reveal')) { e.preventDefault(); api.send({ type: 'showInFolder', path: e.target.closest('a.fileref').dataset.file }); return; } // the file selected in Explorer
+    if (e.target.closest('.pr-reveal')) { e.preventDefault(); api.send({ type: 'showInFolder', cwd, path: e.target.closest('a.fileref').dataset.file }); return; } // the file selected in Explorer
     const ref = e.target.closest('a.fileref'); // file:line → the file at that line in the editor
     if (ref && ref.classList.contains('img')) { e.preventDefault(); lightbox(fileUrl(ref.dataset.file)); return; }
     if (ref) { e.preventDefault(); peekEl.hidden = true; api.send({ type: 'openFileAt', cwd, file: ref.dataset.file, line: ref.dataset.line }); return; }

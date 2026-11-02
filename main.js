@@ -4921,6 +4921,7 @@ function handleIpc(msg) {
       break;
     }
     case 'showInFolder': {
+      if (typeof msg.cwd === 'string') { resolveRef(msg.cwd, msg.path, (p) => p ? shell.showItemInFolder(p) : send({ type: 'toast', text: `Couldn't find ${msg.path}` })); break; } // a chat file ref, maybe relative to the agent's folder
       const p = msg.path;
       if (typeof p !== 'string' || !fs.existsSync(p)) { send({ type: 'toast', text: 'Not found: ' + p }); break; }
       shell.showItemInFolder(p);

@@ -52,6 +52,10 @@ test('an absolute path in inline code becomes a file chip; relative names and pr
   assert.deepStrictEqual(pathRef('C:\\Users\\y\\scratchpad\\chatshot\\live-0.png'), { file: 'C:\\Users\\y\\scratchpad\\chatshot\\live-0.png', name: 'live-0.png', dir: 'chatshot', img: true });
   assert.deepStrictEqual(pathRef('~/.claude/x.md'), { file: '~/.claude/x.md', name: 'x.md', dir: '.claude', img: false });
   assert.strictEqual(pathRef('chat-ui.js'), null);
+  const { relPathRef } = require('./chat-core');
+  assert.deepStrictEqual(relPathRef('src/a/x.js'), { file: 'src/a/x.js', name: 'x.js', dir: 'a', img: false });
+  assert.strictEqual(relPathRef('..\\docs\\b.md').name, 'b.md');
+  for (const s of ['a.cwd', 'chat-ui.js', 'npm run build', 'https://x.com/a.js', 'src/a b.js']) assert.strictEqual(relPathRef(s), null, s);
   assert.strictEqual(pathRef('npm run build'), null);
   assert.strictEqual(pathRef('C:\\Work\\overlord'), null); // a folder: no extension
 });
