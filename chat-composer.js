@@ -514,8 +514,15 @@
   // The engine downloads the first time the mic is used (main.js 'dictateSetup'): the mic shows the progress, then
   // pops back ready. When it's already on disk the take starts at once and the engine loads while you talk.
   let engine = null; // null: not checked yet · { pct }: downloading · 'ready'
-  box().insertAdjacentHTML('beforebegin', '<div id="chat-voice" aria-live="polite"><canvas></canvas><span class="t"></span></div>');
+  box().insertAdjacentHTML('beforebegin', '<div id="chat-voice" aria-live="polite"><canvas></canvas><span class="m"></span><span class="t"></span></div>');
   const voice = document.getElementById('chat-voice'), BAR = 50; // a new bar every 50 ms
+  // The recorder runs on the audio thread and hands over 4096 samples at a time, so a busy page (a burst of agent
+  // output redrawing the chat) delays the audio but never drops it. 'end' flushes what it holds and answers 'end'.
+  const WORKLET = URL.createObjectURL(new Blob([`registerProcessor('take', class extends AudioWorkletProcessor {
+    constructor() { super(); this.b = []; this.n = 0; this.port.onmessage = () => { this.flush(); this.port.postMessage('end'); }; }
+    flush() { if (!this.n) return; const o = new Float32Array(this.n); let k = 0; for (const c of this.b) { o.set(c, k); k += c.length; } this.port.postMessage(o, [o.buffer]); this.b = []; this.n = 0; }
+    process(i) { const c = i[0] && i[0][0]; if (c) { this.b.push(c.slice(0)); this.n += c.length; if (this.n >= 4096) this.flush(); } return true; }
+  });`], { type: 'text/javascript' }));
   let takes = 0; const pending = new Map(); // take number → agent id, while whisper works on it
   function drawMic() {
     const busy = !dict && pending.size > 0;
@@ -552,14 +559,18 @@
   }
   async function micStart() {
     const d = dict = { id: selectedId, chunks: [], bars: [], t0: Date.now() };
-    const cv = voice.querySelector('canvas'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); voice.querySelector('.t').textContent = '0:00'; // not the last take's bars
+    const cv = voice.querySelector('canvas'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); voice.querySelector('.t').textContent = '0:00'; voice.querySelector('.m').textContent = ''; // not the last take's bars
     drawMic(); box().focus(); api.send({ type: 'dictateWarm' }); // the engine unloads when idle; it loads again while you talk
     try {
       d.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } }); // whisper reads raw speech better than Chrome's cleaned-up version
       if (dict !== d) return d.stream.getTracks().forEach((k) => k.stop()); // stopped before the mic opened
+      const label = (d.stream.getAudioTracks()[0] || {}).label || '', m = voice.querySelector('.m');
+      m.textContent = label.replace(/^(Default|Communications) - /, ''); m.title = label; // which mic is listening: the wrong default shows here, not as wrong words
       d.ctx = new AudioContext({ sampleRate: 16000 }); // whisper's rate; the browser resamples
-      const src = d.ctx.createMediaStreamSource(d.stream), node = d.ctx.createScriptProcessor(4096, 1, 1); // ponytail: deprecated but tiny; AudioWorklet if it goes away
-      node.onaudioprocess = (e) => d.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      await d.ctx.audioWorklet.addModule(WORKLET);
+      if (dict !== d) { d.stream.getTracks().forEach((k) => k.stop()); return d.ctx.close(); }
+      const src = d.ctx.createMediaStreamSource(d.stream), node = d.node = new AudioWorkletNode(d.ctx, 'take');
+      node.port.onmessage = (e) => { if (e.data === 'end') { if (d.finish) d.finish(); } else d.chunks.push(e.data); };
       d.an = d.ctx.createAnalyser(); d.an.fftSize = 512;
       const mute = d.ctx.createGain(); mute.gain.value = 0; // the recorder only runs when wired to the speakers; silence that, it hummed
       src.connect(node); src.connect(d.an); node.connect(mute); mute.connect(d.ctx.destination);
@@ -568,14 +579,18 @@
   }
   function micStop(discard) {
     const d = dict; if (!d) return; dict = null;
-    if (d.stream) d.stream.getTracks().forEach((k) => k.stop()); if (d.ctx) d.ctx.close();
-    const n = d.chunks.reduce((s, c) => s + c.length, 0);
-    if (!discard && n > 16000 * 0.3) { // under a third of a second is a mis-click
-      const all = new Float32Array(n); let o = 0; for (const c of d.chunks) { all.set(c, o); o += c.length; }
-      if (!all.some((v) => Math.abs(v) > 0.02)) { showToast('Mic: nothing heard. Is the right mic the default?'); drawMic(); return box().focus(); } // whisper turns silence into "you"
+    if (d.stream) d.stream.getTracks().forEach((k) => k.stop()); // the mic light goes off now; the recorder still holds the tail
+    const take = ++takes; if (!discard) pending.set(take, d.id); // "Transcribing…" from the click on
+    d.finish = () => {
+      if (d.fin) return; d.fin = true; clearTimeout(d.tm); if (d.ctx) d.ctx.close();
+      const n = d.chunks.reduce((s, c) => s + c.length, 0), all = new Float32Array(n); let o = 0; for (const c of d.chunks) { all.set(c, o); o += c.length; }
       const a = agents.get(d.id), shell = document.getElementById('chat-shell');
-      pending.set(++takes, d.id); api.send({ type: 'dictate', take: takes, wav: wavBytes(all, 16000), hint: dictVocab(a && a.cwd ? baseName(a.cwd) : '', shell ? shell.textContent.slice(-4000) : '') });
-    }
+      if (discard || n <= 16000 * 0.3) pending.delete(take); // under a third of a second is a mis-click
+      else if (!all.some((v) => Math.abs(v) > 0.02)) { pending.delete(take); showToast('Mic: nothing heard. Is the right mic the default?'); } // whisper turns silence into "you"
+      else api.send({ type: 'dictate', take, wav: wavBytes(all, 16000), hint: dictVocab(a && a.cwd ? baseName(a.cwd) : '', shell ? shell.textContent.slice(-4000) : '') });
+      drawMic();
+    };
+    if (d.node && !discard) { d.node.port.postMessage('end'); d.tm = setTimeout(d.finish, 1000); } else d.finish();
     drawMic(); box().focus();
   }
   function micToggle() {

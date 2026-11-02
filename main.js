@@ -1081,6 +1081,9 @@ function dictateSetup() {
   w.warm(WHISPER_DIR(), (pct) => send({ type: 'dictation', setup: true, pct }))
     .then(() => send({ type: 'dictation', setup: true, ready: true }), (e) => send({ type: 'dictation', setup: true, error: e.message }));
 }
+// Loads the installed engine 30 s after launch, so the first take of the session isn't 2-3 s slow. It unloads after
+// 5 idle minutes like any other time, freeing the GPU memory (~1 GB).
+app.whenReady().then(() => setTimeout(() => { if (!settings.dictationKey && require('./whisper').installed(WHISPER_DIR())) require('./whisper').warm(WHISPER_DIR()).catch(() => {}); }, 30000));
 function dictateTake(msg) {
   const say = (t, text) => send({ type: 'dictation', take: msg.take, t, text });
   const w = require('./whisper'), wav = Buffer.from(msg.wav), hint = String(msg.hint || '').slice(0, 600);
