@@ -856,6 +856,25 @@ async function ghostComplete(id, reqId, prefix, context) {
   } catch { reply(''); }
 }
 
+// Chat view: when the CLI drew no suggestion after a turn, guess the user's next message from the last exchange.
+// Replies `nextSuggest` with '' on no creds / error / timeout / no confident guess.
+async function suggestNext({ id, key, prompt, reply }) {
+  const auth = anthropicAuthHeaders();
+  const done = (text) => send({ type: 'nextSuggest', id, key, text: String(text || '').trim().split('\n')[0].replace(/^["']|["']$/g, '').slice(0, 120) });
+  if (!auth || !reply) return done('');
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, signal: AbortSignal.timeout(6000),
+      body: JSON.stringify({
+        model: TITLE_MODEL, max_tokens: 40,
+        system: 'You predict the next message a developer will send to their coding agent (Claude Code). Output ONLY that message: short, in the user\'s voice, at most ~10 words, no quotes. If the agent asked a question, answer it the way the user most likely would (e.g. "yes, push"). If there is no likely next message, output nothing.',
+        messages: [{ role: 'user', content: `User's last message:\n${String(prompt || '').slice(-1500)}\n\nAgent's reply:\n${String(reply).slice(-4000)}\n\nUser's next message:` }],
+      }),
+    });
+    done(resp.ok ? (await resp.json()).content?.[0]?.text : '');
+  } catch { done(''); }
+}
+
 // Check if text is a system/internal message rather than a real user prompt
 const SYSTEM_MSG_RE = /^<(?:command-name|local-command|system-reminder|task-notification|user-prompt-submit-hook|antml:)/;
 // A transcript line that means the turn moved on (the user answered, a tool finished, the model spoke)
@@ -4783,6 +4802,7 @@ function handleIpc(msg) {
     case 'chatFiles': chatFiles(msg); break;
     case 'chatSessions': chatSessions(msg); break;
     case 'linkTitle': linkTitle(msg); break;
+    case 'suggestNext': suggestNext(msg); break;
     // The Chat view's composer: a screenshot pasted there is saved to a file (as the terminal's Alt+V does) and its path
     // returned; the image goes to the agent only when the prompt is sent, in the place its [Image #N] tag holds.
     case 'saveClipboardImage': {

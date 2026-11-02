@@ -225,10 +225,22 @@
   // Claude ended by asking you something: its choices (or Yes / No) as one-click answers under the reply.
   // Claude's own suggestion for your next message: the CLI draws it greyed in its empty input box once a turn ends
   // (it isn't in the transcript). One click sends it, as Enter on it does in the CLI.
-  function qrHtml() {
-    const s = cliSuggestion(selectedId);
+  function qrHtml(id, evs) {
+    const s = nextSuggestion(id, evs);
     return s ? `<div class="qreplies"><button type="button" class="qr" data-qr="${escH(s)}">${escH(s)}</button></div>` : '';
   }
+  // The CLI's suggestion when it drew one, else Haiku's guess from the last exchange (asked once per reply).
+  const aiSugg = new Map(); // id → { key: the reply it answers, text: '' while asked or when there's none }
+  function nextSuggestion(id, evs) {
+    const cli = cliSuggestion(id); if (cli || !evs) return cli;
+    let reply = '', prompt = '';
+    for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if (e.type === 'prompt') { prompt = e.text || ''; break; } if (e.type === 'text' && !reply) reply = e.text || ''; }
+    if (!reply) return '';
+    const s = aiSugg.get(id);
+    if (!s || s.key !== reply) { aiSugg.set(id, { key: reply, text: '' }); api.send({ type: 'suggestNext', id, key: reply, prompt, reply }); return ''; }
+    return s.text;
+  }
+  function onNextSuggest(msg) { const s = aiSugg.get(msg.id); if (!s || s.key !== msg.key || !msg.text) return; s.text = msg.text; if (msg.id === selectedId) rerender(); }
   function cliSuggestion(id) {
     const x = typeof xterms !== 'undefined' && xterms.get(id); if (!x) return '';
     const b = x.terminal.buffer.active;
@@ -1110,7 +1122,7 @@
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
     const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && !(a._reverted && now - a._reverted < 8000) && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
-    const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml()) : ''); // queued text waits above the spinner or an open question, as in the CLI
+    const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(id, evs)) : ''); // queued text waits above the spinner or an open question, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
@@ -1148,7 +1160,7 @@
       else { tailEl.innerHTML = tail; if (opening) for (const n of tailEl.children) n.classList.add('still'); } // opening a chat: there already, nothing slides in
       tailEl._h = tail; tailEl._k = key; changed.push(tailEl);
     }
-    { const box = document.getElementById('term-order-input'), sg = tail.includes('class="qreplies"') ? cliSuggestion(id) : ''; // the chip's text, greyed in the box: Tab takes it
+    { const box = document.getElementById('term-order-input'), sg = tail.includes('class="qreplies"') ? nextSuggestion(id, evs) : ''; // the chip's text, greyed in the box: Tab takes it
       if (box && (box.dataset.sugg || '') !== sg) { box.dataset.sugg = sg; box.placeholder = sg ? sg + '  (Tab)' : 'Reply…'; } }
     drawDock(); applyAskHover(); keepAskInput(); // a hovered option keeps its preview through redraws, a typed answer its text
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
@@ -1995,5 +2007,5 @@
   // The CLI repainted under an open question card: redraw it next frame, not on a timer (clicks felt slow).
   let askTick = 0;
   const onTerm = (id) => { if (id === selectedId && !askTick && document.querySelector('#conversation .card.ask')) askTick = requestAnimationFrame(() => { askTick = 0; rerender(); }); };
-  window.chatUi = { onTerm, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { onTerm, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, onNextSuggest, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
