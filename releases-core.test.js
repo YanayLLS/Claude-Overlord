@@ -403,4 +403,18 @@ assert.strictEqual(age('garbage', now), '');
   assert.strictEqual(releasePeriods({ modalOpen: false, inFlight: true }).ping, 15 * S, 'a release in flight pings fast even when closed');
   assert.strictEqual(releasePeriods({ modalOpen: false, inFlight: true }).refresh, 15 * M, 'inFlight only touches ping');
 }
+{ // dev holds: lift on time, or on a green deploy that carries the held commit
+  const { holdActive, activeHolds, HOLD_MS } = require('./releases-core');
+  const at = '2026-11-02T10:00:00Z', t = Date.parse(at);
+  const h = { id: 'a', repo: 'o/f', branch: 'dev', sha: 's1', at, until: new Date(t + HOLD_MS).toISOString() };
+  assert.ok(holdActive(h, null, t + 1000), 'no deploy data: holds until it runs out');
+  assert.ok(!holdActive(h, null, t + HOLD_MS), 'runs out');
+  assert.ok(!holdActive(h, { runs: [{ sha: 's1', state: 'success', started: '2026-11-02T09:59:00Z' }] }, t + 1000), "the held commit's own green run lifts it");
+  assert.ok(holdActive(h, { runs: [{ sha: 's1', state: 'failure', started: at }] }, t + 1000), 'a red deploy keeps holding');
+  assert.ok(holdActive(h, { runs: [{ sha: 's0', state: 'success', started: '2026-11-02T09:50:00Z' }] }, t + 1000), 'an older run finishing late does not lift it');
+  assert.ok(!holdActive(h, { runs: [{ sha: 's2', state: 'success', started: '2026-11-02T10:05:00Z' }] }, t + 1000), 'someone merged anyway: a later green run carries it too');
+  const cfg = { repos: [{ repo: 'o/f', branches: { dev: 'dev', prod: 'master' } }] };
+  const deploys = { 'o/f|dev': { runs: [{ sha: 's1', state: 'success', started: at }] } };
+  assert.deepStrictEqual(activeHolds([h, { ...h, id: 'b', repo: 'o/x' }], cfg, deploys, t + 1000).map(x => x.id), ['b']);
+}
 console.log('releases-core: all passed');

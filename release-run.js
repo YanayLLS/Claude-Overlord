@@ -11,6 +11,10 @@ const MAX_TOP_AREAS = 8;
 
 // Real commits the target has and the source doesn't: single-parent, minus deploy-bot commits.
 // a commit the target has and the source lacks counts as a hotfix unless it's a merge (the release's own) or a CI deploy marker
+// The branch a release PR ships from: the source's tip pinned when Release was clicked (releaseRow).
+const snapshotRef = (source, target) => `overlord/promote-${source}-to-${target}`;
+// Is `ref` the head of a release PR of this step: the source itself (older PRs) or its snapshot?
+const isReleaseHead = (ref, { source, target }) => ref === source || ref === snapshotRef(source, target);
 const isHotfix = (parents, title) => parents === 1 && !CI_DEPLOY.test(title || '');
 function hotfixTitles(compareCommits) {
   return (compareCommits || []).map(c => [(c.parents || []).length, firstLine(c.commit && c.commit.message)])
@@ -143,36 +147,57 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   const api = (...a) => gh(['api', ...a]);
   // GitHub's `head=owner:branch` filter silently returns nothing on some repos (seen on
   // frontline.io-web), so list the base's open PRs and match the head branch here.
-  const findOpen = async (base, head) => {
+  // heads in order of preference: the first one with an open PR wins
+  const findOpen = async (base, ...heads) => {
     const r = await api('-X', 'GET', `repos/${repo}/pulls`, '-f', 'state=open', '-f', `base=${base}`, '-f', 'per_page=100');
     if (r.error) return { error: r.error };
-    const same = (p) => p.head && p.head.ref === head && (!p.head.repo || p.head.repo.full_name.toLowerCase() === repo.toLowerCase());
-    return { pr: (r.data || []).find(same) || null };
+    const same = (h) => (p) => p.head && p.head.ref === h && (!p.head.repo || p.head.repo.full_name.toLowerCase() === repo.toLowerCase());
+    for (const h of heads) { const pr = (r.data || []).find(same(h)); if (pr) return { pr }; }
+    return { pr: null };
   };
   const open = async (payload) => {
     const r = await api('-X', 'POST', `repos/${repo}/pulls`, '--input', writeJson(payload));
     return r.error || !r.data || !r.data.number ? { error: r.error || (r.data && r.data.message) || 'could not open PR' } : { pr: r.data };
   };
-  const cmp = await api(`repos/${repo}/compare/${target}...${source}`);
+  // The release ships `source` as it is NOW: a Release click pins its tip on the snapshot branch, so merges into
+  // dev while the release waits don't ride along. A recheck reads the open PR's head as it stands.
+  // An open PR straight from `source` (opened before snapshots) keeps that old behaviour, never a duplicate.
+  const snap = snapshotRef(source, target);
+  let found = await findOpen(target, snap, source);
+  if (found.error) return { error: found.error };
+  const legacy = !!(found.pr && found.pr.head.ref === source);
+  let head = found.pr ? found.pr.head.ref : source, pinSha = null;
+  if (row.pin && !legacy) {
+    const tip = await api(`repos/${repo}/git/ref/heads/${source}`);
+    pinSha = tip.data && tip.data.object && tip.data.object.sha;
+    if (!pinSha) return { error: tip.error || `could not read ${source}` };
+    head = pinSha;
+  }
+  const cmp = await api(`repos/${repo}/compare/${target}...${head}`);
   if (cmp.error || !cmp.data) return { error: cmp.error || 'compare failed' };
   const ahead = cmp.data.ahead_by, files = (cmp.data.files || []).length;
   if (!ahead || !files) return { nothing: true, ahead };
   const titles = (cmp.data.commits || []).filter(c => (c.parents || []).length === 1).map(c => firstLine(c.commit.message));
   const [back, own] = await Promise.all([api(`repos/${repo}/compare/${source}...${target}`),
-    row.customSource ? api(`repos/${repo}/compare/${row.customSource}...${source}`) : null]);
+    row.customSource ? api(`repos/${repo}/compare/${row.customSource}...${head}`) : null]);
   const carried = own && own.data ? carriedCommits(cmp.data.commits, own.data.commits) : [];
   const fromSource = carried.length ? { from: row.customSource, n: carried.length, titles: carried.slice(0, 8) } : null;
   const hotfixes = back.data ? hotfixTitles(back.data.commits) : [];
   update({ ahead, hotfixes: hotfixes.length, fromSource });
 
+  if (pinSha) { // move (or make) the snapshot branch to the pinned tip; an open snapshot PR follows it
+    const moved = await api('-X', 'PATCH', `repos/${repo}/git/refs/heads/${snap}`, '-f', `sha=${pinSha}`, '-F', 'force=true');
+    const made = moved.error ? await api('-X', 'POST', `repos/${repo}/git/refs`, '-f', `ref=refs/heads/${snap}`, '-f', `sha=${pinSha}`) : moved;
+    if (made.error) return { error: `could not pin ${source} on ${snap}: ${made.error}`, ahead };
+    head = snap;
+  }
+
   // the release PR: reuse an open one, else open it
-  let found = await findOpen(target, source);
-  if (found.error) return { error: found.error };
   let pr = found.pr, reused = !!pr, lastBody = null;
   if (!pr) {
     lastBody = releaseBody({ env: row.env, source, target, workflow: row.deploy, ahead, titles, hotfixes })
       + (row.members && row.opener ? '\n\n' + openerMark(row.opener.login, row.opener.clickup) : '');
-    const made = await open({ title: `chore(release): promote ${source} to ${target}`, head: source, base: target, body: lastBody });
+    const made = await open({ title: `chore(release): promote ${source} to ${target}`, head, base: target, body: lastBody });
     if (made.error) return { error: made.error, ahead };
     pr = made.pr;
   }
@@ -201,7 +226,7 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   // is the release PR mergeable, and are its checks green?
   const [health, dbschemas] = await Promise.all([
     prHealth(gh, repo, pr.number, target, wait, row.members || null),
-    dbschemasCheck(gh, repo, source, cmp.data.files, row.dbschemasLatest, row.customSource ? target : null).catch(e => ({ error: e.message })),
+    dbschemasCheck(gh, repo, head, cmp.data.files, row.dbschemasLatest, row.customSource ? target : null).catch(e => ({ error: e.message })),
   ]);
   return { ahead, hotfixes: hotfixes.length, fromSource, pr: { number: pr.number, url: pr.html_url }, reused, body: reused ? null : lastBody, backMerge, dbschemas, ...health };
 }
@@ -350,7 +375,7 @@ async function runRelease(gh, prs, { writeJson, onRow, wait }) {
   await Promise.all(rows.map(async (row, i) => {
     const update = (patch) => { Object.assign(row, patch); onRow(i, row); };
     let res;
-    try { res = await releaseRow(gh, row, { writeJson, update, wait }); } catch (e) { res = { error: e.message || String(e) }; }
+    try { res = await releaseRow(gh, { ...row, pin: true }, { writeJson, update, wait }); } catch (e) { res = { error: e.message || String(e) }; }
     Object.assign(row, res, { running: false });
     row.status = rowStatus(row);
     onRow(i, row);
@@ -361,5 +386,5 @@ async function runRelease(gh, prs, { writeJson, onRow, wait }) {
 // a Release all queued behind a run starts when that run released (all or part of it), not when it was stopped
 const startsQueue = (status) => status === 'done' || status === 'partial';
 
-module.exports = { startsQueue, recheckRelease, isHotfix, hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
+module.exports = { snapshotRef, isReleaseHead, startsQueue, recheckRelease, isHotfix, hotfixTitles, releaseBody, checksState, requiredChecks, rowStatus, prHealth, releaseRow, runRelease,
   addedSchemaFields, fieldsUsed, shippedVersion, dbschemasCheck, buildCoverage, carriedCommits, prodDbschemas };

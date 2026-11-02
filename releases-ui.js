@@ -1623,7 +1623,13 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
   const isReleasePr = (repo, head, base) => {
     const r = state && state.config && (state.config.repos || []).find(x => x.repo.toLowerCase() === String(repo).toLowerCase());
     const envs = r && r.branches ? Object.values(r.branches) : [];
-    return envs.includes(head) && envs.includes(base);
+    // overlord/promote-<source>-to-<target>: the snapshot a release PR ships from (release-run.js snapshotRef)
+    const snap = String(head).match(/^overlord\/promote-(.+)-to-(.+)$/);
+    return (envs.includes(head) || !!(snap && envs.includes(snap[1]) && snap[2] === base)) && envs.includes(base);
   };
-  window.releasesUi = { releaseRepos, enforcePrWatch, isReleasePr, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (brFor && document.activeElement === brFor) brShow(brFor); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
+  // Dev holds still in force (releases-core.js holdActive), and the branches one can be put on: each repo's first env branch
+  const holds = () => (window.ReleasesCore && state && state.config ? ReleasesCore.activeHolds(state.holds, state.config, state.results && state.results.deploys) : [])
+    .map(h => ({ ...h, mine: !!state.holdsMe && h.by === state.holdsMe }));
+  const holdBranches = () => ((state && state.config && state.config.repos) || []).map(r => ({ repo: r.repo, branch: Object.values(r.branches || {})[0] })).filter(x => x.branch);
+  window.releasesUi = { releaseRepos, enforcePrWatch, isReleasePr, holds, holdBranches, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (brFor && document.activeElement === brFor) brShow(brFor); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
 })();

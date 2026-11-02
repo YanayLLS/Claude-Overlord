@@ -7,6 +7,7 @@
 
 const M = require('./manifest-core');
 const { deploySkipped } = require('./releases-core');
+const { isReleaseHead } = require('./release-run');
 
 const HISTORY_SHOWN = 30;
 // Files whose effects live in the database, not the code: a rollback can't undo them
@@ -333,7 +334,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     await Promise.all(steps.map(async (s) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${s.repo}/pulls`, '-f', 'state=closed', '-f', `base=${s.target}`, '-f', 'per_page=50']);
       for (const p of (Array.isArray(r.data) ? r.data : [])) {
-        if (!p.merged_at || !p.head || p.head.ref !== s.source) continue;
+        if (!p.merged_at || !p.head || !isReleaseHead(p.head.ref, s)) continue;
         prs.push({ repo: s.repo, label: s.label, source: s.source, target: s.target, deploy: s.deploy, number: p.number, url: p.html_url,
           mergedAt: p.merged_at, mergeSha: p.merge_commit_sha, baseSha: p.base && p.base.sha, headSha: p.head.sha, author: p.user && p.user.login });
       }
@@ -410,6 +411,30 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     }
   }
 
+  // holds.json: "don't merge into <branch> for now" notices, shared by the team ([{ id, repo, branch, by, sha, at, until, note }])
+  const HOLDS = 'holds.json';
+  async function readHolds() {
+    const r = await ghJson(['api', `repos/${repoOf()}/contents/${HOLDS}?ref=main`]);
+    if (apiErr(r)) return /404|empty/i.test(apiErr(r)) ? { sha: null, data: [] } : { error: apiErr(r) };
+    try { return { sha: r.data.sha, data: JSON.parse(Buffer.from(r.data.content, 'base64').toString('utf8')) }; } catch { return { sha: r.data.sha, data: [] }; }
+  }
+  async function listHolds() { return repoOf() ? readHolds() : { data: [] }; }
+  // edit(list) → the new list; retried when a teammate wrote in between
+  async function updateHolds(edit, message) {
+    if (!repoOf()) return { error: 'no release-manifests repo' };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const cur = await readHolds();
+      if (cur.error) return cur;
+      const data = edit(Array.isArray(cur.data) ? cur.data : []);
+      const r = await ghJson(['api', '-X', 'PUT', `repos/${repoOf()}/contents/${HOLDS}`, '--input', writeTmp({ message, branch: 'main',
+        ...(cur.sha ? { sha: cur.sha } : {}), content: Buffer.from(JSON.stringify(data, null, 2) + '\n').toString('base64') })]);
+      const e = apiErr(r);
+      if (!e) return { data };
+      if (!/409|422|does not match/i.test(e)) return { error: e };
+    }
+    return { error: 'holds.json kept changing: try again' };
+  }
+
   // A run's findings per prod PR, into its pending manifest (only what changed is written)
   async function recordHealth(rows) {
     const key = (r) => r.repo + '#' + r.pr.number;
@@ -468,5 +493,5 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     }
   }
 
-  return { recordMerged, load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, recordHealth, markCancelled, markSigned };
+  return { recordMerged, load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, holds: listHolds, updateHolds, recordHealth, markCancelled, markSigned };
 };

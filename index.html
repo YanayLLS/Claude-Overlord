@@ -166,6 +166,13 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-refresh:hover { color:var(--accent); }
 .pr-refresh.spin { animation:pr-spin .7s linear infinite; }
 .pr-dhead-btns { display:flex; align-items:center; gap:2px; }
+.pr-holds { display:flex; flex-direction:column; gap:4px; padding:6px 10px; }
+.pr-hold { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:8px; font-size:12px; background:rgba(249,226,175,.16); border-left:2px solid var(--yellow); }
+.pr-hold .pr-hold-ic { color:var(--yellow); }
+.pr-hold .pr-hold-sub { color:var(--subtext0, var(--text)); opacity:.75; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.pr-hold button, .pr-hold select, .pr-hold input { font:inherit; font-size:11.5px; }
+.pr-hold input { flex:1; min-width:80px; }
+.pr-merge.pr-held { background:var(--yellow); }
 .pr-close:hover { color:var(--red); }
 @keyframes pr-spin { to { transform:rotate(360deg); } }
 .pr-row:last-child { border-bottom:none; }
@@ -4356,7 +4363,7 @@ api.onMainLog((msg) => console.log('%c[main]', 'color:#888', msg));
 
 // ── Message handling ───────────────────────────────────
 api.on((msg) => {
-  if (msg.type === 'releases') { if (window.releasesUi) releasesUi.onMsg(msg); return; } // Releases board, releases-ui.js
+  if (msg.type === 'releases') { if (window.releasesUi) { releasesUi.onMsg(msg); const k = JSON.stringify(releasesUi.holds()); if (k !== prHoldsKey) { prHoldsKey = k; prHoldRender(); } } return; } // Releases board, releases-ui.js
   if (msg.type.startsWith('doc') && docsUi.onMsg(msg)) return; // markdown documents, docs-ui.js
   if (msg.type === 'catalog') { catalogUi.onMsg(msg); chatComposer.onCatalog(msg); return; } // + / // popover, catalog-ui.js
   if (msg.type === 'imagePasted') {
@@ -6194,7 +6201,8 @@ function prActionBtn(p, u) {
   if (p.mine) {
     const mi = prMergeInfo(p);
     return mi.enabled
-      ? `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge</button>`
+      ? (prHoldOn(p) ? `<button class="pr-approve pr-merge pr-held" title="${escapeHtml(p.baseRef)} is on hold: merging restarts its deploy" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge anyway</button>`
+        : `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge</button>`)
       : `<button class="pr-approve pr-merge" disabled title="Can't merge: ${mi.label}">⤵ ${escapeHtml(mi.label)}</button>`;
   }
   if (p.approvedByMe) return `<button class="pr-approve" disabled title="You approved this PR">✓ You approved</button>`;
@@ -6226,7 +6234,9 @@ function prRowHtml(p, dim) {
     ? `<span class="pr-chip warn" title="Checks are still running on GitHub${p.checksEta ? ' — ' + escapeHtml(p.checksEta.name) + ', from its recent runs' : ''}">Testing${eta}</span>`
       + (p.failed ? `<span class="pr-chip bad" title="${p.failed} check(s) already failed while others still run">${p.failed} failed</span>` : '')
     : p.checks === 'fail' ? `<span class="pr-chip bad" title="Checks failed on GitHub">${p.failed > 1 ? p.failed + ' checks failed' : 'Checks failed'}</span>` : '';
-  const reqChip = (showReq ? '<span class="pr-chip bad">Your review</span>' : '') + (p.isDraft ? '<span class="pr-chip">Draft</span>' : '');
+  const hold = prHoldOn(p);
+  const reqChip = (showReq ? '<span class="pr-chip bad">Your review</span>' : '') + (p.isDraft ? '<span class="pr-chip">Draft</span>' : '')
+    + (hold ? `<span class="pr-chip warn" title="@${escapeHtml(hold.by)} asked not to merge into ${escapeHtml(hold.branch)}${hold.note ? ': ' + escapeHtml(hold.note) : ''}">⏸ ${escapeHtml(hold.branch)} held</span>` : '');
   const behindChip = p.behindBy > 0 ? `<span class="pr-chip warn" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">${p.behindBy} behind</span>` : '';
   // One table row per PR: each piece in its own column so rows line up (headers: prDropdownHead).
   const refs = p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${prRefHtml(p.headRef)} → ${prRefHtml(p.baseRef)}</span>` : '';
@@ -6326,7 +6336,34 @@ function prDropdownHead() {
     + (prState.prs.some(p => p.archived) ? `<button class="pr-refresh" title="${prCollapsed.has('__archived_open__') ? 'Hide' : 'Show'} archived" style="opacity:${prCollapsed.has('__archived_open__') ? 1 : .45}" onclick="event.stopPropagation();togglePrRepo('__archived_open__')">📦</button>` : '')
     + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button>`
     + `<button class="pr-refresh pr-close" title="Close" onclick="event.stopPropagation();closePrDropdown()">✕</button>`
-    + `</span></div>`;
+    + `</span></div>` + prHoldsHtml();
+}
+
+// Dev holds (releases-ui.js holds): a teammate asks everyone to keep merges out of a branch until their deploy is out.
+// Never blocks: Merge on a held branch asks first. Lifts itself on that deploy going green, or after 3h.
+var prHoldForm = false, prHoldsKey = ''; // var + function declarations: a render before this script part ran still works
+function prHolds() { return window.releasesUi ? releasesUi.holds() : []; }
+function prHoldOn(p) { return prHolds().find(h => !h.mine && h.repo.toLowerCase() === String(p.repo || '').toLowerCase() && h.branch === p.baseRef); }
+function prHoldsHtml() {
+  const hs = prHolds();
+  const hhmm = (iso) => new Date(iso).toTimeString().slice(0, 5);
+  let html = hs.map(h => `<div class="pr-hold"><span class="pr-hold-ic">⏸</span><b>${escapeHtml(h.repo.split('/')[1])} · ${escapeHtml(h.branch)}</b>`
+    + `<span class="pr-hold-sub" title="Lifts when ${escapeHtml(h.title || h.sha.slice(0, 7))} deploys, or at ${hhmm(h.until)}">${h.mine ? 'you' : '@' + escapeHtml(h.by)}${h.note ? ' · ' + escapeHtml(h.note) : ''} · until ${escapeHtml(h.title || h.sha.slice(0, 7))} deploys</span>`
+    + (h.mine ? `<button class="pr-approve" onclick="event.stopPropagation();api.send({type:'holdLift',id:'${escapeHtml(h.id)}'})">Lift</button>` : '') + '</div>').join('');
+  if (prHoldForm) {
+    const opts = releasesUi.holdBranches().map(b => `<option value="${escapeHtml(b.repo + '|' + b.branch)}">${escapeHtml(b.repo.split('/')[1] + ' · ' + b.branch)}</option>`).join('');
+    html += `<div class="pr-hold" onclick="event.stopPropagation()"><span class="pr-hold-ic">⏸</span><select id="pr-hold-br">${opts}</select>`
+      + `<input id="pr-hold-note" maxlength="140" placeholder="Why (optional)" onkeydown="if(event.key==='Enter')prHoldSubmit()">`
+      + `<button class="pr-approve pr-merge" onclick="prHoldSubmit()">Hold</button><button class="pr-approve" onclick="prHoldToggle()">✕</button></div>`;
+  }
+  return html ? `<div class="pr-holds">${html}</div>` : '';
+}
+function prHoldRender() { const d = document.getElementById('pr-dropdown'); if (d && d.style.display === 'block') d.innerHTML = prDropdownHtml(); }
+function prHoldToggle() { prHoldForm = !prHoldForm; prHoldRender(); if (prHoldForm) document.getElementById('pr-hold-note')?.focus(); }
+function prHoldSubmit() {
+  const [repo, branch] = document.getElementById('pr-hold-br').value.split('|');
+  api.send({ type: 'holdSet', repo, branch, note: document.getElementById('pr-hold-note').value.trim() });
+  prHoldForm = false; prHoldRender();
 }
 
 // Dropdown table shared by Pull requests and Tracked Actions (styles: .dt-* in theme.css, columns: --dt-cols
@@ -6343,6 +6380,7 @@ function prFixBtn(p, k) {
   if (p.checks !== 'pending') return fix;
   // Still testing: the ⏱ half toggles a Fix that starts once the checks finish (prRunFixLater).
   const on = !!prFixLater && prFixLater.has(p.key); // var: a render before this script part ran sees undefined
+    + (window.releasesUi && releasesUi.holdBranches().length ? `<button class="pr-refresh" title="Hold a branch: ask the team not to merge into it until your deploy is out" style="opacity:${prHoldForm ? 1 : .6}" onclick="event.stopPropagation();prHoldToggle()">⏸</button>` : '')
   return `<span class="pr-split">${fix}<button class="pr-approve pr-fix pr-later${on ? ' on' : ''}" title="${on ? 'Fixes when the checks finish (click to cancel)' : 'Fix when the checks finish'}" onclick="event.stopPropagation();prFixLaterToggle('${k}')">⏱</button></span>`;
 }
 
@@ -6756,7 +6794,11 @@ function prAnimateOut(label, color) {
   return Promise.race([Promise.all(anims), new Promise(r => setTimeout(r, 800))]);
 }
 function approvePr(url) { api.send({ type: 'approvePr', url }); prAnimateOut('✓ Approved', 'var(--green)').then(() => prOptimistic(url, 'approve')); }
-function mergePr(url) { api.send({ type: 'mergePr', url }); prAnimateOut('⤵ Merged', 'var(--purple)').then(() => prOptimistic(url, 'merge')); }
+function mergePr(url) {
+  const p = prState.prs.concat(prState.extra || []).find(x => x.url === url), hold = p && prHoldOn(p);
+  if (hold && !confirm(`@${hold.by} is holding ${hold.branch} until their deploy is out${hold.note ? ` (${hold.note})` : ''}.
+Merging now restarts that deploy. Merge anyway?`)) return;
+  api.send({ type: 'mergePr', url }); prAnimateOut('⤵ Merged', 'var(--purple)').then(() => prOptimistic(url, 'merge')); }
 
 function prCtx(e, url) {
   e.preventDefault(); e.stopPropagation();

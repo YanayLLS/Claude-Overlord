@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
-const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix, prodDbschemas } = require('./release-run');
+const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix, isReleaseHead, prodDbschemas } = require('./release-run');
 const createHistory = require('./release-history');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
@@ -14,7 +14,7 @@ const { runProgress, releaseEtaMs } = require('./deploy-eta');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
-const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas, releasePeriods } = require('./releases-core');
+const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas, releasePeriods, activeHolds, HOLD_MS } = require('./releases-core');
 const { deployState, deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 // Polling cadence (full refresh, deploy runs, sign ping, stray scan) lives in releasePeriods: slower while the modal is closed
@@ -186,7 +186,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const all = (res.data && res.data.workflow_runs) || [], run = all[0];
       // finished runs for the Timeline: when each deploy went out, who ran it, did it work
       const runs = all.filter(x => x.status === 'completed' && x.conclusion !== 'cancelled' && x.conclusion !== 'skipped').map(x => ({
-        sha: x.head_sha, date: x.updated_at, state: x.conclusion, url: x.html_url, actor: (x.actor && x.actor.login) || '',
+        sha: x.head_sha, date: x.updated_at, started: x.run_started_at || x.created_at, state: x.conclusion, url: x.html_url, actor: (x.actor && x.actor.login) || '',
         title: commitTitle(String((x.head_commit && x.head_commit.message) || x.display_title || '').split('\n')[0], String((x.head_commit && x.head_commit.message) || '').split('\n').slice(2).join('\n')),
       }));
       if (res.error) { out[key] = { state: 'unknown', error: res.error }; return; }
@@ -292,6 +292,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       push({ results, grid: buildGrid(cfg, results) });
       deploysChanged(prevDeploys, deploys);
       checkToSign().catch(() => {});
+      loadHolds().catch(() => {});
       reconcileHistory().catch(() => {});
       scanStray().catch(() => {});
     } finally {
@@ -326,6 +327,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const results = { ...state.results, deploys };
       push({ results, grid: buildGrid(cfg, results) }); // not updatedAt: only deploys are fresh, opening still does a full refresh
       persist();
+      loadHolds().catch(() => {});
       deploysChanged(prevDeploys, deploys);
     }, periods(idle ? { deploying: false } : null).deploys);
     deployTimer.unref?.();
@@ -384,6 +386,31 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   const apiErr = (r) => r.error || (r.data && !Array.isArray(r.data) && r.data.message && r.data.status ? `${r.data.message} (${r.data.status})` : null);
   const approversOrg = () => { const src = parseSource(state.source); return src && src.kind === 'gh' ? src.repo.split('/')[0] : null; };
   let me = null; // { github, clickup }
+  // ── Dev holds (releases-core.js holdActive): a teammate asks everyone to keep merges out of a branch for now ──
+  async function loadHolds() {
+    const [r, who] = await Promise.all([history.holds(), whoAmI()]);
+    if (!r.error && (JSON.stringify(r.data) !== JSON.stringify(state.holds || []) || state.holdsMe !== who.github)) push({ holds: r.data, holdsMe: who.github || null });
+  }
+  const liveHolds = (list) => activeHolds(list, state.config, state.results && state.results.deploys);
+  async function setHold(repo, branch, note) {
+    const r = state.config && (state.config.repos || []).find(x => x.repo.toLowerCase() === String(repo).toLowerCase());
+    if (!r || !Object.values(r.branches || {}).includes(branch) || !SAFE_REF_RE.test(branch)) return send({ type: 'toast', text: `Not a release branch: ${repo} ${branch}` });
+    const [tip, who] = await Promise.all([ghJson(['api', `repos/${r.repo}/commits/${branch}`]), whoAmI()]);
+    if (!tip.data || !tip.data.sha) return send({ type: 'toast', text: `Hold failed: could not read ${branch} (${tip.error || 'no reply'})` });
+    const now = Date.now();
+    const h = { id: now.toString(36), repo: r.repo, branch, by: who.github || 'someone', sha: tip.data.sha, title: commitTitle(String(tip.data.commit.message).split('\n')[0]),
+      at: new Date(now).toISOString(), until: new Date(now + HOLD_MS).toISOString(), note: String(note || '').slice(0, 140) };
+    const res = await history.updateHolds(list => [...liveHolds(list).filter(x => !(x.repo === h.repo && x.branch === branch && x.by === h.by)), h],
+      `hold ${r.repo} ${branch}: @${h.by}${h.note ? ' · ' + h.note : ''}`);
+    if (res.error) return send({ type: 'toast', text: 'Hold failed: ' + res.error });
+    push({ holds: res.data });
+  }
+  async function liftHold(id) {
+    const res = await history.updateHolds(list => liveHolds(list).filter(x => x.id !== id), `hold lifted: ${id}`);
+    if (res.error) return send({ type: 'toast', text: 'Lift failed: ' + res.error });
+    push({ holds: res.data });
+  }
+
   async function whoAmI() { if (!me || !me.github) me = await whoami().catch(() => ({ github: null, clickup: null })); return me; }
 
   async function loadApprovers() {
@@ -529,7 +556,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const soloOwn = (repo, body) => standaloneRepo(repo) && !releaseIdOf(body); // a standalone repo's own PR: no signatures
     await Promise.all(steps.map(async (p) => {
       const r = await ghJson(['api', '-X', 'GET', `repos/${p.repo}/pulls`, '-f', 'state=open', '-f', `base=${p.target}`, '-f', 'per_page=100']);
-      const prs = (Array.isArray(r.data) ? r.data : []).filter(x => x.head && (x.head.ref === p.source || ROLLBACK_HEAD.test(x.head.ref) || releaseIdOf(x.body))
+      const prs = (Array.isArray(r.data) ? r.data : []).filter(x => x.head && (isReleaseHead(x.head.ref, p) || ROLLBACK_HEAD.test(x.head.ref) || releaseIdOf(x.body))
         && (!x.head.repo || x.head.repo.full_name.toLowerCase() === p.repo.toLowerCase()));
       const sos = await Promise.all(prs.map(pr => soloOwn(p.repo, pr.body) ? null : signoffOf(p.repo, pr.number)));
       for (const [pi, pr] of prs.entries()) {
@@ -1577,6 +1604,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         return true;
       }
       case 'releasesRefresh': refresh(); return true;
+      case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
+      case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;
       // the picker's branch boxes: a repo's branches (cached for the session)
       case 'releasesBranches': branchesOf(msg.repo).catch(() => {}); return true;
       case 'releasesRelease': release(msg.envs, msg.repos, msg.of, !!msg.separate, msg.sources || null, !!msg.hotfix).catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
@@ -1650,11 +1679,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         const row = { ...p, env: 'prod', pr: { number: x.number, url: x.url }, author: x.author && x.author.login, title: x.title, head: x.headRefName, commits: x.commits.totalCount };
         out.push({ repo: p.repo, label: p.label, number: x.number, url: x.url, title: x.title, head: x.headRefName, base: p.target, source: p.source, author: row.author, createdAt: x.createdAt });
         if (!ap || Date.now() - Date.parse(x.createdAt) < ADOPT_AFTER_MS) continue;
-        (x.headRefName === p.source ? joinRel : hotfixes).push(row);
+        (isReleaseHead(x.headRefName, p) ? joinRel : hotfixes).push(row);
       }
       for (const x of node.merged.nodes) {
         if (!ap || !x.mergedAt || Date.now() - Date.parse(x.mergedAt) > 86400e3 || releaseIdOf(x.body) || ROLLBACK_HEAD.test(x.headRefName)) continue;
-        after.push({ ...p, env: 'prod', pr: { number: x.number, url: x.url }, mergeSha: x.mergeCommit && x.mergeCommit.oid, mergedAt: x.mergedAt, author: x.author && x.author.login, hotfix: x.headRefName !== p.source, standalone: solo });
+        after.push({ ...p, env: 'prod', pr: { number: x.number, url: x.url }, mergeSha: x.mergeCommit && x.mergeCommit.oid, mergedAt: x.mergedAt, author: x.author && x.author.login, hotfix: !isReleaseHead(x.headRefName, p), standalone: solo });
       }
     });
     push({ strayPrs: out.filter(x => Date.now() - Date.parse(x.createdAt) < ADOPT_AFTER_MS || !ap) });

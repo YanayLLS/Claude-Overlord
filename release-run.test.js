@@ -42,14 +42,17 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
   const calls = [];
   const gh = async (args) => {
     const a = args.join(' '); calls.push(a);
-    if (a.includes('compare/master...dev')) return { data: { ahead_by: 2, files: [{}], commits: [c('fix(x): one'), c('Merge pull request #9', 2)] } };
+    if (a.includes('git/ref/heads/dev')) return { data: { object: { sha: a.includes('o/f') ? 'tip1' : 'tip2' } } };
+    if (a.includes('-X PATCH') && a.includes('git/refs/heads/overlord/promote-dev-to-master')) return { error: 'Reference does not exist' };
+    if (a.includes('-X POST') && a.includes('git/refs')) return { data: { ref: 'refs/heads/overlord/promote-dev-to-master' } };
+    if (a.includes('compare/master...tip1')) return { data: { ahead_by: 2, files: [{}], commits: [c('fix(x): one'), c('Merge pull request #9', 2)] } };
     if (a.includes('compare/dev...master')) return { data: { commits: [c('fix: hotfix on master')] } };
-    if (a.includes('compare/main...dev')) return { data: { ahead_by: 0, files: [], commits: [] } };
+    if (a.includes('compare/main...tip2')) return { data: { ahead_by: 0, files: [], commits: [] } };
     // an unrelated open PR into master (other head branch) must not be mistaken for the release PR
     if (a.includes('-f state=open') && a.includes('base=master')) return { data: [{ number: 3, head: { ref: 'hotfix/x', repo: { full_name: 'o/f' } } }] };
-    if (a.includes('-f state=open') && a.includes('base=dev')) return { data: [] };
+    if (a.includes('-f state=open') && (a.includes('base=dev') || a.includes('base=main'))) return { data: [] };
     if (a.includes('-X POST') && a.includes('pulls')) {
-      const n = calls.filter(x => x.includes('-X POST')).length === 1 ? 10 : 11;
+      const n = calls.filter(x => x.includes('-X POST') && x.includes('pulls')).length === 1 ? 10 : 11;
       return { data: { number: n, html_url: 'u' + n } };
     }
     if (/repos\/o\/f\/pulls\/1[01]$/.test(a)) return { data: { mergeable: true, head: { sha: 'abc' } } };
@@ -69,7 +72,10 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
   assert.strictEqual(front.backMerge.number, 11);
   assert.strictEqual(front.checks, 'fail');
   assert.strictEqual(front.status, 'blocked');
-  assert.deepStrictEqual(payloads.map(p => `${p.head}→${p.base}`), ['dev→master', 'master→dev']);
+  // the release PR ships dev as it was at the click, from the snapshot branch; the back-merge still lands in dev
+  assert.deepStrictEqual(payloads.map(p => `${p.head}→${p.base}`), ['overlord/promote-dev-to-master→master', 'master→dev']);
+  assert.ok(calls.some(x => x.includes('-X POST') && x.includes('ref=refs/heads/overlord/promote-dev-to-master') && x.includes('sha=tip1')));
+  assert.ok(!calls.some(x => x.includes('promote-dev-to-main')), 'nothing to ship: no snapshot branch made');
   assert.ok(payloads[0].body.includes('1 non-merge'));
   assert.ok(payloads[1].body.includes('fix: hotfix on master'));
   assert.ok(front.body && front.body.includes('Promotes'), 'opened PRs carry their body for later patches');
@@ -89,6 +95,33 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
     return { data: null };
   }, [{ ...front }], { writeJson: () => 'f.json', wait: async () => {} });
   assert.deepStrictEqual([fixed[0].status, fixed[0].backMerge, fixed[0].checks, posted.length], ['ok', null, 'pass', 0]);
+
+  // snapshot PR open: a recheck reads its head as it stands (never re-pins); a Release click re-pins dev's tip on it
+  {
+    const { isReleaseHead, releaseRow } = require('./release-run');
+    assert.ok(isReleaseHead('overlord/promote-dev-to-master', { source: 'dev', target: 'master' }));
+    assert.ok(isReleaseHead('dev', { source: 'dev', target: 'master' }) && !isReleaseHead('hotfix/x', { source: 'dev', target: 'master' }));
+    const seen = [];
+    const fake = (openHead) => async (args) => {
+      const a = args.join(' '); seen.push(a);
+      if (a.includes('-f state=open') && a.includes('base=master')) return { data: [{ number: 10, html_url: 'u10', head: { ref: openHead, repo: { full_name: 'o/f' } } }] };
+      if (a.includes('git/ref/heads/dev')) return { data: { object: { sha: 'tip9' } } };
+      if (a.includes('git/refs')) return { data: {} };
+      if (a.includes('compare/master...')) return { data: { ahead_by: 1, files: [{}], commits: [c('fix: y')] } };
+      if (a.includes('compare/dev...master')) return { data: { commits: [] } };
+      if (/pulls\/10$/.test(a)) return { data: { mergeable: true, head: { sha: 'h' } } };
+      return { data: {} };
+    };
+    const row = { repo: 'o/f', env: 'prod', source: 'dev', target: 'master' }, opts = { writeJson: () => 'f.json', update: () => {}, wait: async () => {} };
+    await releaseRow(fake('overlord/promote-dev-to-master'), row, opts);
+    assert.ok(seen.some(x => x.includes('compare/master...overlord/promote-dev-to-master')) && !seen.some(x => x.includes('git/ref')), 'recheck: no re-pin');
+    seen.length = 0;
+    const re = await releaseRow(fake('overlord/promote-dev-to-master'), { ...row, pin: true }, opts);
+    assert.ok(re.reused && seen.some(x => x.includes('-X PATCH') && x.includes('sha=tip9')) && seen.some(x => x.includes('compare/master...tip9')), 'click: re-pinned on the open PR');
+    seen.length = 0;
+    const old = await releaseRow(fake('dev'), { ...row, pin: true }, opts);
+    assert.ok(old.reused && !seen.some(x => x.includes('git/ref')), 'an open PR straight from dev is reused as is, no duplicate');
+  }
 
   // prHealth: GitHub never decides mergeability → conflict is null (unknown), not false
   const { prHealth } = require('./release-run');

@@ -426,7 +426,24 @@ function releasePeriods({ modalOpen = false, inFlight = false, deploying = false
   };
 }
 
-const api = { deployState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+// ── Dev holds: "please don't merge into <branch> for now" (holds.json in the release-manifests repo) ──
+// A hold never blocks a merge: the PR panel just asks first. h: { id, repo, branch, by, sha, title, at, until, note }.
+const HOLD_MS = 3 * 3600 * 1000; // a forgotten hold lifts itself after this
+// The deploy run (fetchDeploys shape) of the branch a hold is on: the env whose branch it is.
+function holdDeploy(cfg, deploys, h) {
+  const r = ((cfg && cfg.repos) || []).find(x => x.repo.toLowerCase() === String(h.repo).toLowerCase());
+  const env = r && r.branches && Object.keys(r.branches).find(e => r.branches[e] === h.branch);
+  return (env && deploys && deploys[`${r.repo}|${env}`]) || null;
+}
+// Still holding? Lifted by its time running out, or by a green deploy that carries the held commit: that commit's
+// own run, or any run started after the hold (the branch only moves forward, so it carries the held tip too).
+function holdActive(h, deploy, now = Date.now()) {
+  if (!h || now >= Date.parse(h.until)) return false;
+  return !((deploy && deploy.runs) || []).some(r => r.state === 'success' && (r.sha === h.sha || (r.started && Date.parse(r.started) > Date.parse(h.at))));
+}
+const activeHolds = (holds, cfg, deploys, now = Date.now()) => (holds || []).filter(h => holdActive(h, holdDeploy(cfg, deploys, h), now));
+
+const api = { HOLD_MS, holdDeploy, holdActive, activeHolds, deployState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);
