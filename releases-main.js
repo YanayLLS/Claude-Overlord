@@ -998,14 +998,20 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const res = await ghJson(['api', '-X', 'PUT', `repos/${repo}/pulls/${n}/merge`, '-f', 'merge_method=merge']);
     if (apiErr(res)) return send({ type: 'toast', text: `${label}: GitHub refused the merge (${apiErr(res)})` });
     shipNow.add(repo.toLowerCase() + '#' + Number(n));
-    if (run) for (const R of run.rels.values()) if (R.items[label] && R.items[label].s === 'queued') markR(R, [label], { s: 'merged' }); // its row in the run: no longer waiting
+    // its row in the run: deploying now; the run's next wave waits for this deploy like its own (R.early)
+    const inRun = run && [...run.rels.values()].find(R => R.items[label] && R.items[label].s === 'queued');
+    if (inRun) markR(inRun, [label], { s: 'deploying' });
     send({ type: 'toast', text: `${label} merged — its deploy starts now` });
     await reconcileHistory().catch(() => {});
     refreshRun().catch(() => {});
     // watch its deploy like Release all would, and say how it went (here, and on every approver's
     // machine through the release record that reconcile writes)
     const wf = found && found.r.deploy && found.r.deploy.workflow, sha = res.data && res.data.sha;
-    if (wf && sha) waitDeploys([{ repo, label, deploy: wf, sha }]).then((bad) => {
+    const watch = wf && sha ? waitDeploys([{ repo, label, deploy: wf, sha }]) : null;
+    if (inRun) {
+      inRun.early = (inRun.early || []).concat((watch || Promise.resolve(null)).then(bad => { if (run && run.rels.has(inRun.key)) markR(inRun, [label], { s: bad ? 'failed' : (wf ? 'deployed' : 'merged-hand') }); return bad ? { ...bad, label } : null; }).catch(() => null));
+    }
+    if (watch) watch.then((bad) => {
       if (notify) notify(bad ? `❌ ${label} deploy failed` : `✅ ${label} deployed`, bad ? bad.detail : 'Merged from the release card', bad ? bad.url : null, () => send({ type: 'releases', state, open: true }));
       reconcileHistory().catch(() => {});
     }).catch(() => {});
@@ -1145,8 +1151,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     // same run, side by side from its first wave: one press ships both. Never a prod one pulled in by another env.
     const rels = new Map([[R.key, R]]);
     for (const c of companions(id)) {
-      const C = await prepareRel(c.id).catch(() => null);
-      if (C && typeof C !== 'string' && !rels.has(C.key)) rels.set(C.key, C);
+      const C = await prepareRel(c.id).catch(e => e.message || 'error');
+      if (C && typeof C !== 'string') { if (!rels.has(C.key)) rels.set(C.key, C); }
+      else send({ type: 'toast', text: `${c.env} release ${c.id} isn't in this Release all: ${C || 'error'}` });
     }
     manualDone = false;
     run = { tick: 0, pending: 0, rels };
@@ -1215,7 +1222,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }
     for (;;) {
       const rels = [...run.rels.values()];
-      for (const R of rels) if (R.status === 'running' && run.tick - R.offset >= R.waves.length) finishRel(R);
+      for (const R of rels) if (R.status === 'running' && run.tick - R.offset >= R.waves.length) {
+        if (R.early && R.early.length) { const bad = (await Promise.all(R.early.splice(0))).find(Boolean); if (bad) { stopR(R, bad.detail, bad.url); continue; } } // shipped early: done once it's deployed
+        finishRel(R);
+      }
       const active = rels.filter(R => R.status === 'running' && run.tick >= R.offset);
       if (releaseAllStop) { for (const R of rels.filter(R => R.status === 'running')) stopR(R, 'Stopped by you'); return; }
       if (!rels.some(R => R.status === 'running')) {
@@ -1226,6 +1236,13 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const slice = active.map(R => [R, R.waves[run.tick - R.offset]]);
       relProgress({ wave: run.tick + 1, status: 'merging', detail: slice.flatMap(([R, w]) => w.map(x => x.label + (R.env !== 'prod' ? ' ' + R.env : ''))).join(', ') });
       const merged = new Map(slice.map(([R]) => [R, []]));
+      // a repo shipped early from its row (Ship now): this wave goes after its deploy, like after its own wave's
+      for (const [R] of slice) if (R.early && R.early.length) {
+        relProgress({ status: 'deploying', detail: 'shipped early: waiting for its deploy' });
+        const bads = (await Promise.all(R.early.splice(0))).filter(Boolean);
+        const stop = bads.find(b => blocksLater(R, b.label));
+        if (stop) stopR(R, stop.detail, stop.url);
+      }
       for (const [R, wave] of slice) {
         for (const it of wave.filter(x => !x.manual)) {
           if (releaseAllStop || R.status !== 'running') break;
