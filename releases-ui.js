@@ -887,7 +887,14 @@
     }
     if (join && armed === 'q:' + myId) return `<button class="armed ${lockedCls}" data-act="queueAll" data-id="${esc(myId)}" title="${esc(tip)}">⚠ Confirm: add ${ready.length} PR${ready.length === 1 ? '' : 's'} to the run</button>`;
     if (join) return `<button class="${lockedCls}" data-act="queueAll" data-id="${esc(myId)}" title="${esc('Joins the running Release all: its waves go out alongside, from the next wave.\n' + tip)}">🚀 Release all · ${ready.length} · alongside</button>`;
-    return `<button ${attrs} title="${esc(tip)}">🚀 Release all · ${ready.length}</button>`;
+    // a prod release takes the other envs' releases opened with it (main: companions): one press ships both
+    const items = (s.history && s.history.items) || [], me = myId && items.find(x => x.id === myId);
+    const comp = me && (me.env || 'prod') === 'prod' ? [...new Set(items.filter(x => x.id !== myId && (x.env || 'prod') !== 'prod' && x.status === 'pending' && !x.cancelled
+      && Math.abs(Date.parse(x.openedAt) - Date.parse(me.openedAt)) < 30 * 60e3).map(x => x.env))] : [];
+    const plus = comp.length ? ' + ' + comp.join(' + ') : '';
+    return `<button ${attrs} title="${esc(tip + (plus ? `
+
+Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}">🚀 Release all · ${ready.length}${plus}</button>`;
   }
 
   // Release all's live progress: which wave, merging or waiting for deploys, the outcome; Stop.

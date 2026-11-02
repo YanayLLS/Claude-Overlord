@@ -1117,6 +1117,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     R.status = 'done'; R.detail = 'every wave merged and deployed';
   }
 
+  // pending non-prod releases opened within 30 min of release id: they go out in the same Release all
+  function companions(id) {
+    const items = (state.history && state.history.items) || [], m = id && items.find(x => x.id === id);
+    if (!m) return [];
+    const at = Date.parse(m.openedAt);
+    return items.filter(x => x.id !== id && (x.env || 'prod') !== 'prod' && x.status === 'pending' && !x.cancelled
+      && Math.abs(Date.parse(x.openedAt) - at) < 30 * 60e3);
+  }
   async function releaseAll(id) {
     // a refusal before the run starts also clears the UI's optimistic "Starting…"
     const no = (text) => { progress({ running: false, status: 'stopped', detail: text }); send({ type: 'toast', text }); };
@@ -1133,8 +1141,15 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const R = await prepareRel(id);
     if (typeof R === 'string') return no(R);
     if (releaseAllStop) return no('Stopped by you before anything merged');
+    // releases of other envs opened together with this one (prod + alpha from one "open release") go in the
+    // same run, side by side from its first wave: one press ships both. Never a prod one pulled in by another env.
+    const rels = new Map([[R.key, R]]);
+    for (const c of companions(id)) {
+      const C = await prepareRel(c.id).catch(() => null);
+      if (C && typeof C !== 'string' && !rels.has(C.key)) rels.set(C.key, C);
+    }
     manualDone = false;
-    run = { tick: 0, pending: 0, rels: new Map([[R.key, R]]) };
+    run = { tick: 0, pending: 0, rels };
     relProgress({ running: true, id: id || null, wave: 0, merged: [], status: 'merging', detail: '', url: null });
     clearInterval(beatTimer); beatTimer = setInterval(() => shareRun(true), BEAT_MS);
     try {
