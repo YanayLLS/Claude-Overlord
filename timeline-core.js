@@ -111,7 +111,7 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     // A message typed while the agent works waits in the CLI's queue (shown under the transcript) until it's delivered:
     // enqueue adds it, dequeue takes the oldest, remove takes it by its text. System notes queue too (kept, marked, so
     // the order holds).
-    if (r.type === 'queue-operation' && /^(enqueue|dequeue|remove)$/.test(r.operation)) {
+    if (r.type === 'queue-operation' && /^(enqueue|dequeue|remove|popAll)$/.test(r.operation)) { // popAll: ↑ pulled the whole queue back into the box (a cancel)
       const text = typeof r.content === 'string' ? r.content : '';
       return [{ type: 'queue', ts, op: r.operation, text: cap(text, TL_TEXT_MAX), sys: !text || isSystemMessage(text.trim()) }];
     }

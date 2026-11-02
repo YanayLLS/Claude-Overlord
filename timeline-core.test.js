@@ -164,3 +164,8 @@ test('watchedEnd: a full read stops where the live watcher is, so no line reache
   assert.strictEqual(watchedEnd(1000, 0, ''), 1000); // watcher not started
   assert.strictEqual(watchedEnd(500, 900, ''), 500); // file replaced
 });
+
+test('a queued message pulled back with ↑ (popAll) is a queue event, so the chat stops showing it as Queued', () => {
+  const ev = parse({ type: 'queue-operation', operation: 'popAll', content: 'oh it shows only when its deploying?' })[0];
+  assert.strictEqual(ev.type, 'queue'); assert.strictEqual(ev.op, 'popAll');
+});

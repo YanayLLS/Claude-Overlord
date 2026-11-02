@@ -834,6 +834,7 @@
       else if (e.type !== 'queue') continue;
       else if (e.op === 'enqueue') q.push(e);
       else if (e.op === 'dequeue') q.shift();
+      else if (e.op === 'popAll') q = []; // ↑ took them all back into the box: none waits now (a cancel, or editing them)
       else { const k = q.findIndex(x => x.text === e.text); if (k >= 0) q.splice(k, 1); }
     }
     // Each of the chat's own waiting bubbles stands for one entry: same text, or (its images and pastes read differently
