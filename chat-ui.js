@@ -651,7 +651,9 @@
     if (!s.options.length) return '';
     const seen = previews.get(q) || []; previews.set(q, seen);
     // The transcript has them whole when the question is in it: those, not the CLI's cut-down box.
-    const key = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase(), full = ((args && args.prevs) || []).find(x => key(x.q) === key(q));
+    // …or, while it's open, the hook's copy of the question (main's askInput): every preview whole, from the start.
+    const hooked = ((askInputs.get(selectedId) || {}).questions || []).map(x => ({ q: x.question, p: (x.options || []).map(o => String(o.preview || '')) }));
+    const key = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase(), full = [...((args && args.prevs) || []), ...hooked].find(x => key(x.q) === key(q));
     if (full) full.p.forEach((p, k) => { seen[k] = p; }); // its ``` fence stays: prevText reads its language
     else if (s.preview || seen[s.pf] == null) seen[s.pf] = /^No preview available$/i.test(s.preview) ? '' : s.preview;
     if (!seen.some(Boolean)) return ''; // a question without previews
@@ -666,6 +668,8 @@
   // the selection reaches them. The pane keeps the tallest it has been for this question, so a new one may grow the card
   // once but nothing ever shrinks it back (the chat is pinned to its bottom: a resize moved the options under the mouse).
   const paneH = new Map();
+  const askInputs = new Map(); // id → the open question's input, from main (the agent's AskUserQuestion hook)
+  function onAskInput(msg) { askInputs.set(msg.id, msg.input); if (msg.id === selectedId) rerender(); }
   function applyAskHover() {
     const pane = document.querySelector('#conversation .card.ask .ask-prev'), card = pane && pane.closest('.card');
     for (const b of document.querySelectorAll('#conversation .card.ask [data-hov]')) b.classList.toggle('hov', +b.dataset.pick === askHover);
@@ -2007,5 +2011,5 @@
   // The CLI repainted under an open question card: redraw it next frame, not on a timer (clicks felt slow).
   let askTick = 0;
   const onTerm = (id) => { if (id === selectedId && !askTick && document.querySelector('#conversation .card.ask')) askTick = requestAnimationFrame(() => { askTick = 0; rerender(); }); };
-  window.chatUi = { onTerm, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, onNextSuggest, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { onTerm, onAskInput, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, onNextSuggest, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

@@ -4705,6 +4705,7 @@ function handleAgentMsg(msg) {
     case 'chatFiles': chatComposer.onFiles(msg); break;
     case 'chatSessions': chatComposer.onSessions(msg); break;
     case 'linkTitle': chatUi.onLinkTitle(msg); break;
+    case 'askInput': chatUi.onAskInput(msg); break; // an open question's whole input, from its hook: the card's previews
     case 'nextSuggest': chatUi.onNextSuggest(msg); break;
     case 'cliEscSent': chatUi.onEscSent(msg.id); break; // the Esc reached the CLI: Esc's take-back looks at its box now
     case 'sessionChanged': { const a = agents.get(msg.id); if (a) { a.sessionId = msg.sessionId; a.chatHides = []; if (msg.id === selectedId) rememberAgent(); } break; } // after /clear or /resume: drafts and hidden messages are this session's

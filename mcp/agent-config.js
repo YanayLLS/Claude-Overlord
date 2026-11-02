@@ -24,9 +24,16 @@ function writeAgentSettings(id) {
   const dir = agentConfigDir(id);
   fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   const settingsPath = path.join(dir, 'settings.json');
-  fs.writeFileSync(settingsPath, JSON.stringify({ permissions: { deny: DENIED_SERVERS } }, null, 2));
+  // A question's whole input (its previews) as it opens: the transcript only gets it once answered, and the CLI's screen
+  // shows one preview at a time, cut to its box. The hook saves it to ask.json; main sends it to the chat's card.
+  // (Written here, not run from the app folder: a packaged app's files sit inside app.asar, which node can't read.)
+  const hook = path.join(dir, 'ask-hook.js'), fwd = (p) => p.replace(/\\/g, '/');
+  fs.writeFileSync(hook, "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () => { try { require('fs').writeFileSync(process.argv[2], JSON.stringify(JSON.parse(s).tool_input || {})); } catch {} });\n");
+  const hooks = { PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: `node "${fwd(hook)}" "${fwd(askFile(id))}"`, timeout: 5 }] }] };
+  fs.writeFileSync(settingsPath, JSON.stringify({ permissions: { deny: DENIED_SERVERS }, hooks }, null, 2));
   return settingsPath;
 }
+const askFile = (id) => path.join(agentConfigDir(id), 'ask.json');
 
 function settingsFlags(id) {
   return ` --settings "${writeAgentSettings(id)}"`;
@@ -43,4 +50,4 @@ function removeAgentConfig(id) {
   try { fs.rmSync(agentConfigDir(id), { recursive: true, force: true }); } catch {}
 }
 
-module.exports = { agentConfigDir, writeAgentConfig, writeAgentSettings, settingsFlags, removeAgentConfig };
+module.exports = { agentConfigDir, writeAgentConfig, writeAgentSettings, settingsFlags, removeAgentConfig, askFile };

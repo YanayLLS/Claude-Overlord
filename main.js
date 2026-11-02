@@ -15,7 +15,7 @@ const wc = require('./watch-core');
 const timelineCore = require('./timeline-core');
 const { createRegistry } = require('./browser/registry');
 const { createMcpServer } = require('./mcp/server');
-const { writeAgentConfig, settingsFlags, removeAgentConfig } = require('./mcp/agent-config');
+const { writeAgentConfig, settingsFlags, removeAgentConfig, askFile } = require('./mcp/agent-config');
 const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
 const { createPtyClient, pipePathFor, hostLauncher } = require('./pty-client');
@@ -397,7 +397,23 @@ let _restarting = false; // an app restart, not a close: every agent stays alive
 // browser", it must never block agent creation.
 // browser:false is the app-quit detached spawn — the MCP port dies with the app,
 // but the deny rule still has to travel with it.
+// A question's full input, saved by the agent's AskUserQuestion hook (mcp/agent-config.js): the chat's card reads its
+// previews from it while the question is open (the transcript has it only once answered).
+const askWatched = new Set();
+function watchAsk(id) {
+  if (askWatched.has(id)) return; askWatched.add(id);
+  const file = askFile(id), dir = path.dirname(file);
+  try {
+    fs.watch(dir, (_ev, name) => {
+      if (name !== 'ask.json') return;
+      let input; try { input = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+      const a = agents.get(id); if (!a) return;
+      a.askInput = input; send({ type: 'askInput', id, input });
+    });
+  } catch {}
+}
 function agentClaudeFlags(id, { browser = true } = {}) {
+  setImmediate(() => watchAsk(id)); // the config folder exists once the flags below are written
   try {
     if (!browser) return settingsFlags(id);
     if (!mcpServer || !mcpServer.port()) {
@@ -5281,7 +5297,7 @@ function handleIpc(msg) {
       }).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
       break;
     }
-    case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); break; }
+    case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); const ag = agents.get(msg.id); if (ag && ag.askInput) send({ type: 'askInput', id: msg.id, input: ag.askInput }); break; } // a reload: the open question's previews too
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
     case 'fetchUsage': fetchUsage(); break;
