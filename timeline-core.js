@@ -35,7 +35,7 @@ function promptEvents(ts, blocks, isSystemMessage) {
   const cut = /^(.*?) and your session was cut off, so it was resumed/.exec(txt);
   if (cut) return [{ type: 'resumed', ts, text: cut[1] }];
   // A background shell or agent finished: the CLI tells the model with a <task-notification>.
-  if (/^<task-notification>/.test(txt)) { const id = /<task-id>([^<]+)<\/task-id>/.exec(txt), st = /<status>([^<]+)<\/status>/.exec(txt); return id ? [{ type: 'bgdone', ts, taskId: id[1].trim(), status: st ? st[1].trim() : '' }] : null; }
+  if (/^<task-notification>/.test(txt)) { const id = /<task-id>([^<]+)<\/task-id>/.exec(txt), st = /<status>([^<]+)<\/status>/.exec(txt), sm = /<summary>([\s\S]*?)<\/summary>/.exec(txt); return id ? [{ type: 'bgdone', ts, taskId: id[1].trim(), status: st ? st[1].trim() : '', ...(sm && sm[1].trim() && { text: cap(sm[1].trim(), 2000) }) }] : null; } // <summary>: the line the CLI prints
   if (isSystemMessage(txt)) return null;
   // Another Claude session's message ("Another Claude session sent a message: <teammate-message …>"): a note from it.
   const tm = /<teammate-message\b([^>]*)>([\s\S]*?)(?:<\/teammate-message>|$)/.exec(txt);
@@ -124,6 +124,8 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     if (r.type === 'system' && r.subtype === 'informational' && r.content) return [{ type: 'note', ts, text: cap(String(r.content), 2000) }];
     if (r.type === 'attachment' && r.attachment?.type === 'file' && r.attachment.displayPath) { const n = r.attachment.content?.file?.numLines; return [{ type: 'note', ts, kind: 'sub', text: `Read ${r.attachment.displayPath}${n ? ` (${n} lines)` : ''}` }]; }
     if (r.type === 'attachment' && r.attachment?.type === 'invoked_skills' && r.attachment.skills?.length) return [{ type: 'note', ts, kind: 'sub', text: `Skills restored (${r.attachment.skills.map(s => s.name).join(', ')})` }];
+    // After a compaction, a background shell or agent still going: the CLI prints "Task "x" still running in background".
+    if (r.type === 'attachment' && r.attachment?.type === 'task_status' && r.attachment.status === 'running' && r.attachment.description) return [{ type: 'note', ts, text: `Task "${cap(String(r.attachment.description), 400)}" still running in background` }];
     if (r.type === 'system' && r.subtype === 'turn_duration') {
       return [{ type: 'turn', ts, text: `Turn completed (${Math.round((r.durationMs || 0) / 1000)}s)`, ms: r.durationMs || 0 }];
     }

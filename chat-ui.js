@@ -317,6 +317,7 @@
       // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.
       if (t === 'tool' && ev.name === 'Artifact' && doneBy.get(ev.toolId) && doneBy.get(ev.toolId).artifactUrl) { flush(); out.push(artifactCard(ev, doneBy.get(ev.toolId).artifactUrl)); open = true; return; }
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
+      if (t === 'bgdone' && ev.text) { if (turn) close(); flush(); out.push(msgHtml({ type: 'note', text: ev.text }, i, cwd)); return; } // the CLI's "Background command "x" completed" line; it opens a turn, after the last one's footer
       if (t === 'tool_done' || t === 'mode' || t === 'bgdone' || t === 'queue') return;
       // The "[Image: source: …]" record after a prompt: only shown when that prompt had no thumbnails of its own.
       // …or the prompt it comes just before (the CLI can write it first: the picture showed twice, above the bubble too).
