@@ -636,6 +636,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) :is(.md, .bubble) a.pathref { display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%; padding: 1px 7px; border-radius: 6px; background: var(--surface0); color: var(--text); text-decoration: none; font-family: 'Geist Mono', monospace; font-size: .85em; vertical-align: baseline; }
 :root body :is(#conversation, #chat-shell) :is(.md, .bubble) a.pathref:hover { background: var(--hover-strong); color: var(--claude); }
 :root body :is(#conversation, #chat-shell) :is(.md, .bubble) a.pathref .pr-dir { color: var(--dim); font-size: .92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root body :is(#conversation, #chat-shell) :is(.md, .bubble) a.pathref .pr-reveal { flex: none; align-self: center; display: inline-flex; padding: 2px; margin-right: -3px; border-radius: 4px; color: var(--dim); opacity: .55; }
+:root body :is(#conversation, #chat-shell) :is(.md, .bubble) a.pathref .pr-reveal:hover { opacity: 1; color: var(--text); background: var(--surface1); }
 :root body :is(#conversation, #chat-shell) :is(.md, .bubble) a.pathref img { width: 1.4em; height: 1.4em; object-fit: cover; border-radius: 3px; align-self: center; margin: 0; }
 /* table columns keep their markdown alignment (:---: centre, ---: right) */
 :root body :is(#conversation, #chat-shell) .md :is(th, td)[align="center"] { text-align: center; }
