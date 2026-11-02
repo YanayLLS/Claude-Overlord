@@ -307,7 +307,9 @@
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
       if (t === 'tool_done' || t === 'mode' || t === 'bgdone' || t === 'queue') return;
       // The "[Image: source: …]" record after a prompt: only shown when that prompt had no thumbnails of its own.
-      if (t === 'images') { if (lastPrompt && ((lastPrompt.images || []).length || (lastPrompt.paths || []).length)) return; }
+      // …or the prompt it comes just before (the CLI can write it first: the picture showed twice, above the bubble too).
+      const hasImgs = (p) => p && p.type === 'prompt' && ((p.images || []).length || (p.paths || []).length);
+      if (t === 'images') { if (hasImgs(lastPrompt) || evs.slice(i + 1, i + 4).some(hasImgs)) return; }
       if (t === 'prompt') lastPrompt = ev;
       if (t === 'turn') { turn = ev; return; }
       if (t === 'interrupt') { flush(); textAt = -1; open = false; sum = fresh(); } // a stopped turn gets no footer; the next one counts afresh
