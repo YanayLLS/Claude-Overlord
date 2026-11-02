@@ -102,6 +102,8 @@ test('liveReply: the reply being written, read off the CLI screen above its spin
   assert.strictEqual(liveReply(screen.slice(0, 8)), '');
   // a reply from an earlier turn above the latest prompt is not this turn's
   assert.strictEqual(liveReply(['● old answer', '', '> next question', '', '✶ Pondering… (2s · esc to interrupt)']), '');
+  // a running call's ● blinks off: its rows are still a call, not part of the text above (it flickered in and out)
+  assert.strictEqual(liveReply(['● Checking it on a real card.', '', '  Bash(cd /c/Work)', '  ⎿  Running… (48s)', '', '✻ Sketching… (1m · esc to interrupt)']), '');
 });
 
 test('screenDialog: a CLI dialog (rewind, /config, /model…) is up when its "Esc to …" footer is at the bottom', () => {

@@ -173,6 +173,8 @@ function liveReply(lines) {
   let b = -1;
   for (let i = s - 1; i >= Math.max(0, s - 400); i--) {
     if (/^\s*[●⏺]\s/.test(lines[i])) { b = i; break; }
+    // A running call's ● blinks: on its blank frames "  Bash(…)" / "  ⎿ Running…" is still a call, newer than any text.
+    if (/^\s{0,2}([A-Z][\w-]*\(|⎿\s)/.test(lines[i])) return '';
     if (/^>\s/.test(lines[i])) return ''; // the latest prompt: no reply yet this turn
   }
   if (b < 0) return '';

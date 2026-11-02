@@ -624,7 +624,13 @@
     if (t == null) return '<span class="ap-wait">…</span>';
     if (!t) return '<span class="ap-wait">No preview</span>';
     const fence = /^```([\w-]*)\n?/.exec(t), body = String(t).replace(/^```[\w-]*\n?/, '').replace(/\n?```\s*$/, '');
-    return termHtml(body, { diff: fence ? fence[1] === 'diff' : /^\+/m.test(body) });
+    // A design sketch, not a terminal: changed lines get a highlight instead of their "+", an emoji takes the two
+    // columns it's drawn in (box edges stay straight), and the text shrinks to the pane's width instead of scrolling.
+    const h = termHtml(body, { diff: fence ? fence[1] === 'diff' : /^\+/m.test(body) })
+      .replace(/<span class="d-(add|del)">[+-]/g, '<span class="d-$1"> ')
+      .replace(/\p{Extended_Pictographic}️?/gu, (m) => `<span class="w2">${m}</span>`);
+    const cols = Math.max(20, ...body.replace(/\x1b\[[0-9;?]*[@-~]/g, '').split('\n').map(l => [...l].reduce((n, c) => n + (/\p{Extended_Pictographic}/u.test(c) ? 2 : /️/.test(c) ? 0 : 1), 0)));
+    return `<span class="ap-in" style="--cols:${cols}">${h}</span>`;
   };
   function prevHtml(q, s, args) {
     if (!s.options.length) return '';
@@ -636,7 +642,7 @@
     if (!seen.some(Boolean)) return ''; // a question without previews
     // Drawn with the selected option's preview; a hover swaps only this pane's text (applyAskHover), never the card.
     const rows = Math.max(...seen.filter(Boolean).map(p => p.split('\n').length)), f = askFocus(s), pk = s.options[f] && s.options[f].bare ? s.pf : f; // "Chat about this" has none: the CLI keeps the last option's
-    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${pk}" style="min-height:calc(${rows} * 1.5em + 18px)">${prevText(seen[pk])}</pre>`;
+    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${pk}" style="min-height:calc(${rows} * 1.2em + 18px)">${prevText(seen[pk])}</pre>`;
   }
   function applyAskHover() {
     const pane = document.querySelector('#conversation .card.ask .ask-prev'), card = pane && pane.closest('.card');
@@ -1661,7 +1667,7 @@
     else if (more) more.remove();
   }
   function permToast(id, ask) {
-    const a = agents.get(id); if (!a || worldView || id === selectedId || !stillWaiting(id)) return; // the one on screen shows its own card
+    const a = agents.get(id); if (!a || ask || worldView || id === selectedId || !stillWaiting(id)) return; // the one on screen shows its own card; another's question waits for you there (its popup distracted)
     dropToast(id);
     const tools = [...a.tools.values()], t = tools.find(x => ask ? x.perm === 'ask' : x.perm === true) || tools.find(x => x.perm) || {}, opts = ask ? quickOpts(id) : [];
     const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
