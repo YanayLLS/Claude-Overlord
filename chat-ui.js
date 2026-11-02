@@ -1130,6 +1130,8 @@
       else { tailEl.innerHTML = tail; if (opening) for (const n of tailEl.children) n.classList.add('still'); } // opening a chat: there already, nothing slides in
       tailEl._h = tail; tailEl._k = key; changed.push(tailEl);
     }
+    { const box = document.getElementById('term-order-input'), sg = tail.includes('class="qreplies"') ? cliSuggestion(id) : ''; // the chip's text, greyed in the box: Tab takes it
+      if (box && (box.dataset.sugg || '') !== sg) { box.dataset.sugg = sg; box.placeholder = sg ? sg + '  (Tab)' : 'Reply…'; } }
     drawDock(); applyAskHover(); keepAskInput(); // a hovered option keeps its preview through redraws, a typed answer its text
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
     announce(st === 'question' ? 'The agent has a question' : st === 'permission' ? 'The agent needs approval' : busy ? 'The agent is working' : a.crashed === 'fatal' ? 'The agent stopped' : 'The agent is done');

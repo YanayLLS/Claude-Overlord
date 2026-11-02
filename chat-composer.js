@@ -359,6 +359,8 @@
       if (e.key === 'Escape') { e.preventDefault(); closeAt(); return; }
     }
     if (chat() && cardKey(e)) { e.preventDefault(); return; }
+    // Claude's suggestion, greyed in the empty box: Tab takes it in to edit or send (never sends by itself).
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && chat() && !t.value && t.dataset.sugg) { e.preventDefault(); t.value = t.dataset.sugg; t.dispatchEvent(new Event('input', { bubbles: true })); return; }
     // A tag goes in one keystroke: Backspace right after "[Image #1]" (or Delete right before it) removes it whole.
     if ((e.key === 'Backspace' || e.key === 'Delete') && t.selectionStart === t.selectionEnd) {
       const at = t.selectionStart, before = t.value.slice(0, at), after = t.value.slice(at);
