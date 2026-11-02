@@ -1833,7 +1833,7 @@ function doSpawnTerminal(id, attached) {
           a._readyTimer = setTimeout(() => {
             a._readyTimer = null; a.claudeReady = true;
             // Resumed after a crash at the prompt: nothing else will clear 'resuming' until the next turn
-            if (a.crashed && !a._crashNudge) { a.crashed = false; send({ type: 'status', id, status: shownStatus(a) }); }
+            if (a.crashed && !a._crashNudge) { a.crashed = false; send({ type: 'crashCleared', id }); send({ type: 'status', id, status: shownStatus(a) }); } // the window's "auto-resuming" line goes too
             sendCrashNudge(id); flushPeerMsgs(id);
           }, 4000);
         } else {
@@ -2156,7 +2156,7 @@ function readLines(id) {
     a.fileOffset = st.size;
     const text = a.lineBuffer + buf.toString('utf-8');
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
-    if (lines.some(l => l.trim())) a.crashed = false;
+    if (a.crashed && lines.some(l => l.trim())) { a.crashed = false; send({ type: 'crashCleared', id }); } // it's writing again: resumed (the window kept "Crashed — auto-resuming" after a restart)
     // Only turn progress ends a pending ask/permission — queued notifications, attachments etc. do not
     // Another subagent's progress isn't an answer to the dialog on screen (answering it goes through handleTermInput).
     if (!a.askIds?.size && lines.some(l => movesTurn(l) && !(a.ptyPerm && /"type":"progress"/.test(l)))) { clrTimer(id, permTimers); clearPtyPerm(id, a); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
