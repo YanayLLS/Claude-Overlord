@@ -754,7 +754,10 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.ask .ask-prev .ap-in { display: block; font-size: clamp(10px, calc(100cqw / (var(--cols) * 0.6)), 12.5px); }
 :root body #conversation .card.ask .ask-prev .w2 { display: inline-block; width: 2ch; text-align: center; }
 :root body #conversation .card.ask .ask-prev :is(.d-add, .d-del) { display: inline-block; min-width: 100%; margin: 0 -10px; padding: 0 10px; box-sizing: content-box; }
-:root body #conversation .card.ask .ask-prev:has(> .sketch) { white-space: normal; font-family: inherit; font-size: 13px; line-height: 1.5; color: var(--text); padding: 12px; }
+:root body #conversation .card.ask .ask-prev .ap-pane:has(> .sketch) { white-space: normal; font-family: Geist, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; font-size: 13px; line-height: 1.5; color: var(--text); }
+:root body #conversation .card.ask .ask-prev { display: grid; }
+:root body #conversation .card.ask .ask-prev > .ap-pane { grid-area: 1 / 1; visibility: hidden; min-width: 0; }
+:root body #conversation .card.ask .ask-prev > .ap-pane.on { visibility: visible; }
 :root body #conversation .sketch .sk-row { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1px 6px; border-radius: 5px; }
 :root body #conversation .sketch .sk-c { text-align: center; }
 :root body #conversation .sketch .sk-gap { height: 8px; }

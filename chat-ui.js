@@ -642,15 +642,19 @@
     else if (s.preview || seen[s.pf] == null) seen[s.pf] = /^No preview available$/i.test(s.preview) ? '' : s.preview;
     if (!seen.some(Boolean)) return ''; // a question without previews
     // Drawn with the selected option's preview; a hover swaps only this pane's text (applyAskHover), never the card.
-    const rows = Math.max(...seen.filter(Boolean).map(p => p.split('\n').length)), f = askFocus(s), pk = s.options[f] && s.options[f].bare ? s.pf : f; // "Chat about this" has none: the CLI keeps the last option's
-    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${pk}" style="min-height:calc(${rows} * 1.2em + 18px)">${prevText(seen[pk])}</pre>`;
+    // Every option's preview is drawn, stacked in one place, only one shown: the pane is as tall as the tallest, so a
+    // hover never resizes the card (it moved the options under the mouse and the hover flickered between them).
+    const f = askFocus(s), pk = s.options[f] && s.options[f].bare ? s.pf : f; // "Chat about this" has none: the CLI keeps the last option's
+    const panes = s.options.map((o, k) => o.bare ? '' : `<div class="ap-pane${k === pk ? ' on' : ''}" data-k="${k}">${prevText(seen[k])}</div>`).join('');
+    return `<pre class="ask-prev" data-q="${escH(q)}" data-focus="${pk}">${panes}</pre>`;
   }
   function applyAskHover() {
     const pane = document.querySelector('#conversation .card.ask .ask-prev'), card = pane && pane.closest('.card');
     for (const b of document.querySelectorAll('#conversation .card.ask [data-hov]')) b.classList.toggle('hov', +b.dataset.pick === askHover);
     if (!pane) return;
-    const seen = previews.get(pane.dataset.q) || [], k = askHover != null && card.querySelector(`[data-pick="${askHover}"]:not([data-bare])`) ? askHover : +pane.dataset.focus; // hovering "Chat about this" keeps the pane
-    const h = prevText(seen[k]); if (pane._h !== h) { pane.innerHTML = h; pane._h = h; }
+    const k = askHover != null && card.querySelector(`[data-pick="${askHover}"]:not([data-bare])`) ? askHover : +pane.dataset.focus; // hovering "Chat about this" keeps the pane
+    if (!pane.querySelector(`.ap-pane[data-k="${k}"]`)) return;
+    for (const p of pane.children) p.classList.toggle('on', +p.dataset.k === k);
   }
   // ↑/↓ from the reply box: one step, wrapping like the CLI's menu; the preview follows the selection.
   function askStep(d) { const s = screenAsk(selectedId), n = s.options.length; if (!n) return false; askHover = null; askMove((askFocus(s) + d + n) % n); return true; }
