@@ -166,13 +166,22 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-refresh:hover { color:var(--accent); }
 .pr-refresh.spin { animation:pr-spin .7s linear infinite; }
 .pr-dhead-btns { display:flex; align-items:center; gap:2px; }
-.pr-holds { display:flex; flex-direction:column; gap:4px; padding:6px 10px; }
-.pr-hold { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:8px; font-size:12px; background:rgba(249,226,175,.16); border-left:2px solid var(--yellow); }
-.pr-hold .pr-hold-ic { color:var(--yellow); }
-.pr-hold .pr-hold-sub { color:var(--subtext0, var(--text)); opacity:.75; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
-.pr-hold button, .pr-hold select, .pr-hold input { font:inherit; font-size:11.5px; }
+.pr-holds { display:flex; flex-direction:column; gap:4px; padding:6px 10px 2px; }
+.pr-hold { display:flex; align-items:center; gap:8px; min-height:34px; padding:4px 6px 4px 10px; border-radius:var(--r); font-size:12px; background:color-mix(in srgb, var(--yellow) 9%, transparent); border:1px solid color-mix(in srgb, var(--yellow) 22%, transparent); }
+.pr-pause { display:inline-flex; color:var(--yellow); flex-shrink:0; }
+.pr-hold b { font-weight:600; white-space:nowrap; }
+.pr-hold .pr-hold-sub { color:var(--subtext); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.pr-hold select, .pr-hold input { height:26px; padding:0 8px; font:inherit; font-size:12px; color:var(--text); background:var(--bg2); border:1px solid var(--border-hi); border-radius:var(--r-sm); outline:none; }
+.pr-hold select:focus, .pr-hold input:focus { border-color:color-mix(in srgb, var(--yellow) 60%, transparent); }
+.pr-hold select option { background:var(--pop); color:var(--text); }
 .pr-hold input { flex:1; min-width:80px; }
-.pr-merge.pr-held { background:var(--yellow); }
+.pr-hold input::placeholder { color:var(--dim); }
+.pr-hold-go { height:26px; padding:0 12px; border:none; border-radius:var(--r-sm); background:var(--yellow); color:var(--on-accent, #111); font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
+.pr-hold-go:hover { filter:brightness(1.08); }
+.pr-hold-x { height:26px; padding:0 8px; border:none; border-radius:var(--r-sm); background:none; color:var(--dim); font:inherit; font-size:12px; cursor:pointer; }
+.pr-hold-x:hover { background:var(--hover-strong); color:var(--text); }
+.pr-chip .pr-pause { margin-right:3px; }
+.pr-merge.pr-held { background:var(--yellow); color:var(--on-accent, #111); }
 .pr-close:hover { color:var(--red); }
 @keyframes pr-spin { to { transform:rotate(360deg); } }
 .pr-row:last-child { border-bottom:none; }
@@ -6238,7 +6247,7 @@ function prRowHtml(p, dim) {
     : p.checks === 'fail' ? `<span class="pr-chip bad" title="Checks failed on GitHub">${p.failed > 1 ? p.failed + ' checks failed' : 'Checks failed'}</span>` : '';
   const hold = prHoldOn(p);
   const reqChip = (showReq ? '<span class="pr-chip bad">Your review</span>' : '') + (p.isDraft ? '<span class="pr-chip">Draft</span>' : '')
-    + (hold ? `<span class="pr-chip warn" title="@${escapeHtml(hold.by)} asked not to merge into ${escapeHtml(hold.branch)}${hold.note ? ': ' + escapeHtml(hold.note) : ''}">⏸ ${escapeHtml(hold.branch)} held</span>` : '');
+    + (hold ? `<span class="pr-chip warn" title="@${escapeHtml(hold.by)} asked not to merge into ${escapeHtml(hold.branch)}${hold.note ? ': ' + escapeHtml(hold.note) : ''}">${prPauseIc(10)}${escapeHtml(hold.branch)} held</span>` : '');
   const behindChip = p.behindBy > 0 ? `<span class="pr-chip warn" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">${p.behindBy} behind</span>` : '';
   // One table row per PR: each piece in its own column so rows line up (headers: prDropdownHead).
   const refs = p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${prRefHtml(p.headRef)} → ${prRefHtml(p.baseRef)}</span>` : '';
@@ -6295,8 +6304,9 @@ function prGroupHeader(repo, count, muted) {
   const muteBtn = muted
     ? `<button class="pr-repo-mute" title="Un-mute repo" onclick="event.stopPropagation();unmuteRepo('${r}')">🔔</button>`
     : `<button class="pr-repo-mute" title="Mute repo — no red/notify for its PRs" onclick="event.stopPropagation();muteRepo('${r}')">🔕</button>`;
-  return `<div class="pr-group-header dt-group${muted ? ' pr-group-muted' : ''}" onclick="event.stopPropagation();togglePrRepo('${r}')">`
-    + `<span>${collapsed ? '▸' : '▾'} ${escapeHtml(repo)}</span>`
+  const held = prHolds().find(h => h.repo.toLowerCase() === repo.toLowerCase());
+  return `<div class="pr-group-header dt-group${muted ? ' pr-group-muted' : ''}" onclick="event.stopPropagation();togglePrRepo('${r}')" oncontextmenu="prRepoCtx(event,'${r}')">`
+    + `<span>${collapsed ? '▸' : '▾'} ${escapeHtml(repo)}${held ? ` <span title="${escapeHtml(held.branch)} on hold by ${held.mine ? 'you' : '@' + escapeHtml(held.by)}">${prPauseIc(11)}</span>` : ''}</span>`
     + `<span class="pr-ghead-right">${muteBtn}<span class="pr-count">${count}</span></span></div>`;
 }
 
@@ -6336,6 +6346,7 @@ function prDropdownHead() {
   const scope = `<span class="pr-scope">${seg('all', 'All', 'Every open PR')}${seg('dev', 'Into dev', 'Only PRs merging into dev')}${seg('norel', 'Hide releases', 'Hide PRs into alpha, staging, master, main and prod')}</span>`;
   return `<div class="pr-dhead"><span>Pull requests</span>${who}${scope}<span class="pr-dhead-btns">`
     + (prState.prs.some(p => p.archived) ? `<button class="pr-refresh" title="${prCollapsed.has('__archived_open__') ? 'Hide' : 'Show'} archived" style="opacity:${prCollapsed.has('__archived_open__') ? 1 : .45}" onclick="event.stopPropagation();togglePrRepo('__archived_open__')">📦</button>` : '')
+    + (window.releasesUi && releasesUi.holdBranches().length ? `<button class="pr-refresh" title="Hold a branch: ask the team not to merge into it until your deploy is out" style="opacity:${prHoldForm ? 1 : .6}" onclick="event.stopPropagation();prHoldToggle()">${prPauseIc(13)}</button>` : '')
     + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button>`
     + `<button class="pr-refresh pr-close" title="Close" onclick="event.stopPropagation();closePrDropdown()">✕</button>`
     + `</span></div>` + prHoldsHtml();
@@ -6344,19 +6355,20 @@ function prDropdownHead() {
 // Dev holds (releases-ui.js holds): a teammate asks everyone to keep merges out of a branch until their deploy is out.
 // Never blocks: Merge on a held branch asks first. Lifts itself on that deploy going green, or after 3h.
 var prHoldForm = false, prHoldsKey = ''; // var + function declarations: a render before this script part ran still works
+function prPauseIc(sz = 12) { return `<span class="pr-pause"><svg width="${sz}" height="${sz}" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2" width="2.6" height="8" rx="1" fill="currentColor"/><rect x="6.9" y="2" width="2.6" height="8" rx="1" fill="currentColor"/></svg></span>`; }
 function prHolds() { return window.releasesUi ? releasesUi.holds() : []; }
 function prHoldOn(p) { return prHolds().find(h => !h.mine && h.repo.toLowerCase() === String(p.repo || '').toLowerCase() && h.branch === p.baseRef); }
 function prHoldsHtml() {
   const hs = prHolds();
   const hhmm = (iso) => new Date(iso).toTimeString().slice(0, 5);
-  let html = hs.map(h => `<div class="pr-hold"><span class="pr-hold-ic">⏸</span><b>${escapeHtml(h.repo.split('/')[1])} · ${escapeHtml(h.branch)}</b>`
+  let html = hs.map(h => `<div class="pr-hold">${prPauseIc()}<b>${escapeHtml(h.repo.split('/')[1])} · ${escapeHtml(h.branch)}</b>`
     + `<span class="pr-hold-sub" title="Lifts when ${escapeHtml(h.title || h.sha.slice(0, 7))} deploys, or at ${hhmm(h.until)}">${h.mine ? 'you' : '@' + escapeHtml(h.by)}${h.note ? ' · ' + escapeHtml(h.note) : ''} · until ${escapeHtml(h.title || h.sha.slice(0, 7))} deploys</span>`
-    + (h.mine ? `<button class="pr-approve" onclick="event.stopPropagation();api.send({type:'holdLift',id:'${escapeHtml(h.id)}'})">Lift</button>` : '') + '</div>').join('');
+    + (h.mine ? `<button class="pr-hold-x" title="Lift: merges into ${escapeHtml(h.branch)} are fine again" onclick="event.stopPropagation();prHoldLift('${escapeHtml(h.id)}')">Lift</button>` : '') + '</div>').join('');
   if (prHoldForm) {
     const opts = releasesUi.holdBranches().map(b => `<option value="${escapeHtml(b.repo + '|' + b.branch)}">${escapeHtml(b.repo.split('/')[1] + ' · ' + b.branch)}</option>`).join('');
-    html += `<div class="pr-hold" onclick="event.stopPropagation()"><span class="pr-hold-ic">⏸</span><select id="pr-hold-br">${opts}</select>`
-      + `<input id="pr-hold-note" maxlength="140" placeholder="Why (optional)" onkeydown="if(event.key==='Enter')prHoldSubmit()">`
-      + `<button class="pr-approve pr-merge" onclick="prHoldSubmit()">Hold</button><button class="pr-approve" onclick="prHoldToggle()">✕</button></div>`;
+    html += `<div class="pr-hold" onclick="event.stopPropagation()">${prPauseIc()}<select id="pr-hold-br">${opts}</select>`
+      + `<input id="pr-hold-note" maxlength="140" placeholder="Why (optional)" onkeydown="if(event.key==='Enter')prHoldSubmit();if(event.key==='Escape')prHoldToggle()">`
+      + `<button class="pr-hold-go" onclick="prHoldSubmit()">Hold until deployed</button><button class="pr-hold-x" title="Cancel" onclick="prHoldToggle()">✕</button></div>`;
   }
   return html ? `<div class="pr-holds">${html}</div>` : '';
 }
@@ -6366,6 +6378,17 @@ function prHoldSubmit() {
   const [repo, branch] = document.getElementById('pr-hold-br').value.split('|');
   api.send({ type: 'holdSet', repo, branch, note: document.getElementById('pr-hold-note').value.trim() });
   prHoldForm = false; prHoldRender();
+}
+function prHoldLift(id) { api.send({ type: 'holdLift', id }); }
+// Right-click a repo's header: hold its dev branch (no note), or lift your hold on it
+function prRepoCtx(e, repo) {
+  e.preventDefault(); e.stopPropagation();
+  const b = window.releasesUi && releasesUi.holdBranches().find(x => x.repo.toLowerCase() === repo.toLowerCase());
+  if (!b) return;
+  const held = prHolds().filter(h => h.repo.toLowerCase() === repo.toLowerCase() && h.branch === b.branch);
+  const mine = held.find(h => h.mine);
+  showBookmarkMenu(e, mine ? [{ label: `Lift hold on ${b.branch}`, action: () => prHoldLift(mine.id) }]
+    : [{ label: `Hold ${b.branch} until deployed`, action: () => api.send({ type: 'holdSet', repo: b.repo, branch: b.branch, note: '' }) }]);
 }
 
 // Dropdown table shared by Pull requests and Tracked Actions (styles: .dt-* in theme.css, columns: --dt-cols
@@ -6382,7 +6405,6 @@ function prFixBtn(p, k) {
   if (p.checks !== 'pending') return fix;
   // Still testing: the ⏱ half toggles a Fix that starts once the checks finish (prRunFixLater).
   const on = !!prFixLater && prFixLater.has(p.key); // var: a render before this script part ran sees undefined
-    + (window.releasesUi && releasesUi.holdBranches().length ? `<button class="pr-refresh" title="Hold a branch: ask the team not to merge into it until your deploy is out" style="opacity:${prHoldForm ? 1 : .6}" onclick="event.stopPropagation();prHoldToggle()">⏸</button>` : '')
   return `<span class="pr-split">${fix}<button class="pr-approve pr-fix pr-later${on ? ' on' : ''}" title="${on ? 'Fixes when the checks finish (click to cancel)' : 'Fix when the checks finish'}" onclick="event.stopPropagation();prFixLaterToggle('${k}')">⏱</button></span>`;
 }
 
