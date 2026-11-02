@@ -312,26 +312,28 @@ function sketchHtml(src) {
   const dashAdd = !lines.some(l => /^\+ /.test(l)) && lines.some(l => /^- [│┌└|]/.test(l)), diff = dashAdd || lines.some(l => /^\+ /.test(l));
   const inline = (s) => escHtml(s)
     .replace(/\[ ?([^\]]+?) ?\]/g, (_, t) => `<span class="sk-btn">${t.trim()}</span>`)
-    .replace(/\( ?([^()]{1,12}?) ?\)/g, (m, t) => /^\S{1,3}$/u.test(t.trim()) ? `<span class="sk-ico">${t.trim()}</span>` : m)
+    .replace(/\( ?([^()]{1,12}?) ?\)/g, (m, t) => /^\S{1,3}$/u.test(t.trim()) ? `<span class="sk-ico">${t.trim()}</span>` : /^[►▶◄◀⏵⏸⏯■▷◁↻⟳]/u.test(t.trim()) ? `<span class="sk-btn sk-round">${t.trim()}</span>` : m)
     .replace(/((?:←|&lt;-)\s.*)$/, '<span class="sk-note">$1</span>');
   const row = (s, cls = '') => { const t = s.trim(); return t ? `<div class="sk-row${cls}">${inline(t)}</div>` : '<div class="sk-gap"></div>'; };
+  // A box, and beside it what the sketch wrote to its right ("◄ changed", "← mailto")
+  const shut = (b) => { const card = `<div class="sk-box${b.ch}">${b.title ? `<div class="sk-title">${escHtml(b.title)}</div>` : ''}${b.rows.join('')}</div>`; return b.notes.length ? `<div class="sk-wrap">${card}<div class="sk-aside">${b.notes.map(n => `<div>${inline(n.trim())}</div>`).join('')}</div></div>` : card; };
   let out = '', box = null;
   for (let raw of lines) {
     let ch = '';
     if (diff) { const m = /^([+-]) ?/.exec(raw); if (m) { ch = m[1] === '+' || dashAdd ? ' sk-add' : ' sk-del'; raw = raw.slice(m[0].length); } else raw = raw.replace(/^ {1,2}/, ''); }
     const top = /^\s*┌─*(.*?)─*┐(.*)$/.exec(raw), bot = /^\s*└─*┘(.*)$/.exec(raw), side = /^\s*[│|](.*?)[│|](.*)$/.exec(raw);
-    if (top) { box = { title: top[1].replace(/─/g, '').trim(), rows: [], note: top[2].trim(), ch }; continue; }
-    if (bot && box) { out += `<div class="sk-box${box.ch}">${box.title ? `<div class="sk-title">${escHtml(box.title)}</div>` : ''}${box.rows.join('')}</div>`; if (bot[1].trim()) out += row(bot[1]); box = null; continue; }
+    if (top) { box = { title: top[1].replace(/─/g, '').trim(), rows: [], notes: top[2].trim() ? [top[2]] : [], ch }; continue; }
+    if (bot && box) { if (bot[1].trim()) box.notes.push(bot[1]); out += shut(box); box = null; continue; }
     if (side) {
       const inner = side[1], l = inner.length - inner.trimStart().length, r = inner.length - inner.trimEnd().length;
-      const r2 = row(inner, (Math.abs(l - r) <= 3 && l > 1 ? ' sk-c' : '') + ch) + (side[2].trim() ? row(side[2], ' sk-aside') : '');
-      if (box) box.rows.push(r2); else out += `<div class="sk-box sk-flat${ch}">${r2}</div>`;
+      const r2 = row(inner, (Math.abs(l - r) <= 3 && l > 1 ? ' sk-c' : '') + ch);
+      if (box) { box.rows.push(r2); if (side[2].trim()) box.notes.push(side[2]); } else out += shut({ rows: [r2], notes: side[2].trim() ? [side[2]] : [], ch: ' sk-flat' + ch });
       continue;
     }
     if (box) { box.rows.push(row(raw, ch)); continue; }
     out += row(raw, ch);
   }
-  if (box) out += `<div class="sk-box${box.ch}">${box.rows.join('')}</div>`;
+  if (box) out += shut(box);
   return `<div class="sketch">${out}</div>`;
 }
 

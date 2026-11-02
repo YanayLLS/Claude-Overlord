@@ -767,6 +767,12 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .sketch .sk-add { background: color-mix(in srgb, var(--green) 12%, transparent); box-shadow: inset 2px 0 var(--green); }
 :root body #conversation .sketch .sk-box.sk-add { box-shadow: none; border-color: color-mix(in srgb, var(--green) 55%, var(--border-hi)); }
 :root body #conversation .sketch .sk-del { color: var(--dim); text-decoration: line-through; }
+:root body #conversation .sketch .sk-wrap { display: flex; align-items: center; gap: 10px; }
+:root body #conversation .sketch .sk-wrap > .sk-box { flex: 1; min-width: 0; }
+:root body #conversation .sketch .sk-wrap > .sk-aside { flex: none; max-width: 40%; }
+:root body #conversation .sketch .sk-round { border-radius: 999px; }
+:root body #conversation .card.ask .ask-body:has(.sketch) > .choices { flex: 0 1 280px; }
+:root body #conversation .card.ask .ask-body:has(.sketch) > .ask-prev { flex: 1 1 360px; }
 :root body #conversation .card.ask .ask-prev .d-add { background: color-mix(in srgb, var(--green) 12%, transparent); box-shadow: inset 2px 0 var(--green); color: var(--text); }
 :root body #conversation .card.ask .ask-prev .d-del { background: color-mix(in srgb, var(--red) 12%, transparent); box-shadow: inset 2px 0 var(--red); color: var(--dim); text-decoration: line-through; }
 /* A question with previews: options on the left, the preview on the right (below them when the chat is narrow) */

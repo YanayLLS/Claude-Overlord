@@ -182,7 +182,8 @@ test('sketchHtml: a preview drawn in text shows as UI (boxes, buttons, icons, no
   const { sketchHtml } = require('./chat-core');
   const h = sketchHtml(['  ┌──────────┐', '  │  ( 🔒 )  │', '+ │ [ Ask Ella ] │  ← mailto', '  └──────────┘', '  Settings › Sharing'].join('\n'));
   assert.match(h, /<div class="sk-box"><div class="sk-row sk-c"><span class="sk-ico">🔒<\/span><\/div>/);
-  assert.match(h, /sk-add"><span class="sk-btn">Ask Ella<\/span><\/div><div class="sk-row sk-aside"><span class="sk-note">← mailto<\/span>/);
+  assert.match(h, /sk-add"><span class="sk-btn">Ask Ella<\/span><\/div><\/div><div class="sk-aside"><div><span class="sk-note">← mailto<\/span>/); // beside its box
+  assert.match(sketchHtml('┌──┐\n│ x │\n└──┘\n[◄ Prev]  ( ► replay )  [Next ►]'),/<span class="sk-btn sk-round">► replay<\/span>/);
   assert.match(h, /<div class="sk-row">Settings › Sharing<\/div>/);
   // the CLI's own copy writes the "+" as "-"
   assert.match(sketchHtml('  ┌───┐\n- │ new │\n  └───┘'), /sk-row sk-add">new/);
