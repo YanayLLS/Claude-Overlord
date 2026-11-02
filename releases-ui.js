@@ -1632,4 +1632,5 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     .map(h => ({ ...h, mine: !!state.holdsMe && h.by === state.holdsMe }));
   const holdBranches = () => ((state && state.config && state.config.repos) || []).map(r => ({ repo: r.repo, branch: Object.values(r.branches || {})[0] })).filter(x => x.branch);
   window.releasesUi = { releaseRepos, enforcePrWatch, isReleasePr, holds, holdBranches, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (brFor && document.activeElement === brFor) brShow(brFor); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
+  api.send({ type: 'releasesState' }); // a reloaded page has no state until main's next push (the PR panel's ⏸ needs the config)
 })();

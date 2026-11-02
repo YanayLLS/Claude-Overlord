@@ -1603,6 +1603,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
           .then(() => send({ type: 'toast', text: `${msg.label}: recorded as deployed` })).catch(e => send({ type: 'toast', text: 'Confirm failed: ' + e.message }));
         return true;
       }
+      case 'releasesState': send({ type: 'releases', state }); return true; // a (re)loaded page: what the PR panel's holds need, now
       case 'releasesRefresh': refresh(); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
       case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;
