@@ -302,7 +302,40 @@ function cellsHtml(buf, from, to, theme = {}) {
   return out.join('\n');
 }
 
+// A question's preview sketch (text art: ┌─┐ boxes, "[ button ]", "( 🔒 )", "← note", "+" changed lines) as real UI:
+// boxes become cards, brackets buttons, notes side notes, the rest plain text. '' when it isn't that kind of sketch
+// (tables, diagrams, code): the caller shows it as text.
+function sketchHtml(src) {
+  const lines = String(src).replace(/\x1b\[[0-9;?]*[@-~]/g, '').replace(/\s+$/, '').split('\n');
+  if (/[├┤┬┴┼╔║═]/.test(src) || !lines.some(l => /[┌└]─|\[ .+? \]|^\s*[│|].*[│|]\s*$/.test(l))) return '';
+  // The CLI's copy on screen draws the "+" marker as a list "-": then a "-" before a box edge means added.
+  const dashAdd = !lines.some(l => /^\+ /.test(l)) && lines.some(l => /^- [│┌└|]/.test(l)), diff = dashAdd || lines.some(l => /^\+ /.test(l));
+  const inline = (s) => escHtml(s)
+    .replace(/\[ ?([^\]]+?) ?\]/g, (_, t) => `<span class="sk-btn">${t.trim()}</span>`)
+    .replace(/\( ?([^()]{1,12}?) ?\)/g, (m, t) => /^\S{1,3}$/u.test(t.trim()) ? `<span class="sk-ico">${t.trim()}</span>` : m)
+    .replace(/((?:←|&lt;-)\s.*)$/, '<span class="sk-note">$1</span>');
+  const row = (s, cls = '') => { const t = s.trim(); return t ? `<div class="sk-row${cls}">${inline(t)}</div>` : '<div class="sk-gap"></div>'; };
+  let out = '', box = null;
+  for (let raw of lines) {
+    let ch = '';
+    if (diff) { const m = /^([+-]) ?/.exec(raw); if (m) { ch = m[1] === '+' || dashAdd ? ' sk-add' : ' sk-del'; raw = raw.slice(m[0].length); } else raw = raw.replace(/^ {1,2}/, ''); }
+    const top = /^\s*┌─*(.*?)─*┐(.*)$/.exec(raw), bot = /^\s*└─*┘(.*)$/.exec(raw), side = /^\s*[│|](.*?)[│|](.*)$/.exec(raw);
+    if (top) { box = { title: top[1].replace(/─/g, '').trim(), rows: [], note: top[2].trim(), ch }; continue; }
+    if (bot && box) { out += `<div class="sk-box${box.ch}">${box.title ? `<div class="sk-title">${escHtml(box.title)}</div>` : ''}${box.rows.join('')}</div>`; if (bot[1].trim()) out += row(bot[1]); box = null; continue; }
+    if (side) {
+      const inner = side[1], l = inner.length - inner.trimStart().length, r = inner.length - inner.trimEnd().length;
+      const r2 = row(inner, (Math.abs(l - r) <= 3 && l > 1 ? ' sk-c' : '') + ch) + (side[2].trim() ? row(side[2], ' sk-aside') : '');
+      if (box) box.rows.push(r2); else out += `<div class="sk-box sk-flat${ch}">${r2}</div>`;
+      continue;
+    }
+    if (box) { box.rows.push(row(raw, ch)); continue; }
+    out += row(raw, ch);
+  }
+  if (box) out += `<div class="sk-box${box.ch}">${box.rows.join('')}</div>`;
+  return `<div class="sketch">${out}</div>`;
+}
+
 // The CLI's "[Crashed — auto-resuming 1/3...]" while Overlord restarts a crashed Claude; '' otherwise.
 const crashLine = (a) => a && a.crashed === 'resuming' ? `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…` : '';
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, undoEdits };

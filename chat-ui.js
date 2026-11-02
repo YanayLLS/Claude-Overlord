@@ -624,6 +624,7 @@
     if (t == null) return '<span class="ap-wait">…</span>';
     if (!t) return '<span class="ap-wait">No preview</span>';
     const fence = /^```([\w-]*)\n?/.exec(t), body = String(t).replace(/^```[\w-]*\n?/, '').replace(/\n?```\s*$/, '');
+    const sk = sketchHtml(body); if (sk) return sk; // a UI sketch drawn in text: shown as UI
     // A design sketch, not a terminal: changed lines get a highlight instead of their "+", an emoji takes the two
     // columns it's drawn in (box edges stay straight), and the text shrinks to the pane's width instead of scrolling.
     const h = termHtml(body, { diff: fence ? fence[1] === 'diff' : /^\+/m.test(body) })
