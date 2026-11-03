@@ -876,14 +876,18 @@ async function ghostComplete(id, reqId, prefix, context) {
 // Replies `nextSuggest` with '' on no creds / error / timeout / no confident guess.
 async function suggestNext({ id, key, prompt, reply }) {
   const auth = anthropicAuthHeaders();
-  const done = (text) => send({ type: 'nextSuggest', id, key, text: String(text || '').trim().split('\n')[0].replace(/^["']|["']$/g, '').slice(0, 120) });
+  const done = (text) => {
+    let t = String(text || '').trim().split('\n')[0].replace(/^["']|["']$/g, '').slice(0, 120);
+    if (t === '-' || /\b(predict|the agent|the user|more context|next message)\b/i.test(t)) t = ''; // Haiku talking about the task, not a message
+    send({ type: 'nextSuggest', id, key, text: t });
+  };
   if (!auth || !reply) return done('');
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, signal: AbortSignal.timeout(6000),
       body: JSON.stringify({
         model: TITLE_MODEL, max_tokens: 40,
-        system: 'You predict the next message a developer will send to their coding agent (Claude Code). Output ONLY that message: short, in the user\'s voice, at most ~10 words, no quotes. If the agent asked a question, answer it the way the user most likely would (e.g. "yes, push"). If there is no likely next message, output nothing.',
+        system: 'You predict the next message a developer will send to their coding agent (Claude Code). Output ONLY that message: short, in the user\'s voice, at most ~10 words, no quotes. If the agent asked a question, answer it the way the user most likely would (e.g. "yes, push"). If there is no likely next message (e.g. the agent just reported it is done and asked nothing), output exactly: -  Never explain, never comment on the task or ask for context.',
         messages: [{ role: 'user', content: `User's last message:\n${String(prompt || '').slice(-1500)}\n\nAgent's reply:\n${String(reply).slice(-4000)}\n\nUser's next message:` }],
       }),
     });
