@@ -575,9 +575,22 @@
   const boxLabel = (l) => { const m = /^\[(.?)\]\s*(.*)$/.exec(String(l)); return m ? `<span class="chk${m[1].trim() ? ' on' : ''}" aria-hidden="true">${m[1].trim() ? ICON.check : ''}</span>${escH(m[2])}` : escH(l); };
   function askHtml(ask, perm) {
     const pl = planOnScreen(selectedId); if (pl) return planHtml({ args: { plan: pl } }, (agents.get(selectedId) || {}).cwd);
-    const s = screenAsk(selectedId); // the open question is only on screen until it's answered
-    const a = (ask && ask.args) || {}, opts = s && s.options.length ? s.options : a.options || [];
-    const q = (s && s.question) || a.question || 'Claude has a question';
+    let s = screenAsk(selectedId); // the open question is only on screen until it's answered
+    const a = (ask && ask.args) || {};
+    // The hook's copy, whole: a narrow screen wraps the question (only its last line, "build?", was read), wraps labels
+    // (a tail read as the description) and runs options together. With it, the screen only says which is focused and
+    // which extra rows ("Type something", "Chat about this") follow the options.
+    const k = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase(), lab = (o) => k(o && (o.label ?? o));
+    const hqs = (askInputs.get(selectedId) || {}).questions || [], q0 = (s && s.question) || a.question || '';
+    const scr = s ? k(s.options.map(lab).join(' ')) : '', tabOn = s && s.tabs && s.tabs.length > 1 ? s.tabs.findIndex(x => !x.done) : -1;
+    const hq = hqs.find(x => k(x.question) === k(q0)) || hqs.find(x => k(q0) && k(x.question).endsWith(k(q0))) || [hqs.length === 1 ? hqs[0] : hqs[tabOn]].find(x => x && (x.options || []).some(o => scr.includes(k(o.label).slice(-10)))); // not an earlier question's copy
+    if (hq && s && s.options.length && !/submit your answers/i.test(q0)) {
+      const extras = s.options.filter(o => o.bare || /^(\[.?\]\s*)?(type something|chat about this)\b/i.test(lab(o)));
+      const same = s.options.length === hq.options.length + extras.length; // the screen's rows line up: keep their boxes and marks
+      if (same || !hq.multiSelect) s = { ...s, options: [...hq.options.map((h, i) => { const o = same ? s.options[i] : {}, box = /^\[.?\]\s*/.exec(o.label || ''); return { ...o, label: (box ? box[0] : '') + h.label, desc: h.description || '' }; }), ...extras] };
+    }
+    const opts = s && s.options.length ? s.options : a.options || [];
+    const q = (hq && hq.question) || q0 || 'Claude has a question';
     if (askFor !== selectedId + '\n' + q) { askFor = selectedId + '\n' + q; askHover = null; askAsked = null; askTyped = ''; } // a new question starts from its focused option
     // Several questions: which one this is, which are answered (the CLI's tab row).
     // The review before sending several answers ("Ready to submit your answers?"): the Submit step, with the answers given.
