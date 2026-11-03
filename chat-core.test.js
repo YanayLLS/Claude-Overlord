@@ -195,3 +195,13 @@ test('sketchHtml: a preview drawn in text shows as UI (boxes, buttons, icons, no
   assert.strictEqual(sketchHtml('┌─┬─┐\n│a│b│\n├─┼─┤'), '');
   assert.strictEqual(sketchHtml('just words'), '');
 });
+test('screenDialog: an inline panel above the prompt box (/btw, a skill UI) counts, so the chat shows the terminal', () => {
+  const { screenDialog } = require('./chat-core');
+  const box = ['──────────────── languages ─', '> ', '────────────────', '  ⏵⏵ bypass permissions on · esc to interrupt'];
+  const btw = ['✽ Brewing… (26s · ↓ 1.4k tokens)', '', '  /btw why bump dbschemas', '', '    The backend uses dbschemas as a package.', '', '  ↑/↓ to scroll · c to copy · f to fork · Esc to close', ''];
+  assert.strictEqual(screenDialog([...btw, ...box]), true);
+  // the plain working screen: spinner, tip, box: no panel
+  assert.strictEqual(screenDialog(['✽ Processing… (16s)', '  ⎿  Tip: Use /theme to change the color theme', '', ...box]), false);
+  // "Esc to close" in the conversation above, not right over the box: not a panel
+  assert.strictEqual(screenDialog(['● Press Esc to close it', '', '✽ Working… (2s)', '', ...box]), false);
+});

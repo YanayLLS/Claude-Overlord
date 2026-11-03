@@ -195,10 +195,15 @@ function liveReply(lines) {
 }
 
 // A full-screen CLI dialog (double-Esc rewind, /config, /model, /permissions, /mcp…) is up: its "Esc to cancel/exit"
-// footer is among the last rows. The normal prompt ends in its box and mode line instead.
+// footer is among the last rows. The normal prompt ends in its box and mode line instead. Or a panel drawn inline just
+// above the prompt box (/btw's answer, a skill's or command's own UI) with the same kind of footer: the chat has no
+// card for those, so it shows the terminal rather than hide them (and nothing is typed into them).
 function screenDialog(rows) {
-  const tail = rows.filter(r => r.trim()).slice(-3).join('\n');
-  return /\besc to (cancel|exit|go back|close)\b/i.test(tail) && !/esc to interrupt/i.test(tail);
+  const dialog = (t) => /\besc to (cancel|exit|go back|close|dismiss)\b/i.test(t) && !/esc to interrupt/i.test(t);
+  const lines = rows.filter(r => r.trim());
+  if (dialog(lines.slice(-3).join('\n'))) return true;
+  const rules = lines.reduce((a, r, i) => (/^\s*─{8,}/.test(r) ? a.concat(i) : a), []);
+  return rules.length >= 2 && dialog(lines[rules[rules.length - 2] - 1] || ''); // the row above the box's top rule
 }
 
 // ── Shared by the Chat view's thread (chat-ui.js) and reply box (chat-composer.js), so both read text the same way ──

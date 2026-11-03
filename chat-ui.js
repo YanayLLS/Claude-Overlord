@@ -847,7 +847,11 @@
       .map(e => `<div class="msg user pending cliq"><div class="bubble">${tagChips(e.text)}</div><span class="q">Queued</span></div>`).join('');
   }
   function pendingHtml(id, evs, busy) {
-    const list = pending.get(id); if (!list || !list.length) return cliQueue(id, evs);
+    const list = pending.get(id);
+    // /btw isn't queued: the CLI answers it at once in its own panel (shown as the terminal) and never writes it to the
+    // transcript, so its bubble would wait "Queued" forever.
+    if (list) for (let k = list.length - 1; k >= 0; k--) if (!list[k].held && /^\/btw\s/.test(list[k].text || '') && Date.now() - list[k].at > 1500) list.splice(k, 1);
+    if (!list || !list.length) return cliQueue(id, evs);
     // Each message sent from here becomes the next message of yours in the transcript, in the order sent, so they clear
     // in that order: the first one of yours written after a message was sent is that message, whatever the CLI made of its
     // text (its own image numbers, a long paste's wrapper, text left in its box…). Matching the text broke on each of those.
