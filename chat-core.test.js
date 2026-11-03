@@ -208,3 +208,10 @@ test('screenDialog: an inline panel above the prompt box (/btw, a skill UI) coun
   // "Esc to close" in the conversation above, not right over the box: not a panel
   assert.strictEqual(screenDialog(['● Press Esc to close it', '', '✽ Working… (2s)', '', ...box]), false);
 });
+test('screenDialog: /btw idle at the bottom of a narrow terminal (its footer wrapped) is a panel, not a full-screen dialog', () => {
+  const { screenDialog, screenPanel } = require('./chat-core');
+  const rows = ['❯ /btw what is 2+2? answer with a numbered   ', '  list of 3 short points', '  /btw what is 2+2? answer with a numbered l…', '    1. 2+2 = 4.', '    2. Basic addition.', '    I AM DONE', '  ↑/↓ to scroll · c to copy · f to fork · Esc', '  to close'];
+  assert.strictEqual(screenPanel(rows), true);
+  assert.strictEqual(screenDialog(rows), true);
+  assert.strictEqual(screenDialog(rows, false), false); // its numbered list isn't a question menu
+});

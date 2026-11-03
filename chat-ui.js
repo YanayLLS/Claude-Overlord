@@ -2008,7 +2008,7 @@
     }
     // A panel drawn inline above the prompt box (/btw's answer, a skill's own UI): the terminal opens beside the chat
     // (the split) while it's up, then the split closes again unless it was yours.
-    const rows = x && screenRows(x, 40), panel = !!(rows && x && termTab === 'conversation' && cv && cv.classList.contains('open') && screenDialog(rows) && !screenDialog(rows, false));
+    const rows = x && screenRows(x, 80), panel = !!(rows && x && termTab === 'conversation' && cv && cv.classList.contains('open') && screenDialog(rows) && !screenDialog(rows, false));
     if (panel) { panelOff = 0; if (!t.classList.contains('split')) { autoSplitFor = selectedId; t.classList.add('split'); switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); } }
     else if (autoSplitFor != null && ++panelOff >= 2) { autoSplitFor = null; t.classList.remove('split'); if (termTab === 'conversation') switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); }
     const up = !!(x && !panel && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(rows) && !(screenAsk(selectedId).dialog && screenAsk(selectedId).options.length >= 2) && !screenRewind(selectedId)); // a question menu gets its card instead

@@ -199,12 +199,19 @@ function liveReply(lines) {
 // above the prompt box (/btw's answer, a skill's or command's own UI) with the same kind of footer: the chat has no
 // card for those, so it shows the terminal rather than hide them (and nothing is typed into them).
 function screenDialog(rows, panels = true) { // panels false: only a full-screen one (a menu's reader: a list in an inline panel isn't a menu)
-  const dialog = (t) => /\besc to (cancel|exit|go back|close|dismiss)\b/i.test(t) && !/esc to interrupt/i.test(t);
+  const full = dialogFooter(rows.filter(r => r.trim()).slice(-3).join('\n'));
+  return panels ? full || screenPanel(rows) : full && !screenPanel(rows);
+}
+// A footer the terminal wrapped ("… · Esc" / "to close": the hidden terminal is narrow) still reads as one line.
+const dialogFooter = (t) => { t = t.replace(/\s+/g, ' '); return /\besc to (cancel|exit|go back|close|dismiss)\b/i.test(t) && !/esc to interrupt/i.test(t); };
+// The panel kind (the chat opens the terminal beside it, in the split): one drawn just above the prompt box, or /btw's
+// answer, which takes the bottom of the screen itself when the agent is idle ("/btw <question>", answer, footer).
+function screenPanel(rows) {
   const lines = rows.filter(r => r.trim());
-  if (dialog(lines.slice(-3).join('\n'))) return true;
-  if (!panels) return false;
-  const rules = lines.reduce((a, r, i) => (/^\s*─{8,}/.test(r) ? a.concat(i) : a), []);
-  return rules.length >= 2 && dialog(lines[rules[rules.length - 2] - 1] || ''); // the row above the box's top rule
+  if (dialogFooter(lines.slice(-3).join(' ')) && lines.slice(-60).some(r => /^\s{1,4}\/btw\s+\S/.test(r))) return true;
+  const rules = lines.reduce((a, r, i) => (/^\s*─{8,}/.test(r) ? a.concat(i) : a), []), top = rules[rules.length - 2];
+  const above = lines[top - 1] || '', wrapped = /^\s*to (cancel|exit|go back|close|dismiss)\b/i.test(above); // "… Esc" / "to close"
+  return rules.length >= 2 && dialogFooter((wrapped ? (lines[top - 2] || '') + ' ' : '') + above); // the row above the box's top rule
 }
 
 // ── Shared by the Chat view's thread (chat-ui.js) and reply box (chat-composer.js), so both read text the same way ──
@@ -353,4 +360,4 @@ function sketchHtml(src) {
 // The CLI's "[Crashed — auto-resuming 1/3...]" while Overlord restarts a crashed Claude; '' otherwise.
 const crashLine = (a) => a && a.crashed === 'resuming' ? `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…` : '';
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, undoEdits };
