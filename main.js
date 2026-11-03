@@ -373,6 +373,8 @@ function flog(...args) {
 }
 process.on('uncaughtException', (e) => flog('uncaughtException:', e));
 process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
+// Freeze trail: the main loop held up 300ms+ (the window's own long tasks come in as perfLog).
+{ let t = Date.now(); setInterval(() => { const lag = Date.now() - t - 100; t = Date.now(); if (lag > 300) flog(`main stalled ${lag}ms agents=${agents.size}`); }, 100).unref(); }
 
 let mainWindow = null;
 // Nobody can see the window (minimized, hidden to tray): background ticks that only feed the
@@ -409,7 +411,7 @@ function watchAsk(id) {
       let input; try { input = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
       const a = agents.get(id); if (!a) return;
       a.askInput = input; send({ type: 'askInput', id, input });
-    });
+    }).on('error', function () { this.close(); askWatched.delete(id); }); // the folder went with the agent: an uncaught EPERM otherwise
   } catch {}
 }
 function agentClaudeFlags(id, { browser = true } = {}) {
@@ -4698,6 +4700,7 @@ function handleIpc(msg) {
     }
     case 'pollActionsNow': armActionsTimer(); break;
     case 'perfSample': samplePerf(); break;
+    case 'perfLog': flog(String(msg.text || '').slice(0, 500)); break;
     case 'ramSample': send({ type: 'ramUsage', total: os.totalmem(), free: os.freemem() }); break;
     case 'fixActionRun': fixActionRun(msg.run || {}).catch(e => { flog('fixActionRun failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
     case 'fixPr': fixPr(msg.pr || {}).catch(e => { flog('fixPr failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;

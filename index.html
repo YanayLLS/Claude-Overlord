@@ -4391,7 +4391,11 @@ window.addEventListener('resize', schedFit);
 api.onMainLog((msg) => console.log('%c[main]', 'color:#888', msg));
 
 // ── Message handling ───────────────────────────────────
+// Freeze trail: a long task (200ms+) goes to overlord.log with the view and what main sent in the last 2 s.
+const _msgN = new Map(); setInterval(() => _msgN.clear(), 2000);
+try { new PerformanceObserver((l) => { for (const e of l.getEntries()) if (e.duration > 200) api.send({ type: 'perfLog', text: `window long task ${Math.round(e.duration)}ms view=${termTab} agents=${agents.size} msgs=${[..._msgN].sort((p, q) => q[1] - p[1]).slice(0, 6).map(([k, v]) => k + ':' + v).join(',')}` }); }).observe({ entryTypes: ['longtask'] }); } catch {}
 api.on((msg) => {
+  _msgN.set(msg.type, (_msgN.get(msg.type) || 0) + 1);
   if (msg.type === 'releases') { if (window.releasesUi) { releasesUi.onMsg(msg); const k = JSON.stringify(releasesUi.holds()); if (k !== prHoldsKey) { prHoldsKey = k; prHoldRender(); } } return; } // Releases board, releases-ui.js
   if (msg.type.startsWith('doc') && docsUi.onMsg(msg)) return; // markdown documents, docs-ui.js
   if (msg.type === 'catalog') { catalogUi.onMsg(msg); chatComposer.onCatalog(msg); return; } // + / // popover, catalog-ui.js
@@ -8027,7 +8031,9 @@ function renderConversation() {
   const a = selectedId != null ? agents.get(selectedId) : null;
   if (!a) { el.innerHTML = '<div class="tl-empty">Select an agent to read its conversation</div>'; return; }
   const evs = worldTl && worldTl.id === selectedId ? worldTl.events : null;
+  const t0 = performance.now();
   chatUi.paint(el, selectedId, a, evs, agentStatus(a)); // chat-ui.js: the Claude-app look, in world mode too
+  const ms = performance.now() - t0; if (ms > 100) api.send({ type: 'perfLog', text: `chat paint ${Math.round(ms)}ms events=${evs ? evs.length : 0}` });
 }
 function sendOrder() { chatComposer.send(); } // chat-composer.js; world mode's order box uses it too
 document.getElementById('conversation').addEventListener('click', (e) => { chatUi.onClick(e, selectedId != null ? agents.get(selectedId) : null, worldTl && worldTl.id === selectedId ? worldTl.events : null); });
