@@ -480,7 +480,7 @@
     const OPT = /^\s*[❯›>]?\s*(\d)\.\s+(.+?)\s*$/, options = []; let first = -1, focus = 0, pf = 0; // pf: the numbered option whose preview is drawn (it keeps its ❯ while "Chat about this" is focused)
     // The focused option's preview, drawn in a box to the right of the menu: its column splits every row in two.
     const top = rows.findIndex(r => OPT.test(r)), col = top < 0 ? -1 : Math.min(...rows.slice(top).map(r => { const k = r.search(/[┌╭]/); return k > 0 ? k : Infinity; }));
-    const preview = [], dialog = screenDialog(rows);
+    const preview = [], dialog = screenDialog(rows, false);
     if (col > 0 && col < Infinity) {
       let inBox = false;
       for (let i = top; i < rows.length; i++) {
@@ -525,7 +525,7 @@
   function screenRewind(id) {
     const rows = screenOf(id, 60); if (!rows) return null;
     let i0 = -1; for (let i = rows.length - 1; i >= 0; i--) if (/^\s*Rewind\s*$/.test(rows[i])) { i0 = i; break; }
-    if (i0 < 0 || !screenDialog(rows)) return null;
+    if (i0 < 0 || !screenDialog(rows, false)) return null;
     const items = []; let focus = -1;
     for (const r of rows.slice(i0 + 1)) {
       if (!r.trim() || /^\s*Restore the code/i.test(r)) continue;
@@ -1979,14 +1979,14 @@
   // ── Side by side: terminal left, chat right (chat.css #term.split); remembered ──
   function toggleSplit(on) {
     const t = document.getElementById('term'); on = on ?? !t.classList.contains('split');
-    t.classList.toggle('split', on); document.getElementById('hdr-split')?.classList.toggle('on', on);
+    autoSplitFor = null; t.classList.toggle('split', on); document.getElementById('hdr-split')?.classList.toggle('on', on);
     try { localStorage.setItem('chatSplit', on ? '1' : ''); } catch {}
     if (termTab === 'conversation') switchTermTab('conversation');
     if (typeof schedFit === 'function') setTimeout(schedFit, 50);
   }
   // ── A CLI dialog the chat has no card for (double-Esc rewind, /config, /model, /permissions, /mcp…): the real terminal
   // floats over the chat while it's up, keys going to it, and goes away when the dialog closes. ──
-  let peekOff = 0, screenSig = '';
+  let peekOff = 0, screenSig = '', autoSplitFor = null, panelOff = 0; // autoSplitFor: the split an inline panel opened (not the user's)
   const screenRows = (x, n) => bufferRows(x.terminal.buffer.active, n);
   let termPeekFor = null; // the agent whose terminal the overlay shows: switching agents shows the new one's, or none
   function peek(on) {
@@ -2006,7 +2006,12 @@
       const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, liveMode(selectedId), cliSuggestion(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
       if (sig !== screenSig) { screenSig = sig; rerender(); }
     }
-    const up = !!(x && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(screenRows(x, 40)) && screenAsk(selectedId).options.length < 2 && !screenRewind(selectedId)); // a question menu gets its card instead
+    // A panel drawn inline above the prompt box (/btw's answer, a skill's own UI): the terminal opens beside the chat
+    // (the split) while it's up, then the split closes again unless it was yours.
+    const rows = x && screenRows(x, 40), panel = !!(rows && x && termTab === 'conversation' && cv && cv.classList.contains('open') && screenDialog(rows) && !screenDialog(rows, false));
+    if (panel) { panelOff = 0; if (!t.classList.contains('split')) { autoSplitFor = selectedId; t.classList.add('split'); switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); } }
+    else if (autoSplitFor != null && ++panelOff >= 2) { autoSplitFor = null; t.classList.remove('split'); if (termTab === 'conversation') switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); }
+    const up = !!(x && !panel && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(rows) && !(screenAsk(selectedId).dialog && screenAsk(selectedId).options.length >= 2) && !screenRewind(selectedId)); // a question menu gets its card instead
     if (up) { peekOff = 0; peek(true); return; }
     if (t && t.classList.contains('peek') && termPeekFor === selectedId && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
     peek(false);

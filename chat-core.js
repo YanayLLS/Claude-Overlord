@@ -198,10 +198,11 @@ function liveReply(lines) {
 // footer is among the last rows. The normal prompt ends in its box and mode line instead. Or a panel drawn inline just
 // above the prompt box (/btw's answer, a skill's or command's own UI) with the same kind of footer: the chat has no
 // card for those, so it shows the terminal rather than hide them (and nothing is typed into them).
-function screenDialog(rows) {
+function screenDialog(rows, panels = true) { // panels false: only a full-screen one (a menu's reader: a list in an inline panel isn't a menu)
   const dialog = (t) => /\besc to (cancel|exit|go back|close|dismiss)\b/i.test(t) && !/esc to interrupt/i.test(t);
   const lines = rows.filter(r => r.trim());
   if (dialog(lines.slice(-3).join('\n'))) return true;
+  if (!panels) return false;
   const rules = lines.reduce((a, r, i) => (/^\s*─{8,}/.test(r) ? a.concat(i) : a), []);
   return rules.length >= 2 && dialog(lines[rules[rules.length - 2] - 1] || ''); // the row above the box's top rule
 }

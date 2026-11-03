@@ -200,6 +200,9 @@ test('screenDialog: an inline panel above the prompt box (/btw, a skill UI) coun
   const box = ['──────────────── languages ─', '> ', '────────────────', '  ⏵⏵ bypass permissions on · esc to interrupt'];
   const btw = ['✽ Brewing… (26s · ↓ 1.4k tokens)', '', '  /btw why bump dbschemas', '', '    The backend uses dbschemas as a package.', '', '  ↑/↓ to scroll · c to copy · f to fork · Esc to close', ''];
   assert.strictEqual(screenDialog([...btw, ...box]), true);
+  // ...but not a full-screen dialog: a numbered list in the /btw answer isn't a question menu
+  assert.strictEqual(screenDialog([...btw.slice(0, 4), '    1. Missing answer', '    2. Wrong state', ...btw.slice(5), ...box], false), false);
+  assert.strictEqual(screenDialog(['  Select model', '  1. Opus', '  Esc to cancel'], false), true);
   // the plain working screen: spinner, tip, box: no panel
   assert.strictEqual(screenDialog(['✽ Processing… (16s)', '  ⎿  Tip: Use /theme to change the color theme', '', ...box]), false);
   // "Esc to close" in the conversation above, not right over the box: not a panel
