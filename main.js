@@ -1354,7 +1354,7 @@ function globalSearch(query) {
 }
 
 // ── State persistence ─────────────────────────────────
-let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, planBudget: 100, englishOnFocus: true, peersEnabled: false, peerName: null, peerCode: null, peers: [] };
+let settings = { zoom: 100, bypassPermissions: true, notifications: true, notificationSound: true, prNotifications: true, planBudget: 100, englishOnFocus: true, peersEnabled: false, peerName: null, peerCode: null, peers: [] };
 
 // restoreAgents() runs on the renderer's did-finish-load, but saves fire earlier
 // (window move/resize, a crash-time close). Saving before the restore writes an
@@ -2915,7 +2915,7 @@ async function pollPRsOnce() {
 }
 
 function notifyNewPR(pr) {
-  if (!Notification.isSupported()) return;
+  if (!Notification.isSupported() || settings.prNotifications === false) return;
   const n = new Notification({ title: `New PR · ${pr.repo}`, body: `#${pr.number} ${pr.title}`, silent: true });
   n.on('click', () => shell.openExternal(pr.url).catch(() => {}));
   n.show();
@@ -2923,7 +2923,7 @@ function notifyNewPR(pr) {
 }
 
 function notifyPrDecision(pr, kind) {
-  if (!Notification.isSupported()) return;
+  if (!Notification.isSupported() || settings.prNotifications === false) return;
   const title = kind === 'approved' ? `✅ PR approved · ${pr.repo}` : `📝 Changes requested · ${pr.repo}`;
   const n = new Notification({ title, body: `#${pr.number} ${pr.title}`, silent: true });
   n.on('click', () => shell.openExternal(pr.url).catch(() => {}));

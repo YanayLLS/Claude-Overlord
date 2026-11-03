@@ -1407,6 +1407,10 @@ button:focus-visible { outline-offset:0; }
         <span>Notification sound</span>
       </label>
       <div class="settings-hint">Plays an audio chime when an agent completes or needs approval.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-pr-notif" onchange="api.send({ type: 'saveSettings', settings: { prNotifications: this.checked } })" />
+        <span>PR notifications</span>
+      </label>
       </div>
       </details>
 
@@ -5299,6 +5303,7 @@ function applySettings(s) {
     const chk = document.getElementById('chk-notif');
     if (chk) chk.checked = notificationsEnabled;
   }
+  if (s.prNotifications !== undefined) { const c = document.getElementById('chk-pr-notif'); if (c) c.checked = s.prNotifications; }
   if (s.notificationSound !== undefined) {
     notificationSoundEnabled = s.notificationSound;
     const chk = document.getElementById('chk-sound');
