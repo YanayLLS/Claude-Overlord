@@ -425,7 +425,12 @@
   // and back on every key, flashing the jump button.
   { const c = document.getElementById('conversation'); let end = true;
     c.addEventListener('scroll', () => { end = c.scrollHeight - c.scrollTop - c.clientHeight < 40; }, { passive: true });
-    new ResizeObserver(() => { if (end && c.classList.contains('open')) c.scrollTop = c.scrollHeight; }).observe(c); }
+    new ResizeObserver(() => { if (end && c.classList.contains('open')) c.scrollTop = c.scrollHeight; }).observe(c);
+    // ponytail: temporary trace - "typing scrolls the chat off the bottom" (not reproduced): who moves it right after a key. Remove once found.
+    let keyAt = 0, logged = 0; const d = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+    document.getElementById('term-order-input')?.addEventListener('input', () => { keyAt = Date.now(); });
+    Object.defineProperty(c, 'scrollTop', { get() { return d.get.call(this); }, set(v) { const b = d.get.call(this); d.set.call(this, v); if (Date.now() - keyAt < 400 && logged < 40 && Math.abs(d.get.call(this) - b) > 20) { logged++; api.send({ type: 'perfLog', text: `chat scroll on key ${Math.round(b)}->${Math.round(d.get.call(this))} h=${this.scrollHeight} ch=${this.clientHeight} ${(new Error().stack || '').split('\n').slice(2, 6).map(s => s.trim()).join(' | ')}` }); } }, configurable: true });
+    c.addEventListener('scroll', () => { if (Date.now() - keyAt < 400 && logged < 40 && c.scrollHeight - c.scrollTop - c.clientHeight > 40) { logged++; api.send({ type: 'perfLog', text: `chat off-bottom after key gap=${Math.round(c.scrollHeight - c.scrollTop - c.clientHeight)} ch=${c.clientHeight}` }); } }, { passive: true }); }
   document.getElementById('conversation').addEventListener('input', (e) => { if (e.target.matches && e.target.matches('.edit-ta')) { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; } });
   // ── Live tail: what the CLI shows under the transcript ──
   const lastTool = (evs, name, doneBy) => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if (e.type === 'tool' && e.name === name) return doneBy && doneBy.get(e.toolId) ? null : e; if (e.type === 'prompt') return null; } return null; };
