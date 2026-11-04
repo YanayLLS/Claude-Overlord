@@ -1908,6 +1908,19 @@
     if (msg.type === 'bgTail') { const p = document.getElementById('chat-shell'); if (p && p.dataset.file === msg.file) { const o = p.querySelector('.sh-out'), atEnd = o.scrollTop + o.clientHeight >= o.scrollHeight - 20; o.innerHTML = msg.ok ? (msg.text ? termHtml(msg.text) : '(no output yet)') : 'The output file is gone: the shell has finished.'; if (atEnd) o.scrollTop = o.scrollHeight; } }
   }
 
+  // Copy from chat as clean HTML (lists, bold, links, code - no app colors/classes) + plain text that keeps list numbers.
+  document.getElementById('conversation').addEventListener('copy', (e) => {
+    const sel = getSelection(); if (!sel.rangeCount || sel.isCollapsed || !e.clipboardData || e.target.closest?.('textarea,input,[contenteditable]')) return;
+    const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:-9999px;top:0;white-space:normal';
+    for (let i = 0; i < sel.rangeCount; i++) box.appendChild(sel.getRangeAt(i).cloneContents());
+    box.querySelectorAll('svg,button,[role=button],input,.pr-reveal,style,script').forEach(n => n.remove());
+    box.querySelectorAll('*').forEach(n => { for (const a of [...n.attributes]) if (!/^(href|src|alt|start|colspan|rowspan)$/.test(a.name)) n.removeAttribute(a.name); });
+    const html = box.innerHTML, plain = box.cloneNode(true);
+    plain.querySelectorAll('li').forEach(li => { const p = li.parentElement, ol = p && p.tagName === 'OL'; li.prepend(ol ? `${(+p.getAttribute('start') || 1) + [...p.children].indexOf(li)}. ` : '- '); });
+    document.body.appendChild(plain); const text = plain.innerText; plain.remove();
+    e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', text.replace(/\n{3,}/g, '\n\n').trim()); e.preventDefault();
+  });
+
   // ── "Ask about this": select text in a reply and a small button quotes it into the composer ──
   const quoteBtn = document.createElement('button'); quoteBtn.type = 'button'; quoteBtn.id = 'chat-quote'; quoteBtn.innerHTML = `${ICON.ask}<span>Ask about this</span>`; quoteBtn.hidden = true;
   document.body.appendChild(quoteBtn);
