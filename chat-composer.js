@@ -99,12 +99,12 @@
   const clearCliBox = (id) => { const n = cliLeftover(id); if (n) api.send({ type: 'cliErase', id, n }); };
   // Every message the chat hands an agent goes through here (the reply box, Retry, an edit, an auto-retry…). Main sends
   // them one at a time per agent; plain text is one paste, a message with images goes images first, then its text.
-  function sendText(id, text, list = []) {
-    const erase = cliLeftover(id);
-    if (list.length) api.send({ type: 'chatSend', id, parts: parts(text, list), erase }); else api.send({ type: 'questPrompt', id, text, erase });
+  function sendText(id, text, list = [], intoDialog = false) { // intoDialog: an answer for a question's own text field
+    const erase = intoDialog ? 0 : cliLeftover(id);
+    if (list.length) api.send({ type: 'chatSend', id, parts: parts(text, list), erase }); else api.send({ type: 'questPrompt', id, text, erase, intoDialog });
   }
-  function deliver(id, text, list) {
-    sendText(id, text, list);
+  function deliver(id, text, list, intoDialog = false) {
+    sendText(id, text, list, intoDialog);
     chatUi.releasePending(id);
     if (chat()) renderConversation();
   }
@@ -129,7 +129,7 @@
     const ask = chat() && !list.length ? chatUi.askState() : null;
     if (ask && ask.dialog && ask.options.length >= 2 && !/^\d$/.test(text)) {
       const free = ask.options.findIndex(o => /^(type something|other)\b/i.test(o.label));
-      if (free >= 0 && free < 9) { chatUi.dropPending(id); chatUi.askTo(free); setTimeout(() => deliver(id, text, list), 400); } // its cursor onto that row (its number would be typed in once there) // an answer, not a message: no bubble waiting for it
+      if (free >= 0 && free < 9) { chatUi.dropPending(id); chatUi.askTo(free); setTimeout(() => deliver(id, text, list, true), 400); } // its cursor onto that row (its number would be typed in once there) // an answer, not a message: no bubble waiting for it
       else { api.send({ type: 'termInput', id, data: '\x1b' }); setTimeout(() => deliver(id, text, list), 600); }
       return;
     }

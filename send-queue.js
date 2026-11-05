@@ -10,9 +10,13 @@ const pause = (ms) => new Promise(r => setTimeout(r, ms));
 const pasteSettleMs = (len) => 150 + Math.ceil(len / 1024) * 12 + (len > 800 ? 250 : 0);
 const bracketed = (s) => '\x1b[200~' + s + '\x1b[201~';
 
-// getTerm(id) → { write(s) } or null; writeChunked(term, s) writes a long string in pieces (may return a promise that
-// resolves when all are written); isImage(path) → bool; wait(ms) is pause by default (a test passes its own).
-function makeSender({ getTerm, writeChunked = (t, s) => t.write(s), isImage = () => true, wait = pause, log = () => {} }) {
+// getTerm(id) → { write(s) } or null: the agent's live CLI; isReady(id): it can take a message (at its prompt, no dialog);
+// writeChunked(term, s) writes a long string in pieces (may return a promise that resolves when all are written);
+// isImage(path) → bool; wait(ms) is pause by default (a test passes its own).
+// No CLI right now (still loading, a crash being auto-resumed, Overlord restarting): a message waits up to waitMs for one,
+// then opts.onFail. The CLI swapped mid-paste (it died, a new one came): the whole message goes again into the new one.
+// opts.still() false once a CLI is ready: not sent (it reached the transcript meanwhile). opts.onSent: Enter written.
+function makeSender({ getTerm, writeChunked = (t, s) => t.write(s), isImage = () => true, wait = pause, log = () => {}, isReady = () => true, pollMs = 500, waitMs = 10 * 60e3 }) {
   const chains = new Map();  // agent id → its last send
   const gens = new Map();    // agent id → Esc count: a send started under an older one stops
   const writing = new Map(); // agent id → the paste being written right now
@@ -26,29 +30,42 @@ function makeSender({ getTerm, writeChunked = (t, s) => t.write(s), isImage = ()
   const erase = async (t, n) => { if (n > 0) { t.write('\x05' + '\x7f'.repeat(Math.min(n, 20000))); await wait(120); } }; // Ctrl+E, then Backspace: safe mid-turn
   // onSubmit runs as Enter goes in, never for a cancelled message (a /clear or /resume is acted on only once really sent).
   const submit = async (t, onSubmit) => { if (onSubmit) onSubmit(); t.write('\r'); await wait(250); };
+  const ready = async (id, cancelled, opts = {}) => { for (let w = 0; w <= waitMs && !cancelled(); w += pollMs) { const t = getTerm(id); if (t && isReady(id, opts)) return t; await wait(pollMs); } return null; };
+  // One message, start to Enter, into one CLI; again from the start in a new CLI if that one went away meanwhile.
+  const deliver = (id, opts, body) => inOrder(id, async (cancelled) => {
+    for (let tries = 0; tries < 4; tries++) {
+      const t = await ready(id, cancelled, opts);
+      if (cancelled()) return;
+      if (!t) break;
+      if (opts.still && !opts.still()) return;
+      let ok = false; try { ok = await body(t, cancelled, tries); } catch (e) { log(`send to agent ${id} failed: ${e && e.message}`); }
+      if (cancelled()) return;
+      if (ok) { if (opts.onSent) opts.onSent(); return; } // Enter went in (it dying right after is main's transcript check)
+      await wait(pollMs);
+    }
+    if (!cancelled() && opts.onFail) opts.onFail();
+  });
   return {
     // Plain text: one paste, then Enter.
-    prompt: (id, text, eraseN = 0, onSubmit = null) => inOrder(id, async (cancelled) => {
-      const t = getTerm(id); if (!t) return;
-      await erase(t, eraseN);
-      if (cancelled()) return; // Esc while the leftover was being erased: nothing of it goes in
+    prompt: (id, text, eraseN = 0, onSubmit = null, opts = {}) => deliver(id, opts, async (t, cancelled, tries) => {
+      await erase(t, tries ? 0 : eraseN); // a new CLI's box is empty
+      if (cancelled()) return false; // Esc while the leftover was being erased: nothing of it goes in
       const s = bracketed(String(text).replace(/\r\n?/g, '\n'));
       await put(id, t, s); await wait(pasteSettleMs(s.length));
-      if (cancelled()) return; // Esc while it was going in: the CLI's own Esc handles what's in its box
-      await submit(t, onSubmit);
+      if (cancelled() || getTerm(id) !== t) return false; // Esc while it was going in: the CLI's own Esc handles what's in its box
+      await submit(t, onSubmit); return true;
     }),
     // Text and images in the order written ("compare [Image #1] with [Image #2]"), each paste settled before the next,
     // then Enter.
-    parts: (id, parts, eraseN = 0) => inOrder(id, async (cancelled) => {
-      const t = getTerm(id); if (!t) return;
-      await erase(t, eraseN);
+    parts: (id, parts, eraseN = 0, opts = {}) => deliver(id, opts, async (t, cancelled, tries) => {
+      await erase(t, tries ? 0 : eraseN);
       for (const p of parts.slice(0, 60)) {
-        if (cancelled()) return;
+        if (cancelled() || getTerm(id) !== t) return false;
         if (typeof p.image === 'string' && isImage(p.image)) { await put(id, t, bracketed(p.image.replace(/\\/g, '/'))); await wait(400); }
         else if (typeof p.text === 'string' && p.text) { const s = bracketed(p.text.replace(/\r\n?/g, '\n').slice(0, 200000)); await put(id, t, s); await wait(pasteSettleMs(s.length)); }
       }
-      if (cancelled()) return;
-      await submit(t);
+      if (cancelled() || getTerm(id) !== t) return false;
+      await submit(t); return true;
     }),
     // Just the leftover, in turn with the sends (Esc took a message back).
     erase: (id, n) => inOrder(id, async () => { const t = getTerm(id); if (t) await erase(t, n); }),

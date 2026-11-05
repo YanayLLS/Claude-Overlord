@@ -4433,6 +4433,9 @@ api.on((msg) => {
     x.terminal.write(msg.data, () => {
       if (atBottom) x.terminal.scrollToBottom();
       if (msg.id === selectedId) { updateScrollBtn(); window.chatUi && chatUi.onTerm(msg.id); }
+      // A full-screen menu up in this CLI (/model, "Make auto mode your default?"…): main holds chat sends till it's gone,
+      // a paste and Enter would answer it. The screen is only here; main's raw stream misses the redraw when one closes.
+      if (!x._menuT) x._menuT = setTimeout(() => { x._menuT = 0; const on = !!screenDialog(bufferRows(x.terminal.buffer.active, 40), false); if (on !== x._menu) { x._menu = on; api.send({ type: 'cliMenu', id: msg.id, on }); } }, 300);
     });
     const ag = agents.get(msg.id);
     if (ag && ag.dead) { ag.dead = null; if (msg.id === selectedId) updateDeadOverlay(); scheduleRender(); } // terminal is talking again
@@ -4738,7 +4741,7 @@ function handleAgentMsg(msg) {
     case 'sessionChanged': { const a = agents.get(msg.id); if (a) { a.sessionId = msg.sessionId; a.chatHides = []; if (msg.id === selectedId) rememberAgent(); } break; } // after /clear or /resume: drafts and hidden messages are this session's
     case 'dictation': chatComposer.onDictation(msg); break;
     case 'clipboardImageSaved': chatComposer.onImageSaved(msg); break;
-    case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': case 'gitReverted': chatUi.onMsg(msg); break;
+    case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': case 'gitReverted': case 'cliSent': case 'sendFailed': chatUi.onMsg(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;

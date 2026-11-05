@@ -1138,7 +1138,46 @@ function dictateTake(msg) {
 // Messages handed to an agent's CLI (the Chat view, a quest): one at a time per agent, images first then the text as
 // one paste, text left in its box erased in turn (send-queue.js).
 const cliSend = makeSender({ getTerm: (id) => { const t = terminals.get(id); return t && !t._ovShell ? t : null; }, writeChunked: (t, s) => writePtyChunked(t, s),
-  isImage: (p) => /\.(png|jpe?g|gif|webp|bmp)$/i.test(p) && fs.existsSync(p), log: (m) => console.log('[Overlord] ' + m) });
+  isImage: (p) => /\.(png|jpe?g|gif|webp|bmp)$/i.test(p) && fs.existsSync(p), log: (m) => console.log('[Overlord] ' + m), isReady: (id, o) => !!(o && o.intoDialog) || cliReady(id) }); // an answer typed into a question's own text field goes into the dialog
+// A chat message must arrive. It waits for the CLI to be at its prompt (not loading, not crashed, no dialog: a paste and
+// Enter into "Make auto mode your default?" or a permission would answer it), stays tracked until the transcript has it,
+// goes again into the next CLI if this one dies first, and comes back to the chat's box when no CLI ever takes it.
+function cliReady(id) {
+  const a = agents.get(id); if (!a || a.archived || !a.claudeReady || a.ptyPerm) return false;
+  return !a.cliMenu; // the page's screen check (cliMenu): a full-screen menu is up
+}
+const sentNorm = (t) => String(t || '').replace(/<\/?pasted_content[^>]*>/g, '').replace(/\[image #\d+\]\s*/gi, '').replace(/\s+/g, ' ').trim().toLowerCase();
+const sentKey = (t) => sentNorm(t).slice(0, 40);
+const unconfirmed = new Map(); // agent id → [{ key, at, done, resend }]: handed to its CLI, not in the transcript yet
+function chatDeliver(id, text, parts, erase, onSubmit, intoDialog = false) {
+  const e = { key: sentKey(parts ? parts.filter(p => p.text).map(p => p.text).join('') : text), at: 0, done: false, tries: 0 };
+  const failed = () => { e.done = true; flog('send to agent ' + id + ' failed: no CLI took it'); send({ type: 'sendFailed', id, text: parts ? parts.map(p => p.text || p.image || '').join('') : text }); };
+  const opts = { intoDialog, still: () => !e.done, onFail: failed, onSent: () => {
+    send({ type: 'cliSent', id });
+    if (intoDialog) return; // an answer: the transcript has it as the question's result, not a message
+    e.at = Date.now(); const l = unconfirmed.get(id) || []; if (!l.includes(e)) l.push(e); unconfirmed.set(id, l.slice(-20));
+    // Idle and still not in the transcript: its Enter was lost. Enter again; on an empty box that's nothing.
+    const t0 = terminals.get(id);
+    setTimeout(() => { const a = agents.get(id); if (!e.done && a && a.isWaiting && terminals.get(id) === t0 && cliReady(id)) { flog('agent ' + id + ': a sent message not in the transcript after 10s idle - Enter again'); try { t0.write('\r'); } catch {} } }, 10000);
+  } };
+  e.resend = () => { if (e.done || ++e.tries > 3) return; if (parts) cliSend.parts(id, parts, 0, opts); else cliSend.prompt(id, text, 0, onSubmit, opts); };
+  if (parts) cliSend.parts(id, parts, erase, opts); else cliSend.prompt(id, text, erase, onSubmit, opts);
+}
+// The transcript has a message of yours: the ones it holds are delivered (several queued mid-turn can arrive as one).
+function confirmSent(id, text, ts) {
+  const l = unconfirmed.get(id); if (!l) return;
+  const n = sentNorm(text), at = Date.parse(ts) || Date.now();
+  for (const e of l) if (!e.done && at >= e.at - 5000 && (!e.key || n.includes(e.key))) { e.done = true; if (!e.key) break; }
+  unconfirmed.set(id, l.filter(e => !e.done));
+}
+// Its CLI died: what it took but never wrote down goes again, into the next one.
+function resendUnconfirmed(id) {
+  const l = unconfirmed.get(id); if (!l || !l.length) return;
+  unconfirmed.delete(id);
+  const live = l.filter(e => !e.done && Date.now() - e.at < 30 * 60e3);
+  if (live.length) flog('agent ' + id + ': CLI exited with ' + live.length + ' sent message(s) not in the transcript - sending again once it is back');
+  for (const e of live) e.resend();
+}
 
 // A subagent's own steps for the Chat view: Claude Code keeps each one's transcript beside the session
 // (<session>/subagents/agent-<id>.jsonl, its .meta.json naming the Agent call that started it).
@@ -1700,6 +1739,7 @@ function handleTermExit(id, exitCode) {
   const a = agents.get(id);
   if (!a) return;
   terminals.delete(id);
+  if (!a.archived) resendUnconfirmed(id); // they wait for the next CLI (auto-resume, restart); none comes → back to the box
   const hadBg = a.bgTasks?.size > 0;
   a.bgTasks?.clear(); // background shells/agents die with the Claude process
   a.claudeReady = false; // peer messages queue until a new pty shows Claude's prompt
@@ -2315,13 +2355,13 @@ function parseLine(id, line) {
         } else {
           const txt = c.filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
           if (!isReminderOnly(txt) && !r.isMeta && !r.isCompactSummary) { // not a skill's own instructions
-            if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); }
+            if (txt) { setPrompt(id, a, txt); confirmPeerInjection(a, txt); confirmSent(id, txt, r.timestamp); }
             clrActivity(id); a.hadTools = false; a.turnTools = 0;
           }
         }
       } else if (typeof c === 'string' && c.trim() && !isReminderOnly(c) && !r.isMeta && !r.isCompactSummary) {
         setPrompt(id, a, c);
-        confirmPeerInjection(a, c.trim());
+        confirmPeerInjection(a, c.trim()); confirmSent(id, c, r.timestamp);
         clrActivity(id); a.hadTools = false; a.turnTools = 0;
       }
     } else if (r.type === 'system' && r.subtype === 'compact_boundary') {
@@ -5001,16 +5041,18 @@ function handleIpc(msg) {
       break;
     }
     case 'bgTail': bgTail(msg); break;
-    case 'chatSend': cliSend.parts(msg.id, Array.isArray(msg.parts) ? msg.parts : [], +msg.erase || 0); break;
+    case 'chatSend': chatDeliver(msg.id, '', Array.isArray(msg.parts) ? msg.parts : [], +msg.erase || 0); break;
+    case 'cliMenu': { const ag = agents.get(msg.id); if (ag) ag.cliMenu = !!msg.on; break; }
     case 'cliErase': cliSend.erase(msg.id, +msg.n || 0); break;
     case 'chatHides': { const a = agents.get(msg.id); if (a && Array.isArray(msg.hides)) { a.chatHides = msg.hides.filter(r => r && Number.isFinite(r.from) && Number.isFinite(r.until)).slice(-200).map(r => ({ from: r.from, until: r.until })); saveState(); } break; } // what an edit or Esc took out of the chat // leftover text in an agent's CLI box, in turn with its sends
     case 'dictate': dictateTake(msg); break;
     case 'dictateSetup': dictateSetup(); break;
     case 'dictateWarm': if (!settings.dictationKey && require('./whisper').installed(WHISPER_DIR())) require('./whisper').warm(WHISPER_DIR()).catch(() => {}); break;
     case 'dictateRemove': { const n = require('./whisper').remove(WHISPER_DIR()); send({ type: 'dictation', setup: true, reset: true, toast: n ? `Speech engine removed (${(n / 1e9).toFixed(1)} GB freed)` : 'Speech engine is not installed' }); break; }
-    case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); cliSend.prompt(msg.id, text, +msg.erase || 0, () => markSessionSwitch(msg.id, text)); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
+    case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); chatDeliver(msg.id, text, null, +msg.erase || 0, () => markSessionSwitch(msg.id, text), !!msg.intoDialog); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
     case 'cliCancel': { // Esc: stops the sends, then the Esc itself once no paste is half-written; the page hears when it's out
       const ag = agents.get(msg.id); if (ag && ag.ptyPerm) { clearPtyPerm(msg.id, ag); ag.permSent = false; send({ type: 'permClear', id: msg.id }); } // as an Esc typed into the terminal does
+      unconfirmed.delete(msg.id); // taken back: never sent again
       cliSend.cancel(msg.id, msg.esc !== false, () => send({ type: 'cliEscSent', id: msg.id }));
       break;
     } // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt

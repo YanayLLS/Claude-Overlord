@@ -42,10 +42,10 @@ const { makeSender } = require('./send-queue');
   // the cancelled message isn't submitted and its /clear isn't acted on, the next one's is.
   writes.length = 0;
   const pieces = [];
-  const chunky = makeSender({ getTerm: () => ({ write: (s) => pieces.push(s) }), wait, writeChunked: async (t, s) => { for (let i = 0; i < s.length; i += 1024) { t.write(s.slice(i, i + 1024)); await wait(8); } } });
+  const pt = { write: (s) => pieces.push(s) }; const chunky = makeSender({ getTerm: () => pt, wait, writeChunked: async (t, s) => { for (let i = 0; i < s.length; i += 1024) { t.write(s.slice(i, i + 1024)); await wait(8); } } });
   const acted = [];
   const big = chunky.prompt(5, '/clear ' + 'y'.repeat(4000), 0, () => acted.push('first'));
-  await null; await null; // the paste has started
+  while (!pieces.length) await null; // the paste has started
   chunky.cancel(5);
   const next = chunky.prompt(5, '/clear', 0, () => acted.push('second'));
   await Promise.all([big, next]); await new Promise(r => setTimeout(r, 0));
@@ -59,6 +59,26 @@ const { makeSender } = require('./send-queue');
   writes.length = 0;
   await bad.prompt(9, 'lost'); await bad.prompt(1, 'still goes');
   assert.ok(writes.some(([, s]) => s.includes('still goes')));
+
+  // No CLI yet (crash auto-resume, a restart, still loading): the message waits for one at its prompt, then goes.
+  { let live = null; const w = []; const t2 = { write: (s) => w.push(s) }; const sent = [];
+    const s = makeSender({ getTerm: () => live, wait, pollMs: 100, waitMs: 5000 });
+    const p = s.prompt(1, 'waits', 0, null, { onSent: () => sent.push(1) });
+    for (let i = 0; i < 5; i++) await wait(100);
+    assert.strictEqual(w.length, 0, 'nothing written while no CLI'); live = t2; await p;
+    assert.deepStrictEqual(w.map(short), ['«waits»', '\r'], 'delivered once the CLI is up'); assert.deepStrictEqual(sent, [1], 'onSent once'); }
+  // No CLI ever: not written, onFail with nothing lost silently.
+  { const fails = []; const s = makeSender({ getTerm: () => null, wait, pollMs: 100, waitMs: 1000 });
+    await s.prompt(1, 'never', 0, null, { onFail: () => fails.push('p') }); await s.parts(1, [{ text: 'x' }], 0, { onFail: () => fails.push('parts') });
+    assert.deepStrictEqual(fails, ['p', 'parts'], 'each failed send reported'); }
+  // The CLI dies mid-paste and a new one comes: the whole message is pasted again into the new one and submitted there.
+  { const old = [], neu = []; const tOld = { write: (s) => old.push(s) }, tNew = { write: (s) => neu.push(s) }; let cur = tOld;
+    const s = makeSender({ getTerm: () => cur, wait, pollMs: 100, writeChunked: (t, x) => { t.write(x); if (t === tOld) cur = tNew; } });
+    await s.prompt(1, 'again');
+    assert.ok(!old.includes('\r'), 'no Enter into the dead CLI'); assert.deepStrictEqual(neu.map(short), ['«again»', '\r'], 'whole message into the new CLI'); }
+  // still() false by the time a CLI is ready (it reached the transcript after all): not sent twice.
+  { const w = []; const tw = { write: (x) => w.push(x) }; const s = makeSender({ getTerm: () => tw, wait });
+    await s.prompt(1, 'dup', 0, null, { still: () => false }); assert.strictEqual(w.length, 0, 'skipped'); }
 
   console.log('send-queue: all tests passed');
 })().catch((e) => { console.error(e); process.exit(1); });

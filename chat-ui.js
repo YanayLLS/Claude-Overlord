@@ -894,7 +894,8 @@
       if (p.held) continue;
       while (j < yours.length && Date.parse(yours[j]) < p.at - 500) j++;
       if (j < yours.length) { used.add(yours[j]); j++; list.splice(list.indexOf(p), 1); continue; }
-      if (!busy && Date.now() - (p.busyAt || p.at) > 30000) list.splice(list.indexOf(p), 1);
+      // Only once main has handed it over (else it's still waiting for a CLI: main says when it fails); a page reload lost that word: 15 min.
+      if (!busy && (p.sentAt ? Date.now() - Math.max(p.busyAt || 0, p.sentAt) > 30000 : Date.now() - p.at > 15 * 60e3)) list.splice(list.indexOf(p), 1);
     }
     return list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
@@ -1897,6 +1898,16 @@
   document.addEventListener('keydown', (e) => { if (undoRevert && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !/^(INPUT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName)) { e.preventDefault(); undoRevert(); } }, true);
   function onMsg(msg) {
     if (msg.type === 'gitDiff') return onGitDiff(msg);
+    // Main handed a message to the CLI (Enter written): from now its bubble can expire. Before, it's still on its way.
+    if (msg.type === 'cliSent') { const p = (pending.get(msg.id) || []).filter(x => !x.held && !x.sentAt).sort((x, y) => x.at - y.at)[0]; if (p) p.sentAt = Date.now(); return; }
+    // No CLI took it (gone 10 minutes, or the agent was closed): the bubble goes, its text comes back to the box.
+    if (msg.type === 'sendFailed') {
+      const l = pending.get(msg.id) || [], p = l.filter(x => !x.held && !x.sentAt).sort((x, y) => x.at - y.at)[0]; if (p) l.splice(l.indexOf(p), 1);
+      const had = chatComposer.getDraft(msg.id) || '', t = String(msg.text || '');
+      if (t && !had.includes(t)) chatComposer.setDraft(msg.id, had.trim() ? had.replace(/\s*$/, '\n') + t : t);
+      showToast(`Not sent: ${(agents.get(msg.id) || {}).title || 'the agent'}'s CLI isn't running. Your message is back in the box.`, () => focusAgent(msg.id));
+      rerender(); return;
+    }
     // Reverted: 10 seconds to take it back (git restore can't be undone, so main kept the file as it was).
     if (msg.type === 'gitReverted') {
       if (typeof msg.content !== 'string') return;
