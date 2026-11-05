@@ -1792,12 +1792,12 @@ function toggleGroupMenu(btn) {
   const dd = btn.nextElementSibling;
   const wasOpen = dd.classList.contains('open');
   closeGroupMenus();
-  if (!wasOpen) { dd.classList.add('open'); _openMenu = dd.dataset.menu || null; }
+  if (!wasOpen) { dd.classList.add('open'); _openMenu = dd.dataset.menu || null; placeMenu(dd, btn, true); }
 }
 function closeGroupMenus() { document.querySelectorAll('.group-dropdown.open').forEach(d => d.classList.remove('open')); _openMenu = null; }
 function restoreOpenMenu() {
   if (_openMenu == null) return;
-  document.querySelectorAll('.group-dropdown').forEach(d => { if (d.dataset.menu === _openMenu) d.classList.add('open'); });
+  document.querySelectorAll('.group-dropdown').forEach(d => { if (d.dataset.menu === _openMenu) { d.classList.add('open'); placeMenu(d, d.previousElementSibling, true); } });
 }
 function persistProjects() { api.send({ type: 'saveProjects', dirs: [...knownProjects] }); }
 function addKnownProject(cwd) { if (cwd && !knownProjects.has(cwd)) { knownProjects.add(cwd); persistProjects(); } }
@@ -2079,6 +2079,8 @@ function submitFeature() {
   closeWt();
 }
 document.addEventListener('click', closeGroupMenus);
+// Dropdowns are position:fixed (placeMenu), so scrolling the list under one would leave it floating.
+document.addEventListener('scroll', (e) => { const d = document.querySelector('.group-dropdown.open'); if (d && e.target.contains && e.target !== d && e.target.contains(d)) closeGroupMenus(); }, true);
 
 // ── Agent icons (flat text glyphs — \uFE0E forces text presentation) ──
 const AGENT_ICONS = [
@@ -2346,9 +2348,7 @@ function showIconPicker(e, sessionId) {
   }
   document.body.appendChild(picker);
   // Adjust if off-screen
-  const rect = picker.getBoundingClientRect();
-  if (rect.right > window.innerWidth) picker.style.left = (window.innerWidth - rect.width - 8) + 'px';
-  if (rect.bottom > window.innerHeight) picker.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  placeMenu(picker, e);
   // Close on outside click
   const close = (ev) => { if (!picker.contains(ev.target)) { picker.remove(); _iconMenuId = null; document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
@@ -2747,9 +2747,7 @@ function showCtxMenu(e, items) {
     menu.appendChild(btn);
   }
   document.body.appendChild(menu);
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
-  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  placeMenu(menu, e); // tooltip.js
   const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
@@ -2820,9 +2818,7 @@ function showServerMenu(e, items) {
     menu.appendChild(btn);
   }
   document.body.appendChild(menu);
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
-  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  placeMenu(menu, e); // tooltip.js
   const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
@@ -2929,9 +2925,7 @@ function showModelMenu(e, id) {
 
   document.body.appendChild(menu);
   search.focus();
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
-  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  placeMenu(menu, e); // tooltip.js
   const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
@@ -4873,9 +4867,7 @@ function showUsageAcctMenu(e) {
     menu.appendChild(btn);
   }
   document.body.appendChild(menu);
-  const rect = menu.getBoundingClientRect();
-  menu.style.left = Math.max(4, Math.min(e.clientX, window.innerWidth - rect.width - 8)) + 'px';
-  menu.style.top = Math.max(4, Math.min(e.clientY, window.innerHeight - rect.height - 8)) + 'px';
+  placeMenu(menu, e);
   const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
@@ -4960,13 +4952,8 @@ function showAccountMenu(e) {
   }
 
   // Position
-  const btnRect = e.currentTarget.getBoundingClientRect();
-  menu.style.left = btnRect.left + 'px';
-  menu.style.top = (btnRect.bottom + 4) + 'px';
   document.body.appendChild(menu);
-  const rect = menu.getBoundingClientRect();
-  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
-  if (rect.bottom > window.innerHeight) menu.style.top = (btnRect.top - rect.height - 4) + 'px';
+  placeMenu(menu, e.currentTarget);
   const close = (ev) => { if (!menu.contains(ev.target) && ev.target.id !== 'account-btn') { menu.remove(); document.removeEventListener('mousedown', close); } };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
@@ -5137,6 +5124,7 @@ function showBookmarkMenu(e, items) {
     menu.appendChild(mb);
   }
   document.body.appendChild(menu);
+  placeMenu(menu, e);
   setTimeout(() => document.addEventListener('mousedown', function close(ev) {
     if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', close); }
   }), 0);

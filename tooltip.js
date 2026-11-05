@@ -29,6 +29,29 @@ function tipPlacement(r, w, h, vw, vh) {
   return { side, x, y, arrow: tipClamp(cy - y, TIP_ARROW_PAD, h - TIP_ARROW_PAD) };
 }
 
+// Menus/dropdowns: r is the anchor (a button rect, or a 0-size rect at the cursor).
+// Opens below when it fits, else above, else on the roomier side with maxH to scroll.
+// alignRight lines the menu's right edge up with the anchor's.
+function menuPlacement(r, w, h, vw, vh, alignRight) {
+  const gap = r.height ? 4 : 0, M = 8;
+  const below = vh - r.bottom - gap - M, above = r.top - gap - M;
+  const down = h <= below || (h > above && below >= above);
+  const maxH = h <= (down ? below : above) ? null : Math.max(below, above);
+  const y = down ? r.bottom + gap : r.top - gap - Math.min(h, maxH || h);
+  let x = alignRight ? r.right - w : r.left;
+  if (x + w > vw - M) x = r.right - w;
+  return { x: tipClamp(x, M, vw - w - M), y, maxH };
+}
+// Position a position:fixed menu already in the DOM. anchor: an element, or a mouse event.
+function placeMenu(menu, anchor, alignRight) {
+  const r = anchor instanceof Element ? anchor.getBoundingClientRect()
+    : { left: anchor.clientX, right: anchor.clientX, top: anchor.clientY, bottom: anchor.clientY, width: 0, height: 0 };
+  Object.assign(menu.style, { position: 'fixed', right: 'auto', bottom: 'auto', margin: '0', maxHeight: '' });
+  const p = menuPlacement(r, menu.offsetWidth, menu.offsetHeight, innerWidth, innerHeight, alignRight);
+  Object.assign(menu.style, { left: p.x + 'px', top: p.y + 'px' });
+  if (p.maxH) Object.assign(menu.style, { maxHeight: p.maxH + 'px', overflowY: 'auto' });
+}
+
 if (typeof document !== 'undefined') {
   const tipEl = document.createElement('div');
   tipEl.id = 'app-tip';
@@ -136,5 +159,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { tipPlacement };
+  module.exports = { tipPlacement, menuPlacement };
 }
