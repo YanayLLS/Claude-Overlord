@@ -1851,7 +1851,7 @@ function doSpawnTerminal(id, attached) {
       try { proc.resize(sz.cols, Math.max(1, sz.rows - 1)); } catch {}
       setTimeout(() => { try { proc.resize(sz.cols, sz.rows); } catch {} }, 150);
     } else {
-      a.bgTasks?.clear(); // a new Claude process — the old one's background tasks died with it
+      a.bgTasks?.clear(); a._loginMove = false; // a new Claude process: the old one's background tasks died with it, and it starts on the active login
       applyLastTermSize(id, proc);
       a.claudeReady = false; // respawn: wait for Claude's prompt again before injecting peer messages
     }
@@ -2218,7 +2218,7 @@ function parseLine(id, line) {
     }
     if (a.pendingPrompt && recordHasPrompt(r, a.pendingPrompt.key, a.pendingPrompt.at)) a.pendingPrompt = null;
     // Ledger moved while at the prompt (e.g. a background task finished) → re-show status
-    if (applyBgRecord(a.bgTasks ||= new Set(), r) && a.isWaiting) send({ type: 'status', id, status: shownStatus(a) });
+    if (applyBgRecord(a.bgTasks ||= new Set(), r) && a.isWaiting) { send({ type: 'status', id, status: shownStatus(a) }); moveIfIdle(id); } // last background task done: may move logins now
     // Esc: an interrupted turn writes no turn_duration, only this note — the agent is back at the prompt.
     if (r.type === 'user' && !a.isWaiting) {
       const c = r.message && r.message.content, t = typeof c === 'string' ? c : Array.isArray(c) ? ((c.find(b => b.type === 'text') || {}).text || '') : '';
@@ -3677,6 +3677,7 @@ function switchAccount(label, auto) {
           if (curIdx >= 0) { data.accounts[curIdx].credentials = curCreds; data.accounts[curIdx].meta = getAccountMeta(); }
         } catch {}
       }
+      const fromLabel = data.activeLabel;
       fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(target.credentials, null, 2));
       data.activeLabel = target.label;
       saveAccountsFile(data);
@@ -3687,7 +3688,7 @@ function switchAccount(label, auto) {
       moveAgentsToLogin();
       // Saved creds carry a refresh token — only open the browser if the CLI says they're dead.
       refreshAuthStatus(true).then(() => {
-      if (_cachedAuthStatus?.loggedIn || auto) { fetchUsage(); return; } // auto: never pop a browser unasked
+      if (_cachedAuthStatus?.loggedIn || auto) { guardCreds(fromLabel, target.credentials?.claudeAiOauth?.accessToken); fetchUsage(); return; } // auto: never pop a browser unasked
       const switchLoginProc = spawn('claude', ['auth', 'login'], { shell: true, stdio: 'ignore', detached: true });
       switchLoginProc.unref();
       let switchPrevToken = getApiKey();
@@ -3738,11 +3739,38 @@ function moveAgentsToLogin() {
   for (const [id, a] of agents) if (!a.account && terminals.has(id)) { a._loginMove = true; moveIfIdle(id); }
 }
 function moveIfIdle(id) {
-  const a = agents.get(id), t = terminals.get(id);
-  if (!a || !t || !a._loginMove || !(a.isWaiting || a._limitHit)) return;
+  const a = agents.get(id), t = terminals.get(id), m = t && acctCore.loginMove(a);
+  if (!m) return;
   a._loginMove = false;
-  if (a._limitHit) a._crashNudge = 'The usage limit stopped you, so Overlord moved you to another account and resumed this chat. Continue from where you left off.';
+  if (m.nudge) a._crashNudge = 'The usage limit stopped you, so Overlord moved you to another account and resumed this chat.'
+    + (m.nudge === 'limit+bg' ? ' Your background shells and subagents were killed — check what finished, re-run what did not, and continue.' : ' Continue from where you left off.');
   a._accountRespawn = true; killPty(t);
+  if (![...agents.values()].some(x => x._loginMove)) unguardCreds();
+}
+// An agent still on the old login refreshing its token writes that login back into the credentials file,
+// which would undo the switch for every later spawn. Until the last agent has moved, such a write is
+// folded into the old account (its rotated refresh token must be kept) and the new login put back.
+// ponytail: an hour cap, the new login's token was minted with an hour+ left so it doesn't refresh itself meanwhile.
+let credGuard = null;
+function guardCreds(fromLabel, token) {
+  unguardCreds();
+  if (!fromLabel || !token || ![...agents.values()].some(x => x._loginMove)) return;
+  credGuard = { fromLabel, token, timer: setTimeout(unguardCreds, 3600000) };
+  fs.watchFile(CREDENTIALS_PATH, { interval: 2000 }, checkCreds);
+}
+function unguardCreds() {
+  if (!credGuard) return;
+  clearTimeout(credGuard.timer); fs.unwatchFile(CREDENTIALS_PATH, checkCreds); credGuard = null;
+}
+function checkCreds() {
+  if (!credGuard) return;
+  let cur; try { cur = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8')); } catch { return; }
+  if (!cur?.claudeAiOauth?.accessToken || cur.claudeAiOauth.accessToken === credGuard.token) return;
+  const data = loadAccounts(), from = findAccount(data, credGuard.fromLabel), to = findAccount(data, data.activeLabel);
+  if (!from || !to?.credentials) return unguardCreds();
+  from.credentials = cur; saveAccountsFile(data);
+  fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(to.credentials, null, 2));
+  flog('credentials reverted to', credGuard.fromLabel, 'by an old-login refresh; put', data.activeLabel, 'back');
 }
 
 // ── Agents pinned to another saved login (account-core.js) ──

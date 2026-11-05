@@ -33,3 +33,15 @@ assert.ok(refreshScope({}).includes('user:inference'));
   assert.strictEqual(a.credentials.claudeAiOauth.accessToken, 'fresh');
   assert.strictEqual(a.credentials.claudeAiOauth.expiresAt, 10000);
 }
+
+// loginMove: when an agent on the main login restarts onto a newly switched login, and what it's told.
+{
+  const { loginMove } = require('./account-core');
+  const bg = new Set(['x']);
+  assert.strictEqual(loginMove({ _loginMove: false, isWaiting: true }), null);
+  assert.deepStrictEqual(loginMove({ _loginMove: true, isWaiting: true, bgTasks: new Set() }), { nudge: null }); // idle, nothing running: quiet
+  assert.strictEqual(loginMove({ _loginMove: true, isWaiting: false }), null); // mid-turn: wait
+  assert.strictEqual(loginMove({ _loginMove: true, isWaiting: true, bgTasks: bg }), null); // background work: wait for it
+  assert.deepStrictEqual(loginMove({ _loginMove: true, _limitHit: true }), { nudge: 'limit' });
+  assert.deepStrictEqual(loginMove({ _loginMove: true, _limitHit: true, bgTasks: bg }), { nudge: 'limit+bg' }); // stopped anyway: go, say what died
+}

@@ -74,4 +74,14 @@ async function exchangeCode(login, code, now = Date.now()) {
   return toToken(resp, now);
 }
 
-module.exports = { validToken, refreshScope, applyRefresh, mintUsageToken, newLogin, exchangeCode, SUCCESS_URL };
+// When an agent on the main login restarts onto a newly switched login (null = not yet), and how it's
+// told. Idle with no background work: quietly. Background shells/agents would die with the restart, so
+// wait for them, unless the limit already stopped the agent: then go now and say what was killed.
+function loginMove(a) {
+  if (!a || !a._loginMove) return null;
+  const bg = a.bgTasks && a.bgTasks.size > 0;
+  if (a._limitHit) return { nudge: bg ? 'limit+bg' : 'limit' };
+  return a.isWaiting && !bg ? { nudge: null } : null;
+}
+
+module.exports = { loginMove, validToken, refreshScope, applyRefresh, mintUsageToken, newLogin, exchangeCode, SUCCESS_URL };
