@@ -1719,6 +1719,8 @@ function handleTermExit(id, exitCode) {
   // A clean exit (user typed /exit, code 0) is still not a crash.
   const crashed = exitCode !== 0 && exitCode !== undefined;
   if (crashed) a.crashed = true; // watchdog must not flip a crashed card to 'waiting'
+  // The why: exit code + what the CLI printed last (its error), with ANSI stripped.
+  if (crashed) { const b = termBuffers.get(id), tail = b ? b.chunks.slice(-20).join('').slice(-1500) : ''; flog(`agent ${id} "${String(a.title || '').slice(0, 30)}" exited ${exitCode} after ${Math.round((Date.now() - (a._spawnAt || 0)) / 1000)}s: ${JSON.stringify(tail.replace(/\x1b\[[0-9;?<>=]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b./g, '').replace(/\s+/g, ' ').slice(-700))}`); }
   if (crashed && a.crashCount < MAX_CRASH_RETRIES) {
     a.crashCount++;
     a._crashNudge = !a.isWaiting || hadBg; // died mid-turn or with background work → tell the resumed Claude to carry on
@@ -1769,6 +1771,7 @@ function spawnTerminal(id) {
   if (terminals.has(id) || spawningTerms.has(id)) return; // already running/starting
   const a = agents.get(id);
   if (!a) return;
+  a._spawnAt = Date.now();
   protectClaudeConfig(); // keep hasCompletedOnboarding set before each `claude` launch
 
   // If an orphaned Claude process is still writing, don't spawn a conflicting --resume.
