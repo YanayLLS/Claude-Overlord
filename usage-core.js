@@ -148,7 +148,7 @@ function usageCapacity(usd, pct) {
 function usagePeak(usage) { return Math.max(0, ...usageMeters(usage).map(m => m.pct)); }
 // Auto-switch: once the active login's fullest meter reaches `at`%, the saved login with the most
 // room left (its fullest meter lowest, and under `at`); null = stay put.
-function pickSwitchTarget(active, others, at = 90) {
+function pickSwitchTarget(active, others, at = 99) {
   if (usagePeak(active) < at) return null;
   let best = null;
   for (const o of others) { const p = o.usage ? usagePeak(o.usage) : 100; if (p < at && (!best || p < best.p)) best = { label: o.label, p }; }
