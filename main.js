@@ -1811,7 +1811,8 @@ function spawnTerminal(id) {
   if (terminals.has(id) || spawningTerms.has(id)) return; // already running/starting
   const a = agents.get(id);
   if (!a) return;
-  a._spawnAt = Date.now();
+  a._spawnAt = Date.now(); // who started it: a CLI dying seconds after a spawn needs the spawner (crash log above)
+  flog(`spawn agent ${id} "${String(a.title || '').slice(0, 30)}" crashed=${!!a.crashed} n=${a.crashCount || 0} live=${terminals.size} from ${(new Error().stack || '').split('\n').slice(2, 5).map(l => l.trim().replace(/^at /, '').replace(/\s*\(.*?main\.js:(\d+):\d+\)/, ':$1')).join(' < ')}`);
   protectClaudeConfig(); // keep hasCompletedOnboarding set before each `claude` launch
 
   // If an orphaned Claude process is still writing, don't spawn a conflicting --resume.
