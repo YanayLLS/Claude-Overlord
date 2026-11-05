@@ -106,7 +106,7 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
       const a = args.join(' '); seen.push(a);
       if (a.includes('-f state=open') && a.includes('base=master')) return { data: [{ number: 10, html_url: 'u10', head: { ref: openHead, repo: { full_name: 'o/f' } } }] };
       if (a.includes('git/ref/heads/dev')) return { data: { object: { sha: 'tip9' } } };
-      if (a.includes('git/refs')) return { data: {} };
+      if (a.includes('git/refs')) return { data: { ref: 'refs/heads/overlord/promote-dev-to-master' } };
       if (a.includes('compare/master...')) return { data: { ahead_by: 1, files: [{}], commits: [c('fix: y')] } };
       if (a.includes('compare/dev...master')) return { data: { commits: [] } };
       if (/pulls\/10$/.test(a)) return { data: { mergeable: true, head: { sha: 'h' } } };
@@ -121,6 +121,22 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
     seen.length = 0;
     const old = await releaseRow(fake('dev'), { ...row, pin: true }, opts);
     assert.ok(old.reused && !seen.some(x => x.includes('git/ref')), 'an open PR straight from dev is reused as is, no duplicate');
+    // no snapshot branch yet: GitHub answers the PATCH with an error body (gh hands it back as data) → the branch is created
+    seen.length = 0;
+    const fresh = async (args) => {
+      const a = args.join(' '); seen.push(a);
+      if (a.includes('-f state=open')) return { data: [] };
+      if (a.includes('git/ref/heads/dev')) return { data: { object: { sha: 'tip9' } } };
+      if (a.includes('-X PATCH') && a.includes('git/refs')) return { data: { message: 'Reference does not exist', status: '422' } };
+      if (a.includes('-X POST') && a.includes('git/refs')) return { data: { ref: 'refs/heads/overlord/promote-dev-to-master' } };
+      if (a.includes('compare/master...')) return { data: { ahead_by: 1, files: [{}], commits: [c('fix: y')] } };
+      if (a.includes('compare/dev...master')) return { data: { commits: [] } };
+      if (a.includes('-X POST') && a.includes('/pulls')) return { data: { number: 11, html_url: 'u11' } };
+      return { data: {} };
+    };
+    const made = await releaseRow(fresh, { ...row, pin: true }, opts);
+    assert.ok(seen.some(x => x.includes('-X POST') && x.includes('ref=refs/heads/overlord/promote-dev-to-master')), 'a missing snapshot branch is created');
+    assert.ok(!made.error, 'and the PR opens from it');
   }
 
   // prHealth: GitHub never decides mergeability → conflict is null (unknown), not false

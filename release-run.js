@@ -186,9 +186,11 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   update({ ahead, hotfixes: hotfixes.length, fromSource });
 
   if (pinSha) { // move (or make) the snapshot branch to the pinned tip; an open snapshot PR follows it
+    // a ref came back = done; GitHub's error answers (422 "Reference does not exist") arrive as data, not as .error
+    const isRef = (r) => !r.error && r.data && r.data.ref;
     const moved = await api('-X', 'PATCH', `repos/${repo}/git/refs/heads/${snap}`, '-f', `sha=${pinSha}`, '-F', 'force=true');
-    const made = moved.error ? await api('-X', 'POST', `repos/${repo}/git/refs`, '-f', `ref=refs/heads/${snap}`, '-f', `sha=${pinSha}`) : moved;
-    if (made.error) return { error: `could not pin ${source} on ${snap}: ${made.error}`, ahead };
+    const made = isRef(moved) ? moved : await api('-X', 'POST', `repos/${repo}/git/refs`, '-f', `ref=refs/heads/${snap}`, '-f', `sha=${pinSha}`);
+    if (!isRef(made)) return { error: `could not pin ${source} on ${snap}: ${made.error || (made.data && made.data.message) || 'no reply'}`, ahead };
     head = snap;
   }
 
