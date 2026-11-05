@@ -170,3 +170,15 @@ console.log('ok — all usage-core checks passed');
   assert.ok(usageFillGradient([], 'h', 0, span, 60, H).includes('var(--red) 100%'));
   assert.strictEqual(usageFillGradient([], 'h', 0, span, 0, H), null);
 }
+
+// ── pickSwitchTarget: the active login nears any limit → the saved login with the most room left
+{
+  const { usagePeak, pickSwitchTarget } = require('./usage-core');
+  assert.strictEqual(usagePeak({ hourly: 20, weekly: 40, modelWeekly: [{ model: 'fable', pct: 95 }] }), 95);
+  assert.strictEqual(usagePeak(null), 0);
+  const full = { hourly: 92, weekly: 10 }, b = { label: 'b', usage: { hourly: 50, weekly: 30 } }, c = { label: 'c', usage: { hourly: 5, weekly: 20 } };
+  assert.strictEqual(pickSwitchTarget({ hourly: 80, weekly: 89 }, [c]), null); // room left: stay
+  assert.strictEqual(pickSwitchTarget(full, [b, c]), 'c'); // most room
+  assert.strictEqual(pickSwitchTarget({ hourly: 1, weekly: 97 }, [b]), 'b'); // weekly counts too
+  assert.strictEqual(pickSwitchTarget(full, [{ label: 'd', usage: { hourly: 10, weekly: 91 } }, { label: 'e', usage: null }]), null); // nowhere better
+}

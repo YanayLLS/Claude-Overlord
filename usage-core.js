@@ -144,6 +144,17 @@ function usageCapacity(usd, pct) {
   return !(usd > 0) || !(pct >= 10) ? null : usd / pct * 100;
 }
 
+// The fullest meter of a reading (session, week or a per-model cap), 0 when none.
+function usagePeak(usage) { return Math.max(0, ...usageMeters(usage).map(m => m.pct)); }
+// Auto-switch: once the active login's fullest meter reaches `at`%, the saved login with the most
+// room left (its fullest meter lowest, and under `at`); null = stay put.
+function pickSwitchTarget(active, others, at = 90) {
+  if (usagePeak(active) < at) return null;
+  let best = null;
+  for (const o of others) { const p = o.usage ? usagePeak(o.usage) : 100; if (p < at && (!best || p < best.p)) best = { label: o.label, p }; }
+  return best ? best.label : null;
+}
+
 // Ended windows (reset <= now; an idle account's last week counts too) whose last history point has no '<key>$' yet: [{ p, key, start, end, model }].
 // Grouped by reset rounded to the minute, as usageWindows does (resets_at jitters by milliseconds).
 function pastUnstamped(points, now) {
@@ -225,5 +236,5 @@ function usageFillGradient(points, key, start, end, pct, now) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseModelWeekly, parseOauthUsage, parseExtraUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageCapacity, pastUnstamped, stampWindowCosts, usageChartSvg, usageFillGradient, MODEL_7D_RE };
+  module.exports = { usagePeak, pickSwitchTarget, parseModelWeekly, parseOauthUsage, parseExtraUsage, modelLabel, carryModelWeekly, appendUsageSample, usageMeters, usageWindows, usageCapacity, pastUnstamped, stampWindowCosts, usageChartSvg, usageFillGradient, MODEL_7D_RE };
 }

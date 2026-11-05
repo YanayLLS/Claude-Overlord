@@ -25,3 +25,11 @@ console.log('account-core ok');
 // Refresh asks for the login's own scopes; the server rejects any other set.
 assert.strictEqual(refreshScope({ scopes: ['user:inference', 'user:plugins'] }), 'user:inference user:plugins');
 assert.ok(refreshScope({}).includes('user:inference'));
+
+// A refresh also freshens the saved login's access token, so switching to it works without a re-login.
+{
+  const a = { credentials: { claudeAiOauth: { accessToken: 'stale', expiresAt: 0, refreshToken: 'r' } } };
+  applyRefresh(a, { access_token: 'fresh', expires_in: 10 }, 0);
+  assert.strictEqual(a.credentials.claudeAiOauth.accessToken, 'fresh');
+  assert.strictEqual(a.credentials.claudeAiOauth.expiresAt, 10000);
+}

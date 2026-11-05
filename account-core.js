@@ -26,7 +26,11 @@ const toToken = (resp, now) => ({ accessToken: resp.access_token, expiresAt: now
 // must be kept or the next switch to this account would need a browser login.
 function applyRefresh(acct, resp, now) {
   acct.usageToken = toToken(resp, now);
-  if (resp.refresh_token && acct.credentials && acct.credentials.claudeAiOauth) acct.credentials.claudeAiOauth.refreshToken = resp.refresh_token;
+  const oauth = acct.credentials && acct.credentials.claudeAiOauth;
+  if (oauth) { // the saved login stays usable as-is when it is switched to
+    if (resp.refresh_token) oauth.refreshToken = resp.refresh_token;
+    oauth.accessToken = acct.usageToken.accessToken; oauth.expiresAt = acct.usageToken.expiresAt;
+  }
   return acct.usageToken.accessToken;
 }
 

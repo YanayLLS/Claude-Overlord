@@ -2254,6 +2254,8 @@ function parseLine(id, line) {
       return;
     }
     if (r.type === 'assistant') {
+      a._limitHit = !!r.isApiErrorMessage && /limit|rate/i.test((r.error || '') + ' ' + JSON.stringify(r.message?.content || '')); // ponytail: same test as chat-ui's limit card
+      if (a._limitHit) moveIfIdle(id);
       // Extract usage/model regardless of content format (matches restore logic)
       if (r.message?.model) { a.stats.modelFamily = modelFamily(r.message.model); a.stats.model = r.message.model; }
       if (r.effort) a.stats.effort = r.effort; // Claude Code stamps the live /effort level on each assistant entry
@@ -2343,6 +2345,7 @@ function parseLine(id, line) {
       send({ type: 'status', id, status: shownStatus(a) });
       flushPeerMsgs(id);
       fireWatches(id, a);
+      moveIfIdle(id);
     } else if (r.type === 'progress') {
       const ptid = r.parentToolUseID, d = r.data;
       if (ptid && d) {
@@ -3662,6 +3665,86 @@ function getCurrentAccountInfo() {
   };
 }
 
+function switchAccount(label, auto) {
+      const data = loadAccounts();
+      const target = data.accounts.find(a => a.label === label);
+      if (!target) return;
+      // Save current credentials under active label before switching
+      if (data.activeLabel) {
+        try {
+          const curCreds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+          const curIdx = data.accounts.findIndex(a => a.label === data.activeLabel);
+          if (curIdx >= 0) { data.accounts[curIdx].credentials = curCreds; data.accounts[curIdx].meta = getAccountMeta(); }
+        } catch {}
+      }
+      fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(target.credentials, null, 2));
+      data.activeLabel = target.label;
+      saveAccountsFile(data);
+      _cachedAuthStatus = null;
+      lastUsage = null;
+      send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+      send({ type: 'usage', usage: null });
+      moveAgentsToLogin();
+      // Saved creds carry a refresh token — only open the browser if the CLI says they're dead.
+      refreshAuthStatus(true).then(() => {
+      if (_cachedAuthStatus?.loggedIn || auto) { fetchUsage(); return; } // auto: never pop a browser unasked
+      const switchLoginProc = spawn('claude', ['auth', 'login'], { shell: true, stdio: 'ignore', detached: true });
+      switchLoginProc.unref();
+      let switchPrevToken = getApiKey();
+      const switchCheckInterval = setInterval(() => {
+        const newToken = getApiKey();
+        if (newToken && newToken !== switchPrevToken) {
+          clearInterval(switchCheckInterval);
+          _cachedAuthStatus = null;
+          refreshAuthStatus(true).then(() => {
+            const switchData = loadAccounts();
+            const switchIdx = switchData.accounts.findIndex(a => a.label === target.label);
+            if (switchIdx >= 0) {
+              try { switchData.accounts[switchIdx].credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
+              switchData.accounts[switchIdx].meta = getAccountMeta();
+              switchData.accounts[switchIdx].email = getAccountEmail();
+              saveAccountsFile(switchData);
+            }
+            send({ type: 'accountInfo', ...getCurrentAccountInfo() });
+            fetchUsage();
+          });
+        }
+      }, 1000);
+      setTimeout(() => clearInterval(switchCheckInterval), 120000);
+      });
+}
+
+// ── Auto-switch: the active login nears a limit (session, week or a model cap) → the saved login
+// with the most room, so agents keep working. Each agent on the main login restarts on it at its
+// next idle moment (or now, if the limit already stopped it), resuming the same chat.
+const { pickSwitchTarget } = require('./usage-core');
+let autoSwitching = false;
+async function maybeAutoSwitch(usage) {
+  const data = loadAccounts();
+  if (autoSwitching || !data.activeLabel || data.accounts.length < 2 || !pickSwitchTarget(usage, [])) return; // unsaved login: a switch would lose it
+  autoSwitching = true;
+  try {
+    const others = []; // one at a time: each read may rotate and save that login's refresh token
+    for (const a of data.accounts) if (a.label !== data.activeLabel) others.push({ label: a.label, usage: await accountUsage(a.label).catch(() => null) });
+    const to = pickSwitchTarget(usage, others);
+    if (!to) return;
+    flog('auto-switch:', data.activeLabel, '->', to, JSON.stringify(usage));
+    send({ type: 'toast', text: `⇄ ${data.activeLabel} near its limit — agents moved to ${to}` });
+    switchAccount(to, true);
+  } finally { autoSwitching = false; }
+}
+// Claude caches its token, so a credentials swap only reaches a running agent through a restart.
+function moveAgentsToLogin() {
+  for (const [id, a] of agents) if (!a.account && terminals.has(id)) { a._loginMove = true; moveIfIdle(id); }
+}
+function moveIfIdle(id) {
+  const a = agents.get(id), t = terminals.get(id);
+  if (!a || !t || !a._loginMove || !(a.isWaiting || a._limitHit)) return;
+  a._loginMove = false;
+  if (a._limitHit) a._crashNudge = 'The usage limit stopped you, so Overlord moved you to another account and resumed this chat. Continue from where you left off.';
+  a._accountRespawn = true; killPty(t);
+}
+
 // ── Agents pinned to another saved login (account-core.js) ──
 const acctCore = require('./account-core');
 const findAccount = (data, label) => data.accounts.find(x => x.label === label);
@@ -3739,6 +3822,7 @@ function fetchUsage() {
     recordUsage(usage);
     send({ type: 'usage', usage });
     console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
+    maybeAutoSwitch(usage).catch(e => flog('auto-switch failed:', e));
   }, (e) => {
     if (!usageEndpointFailed) { usageEndpointFailed = true; console.log('[Overlord] Usage endpoint ' + e.message + ' — falling back to the header probe'); }
     fetchUsageFromHeaders(apiKey);
@@ -3816,6 +3900,7 @@ function fetchUsageFromHeaders(apiKey) {
         recordUsage(usage);
         send({ type: 'usage', usage });
         console.log('[Overlord] Usage fetched:', JSON.stringify(usage));
+        maybeAutoSwitch(usage).catch(e => flog('auto-switch failed:', e));
       } else {
         console.log('[Overlord] No rate-limit headers in response');
       }
@@ -5346,54 +5431,7 @@ function handleIpc(msg) {
       send({ type: 'accountInfo', ...getCurrentAccountInfo() });
       break;
     }
-    case 'switchAccount': {
-      const data = loadAccounts();
-      const target = data.accounts.find(a => a.label === msg.label);
-      if (!target) break;
-      // Save current credentials under active label before switching
-      if (data.activeLabel) {
-        try {
-          const curCreds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
-          const curIdx = data.accounts.findIndex(a => a.label === data.activeLabel);
-          if (curIdx >= 0) { data.accounts[curIdx].credentials = curCreds; data.accounts[curIdx].meta = getAccountMeta(); }
-        } catch {}
-      }
-      fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(target.credentials, null, 2));
-      data.activeLabel = target.label;
-      saveAccountsFile(data);
-      _cachedAuthStatus = null;
-      lastUsage = null;
-      send({ type: 'accountInfo', ...getCurrentAccountInfo() });
-      send({ type: 'usage', usage: null });
-      // Saved creds carry a refresh token — only open the browser if the CLI says they're dead.
-      refreshAuthStatus(true).then(() => {
-      if (_cachedAuthStatus?.loggedIn) { fetchUsage(); return; }
-      const switchLoginProc = spawn('claude', ['auth', 'login'], { shell: true, stdio: 'ignore', detached: true });
-      switchLoginProc.unref();
-      let switchPrevToken = getApiKey();
-      const switchCheckInterval = setInterval(() => {
-        const newToken = getApiKey();
-        if (newToken && newToken !== switchPrevToken) {
-          clearInterval(switchCheckInterval);
-          _cachedAuthStatus = null;
-          refreshAuthStatus(true).then(() => {
-            const switchData = loadAccounts();
-            const switchIdx = switchData.accounts.findIndex(a => a.label === target.label);
-            if (switchIdx >= 0) {
-              try { switchData.accounts[switchIdx].credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
-              switchData.accounts[switchIdx].meta = getAccountMeta();
-              switchData.accounts[switchIdx].email = getAccountEmail();
-              saveAccountsFile(switchData);
-            }
-            send({ type: 'accountInfo', ...getCurrentAccountInfo() });
-            fetchUsage();
-          });
-        }
-      }, 1000);
-      setTimeout(() => clearInterval(switchCheckInterval), 120000);
-      });
-      break;
-    }
+    case 'switchAccount': switchAccount(msg.label); break;
     case 'addAccount': {
       // Auto-save current credentials before login flow
       const curData = loadAccounts();
