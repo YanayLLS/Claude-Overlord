@@ -1565,6 +1565,19 @@ button:focus-visible { outline-offset:0; }
       <div id="peer-list" style="margin-top:6px;"></div>
       </div>
       </details>
+      <details class="settings-sec" data-sec="api">
+      <summary>Local API<span class="sec-chip" id="chip-api"></span></summary>
+      <div class="sec-body">
+      <label class="settings-label">
+        <input type="checkbox" id="chk-api" onchange="api.send({ type: 'saveSettings', settings: { apiEnabled: this.checked } })" />
+        <span>Let programs on this computer control Overlord</span>
+      </label>
+      <div class="settings-hint">REST, live events (SSE or webhooks) and MCP on 127.0.0.1 only. A program holding the token can do anything you can: start and close agents, send them prompts, approve their permission prompts, read their chats and your peer chat.</div>
+      <div class="settings-hint" id="api-where" style="user-select:text;"></div>
+      <div class="field-row" style="padding-left:26px;"><button class="settings-btn" type="button" onclick="api.send({ type: 'apiNewToken' })">New token</button></div>
+      <div class="settings-hint">Programs using the old token stop working until they read the new one from the file.</div>
+      </div>
+      </details>
       </div>
       </div>
     </div>
@@ -4753,6 +4766,13 @@ function handleAgentMsg(msg) {
     case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
+    case 'apiState': {
+      const chk = document.getElementById('chk-api'); if (chk) chk.checked = msg.enabled;
+      const chip = document.getElementById('chip-api'); if (chip) { chip.textContent = msg.running ? `● port ${msg.port}` : ''; chip.classList.toggle('on', !!msg.running); }
+      const where = document.getElementById('api-where');
+      if (where) where.textContent = msg.running ? `Running on http://127.0.0.1:${msg.port}. Port and token: ${msg.file}` : msg.enabled ? 'Not running — see the toast or overlord.log.' : '';
+      break;
+    }
     case 'peerMsgPending': {
       const a = agents.get(msg.id);
       if (a) {
