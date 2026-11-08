@@ -179,3 +179,9 @@ test('a narration thinking block (shown by the CLI as reply text) is a text even
   const evs = parse({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'secret', signature: think }, { type: 'thinking', thinking: 'I did X because Y.\n\n', signature: narr }] } });
   assert.deepStrictEqual(evs.map(e => [e.type, e.text]), [['text', 'I did X because Y.']]);
 });
+
+test('a local command (/rename) shows as its /name line, its output as a sub note', () => {
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'local_command', content: '<command-name>/rename</command-name>\n<command-message>rename</command-message>\n<command-args>Rendered chat</command-args>' }), [{ type: 'command', ts: null, text: '/rename Rendered chat' }]);
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'local_command', content: '<local-command-stdout>Session renamed to: Rendered chat</local-command-stdout>' }), [{ type: 'note', ts: null, kind: 'sub', text: 'Session renamed to: Rendered chat' }]);
+  assert.strictEqual(parse({ type: 'system', subtype: 'local_command', content: '<local-command-stdout></local-command-stdout>' }), null);
+});

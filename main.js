@@ -1357,6 +1357,7 @@ function globalSearch(query) {
             role = 'assistant';
             for (const b of r.message.content) {
               if (b.type === 'text' && b.text) texts.push(b.text);
+              else if (timelineCore.isNarration(b)) texts.push(b.thinking.trim());
             }
           } else if (r.type === 'user') {
             role = 'user';
@@ -1653,7 +1654,8 @@ function restoreAgents(state) {
                 agent.stats.cacheRead += u.cache_read_input_tokens || 0;
               }
               if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
-                for (const b of r.message.content) {
+                for (let b of r.message.content) {
+                  if (timelineCore.isNarration(b)) b = { type: 'text', text: b.thinking.trim() }; // narration = reply text
                   if (b.type === 'text' && b.text) {
                     agent.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text;
                   }
@@ -3436,6 +3438,7 @@ async function exportTranscript(id) {
         const texts = [], tools = [];
         for (const b of r.message.content) {
           if (b.type === 'text' && b.text) texts.push(b.text);
+          else if (timelineCore.isNarration(b)) texts.push(b.thinking.trim());
           else if (b.type === 'tool_use') tools.push(b.name || 'unknown');
         }
         if (texts.length || tools.length) turns.push({ role: 'assistant', text: texts.join('\n'), tools });

@@ -123,6 +123,12 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     // The CLI's permission mode (bypass / accept edits / plan / ask), for the Chat view's mode chip.
     if (r.type === 'permission-mode' && typeof r.permissionMode === 'string') return [{ type: 'mode', ts, mode: r.permissionMode }];
     if (r.type === 'system' && r.subtype === 'compact_boundary') return [{ type: 'compact', ts }];
+    // A local command (/rename, /resume…): the CLI prints its line and, under it, its output ("⎿ Session renamed to: x").
+    if (r.type === 'system' && r.subtype === 'local_command' && typeof r.content === 'string') {
+      const out = /<local-command-std(?:out|err)>([\s\S]*?)<\/local-command-std(?:out|err)>/.exec(r.content);
+      if (out) return out[1].trim() ? [{ type: 'note', ts, kind: 'sub', text: cap(out[1].trim(), 2000) }] : null;
+      return promptEvents(ts, [{ type: 'text', text: r.content }], isSystemMessage);
+    }
     // Lines the CLI prints between turns: its "※ recap:", a notice ("Compacted while idle…", "x is idle"), and what a
     // compaction put back ("⎿ Read file (n lines)", "⎿ Skills restored (…)").
     if (r.type === 'system' && r.subtype === 'away_summary' && r.content) return [{ type: 'note', ts, kind: 'recap', text: cap(String(r.content), 2000) }];
