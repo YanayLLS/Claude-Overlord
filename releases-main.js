@@ -1747,5 +1747,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     return !!(r && !r.standalone && !(r.deploy && r.deploy.prod === 'manual') && r.branches && r.branches.prod && r.branches.prod === base);
   }
 
-  return { handle, mergeGate, isProdPr, flush };
+  // a teammate's live hold on this branch (yours don't stop you), for auto-merge
+  const holdOn = (repo, branch) => liveHolds(state.holds || []).find(h => h.by !== state.holdsMe && h.repo.toLowerCase() === String(repo).toLowerCase() && h.branch === branch);
+  return { handle, mergeGate, isProdPr, flush, holdOn };
 };

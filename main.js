@@ -2877,6 +2877,7 @@ function applyPrFlags(prs) {
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);
   const archived = new Set(settings.prArchived || []);
+  const auto = new Set(settings.prAutoMerge || []);
   const nowMs = Date.now();
   const snoozes = settings.prSnoozed || {};
   for (const k of Object.keys(snoozes)) if (snoozes[k] <= nowMs) delete snoozes[k]; // drop expired
@@ -2887,7 +2888,40 @@ function applyPrFlags(prs) {
     p.snoozed = snoozes[p.key] > nowMs;
     p.archived = archived.has(p.key);
     p.snoozeUntil = snoozes[p.key] || 0;
+    p.autoMerge = auto.has(p.url);
   });
+}
+
+// "Auto" on a PR's Merge button: merge it on the first poll that sees it green. Runs here, not as GitHub's
+// auto-merge, so the release gate (SOC2) and teammates' holds still apply. ponytail: only while Overlord runs.
+function runAutoMerge(prs) {
+  const armed = settings.prAutoMerge || [];
+  if (!armed.length) return;
+  const keep = [];
+  for (const url of armed) {
+    const p = prs.find(x => x.url === url);
+    if (!p) continue; // merged or closed elsewhere
+    const name = `${p.repo.split('/')[1]} #${p.number}`;
+    if (p.checks === 'fail' || p.mergeState === 'DIRTY') { send({ type: 'toast', text: `Auto-merge off: ${name} ${p.checks === 'fail' ? 'failed checks' : 'has conflicts'}` }); continue; }
+    const green = (p.checks === 'pass' || p.checks === 'none') && ['CLEAN', 'HAS_HOOKS'].includes(p.mergeState);
+    if (!green || releases.holdOn(p.repo, p.baseRef)) { keep.push(url); continue; }
+    send({ type: 'toast', text: `Auto-merging ${name}` });
+    mergePrNow(url);
+  }
+  if (keep.length !== armed.length) { settings.prAutoMerge = keep; saveState(); }
+}
+
+function mergePrNow(url) {
+  // prod release PRs merge only with two release approvers' signatures (SOC2)
+  releases.mergeGate(url).then((gate) => {
+    if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return; }
+    if (gate.warn) send({ type: 'toast', text: gate.warn });
+    execFile('gh', ['pr', 'merge', url, '--merge'],
+      { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+        if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
+        pollPRs(); // merged PR drops from the list
+      });
+  }).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
 }
 
 // Every caller (timers, the watch, ~15 PR actions) shares one poll: while one runs, more requests just queue a single
@@ -2963,6 +2997,7 @@ async function pollPRsOnce() {
   }
   applyPrFlags(prs); // a mute/archive clicked while we awaited must not be reverted
   send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
+  runAutoMerge(prs);
 }
 
 function notifyNewPR(pr) {
@@ -3047,7 +3082,7 @@ function armPrTimer() {
   if (!cfg || !cfg.enabled) return;
   const sec = Math.max(30, Number(cfg.intervalSec) || 60);
   pollPRs();
-  prTimer = setInterval(async () => { if (userAway()) return; if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
+  prTimer = setInterval(async () => { if (userAway() && !(settings.prAutoMerge || []).length) return; if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
   prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled && !userAway() && !appQuiet()) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
   prCheckWatchTimer = setInterval(() => {
     if (userAway() || appQuiet()) return;
@@ -5455,16 +5490,14 @@ function handleIpc(msg) {
     case 'mergePr': {
       const url = msg.url;
       if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
-      // prod release PRs merge only with two release approvers' signatures (SOC2)
-      releases.mergeGate(url).then((gate) => {
-        if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return; }
-        if (gate.warn) send({ type: 'toast', text: gate.warn });
-        execFile('gh', ['pr', 'merge', url, '--merge'],
-          { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-            if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
-            pollPRs(); // merged PR drops from the list
-          });
-      }).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
+      mergePrNow(url);
+      break;
+    }
+    case 'setPrAutoMerge': {
+      if (typeof msg.url !== 'string' || !msg.url.startsWith('https://github.com/')) break;
+      const s = new Set(settings.prAutoMerge || []);
+      if (msg.on) s.add(msg.url); else s.delete(msg.url);
+      settings.prAutoMerge = [...s]; saveState(); pollPRs();
       break;
     }
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); const ag = agents.get(msg.id); if (ag && ag.askInput) send({ type: 'askInput', id: msg.id, input: ag.askInput }); break; } // a reload: the open question's previews too
