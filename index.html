@@ -183,9 +183,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .pr-chip .pr-pause { margin-right:3px; }
 .pr-split { display:inline-flex; white-space:nowrap; }
 .pr-split > .pr-merge { border-radius:4px 0 0 4px; }
-.pr-auto { border-radius:0 4px 4px 0; margin-left:1px; background:rgba(137,180,250,.18); color:#89b4fa; }
-.pr-auto:hover { background:rgba(137,180,250,.32); }
-.pr-auto.on, .pr-auto.on:hover { background:#89b4fa; color:#11111b; }
+.pr-split > .pr-merge:disabled { opacity:1; background:#6c7fa8; } /* one pill: no half-faded left side */
+.pr-auto { border-radius:0 4px 4px 0; border-left:1px solid rgba(17,17,27,.3); background:#89b4fa; color:rgba(17,17,27,.65); padding:0 7px; display:inline-flex; align-items:center; }
+.pr-auto:hover { background:#74a8f7; color:#11111b; }
+.pr-split > .pr-merge:disabled + .pr-auto:not(.on):not(:hover) { background:#6c7fa8; }
+.pr-auto.on, .pr-auto.on:hover { background:#a6e3a1; color:#11111b; }
 .pr-merge.pr-held { background:var(--yellow); color:var(--on-accent, #111); }
 .pr-close:hover { color:var(--red); }
 @keyframes pr-spin { to { transform:rotate(360deg); } }
@@ -6236,9 +6238,11 @@ function prRelTime(iso) {
 function prActionBtn(p, u) {
   const btn = prActionBtnOnly(p, u);
   if (!p.mine || !(p.checks === 'pending' || p.autoMerge) || p.mergeable === 'CONFLICTING') return btn;
+  // stopwatch: "merge when the clock runs out"
+  const ic = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="8"/><path d="M12 10v4l2 2M10 2h4"/></svg>';
   const auto = p.autoMerge
-    ? `<button class="pr-approve pr-auto on" title="Merges itself once checks pass. Click to cancel" onclick="event.stopPropagation();setPrAutoMerge('${u}',false)">✓ Auto</button>`
-    : `<button class="pr-approve pr-auto" title="Merge automatically when checks pass" onclick="event.stopPropagation();setPrAutoMerge('${u}',true)">Auto</button>`;
+    ? `<button class="pr-approve pr-auto on" title="Auto-merge on: merges once checks pass. Click to cancel" onclick="event.stopPropagation();setPrAutoMerge('${u}',false)">${ic}</button>`
+    : `<button class="pr-approve pr-auto" title="Auto-merge when checks pass" onclick="event.stopPropagation();setPrAutoMerge('${u}',true)">${ic}</button>`;
   return `<span class="pr-split${p.autoMerge ? ' armed' : ''}">${btn}${auto}</span>`;
 }
 function prActionBtnOnly(p, u) {
