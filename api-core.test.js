@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { createApi, toEvent, wants, tokenOk, hostOk, webhookUrlOk, sign } = require('./api-core');
+const fs = require('fs');
+const path = require('path');
+const { createApi, toEvent, wants, tokenOk, hostOk, webhookUrlOk, sign, TOOLS, EVENT_TYPES } = require('./api-core');
 
 function fakeHost(over = {}) {
   const agents = new Map([[1, { id: 1, name: 'Ada', status: 'waiting', pending: null, archived: false, lastReply: '' }]]);
@@ -9,6 +11,7 @@ function fakeHost(over = {}) {
   const host = {
     agents, calls,
     info: () => ({ version: '9.9.9', agents: agents.size }),
+    features: () => ({ peerChat: true }),
     getAgentRaw: (id) => (agents.has(id) ? { fullText: 'full ' + id } : null),
     listAgents: () => [...agents.values()],
     getAgent: (id) => agents.get(id) || null,
@@ -148,6 +151,22 @@ test('peer chat: exactly one target, offline is a conflict', async () => {
   await assert.rejects(api.call('chat_send', { peer: 'eve', text: 'x' }), { status: 409, message: 'offline' });
   assert.strictEqual((await api.call('chat_send', { peer: 'bob', text: 'yo' })).id, 'm1');
   assert.deepStrictEqual((await api.call('chat_read', { peer: 'bob' })).messages, [{ text: 'hi' }]);
+});
+
+test('overlord_capabilities lists every tool and event, with transports and feature switches', async () => {
+  const c = await createApi(fakeHost()).call('overlord_capabilities');
+  assert.deepStrictEqual(c.tools.map(t => t.name), TOOLS.map(t => t.name));
+  assert.ok(c.events.some(e => e.type === 'agent.pending' && e.description));
+  assert.deepStrictEqual(Object.keys(c.transports), ['rest', 'mcp', 'sse', 'webhooks']);
+  assert.deepStrictEqual(c.features, { peerChat: true });
+  assert.strictEqual(c.overlord.version, '9.9.9');
+});
+
+// CLAUDE.md "Local API coverage": a tool or event added in code but not in the integration guide fails here.
+test('docs/local-api.md documents every tool and every event type', () => {
+  const doc = fs.readFileSync(path.join(__dirname, 'docs', 'local-api.md'), 'utf8');
+  const missing = [...TOOLS.map(t => t.name), ...EVENT_TYPES.map(e => e.type)].filter(n => !doc.includes('`' + n + '`'));
+  assert.deepStrictEqual(missing, [], 'add these to docs/local-api.md');
 });
 
 test('MCP: tools/list and tools/call share the REST tools; errors come back as isError', async () => {

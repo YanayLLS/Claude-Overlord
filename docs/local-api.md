@@ -28,6 +28,22 @@ While the API runs, Overlord writes `~/.overlord/api.json` (`%USERPROFILE%\.over
 
 A program that holds the token can do anything you can do in Overlord, including approving an agent's Bash commands. Treat the token like a password.
 
+## Discovering capabilities
+
+Call `overlord_capabilities` first (`POST /v1/overlord_capabilities` with `{}`, or the MCP tool of the same name). It returns:
+
+| Field | Contents |
+|---|---|
+| `overlord.version`, `apiVersion` | The app version, and the API contract version. `apiVersion` goes up only on a breaking change. |
+| `auth` | How to authenticate and where the token file is |
+| `transports` | REST, MCP, SSE and webhooks: paths, resume rules, retry schedule, error codes |
+| `features` | Switches that change what you will see: `peerChat` (peer connections on), `bypassPermissions` (agents skip permission prompts, so `agent.pending` with kind `permission` is rare), `remoteControl` |
+| `limits` | The longest `agent_ask` wait, how many events are buffered, the most webhooks allowed |
+| `tools` | Every tool with its description and JSON Schema |
+| `events` | Every event type with its description |
+
+The `tools` and `events` lists are built from the same tables the server dispatches from, so a newer Overlord's new tools and events show up here with no client change.
+
 ## Calling tools (REST)
 
 Each tool is `POST /v1/<tool>`, with the arguments as a JSON body. The response is the result as JSON.
@@ -50,6 +66,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 
 | Tool | Arguments | Returns |
 |---|---|---|
+| `overlord_capabilities` | | Everything this Overlord supports (see [Discovering capabilities](#discovering-capabilities)) |
 | `overlord_info` | | version, apiVersion, agent and peer counts |
 | `agents_list` | `includeArchived?` | `{ agents: [{ id, name, title, cwd, status, pending, archived, crashed, createdAt, sessionId, model }] }` |
 | `agent_get` | `agentId` | The `agents_list` fields plus `lastPrompt`, `lastReply`, `spinner`, open `tools`, the open `question` input and `stats` |

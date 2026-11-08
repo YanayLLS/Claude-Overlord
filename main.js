@@ -5670,6 +5670,9 @@ function apiHost() {
   const need = (id) => { if (!agents.has(id)) throw new ApiError(404, `no agent ${id}`); return id; };
   return {
     info: () => ({ version: app.getVersion(), agents: [...agents.values()].filter(a => !a.archived).length, peersEnabled: !!settings.peersEnabled, peersOnline: connectedPeerNames().length }),
+    // Switches that change what an integration will see. bypassPermissions: agents start with
+    // --dangerously-skip-permissions, so permission prompts (agent.pending kind permission) are rare.
+    features: () => ({ peerChat: !!settings.peersEnabled, bypassPermissions: !!settings.bypassPermissions, remoteControl: settings.remoteControl !== false }),
     getAgentRaw: (id) => agents.get(id) || null,
     listAgents: (withArchived) => [...agents.values()].filter(a => withArchived || !a.archived).map(a => apiAgent(a, false)),
     getAgent: (id) => (agents.has(id) ? apiAgent(agents.get(id), true) : null),

@@ -11,6 +11,7 @@ const WEBHOOK_MAX = 20;
 const WEBHOOK_RETRIES = [1000, 5000, 25000];
 const WEBHOOK_QUEUE_MAX = 200;    // ponytail: a dead receiver drops its oldest undelivered events past this
 const ASK_TIMEOUT_MAX_S = 3600;
+const MCP_PROTOCOL = '2025-06-18';
 
 // ── Auth ──────────────────────────────────────────────
 const newToken = () => crypto.randomBytes(32).toString('base64url');
@@ -33,28 +34,32 @@ const sign = (secret, body) => 'sha256=' + crypto.createHmac('sha256', secret).u
 
 // ── Events: renderer message → public event ──────────
 // The renderer protocol is internal and chatty (termData is every byte of every terminal); this is the stable,
-// documented subset. host gives the agent object for fields the raw message lacks.
-const EVENT_MAP = {
-  agentCreated: (m) => ({ type: 'agent.created', agentId: m.id, cwd: m.cwd, name: m.agentName, sessionId: m.sessionId }),
-  agentClosed: (m) => ({ type: 'agent.closed', agentId: m.id }),
-  agentArchived: (m) => ({ type: 'agent.archived', agentId: m.id }),
-  agentUnarchived: (m) => ({ type: 'agent.unarchived', agentId: m.id }),
-  status: (m) => ({ type: 'agent.status', agentId: m.id, status: m.status }),
-  perm: (m) => ({ type: 'agent.pending', agentId: m.id, kind: m.ask ? 'question' : 'permission' }),
-  permClear: (m) => ({ type: 'agent.pending_cleared', agentId: m.id }),
-  askInput: (m) => ({ type: 'agent.question', agentId: m.id, input: m.input }),
-  prompt: (m) => ({ type: 'agent.prompt', agentId: m.id, text: m.text }),
-  preview: (m, a) => ({ type: 'agent.message', agentId: m.id, text: (a && a.fullText) || m.text }),
-  title: (m) => ({ type: 'agent.title', agentId: m.id, title: m.text }),
-  toolStart: (m) => ({ type: 'agent.tool_start', agentId: m.id, toolId: m.toolId, tool: m.name, status: m.status }),
-  toolDone: (m) => ({ type: 'agent.tool_done', agentId: m.id, toolId: m.toolId }),
-  crashed: (m) => ({ type: 'agent.crashed', agentId: m.id }),
-  sendFailed: (m) => ({ type: 'agent.send_failed', agentId: m.id, text: m.text }),
-  chatMsg: (m) => ({ type: 'chat.message', conversation: m.key, group: m.groupName, message: m.msg }),
-};
+// documented subset. host gives the agent object for fields the raw message lacks. A new feature's state change gets
+// a row here (CLAUDE.md, "Local API coverage"); overlord_capabilities lists this table as is.
+// [renderer message type, public type, description, map]
+const EVENTS = [
+  ['agentCreated', 'agent.created', 'An agent started. Fields: agentId, cwd, name, sessionId.', (m) => ({ agentId: m.id, cwd: m.cwd, name: m.agentName, sessionId: m.sessionId })],
+  ['agentClosed', 'agent.closed', 'An agent was closed for good. Fields: agentId.', (m) => ({ agentId: m.id })],
+  ['agentArchived', 'agent.archived', 'An agent was archived. Fields: agentId.', (m) => ({ agentId: m.id })],
+  ['agentUnarchived', 'agent.unarchived', 'An archived agent came back. Fields: agentId.', (m) => ({ agentId: m.id })],
+  ['status', 'agent.status', 'An agent went active (working) or waiting (idle at its prompt). Fields: agentId, status.', (m) => ({ agentId: m.id, status: m.status })],
+  ['perm', 'agent.pending', 'An agent now waits on you. Fields: agentId, kind (permission | question).', (m) => ({ agentId: m.id, kind: m.ask ? 'question' : 'permission' })],
+  ['permClear', 'agent.pending_cleared', 'What the agent waited on was answered. Fields: agentId.', (m) => ({ agentId: m.id })],
+  ['askInput', 'agent.question', 'The full input of a question an agent asks (questions, options, previews). Fields: agentId, input.', (m) => ({ agentId: m.id, input: m.input })],
+  ['prompt', 'agent.prompt', 'A prompt reached an agent\'s transcript. Fields: agentId, text.', (m) => ({ agentId: m.id, text: m.text })],
+  ['preview', 'agent.message', 'An agent wrote a message. Fields: agentId, text.', (m, a) => ({ agentId: m.id, text: (a && a.fullText) || m.text })],
+  ['title', 'agent.title', 'An agent\'s title changed. Fields: agentId, title.', (m) => ({ agentId: m.id, title: m.text })],
+  ['toolStart', 'agent.tool_start', 'An agent started a tool call. Fields: agentId, toolId, tool, status.', (m) => ({ agentId: m.id, toolId: m.toolId, tool: m.name, status: m.status })],
+  ['toolDone', 'agent.tool_done', 'A tool call finished. Fields: agentId, toolId.', (m) => ({ agentId: m.id, toolId: m.toolId })],
+  ['crashed', 'agent.crashed', 'An agent\'s CLI crashed. Fields: agentId.', (m) => ({ agentId: m.id })],
+  ['sendFailed', 'agent.send_failed', 'A message for an agent could not be delivered. Fields: agentId, text.', (m) => ({ agentId: m.id, text: m.text })],
+  ['chatMsg', 'chat.message', 'A peer-chat message was sent or received. Fields: conversation ({type: peer | group, id}), group, message.', (m) => ({ conversation: m.key, group: m.groupName, message: m.msg })],
+];
+const EVENT_BY_SOURCE = new Map(EVENTS.map(([src, type, , map]) => [src, { type, map }]));
+const EVENT_TYPES = EVENTS.map(([, type, description]) => ({ type, description }));
 function toEvent(msg, agentOf) {
-  const f = msg && EVENT_MAP[msg.type];
-  return f ? f(msg, msg.id !== undefined && agentOf ? agentOf(msg.id) : null) : null;
+  const e = msg && EVENT_BY_SOURCE.get(msg.type);
+  return e ? { type: e.type, ...e.map(msg, msg.id !== undefined && agentOf ? agentOf(msg.id) : null) } : null;
 }
 // "agent." matches every agent event, "agent.status" just that one; none = everything.
 const wants = (filter, type) => !filter || !filter.length || filter.some(f => f === type || (f.endsWith('.') && type.startsWith(f)));
@@ -68,7 +73,8 @@ const AGENT = { agentId: N('Agent id, from agents_list.') };
 const TO = { peer: S('Peer Overlord name, for a direct message.'), group: S('Group id, for a group conversation.') };
 
 const TOOLS = [
-  ['overlord_info', 'Overlord version, API version, and counts of agents and connected peers.', obj({})],
+  ['overlord_capabilities', 'What this Overlord can do: every tool with its input schema, every event type, how to connect (REST, MCP, SSE, webhooks), limits, and which optional features are switched on. Call it first when integrating.', obj({})],
+  ['overlord_info','Overlord version, API version, and counts of agents and connected peers.', obj({})],
   ['agents_list', 'Every agent: id, name, title, folder, status (active | waiting), what it is pending on (permission | question | null), archived.', obj({ includeArchived: { type: 'boolean', description: 'Also list archived agents. Default false.' } })],
   ['agent_get', 'One agent in full: the agents_list fields plus its last prompt, last reply, open tools and an open question\'s input.', obj(AGENT, ['agentId'])],
   ['agent_create', 'Start a new agent in a folder, optionally with a first prompt. Returns its id.', obj({ cwd: S('Absolute folder path the agent works in.'), prompt: S('First prompt, submitted once the agent is ready.') }, ['cwd'])],
@@ -110,7 +116,7 @@ function checkArgs(tool, args) {
 }
 const clamp = (v, def, max) => Math.max(1, Math.min(max, Number.isFinite(v) ? Math.floor(v) : def));
 
-// host: { info, listAgents(includeArchived), getAgent(id), createAgent(cwd, prompt), send(id, text, intoDialog),
+// host: { info, features, getAgentRaw(id), listAgents(includeArchived), getAgent(id), createAgent(cwd, prompt), send(id, text, intoDialog),
 //   keys(id, data), interrupt(id), archive(id), unarchive(id), close(id), transcript(id), screen(id),
 //   chatList(), chatRead(to), chatSend(to, text), loadWebhooks(), saveWebhooks(list), fetch, log }
 function createApi(host) {
@@ -198,6 +204,22 @@ function createApi(host) {
   const pause = (ms) => new Promise(r => setTimeout(r, ms));
 
   const HANDLERS = {
+    // Built from the same tables call() and publish() use, so it can't list a tool or event that doesn't exist.
+    overlord_capabilities: () => ({
+      overlord: { version: String(host.info().version || '') },
+      apiVersion: API_VERSION,
+      auth: { scheme: 'Bearer', header: 'Authorization: Bearer <token>', tokenFile: '~/.overlord/api.json', note: 'Read port and token from the file on every connect; it exists only while the API runs.' },
+      transports: {
+        rest: { call: 'POST /v1/<tool> with the arguments as a JSON body', tools: 'GET /v1/tools', health: 'GET /v1/health (no token)', errors: { 400: 'bad arguments', 401: 'missing or wrong token', 404: 'no such agent, conversation or tool', 409: 'the agent is not in a state that allows it' } },
+        mcp: { url: '/mcp', transport: 'Streamable HTTP, stateless, JSON responses', protocolVersion: MCP_PROTOCOL, events: 'events_poll' },
+        sse: { url: '/v1/events', filter: '?types=<type or prefix.>,...', resume: 'Last-Event-ID header or ?since=<seq>', buffered: RING_MAX },
+        webhooks: { add: 'webhook_add', urls: 'http://127.0.0.1, localhost or [::1] only', signature: 'X-Overlord-Signature: sha256=<hex HMAC-SHA256(secret, raw body)>', eventHeader: 'X-Overlord-Event', retriesMs: WEBHOOK_RETRIES, max: WEBHOOK_MAX },
+      },
+      features: host.features(),
+      limits: { askTimeoutMaxSec: ASK_TIMEOUT_MAX_S, eventsBuffered: RING_MAX, webhooks: WEBHOOK_MAX },
+      tools: TOOLS,
+      events: EVENT_TYPES,
+    }),
     overlord_info: () => ({ ...host.info(), apiVersion: API_VERSION }),
     agents_list: (x) => ({ agents: host.listAgents(!!x.includeArchived) }),
     agent_get: (x) => needAgent(x.agentId),
@@ -260,7 +282,7 @@ function createApi(host) {
   async function mcp(msg) {
     const { id, method, params } = msg || {};
     const ok = (result) => ({ jsonrpc: '2.0', id, result });
-    if (method === 'initialize') return ok({ protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'overlord', version: String(host.info().version || '') } });
+    if (method === 'initialize') return ok({ protocolVersion: MCP_PROTOCOL, capabilities: { tools: {} }, serverInfo: { name: 'overlord', version: String(host.info().version || '') } });
     if (method === 'ping') return ok({});
     if (method === 'tools/list') return ok({ tools: TOOLS });
     if (method === 'tools/call') {
@@ -273,4 +295,4 @@ function createApi(host) {
   return { publish, subscribe, since, call, mcp, tools: TOOLS, seq: () => seq };
 }
 
-module.exports = { createApi, TOOLS, ApiError, toEvent, wants, parseFilter, tokenOk, hostOk, webhookUrlOk, sign, newToken, API_VERSION };
+module.exports = { createApi, TOOLS, EVENT_TYPES, ApiError, toEvent, wants, parseFilter, tokenOk, hostOk, webhookUrlOk, sign, newToken, API_VERSION };
