@@ -759,10 +759,18 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
 .group-header.hot .group-name { color: var(--accent); }
 
 /* Merge | auto-merge split (index.html prActionBtn): one pill — the wrapper owns the shape, the halves are flat */
-#pr-dropdown .pr-split { display: inline-flex; align-items: stretch; border-radius: var(--r-sm); overflow: hidden; white-space: nowrap; }
-#pr-dropdown .pr-split > .pr-approve { border-radius: 0; margin: 0; }
-#pr-dropdown .pr-split > .pr-merge:disabled { opacity: 1; background: #6c7fa8; } /* no half-faded left side */
-#pr-dropdown .pr-split > .pr-auto { display: inline-flex; align-items: center; padding: 0 8px; background: #89b4fa; color: rgba(17,17,27,.6); box-shadow: inset 1px 0 0 rgba(17,17,27,.28); }
-#pr-dropdown .pr-split > .pr-merge:disabled + .pr-auto { background: #6c7fa8; }
-#pr-dropdown .pr-split > .pr-auto:hover { background: #74a8f7; color: #11111b; }
-#pr-dropdown .pr-split > .pr-auto.on { background: #a6e3a1; color: #11111b; }
+#pr-dropdown .pr-am { display: inline-flex; align-items: stretch; border-radius: var(--r-sm); overflow: hidden; white-space: nowrap; gap: 0; }
+#pr-dropdown .pr-am > .pr-approve { border-radius: 0; margin: 0; transition: background .18s, color .18s; }
+#pr-dropdown .pr-am > .pr-merge:disabled { opacity: 1; background: #6c7fa8; } /* no half-faded left side */
+#pr-dropdown .pr-am > .pr-auto { display: inline-flex; align-items: center; padding: 0 8px; background: #89b4fa; color: rgba(17,17,27,.6); box-shadow: inset 1px 0 0 rgba(17,17,27,.28); }
+#pr-dropdown .pr-am > .pr-merge:disabled + .pr-auto { background: #6c7fa8; }
+#pr-dropdown .pr-am > .pr-auto:hover { background: #74a8f7; color: #11111b; }
+#pr-dropdown .pr-am > .pr-fix + .pr-auto { background: var(--red, #f38ba8); }
+#pr-dropdown .pr-am > .pr-fix + .pr-auto:hover { filter: brightness(1.1); }
+/* armed: whole pill green, stopwatch ticks, a pop when it turns on */
+#pr-dropdown .pr-am.armed { animation: pr-am-pop .28s ease-out; box-shadow: 0 0 0 2px rgba(166,227,161,.35); }
+#pr-dropdown .pr-am.armed > .pr-approve { background: #a6e3a1; color: #11111b; }
+#pr-dropdown .pr-am.armed > .pr-approve:hover { background: #94e2b5; }
+#pr-dropdown .pr-am.armed > .pr-auto svg .h { transform-origin: 12px 14px; animation: pr-am-tick 2s steps(8) infinite; }
+@keyframes pr-am-pop { 0% { transform: scale(.9); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+@keyframes pr-am-tick { to { transform: rotate(360deg); } }

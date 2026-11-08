@@ -6227,16 +6227,17 @@ function prRelTime(iso) {
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' at ' + hhmm;
 }
 
-// Merge | Auto split while checks run: the right half arms "merge when green" (main.js runAutoMerge).
-function prActionBtn(p, u) {
-  const btn = prActionBtnOnly(p, u);
-  if (!p.mine || !(p.checks === 'pending' || p.autoMerge) || p.mergeable === 'CONFLICTING') return btn;
-  // stopwatch: "merge when the clock runs out"
-  const ic = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="8"/><path d="M12 10v4l2 2M10 2h4"/></svg>';
-  const auto = p.autoMerge
-    ? `<button class="pr-approve pr-auto on" title="Auto-merge on: merges once checks pass. Click to cancel" onclick="event.stopPropagation();setPrAutoMerge('${u}',false)">${ic}</button>`
-    : `<button class="pr-approve pr-auto" title="Auto-merge when checks pass" onclick="event.stopPropagation();setPrAutoMerge('${u}',true)">${ic}</button>`;
-  return `<span class="pr-split${p.autoMerge ? ' armed' : ''}">${btn}${auto}</span>`;
+// [action | ⏱] on my PR until it can merge now: the ⏱ half arms "fix if red, update if behind, merge when green,
+// I'm gone" (main.js runAutoMerge). btn: the row's main action (Merge, or Fix when it's red).
+function prActionBtn(p, u, btn = prActionBtnOnly(p, u)) {
+  const readyNow = prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none');
+  if (!p.mine || p.isDraft || p.isCrossRepository || (readyNow && !p.autoMerge)) return btn;
+  const ic = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="8"/><path d="M10 2h4"/><path class="h" d="M12 14V9"/></svg>';
+  const off = `event.stopPropagation();setPrAutoMerge('${u}',false)`;
+  if (p.autoMerge) // armed: the whole pill turns green and says so; either half cancels
+    return `<span class="pr-split pr-am armed"><button class="pr-approve pr-merge" title="Fixes it if red, then merges once green. Click to cancel" onclick="${off}">Fix &amp; merge</button>`
+      + `<button class="pr-approve pr-auto on" title="Click to cancel" onclick="${off}">${ic}</button></span>`;
+  return `<span class="pr-split pr-am">${btn}<button class="pr-approve pr-auto" title="Fix if red, merge when green: hands-off" onclick="event.stopPropagation();setPrAutoMerge('${u}',true)">${ic}</button></span>`;
 }
 function prActionBtnOnly(p, u) {
   if (p.mine) {
@@ -6303,7 +6304,7 @@ function prRowHtml(p, dim) {
   // Main action sits in its own always-visible column; the rest wait for hover.
   // Mine but can't merge → Fix takes the column instead.
   const unblock = p.mine && !mi.enabled && fixBtn;
-  const mainBtn = unblock || prActionBtn(p, u);
+  const mainBtn = unblock ? prActionBtn(p, u, prFixBtn(p, k, true)) : prActionBtn(p, u);
   const extra = unblock ? '' : fixBtn;
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions">${extra}${snoozeBtn}${muteBtn}${archBtn}</div>`
@@ -6428,11 +6429,11 @@ function dtHeadHtml(cols) {
   return `<div class="dt-head">${cols.map(c => c[0] === '>' ? `<span class="dt-n">${c.slice(1)}</span>` : `<span>${c}</span>`).join('')}</div>`;
 }
 
-function prFixBtn(p, k) {
+function prFixBtn(p, k, plain) { // plain: no ⏱ half (my PR gets the Fix & merge one instead)
   const conflict = prBranchAction(p) === 'conflict';
   const title = conflict ? `New agent merges ${escapeHtml(p.baseRef)} in, resolves the conflicts, then fixes any red checks until it's green` : "New agent reads the failed checks, pushes fixes to this PR and watches until it's green";
   const fix = `<button class="pr-approve pr-fix" title="${title}" onclick="event.stopPropagation();fixPr('${k}')">🔧 Fix</button>`;
-  if (p.checks !== 'pending') return fix;
+  if (p.checks !== 'pending' || plain) return fix;
   // Still testing: the ⏱ half toggles a Fix that starts once the checks finish (prRunFixLater).
   const on = !!prFixLater && prFixLater.has(p.key); // var: a render before this script part ran sees undefined
   return `<span class="pr-split">${fix}<button class="pr-approve pr-fix pr-later${on ? ' on' : ''}" title="${on ? 'Fixes when the checks finish (click to cancel)' : 'Fix when the checks finish'}" onclick="event.stopPropagation();prFixLaterToggle('${k}')">⏱</button></span>`;
@@ -6874,7 +6875,10 @@ function flipPrFlag(match, flag, on) {
   refreshOpenDropdown('pr-dropdown', prDropdownHtml);
   if (worldView) scheduleRender();
 }
-function setPrAutoMerge(url, on) { flipPrFlag(p => p.url === url, 'autoMerge', on); api.send({ type: 'setPrAutoMerge', url, on }); }
+function setPrAutoMerge(url, on) {
+  flipPrFlag(p => p.url === url, 'autoMerge', on); api.send({ type: 'setPrAutoMerge', url, on });
+  showToast(on ? 'Fix & merge on: fixes if red, merges once green' : 'Fix & merge off');
+}
 function mutePr(key) { setPrFlag(p => p.key === key, 'muted', true); api.send({ type: 'mutePr', key }); }
 function unsnoozePr(key) { setPrFlag(p => p.key === key, 'snoozed', false); api.send({ type: 'unsnoozePr', key }); }
 function unmutePr(key) { setPrFlag(p => p.key === key, 'muted', false); api.send({ type: 'unmutePr', key }); }

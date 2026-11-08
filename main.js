@@ -2892,19 +2892,40 @@ function applyPrFlags(prs) {
   });
 }
 
-// "Auto" on a PR's Merge button: merge it on the first poll that sees it green. Runs here, not as GitHub's
-// auto-merge, so the release gate (SOC2) and teammates' holds still apply. ponytail: only while Overlord runs.
-function runAutoMerge(prs) {
+// "Fix & merge" on my PR ("I'm gone, land it"): red or conflicting → one Fix agent (it loops until green, actions-core.js
+// fixPrPlan); behind → update the branch; green → merge. Runs here, not as GitHub's auto-merge, so the release
+// gate (SOC2) and teammates' holds still apply. ponytail: only while Overlord runs.
+const autoFixAgents = new Map(); // url → agent id (or 'starting'); one fixer per PR at a time
+const autoUpdatedSha = new Map(); // url → head sha we already asked GitHub to update
+function runAutoMerge(prs, failedRepos = []) {
   const armed = settings.prAutoMerge || [];
   if (!armed.length) return;
   const keep = [];
   for (const url of armed) {
     const p = prs.find(x => x.url === url);
-    if (!p) continue; // merged or closed elsewhere
+    if (!p) { if (failedRepos.some(r => url.toLowerCase().includes('/' + r.toLowerCase() + '/'))) keep.push(url); continue; } // closed/merged, unless its repo just failed to load
+    keep.push(url);
     const name = `${p.repo.split('/')[1]} #${p.number}`;
-    if (p.checks === 'fail' || p.mergeState === 'DIRTY') { send({ type: 'toast', text: `Auto-merge off: ${name} ${p.checks === 'fail' ? 'failed checks' : 'has conflicts'}` }); continue; }
+    const conflict = p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY';
+    if (conflict || p.checks === 'fail') {
+      const fixer = autoFixAgents.get(url);
+      if (fixer === 'starting' || fixer === 'failed' || (fixer != null && agents.has(fixer))) continue; // already on it, or can't (its toast said why; re-arm retries)
+      autoFixAgents.set(url, 'starting');
+      send({ type: 'toast', text: `Auto-fixing ${name}` });
+      fixPr(p).then(id => autoFixAgents.set(url, id != null ? id : 'failed'))
+        .catch(e => { autoFixAgents.delete(url); send({ type: 'toast', text: `Auto-fix ${name} failed: ${e.message || e}` }); });
+      continue;
+    }
+    if (p.mergeState === 'BEHIND' && autoUpdatedSha.get(url) !== p.headSha) {
+      autoUpdatedSha.set(url, p.headSha);
+      execFile('gh', ['pr', 'update-branch', url], { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+        if (err) send({ type: 'toast', text: `Auto-merge: couldn't update ${name}: ${ghErr({ message: ((stderr || '') + err.message).trim() })}` });
+      });
+      continue;
+    }
     const green = (p.checks === 'pass' || p.checks === 'none') && ['CLEAN', 'HAS_HOOKS'].includes(p.mergeState);
-    if (!green || releases.holdOn(p.repo, p.baseRef)) { keep.push(url); continue; }
+    if (!green || releases.holdOn(p.repo, p.baseRef)) continue;
+    keep.pop();
     send({ type: 'toast', text: `Auto-merging ${name}` });
     mergePrNow(url);
   }
@@ -2997,7 +3018,7 @@ async function pollPRsOnce() {
   }
   applyPrFlags(prs); // a mute/archive clicked while we awaited must not be reverted
   send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
-  runAutoMerge(prs);
+  runAutoMerge(prs, failedRepos);
 }
 
 function notifyNewPR(pr) {
@@ -3274,7 +3295,7 @@ async function fixActionRun(run) { return startFixAgent(fixRunPlan, run); }
 
 // "Fix" on a PR with failing checks: a normal agent in the repo's checkout (no worktree) that
 // pushes fixes to the PR until its checks are green (actions-core.js fixPrPlan).
-async function fixPr(pr) { return startFixAgent(fixPrPlan, pr); }
+async function fixPr(pr) { return startFixAgent(fixPrPlan, pr); } // → the new agent's id
 
 // Fix chat (the chat's ⋯ menu): the chat as shown and its terminal (pictured offscreen from the renderer's buffer
 // HTML, so the user sees nothing) are saved, and a new agent in Overlord's repo finds why they differ and fixes the
@@ -3313,7 +3334,7 @@ async function startFixAgent(planFor, target) {
     plan = planFor(target, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
   }
   if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
-  if (!plan.branch) { createAgent(plan.repoDir, null, plan.prompt); return; } // PR fix: no worktree
+  if (!plan.branch) return createAgent(plan.repoDir, null, plan.prompt); // PR fix: no worktree
   // Reuse by folder, not by settings entry: an earlier click (or another checkout of the
   // same repo) may have made it without a matching entry, and git refuses to re-add it.
   let dir = wt.worktreePath(plan.repoDir, wt.safeBranch(plan.branch));
@@ -3326,7 +3347,7 @@ async function startFixAgent(planFor, target) {
     projectConfig(plan.repoDir).defaultBase = prevBase || 'dev'; saveState();
   }
   protectClaudeConfig([{ repo: plan.repoDir, path: dir }]);
-  createAgent(dir, null, plan.prompt);
+  return createAgent(dir, null, plan.prompt);
 }
 
 // The local checkouts Overlord already knows about: every agent's cwd plus every
@@ -5497,6 +5518,7 @@ function handleIpc(msg) {
       if (typeof msg.url !== 'string' || !msg.url.startsWith('https://github.com/')) break;
       const s = new Set(settings.prAutoMerge || []);
       if (msg.on) s.add(msg.url); else s.delete(msg.url);
+      if (autoFixAgents.get(msg.url) === 'failed') autoFixAgents.delete(msg.url);
       settings.prAutoMerge = [...s]; saveState(); pollPRs();
       break;
     }
