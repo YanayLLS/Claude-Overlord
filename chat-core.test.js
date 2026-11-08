@@ -215,3 +215,17 @@ test('screenDialog: /btw idle at the bottom of a narrow terminal (its footer wra
   assert.strictEqual(screenDialog(rows), true);
   assert.strictEqual(screenDialog(rows, false), false); // its numbered list isn't a question menu
 });
+
+test('screenPermRows: a sub-agent\'s permission dialog with a long command keeps its header; a question picker is not one', () => {
+  const { screenPermRows } = require('./chat-core');
+  const cmd = Array.from({ length: 34 }, (_, i) => ' │ line ' + i);
+  const rows = ['old reply', '─'.repeat(60), ' Bash command · from the general-purpose agent', ' Run shell command', '╌'.repeat(60), ...cmd, '╌'.repeat(60),
+    ' │ Dangerous rm operation not ruled out — the shell may read this command differently than it was parsed', '', ' Do you want to proceed?', ' > 1. Yes', '   2. No', '', ' Esc to cancel · Tab to amend · ctrl+x ctrl+k twice to stop background agents'];
+  const p = screenPermRows(rows);
+  assert.strictEqual(p.question, 'Do you want to proceed?');
+  assert.strictEqual(p.body[0], 'Bash command · from the general-purpose agent');
+  assert.ok(p.body.some(r => /Dangerous rm/.test(r)));
+  assert.ok(p.body.some(r => /line 33/.test(r)));
+  assert.strictEqual(screenPermRows(['─'.repeat(40), ' Do you want to keep it?', ' ❯ 1. Yes', '   2. No', ' Enter to select · ↑/↓ to navigate · Esc to cancel']), null);
+  assert.strictEqual(screenPermRows(['just a reply']), null);
+});

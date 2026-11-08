@@ -360,4 +360,15 @@ function sketchHtml(src) {
 // The CLI's "[Crashed — auto-resuming 1/3...]" while Overlord restarts a crashed Claude; '' otherwise.
 const crashLine = (a) => a && a.crashed === 'resuming' ? `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…` : '';
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, undoEdits };
+// A permission dialog as the CLI draws it: its question ("Do you want to make this edit to hello.txt?") and the rows
+// above it, up to the rule that opens the dialog, frame lines left out. A question picker ("Enter to select") isn't one.
+// null when none is on screen.
+function screenPermRows(rows) {
+  rows = rows || []; let q = -1;
+  for (let k = rows.length - 1; k >= 0 && k >= rows.length - 14; k--) if (/Do\s+you\s+want\s+to\b.*\?/.test(rows[k])) { q = k; break; }
+  if (q < 0 || rows.slice(q).some(r => /Enter\s+to\s+select/.test(r))) return null;
+  let top = q - 1; while (top >= 0 && !/^\s*─{10,}/.test(rows[top])) top--; // ponytail: a long command can fill the screen; the rule is the dialog's top
+  const body = rows.slice(top + 1, q).map(r => r.replace(/╌{3,}/g, '').replace(/^ /, '').replace(/\s+$/, '')).filter(r => r.trim() && !/^[\s─│]*$/.test(r) && !/^\s*Tip:/.test(r));
+  return { question: rows[q].trim(), body };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = { relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };
