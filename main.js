@@ -2307,7 +2307,7 @@ function parseLine(id, line) {
       if (u) { a.stats.inTok += u.input_tokens || 0; a.stats.outTok += u.output_tokens || 0; a.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); a.stats.cacheTok += u.cache_creation_input_tokens || 0; a.stats.cacheRead += u.cache_read_input_tokens || 0; send({ type: 'stats', id, stats: a.stats }); }
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
-      const blocks = r.message.content;
+      const blocks = r.message.content.map(b => timelineCore.isNarration(b) ? { type: 'text', text: b.thinking.trim() } : b); // narration = reply text
       for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); a.fullText = b.text; scanPeerReply(id, a, b.text); scanPeerSend(id, a, b.text); scanWhenDone(id, a, b.text); } }
       if (blocks.some(b => b.type === 'tool_use')) {
         a.isWaiting = false; a.hadTools = true;

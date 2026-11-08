@@ -54,6 +54,10 @@ function promptEvents(ts, blocks, isSystemMessage) {
   return [ev];
 }
 
+// The CLI writes some reply text as a thinking block whose signature is tagged "narration" and prints it like any reply:
+// it's text, not private thinking (the chat was hiding answers the CLI showed).
+const isNarration = (b) => b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim() && Buffer.from(String(b.signature || '').slice(0, 48), 'base64').includes('narration');
+
 function parseLineForTimeline(line, fmtTool, isSystemMessage) {
   try {
     const r = JSON.parse(line);
@@ -64,6 +68,7 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
       const events = [];
       for (const b of r.message.content) {
         if (b.type === 'text' && b.text) events.push({ type: 'text', ts, text: cap(b.text, TL_TEXT_MAX) });
+        else if (isNarration(b)) events.push({ type: 'text', ts, text: cap(b.thinking.trim(), TL_TEXT_MAX) });
         if (b.type === 'tool_use' && b.id) { const inp = b.input || {}; events.push({ type: 'tool', ts, name: b.name || 'unknown', text: fmtTool(b.name || '', inp), toolId: b.id, args: toolArgs(b.name, inp) }); }
       }
       // The record's token use rides on its first event, so the Chat view can total a turn's tokens and cost.
@@ -183,4 +188,4 @@ function watchedEnd(size, fileOffset, lineBuffer) {
   return Math.max(0, fileOffset - Buffer.byteLength(lineBuffer || ''));
 }
 
-module.exports = { parseLineForTimeline, toolArgs, activeLines, branches, isPromptRec, freshUsage, watchedEnd };
+module.exports = { parseLineForTimeline, isNarration, toolArgs, activeLines, branches, isPromptRec, freshUsage, watchedEnd };

@@ -173,3 +173,9 @@ test('a queued message pulled back with ↑ (popAll) is a queue event, so the ch
   const ev = parse({ type: 'queue-operation', operation: 'popAll', content: 'oh it shows only when its deploying?' })[0];
   assert.strictEqual(ev.type, 'queue'); assert.strictEqual(ev.op, 'popAll');
 });
+
+test('a narration thinking block (shown by the CLI as reply text) is a text event; real thinking stays hidden', () => {
+  const narr = 'CAQS7wwKEQgTGAI4AUIJbmFycmF0aW9uEgy1dcKsGZerMds8FmIaDLaLlGlGFpm2URcqiyIwp5d', think = 'CAQS6AsKEAgTGAI4AUIIdGhpbmtpbmcSDCTlT8CN7+G7gG46RBoMWlvYDCsYpPP';
+  const evs = parse({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'secret', signature: think }, { type: 'thinking', thinking: 'I did X because Y.\n\n', signature: narr }] } });
+  assert.deepStrictEqual(evs.map(e => [e.type, e.text]), [['text', 'I did X because Y.']]);
+});
