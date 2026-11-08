@@ -6227,25 +6227,51 @@ function prRelTime(iso) {
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' at ' + hhmm;
 }
 
-// [action | ⏱] on my PR until it can merge now: the ⏱ half arms "fix if red, update if behind, merge when green,
-// I'm gone" (main.js runAutoMerge). btn: the row's main action (Merge, or Fix when it's red).
-function prActionBtn(p, u, btn = prActionBtnOnly(p, u)) {
-  const readyNow = prMergeInfo(p).enabled && (p.checks === 'pass' || p.checks === 'none');
-  if (!p.mine || p.isDraft || p.isCrossRepository || (readyNow && !p.autoMerge)) return btn;
-  const ic = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="8"/><path d="M10 2h4"/><path class="h" d="M12 14V9"/></svg>';
-  const off = `event.stopPropagation();setPrAutoMerge('${u}',false)`;
-  if (p.autoMerge) // armed: the whole pill turns green and says so; either half cancels
-    return `<span class="pr-split pr-am armed"><button class="pr-approve pr-merge" title="Fixes it if red, then merges once green. Click to cancel" onclick="${off}">Fix &amp; merge</button>`
-      + `<button class="pr-approve pr-auto on" title="Click to cancel" onclick="${off}">${ic}</button></span>`;
-  return `<span class="pr-split pr-am">${btn}<button class="pr-approve pr-auto" title="Fix if red, merge when green: hands-off" onclick="event.stopPropagation();setPrAutoMerge('${u}',true)">${ic}</button></span>`;
+// "Fix & merge" on my PR that can't merge right now: arms fix-if-red, update-if-behind, merge-when-green (main.js
+// runAutoMerge). Off: a blue outline ⏱ (beside Merge when Merge works but checks still run). Armed: a filled ⏱ + what it
+// waits on now (main.js autoPhaseOf) + ✕; busy phases go solid with a spinner. 124px in every state.
+const prSvg = (d) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const PR_WATCH = '<circle class="face" cx="12" cy="14" r="8"/><path d="M10 2h4M12 14V10M19 7l1.5-1.5"/>'; // stopwatch: "when it's ready"
+const PR_SPIN = '<path class="spin" d="M12 3a9 9 0 1 0 9 9"/>';
+const PR_WARN = '<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>';
+const PR_X = '<path d="M7 7l10 10M17 7L7 17"/>';
+const PR_RETRY = '<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/>';
+const PR_PERSON = '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>';
+const PR_LOCK = '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>';
+const PR_MERGE_SVG = '<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM5 3.25a.75.75 0 1 0 0 .005V3.25Z"/></svg>';
+// label (the row chips' words), look (w: armed & waiting, busy: the system is working, y: waiting on a person or on you), icon, tooltip
+const PR_AUTO_PH = {
+  waiting: ['Testing', 'w', PR_WATCH, 'Merges once checks pass'], fixing: ['Fixing', 'busy', PR_SPIN, 'An agent is fixing it'],
+  updating: ['Updating', 'busy', PR_SPIN, 'Updating the branch'], merging: ['Merging', 'busy', PR_SPIN, 'Merging'],
+  review: ['Needs review', 'y', PR_PERSON, 'Merges once approved'], held: ['Base held', 'y', PR_LOCK, 'Held by a teammate'],
+  stuck: ['Retry fix', 'act', PR_RETRY, "The fix agent couldn't start"],
+};
+var prAutoUndo = new Map(); // url → timer: a just-cancelled PR shows Undo for 8s
+function prAutoCtl(p, u) {
+  if (!p.mine || p.isDraft || p.isCrossRepository) return '';
+  const mi = prMergeInfo(p), readyNow = mi.enabled && (p.checks === 'pass' || p.checks === 'none');
+  if (readyNow && !p.autoMerge) return ''; // Merge now is the job
+  const arm = `event.stopPropagation();setPrAutoMerge('${u}',true)`, id = `data-am="${escapeHtml(p.url)}"`;
+  if (p.autoMerge) {
+    const ph = PR_AUTO_PH[p.autoPhase] ? p.autoPhase : 'waiting', [lbl, look, ic, tip0] = PR_AUTO_PH[ph];
+    const hold = ph === 'held' && prHoldOn(p), tip = ph === 'stuck' && p.autoReason ? p.autoReason : hold ? `Held by @${hold.by}` : tip0;
+    const st = ph === 'stuck'
+      ? `<button class="st" ${id} title="${escapeHtml(tip)}" onclick="event.stopPropagation();prAutoRetry('${u}')">${prSvg(ic)}${lbl}</button>`
+      : `<span class="st" aria-live="polite" title="${escapeHtml(tip)}">${prSvg(ic)}${lbl}</span>`;
+    return `<span class="pr-am armed l-${look}">${st}<button class="cx" ${ph === 'stuck' ? '' : id} aria-label="Cancel fix &amp; merge" onclick="event.stopPropagation();setPrAutoMerge('${u}',false)">${prSvg(PR_X)}</button></span>`;
+  }
+  if (prAutoUndo.has(p.url)) return `<button class="pr-approve pr-am undo" ${id} aria-label="Undo cancel" title="Undo cancel" onclick="${arm}">${prSvg('<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/>')}Undo<i></i></button>`;
+  if (mi.enabled) // Merge works now, checks still run: Merge stays first; the outline ⏱ is the same arm control as elsewhere
+    return `<span class="pr-amsplit">${prActionBtn(p, u)}<button class="pr-approve pr-am-ic" ${id} aria-pressed="false" aria-label="Auto-merge" title="Auto-merge" onclick="${arm}">${prSvg(PR_WATCH)}</button></span>`;
+  return `<button class="pr-approve pr-am" ${id} aria-pressed="false" onclick="${arm}">${prSvg(PR_WATCH)}Auto-merge</button>`;
 }
-function prActionBtnOnly(p, u) {
+function prActionBtn(p, u) {
   if (p.mine) {
     const mi = prMergeInfo(p);
     return mi.enabled
-      ? (prHoldOn(p) ? `<button class="pr-approve pr-merge pr-held" title="${escapeHtml(p.baseRef)} is on hold: merging restarts its deploy" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge anyway</button>`
-        : `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">⤵ Merge</button>`)
-      : `<button class="pr-approve pr-merge" disabled title="Can't merge: ${mi.label}">⤵ ${escapeHtml(mi.label)}</button>`;
+      ? (prHoldOn(p) ? `<button class="pr-approve pr-merge pr-held" title="${escapeHtml(p.baseRef)} is on hold: merging restarts its deploy" onclick="event.stopPropagation();mergePr('${u}',this)">${PR_MERGE_SVG}Merge anyway</button>`
+        : `<button class="pr-approve pr-merge" title="Merge this PR (merge commit)" onclick="event.stopPropagation();mergePr('${u}',this)">${PR_MERGE_SVG}Merge</button>`)
+      : `<button class="pr-approve pr-merge" disabled title="Can't merge: ${mi.label}">${PR_MERGE_SVG}${escapeHtml(mi.label)}</button>`;
   }
   if (p.approvedByMe) return `<button class="pr-approve" disabled title="You approved this PR">✓ You approved</button>`;
   return `<button class="pr-approve" title="Approve without a message" onclick="event.stopPropagation();approvePr('${u}',this)">✓ Approve</button>`;
@@ -6277,7 +6303,7 @@ function prRowHtml(p, dim) {
       + (p.failed ? `<span class="pr-chip bad" title="${p.failed} check(s) already failed while others still run">${p.failed} failed</span>` : '')
     : p.checks === 'fail' ? `<span class="pr-chip bad" title="Checks failed on GitHub">${p.failed > 1 ? p.failed + ' checks failed' : 'Checks failed'}</span>` : '';
   const hold = prHoldOn(p);
-  const reqChip = (showReq ? '<span class="pr-chip bad">Your review</span>' : '') + (p.isDraft ? '<span class="pr-chip">Draft</span>' : '')
+  const reqChip = (p.autoReason ? `<span class="pr-chip warn pr-reason" title="${escapeHtml(p.autoReason)}">${escapeHtml(p.autoReason)}</span>` : '') + (showReq ? '<span class="pr-chip bad">Your review</span>' : '') + (p.isDraft ? '<span class="pr-chip">Draft</span>' : '')
     + (hold ? `<span class="pr-chip warn" title="@${escapeHtml(hold.by)} asked not to merge into ${escapeHtml(hold.branch)}${hold.note ? ': ' + escapeHtml(hold.note) : ''}">${prPauseIc(10)}${escapeHtml(hold.branch)} held</span>` : '');
   const behindChip = p.behindBy > 0 ? `<span class="pr-chip warn" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">${p.behindBy} behind</span>` : '';
   // One table row per PR: each piece in its own column so rows line up (headers: prDropdownHead).
@@ -6303,9 +6329,11 @@ function prRowHtml(p, dim) {
   const fixBtn = !dim && (prBranchAction(p) === 'conflict' || (!advisoryOnly && (p.checks === 'fail' || p.failed))) ? prFixBtn(p, k) : ''; // pr-behind.js
   // Main action sits in its own always-visible column; the rest wait for hover.
   // Mine but can't merge → Fix takes the column instead.
-  const unblock = p.mine && !mi.enabled && fixBtn;
-  const mainBtn = unblock ? prActionBtn(p, u, prFixBtn(p, k, true)) : prActionBtn(p, u);
-  const extra = unblock ? '' : fixBtn;
+  // my PR that can't merge now: "Fix & merge" takes the column and a one-off Fix waits on hover
+  const autoCtl = prAutoCtl(p, u);
+  const unblock = !autoCtl && p.mine && !mi.enabled && fixBtn;
+  const mainBtn = autoCtl || unblock || prActionBtn(p, u);
+  const extra = unblock ? '' : autoCtl && fixBtn ? prFixBtn(p, k, true) : fixBtn;
   return `<div class="${cls}" onclick="openPr('${u}')" oncontextmenu="prCtx(event,'${u}')">`
     + `<div class="pr-actions">${extra}${snoozeBtn}${muteBtn}${archBtn}</div>`
     + `<span class="pr-ci ${p.checks || 'none'}" title="Checks: ${escapeHtml(p.checks || 'none')}"></span>`
@@ -6857,9 +6885,11 @@ Merging now restarts that deploy. Merge anyway?`)) return;
 
 function prCtx(e, url) {
   e.preventDefault(); e.stopPropagation();
+  const p = prState.prs.find(x => x.url === url), fixable = p && (prBranchAction(p) === 'conflict' || p.checks === 'fail' || p.failed);
   showBookmarkMenu(e, [
     { label: 'Open PR', action: () => openPr(url) },
     { label: 'Copy link', action: () => navigator.clipboard.writeText(url) },
+    ...(fixable ? [{ label: 'Fix', action: () => fixPr(p.key) }] : []),
   ]);
 }
 
@@ -6875,9 +6905,17 @@ function flipPrFlag(match, flag, on) {
   refreshOpenDropdown('pr-dropdown', prDropdownHtml);
   if (worldView) scheduleRender();
 }
+function prAutoRetry(url) { flipPrFlag(p => p.url === url, 'autoPhase', 'fixing'); setPrAutoMerge(url, true); }
 function setPrAutoMerge(url, on) {
+  clearTimeout(prAutoUndo.get(url)); prAutoUndo.delete(url);
+  if (!on) prAutoUndo.set(url, setTimeout(() => { prAutoUndo.delete(url); refreshOpenDropdown('pr-dropdown', prDropdownHtml); prAutoRefocus(url); }, 8000));
   flipPrFlag(p => p.url === url, 'autoMerge', on); api.send({ type: 'setPrAutoMerge', url, on });
-  showToast(on ? 'Fix & merge on: fixes if red, merges once green' : 'Fix & merge off');
+  prAutoRefocus(url);
+}
+// keyboard focus follows the control across arm / cancel / undo re-renders
+function prAutoRefocus(url) {
+  const was = document.activeElement && document.activeElement.closest && document.activeElement.closest('#pr-dropdown');
+  if (was || document.activeElement === document.body) { const el = [...document.querySelectorAll('#pr-dropdown [data-am]')].find(e => e.dataset.am === url); if (el) el.focus({ preventScroll: true }); }
 }
 function mutePr(key) { setPrFlag(p => p.key === key, 'muted', true); api.send({ type: 'mutePr', key }); }
 function unsnoozePr(key) { setPrFlag(p => p.key === key, 'snoozed', false); api.send({ type: 'unsnoozePr', key }); }

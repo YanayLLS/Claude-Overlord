@@ -2889,6 +2889,8 @@ function applyPrFlags(prs) {
     p.archived = archived.has(p.key);
     p.snoozeUntil = snoozes[p.key] || 0;
     p.autoMerge = auto.has(p.url);
+    p.autoPhase = p.autoMerge ? autoPhaseOf(p) : null;
+    p.autoReason = p.autoPhase === 'stuck' ? autoFixReason.get(p.url) || '' : '';
   });
 }
 
@@ -2897,6 +2899,12 @@ function applyPrFlags(prs) {
 // gate (SOC2) and teammates' holds still apply. ponytail: only while Overlord runs.
 const autoFixAgents = new Map(); // url → agent id (or 'starting'); one fixer per PR at a time
 const autoUpdatedSha = new Map(); // url → head sha we already asked GitHub to update
+const autoMerging = new Set(); // urls whose merge call is in flight
+const autoFixReason = new Map(); // url → why its fixer couldn't start
+function autoPhaseOf(p) {
+  const f = autoFixAgents.get(p.url);
+  return autoPhase(p, { fixing: f === 'starting' || (f != null && agents.has(f)), fixFailed: f === 'failed', merging: autoMerging.has(p.url), held: !!releases.holdOn(p.repo, p.baseRef) });
+}
 function runAutoMerge(prs, failedRepos = []) {
   const armed = settings.prAutoMerge || [];
   if (!armed.length) return;
@@ -2911,8 +2919,7 @@ function runAutoMerge(prs, failedRepos = []) {
       const fixer = autoFixAgents.get(url);
       if (fixer === 'starting' || fixer === 'failed' || (fixer != null && agents.has(fixer))) continue; // already on it, or can't (its toast said why; re-arm retries)
       autoFixAgents.set(url, 'starting');
-      send({ type: 'toast', text: `Auto-fixing ${name}` });
-      fixPr(p).then(id => autoFixAgents.set(url, id != null ? id : 'failed'))
+      fixPr(p).then(id => { const ok = typeof id === 'number'; autoFixAgents.set(url, ok ? id : 'failed'); if (!ok) autoFixReason.set(url, (id && id.error) || 'Fix agent didn\'t start'); })
         .catch(e => { autoFixAgents.delete(url); send({ type: 'toast', text: `Auto-fix ${name} failed: ${e.message || e}` }); });
       continue;
     }
@@ -2926,23 +2933,24 @@ function runAutoMerge(prs, failedRepos = []) {
     const green = (p.checks === 'pass' || p.checks === 'none') && ['CLEAN', 'HAS_HOOKS'].includes(p.mergeState);
     if (!green || releases.holdOn(p.repo, p.baseRef)) continue;
     keep.pop();
-    send({ type: 'toast', text: `Auto-merging ${name}` });
-    mergePrNow(url);
+    autoMerging.add(url);
+    mergePrNow(url).finally(() => autoMerging.delete(url));
   }
   if (keep.length !== armed.length) { settings.prAutoMerge = keep; saveState(); }
 }
 
-function mergePrNow(url) {
+function mergePrNow(url) { // → a promise that settles once the merge call is done
   // prod release PRs merge only with two release approvers' signatures (SOC2)
-  releases.mergeGate(url).then((gate) => {
-    if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return; }
+  return releases.mergeGate(url).then((gate) => new Promise((done) => {
+    if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return done(); }
     if (gate.warn) send({ type: 'toast', text: gate.warn });
     execFile('gh', ['pr', 'merge', url, '--merge'],
       { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+        done();
         if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
         pollPRs(); // merged PR drops from the list
       });
-  }).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
+  })).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
 }
 
 // Every caller (timers, the watch, ~15 PR actions) shares one poll: while one runs, more requests just queue a single
@@ -3016,9 +3024,9 @@ async function pollPRsOnce() {
     p.checksEta = null;
     if (p.checks === 'pending' && p.running.length) p.checksEta = checksEta(p.running, await fetchWorkflowDurations(p.repo));
   }
+  runAutoMerge(prs, failedRepos); // before the stamp: the row shows the phase this poll just started
   applyPrFlags(prs); // a mute/archive clicked while we awaited must not be reverted
   send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
-  runAutoMerge(prs, failedRepos);
 }
 
 function notifyNewPR(pr) {
@@ -3113,7 +3121,7 @@ function armPrTimer() {
 }
 
 // ── GitHub Actions tracking ───────────────────────────
-const { runState, nextPollDelay, diffNewFailures, fixRunPlan, fixPrPlan, REPO_RE: WF_REPO_RE } = require('./actions-core');
+const { runState, nextPollDelay, diffNewFailures, fixRunPlan, fixPrPlan, autoPhase, REPO_RE: WF_REPO_RE } = require('./actions-core');
 const { git: gitIn, checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
 const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
 let actionsTimer = null;
@@ -3333,7 +3341,7 @@ async function startFixAgent(planFor, target) {
   if (plan.error && target && target.repo && await findOrCloneCheckout(target.repo)) {
     plan = planFor(target, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
   }
-  if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
+  if (plan.error) { send({ type: 'toast', text: plan.error }); return { error: plan.error }; }
   if (!plan.branch) return createAgent(plan.repoDir, null, plan.prompt); // PR fix: no worktree
   // Reuse by folder, not by settings entry: an earlier click (or another checkout of the
   // same repo) may have made it without a matching entry, and git refuses to re-add it.
@@ -5518,7 +5526,7 @@ function handleIpc(msg) {
       if (typeof msg.url !== 'string' || !msg.url.startsWith('https://github.com/')) break;
       const s = new Set(settings.prAutoMerge || []);
       if (msg.on) s.add(msg.url); else s.delete(msg.url);
-      if (autoFixAgents.get(msg.url) === 'failed') autoFixAgents.delete(msg.url);
+      if (autoFixAgents.get(msg.url) === 'failed') { autoFixAgents.delete(msg.url); autoFixReason.delete(msg.url); }
       settings.prAutoMerge = [...s]; saveState(); pollPRs();
       break;
     }

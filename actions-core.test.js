@@ -186,3 +186,19 @@ const { fixPrPlan } = require('./actions-core');
   assert.ok(fixPrPlan({ ...pr, headRef: 'x&calc' }, infos, []).error);
   assert.ok(fixPrPlan({ ...pr, repo: 'o/none' }, infos, []).error);
 }
+
+// ── autoPhase: what an armed "Fix & merge" PR is doing now ──
+{
+  const { autoPhase } = require('./actions-core');
+  const p = { checks: 'pending', mergeable: 'MERGEABLE', mergeState: 'BLOCKED' };
+  assert.strictEqual(autoPhase(p, {}), 'waiting');
+  assert.strictEqual(autoPhase({ ...p, checks: 'fail' }, { fixing: true }), 'fixing');
+  assert.strictEqual(autoPhase({ ...p, mergeState: 'DIRTY' }, { fixing: true }), 'fixing');
+  assert.strictEqual(autoPhase({ ...p, checks: 'fail' }, { fixFailed: true }), 'stuck');
+  assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'CLEAN' }, { fixing: true }), 'waiting'); // a fixer still open on a green PR isn't "fixing"
+  assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'BEHIND' }, {}), 'updating');
+  assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'BLOCKED' }, {}), 'review');
+  assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'CLEAN' }, { held: true }), 'held');
+  assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'CLEAN' }, { merging: true }), 'merging');
+}
+console.log('autoPhase ok');

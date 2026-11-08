@@ -125,6 +125,20 @@ const ENV_BRANCH = /^(dev|develop|alpha|staging|master|main|production|prod(-.*)
 // Plan for "Fix" on a PR with failing checks or conflicts (conflicts get resolved first): a normal agent, no new worktree, in the checkout (or worktree)
 // already on the PR's branch — else the repo's main checkout, told to switch to it. It loops — read the
 // failed logs, fix or rerun, push to the PR, watch — until green.
+// What an armed "Fix & merge" PR is doing now (main.js runAutoMerge acts on the same states; the row shows this).
+// ctx: fixing (a fixer agent is alive), fixFailed (it couldn't start), merging, held (a teammate's hold on the base).
+function autoPhase(p, ctx) {
+  const red = p.checks === 'fail' || p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY';
+  if (red) return ctx.fixFailed ? 'stuck' : ctx.fixing ? 'fixing' : 'waiting';
+  if (ctx.merging) return 'merging';
+  if (p.mergeState === 'BEHIND') return 'updating';
+  if (p.checks === 'pass' || p.checks === 'none') {
+    if (ctx.held) return 'held';
+    if (p.mergeState === 'BLOCKED') return 'review';
+  }
+  return 'waiting';
+}
+
 function fixPrPlan(pr, infos, worktreeDirs) {
   if (!pr || !pr.repo || !pr.number) return { error: 'No PR to fix' };
   if (pr.isCrossRepository) return { error: `#${pr.number} comes from a fork — its branch can't be pushed to` };
@@ -169,5 +183,5 @@ function fixPrPlan(pr, infos, worktreeDirs) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, fixRunPlan, fixPrPlan, REPO_RE };
+  module.exports = { autoPhase, parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, fixRunPlan, fixPrPlan, REPO_RE };
 }
