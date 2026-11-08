@@ -1,7 +1,7 @@
 {
   "name": "overlord",
-  "version": "1.223.1",
-  "description": "Overlord — Claude Agent Manager",
+  "version": "1.223.2",
+  "description": "Overlord â€” Claude Agent Manager",
   "main": "main.js",
   "scripts": {
     "preinstall": "node scripts/check-prerequisites.js",

@@ -29,8 +29,9 @@ async function checkoutInfo(dir) {
     git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'], 10000),
   ]);
   const repo = remoteRepo(url);
-  if (!repo || !branch || branch === 'HEAD') return null;
-  return { dir, repo, branch };
+  if (!repo || !branch) return null;
+  // detached HEAD: still a checkout of the repo (Fix can start there), just on no branch
+  return { dir, repo, branch: branch === 'HEAD' ? '' : branch };
 }
 
 const lastFetch = new Map();

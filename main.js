@@ -3347,7 +3347,7 @@ async function annotateAhead(rows) {
     // sitting ON the deploy branch is skipped — no PR to open from dev to dev.
     const seen = new Set();
     const mine = infos.filter(i => i.repo.toLowerCase() === r.repo.toLowerCase()
-      && i.branch !== r.branch && !seen.has(i.branch) && seen.add(i.branch));
+      && i.branch && i.branch !== r.branch && !seen.has(i.branch) && seen.add(i.branch));
     const counts = [];
     for (const i of mine) {
       const n = await aheadOf(i.dir, r.branch, now);

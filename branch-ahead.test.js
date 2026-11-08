@@ -23,4 +23,16 @@ const many = aheadSummary([{ branch: 'feat/a', count: 2 }, { branch: 'feat/b', c
 assert.strictEqual(many.count, 9);
 assert.strictEqual(many.title, '9 commits on feat/b not in dev\n2 commits on feat/a not in dev');
 
-console.log('branch-ahead.test.js OK');
+// A checkout on a detached HEAD is still a checkout of its repo (Fix needs it), just with no branch.
+(async () => {
+  const { checkoutInfo } = require('./branch-ahead');
+  const { execFileSync } = require('child_process');
+  const dir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'ba-'));
+  const g = (...a) => execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
+  g('init', '-q'); g('remote', 'add', 'origin', 'https://github.com/o/r.git');
+  g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x');
+  g('checkout', '-q', '--detach');
+  assert.deepStrictEqual(await checkoutInfo(dir), { dir, repo: 'o/r', branch: '' });
+  require('fs').rmSync(dir, { recursive: true, force: true });
+  console.log('branch-ahead.test.js OK');
+})();
