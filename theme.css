@@ -757,3 +757,12 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
 .group-actions .split-btn .fav-star { display: inline-flex; align-items: center; padding: 0 6px; border-radius: 0; border-left-color: rgba(124,140,255,.4); }
 .split-btn .fav-star svg { width: 11px; height: 11px; fill: currentColor; }
 .group-header.hot .group-name { color: var(--accent); }
+
+/* Merge | auto-merge split (index.html prActionBtn): one pill — the wrapper owns the shape, the halves are flat */
+#pr-dropdown .pr-split { display: inline-flex; align-items: stretch; border-radius: var(--r-sm); overflow: hidden; white-space: nowrap; }
+#pr-dropdown .pr-split > .pr-approve { border-radius: 0; margin: 0; }
+#pr-dropdown .pr-split > .pr-merge:disabled { opacity: 1; background: #6c7fa8; } /* no half-faded left side */
+#pr-dropdown .pr-split > .pr-auto { display: inline-flex; align-items: center; padding: 0 8px; background: #89b4fa; color: rgba(17,17,27,.6); box-shadow: inset 1px 0 0 rgba(17,17,27,.28); }
+#pr-dropdown .pr-split > .pr-merge:disabled + .pr-auto { background: #6c7fa8; }
+#pr-dropdown .pr-split > .pr-auto:hover { background: #74a8f7; color: #11111b; }
+#pr-dropdown .pr-split > .pr-auto.on { background: #a6e3a1; color: #11111b; }
