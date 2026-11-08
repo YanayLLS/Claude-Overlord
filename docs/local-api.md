@@ -37,7 +37,7 @@ Call `overlord_capabilities` first (`POST /v1/overlord_capabilities` with `{}`, 
 | `overlord.version`, `apiVersion` | The app version, and the API contract version. `apiVersion` goes up only on a breaking change. |
 | `auth` | How to authenticate and where the token file is |
 | `transports` | REST, MCP, SSE and webhooks: paths, resume rules, retry schedule, error codes |
-| `features` | Switches that change what you will see: `peerChat` (peer connections on), `bypassPermissions` (agents skip permission prompts, so `agent.pending` with kind `permission` is rare), `remoteControl` |
+| `features` | Switches that change what you will see: `peerChat` (peer connections on), `bypassPermissions` (agents skip permission prompts, so `agent.pending` with kind `permission` is rare), `remoteControl`, `cpuSaving` (idle agents nobody has open get their CLI closed; see `sleeping`) |
 | `limits` | The longest `agent_ask` wait, how many events are buffered, the most webhooks allowed |
 | `tools` | Every tool with its description and JSON Schema |
 | `events` | Every event type with its description |
@@ -68,7 +68,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 |---|---|---|
 | `overlord_capabilities` | | Everything this Overlord supports (see [Discovering capabilities](#discovering-capabilities)) |
 | `overlord_info` | | version, apiVersion, agent and peer counts |
-| `agents_list` | `includeArchived?` | `{ agents: [{ id, name, title, cwd, status, pending, archived, crashed, createdAt, sessionId, model }] }` |
+| `agents_list` | `includeArchived?` | `{ agents: [{ id, name, title, cwd, status, pending, archived, sleeping, crashed, createdAt, sessionId, model }] }` |
 | `agent_get` | `agentId` | The `agents_list` fields plus `lastPrompt`, `lastReply`, `spinner`, open `tools`, the open `question` input and `stats` |
 | `agent_create` | `cwd`, `prompt?` | `{ agentId }` |
 | `agent_send` | `agentId`, `text` | `{ queued: true }`. The message waits until the agent is at its prompt. If it can't be delivered, an `agent.send_failed` event follows. |
@@ -80,6 +80,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `agent_keys` | `agentId`, `keys` | Sends raw keys to the terminal (`"\r"` Enter, `"\u001b"` Esc, `"\u001b[B"` down arrow) |
 | `agent_interrupt` | `agentId` | Esc: stops the turn and drops queued sends |
 | `agent_archive`, `agent_unarchive`, `agent_close` | `agentId` | `{ ok: true }` |
+| `agent_wake` | `agentId` | `{ woke }`: resumes an agent CPU saving put to sleep (`woke` false if it wasn't asleep). You rarely need it: `agent_send` and `agent_ask` wake it themselves. |
 | `chat_list` | | `{ peersEnabled, me, online, conversations }` |
 | `chat_read` | `peer` or `group`, `limit?` | `{ messages }` |
 | `chat_send` | `peer` or `group`, `text` | `{ conversation, message, offline }`. 409 if no recipient is online. |
@@ -92,6 +93,7 @@ What each field means:
 
 - `status` is `active` (working) or `waiting` (idle at its prompt).
 - `pending` is `permission`, `question` or `null`: whatever the agent is waiting for you to answer.
+- `sleeping` is true while CPU saving has its CLI closed (Settings → CPU saving: an idle agent nobody has open). Its `status` stays `waiting`. Anything you send it resumes the same session first, which takes a few seconds; `agent_screen` shows the screen from before it slept until then.
 - A multi-question `AskUserQuestion` may end on a review screen that needs Enter. Send it with `agent_keys` and `"\r"`. `agent_screen` shows you what the agent's screen shows.
 
 ## Events
@@ -101,6 +103,7 @@ What each field means:
 | `agent.created` | agentId, cwd, name, sessionId |
 | `agent.closed`, `agent.archived`, `agent.unarchived`, `agent.crashed` | agentId |
 | `agent.status` | agentId, status (`active` or `waiting`) |
+| `agent.sleeping` | agentId, sleeping: CPU saving closed its CLI (`true`), or it was resumed (`false`) |
 | `agent.pending` | agentId, kind (`permission` or `question`): the agent now waits on you |
 | `agent.pending_cleared` | agentId |
 | `agent.question` | agentId, input (the full `AskUserQuestion` input: questions, options, previews) |

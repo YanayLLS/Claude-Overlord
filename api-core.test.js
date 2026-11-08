@@ -19,7 +19,7 @@ function fakeHost(over = {}) {
     send: (id, text, intoDialog) => calls.push(['send', id, text, intoDialog]),
     keys: (id, data) => calls.push(['keys', id, data]),
     interrupt: (id) => calls.push(['interrupt', id]),
-    archive: () => {}, unarchive: () => {}, close: () => {},
+    archive: () => {}, unarchive: () => {}, close: () => {}, wake: (id) => calls.push(['wake', id]),
     transcript: () => [{ type: 'prompt' }, { type: 'text' }, { type: 'turn' }],
     screen: () => 'abcdef',
     chatList: () => ({ conversations: [] }),
@@ -160,6 +160,16 @@ test('overlord_capabilities lists every tool and event, with transports and feat
   assert.deepStrictEqual(Object.keys(c.transports), ['rest', 'mcp', 'sse', 'webhooks']);
   assert.deepStrictEqual(c.features, { peerChat: true });
   assert.strictEqual(c.overlord.version, '9.9.9');
+});
+
+test('CPU saving: sleeping shows as an event, agent_wake resumes it and says whether it slept', async () => {
+  assert.deepStrictEqual(toEvent({ type: 'sleeping', id: 2, on: true }), { type: 'agent.sleeping', agentId: 2, sleeping: true });
+  const h = fakeHost(), api = createApi(h);
+  h.agents.get(1).sleeping = true;
+  assert.deepStrictEqual(await api.call('agent_wake', { agentId: 1 }), { woke: true });
+  assert.deepStrictEqual(h.calls, [['wake', 1]]);
+  h.agents.get(1).archived = true;
+  await assert.rejects(api.call('agent_wake', { agentId: 1 }), { status: 409 });
 });
 
 // CLAUDE.md "Local API coverage": a tool or event added in code but not in the integration guide fails here.

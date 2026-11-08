@@ -405,6 +405,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .agent[data-status="waiting"] .agent-dot { background:var(--green); opacity:1; }
 .agent[data-status="permission"] .agent-dot { background:var(--yellow); opacity:1; box-shadow:0 0 0 3px rgba(249,226,175,.15); }
 .agent[data-status="crashed"] .agent-dot { background:var(--red); opacity:1; }
+.agent.sleeping .agent-dot { opacity:.35; }
+.agent-sleep { color:var(--dim); font-size:11px; line-height:1; }
 .agent[data-status="resuming"] .agent-dot { background:var(--yellow); opacity:1; animation:pulse 2s ease-in-out infinite; }
 /* Middle flexible zone (status + current file) keeps the right cluster right-anchored */
 /* Right cluster — fixed-width columns so model + ctx% line up across rows */
@@ -1362,6 +1364,11 @@ button:focus-visible { outline-offset:0; }
         <span>Remote Control (continue agents in the Claude mobile app)</span>
       </label>
       <div class="settings-hint">Agents show under their chat title in the app and at claude.ai/code. Switching it also connects or disconnects running agents as soon as each is idle.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-cpu-saving" onchange="api.send({ type: 'saveSettings', settings: { cpuSaving: this.checked } })" />
+        <span>CPU saving (close idle agents' Claude until you open them)</span>
+      </label>
+      <div class="settings-hint">An agent you don't have open that has sat idle for a minute, with no tool, background shell, subagent, loop, dev server or question still running, gets its Claude process closed (☾ on its card). Its card and chat stay. Opening it, or sending it a message, resumes the same session in a few seconds. A sleeping agent isn't reachable from Remote Control until it's resumed.</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-english-focus" checked onchange="api.send({ type: 'saveSettings', settings: { englishOnFocus: this.checked } })" />
         <span>Switch the keyboard to English when Overlord gets focus (Windows)</span>
@@ -3242,12 +3249,12 @@ function render() {
       const ctxPct = a.stats?.ctxTok ? Math.min(100, Math.round((a.stats.ctxTok / agentCtxWin) * 100)) : 0;
       const cost = calcCost(a.stats);
       const ctxCls = ctxPct >= 90 ? 'danger' : ctxPct >= 70 ? 'warn' : '';
-      const stext = (statusVerb(a, st) + (statusMetaText(a) ? ' · ' + statusMetaText(a) : '')).trim();
+      const stext = (statusVerb(a, st) + (statusMetaText(a) ? ' · ' + statusMetaText(a) : '') + (a.sleeping ? ' · Sleeping' : '')).trim();
 
       const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
       const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
       const mf = a.stats?.modelFamily || '';
-      html += `<div class="agent${sel ? ' selected' : ''}${hasTeam ? ' has-team' : ''}${needsAnswer(a) ? ' needs-answer' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
+      html += `<div class="agent${sel ? ' selected' : ''}${a.sleeping ? ' sleeping' : ''}${hasTeam ? ' has-team' : ''}${needsAnswer(a) ? ' needs-answer' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
         <span class="agent-name${a.unread ? ' unread' : ''}" data-tip-overflow onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
@@ -3255,6 +3262,7 @@ function render() {
           <span class="agent-model-slot">${mf ? `<span class="model-tag ${mf}"><span onclick="event.stopPropagation();showModelMenu(event,${id})" title="Change model">${mf}</span><span class="mt-chev" onclick="event.stopPropagation();showEffortMenu(event,${id})" title="Change effort level">&#9662;</span></span>` : ''}</span>
           <span class="agent-tail">
             ${a.peerPending && a.peerPending.length ? `<span title="Peer messages awaiting your approval — click to review" onclick="event.stopPropagation();openPeerApprovalModal(${id})" style="background:var(--peach);color:var(--bg);border-radius:8px;padding:0 6px;font-size:10px;font-weight:600;cursor:pointer;">&#x2709; ${a.peerPending.length}</span>` : ''}
+            ${a.sleeping ? `<span class="agent-sleep" title="CPU saving: its Claude is closed while idle. Opening the agent or sending it a message resumes the session.">&#x263E;</span>` : ''}
             <span class="ctx-pct ${ctxCls}">${ctxPct > 0 ? ctxPct + '%' : ''}</span>
             <span class="agent-actions">
               ${a.looping ? `<button class="agent-btn btn-loop" onclick="event.stopPropagation();stopLoop(${id})" title="Stop loop (sends Ctrl+C)"><i class="loop-icon">&#x21BB;</i>Loop</button>` : ''}
@@ -4612,6 +4620,7 @@ function handleAgentMsg(msg) {
     case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
     case 'interrupted': showInterrupted(msg.agents); break;
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
+    case 'sleeping': { const a = agents.get(msg.id); if (a) { a.sleeping = !!msg.on; scheduleRender(); } break; } // CPU saving closed (or resumed) its CLI
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
     case 'perm': { const a = agents.get(msg.id); if (msg.id !== selectedId) setTimeout(() => chatUi.permToast(msg.id, msg.ask), 400); /* another agent: answer from a toast (after its menu has drawn) */ if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }
     case 'permClear': { chatUi.dropToast(msg.id); const a = agents.get(msg.id); if (askFlip && msg.id === selectedId && termTab === 'terminal') switchTermTab('conversation'); if (a) { for (const t of a.tools.values()) t.perm = false; scheduleRender(); } break; }
@@ -5312,6 +5321,7 @@ function applySettings(s) {
   }
   if (s.remoteControl !== undefined) document.getElementById('chk-remote-control').checked = s.remoteControl;
   if (s.englishOnFocus !== undefined) document.getElementById('chk-english-focus').checked = s.englishOnFocus;
+  if (s.cpuSaving !== undefined) document.getElementById('chk-cpu-saving').checked = s.cpuSaving;
   if (s.dictationHasKey !== undefined) { document.getElementById('inp-dict-key').placeholder = s.dictationHasKey ? 'Cloud key saved · paste a new one to replace it' : 'This computer · paste an OpenAI or Groq key for cloud'; document.getElementById('dict-local-btn').style.display = s.dictationHasKey ? '' : 'none'; }
   if (s.notifications !== undefined) {
     notificationsEnabled = s.notifications;

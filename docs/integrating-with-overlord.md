@@ -39,10 +39,11 @@ Over MCP, a failed call returns `isError: true` with the message as its text.
 
 ## 3. The model
 
-- **Agent:** `{ id (number), name, title, cwd, status, pending, archived, crashed, createdAt, sessionId, model }`.
+- **Agent:** `{ id (number), name, title, cwd, status, pending, archived, sleeping, crashed, createdAt, sessionId, model }`.
   - `status` is `active` (working) or `waiting` (idle at its prompt).
   - `pending` is `null`, `permission` (a tool-approval dialog is open) or `question` (an `AskUserQuestion` is open).
   - While `pending` is set, the agent is blocked on a human, which means you.
+  - `sleeping` is true when CPU saving closed its CLI because it sat idle and nobody had it open. It still counts as `waiting`. Sending it anything (`agent_send`, `agent_ask`, `agent_keys`) resumes the same session first, which adds a few seconds; `agent_wake` resumes it without sending anything.
 - `agent_get` adds `lastPrompt`, `lastReply` (its last assistant message), `spinner`, open `tools`, the open `question` input, and `stats`.
 
 ## 4. Tools at a glance
@@ -57,7 +58,7 @@ Over MCP, a failed call returns `isError: true` with the message as its text.
 | Read history | `agent_transcript` (`agentId`, `limit?`), `agent_screen` (`agentId`, `chars?`), which is the terminal as text |
 | Unblock an agent | `permission_answer` (`decision`: `allow` \| `allow_always` \| `deny`, or `option` 1–9), `question_answer` (`options`: one 1-based number per question, or `text`) |
 | Low-level control | `agent_keys` (raw keys: `"\r"` Enter, `"\u001b"` Esc, `"\u001b[B"` down arrow), `agent_interrupt` (Esc: stops the turn and drops queued sends) |
-| Lifecycle | `agent_archive`, `agent_unarchive`, `agent_close` |
+| Lifecycle | `agent_archive`, `agent_unarchive`, `agent_close`, `agent_wake` (resume a sleeping agent) |
 | Peer chat (people and their Overlords on the LAN) | `chat_list`, `chat_read` (`peer` or `group`, `limit?`), `chat_send` (`peer` or `group`, `text`) |
 | Events | `events_poll` (`since?`, `types?`, `timeoutSec?` max 60), `webhook_add` / `webhook_list` / `webhook_remove` |
 
@@ -99,6 +100,7 @@ Every event has `type`, `seq`, `at` (ISO time) and, for agent events, `agentId`.
 | `agent.created` | `cwd`, `name`, `sessionId` |
 | `agent.closed`, `agent.archived`, `agent.unarchived`, `agent.crashed` | none |
 | `agent.status` | `status` (`active` or `waiting`) |
+| `agent.sleeping` | `sleeping` (`true`: CPU saving closed its CLI; `false`: resumed) |
 | `agent.pending` | `kind` (`permission` or `question`) |
 | `agent.pending_cleared` | none |
 | `agent.question` | `input` (full `AskUserQuestion` input) |
@@ -119,3 +121,4 @@ Filter with exact types or prefixes ending in `.`, for example `agent.status,cha
 - **Feature switches:** check `features` in `overlord_capabilities`:
   - `peerChat: false` means the chat tools have no one to talk to.
   - `bypassPermissions: true` means agents rarely stop for permissions.
+  - `cpuSaving: true` means idle agents get their CLI closed (`sleeping`) and the first message to one takes a few seconds longer.

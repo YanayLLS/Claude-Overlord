@@ -17,6 +17,8 @@ const { createRegistry } = require('./browser/registry');
 const { createMcpServer } = require('./mcp/server');
 const { createApi, ApiError, newToken } = require('./api-core');
 const { createApiServer } = require('./api-server');
+const { keepAwake, dueToSleep } = require('./cpu-saver-core');
+let focusedAgentId = null; // the agent open in the window (focusAgent): CPU saving never puts it to sleep
 let localApi = null, localApiServer = null; // the local API (Settings → Local API); send() feeds it, so declared before any send
 const { writeAgentConfig, settingsFlags, removeAgentConfig, askFile } = require('./mcp/agent-config');
 const { spareFits } = require('./spare-core');
@@ -659,6 +661,7 @@ function sendFullState() {
   if (settings.actionsCache) send({ type: 'actionsList', runs: settings.actionsCache, error: null });
   for (const [id, a] of agents) {
     send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, archivedAt: a.archivedAt || null, account: a.account || null, procAt: (terminals.get(id) && terminals.get(id)._at) || null, chatHides: a.chatHides || [] });
+    if (a.sleeping) send({ type: 'sleeping', id, on: true });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
@@ -1155,6 +1158,7 @@ const sentNorm = (t) => String(t || '').replace(/<\/?pasted_content[^>]*>/g, '')
 const sentKey = (t) => sentNorm(t).slice(0, 40);
 const unconfirmed = new Map(); // agent id → [{ key, at, done, resend }]: handed to its CLI, not in the transcript yet
 function chatDeliver(id, text, parts, erase, onSubmit, intoDialog = false) {
+  wakeAgent(id); // asleep (CPU saving): the send waits for the resumed CLI
   const e = { key: sentKey(parts ? parts.filter(p => p.text).map(p => p.text).join('') : text), at: 0, done: false, tries: 0 };
   const failed = () => { e.done = true; flog('send to agent ' + id + ' failed: no CLI took it'); send({ type: 'sendFailed', id, text: parts ? parts.map(p => p.text || p.image || '').join('') : text }); };
   const opts = { intoDialog, still: () => !e.done, onFail: failed, onSent: () => {
@@ -1716,7 +1720,10 @@ function restoreAgents(state) {
       // startups race-write ~/.claude.json) so clicking an agent connects instantly
       // instead of paying `claude --resume` cold-start on click. The old freeze that
       // killed pre-warming came from sync wmic kills, not from spawning itself.
-      if (!agent.archived) queuePrewarm(id);
+      // CPU saving: nothing to warm. It sleeps until opened; one cut off mid-turn or running a loop still resumes now.
+      if (agent.archived) continue;
+      if (settings.cpuSaving && !agent._crashNudge && !agent.cronCount && id !== focusedAgentId && !terminals.has(id) && !spawningTerms.has(id)) { agent.sleeping = true; send({ type: 'sleeping', id, on: true }); }
+      else queuePrewarm(id);
     }
     // After the resumes: warm a spare where the newest agent lives — likely where the next one goes.
     const newest = [...agents.values()].filter(a => !a.archived).sort((a, b) => b.createdAt - a.createdAt)[0];
@@ -1893,6 +1900,7 @@ function doSpawnTerminal(id, attached) {
   try {
     const proc = attached || agentPty().spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env, ...acctEnv }) });
     terminals.set(id, proc);
+    if (a.sleeping) { a.sleeping = false; a._idleSince = 0; send({ type: 'sleeping', id, on: false }); }
     noteProcStart(id, proc, !!attached);
     // ponytail: an adopted pty's Remote Control state is unknown; assume the setting. Toggling off/on fixes a stray one.
     if (!attached || a.rc === undefined) a.rc = settings.remoteControl !== false;
@@ -1981,7 +1989,7 @@ function doSpawnTerminal(id, attached) {
         }
       }
     });
-    proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
+    proc.onExit((e) => { proc._ovKilled = true; if (!proc._ovSlept) handleTermExit(id, e?.exitCode); }); // put to sleep: not a crash, and a woken CLI may already be in terminals
   } catch (e) {
     console.log(`[Overlord] Failed to spawn terminal for agent ${id}:`, e.message);
     send({ type: 'termData', id, data: `\r\n\x1b[31mFailed to start terminal: ${e.message}\x1b[0m\r\n` });
@@ -2071,7 +2079,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team) {
   const shellArgs = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
   send({ type: 'stats', id, stats: agent.stats });
-  send({ type: 'focused', id });
+  send({ type: 'focused', id }); focusedAgentId = id;
 
   const agentEnv = cleanAgentEnv(team ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env } : feat.env);
   try {
@@ -2126,7 +2134,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team) {
     // Replay what the spare painted while idle — minus its boot-time terminal queries (XTVERSION, DA, DSR, kitty ?u,
     // OSC ?): xterm would answer them now, long after boot, and claude reads the late replies as keys that wipe the prompt.
     if (warm && warm.buf) onData(warm.buf.replace(/\x1b\[(?:[>=]?[0-9;]*c|[56]n|>[0-9]*q|\?u)|\x1b\][0-9]+;\?(?:\x07|\x1b\\)/g, ''));
-    proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
+    proc.onExit((e) => { proc._ovKilled = true; if (!proc._ovSlept) handleTermExit(id, e?.exitCode); });
     // Fallback: send prompt after timeout if ready-detection didn't fire
     if (initialPrompt) {
       setTimeout(() => { if (!promptSent) { promptSent = true; try { writeInitialPrompt(proc, initialPrompt); } catch {} } }, 8000);
@@ -2177,7 +2185,7 @@ function closeAgent(id) {
 function archiveAgent(id) {
   const a = agents.get(id);
   if (!a || a.archived) return;
-  a.archived = true;
+  a.archived = true; a.sleeping = false; // archived is its own kind of stopped; unarchive resumes it
   a.archivedAt = Date.now(); // Ctrl+Shift+T reopens the newest first, across restarts (reopen-core.js)
   // Kill pty + watchers to free resources; keep agent metadata + jsonl intact.
   const w = watchers.get(id); if (w) { try { w.close(); } catch {} watchers.delete(id); }
@@ -2219,6 +2227,40 @@ function unarchiveAgent(id) {
   spawnTerminal(id);
   saveState();
 }
+
+// ── CPU saving (cpu-saver-core.js) ─────────────────────
+// Its Claude closes; card, transcript watcher and terminal history stay. wakeAgent (opening it, a message,
+// a key) runs `claude --resume` on the same session, and doSpawnTerminal clears `sleeping`.
+function sleepAgent(id) {
+  const a = agents.get(id), t = terminals.get(id);
+  if (!a || !t) return;
+  t._ovSlept = true; // its onExit skips handleTermExit: not a crash, and the woken CLI may already be in terminals
+  a.sleeping = true; a._idleSince = 0; a.claudeReady = false;
+  if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
+  send({ type: 'termData', id, data: '\r\n\x1b[90m[CPU saving: Claude closed while idle. Opening this agent resumes the session.]\x1b[0m\r\n' });
+  killPty(t); terminals.delete(id);
+  flog(`agent ${id} "${String(a.title || '').slice(0, 30)}" asleep (CPU saving)`);
+  send({ type: 'sleeping', id, on: true });
+  saveState();
+}
+function wakeAgent(id) {
+  const a = agents.get(id);
+  if (a && a.sleeping && !a.archived) spawnTerminal(id);
+}
+function cpuSaveSweep() {
+  if (!settings.cpuSaving) return;
+  const list = [];
+  for (const [id, a] of agents) {
+    const t = terminals.get(id);
+    list.push({ id, a, why: keepAwake(a, {
+      focused: id === focusedAgentId, hasTerm: !!t, shell: !!(t && t._ovShell),
+      unsent: !!((unconfirmed.get(id) || []).length || (pendingPeerMsgs.get(id) || []).length || (pendingTermInput.get(id) || []).length),
+      servers: !!(serverPorts.get(id) && serverPorts.get(id).size), team: agentTeamMap.has(id), draft: inputBuffers.get(id),
+    }) });
+  }
+  for (const id of dueToSleep(list, Date.now())) sleepAgent(id);
+}
+setInterval(cpuSaveSweep, 15000);
 
 // ── JSONL watching ─────────────────────────────────────
 function startWatch(id) {
@@ -4317,7 +4359,9 @@ function handleTermInput(id, data, shown) {
     if (answered) { clearPtyPerm(id, a); a.permSent = false; send({ type: 'permClear', id }); } }
   const t = terminals.get(id);
   if (!t) {
-    // PTY not yet spawned — queue input, flushed after spawn.
+    // PTY not yet spawned — queue input, flushed after spawn. A key for an agent asleep (CPU saving) wakes it;
+    // a terminal's focus in/out report does not.
+    if (!/^\x1b\[[IO]$/.test(data)) wakeAgent(id);
     const q = pendingTermInput.get(id) || [];
     q.push(data);
     // cap queue to prevent unbounded growth if spawn never happens
@@ -4851,7 +4895,8 @@ function handleIpc(msg) {
       break;
     }
     case 'focusAgent':
-      spawnTerminal(msg.id);
+      focusedAgentId = msg.id;
+      spawnTerminal(msg.id); // also wakes it from CPU saving
       if (preview) preview.setAgent(msg.id);
       send({ type: 'focused', id: msg.id });
       break;
@@ -5321,6 +5366,7 @@ function handleIpc(msg) {
       if ('worldEnabled' in msg.settings) armClickupTimer();
       if ('remoteControl' in msg.settings) syncRemoteControl();
       if ('apiEnabled' in msg.settings) { if (settings.apiEnabled) startLocalApi(); else { stopLocalApi(); sendApiState(); } }
+      if ('cpuSaving' in msg.settings) { if (!settings.cpuSaving) { for (const [id, a] of agents) if (a.sleeping) queuePrewarm(id); } else for (const a of agents.values()) a._idleSince = 0; } // off: everyone back up, staggered
       if (msg.settings.englishOnFocus) kbdHelper(() => {}); // build the helper now so the next focus switches at once
       if ('dictationKey' in msg.settings) { settings.dictationKey = String(msg.settings.dictationKey || '').trim() || null; saveState(); send({ type: 'settings', settings: publicSettings() }); send({ type: 'dictation', setup: true, reset: true, toast: settings.dictationKey ? 'Dictation: cloud' : 'Dictation: this computer' }); } // the mic re-checks the engine on its next click
       break;
@@ -5726,7 +5772,7 @@ function apiPending(a) {
 }
 function apiAgent(a, full) {
   const pending = apiPending(a);
-  const o = { id: a.id, name: a.agentName || '', title: a.title || '', cwd: a.cwd, status: shownStatus(a), pending, archived: !!a.archived, crashed: !!a.crashed, createdAt: a.createdAt, sessionId: a.sessionId, model: a.stats?.model || null };
+  const o = { id: a.id, name: a.agentName || '', title: a.title || '', cwd: a.cwd, status: shownStatus(a), pending, archived: !!a.archived, sleeping: !!a.sleeping, crashed: !!a.crashed, createdAt: a.createdAt, sessionId: a.sessionId, model: a.stats?.model || null };
   if (!full) return o;
   return { ...o, lastPrompt: a.lastPrompt || '', lastReply: a.fullText || a.lastText || '', spinner: a.spinnerText || '',
     tools: [...a.toolIds].map(t => ({ id: t, name: a.toolNames.get(t) || '', status: a.toolStatuses.get(t) || '' })),
@@ -5738,7 +5784,7 @@ function apiHost() {
     info: () => ({ version: app.getVersion(), agents: [...agents.values()].filter(a => !a.archived).length, peersEnabled: !!settings.peersEnabled, peersOnline: connectedPeerNames().length }),
     // Switches that change what an integration will see. bypassPermissions: agents start with
     // --dangerously-skip-permissions, so permission prompts (agent.pending kind permission) are rare.
-    features: () => ({ peerChat: !!settings.peersEnabled, bypassPermissions: !!settings.bypassPermissions, remoteControl: settings.remoteControl !== false }),
+    features: () => ({ peerChat: !!settings.peersEnabled, bypassPermissions: !!settings.bypassPermissions, remoteControl: settings.remoteControl !== false, cpuSaving: !!settings.cpuSaving }),
     getAgentRaw: (id) => agents.get(id) || null,
     listAgents: (withArchived) => [...agents.values()].filter(a => withArchived || !a.archived).map(a => apiAgent(a, false)),
     getAgent: (id) => (agents.has(id) ? apiAgent(agents.get(id), true) : null),
@@ -5752,6 +5798,7 @@ function apiHost() {
     interrupt: (id) => cliCancel(need(id)),
     archive: (id) => archiveAgent(need(id)),
     unarchive: (id) => unarchiveAgent(need(id)),
+    wake: (id) => wakeAgent(need(id)),
     close: (id) => closeAgent(need(id)),
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
@@ -6059,6 +6106,7 @@ function queuePeerInjection(agentId, env) {
   const a = agents.get(agentId);
   if (!a) return;
   if (!terminals.has(agentId) || !a.claudeReady || a.crashed) {
+    wakeAgent(agentId); // asleep (CPU saving): resume it so the message lands
     const q = pendingPeerMsgs.get(agentId) || [];
     q.push(env); if (q.length > 50) q.shift();
     pendingPeerMsgs.set(agentId, q);
