@@ -19,6 +19,15 @@ const { createApi, ApiError, newToken } = require('./api-core');
 const { createApiServer } = require('./api-server');
 const { keepAwake, dueToSleep } = require('./cpu-saver-core');
 let focusedAgentId = null; // the agent open in the window (focusAgent): CPU saving never puts it to sleep
+// Messages after which an agent may have just become sleepable (a turn ended, a tool or dialog cleared).
+// Declared up here: send() runs from the first line of startup.
+const SLEEP_TRIGGERS = new Set(['status', 'permClear', 'toolDone', 'toolsClear', 'compacting', 'crashCleared']);
+let _saveSweepQueued = false;
+function queueSaveSweep() {
+  if (_saveSweepQueued) return;
+  _saveSweepQueued = true;
+  setTimeout(() => { _saveSweepQueued = false; cpuSaveSweep(); }, 0); // after the message's own state change lands; it checks the setting
+}
 let localApi = null, localApiServer = null; // the local API (Settings → Local API); send() feeds it, so declared before any send
 const { writeAgentConfig, settingsFlags, removeAgentConfig, askFile } = require('./mcp/agent-config');
 const { spareFits } = require('./spare-core');
@@ -638,6 +647,7 @@ function send(data) {
   }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
   if (localApi) localApi.publish(data); // the local API's events are the renderer's messages, translated (api-core.js)
+  if (SLEEP_TRIGGERS.has(data.type)) queueSaveSweep(); // CPU saving: a turn ended, a tool or dialog cleared → check at once
 }
 function logToRenderer(...args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
@@ -1720,9 +1730,9 @@ function restoreAgents(state) {
       // startups race-write ~/.claude.json) so clicking an agent connects instantly
       // instead of paying `claude --resume` cold-start on click. The old freeze that
       // killed pre-warming came from sync wmic kills, not from spawning itself.
-      // CPU saving: nothing to warm. It sleeps until opened; one cut off mid-turn or running a loop still resumes now.
+      // CPU saving: nothing to warm. It sleeps until opened; one cut off mid-turn still resumes now.
       if (agent.archived) continue;
-      if (settings.cpuSaving && !agent._crashNudge && !agent.cronCount && id !== focusedAgentId && !terminals.has(id) && !spawningTerms.has(id)) { agent.sleeping = true; send({ type: 'sleeping', id, on: true }); }
+      if (settings.cpuSaving && !agent._crashNudge && id !== focusedAgentId && !terminals.has(id) && !spawningTerms.has(id)) { agent.sleeping = true; send({ type: 'sleeping', id, on: true }); }
       else queuePrewarm(id);
     }
     // After the resumes: warm a spare where the newest agent lives — likely where the next one goes.
@@ -2255,12 +2265,13 @@ function cpuSaveSweep() {
     list.push({ id, a, why: keepAwake(a, {
       focused: id === focusedAgentId, hasTerm: !!t, shell: !!(t && t._ovShell),
       unsent: !!((unconfirmed.get(id) || []).length || (pendingPeerMsgs.get(id) || []).length || (pendingTermInput.get(id) || []).length),
-      servers: !!(serverPorts.get(id) && serverPorts.get(id).size), team: agentTeamMap.has(id), draft: inputBuffers.get(id),
     }) });
   }
   for (const id of dueToSleep(list, Date.now())) sleepAgent(id);
 }
-setInterval(cpuSaveSweep, 15000);
+// Checked the moment something could make an agent sleepable (send(), focusAgent: queueSaveSweep); the
+// interval is the fallback.
+setInterval(cpuSaveSweep, 3000);
 
 // ── JSONL watching ─────────────────────────────────────
 function startWatch(id) {
@@ -4895,7 +4906,7 @@ function handleIpc(msg) {
       break;
     }
     case 'focusAgent':
-      focusedAgentId = msg.id;
+      focusedAgentId = msg.id; queueSaveSweep(); // the agent you left sleeps now if it's idle
       spawnTerminal(msg.id); // also wakes it from CPU saving
       if (preview) preview.setAgent(msg.id);
       send({ type: 'focused', id: msg.id });

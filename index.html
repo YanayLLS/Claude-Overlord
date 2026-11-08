@@ -1368,7 +1368,7 @@ button:focus-visible { outline-offset:0; }
         <input type="checkbox" id="chk-cpu-saving" onchange="api.send({ type: 'saveSettings', settings: { cpuSaving: this.checked } })" />
         <span>CPU saving (close idle agents' Claude until you open them)</span>
       </label>
-      <div class="settings-hint">An agent you don't have open that has sat idle for a minute, with no tool, background shell, subagent, loop, dev server or question still running, gets its Claude process closed (☾ on its card). Its card and chat stay. Opening it, or sending it a message, resumes the same session in a few seconds. A sleeping agent isn't reachable from Remote Control until it's resumed.</div>
+      <div class="settings-hint">An agent you don't have open gets its Claude process closed the moment it's idle: not working, no subagent and no shell command running (☾ on its card). Its card and chat stay. Opening it, or sending it a message, resumes the same session in a few seconds. A sleeping agent isn't reachable from Remote Control until it's resumed.</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-english-focus" checked onchange="api.send({ type: 'saveSettings', settings: { englishOnFocus: this.checked } })" />
         <span>Switch the keyboard to English when Overlord gets focus (Windows)</span>

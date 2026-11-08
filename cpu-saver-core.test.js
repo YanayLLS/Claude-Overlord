@@ -7,7 +7,6 @@ const ctx = (over = {}) => ({ hasTerm: true, ...over });
 
 test('an idle, unfocused agent with nothing running can sleep', () => {
   assert.strictEqual(keepAwake(idle(), ctx()), '');
-  assert.strictEqual(keepAwake(idle(), ctx({ draft: '\x1b[A\x7f' })), ''); // keys only, no text
 });
 
 test('anything still running, waiting or on its way keeps it awake', () => {
@@ -24,12 +23,8 @@ test('anything still running, waiting or on its way keeps it awake', () => {
     [{ ptyPerm: 'ask' }, {}, 'waiting on you'],
     [{ askIds: new Set(['q']) }, {}, 'waiting on you'],
     [{ cliMenu: true }, {}, 'waiting on you'],
-    [{ cronCount: 1 }, {}, 'scheduled loop'],
     [{ pendingPrompt: { key: 'x' } }, {}, 'message on its way'],
     [{}, { unsent: true }, 'message on its way'],
-    [{}, { servers: true }, 'dev server'],
-    [{}, { team: true }, 'leads a team'],
-    [{}, { draft: 'fix the login' }, 'unsent text in its box'],
     [{ archived: true }, {}, 'not running'],
     [{ sleeping: true }, {}, 'not running'],
   ];
@@ -43,4 +38,8 @@ test('it sleeps only after a full idle stretch; any reason to stay awake restart
   assert.deepStrictEqual(dueToSleep([{ id: 1, a, why: 'open' }], 61000, 60000), []); // you looked at it
   assert.deepStrictEqual(dueToSleep([{ id: 1, a, why: '' }], 62000, 60000), []);
   assert.deepStrictEqual(dueToSleep([{ id: 1, a, why: '' }], 122000, 60000), [1]);
+});
+
+test('by default it sleeps on the first sweep that finds it idle', () => {
+  assert.deepStrictEqual(dueToSleep([{ id: 1, a: idle(), why: '' }, { id: 2, a: idle(), why: 'open' }], 5000), [1]);
 });
