@@ -757,3 +757,51 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
 .group-actions .split-btn .fav-star { display: inline-flex; align-items: center; padding: 0 6px; border-radius: 0; border-left-color: rgba(124,140,255,.4); }
 .split-btn .fav-star svg { width: 11px; height: 11px; fill: currentColor; }
 .group-header.hot .group-name { color: var(--accent); }
+
+/* "Fix & merge" (index.html prAutoCtl). 124px in every state (Merge too), so nothing shifts. Off = blue outline, hollow ⏱;
+   armed = tinted fill, filled ⏱, phase + ✕; busy = solid blue + spinner; yellow tint = waiting on a person; solid yellow =
+   your move (Retry fix). One anatomy for every armed state: [icon phase | ✕] with a divider. */
+#pr-dropdown .pr-main > .pr-merge, #pr-dropdown .pr-am, #pr-dropdown .pr-amsplit { box-sizing: border-box; width: 124px; height: 22px; }
+#pr-dropdown .pr-main .pr-merge { display: inline-flex; align-items: center; justify-content: center; gap: 5px; max-width: none; font-weight: 700; }
+#pr-dropdown .pr-main .pr-merge svg { width: 13px; height: 13px; flex: none; }
+/* Merge here is green (green = mergeable), so solid blue only ever means "the system is on it" */
+#pr-dropdown .pr-main .pr-merge:not(:disabled):not(.pr-held) { background: var(--green, #a6e3a1); color: #11111b; }
+#pr-dropdown .pr-main .pr-merge:not(:disabled):not(.pr-held):hover { background: var(--green, #a6e3a1); filter: brightness(1.08); }
+#pr-dropdown .pr-am { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; border-radius: var(--r-sm); font-weight: 600;
+  background: transparent; color: #89b4fa; box-shadow: inset 0 0 0 1px rgba(137,180,250,.45); transition: background .14s, color .14s, box-shadow .14s; }
+#pr-dropdown button.pr-am:hover, #pr-dropdown button.pr-am:focus-visible { background: rgba(137,180,250,.12); box-shadow: inset 0 0 0 1px #89b4fa; }
+#pr-dropdown .pr-am svg { flex: none; }
+#pr-dropdown .pr-am :focus-visible, #pr-dropdown button.pr-am:focus-visible, #pr-dropdown .pr-am-ic:focus-visible { outline: 2px solid #89b4fa; outline-offset: 1px; }
+/* Undo: the bar drains over the 8s it stays */
+#pr-dropdown .pr-am.undo { overflow: hidden; box-shadow: inset 0 0 0 1px rgba(137,180,250,.35); }
+#pr-dropdown .pr-am.undo i { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #b4cefc; transform-origin: left; animation: pr-am-drain 8s linear forwards; }
+/* armed */
+#pr-dropdown .pr-am.armed { --c: #89b4fa; --bg: rgba(137,180,250,.2); --bd: #89b4fa; --dv: rgba(137,180,250,.55); padding: 0; gap: 0; overflow: hidden; font-size: 11px;
+  color: var(--c); background: var(--bg); box-shadow: inset 0 0 0 1px var(--bd); animation: pr-am-in .22s cubic-bezier(.2,.8,.2,1); }
+#pr-dropdown .pr-am.armed .face { fill: currentColor; fill-opacity: .3; }
+#pr-dropdown .pr-am.armed.l-busy { --c: #11111b; --bg: #89b4fa; --bd: #89b4fa; --dv: rgba(17,17,27,.28); font-weight: 700; }
+#pr-dropdown .pr-am.armed.l-y { --c: var(--yellow, #f9e2af); --bg: rgba(249,226,175,.08); --bd: var(--yellow, #f9e2af); --dv: rgba(249,226,175,.55); }
+#pr-dropdown .pr-am.armed.l-act { --c: #11111b; --bg: var(--yellow, #f9e2af); --bd: var(--yellow, #f9e2af); --dv: rgba(17,17,27,.28); font-weight: 700; }
+#pr-dropdown .pr-am .st { flex: 1; min-width: 0; height: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 2px 0 4px;
+  font: inherit; color: inherit; background: none; border: 0; white-space: nowrap; }
+#pr-dropdown .pr-am button.st { cursor: pointer; }
+#pr-dropdown .pr-am button.st:hover { background: rgba(255,255,255,.22); }
+#pr-dropdown .pr-am .cx { flex: none; width: 27px; height: 100%; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; cursor: pointer;
+  background: none; color: inherit; opacity: .85; box-shadow: inset 1px 0 0 var(--dv); }
+#pr-dropdown .pr-am .cx svg { width: 12px; height: 12px; }
+#pr-dropdown .pr-am .cx:hover, #pr-dropdown .pr-am .cx:focus-visible { opacity: 1; background: rgba(243,139,168,.22); }
+#pr-dropdown .pr-am:not(.l-busy):not(.l-act) .cx:hover svg, #pr-dropdown .pr-am:not(.l-busy):not(.l-act) .cx:focus-visible svg { color: var(--red, #f38ba8); }
+#pr-dropdown .pr-am:has(.cx:hover, .cx:focus-visible) .st { text-decoration: line-through; } /* shows what ✕ cancels */
+#pr-dropdown .pr-am .spin { transform-origin: 12px 12px; animation: pr-am-spin .9s linear infinite; }
+#pr-dropdown .pr-reason { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pr-dropdown .pr-row:focus-within .pr-actions { display: flex; } /* the hover actions (one-off Fix…) for keyboard too */
+/* Merge | ⏱ Auto: one 120px pill when Merge works but checks still run */
+#pr-dropdown .pr-amsplit { display: inline-flex; border-radius: var(--r-sm); overflow: hidden; box-shadow: inset 0 0 0 1px rgba(137,180,250,.45); }
+#pr-dropdown .pr-amsplit > .pr-merge { flex: 1; min-width: 0; padding: 0 4px; margin: 0; border-radius: 0; }
+#pr-dropdown .pr-am-ic { flex: none; width: 30px; padding: 0; margin: 0; gap: 4px; border-radius: 0; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(137,180,250,.16); color: #89b4fa; font-weight: 600; }
+#pr-dropdown .pr-am-ic:hover { background: rgba(137,180,250,.14); }
+@keyframes pr-am-in { from { transform: scale(.94); } to { transform: none; } }
+@keyframes pr-am-spin { to { transform: rotate(360deg); } }
+@keyframes pr-am-drain { to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { #pr-dropdown .pr-am, #pr-dropdown .pr-am * { animation: none !important; } }

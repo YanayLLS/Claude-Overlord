@@ -448,16 +448,7 @@
     else if (a.url || a.query) what = `<pre>${escH(a.url || a.query)}</pre>`;
     return `<div class="card perm"><div class="card-h">${ICON[kind] || ICON.shield}<span>${title}</span></div>${what}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
   }
-  // A permission dialog as the CLI draws it: its question ("Do you want to make this edit to hello.txt?") and the
-  // rows above it, up to the rule that opens the dialog, frame lines left out. null when none is on screen.
-  function screenPerm(id) {
-    const rows = screenOf(id, 50, true) || []; let q = -1;
-    for (let k = rows.length - 1; k >= 0 && k >= rows.length - 14; k--) if (/Do\s+you\s+want\s+to\b.*\?/.test(rows[k])) { q = k; break; }
-    if (q < 0) return null;
-    let top = q - 1; while (top >= 0 && !/^\s*─{10,}/.test(rows[top]) && q - top < 30) top--;
-    const body = rows.slice(top + 1, q).map(r => r.replace(/╌{3,}/g, '').replace(/^ /, '').replace(/\s+$/, '')).filter(r => r.trim() && !/^[\s─│]*$/.test(r) && !/^\s*Tip:/.test(r));
-    return { question: rows[q].trim(), body };
-  }
+  const screenPerm = (id) => screenPermRows(screenOf(id, 80, true));
   // The terminal's open menu ("❯ 1. Yes …  2. No …"), read off its last lines: the plan card's choices are exactly
   // the CLI's, whatever this version offers.
   function menuOptions(id) { return screenAsk(id).options.map(o => o.label); }
@@ -820,7 +811,7 @@
       + bg.map(e => { const a2 = e.args || {};
         return `<button type="button" role="menuitem" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
     // A menu on the CLI's screen that main didn't flag (a question with previews, say): still a question card, not the raw terminal.
-    if (!perm) { const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw); const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + askHtml(lastTool(evs, 'AskUserQuestion', doneBy), null); }
+    if (!perm) { const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw); const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + (permMenu(selectedId) && screenPerm(selectedId) ? permHtml({}, evs, doneBy) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), null)); }
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${termHtml(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -1728,11 +1719,10 @@
     const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
     el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
       + (() => { const w = ask ? screenAsk(id).question : (t.status || t.name || ''); return w && !/^Waiting for your (answer|permission)$/i.test(w) ? `<div class="ct-what${ask ? ' q' : ''}">${escH(w)}</div>` : ''; })()
-      + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : permBtns(id, 'data-k')}<button type="button" data-open="1">Open</button></div>`;
+      + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : permBtns(id, 'data-k')}</div>`;
     el.addEventListener('click', (e) => {
-      const b = e.target.closest('button'); if (!b) return;
+      const b = e.target.closest('button'); if (!b) { el.remove(); placeToasts(); focusAgent(id); return; } // the card itself opens the chat
       if (b.classList.contains('ct-x')) { el.remove(); return placeToasts(); }
-      if (b.dataset.open) { el.remove(); placeToasts(); focusAgent(id); return; }
       if (!stillWaiting(id)) { el.remove(); placeToasts(); return; } // answered elsewhere already: never type into a live prompt
       if (b.dataset.k) { if (!menuUp(id)) { el.remove(); placeToasts(); return; } api.send({ type: 'termInput', id, data: b.dataset.k === 'esc' ? '\x1b' : b.dataset.k }); }
       if (b.dataset.pick && !pickOption(id, +b.dataset.pick)) { el.remove(); placeToasts(); return; }

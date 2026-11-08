@@ -173,3 +173,15 @@ test('a queued message pulled back with ↑ (popAll) is a queue event, so the ch
   const ev = parse({ type: 'queue-operation', operation: 'popAll', content: 'oh it shows only when its deploying?' })[0];
   assert.strictEqual(ev.type, 'queue'); assert.strictEqual(ev.op, 'popAll');
 });
+
+test('a narration thinking block (shown by the CLI as reply text) is a text event; real thinking stays hidden', () => {
+  const narr = 'CAQS7wwKEQgTGAI4AUIJbmFycmF0aW9uEgy1dcKsGZerMds8FmIaDLaLlGlGFpm2URcqiyIwp5d', think = 'CAQS6AsKEAgTGAI4AUIIdGhpbmtpbmcSDCTlT8CN7+G7gG46RBoMWlvYDCsYpPP';
+  const evs = parse({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'secret', signature: think }, { type: 'thinking', thinking: 'I did X because Y.\n\n', signature: narr }] } });
+  assert.deepStrictEqual(evs.map(e => [e.type, e.text]), [['text', 'I did X because Y.']]);
+});
+
+test('a local command (/rename) shows as its /name line, its output as a sub note', () => {
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'local_command', content: '<command-name>/rename</command-name>\n<command-message>rename</command-message>\n<command-args>Rendered chat</command-args>' }), [{ type: 'command', ts: null, text: '/rename Rendered chat' }]);
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'local_command', content: '<local-command-stdout>Session renamed to: Rendered chat</local-command-stdout>' }), [{ type: 'note', ts: null, kind: 'sub', text: 'Session renamed to: Rendered chat' }]);
+  assert.strictEqual(parse({ type: 'system', subtype: 'local_command', content: '<local-command-stdout></local-command-stdout>' }), null);
+});

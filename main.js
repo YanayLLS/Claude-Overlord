@@ -1368,6 +1368,7 @@ function globalSearch(query) {
             role = 'assistant';
             for (const b of r.message.content) {
               if (b.type === 'text' && b.text) texts.push(b.text);
+              else if (timelineCore.isNarration(b)) texts.push(b.thinking.trim());
             }
           } else if (r.type === 'user') {
             role = 'user';
@@ -1664,7 +1665,8 @@ function restoreAgents(state) {
                 agent.stats.cacheRead += u.cache_read_input_tokens || 0;
               }
               if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
-                for (const b of r.message.content) {
+                for (let b of r.message.content) {
+                  if (timelineCore.isNarration(b)) b = { type: 'text', text: b.thinking.trim() }; // narration = reply text
                   if (b.type === 'text' && b.text) {
                     agent.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text;
                   }
@@ -2318,7 +2320,7 @@ function parseLine(id, line) {
       if (u) { a.stats.inTok += u.input_tokens || 0; a.stats.outTok += u.output_tokens || 0; a.stats.ctxTok = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0); a.stats.cacheTok += u.cache_creation_input_tokens || 0; a.stats.cacheRead += u.cache_read_input_tokens || 0; send({ type: 'stats', id, stats: a.stats }); }
     }
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
-      const blocks = r.message.content;
+      const blocks = r.message.content.map(b => timelineCore.isNarration(b) ? { type: 'text', text: b.thinking.trim() } : b); // narration = reply text
       for (const b of blocks) { if (b.type === 'text' && b.text) { a.lastText = b.text.length > PREVIEW_MAX ? b.text.slice(0, PREVIEW_MAX) + '\u2026' : b.text; send({ type: 'preview', id, text: a.lastText }); a.fullText = b.text; scanPeerReply(id, a, b.text); scanPeerSend(id, a, b.text); scanWhenDone(id, a, b.text); } }
       if (blocks.some(b => b.type === 'tool_use')) {
         a.isWaiting = false; a.hadTools = true;
@@ -2886,6 +2888,7 @@ function applyPrFlags(prs) {
   const muted = new Set(settings.prMuted || []);
   const mutedRepos = new Set(settings.prMutedRepos || []);
   const archived = new Set(settings.prArchived || []);
+  const auto = new Set(settings.prAutoMerge || []);
   const nowMs = Date.now();
   const snoozes = settings.prSnoozed || {};
   for (const k of Object.keys(snoozes)) if (snoozes[k] <= nowMs) delete snoozes[k]; // drop expired
@@ -2896,7 +2899,69 @@ function applyPrFlags(prs) {
     p.snoozed = snoozes[p.key] > nowMs;
     p.archived = archived.has(p.key);
     p.snoozeUntil = snoozes[p.key] || 0;
+    p.autoMerge = auto.has(p.url);
+    p.autoPhase = p.autoMerge ? autoPhaseOf(p) : null;
+    p.autoReason = p.autoPhase === 'stuck' ? autoFixReason.get(p.url) || '' : '';
   });
+}
+
+// "Fix & merge" on my PR ("I'm gone, land it"): red or conflicting → one Fix agent (it loops until green, actions-core.js
+// fixPrPlan); behind → update the branch; green → merge. Runs here, not as GitHub's auto-merge, so the release
+// gate (SOC2) and teammates' holds still apply. ponytail: only while Overlord runs.
+const autoFixAgents = new Map(); // url → agent id (or 'starting'); one fixer per PR at a time
+const autoUpdatedSha = new Map(); // url → head sha we already asked GitHub to update
+const autoMerging = new Set(); // urls whose merge call is in flight
+const autoFixReason = new Map(); // url → why its fixer couldn't start
+function autoPhaseOf(p) {
+  const f = autoFixAgents.get(p.url);
+  return autoPhase(p, { fixing: f === 'starting' || (f != null && agents.has(f)), fixFailed: f === 'failed', merging: autoMerging.has(p.url), held: !!releases.holdOn(p.repo, p.baseRef) });
+}
+function runAutoMerge(prs, failedRepos = []) {
+  const armed = settings.prAutoMerge || [];
+  if (!armed.length) return;
+  const keep = [];
+  for (const url of armed) {
+    const p = prs.find(x => x.url === url);
+    if (!p) { if (failedRepos.some(r => url.toLowerCase().includes('/' + r.toLowerCase() + '/'))) keep.push(url); continue; } // closed/merged, unless its repo just failed to load
+    keep.push(url);
+    const name = `${p.repo.split('/')[1]} #${p.number}`;
+    const conflict = p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY';
+    if (conflict || p.checks === 'fail') {
+      const fixer = autoFixAgents.get(url);
+      if (fixer === 'starting' || fixer === 'failed' || (fixer != null && agents.has(fixer))) continue; // already on it, or can't (its toast said why; re-arm retries)
+      autoFixAgents.set(url, 'starting');
+      fixPr(p).then(id => { const ok = typeof id === 'number'; autoFixAgents.set(url, ok ? id : 'failed'); if (!ok) autoFixReason.set(url, (id && id.error) || 'Fix agent didn\'t start'); })
+        .catch(e => { autoFixAgents.delete(url); send({ type: 'toast', text: `Auto-fix ${name} failed: ${e.message || e}` }); });
+      continue;
+    }
+    if (p.mergeState === 'BEHIND' && autoUpdatedSha.get(url) !== p.headSha) {
+      autoUpdatedSha.set(url, p.headSha);
+      execFile('gh', ['pr', 'update-branch', url], { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+        if (err) send({ type: 'toast', text: `Auto-merge: couldn't update ${name}: ${ghErr({ message: ((stderr || '') + err.message).trim() })}` });
+      });
+      continue;
+    }
+    const green = (p.checks === 'pass' || p.checks === 'none') && ['CLEAN', 'HAS_HOOKS'].includes(p.mergeState);
+    if (!green || releases.holdOn(p.repo, p.baseRef)) continue;
+    keep.pop();
+    autoMerging.add(url);
+    mergePrNow(url).finally(() => autoMerging.delete(url));
+  }
+  if (keep.length !== armed.length) { settings.prAutoMerge = keep; saveState(); }
+}
+
+function mergePrNow(url) { // → a promise that settles once the merge call is done
+  // prod release PRs merge only with two release approvers' signatures (SOC2)
+  return releases.mergeGate(url).then((gate) => new Promise((done) => {
+    if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return done(); }
+    if (gate.warn) send({ type: 'toast', text: gate.warn });
+    execFile('gh', ['pr', 'merge', url, '--merge'],
+      { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+        done();
+        if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
+        pollPRs(); // merged PR drops from the list
+      });
+  })).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
 }
 
 // Every caller (timers, the watch, ~15 PR actions) shares one poll: while one runs, more requests just queue a single
@@ -2970,6 +3035,7 @@ async function pollPRsOnce() {
     p.checksEta = null;
     if (p.checks === 'pending' && p.running.length) p.checksEta = checksEta(p.running, await fetchWorkflowDurations(p.repo));
   }
+  runAutoMerge(prs, failedRepos); // before the stamp: the row shows the phase this poll just started
   applyPrFlags(prs); // a mute/archive clicked while we awaited must not be reverted
   send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
 }
@@ -3056,7 +3122,7 @@ function armPrTimer() {
   if (!cfg || !cfg.enabled) return;
   const sec = Math.max(30, Number(cfg.intervalSec) || 60);
   pollPRs();
-  prTimer = setInterval(async () => { if (userAway()) return; if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
+  prTimer = setInterval(async () => { if (userAway() && !(settings.prAutoMerge || []).length) return; if (gqlAllow('regular', await gqlBudget(), { lastRegular: prRegularAt }).ok) { prRegularAt = Date.now(); pollPRs(); } }, sec * 1000);
   prWatchTimer = setInterval(() => { const c = settings.prSettings; if (c && c.enabled && !userAway() && !appQuiet()) prWatch.tick((c.repos || []).filter(r => PR_REPO_RE.test(r)).flatMap(r => [r, r + '#runs'])); }, PR_WATCH_MS);
   prCheckWatchTimer = setInterval(() => {
     if (userAway() || appQuiet()) return;
@@ -3066,7 +3132,7 @@ function armPrTimer() {
 }
 
 // ── GitHub Actions tracking ───────────────────────────
-const { runState, nextPollDelay, diffNewFailures, fixRunPlan, fixPrPlan, REPO_RE: WF_REPO_RE } = require('./actions-core');
+const { runState, nextPollDelay, diffNewFailures, fixRunPlan, fixPrPlan, autoPhase, REPO_RE: WF_REPO_RE } = require('./actions-core');
 const { git: gitIn, checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
 const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
 let actionsTimer = null;
@@ -3248,7 +3314,7 @@ async function fixActionRun(run) { return startFixAgent(fixRunPlan, run); }
 
 // "Fix" on a PR with failing checks: a normal agent in the repo's checkout (no worktree) that
 // pushes fixes to the PR until its checks are green (actions-core.js fixPrPlan).
-async function fixPr(pr) { return startFixAgent(fixPrPlan, pr); }
+async function fixPr(pr) { return startFixAgent(fixPrPlan, pr); } // → the new agent's id
 
 // Fix chat (the chat's ⋯ menu): the chat as shown and its terminal (pictured offscreen from the renderer's buffer
 // HTML, so the user sees nothing) are saved, and a new agent in Overlord's repo finds why they differ and fixes the
@@ -3286,8 +3352,8 @@ async function startFixAgent(planFor, target) {
   if (plan.error && target && target.repo && await findOrCloneCheckout(target.repo)) {
     plan = planFor(target, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
   }
-  if (plan.error) { send({ type: 'toast', text: plan.error }); return; }
-  if (!plan.branch) { createAgent(plan.repoDir, null, plan.prompt); return; } // PR fix: no worktree
+  if (plan.error) { send({ type: 'toast', text: plan.error }); return { error: plan.error }; }
+  if (!plan.branch) return createAgent(plan.repoDir, null, plan.prompt); // PR fix: no worktree
   // Reuse by folder, not by settings entry: an earlier click (or another checkout of the
   // same repo) may have made it without a matching entry, and git refuses to re-add it.
   let dir = wt.worktreePath(plan.repoDir, wt.safeBranch(plan.branch));
@@ -3300,7 +3366,7 @@ async function startFixAgent(planFor, target) {
     projectConfig(plan.repoDir).defaultBase = prevBase || 'dev'; saveState();
   }
   protectClaudeConfig([{ repo: plan.repoDir, path: dir }]);
-  createAgent(dir, null, plan.prompt);
+  return createAgent(dir, null, plan.prompt);
 }
 
 // The local checkouts Overlord already knows about: every agent's cwd plus every
@@ -3447,6 +3513,7 @@ async function exportTranscript(id) {
         const texts = [], tools = [];
         for (const b of r.message.content) {
           if (b.type === 'text' && b.text) texts.push(b.text);
+          else if (timelineCore.isNarration(b)) texts.push(b.thinking.trim());
           else if (b.type === 'tool_use') tools.push(b.name || 'unknown');
         }
         if (texts.length || tools.length) turns.push({ role: 'assistant', text: texts.join('\n'), tools });
@@ -5460,16 +5527,15 @@ function handleIpc(msg) {
     case 'mergePr': {
       const url = msg.url;
       if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
-      // prod release PRs merge only with two release approvers' signatures (SOC2)
-      releases.mergeGate(url).then((gate) => {
-        if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return; }
-        if (gate.warn) send({ type: 'toast', text: gate.warn });
-        execFile('gh', ['pr', 'merge', url, '--merge'],
-          { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-            if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
-            pollPRs(); // merged PR drops from the list
-          });
-      }).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
+      mergePrNow(url);
+      break;
+    }
+    case 'setPrAutoMerge': {
+      if (typeof msg.url !== 'string' || !msg.url.startsWith('https://github.com/')) break;
+      const s = new Set(settings.prAutoMerge || []);
+      if (msg.on) s.add(msg.url); else s.delete(msg.url);
+      if (autoFixAgents.get(msg.url) === 'failed') { autoFixAgents.delete(msg.url); autoFixReason.delete(msg.url); }
+      settings.prAutoMerge = [...s]; saveState(); pollPRs();
       break;
     }
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); const ag = agents.get(msg.id); if (ag && ag.askInput) send({ type: 'askInput', id: msg.id, input: ag.askInput }); break; } // a reload: the open question's previews too

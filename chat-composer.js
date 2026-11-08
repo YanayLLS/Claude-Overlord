@@ -159,8 +159,8 @@
   }
   // "/resume <filter>": the agent's other sessions, newest first; picking one runs "/resume <id>".
   const sessions = new Map(); // agent id → [{ id, title, mtime, size }]
-  // Every word typed, in any order ("flow assign" finds "Flow Editor | Assign bookmarks…").
-  const resumeHits = (id, q) => { const ws = q.toLowerCase().split(/\s+/).filter(Boolean); return (sessions.get(id) || []).filter(x => ws.every(w => x.title.toLowerCase().includes(w))); };
+  // Every word typed, in any order ("flow assign" finds "Flow Editor | Assign bookmarks…"), or its session id (or part).
+  const resumeHits = (id, q) => { const ws = q.toLowerCase().split(/\s+/).filter(Boolean); return (sessions.get(id) || []).filter(x => ws.every(w => (x.title + ' ' + x.id).toLowerCase().includes(w))); };
   function resumeCheck(t) {
     const m = /^\/resume\s+(.*)$/s.exec(t.value);
     if (!m || !chat()) return false;
@@ -208,7 +208,7 @@
     };
     const size = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
     const row = (f, k) => {
-      if (at.kind === 'resume') return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.title)}</b><span>${fmtTimeAgo(f.mtime)} · ${size(f.size)}</span></div>`;
+      if (at.kind === 'resume') return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.title)}</b><span>${fmtTimeAgo(f.mtime)} · ${size(f.size)}${at.q.split(/\s+/).some(w => w && f.id.includes(w.toLowerCase())) ? ' · ' + mark(f.id) : ''}</span></div>`;
       if (at.kind === '/') return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>/${mark(f.name)}</b><span class="d">${esc(f.desc || '')}</span></div>`;
       const i = f.lastIndexOf('/'); return `<div class="at-i${k === at.sel ? ' sel' : ''}" data-k="${k}"><b>${mark(f.slice(i + 1))}</b><span>${i > 0 ? esc(f.slice(0, i)) : ''}</span></div>`;
     };
