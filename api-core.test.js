@@ -164,9 +164,11 @@ test('overlord_capabilities lists every tool and event, with transports and feat
 
 // CLAUDE.md "Local API coverage": a tool or event added in code but not in the integration guide fails here.
 test('docs/local-api.md documents every tool and every event type', () => {
-  const doc = fs.readFileSync(path.join(__dirname, 'docs', 'local-api.md'), 'utf8');
-  const missing = [...TOOLS.map(t => t.name), ...EVENT_TYPES.map(e => e.type)].filter(n => !doc.includes('`' + n + '`'));
-  assert.deepStrictEqual(missing, [], 'add these to docs/local-api.md');
+  for (const f of ['local-api.md', 'integrating-with-overlord.md']) {
+    const doc = fs.readFileSync(path.join(__dirname, 'docs', f), 'utf8');
+    const missing = [...TOOLS.map(t => t.name), ...EVENT_TYPES.map(e => e.type)].filter(n => !doc.includes('`' + n + '`'));
+    assert.deepStrictEqual(missing, [], 'add these to docs/' + f);
+  }
 });
 
 test('MCP: tools/list and tools/call share the REST tools; errors come back as isError', async () => {
