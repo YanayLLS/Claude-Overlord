@@ -490,7 +490,7 @@ body.world-mode #hdr-chat { display: none; }
 
 /* toasts you can answer from */
 #chat-toasts { position: fixed; right: 16px; top: 56px; z-index: 40; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 32px)); }
-#chat-toasts .ctoast { padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, #d97757 55%, var(--border-hi)); background: var(--pop, var(--surface0)); box-shadow: 0 12px 36px rgba(0,0,0,.4); animation: chat-in .2s ease-out; transition: opacity .25s, transform .25s; font-size: 12.5px; }
+#chat-toasts .ctoast { cursor: pointer; padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, #d97757 55%, var(--border-hi)); background: var(--pop, var(--surface0)); box-shadow: 0 12px 36px rgba(0,0,0,.4); animation: chat-in .2s ease-out; transition: opacity .25s, transform .25s; font-size: 12.5px; }
 #chat-toasts .ctoast.done { opacity: 0; transform: translateX(20px); }
 #chat-toasts .ct-h { display: flex; align-items: center; gap: 6px; color: var(--text); }
 #chat-toasts .ct-h .ic { width: 14px; height: 14px; fill: none; stroke: #d97757; stroke-width: 2; }

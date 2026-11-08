@@ -1728,11 +1728,10 @@
     const el = document.createElement('div'); el.className = 'ctoast'; el.dataset.id = id; el.setAttribute('role', 'alert');
     el.innerHTML = `<div class="ct-h">${ask ? ICON.ask : ICON.shield}<b>${escH(a.title || 'Agent')}</b><span>${ask ? 'has a question' : 'wants to run'}</span><button type="button" class="ct-x" aria-label="Dismiss">×</button></div>`
       + (() => { const w = ask ? screenAsk(id).question : (t.status || t.name || ''); return w && !/^Waiting for your (answer|permission)$/i.test(w) ? `<div class="ct-what${ask ? ' q' : ''}">${escH(w)}</div>` : ''; })()
-      + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : permBtns(id, 'data-k')}<button type="button" data-open="1">Open</button></div>`;
+      + `<div class="ct-btns">${ask ? opts.slice(0, 4).map((o, k) => `<button type="button" data-pick="${k}">${escH(o)}</button>`).join('') : permBtns(id, 'data-k')}</div>`;
     el.addEventListener('click', (e) => {
-      const b = e.target.closest('button'); if (!b) return;
+      const b = e.target.closest('button'); if (!b) { el.remove(); placeToasts(); focusAgent(id); return; } // the card itself opens the chat
       if (b.classList.contains('ct-x')) { el.remove(); return placeToasts(); }
-      if (b.dataset.open) { el.remove(); placeToasts(); focusAgent(id); return; }
       if (!stillWaiting(id)) { el.remove(); placeToasts(); return; } // answered elsewhere already: never type into a live prompt
       if (b.dataset.k) { if (!menuUp(id)) { el.remove(); placeToasts(); return; } api.send({ type: 'termInput', id, data: b.dataset.k === 'esc' ? '\x1b' : b.dataset.k }); }
       if (b.dataset.pick && !pickOption(id, +b.dataset.pick)) { el.remove(); placeToasts(); return; }
