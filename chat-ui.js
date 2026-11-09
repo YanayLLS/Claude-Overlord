@@ -1915,6 +1915,11 @@
   }
 
   // Copy from chat as clean HTML (lists, bold, links, code - no app colors/classes) + plain text that keeps list numbers.
+  // Hovering a /skill in a message shows its description (tooltip.js reads data-tip on the same mouseover, after this).
+  document.getElementById('conversation').addEventListener('mouseover', (e) => {
+    const t = e.target.closest && e.target.closest('.cmdtag'); if (!t || t.dataset.tip) return;
+    const d = window.chatComposer && chatComposer.cmdDesc(t.textContent.trim()); if (d) t.dataset.tip = d;
+  });
   document.getElementById('conversation').addEventListener('copy', (e) => {
     const sel = getSelection(); if (!sel.rangeCount || sel.isCollapsed || !e.clipboardData || e.target.closest?.('textarea,input,[contenteditable]')) return;
     const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:-9999px;top:0;white-space:normal';

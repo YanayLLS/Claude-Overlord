@@ -686,6 +686,8 @@ body.world-mode #hdr-chat { display: none; }
 /* in your own message: a file chip stands off the bubble, a /command or /skill in the brand colour */
 :root body :is(#conversation, #chat-shell) .bubble a.pathref { background: var(--bg); }
 :root body :is(#conversation, #chat-shell) .cmdtag { color: var(--claude); font-weight: 500; }
+#conversation .cmdtag { border-radius: 4px; padding: 0 2px; margin: 0 -2px; cursor: default; transition: background .12s; }
+#conversation .cmdtag:hover { background: color-mix(in srgb, var(--claude) 16%, transparent); }
 /* A subagent's panel: task (folded), steps, result */
 #chat-shell.agentp { max-height: 70%; }
 #chat-shell .ap-b { overflow: auto; padding: 8px 12px 12px; }
