@@ -877,3 +877,6 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell, #chat-hover) .ansi-fg11 { color: var(--ansi11); } :root body :is(#conversation, #chat-shell, #chat-hover) .ansi-fg12 { color: var(--ansi12); } :root body :is(#conversation, #chat-shell, #chat-hover) .ansi-fg13 { color: var(--ansi13); } :root body :is(#conversation, #chat-shell, #chat-hover) .ansi-fg14 { color: var(--ansi14); }
 :root body :is(#conversation, #chat-shell, #chat-hover) .ansi-b { font-weight: 600; } :root body :is(#conversation, #chat-shell, #chat-hover) .ansi-dim { opacity: .65; } :root body :is(#conversation, #chat-shell, #chat-hover) .ansi-i { font-style: italic; } :root body :is(#conversation, #chat-shell, #chat-hover) .ansi-u { text-decoration: underline; }
 :root body :is(#conversation, #chat-shell, #chat-hover) .d-add { color: var(--green); } :root body :is(#conversation, #chat-shell, #chat-hover) .d-del { color: var(--red); } :root body :is(#conversation, #chat-shell, #chat-hover) .d-hunk { color: var(--dim); }
+
+/* Scrolled-up reading position is held by chat-ui.js (holdPlace); the browser's own anchoring shifted it a second time. */
+#conversation { overflow-anchor: none; }

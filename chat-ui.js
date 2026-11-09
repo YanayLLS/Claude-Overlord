@@ -424,7 +424,8 @@
   // At the bottom and the chat's box shrinks (the reply box grows a line as you type): stay at the bottom. It slid off
   // and back on every key, flashing the jump button.
   { const c = document.getElementById('conversation'); let end = true;
-    c.addEventListener('scroll', () => { end = c.scrollHeight - c.scrollTop - c.clientHeight < 40; }, { passive: true });
+    c.addEventListener('scroll', () => { end = c.scrollHeight - c.scrollTop - c.clientHeight < 40; holdPlace(c); }, { passive: true });
+
     new ResizeObserver(() => { if (end && c.classList.contains('open')) c.scrollTop = c.scrollHeight; }).observe(c);
     // ponytail: temporary trace - "typing scrolls the chat off the bottom" (not reproduced): who moves it right after a key. Remove once found.
     let keyAt = 0, logged = 0; const d = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
@@ -1087,6 +1088,22 @@
   // After you send: the bottom for a moment, through what still grows the thread (its bubble, markdown, images, blocks
   // getting their real height). Scrolling up yourself lets go.
   let pinUntil = 0;
+  // Scrolled up reading: the block at the top of the view stays exactly where it is while anything in the thread
+  // changes height after a redraw (link titles, diagrams, images, tool rows filling in): only the redraw itself
+  // re-anchored, so later growth above pushed what you were reading away. Chromium's own anchoring is off (chat.css):
+  // it shifted again on top of this.
+  const blockKey = (n) => n && (n.dataset.i || (n.querySelector('[data-i]') || {}).dataset?.i);
+  function holdPlace(el) { // what's at the top of the view now (called on every scroll)
+    el._anc = null;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) return; // following the bottom
+    const thread = el.querySelector(':scope > .thread'), top = el.getBoundingClientRect().top; if (!thread) return;
+    for (const n of thread.children) { const r = n.getBoundingClientRect(); if (r.bottom > top && blockKey(n)) { el._anc = { i: blockKey(n), y: r.top - top }; return; } }
+  }
+  const placeRO = new ResizeObserver(() => {
+    const el = document.getElementById('conversation'), a = el._anc; if (!a || !el.classList.contains('open') || Date.now() < pinUntil) return;
+    const n = [...(el.querySelector(':scope > .thread')?.children || [])].find(x => blockKey(x) === a.i); if (!n) return;
+    const d = n.getBoundingClientRect().top - el.getBoundingClientRect().top - a.y; if (Math.abs(d) >= 1) el.scrollTop += d;
+  });
   function pinBottom() {
     pinUntil = Date.now() + 2000; const el = document.getElementById('conversation');
     if (!el._pinWired) { el._pinWired = 1; el.addEventListener('wheel', (e) => { if (e.deltaY < 0) pinUntil = 0; }, { passive: true }); }
@@ -1149,14 +1166,14 @@
     const fresh = el.dataset.for !== String(id) || !thread;
     if (fresh && window.chatComposer) chatComposer.drawAtt(); // another agent: its own pending images
     if (fresh && el._agent != null && el._agent !== id) onAgentSwitch(); el._agent = id;
-    if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); el._shown = null; }
+    if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); el._shown = null; el._anc = null; placeRO.disconnect(); placeRO.observe(thread); }
     // The history landing after the loading spinner is opening the chat too: always at the bottom, nothing slides in
     // (else the last reply counted as "just arrived" and a long one parked you at its first line).
     const opening = fresh || (!!evs && el._shown !== id); if (evs) el._shown = id;
     const stuck = !opening && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
     // Scrolled up reading: the message at the top of the view stays put whatever changes above it (a new turn folds the
     // oldest into "Earlier", blocks get rebuilt).
-    const keyOf = (n) => n && (n.dataset.i || (n.querySelector('[data-i]') || {}).dataset?.i);
+    const keyOf = blockKey;
     let anchor = null;
     if (stuck) { const top = el.getBoundingClientRect().top; for (const n of thread.children) { const r = n.getBoundingClientRect(); if (r.bottom > top && keyOf(n)) { anchor = { i: keyOf(n), y: r.top }; break; } } }
     const old = el._blocks || [];
@@ -1173,6 +1190,7 @@
     while (thread.children.length > list.length) thread.lastElementChild.remove();
     el._blocks = list;
     if (anchor) { const n = [...thread.children].find(c => keyOf(c) === anchor.i); if (n) el.scrollTop += n.getBoundingClientRect().top - anchor.y; }
+    if (stuck) holdPlace(el); else el._anc = null;
     // The live tail ticks every second (elapsed, the CLI's verb, agent timers). When only that text changed, swap the
     // text in place: rebuilding would replay the slide-in and restart the spark and shimmer on every tick.
     if (tailEl._h !== tail) {
