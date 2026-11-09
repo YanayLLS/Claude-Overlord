@@ -4297,6 +4297,7 @@ focusAgent = function(id) {
   if (window.chatComposer) chatComposer.carryDraft(termTab === 'terminal' ? 'conversation' : 'terminal', termTab);
   api.send({ type: 'focusAgent', id });
   openTerm(id);
+  syncPreview(); // the web preview shows this agent's browser (this override had dropped it: the pane sat on "Waiting for localhost…")
   // Scroll selected card into view (for keyboard nav with long lists)
   const sel = document.querySelector('.agent.selected');
   if (sel) sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

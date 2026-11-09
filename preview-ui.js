@@ -9,7 +9,12 @@
   let refs = null;
   let deviceCtl = null;
 
-  function toggle() {
+  // The pane opens beside the chat on its own once the agent browses (as in Claude's app) and follows the focused
+  // agent: shown for one with a page, hidden for one without. × keeps it shut for that agent until you reopen it.
+  const pages = new Set(), shut = new Set(); let auto = false;
+  function toggle(byUser = true) {
+    if (byUser && activeAgentId != null) { if (visible) shut.add(activeAgentId); else shut.delete(activeAgentId); }
+    auto = !byUser && !visible;
     visible = !visible;
     const content = document.getElementById('content');
     refs.col.classList.toggle('open', visible);
@@ -78,6 +83,9 @@
     refs.errorBadge.classList.remove('has-errors');
     refs.sendBtn.disabled = true;
     refs.clearBtn.disabled = true;
+    const want = activeAgentId != null && pages.has(activeAgentId) && !shut.has(activeAgentId);
+    if (want && !visible) toggle(false);
+    else if (!want && visible && auto) toggle(false);
   }
 
   function onPreviewError(msg) {
@@ -90,6 +98,10 @@
   }
 
   function onPreviewLoaded(msg) {
+    if (msg.nav && msg.id != null && /^https?:/.test(msg.url || '')) {
+      pages.add(msg.id);
+      if (msg.id === activeAgentId && !visible && !shut.has(msg.id)) toggle(false);
+    }
     if (msg.id != null && msg.id !== activeAgentId) return;
     if (msg.url) setUrlValue(msg.url);
     refs.statusEl.style.display = 'none';

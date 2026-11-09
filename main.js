@@ -6554,7 +6554,7 @@ app.whenReady().then(() => {
       return `persist:overlord-agent-${a && a.sessionId ? a.sessionId : id}`;
     },
     onErrorCount: (id, count, last) => send({ type: 'previewError', id, count, last }),
-    onNavigated: (id, url) => { send({ type: 'previewLoaded', id, url }); if (preview) preview.onAgentNavigated(id, url); },
+    onNavigated: (id, url) => { if (preview) preview.onAgentNavigated(id, url); }, // it sends previewLoaded
   });
   mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));

@@ -45,7 +45,7 @@ function createPreviewController({ window, registry, send, writeToAgent, isAlive
   // actually navigated — never a stale one from a focus switch that happened
   // while a load was in flight.
   function onAgentNavigated(id, url) {
-    send({ type: 'previewLoaded', id, url });
+    send({ type: 'previewLoaded', id, url, nav: true }); // nav: the agent's own browsing, which opens the pane beside its chat
     if (id === agentId) restoreParentFocus();
   }
 

@@ -6,6 +6,8 @@ const { TOOL_SCHEMAS, createDispatcher } = require('./tools');
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_INFO = { name: 'overlord-browser', version: '1.0.0' };
+// Agents kept popping Chrome/Playwright windows on the user's screen: this browser opens in Overlord beside their chat.
+const INSTRUCTIONS = "Your own browser inside Overlord: it opens in a pane beside your chat, where the user watches. Use it for every look at a web page (checking a UI, a localhost app, a flow) instead of opening Chrome, Edge or a headed Playwright window, which pop up on the user's screen. Playwright scripts for tests or screenshots are fine only headless (never headless: false). Never open URLs with start/Start-Process/explorer.";
 const MAX_BODY = 1024 * 1024;
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
@@ -33,7 +35,7 @@ function reply(res, status, payload) {
 async function handleRpc(msg, resolveActions, agentId) {
   const { id, method, params } = msg;
   if (method === 'initialize') {
-    return ok(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: SERVER_INFO });
+    return ok(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
   }
   if (method === 'ping') return ok(id, {});
   if (method === 'tools/list') return ok(id, { tools: TOOL_SCHEMAS });
