@@ -4077,20 +4077,26 @@ function buildTeamPrompt(task, roles) {
 }
 
 // ── Team detection ────────────────────────────────────
-function scanTeams() {
+// Async, and a team's config is re-read only when its file changes: with hundreds of team dirs under ~/.claude/teams the
+// sync version (exists + read + parse of each, every 3 s) stalled the main process 300-650 ms per tick.
+const teamCfgCache = new Map(); // team dir -> { mtimeMs, config }
+let teamScanBusy = false;
+async function scanTeams() {
+  if (teamScanBusy) return; teamScanBusy = true;
   try {
-    if (!fs.existsSync(TEAMS_DIR)) return;
+    if (!(await fs.promises.stat(TEAMS_DIR).catch(() => null))) return;
     // Build sessionId -> agentId lookup from our agents
     const sessionToAgent = new Map();
     for (const [id, a] of agents) sessionToAgent.set(a.sessionId, id);
     if (!sessionToAgent.size && !teams.size) return; // nobody could lead a team: no reason to read every team dir
-    const teamDirs = fs.readdirSync(TEAMS_DIR);
+    const teamDirs = await fs.promises.readdir(TEAMS_DIR);
 
     for (const teamName of teamDirs) {
       const configPath = path.join(TEAMS_DIR, teamName, 'config.json');
-      if (!fs.existsSync(configPath)) continue;
-      let config;
-      try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { continue; }
+      const st = await fs.promises.stat(configPath).catch(() => null); if (!st) { teamCfgCache.delete(teamName); continue; }
+      let config, hit = teamCfgCache.get(teamName);
+      if (hit && hit.mtimeMs === st.mtimeMs) config = hit.config;
+      else { try { config = JSON.parse(await fs.promises.readFile(configPath, 'utf-8')); } catch { continue; } teamCfgCache.set(teamName, { mtimeMs: st.mtimeMs, config }); }
       if (!config.leadSessionId || !config.members) continue;
 
       // Match team to one of our agents via leadSessionId
@@ -4100,12 +4106,12 @@ function scanTeams() {
       // Read tasks
       let taskList = [];
       const tasksDir = path.join(TASKS_DIR, teamName);
-      if (fs.existsSync(tasksDir)) {
+      if (await fs.promises.stat(tasksDir).catch(() => null)) {
         try {
-          const taskFiles = fs.readdirSync(tasksDir).filter(f => f.endsWith('.json'));
+          const taskFiles = (await fs.promises.readdir(tasksDir)).filter(f => f.endsWith('.json'));
           for (const tf of taskFiles) {
             try {
-              const task = JSON.parse(fs.readFileSync(path.join(tasksDir, tf), 'utf-8'));
+              const task = JSON.parse(await fs.promises.readFile(path.join(tasksDir, tf), 'utf-8'));
               taskList.push({ id: task.id, subject: task.subject, status: task.status, owner: task.owner, activeForm: task.activeForm });
             } catch {}
           }
@@ -4150,6 +4156,7 @@ function scanTeams() {
       }
     }
   } catch (e) { console.log('[Overlord] Team scan error:', e.message); }
+  finally { teamScanBusy = false; }
 }
 
 // ── @Mention detection + context injection ─────────────
