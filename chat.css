@@ -1238,3 +1238,11 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-queue { width: min(70%, 520px); }
 :root body #chat-queue .msg.user.pending { margin: 0; max-width: 100%; }
 :root body #chat-queue .msg.user.pending .bubble { max-width: 100%; }
+/* ── round 16 ── */
+:root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary { display: flex; align-items: center; gap: 6px; min-width: 0; }
+:root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary .ic { flex: none; margin: 0; order: 2; }
+:root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary b { flex: none; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .card.choice .code-in input { font-family: Geist, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; }
+:root body #chat-queue { right: 37px; gap: 8px; padding-bottom: 6px; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .ctx-use .cu-l li:last-child, :root body :is(#conversation, #chat-shell, #chat-queue) .ctx-use .cu-l li:has(i[style*="surface1"]) { color: var(--dim); }
+:root body #chat-queue .msg.user.pending:has(.q-x) { margin: 0; }
