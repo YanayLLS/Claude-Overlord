@@ -37,6 +37,7 @@ test('ovl-start opens a tab over HTTP; same title replaces it; the key is kept f
     assert.match(pty.spawned[0].args, /^\/d \/k "npm run dev"$/);
     assert.strictEqual(pty.spawned[0].opts.cwd, dir);
     assert.strictEqual(pty.spawned[0].opts.env.MY_VAR, 'x1', 'the bat\'s environment reaches the server');
+    assert.ok(!('NoDefaultCurrentDirectoryInExePath' in pty.spawned[0].opts.env), 'agent-shell vars dropped: cmd must find dev.bat in its folder');
     assert.deepStrictEqual([...termPaneKeys(dir)], ['k1']);
 
     pty.spawned[0].dataCb('hello');

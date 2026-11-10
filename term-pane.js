@@ -11,6 +11,11 @@ const path = require('path');
 const crypto = require('crypto');
 const { appendBuf } = require('./term-pane-core');
 
+// A bat an agent runs carries the agent's shell env. Claude Code sets NoDefaultCurrentDirectoryInExePath there,
+// which stops cmd finding `dev.bat` in its own folder ("'dev.bat' is not recognized"); a console you open never has it.
+const AGENT_ONLY = /^(NoDefaultCurrentDirectoryInExePath|CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID)$/i;
+const tabEnv = (env) => Object.fromEntries(Object.entries(env || process.env).filter(([k]) => !AGENT_ONLY.test(k)));
+
 function createTermPane({ stateDir, ptyFactory, ptyHost, send, log = () => {}, appDir = __dirname }) {
   const tabs = new Map(); // name -> { name, cwd, mode, line, env, proc, key, buf, running, code }
   const tabsFile = path.join(stateDir, 'term-tabs.json');
@@ -38,7 +43,7 @@ function createTermPane({ stateDir, ptyFactory, ptyHost, send, log = () => {}, a
   function spawn(t) {
     const comspec = process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe';
     // A string, not an array: node-pty hands it to CreateProcess as typed, so cmd sees the bat's own quoting.
-    const proc = ptyFactory().spawn(comspec, `/d ${t.mode} ${t.line}`, { name: 'xterm-256color', cols: size.cols, rows: size.rows, cwd: t.cwd, env: t.env });
+    const proc = ptyFactory().spawn(comspec, `/d ${t.mode} ${t.line}`, { name: 'xterm-256color', cols: size.cols, rows: size.rows, cwd: t.cwd, env: tabEnv(t.env) });
     wire(t, proc);
   }
 
