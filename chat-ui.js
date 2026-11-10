@@ -267,7 +267,7 @@
     return '';
   }
   function footHtml(textAt, turn, sum, mark) {
-    const meta = turn ? `<span class="tf-meta">${SPARK}${Number.isFinite(turn.ms) && turn.ms > 0 ? 'Worked ' + escH(dur(turn.ms)) : 'Done'}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : ''; // a turn without its duration says Done, not "NaNh"
+    const meta = turn ? `<span class="tf-meta">${SPARK}${Number.isFinite(turn.ms) && turn.ms > 0 ? 'Worked ' + escH(dur(turn.ms)) + (turn.ts ? ' · ' : '') : ''}${turn.ts ? escH(clock(turn.ts)) : Number.isFinite(turn.ms) && turn.ms > 0 ? '' : 'Done'}</span>` : ''; // a turn without its duration says Done, not "NaNh"
     let files = '', cost = '';
     if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
     if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
@@ -579,14 +579,14 @@
       : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">${ICON.ext}Open link<kbd>1</kbd></button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}<span>Copy link</span><kbd>2</kbd></button>` : '');
     const cancel = sc.options.length ? '' : `<div class="btns"><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div>`;
     const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
-    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : (/^([a-z]:[\\/]|~|\/)/i.test(l) ? (() => { const parts = l.split(/[\\/]/), last = parts.pop(); return `<p class="fname" title="${escH(l)}"><b>${escH(last)}</b></p><p class="mono path" title="${escH(l)}"><span class="pp">${escH(parts.filter(Boolean).join('\\'))}</span></p>`; })() : `<p>${escH(l)}</p>`)).join('');
+    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : (/^([a-z]:[\\/]|~|\/)/i.test(l) ? (() => { const parts = l.split(/[\\/]/), last = parts.pop(); return `<p class="fname" title="${escH(l)}"><b>${escH(last)}</b></p><p class="mono path" title="${escH(l)}">${escH((p => p.length > 4 ? [...p.slice(0, 2), '…', ...p.slice(-2)] : p)(parts.filter(Boolean)).join('\\'))}</p>`; })() : `<p>${escH(l)}</p>`)).join('');
     const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled>Sign in</button></div>' : '';
     return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${login ? 'Sign in' : escH(sc.title)}</span></div>${lines}${btns ? `<div class="btns">${btns}</div>` : ''}${field}${cancel}</div>`;
   }
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
     // The plan in full (it scrolls inside past ~360px), then the CLI's choices as one footer: Approve filled, the rest quiet.
-    const lab = (l) => /auto-?accept/i.test(l) ? 'Approve' : /manual/i.test(l) ? 'Approve, ask per edit' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
+    const lab = (l) => /auto-?accept/i.test(l) ? 'Approve' : /manual/i.test(l) ? 'Ask per edit' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
     return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Approve plan?</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${/keep planning|^no\b/i.test(l) ? 'Esc' : k + 1}</kbd></button>`).join('')}</div></div>`;
   }
   // Which step of a several-question prompt the CLI is on: it only shows that by colour (the step's name on a filled
@@ -912,7 +912,8 @@
     // /btw isn't queued: the CLI answers it at once in its own panel (shown as the terminal) and never writes it to the
     // transcript, so its bubble would wait "Queued" forever.
     if (list) for (let k = list.length - 1; k >= 0; k--) if (!list[k].held && /^\/btw\s/.test(list[k].text || '') && Date.now() - list[k].at > 1500) list.splice(k, 1);
-    if (!list || !list.length) return cliQueue(id, evs);
+    const rq = removedQ.get(id), undoRow = rq && Date.now() - rq.at < 6000 ? `<div class="msg note cli qremoved">Removed “${escH(String(rq.text || '').slice(0, 60))}” <button type="button" class="q-x undo" data-act="unremove">Undo</button></div>` : '';
+    if (!list || !list.length) return undoRow + cliQueue(id, evs);
     // Each message sent from here becomes the next message of yours in the transcript, in the order sent, so they clear
     // in that order: the first one of yours written after a message was sent is that message, whatever the CLI made of its
     // text (its own image numbers, a long paste's wrapper, text left in its box…). Matching the text broke on each of those.
@@ -940,7 +941,7 @@
       // Only once main has handed it over (else it's still waiting for a CLI: main says when it fails); a page reload lost that word: 15 min.
       if (!busy && (p.sentAt ? Date.now() - Math.max(p.busyAt || 0, p.sentAt) > 30000 : Date.now() - p.at > 15 * 60e3)) list.splice(list.indexOf(p), 1);
     }
-    return list.map((p, k) => {
+    return undoRow + list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
       const queued = busy && !p.held;
       return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
@@ -949,6 +950,7 @@
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
   // the queued messages into the input; if that's what came up, Ctrl+C on the (non-empty) input clears it — it only
   // interrupts on an empty input, which is checked first — and the others still wanted are queued again.
+  const removedQ = new Map(); // agent id -> the queued message just removed (its Undo row shows 6 s)
   async function unqueue(id, k, drop = false) {
     const list = pending.get(id) || [], p = list[k]; if (!p) return;
     const x = typeof xterms !== 'undefined' && xterms.get(id), t = x && x.terminal;
@@ -978,7 +980,7 @@
     }
     // Your words aren't lost: back in the reply box (images too) when it's empty, to edit and send again.
     if (p.restore && !drop) chatComposer.restoreDraft(id, p.restore);
-    else if (p.restore) { showToast('Removed · Undo', () => chatComposer.restoreDraft(id, p.restore)); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } // gone from the queue; Undo puts its words back in the reply box
+    else if (p.restore) { removedQ.set(id, { text: p.text, restore: p.restore, at: Date.now() }); setTimeout(() => { const r = removedQ.get(id); if (r && Date.now() - r.at >= 6000) { removedQ.delete(id); rerender(); } }, 6100); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } // gone from the queue; Undo puts its words back in the reply box
     document.getElementById('term-order-input')?.focus({ preventScroll: true });
     rerender();
   }
@@ -1543,6 +1545,7 @@
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
     const sw = e.target.closest('[data-act="switch-acct"]'); if (sw && selectedId != null) { chatComposer.sendText(selectedId, '/login'); return; } // another account: the CLI's /login (its card follows)
+    const ur = e.target.closest('[data-act="unremove"]'); if (ur && selectedId != null) { const r = removedQ.get(selectedId); if (r) { removedQ.delete(selectedId); chatComposer.restoreDraft(selectedId, r.restore); rerender(); } return; } // its words back in the reply box
     const ud = e.target.closest('[data-act="undismiss-limit"]'); if (ud && evs) { const ev = evs[+ud.dataset.i]; if (ev) { ev._dismissed = false; cache.delete(ev); rerender(); } return; }
     const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } return; }
     if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out

@@ -1188,3 +1188,9 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .q-x.undo { width: auto; padding: 0 8px; font-size: 12px; text-decoration: underline; opacity: 1; }
 /* The cursor row's key keeps its box. */
 :root body #conversation .card.ask .choices button.focus kbd { border-color: var(--border-hi); }
+
+/* ── /improve round 12 ── */
+:root body #conversation .card.ask .choices button.focus kbd { background: var(--surface0); border-color: var(--border-hi); color: var(--subtext); }
+:root body :is(#conversation, #chat-shell) .card.err.limit .card-h .ic { color: var(--claude); }
+:root body #term:has(#conversation .chat-empty.hello) [data-act="session-changes"] { display: none; } /* nothing changed in a new chat */
+:root body :is(#conversation, #chat-shell) .card.choice:not(:has(.btns button.primary)) .btns button.dec { color: var(--subtext); }
