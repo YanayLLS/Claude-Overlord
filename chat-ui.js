@@ -174,7 +174,7 @@
     // While a call runs the line names it ("Running npm test"), with a dot; once all are done, the summary.
     const live = [...tools].reverse().find(ev => ev.toolId && !doneBy.get(ev.toolId)), lv = live && toolView(live, true);
     const label = lv ? `${escH(lv.verb)}${lv.target ? ` <span class="mono">${escH(lv.target)}</span>` : ''}` : escH(groupSummary(tools));
-    return done(`<div class="tools"><details class="tgroup${live ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary>${live ? '<span class="dot"></span>' : ''}<span class="gl">${label}</span><span class="gl gs">${tools.length} actions</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`);
+    return done(`<div class="tools"><details class="tgroup${live ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary>${live ? '<span class="dot"></span>' : ''}<span class="gl">${label}</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`);
   }
 
   function msgHtml(ev, i, cwd) {
@@ -192,19 +192,20 @@
     // A /command (a skill, /compact…) is something you sent: your message bubble, the command tinted as in the reply box.
     else if (ev.type === 'command') h = `<div class="msg user" data-i="${i}"><div class="bubble">${tagChips(ev.text)}</div></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
-    else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
+    else if (ev.type === 'compact') h = `<details class="msg divider compacted"${ev._restored && ev._restored.length ? '' : ' data-empty'}><summary><span>Conversation compacted${ev._restored && ev._restored.length ? ` · ${ev._restored.length} restored` : ''}</span></summary>${ev._restored && ev._restored.length ? `<div class="cp-list">${ev._restored.map(t => `<div>${escH(t)}</div>`).join('')}</div>` : ''}</details>`;
     else if (ev.type === 'note' && ev.kind === 'sub' && contextUsage(ev.text)) { // /context: one bar of what fills the window, the categories under it
       const u = contextUsage(ev.text), used = u.cats.filter(c => !/^free/i.test(c.name)), hue = (k) => `var(${['--claude', '--cyan', '--purple', '--yellow', '--green', '--peach', '--red'][k % 7]})`; // theme tokens, one per category
       h = `<div class="msg ctx-use"><div class="cu-h"><b>${escH(u.used)}</b><span>${u.pct}%</span><span class="cu-m">${escH(u.model)}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
     }
-    else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>${escH(String(ev.text).split(/[.·(]|\s[-–]\s/)[0].replace(/…$/, '').trim())}</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
-    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.text)}</div>`;
+    else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
+    else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
+    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/s*(disable recaps in /config)s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset">Resets ${escH(clock(new Date(at).toISOString()))} · <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Auto-retry">Auto-retry</button></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset">Resets <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}" data-armed="Retrying at ${escH(clock(new Date(at).toISOString()))} · Cancel">Retry at ${escH(clock(new Date(at).toISOString()))}</button></div></div></div>`;
     }
     else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
@@ -317,9 +318,12 @@
     // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
     const mk = marksOf(id);
     const close = () => { flush(); if (!turn) return; if (open) out.push(footHtml(textAt, turn, sum, textAt >= 0 && evs[textAt].ts ? { ts: evs[textAt].ts, on: mk.has(evs[textAt].ts) } : null)); textAt = -1; turn = null; open = false; sum = fresh(); };
+    const folded = new Set(); // CLI lines a compaction printed (files re-read, skills restored): under its divider
     evs.forEach((ev, i) => {
-      if (i < start) return;
+      if (i < start || folded.has(i)) return;
       const t = ev.type;
+      if (t === 'compact' && !ev._restored) { ev._restored = []; for (let j = i + 1; j < evs.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { ev._restored.push(String(evs[j].text || '').replace(/^⎿\s*/, '').split('\n')[0]); folded.add(j); } }
+      else if (t === 'compact') for (let j = i + 1, n = 0; j < evs.length && n < ev._restored.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { folded.add(j); n++; }
       tally(ev, i);
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
       // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.
@@ -568,9 +572,10 @@
     const url = (sc.lines.join(' ').match(chatUrlRe()) || [])[0], code = sc.lines.some(l => /paste (the )?code/i.test(l)), login = /^(log ?in|sign ?in)/i.test(sc.title);
     const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${n + 1}</kbd></button>`).join('')
       : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">Open link</button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}Copy link</button>` : '') + `<button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button>`;
-    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l)).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l)}</p>` : `<p${/^([a-z]:[\\/]|~|\/)/i.test(l) ? ' class="mono"' : ''}>${escH(l)}</p>`).join('');
-    const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" class="primary" data-login-send>Sign in</button></div>' : '';
-    return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${escH(sc.title)}</span></div>${lines}${field}<div class="btns">${btns}</div></div>`;
+    const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
+    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l)}</p>` : `<p${/^([a-z]:[\\/]|~|\/)/i.test(l) ? ' class="mono"' : ''}>${escH(l)}</p>`).join('');
+    const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send>Sign in</button></div>' : '';
+    return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${escH(sc.title)}</span></div>${lines}<div class="btns">${btns}</div>${field}</div>`;
   }
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
@@ -1253,7 +1258,7 @@
       // Trust / login: Claude can't take a message yet. A question: typed text is your own answer. Nothing said yet: ask.
       const lastEv = evs && evs.length ? evs[evs.length - 1] : null, declinedLast = !!(lastEv && lastEv.type === 'interrupt' && evs.length > 1 && evs[evs.length - 2].err && /\buser (rejected|denied|declined)\b/i.test(evs[evs.length - 2].text || ''));
       const locked = tail.includes('class="card perm choice"'); document.getElementById('term-order')?.classList.toggle('locked', locked);
-      const ph = sg ? sg + '  (Tab)' : locked ? '' : /class="card (perm|ask)/.test(tail) ? 'Tell Claude instead…' : evs && !evs.length ? 'Ask Claude…' : declinedLast ? 'What should Claude do instead?' : 'Reply…';
+      const ph = sg ? sg + '  (Tab)' : locked ? 'Answer above' : /class="card (perm|ask)/.test(tail) ? 'Tell Claude instead…' : evs && !evs.length ? 'Ask Claude…' : declinedLast ? 'What should Claude do instead?' : 'Reply…';
       if (box && box.placeholder !== ph) { box.dataset.sugg = sg; box.placeholder = ph; } }
     drawDock(); applyAskHover(); keepAskInput(); // a hovered option keeps its preview through redraws, a typed answer its text
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
@@ -1279,7 +1284,7 @@
     // Usage-limit cards: the countdown, Retry held until the reset, and the retry the user asked for once it's passed.
     for (const s of inRecent('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
     for (const b of inRecent('button[data-reset]')) b.hidden = +b.dataset.reset > now; // Retry once it has reset
-    for (const c of inRecent('button[data-autoretry]')) { const on = autoRetry.has(id + ':' + c.dataset.autoretry), due = +c.dataset.autoretry <= now; c.hidden = due; c.classList.toggle('primary', !on); c.textContent = on ? 'Scheduled · Undo' : c.dataset.label; } // one button before the reset: arm it, then it reads as armed and undoes
+    for (const c of inRecent('button[data-autoretry]')) { const on = autoRetry.has(id + ':' + c.dataset.autoretry), due = +c.dataset.autoretry <= now; c.hidden = due; c.classList.toggle('primary', !on); c.textContent = on ? c.dataset.armed : c.dataset.label; } // one button before the reset: arm it, then it reads as armed and undoes
     for (const key of [...autoRetry]) { const [aid, at] = key.split(':').map(Number); if (aid !== id || at > now) continue; autoRetry.delete(key); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); } // only this agent's: each agent remembers its own
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);

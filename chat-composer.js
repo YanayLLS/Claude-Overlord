@@ -391,6 +391,8 @@
     if (!e.shiftKey && !e.altKey && ((e.key === 'ArrowUp' && firstLine) || (e.key === 'ArrowDown' && lastLine))) {
       e.preventDefault(); document.getElementById('conversation').scrollBy({ top: e.key === 'ArrowUp' ? -80 : 80 });
     }
+    // Page Up / Page Down page the chat from the reply box; Ctrl+End jumps to the latest.
+    if (chat() && (e.key === 'PageUp' || e.key === 'PageDown' || (e.key === 'End' && e.ctrlKey))) { const c = document.getElementById('conversation'); e.preventDefault(); if (e.key === 'End') c.scrollTop = c.scrollHeight; else c.scrollBy({ top: (e.key === 'PageUp' ? -1 : 1) * c.clientHeight * 0.85 }); }
   }
   // Pasted files: a screenshot goes through main like Alt+V in the terminal; an image file copied in Explorer is attached
   // by path; any other file drops its path into the box. Plain text pastes as usual.

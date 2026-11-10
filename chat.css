@@ -998,3 +998,40 @@ body.world-mode #hdr-chat { display: none; }
 /* Keyboard: the rail opens its list on focus. */
 :root body #chat-rail:focus-within .cr-pop { visibility: visible; opacity: 1; transition-delay: 0s; }
 :root body #chat-rail .cr-pop div:focus-visible { outline: 2px solid color-mix(in srgb, var(--claude) 50%, transparent); }
+
+/* ── /improve round 3 ── */
+/* Footer actions (copy, forward, star) on hover or focus for every turn; a starred turn keeps its star. */
+:root body :is(#conversation, #chat-shell) .turnfoot.latest .tf-acts { opacity: 0; transition: opacity .15s; }
+:root body :is(#conversation, #chat-shell) .turnfoot.latest:hover .tf-acts, :root body :is(#conversation, #chat-shell) .turnfoot.latest .tf-acts:focus-within { opacity: 1; }
+:root body :is(#conversation, #chat-shell) .tf-acts { gap: 8px; }
+/* Tables: the pinned first column only where a table really scrolls (a narrow column), drawn in the table's own fill. */
+:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: static; background: inherit; }
+@container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: sticky; left: 0; z-index: 1; background: var(--bg); } }
+/* Question focus: a neutral ring (an orange one inside the orange card read as already chosen); rows 8px apart. */
+:root body #conversation .card.ask .choices button.focus { box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 45%, transparent); border-color: transparent; }
+:root body :is(#conversation, #chat-shell) .choices { gap: 8px; }
+/* Login: the code field under the buttons; its Sign in fills once there is a code. */
+:root body :is(#conversation, #chat-shell) .card.choice .code-in button { background: transparent; color: var(--text); border-color: var(--border-hi); }
+:root body :is(#conversation, #chat-shell) .card.choice .code-in:has(input:not(:placeholder-shown)) button { background: var(--text); color: var(--bg); border-color: var(--text); }
+/* Compaction: one divider; what it restored opens under it. */
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary { list-style: none; cursor: pointer; display: flex; justify-content: center; }
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted[data-empty] > summary { cursor: default; pointer-events: none; }
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary::-webkit-details-marker { display: none; }
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted .cp-list { margin: 6px 0 10px; font-size: 12px; color: var(--dim); display: grid; gap: 2px; overflow-wrap: anywhere; }
+/* Long CLI notices: one line that opens on click or Enter. */
+:root body :is(#conversation, #chat-shell) details.msg.note.cli.long { white-space: normal; }
+:root body :is(#conversation, #chat-shell) details.msg.note.cli.long > summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; list-style: none; }
+:root body :is(#conversation, #chat-shell) details.msg.note.cli.long > summary::-webkit-details-marker { display: none; }
+:root body :is(#conversation, #chat-shell) details.msg.note.cli.long[open] > summary { display: none; }
+:root body :is(#conversation, #chat-shell) details.msg.note.cli.long > div { overflow-wrap: anywhere; }
+/* Loading: the skeleton sits where the thread will (its latest turn, at the bottom). */
+:root body #conversation .thread:has(> .chat-skel) { min-height: 100%; justify-content: flex-end; }
+/* The jump button never sits on the last line of text. */
+:root body #conversation > .tail { padding-bottom: 40px; }
+/* Rail: dashes 12px tall to hit, 2px apart; its list never wider than the column. */
+:root body #chat-rail .cr-dashes { gap: 2px; }
+:root body #chat-rail .cr-dashes i { padding: 5px 0; }
+:root body #chat-rail .cr-pop { width: min(340px, 70vw); }
+/* Minimum sizes. */
+:root body #chat-hover .hv-foot, :root body #chat-changes .cc-n em { font-size: 11px; }
+:root body :is(#conversation, #chat-shell) .md-code-head button { min-height: 32px; }
