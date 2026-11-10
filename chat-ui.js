@@ -1417,10 +1417,19 @@
     if (rail._on === on) return; rail._on = on; // same prompt as last time: nothing to move
     for (const n of rail.querySelectorAll('[data-i]')) n.classList.toggle('on', n.dataset.i === on);
   }
+  // Jump to a message: land with its top 8px under the view's top, and keep it there while the blocks around it get their
+  // real heights (off-screen blocks carry an estimate until drawn; a smooth scroll aimed at where the message *was* fell
+  // short of it). The place-holding anchor is pinned to it, and a few frames re-align it.
+  function jumpTo(m) {
+    const el = document.getElementById('conversation'); if (!el || !m) return;
+    const align = () => { const d = m.getBoundingClientRect().top - el.getBoundingClientRect().top - 8; if (Math.abs(d) >= 1) el.scrollTop += d; };
+    align(); holdPlace(el);
+    let n = 0; const again = () => { align(); holdPlace(el); if (++n < 8) requestAnimationFrame(again); }; requestAnimationFrame(again);
+  }
   let scrubEnd = 0;
   rail.addEventListener('click', (e) => {
     const t = e.target.closest('[data-i]'); if (!t || Date.now() - scrubEnd < 300) return;
-    const go = () => { const m = document.querySelector(`#conversation .thread > [data-i="${t.dataset.i}"]`); if (m) { m.scrollIntoView({ block: 'start', behavior: 'smooth' }); m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash'); } return !!m; };
+    const go = () => { const m = document.querySelector(`#conversation .thread > [data-i="${t.dataset.i}"]`); if (m) { jumpTo(m); m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash'); } return !!m; };
     if (!go()) { expanded.add(selectedId); rerender(); setTimeout(go, 50); } // it's in the folded earlier turns: open them first
   });
   rail.addEventListener('mouseenter', () => { const on = rail.querySelector('.cr-pop .on'); if (on) on.scrollIntoView({ block: 'nearest' }); });
@@ -1433,7 +1442,7 @@
     scrub.last = d.dataset.i; scrub.moved = true;
     let m = document.querySelector(`#conversation .thread > [data-i="${d.dataset.i}"]`);
     if (!m && !expanded.has(selectedId)) { expanded.add(selectedId); rerender(); m = document.querySelector(`#conversation .thread > [data-i="${d.dataset.i}"]`); } // folded earlier turns: open them
-    if (m) m.scrollIntoView({ block: 'start', behavior: 'auto' });
+    if (m) jumpTo(m);
   };
   rail.querySelector('.cr-dashes').addEventListener('pointerdown', (e) => { if (e.button) return; scrub = { last: null, moved: false }; rail.setPointerCapture(e.pointerId); rail.classList.add('scrub'); scrubTo(e.clientY); e.preventDefault(); });
   rail.addEventListener('pointermove', (e) => { if (scrub) scrubTo(e.clientY); });
