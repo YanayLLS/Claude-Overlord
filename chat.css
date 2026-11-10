@@ -1175,3 +1175,16 @@ body.world-mode #hdr-chat { display: none; }
 /* Quick replies and the hover card footer at the minimums. */
 :root body :is(#conversation, #chat-shell) .qr { min-height: 32px; }
 :root:root body #chat-hover .hv-foot { font-size: 11px; }
+
+/* ── /improve round 11 ── */
+/* Queued: no clock (nobody acts on it); Edit and Remove 8px apart. */
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q:has(.q-x)::before { content: none; }
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q { gap: 8px; }
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q-x { margin: -6px 0; }
+/* Recap: one dim line that opens. */
+:root body :is(#conversation, #chat-shell) details.msg.note.recap > summary { cursor: pointer; list-style: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root body :is(#conversation, #chat-shell) details.msg.note.recap > summary::-webkit-details-marker { display: none; }
+:root body :is(#conversation, #chat-shell) details.msg.note.recap[open] > summary { display: none; }
+:root body :is(#conversation, #chat-shell) .q-x.undo { width: auto; padding: 0 8px; font-size: 12px; text-decoration: underline; opacity: 1; }
+/* The cursor row's key keeps its box. */
+:root body #conversation .card.ask .choices button.focus kbd { border-color: var(--border-hi); }

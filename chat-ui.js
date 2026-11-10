@@ -202,10 +202,11 @@
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
     else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span>${/fail/i.test(m[2]) ? ICON.alert : ICON.check}</div>`; }
     else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
+    else if (ev.type === 'note' && ev.kind === 'recap') h = `<details class="msg note cli recap"><summary><b>Recap</b> ${escH(String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '').split('\n')[0])}</summary><div>${escH(String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, ''))}</div></details>`;
     else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>Recap</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
-    else if (ev.type === 'apierror' && ev._dismissed) h = `<div class="msg note cli" data-i="${i}">Usage limit · resets ${escH(clock(new Date(resetOf(ev) || Date.now()).toISOString()))}</div>`;
+    else if (ev.type === 'apierror' && ev._dismissed) h = `<div class="msg note cli" data-i="${i}">Usage limit · resets ${escH(clock(new Date(resetOf(ev) || Date.now()).toISOString()))} <button type="button" class="q-x undo" data-act="undismiss-limit" data-i="${i}">Undo</button></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
@@ -574,7 +575,7 @@
     // /login: the sign-in link the CLI prints (Open is the primary, for when no browser opened by itself), and a field
     // for the code when it asks for one.
     const url = (sc.lines.join(' ').match(chatUrlRe()) || [])[0], code = sc.lines.some(l => /paste (the )?code/i.test(l)), login = /^(log ?in|sign ?in)/i.test(sc.title);
-    const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${k === prim ? 'Enter' : 'Esc'}</kbd></button>`).join('')
+    const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${k === prim ? '1' : 'Esc'}</kbd></button>`).join('')
       : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">${ICON.ext}Open link<kbd>1</kbd></button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}<span>Copy link</span><kbd>2</kbd></button>` : '');
     const cancel = sc.options.length ? '' : `<div class="btns"><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div>`;
     const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
@@ -585,7 +586,7 @@
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
     // The plan in full (it scrolls inside past ~360px), then the CLI's choices as one footer: Approve filled, the rest quiet.
-    const lab = (l) => /auto-?accept/i.test(l) ? 'Auto-accept edits' : /manual/i.test(l) ? 'Ask before edits' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
+    const lab = (l) => /auto-?accept/i.test(l) ? 'Approve' : /manual/i.test(l) ? 'Approve, ask per edit' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
     return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Approve plan?</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${/keep planning|^no\b/i.test(l) ? 'Esc' : k + 1}</kbd></button>`).join('')}</div></div>`;
   }
   // Which step of a several-question prompt the CLI is on: it only shows that by colour (the step's name on a filled
@@ -977,7 +978,7 @@
     }
     // Your words aren't lost: back in the reply box (images too) when it's empty, to edit and send again.
     if (p.restore && !drop) chatComposer.restoreDraft(id, p.restore);
-    else if (p.restore) showToast('Removed · Undo', () => chatComposer.restoreDraft(id, p.restore)); // gone from the queue; Undo puts its words back in the reply box
+    else if (p.restore) { showToast('Removed · Undo', () => chatComposer.restoreDraft(id, p.restore)); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } // gone from the queue; Undo puts its words back in the reply box
     document.getElementById('term-order-input')?.focus({ preventScroll: true });
     rerender();
   }
@@ -1295,7 +1296,7 @@
     // Usage-limit cards: the countdown, Retry held until the reset, and the retry the user asked for once it's passed.
     for (const s of inRecent('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
     for (const b of inRecent('button[data-reset]')) b.hidden = +b.dataset.reset > now; // Retry once it has reset
-    for (const c of inRecent('button[data-autoretry]')) { const on = autoRetry.has(id + ':' + c.dataset.autoretry), due = +c.dataset.autoretry <= now; c.hidden = due; c.classList.toggle('primary', !on); c.classList.toggle('dec', on); c.innerHTML = on ? ICON.check + escH(c.dataset.armed) : ICON.clock + escH(c.dataset.label) + '<kbd>1</kbd>'; } // one button before the reset: arm it, then it reads as armed and undoes
+    for (const c of inRecent('button[data-autoretry]')) { const on = autoRetry.has(id + ':' + c.dataset.autoretry), due = +c.dataset.autoretry <= now; c.hidden = due; c.classList.toggle('primary', !on); c.classList.toggle('dec', on); c.innerHTML = on ? ICON.check + escH(c.dataset.armed) : escH(c.dataset.label) + '<kbd>1</kbd>'; } // one button before the reset: arm it, then it reads as armed and undoes
     for (const key of [...autoRetry]) { const [aid, at] = key.split(':').map(Number); if (aid !== id || at > now) continue; autoRetry.delete(key); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); } // only this agent's: each agent remembers its own
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
@@ -1533,7 +1534,8 @@
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
     const sw = e.target.closest('[data-act="switch-acct"]'); if (sw && selectedId != null) { chatComposer.sendText(selectedId, '/login'); return; } // another account: the CLI's /login (its card follows)
-    const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); showToast('Dismissed · Undo', () => { ev._dismissed = false; cache.delete(ev); rerender(); }); } return; }
+    const ud = e.target.closest('[data-act="undismiss-limit"]'); if (ud && evs) { const ev = evs[+ud.dataset.i]; if (ev) { ev._dismissed = false; cache.delete(ev); rerender(); } return; }
+    const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } return; }
     if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
