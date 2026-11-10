@@ -1220,3 +1220,9 @@ body.world-mode #hdr-chat { display: none; }
 /* Question: no tint on the CLI's cursor row at rest, only a brighter edge. */
 :root body #conversation .card.ask .choices button.focus { background: transparent; border-color: color-mix(in srgb, var(--text) 35%, var(--border-hi)); }
 @container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .card.choice .code-in input { flex: none; } } /* stacked: the field keeps its 40px (flex:1 squashed it in a column) */
+/* ── /improve round 15 ── */
+:root body :is(#conversation, #chat-shell) details.msg.note.recap > summary .ic { width: 12px; height: 12px; vertical-align: -2px; margin-right: 4px; }
+/* Sign in: Submit only once there's a code; the field's placeholder in the UI font. */
+:root body :is(#conversation, #chat-shell) .card.choice .code-in:has(input:placeholder-shown) button { display: none; }
+:root body :is(#conversation, #chat-shell) .card.choice .code-in input::placeholder { font-family: inherit; color: var(--dim); }
+:root body :is(#conversation, #chat-shell) .card.choice .code-in input { border-color: var(--border-hi); }

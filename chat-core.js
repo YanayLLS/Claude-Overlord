@@ -18,7 +18,7 @@ function toolView(ev, running) {
     case 'Glob': return { kind: 'search', verb: v('Listed', 'Listing'), target: a.pattern || a.glob || '', mono: true };
     case 'WebFetch': return { kind: 'web', verb: v('Fetched', 'Fetching'), target: hostOf(a.url), mono: false };
     case 'WebSearch': return { kind: 'web', verb: v('Searched the web', 'Searching the web'), target: a.query || '', mono: false };
-    case 'Task': case 'Agent': return { kind: 'agent', verb: v('Agent', 'Agent'), target: a.description || a.subagent_type || '', mono: false };
+    case 'Task': case 'Agent': return { kind: 'agent', verb: v('Agent', 'Running'), target: a.description || a.subagent_type || '', mono: false };
     case 'TodoWrite': return { kind: 'todo', verb: v('Updated the plan', 'Updating the plan'), target: '', mono: false };
     case 'AskUserQuestion': return { kind: 'ask', verb: v('Asked', 'Asking'), target: a.question || '', mono: false };
     case 'ExitPlanMode': return { kind: 'plan', verb: v('Proposed a plan', 'Proposing a plan'), target: '', mono: false };
