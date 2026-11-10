@@ -3800,7 +3800,10 @@ function pauseWhenHidden(x) {
   x._pauseSync = () => { const show = termShown(x); if (show === x._wasShown) return; x._wasShown = show; orig({ isIntersecting: show, intersectionRatio: show ? 1 : 0 }); };
   x._pauseSync();
 }
-function syncTermPause() { for (const x of xterms.values()) x._pauseSync && x._pauseSync(); }
+// Every xterm, the Terminals pane's too (term-pane-ui.js hides its tabs the same way): paused while it can't be seen.
+const _otherTerms = new Set();
+if (window.Terminal && !Terminal.prototype._ovOpen) { const open = Terminal.prototype.open; Terminal.prototype._ovOpen = true; Terminal.prototype.open = function (parent) { open.call(this, parent); const x = { terminal: this, el: parent }; setTimeout(() => { pauseWhenHidden(x); if (x._pauseSync) _otherTerms.add(x); }, 0); this.onDispose?.(() => _otherTerms.delete(x)); }; }
+function syncTermPause() { for (const x of xterms.values()) x._pauseSync && x._pauseSync(); for (const x of _otherTerms) x._pauseSync(); }
 setInterval(syncTermPause, 500); // tab switches, the chat's split/peek, window minimise: caught within half a second
 function showXterm(id) {
   ghostClear(); // stale suggestion from the previously-shown agent
