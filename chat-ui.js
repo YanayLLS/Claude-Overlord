@@ -199,7 +199,7 @@
       h = `<div class="msg ctx-use"><div class="cu-h"><b title="${u.pct}% used">${escH(u.used)}</b><span class="cu-m">${escH(u.model.replace(/^claude-(\w+)-(\d+)-(\d+).*$/i, (m, f, a2, b2) => f[0].toUpperCase() + f.slice(1) + ' ' + a2 + '.' + b2))}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.filter(c => !/^free/i.test(c.name)).map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
     }
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
-    else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span><em>${escH(m[2])}</em></div>`; }
+    else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span>${/fail/i.test(m[2]) ? ICON.alert : ICON.check}</div>`; }
     else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
     else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
@@ -207,7 +207,7 @@
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset" title="Resets ${escH(clock(new Date(at).toISOString()))}">Resets <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Auto-retry" data-armed="Auto-retry on · Cancel">Auto-retry</button></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset" title="Resets ${escH(clock(new Date(at).toISOString()))}">Resets <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}" data-armed="Retrying at ${escH(clock(new Date(at).toISOString()))} · Cancel">Retry at ${escH(clock(new Date(at).toISOString()))}</button></div></div></div>`;
     }
     else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
@@ -483,7 +483,7 @@
   function permBtns(id, attr, kbd) {
     const o = permMenu(id), list = o ? o.slice(0, 4).map((l, k) => [String(k + 1), l]) : [['1', 'Yes'], ['2', 'Yes, always allow']];
     // Short labels on the buttons (the CLI's full wording stays in the tooltip); "No…" is a quiet text button at the end.
-    const b = (k, l, j) => `<button type="button" class="${j ? '' : 'primary'}${/^(no|deny)\b/i.test(l) ? ' dec' : ''}" ${attr}="${k}" title="${escH(l)}">${escH(permLabel(l))}${kbd ? `<kbd>${k === 'esc' ? 'Esc' : k}</kbd>` : ''}</button>`;
+    const b = (k, l, j) => { const no = /^(no|deny)\b/i.test(l); return `<button type="button" class="${j ? '' : 'primary'}${no ? ' dec' : ''}" ${attr}="${k}" title="${escH(l)}">${escH(permLabel(l))}${kbd ? `<kbd>${k === 'esc' || no ? 'Esc' : k}</kbd>` : ''}</button>`; };
     return list.map(([k, l], j) => b(k, l, j)).join('') + (list.some(([, l]) => /^no\b/i.test(l)) ? '' : b('esc', 'Deny', 1));
   }
   // The open question as the CLI draws it: the line above its menu, and each option with the lines under it. A question
@@ -572,19 +572,19 @@
     // /login: the sign-in link the CLI prints (Open is the primary, for when no browser opened by itself), and a field
     // for the code when it asks for one.
     const url = (sc.lines.join(' ').match(chatUrlRe()) || [])[0], code = sc.lines.some(l => /paste (the )?code/i.test(l)), login = /^(log ?in|sign ?in)/i.test(sc.title);
-    const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${n + 1}</kbd></button>`).join('')
+    const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${k === prim ? 'Enter' : 'Esc'}</kbd></button>`).join('')
       : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">${ICON.ext}Open link<kbd>1</kbd></button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}<span>Copy link</span><kbd>2</kbd></button>` : '');
     const cancel = sc.options.length ? '' : `<div class="btns"><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div>`;
     const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
-    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l)}</p>` : `<p${/^([a-z]:[\\/]|~|\/)/i.test(l) ? ' class="mono"' : ''}>${escH(l)}</p>`).join('');
+    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : `<p${/^([a-z]:[\\/]|~|\/)/i.test(l) ? ' class="mono"' : ''}>${escH(l)}</p>`).join('');
     const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled>Sign in</button></div>' : '';
     return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${login ? 'Sign in' : escH(sc.title)}</span></div>${lines}${btns ? `<div class="btns">${btns}</div>` : ''}${field}${cancel}</div>`;
   }
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
     // The plan in full (it scrolls inside past ~360px), then the CLI's choices as one footer: Approve filled, the rest quiet.
-    const lab = (l) => /auto-?accept/i.test(l) ? 'Approve' : /manual/i.test(l) ? 'Review each edit' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
-    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${k + 1}</kbd></button>`).join('')}</div></div>`;
+    const lab = (l) => /auto-?accept/i.test(l) ? 'Auto-accept edits' : /manual/i.test(l) ? 'Review each edit' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
+    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${/keep planning|^no\b/i.test(l) ? 'Esc' : k + 1}</kbd></button>`).join('')}</div></div>`;
   }
   // Which step of a several-question prompt the CLI is on: it only shows that by colour (the step's name on a filled
   // background), and the question isn't in the transcript until it's answered. -1 when it can't tell.
@@ -1554,7 +1554,7 @@
     const ar = e.target.closest('button[data-autoretry]'); // "Retry at 3:00 PM": arm it; again: undo
     if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; autoRetry.has(key) ? autoRetry.delete(key) : autoRetry.add(key); rerender(); return; }
     const uq = e.target.closest('[data-unqueue]'); if (uq) uq.closest('.msg')?.classList.add('leaving'); // ✕ on a queued prompt: take it back, the agent keeps working (it fades at once)
-    if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
+    if (uq) { const m = uq.closest('.msg'); Promise.resolve(unqueue(selectedId, +uq.dataset.unqueue)).finally(() => m && m.isConnected && m.classList.remove('leaving')); return; }
     const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
     if (art) { if (art.dataset.artOpen) api.send({ type: 'openUrl', url: art.dataset.artOpen }); else navigator.clipboard.writeText(art.dataset.artCopy).then(() => { art.classList.add('done'); setTimeout(() => art.classList.remove('done'), 1200); }); return; }
     const pn = e.target.closest('[data-pn]'); // a pasted text's chip in a message on its way: its text in the panel

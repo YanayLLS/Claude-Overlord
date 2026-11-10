@@ -263,4 +263,5 @@ test('contextUsage: /context output as model, total and categories (the glyph gr
   assert.deepStrictEqual(u.cats, [{ name: 'System prompt', size: '3.1k', pct: 0.3 }, { name: 'Skills', size: '9.6k', pct: 1 }, { name: 'Free space', size: '923.7k', pct: 92.4 }, { name: 'Autocompact buffer', size: '33k', pct: 3.3 }]);
   assert.match(u.rest, /^Auto-compact window/);
   assert.strictEqual(contextUsage('Total cost: $0.12'), null);
+  assert.deepStrictEqual((({ model, used }) => ({ model, used }))(contextUsage('Context Usage\n⛁ ⛀   claude-opus-5-5 · 43.7k/1m tokens (4%)')), { model: 'claude-opus-5-5', used: '43.7k/1m tokens' });
 });

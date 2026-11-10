@@ -400,7 +400,7 @@ function contextUsage(text) {
   for (let i = 1; i < lines.length; i++) {
     const l = strip(lines[i]);
     let m;
-    if ((m = /^(.+?\d[\d.]*[km]?\/[\d.]+[km]? tokens)\s*\((\d+(?:\.\d+)?)%\)/i.exec(l))) { used = m[1]; pct = +m[2]; }
+    if ((m = /^(.*?)\s*[·•]?\s*(\d[\d.]*[km]?\/[\d.]+[km]? tokens)\s*\((\d+(?:\.\d+)?)%\)/i.exec(l))) { used = m[2]; pct = +m[3]; if (m[1] && !model) model = m[1]; }
     else if ((m = /^(.+?):\s*([\d.]+[km]?)(?: tokens)?\s*\((\d+(?:\.\d+)?)%\)$/i.exec(l))) cats.push({ name: m[1], size: m[2], pct: +m[3] });
     else if (l && !model && !/^claude-|usage by category/i.test(l)) model = l;
     if (l || i < 3) end = i + 1;

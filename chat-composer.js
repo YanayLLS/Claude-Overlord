@@ -338,7 +338,7 @@
       if (b) { b.click(); return true; }
     }
     if (e.key === 'Enter' && !e.shiftKey) { const b = tail && tail.querySelector('.card.perm:not(.choice) .btns button.primary, .card.plan-ask .btns button.primary'); if (b) { b.click(); return true; } }
-    if (e.key === 'Escape') { const b = tail && tail.querySelector('[data-keys="esc"]'); if (b) { b.click(); return true; } }
+    if (e.key === 'Escape') { const b = tail && (tail.querySelector('[data-keys="esc"]') || tail.querySelector('.card .btns button.dec')); if (b) { b.click(); return true; } }
     if (e.key === 'Escape' && tail && tail.querySelector('.card.ask')) { chatUi.keys(['\x1b']); return true; } // an open question or plan: Esc closes it, as in the CLI
     // The rewind list: ↑/↓ move, Enter picks, Esc cancels, as in the CLI.
     if (tail && tail.querySelector('.card.rewind')) {

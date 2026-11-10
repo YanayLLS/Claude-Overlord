@@ -1091,3 +1091,28 @@ body.world-mode #hdr-chat { display: none; }
 /* 32px rows and actions. */
 :root body :is(#conversation, #chat-shell) :is(.sumrow, .tools summary) { min-height: 32px; }
 :root body :is(#conversation, #chat-shell) .act { width: 32px; height: 32px; }
+
+/* ── /improve round 6 ── */
+/* Compaction divider: its label sits in the rule, like every divider (details can't host the rule pseudo-elements, its summary does). */
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted { display: block; }
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted::before, :root body :is(#conversation, #chat-shell) details.msg.divider.compacted::after { content: none; }
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary { align-items: center; gap: 12px; }
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary::before, :root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary::after { content: ''; flex: 1; height: 1px; background: var(--border-hi); }
+/* Tables: one header fill, the first column like the rest. */
+:root body :is(#conversation, #chat-shell) .md table td:first-child { background: none; }
+:root body :is(#conversation, #chat-shell) .md table th:first-child { background: unset; }
+/* Stacked footer: label left, key hint right, so they read as one row. */
+@container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .card .btns button { justify-content: flex-start; padding: 0 44px 0 14px; } :root body :is(#conversation, #chat-shell) .card .btns button.dec { justify-content: flex-start; } }
+/* Queued: the clock is a dim state mark, smaller than the take-back. */
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q:has(.q-x)::before { font-size: 11px; opacity: .6; }
+/* Usage limit: one heading; the reset line is body text. */
+:root body :is(#conversation, #chat-shell) .card .reset { font-weight: 400 !important; color: var(--subtext) !important; }
+/* Agent finished: the state icon. */
+:root body :is(#conversation, #chat-shell) .msg.note.agentdone > .ic:last-child { width: 13px; height: 13px; color: var(--green); }
+/* Less dead space under the last card; the jump button only shows when you've scrolled up. */
+:root body #conversation > .tail { padding-bottom: 16px; }
+/* Targets: files chip, question tabs, attachment remove (always visible), find bar buttons. */
+:root body :is(#conversation, #chat-shell) .tf-files { height: 32px; }
+:root body #conversation .card.ask .ask-tabs span { height: 32px; } :root body #conversation .card.ask .ask-tabs { gap: 8px; }
+:root body #chat-att .att-x { width: 24px; height: 24px; opacity: 1; }
+:root body #chat-find button { width: 32px; height: 32px; }
