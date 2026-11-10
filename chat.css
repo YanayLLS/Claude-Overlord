@@ -335,8 +335,8 @@ body.world-mode #hdr-chat { display: none; }
 #chat-rail .cr-dashes i { display: block; width: 10px; height: 2px; border-radius: 1px; background: var(--dim); opacity: .45; transition: width .15s, opacity .15s, background .15s; }
 #chat-rail:hover .cr-dashes i { opacity: .8; }
 #chat-rail .cr-dashes i.on { width: 18px; background: var(--claude); opacity: 1; }
-#chat-rail .cr-pop { display: none; position: absolute; right: calc(100% + 4px); top: 50%; transform: translateY(-50%); width: 340px; max-height: 60vh; overflow-y: auto; padding: 6px; border-radius: 14px; background: var(--pop, var(--surface0)); border: 1px solid var(--border-hi); box-shadow: 0 10px 32px rgba(0,0,0,.35); }
-#chat-rail:hover .cr-pop { display: block; }
+#chat-rail .cr-pop { display: block; visibility: hidden; opacity: 0; transition: opacity .12s, visibility 0s .35s; position: absolute; right: 100%; top: 50%; transform: translateY(-50%); width: 340px; max-height: 60vh; overflow-y: auto; padding: 6px; border-radius: 14px; background: var(--pop, var(--surface0)); border: 1px solid var(--border-hi); box-shadow: 0 10px 32px rgba(0,0,0,.35); }
+#chat-rail:hover .cr-pop { visibility: visible; opacity: 1; transition-delay: 0s; } /* no gap to the rail, and a short grace on leave: a slip off the dashes on the way to the list no longer shuts it */
 #chat-rail .cr-pop div { padding: 7px 10px; border-radius: 8px; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #chat-rail .cr-pop div:hover, #chat-rail .cr-pop div.on { background: var(--hover-strong); }
 :root body :is(#conversation, #chat-shell) .msg.flash .bubble { animation: chat-flash 1.2s ease-out; }
