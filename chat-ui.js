@@ -1098,13 +1098,14 @@
   // The first block whose bottom is below the view's top: binary search (blocks are stacked), ~10 rects per scroll, not thousands.
   function firstVisible(thread, top) { const ch = thread.children; let lo = 0, hi = ch.length - 1, at = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (ch[m].getBoundingClientRect().bottom > top) { at = m; hi = m - 1; } else lo = m + 1; } return at; }
   function holdPlace(el) { // what's at the top of the view now (called on every scroll)
-    el._anc = null;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) return; // following the bottom
+    el._anc = null; el._follow = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (el._follow) return; // following the bottom
     const thread = el.querySelector(':scope > .thread'), top = el.getBoundingClientRect().top; if (!thread) return;
     const ch = thread.children; for (let k = Math.max(0, firstVisible(thread, top)); k < ch.length; k++) { const key = blockKey(ch[k]); if (key) { el._anc = { i: key, y: ch[k].getBoundingClientRect().top - top }; return; } }
   }
   const placeRO = new ResizeObserver(() => {
-    const el = document.getElementById('conversation'), a = el._anc; if (!a || !el.classList.contains('open') || Date.now() < pinUntil) return;
+    const el = document.getElementById('conversation'), a = el._anc; if (!el.classList.contains('open') || Date.now() < pinUntil) return;
+    if (!a) { if (el._follow !== false && el.scrollHeight - el.scrollTop - el.clientHeight >= 1) el.scrollTop = el.scrollHeight; return; } // following: late growth (markdown, rows, diagrams) after the redraw left you short of the bottom, with the jump button up and new output arriving out of sight
     const n = [...(el.querySelector(':scope > .thread')?.children || [])].find(x => blockKey(x) === a.i); if (!n) return;
     const d = n.getBoundingClientRect().top - el.getBoundingClientRect().top - a.y; if (Math.abs(d) >= 0.5) el.scrollTop += d;
   });
@@ -1215,7 +1216,7 @@
     else if (!busy && tick) { clearInterval(tick); tick = null; }
     // A long reply that just arrived: land on its first line, to read it top-down (from then on you're "scrolled up",
     // so the live ticks leave it there).
-    if (!stuck && !jumpOnce && Date.now() >= pinUntil && newReply && newReply.offsetHeight > el.clientHeight * 0.6) el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24;
+    if (!stuck && !jumpOnce && Date.now() >= pinUntil && newReply && newReply.offsetHeight > el.clientHeight * 0.6) { el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24; holdPlace(el); }
     else if (!stuck) {
       el.scrollTop = el.scrollHeight;
       // Images grow the thread as they load: stay pinned to the bottom through that.
