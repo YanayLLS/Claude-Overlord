@@ -411,6 +411,15 @@ function deployState(runs) {
   return r.conclusion === 'success' ? 'success' : 'failure';
 }
 
+// A deploy run's state from its jobs: the deploy is done once its own jobs are, even while the ClickUp
+// bookkeeping jobs that follow (clickup-released, clickup-sweep: minutes of ticket moves) still run.
+// jobs: GitHub's run jobs → 'success' | 'failure' | 'running'
+function deployJobsState(jobs) {
+  const own = (jobs || []).filter(j => !/clickup/i.test(j.name || ''));
+  if (!own.length || own.some(j => j.status !== 'completed')) return 'running';
+  return own.some(j => !['success', 'skipped', 'neutral'].includes(j.conclusion)) ? 'failure' : 'success';
+}
+
 // Background polling cadence (ms) for releases-main. Everything slows while the Releases modal is closed —
 // the footer badge still needs a failed deploy / a release waiting on me, just not as fast; a release in
 // flight keeps the sign ping at its fastest, a deploy in flight keeps the deploy poll at its fastest.
@@ -443,7 +452,7 @@ function holdActive(h, deploy, now = Date.now()) {
 }
 const activeHolds = (holds, cfg, deploys, now = Date.now()) => (holds || []).filter(h => holdActive(h, holdDeploy(cfg, deploys, h), now));
 
-const api = { HOLD_MS, holdDeploy, holdActive, activeHolds, deployState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+const api = { HOLD_MS, holdDeploy, holdActive, activeHolds, deployState, deployJobsState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

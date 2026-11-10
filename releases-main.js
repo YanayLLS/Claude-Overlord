@@ -15,7 +15,7 @@ const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's 
 const { execFile } = require('child_process');
 const os = require('os');
 const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas, releasePeriods, activeHolds, HOLD_MS } = require('./releases-core');
-const { deployState, deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
+const { deployState, deployJobsState, deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 // Polling cadence (full refresh, deploy runs, sign ping, stray scan) lives in releasePeriods: slower while the modal is closed
 const TICK_MS = 15 * 1000;              // the background loop wakes this often and runs whatever releasePeriods says is due
@@ -768,7 +768,15 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const still = [];
       for (const x of pending) {
         const runs = await ghJson(['api', '-X', 'GET', `repos/${x.repo}/actions/workflows/${x.deploy}/runs`, '-f', `head_sha=${x.sha}`, '-f', 'per_page=5']);
-        const list = (runs.data && runs.data.workflow_runs) || [], newest = list[0], st = deployState(list);
+        const list = (runs.data && runs.data.workflow_runs) || [], newest = list[0];
+        let st = deployState(list);
+        // still running: done already if only the ClickUp jobs after the deploy are left (minutes of ticket moves)
+        if (st === 'running' && newest) {
+          const jobs = await ghJson(['api', `repos/${x.repo}/actions/runs/${newest.id}/jobs`, '-f', 'per_page=100', '-X', 'GET']);
+          const js = deployJobsState((jobs.data && jobs.data.jobs) || []);
+          if (js === 'success') continue;
+          if (js === 'failure') st = 'failure';
+        }
         // no run at all a while after the merge: its paths filter may skip this change (nothing to deploy)
         if (!list.length && Date.now() - (x.mergedAt || (x.mergedAt = Date.now())) > 2 * 60e3 && !x.skipChecked) {
           x.skipChecked = true;
