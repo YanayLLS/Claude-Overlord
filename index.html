@@ -4177,7 +4177,10 @@ function handleTimelineEvent(msg) {
 // A burst of events (a restart reading a transcript's backlog) paints once per frame, not once per event: each paint
 // walks the whole thread, so the chat redrew for seconds.
 let _convPending = false;
-function scheduleConv() { if (!_convPending) { _convPending = true; requestAnimationFrame(() => { _convPending = false; if (termTab === 'conversation') renderConversation(); }); } }
+// A streaming agent writes dozens of events a second: the chat redraws at most every 100 ms (each redraw lays out the
+// whole thread), still on a frame, so a burst costs a few redraws instead of one per event.
+let _convLast = 0;
+function scheduleConv() { if (_convPending) return; _convPending = true; const go = () => requestAnimationFrame(() => { _convPending = false; _convLast = performance.now(); if (termTab === 'conversation') renderConversation(); }); const wait = 100 - (performance.now() - _convLast); if (wait > 0) setTimeout(go, wait); else go(); }
 
 // ── Global Search ──
 let _searchTimer = null;

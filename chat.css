@@ -1124,3 +1124,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .msg.user.pending .q-x { color: var(--subtext); font-size: 18px; }
 :root body :is(#conversation, #chat-shell, #chat-bg) .bga-dot { background: var(--purple); }
 :root body #chat-att .att-x { width: 32px; height: 32px; right: -10px; top: -10px; }
+/* Performance: blocks off screen skip layout and paint (a long thread is ~10k nodes, laid out on every redraw while an
+   agent streams). Each remembers its real height once drawn; the place-holding anchor (chat-ui holdPlace) absorbs the
+   rest. */
+:root body #conversation > .thread > * { content-visibility: auto; contain-intrinsic-size: auto 80px; }

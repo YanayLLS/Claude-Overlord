@@ -1146,7 +1146,7 @@
   // it shifted again on top of this.
   // Keyed by the event itself, not its index: a long chat keeps its last 1000 events, so every new one shifted all
   // indices by one and the anchor latched onto the next block down - the view hopped on each update.
-  const blockKey = (n) => { const i = n && (n.dataset.i || (n.querySelector('[data-i]') || {}).dataset?.i); if (i == null) return null; const c = n.closest('#conversation'), ev = c && c._evs && c._evs[i]; return ev ? `${n.className.split(' ')[0]}|${ev.type}|${ev.ts}|${String(ev.text || ev.name || '').slice(0, 40)}` : null; };
+  const blockKey = (n) => { if (!n) return null; if (n._bi === undefined) n._bi = n.dataset.i ?? (n.querySelector('[data-i]') || {}).dataset?.i ?? null; const i = n._bi; if (i == null) return null; /* the index lookup once per node: its html (data-i included) never changes, a changed block is a new node */ const c = n.closest('#conversation'), ev = c && c._evs && c._evs[i]; return ev ? `${n.className.split(' ')[0]}|${ev.type}|${ev.ts}|${String(ev.text || ev.name || '').slice(0, 40)}` : null; };
   // The first block whose bottom is below the view's top: binary search (blocks are stacked), ~10 rects per scroll, not thousands.
   function firstVisible(thread, top) { const ch = thread.children; let lo = 0, hi = ch.length - 1, at = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (ch[m].getBoundingClientRect().bottom > top) { at = m; hi = m - 1; } else lo = m + 1; } return at; }
   function holdPlace(el) { // what's at the top of the view now (called on every scroll)
