@@ -3694,6 +3694,7 @@ function createXterm(id) {
     return true;
   });
   xterms.set(id, { id, terminal, fitAddon, searchAddon, el, bidiOff, mentionSync });
+  pauseWhenHidden(xterms.get(id));
   const pend = pendingTermData.get(id);
   if (pend) { pendingTermData.delete(id); terminal.write(pend, () => terminal.scrollToBottom()); }
   sendResize(id, xterms.get(id)); // pty spawns at 120x30 — hand it the real width now
@@ -3782,10 +3783,30 @@ function fitPreservingScroll(x) {
   if (x.id != null) sendResize(x.id, x);
 }
 
+// Performance: a terminal you can't see doesn't render. Terminals are hidden with visibility (so they keep their size),
+// which xterm's own visibility check can't see: every agent's terminal re-rendered on each redraw of its CLI's spinner,
+// and each render measured glyphs, forcing a layout of the whole window (14 agents ≈ half the main thread, the app's
+// low fps). Output is still parsed into the buffer (the chat reads the screen from it); the view repaints when shown.
+function termShown(x) { return !!(x && x.el && x.el.checkVisibility && x.el.checkVisibility({ visibilityProperty: true })); }
+function pauseWhenHidden(x) {
+  const rs = x && x.terminal && x.terminal._core && x.terminal._core._renderService;
+  if (!rs || typeof rs._handleIntersectionChange !== 'function' || rs._ovPatched) return;
+  const orig = rs._handleIntersectionChange.bind(rs); rs._ovPatched = true;
+  rs._handleIntersectionChange = (e) => orig(termShown(x) ? e : { isIntersecting: false, intersectionRatio: 0 });
+  // The selection service redraws every row on its own (it bypasses the pause): a paused terminal keeps the selection and
+  // draws it when shown.
+  const sel = rs.handleSelectionChanged && rs.handleSelectionChanged.bind(rs);
+  if (sel) rs.handleSelectionChanged = (st, en, col) => { if (!rs._isPaused) return sel(st, en, col); if (rs._selectionState) { rs._selectionState.start = st; rs._selectionState.end = en; rs._selectionState.columnSelectMode = col; } rs._needsSelectionRefresh = true; };
+  x._pauseSync = () => { const show = termShown(x); if (show === x._wasShown) return; x._wasShown = show; orig({ isIntersecting: show, intersectionRatio: show ? 1 : 0 }); };
+  x._pauseSync();
+}
+function syncTermPause() { for (const x of xterms.values()) x._pauseSync && x._pauseSync(); }
+setInterval(syncTermPause, 500); // tab switches, the chat's split/peek, window minimise: caught within half a second
 function showXterm(id) {
   ghostClear(); // stale suggestion from the previously-shown agent
   // visibility, not display — a display:none xterm loses its dims and reflows on re-show
   for (const [xid, x] of xterms) x.el.style.visibility = xid === id ? 'visible' : 'hidden';
+  syncTermPause();
   const x = xterms.get(id);
   if (x) { x.mentionSync?.(); setTimeout(() => {
     if (!xterms.has(id)) return;
@@ -4125,7 +4146,7 @@ function jumpPrompt(dir) {
 // ── Terminal / conversation tabs ───────────────────────
 function switchTermTab(tab) {
   if (tab !== termTab && selectedId != null) chatComposer.carryDraft(termTab, tab); // what you were typing comes along
-  termTab = tab; askFlip = false;
+  termTab = tab; askFlip = false; setTimeout(syncTermPause, 0); // the terminal shown or hidden: its renderer follows
   try { localStorage.setItem('termView', tab); } catch {}
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
   document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
