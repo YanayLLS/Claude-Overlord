@@ -337,6 +337,7 @@
       const b = /^[1-9]$/.test(e.key) ? choice.querySelectorAll('[data-choice]')[+e.key - 1] : e.key === 'Enter' && !e.shiftKey ? choice.querySelector('button.primary[data-choice]') : e.key === 'Escape' ? choice.querySelector('[data-choice="-1"], button.dec[data-choice]') : null;
       if (b) { b.click(); return true; }
     }
+    if (e.key === 'Enter' && !e.shiftKey) { const b = tail && tail.querySelector('.card.perm:not(.choice) .btns button.primary, .card.plan-ask .btns button.primary'); if (b) { b.click(); return true; } }
     if (e.key === 'Escape') { const b = tail && tail.querySelector('[data-keys="esc"]'); if (b) { b.click(); return true; } }
     if (e.key === 'Escape' && tail && tail.querySelector('.card.ask')) { chatUi.keys(['\x1b']); return true; } // an open question or plan: Esc closes it, as in the CLI
     // The rewind list: ↑/↓ move, Enter picks, Esc cancels, as in the CLI.
@@ -349,7 +350,7 @@
     if (tail && tail.querySelector('.card.ask [data-hov]')) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') return chatUi.askStep(e.key === 'ArrowDown' ? 1 : -1);
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return chatUi.askTab(e.key === 'ArrowRight' ? 1 : -1);
-      if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) return chatUi.askTab(e.shiftKey ? -1 : 1); // as in the CLI
+      // Tab stays the browser's (out of the reply box); ←/→ move between a multi-question card's tabs.
       if (e.key === 'Enter' && !e.shiftKey) { const b = tail.querySelector('.card.ask .focus[data-pick]'); if (b) { b.click(); return true; } }
     }
     return false;

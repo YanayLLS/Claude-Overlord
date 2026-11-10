@@ -271,7 +271,7 @@ body.world-mode #hdr-chat { display: none; }
 @container (max-width: 520px) {
   :root body #chat-chips .mode .l { display: none; }
   :root body #chat-chips .mode .s { display: inline; }
-  :root body :is(#conversation, #chat-shell) .tgroup .gl:not(.gs) { display: none; }
+  :root body :is(#conversation, #chat-shell) .tgroup .gl:not(.gs) { display: inline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; } /* one label at every width (truncated, never hidden) */
   :root body :is(#conversation, #chat-shell) .gl.gs { display: inline; }
   :root body :is(#conversation, #chat-shell) .w-hint { display: inline; margin-left: 28px; flex-basis: 100%; }
   :root body :is(#conversation, #chat-shell) .w-x { display: none; }
@@ -1035,3 +1035,31 @@ body.world-mode #hdr-chat { display: none; }
 /* Minimum sizes. */
 :root body #chat-hover .hv-foot, :root body #chat-changes .cc-n em { font-size: 11px; }
 :root body :is(#conversation, #chat-shell) .md-code-head button { min-height: 32px; }
+
+/* ── /improve round 4 ── */
+/* A narrow column: each table row stacks as label / value pairs (no sideways scrolling). */
+@container (max-width: 520px) {
+  :root body :is(#conversation, #chat-shell) .md table { display: block; width: auto; border: 0; overflow: visible; }
+  :root body :is(#conversation, #chat-shell) .md table thead { display: none; }
+  :root body :is(#conversation, #chat-shell) .md table tbody { display: grid; gap: 8px; }
+  :root body :is(#conversation, #chat-shell) .md table tr { display: grid; gap: 2px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; }
+  :root body :is(#conversation, #chat-shell) .md table td { display: grid; grid-template-columns: minmax(70px, 34%) 1fr; gap: 8px; padding: 2px 0; border: 0; position: static; background: none; }
+  :root body :is(#conversation, #chat-shell) .md table td::before { content: attr(data-label); color: var(--dim); font-size: 12px; }
+  :root body :is(#conversation, #chat-shell) .md table td:not([data-label])::before { content: none; }
+}
+:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: static; background: inherit; }
+/* Short threads sit at the bottom, by the reply box (a card answered where you type), as long ones do. */
+:root body #conversation > .thread { margin-top: auto; }
+/* Notices keep the rhythm: a gap before the next paragraph. */
+:root body :is(#conversation, #chat-shell) .msg.note.cli { margin-bottom: 10px; }
+/* The star on older turns shows on keyboard focus too. */
+:root body :is(#conversation, #chat-shell) .turnfoot .act.mark:focus-visible, :root body :is(#conversation, #chat-shell) .turnfoot:focus-within .act.mark { opacity: 1; }
+/* 32px targets: composer chips, the background-agent pill, rail dashes 16px bands. */
+:root body #chat-chips .chip { height: 32px; }
+:root body :is(#conversation, #chat-shell, #chat-bg) .bga { min-height: 32px; }
+:root body #chat-rail .cr-dashes { gap: 4px; } :root body #chat-rail .cr-dashes i { padding: 6px 0; }
+/* Usage limit armed: a quiet state with its check. */
+:root body :is(#conversation, #chat-shell) .card .btns button[data-autoretry].dec { color: var(--subtext); }
+/* Compaction divider: its chevron says it opens. */
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary .ic { width: 12px; height: 12px; margin-left: 4px; }
+:root body :is(#conversation, #chat-shell) details.msg.divider.compacted[open] > summary .ic { transform: rotate(90deg); }
