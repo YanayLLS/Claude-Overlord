@@ -1923,7 +1923,7 @@ function doSpawnTerminal(id, attached) {
           a._readyTimer = setTimeout(() => {
             a._readyTimer = null; a.claudeReady = true;
             // Resumed after a crash at the prompt: nothing else will clear 'resuming' until the next turn
-            if (a.crashed && !a._crashNudge) { a.crashed = false; send({ type: 'crashCleared', id }); send({ type: 'status', id, status: shownStatus(a) }); } // the window's "auto-resuming" line goes too
+            if (a.crashed) { a.crashed = false; send({ type: 'crashCleared', id }); send({ type: 'status', id, status: shownStatus(a) }); } // Claude is back at its prompt: the window's "Crashed — auto-resuming" line goes, nudge or not (with a nudge it waited for the transcript to move, and an agent that died looking busy kept the line after a good resume)
             sendCrashNudge(id); flushPeerMsgs(id);
           }, 4000);
         } else {
