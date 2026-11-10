@@ -1155,3 +1155,23 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.ask .choices button.focus { box-shadow: inset 2px 0 0 var(--subtext); border-color: var(--border); }
 /* The transcript's right edge doesn't move when the rail shows. */
 :root body #conversation .thread { padding-right: 28px; }
+
+/* ── /improve round 10 ── */
+/* One right edge: the cards and queued messages in the tail keep the thread's gutter. */
+:root body #conversation > .tail { padding-right: 28px; }
+/* Long words and paths in a reply wrap instead of running past the column. */
+:root body :is(#conversation, #chat-shell) .md { overflow-wrap: break-word; min-width: 0; }
+:root body :is(#conversation, #chat-shell) .md :is(p, li) code { overflow-wrap: anywhere; }
+/* Sign in after the link is opened: its Sign in is the primary. */
+:root body :is(#conversation, #chat-shell) .card.choice.opened .code-in button:not(:disabled) { background: var(--text); color: var(--bg); border-color: var(--text); }
+:root body :is(#conversation, #chat-shell) .card.choice p.status .loading { width: 13px; height: 13px; }
+/* Question cursor: the row tinted, no partial border on a rounded row. */
+:root body #conversation .card.ask .choices button.focus { box-shadow: none; background: var(--hover-strong); border-color: var(--border-hi); }
+/* Loading: no scrollbar flashing in and out. */
+:root body #conversation:has(.chat-skel) { overflow: hidden; }
+/* Queued Edit/Remove reachable without hover (touch, a narrow pane): dim at rest, full on hover or focus. */
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q-x { opacity: .55; }
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q { justify-content: flex-end; }
+/* Quick replies and the hover card footer at the minimums. */
+:root body :is(#conversation, #chat-shell) .qr { min-height: 32px; }
+:root:root body #chat-hover .hv-foot { font-size: 11px; }

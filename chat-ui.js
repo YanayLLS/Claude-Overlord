@@ -12,6 +12,7 @@
     edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
     ban: svg('<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>'),
     ext: svg('<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6"/>'),
+    clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
     key: svg('<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.8-8.8"/><path d="m16 7 3 3"/><path d="m19 4 2 2"/>'),
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>'),
     web: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/>'),
@@ -201,7 +202,7 @@
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
     else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span>${/fail/i.test(m[2]) ? ICON.alert : ICON.check}</div>`; }
     else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
-    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
+    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>Recap</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
     else if (ev.type === 'apierror' && ev._dismissed) h = `<div class="msg note cli" data-i="${i}">Usage limit · resets ${escH(clock(new Date(resetOf(ev) || Date.now()).toISOString()))}</div>`;
@@ -574,7 +575,7 @@
     // for the code when it asks for one.
     const url = (sc.lines.join(' ').match(chatUrlRe()) || [])[0], code = sc.lines.some(l => /paste (the )?code/i.test(l)), login = /^(log ?in|sign ?in)/i.test(sc.title);
     const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${k === prim ? 'Enter' : 'Esc'}</kbd></button>`).join('')
-      : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">${ICON.ext}Open link<kbd>1</kbd></button><button type="button" class="quiet" data-copy-url="${escH(url)}">${ICON.copy}<span>Copy link</span><kbd>2</kbd></button>` : '');
+      : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">${ICON.ext}Open link<kbd>1</kbd></button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}<span>Copy link</span><kbd>2</kbd></button>` : '');
     const cancel = sc.options.length ? '' : `<div class="btns"><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div>`;
     const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
     const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : (/^([a-z]:[\\/]|~|\/)/i.test(l) ? (() => { const parts = l.split(/[\\/]/), last = parts.pop(); return `<p class="fname" title="${escH(l)}"><b>${escH(last)}</b></p><p class="mono path" title="${escH(l)}"><span class="pp">${escH(parts.filter(Boolean).join('\\'))}</span></p>`; })() : `<p>${escH(l)}</p>`)).join('');
@@ -584,8 +585,8 @@
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
     // The plan in full (it scrolls inside past ~360px), then the CLI's choices as one footer: Approve filled, the rest quiet.
-    const lab = (l) => /auto-?accept/i.test(l) ? 'Approve' : /manual/i.test(l) ? 'Approve, review edits' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
-    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${/keep planning|^no\b/i.test(l) ? 'Esc' : k + 1}</kbd></button>`).join('')}</div></div>`;
+    const lab = (l) => /auto-?accept/i.test(l) ? 'Auto-accept edits' : /manual/i.test(l) ? 'Ask before edits' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
+    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Approve plan?</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${/keep planning|^no\b/i.test(l) ? 'Esc' : k + 1}</kbd></button>`).join('')}</div></div>`;
   }
   // Which step of a several-question prompt the CLI is on: it only shows that by colour (the step's name on a filled
   // background), and the question isn't in the transcript until it's answered. -1 when it can't tell.
@@ -1294,7 +1295,7 @@
     // Usage-limit cards: the countdown, Retry held until the reset, and the retry the user asked for once it's passed.
     for (const s of inRecent('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
     for (const b of inRecent('button[data-reset]')) b.hidden = +b.dataset.reset > now; // Retry once it has reset
-    for (const c of inRecent('button[data-autoretry]')) { const on = autoRetry.has(id + ':' + c.dataset.autoretry), due = +c.dataset.autoretry <= now; c.hidden = due; c.classList.toggle('primary', !on); c.classList.toggle('dec', on); c.innerHTML = on ? ICON.check + escH(c.dataset.armed) : escH(c.dataset.label) + '<kbd>1</kbd>'; } // one button before the reset: arm it, then it reads as armed and undoes
+    for (const c of inRecent('button[data-autoretry]')) { const on = autoRetry.has(id + ':' + c.dataset.autoretry), due = +c.dataset.autoretry <= now; c.hidden = due; c.classList.toggle('primary', !on); c.classList.toggle('dec', on); c.innerHTML = on ? ICON.check + escH(c.dataset.armed) : ICON.clock + escH(c.dataset.label) + '<kbd>1</kbd>'; } // one button before the reset: arm it, then it reads as armed and undoes
     for (const key of [...autoRetry]) { const [aid, at] = key.split(':').map(Number); if (aid !== id || at > now) continue; autoRetry.delete(key); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); } // only this agent's: each agent remembers its own
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
@@ -1532,7 +1533,7 @@
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
     const sw = e.target.closest('[data-act="switch-acct"]'); if (sw && selectedId != null) { chatComposer.sendText(selectedId, '/login'); return; } // another account: the CLI's /login (its card follows)
-    const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); } return; }
+    const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); showToast('Dismissed · Undo', () => { ev._dismissed = false; cache.delete(ev); rerender(); }); } return; }
     if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
@@ -1542,7 +1543,7 @@
     if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
     if (tab) { if (askTab(+tab.dataset.tab - +tab.parentElement.dataset.on)) for (const t of tab.parentElement.children) t.classList.toggle('on', t === tab); return; }
-    const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); ou.classList.remove('primary'); ou.innerHTML = ICON.check + 'Opened'; ou.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // /login's link
+    const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); ou.classList.remove('primary'); ou.innerHTML = ICON.check + 'Opened'; ou.closest('.card')?.classList.add('opened'); ou.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // /login's link
     const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => { const t = cu.querySelector('span'); if (t) { t.textContent = 'Copied'; setTimeout(() => { t.textContent = 'Copy link'; }, 1500); } }, () => {}); return; } // the result on the button you pressed, not a toast
     const ae = e.target.closest('[data-ask-esc]'); if (ae) { keys(['\x1b']); answered(ae); return; } // a question's Skip: Esc, as in the CLI
     const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) { api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); i.disabled = true; ls.disabled = true; ls.innerHTML = '<span class="loading"></span>Signing in'; } return; }
