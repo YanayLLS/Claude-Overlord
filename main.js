@@ -5317,6 +5317,7 @@ function handleIpc(msg) {
       Object.assign(settings, msg.settings); saveState();
       if ('worldEnabled' in msg.settings) armClickupTimer();
       if ('remoteControl' in msg.settings) syncRemoteControl();
+      if ('terminalsInApp' in msg.settings && termPane) try { termPane.sync(); } catch {}
       if (msg.settings.englishOnFocus) kbdHelper(() => {}); // build the helper now so the next focus switches at once
       if ('dictationKey' in msg.settings) { settings.dictationKey = String(msg.settings.dictationKey || '').trim() || null; saveState(); send({ type: 'settings', settings: publicSettings() }); send({ type: 'dictation', setup: true, reset: true, toast: settings.dictationKey ? 'Dictation: cloud' : 'Dictation: this computer' }); } // the mic re-checks the engine on its next click
       break;
@@ -6560,10 +6561,10 @@ app.whenReady().then(() => {
     onErrorCount: (id, count, last) => send({ type: 'previewError', id, count, last }),
     onNavigated: (id, url) => { if (preview) preview.onAgentNavigated(id, url); }, // it sends previewLoaded
   });
-  mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
+  mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
-  termPane = createTermPane({ stateDir: STATE_DIR, ptyFactory: agentPty, ptyHost, send, log: flog });
+  termPane = createTermPane({ stateDir: STATE_DIR, ptyFactory: agentPty, ptyHost, send, log: flog, enabled: () => settings.terminalsInApp !== false });
   _ptyHostReady.then(() => termPane.start()).catch((e) => flog(`Terminals pane failed to start: ${e.message}`));
   // A scratch instance (own state dir: tests, verification runs) stays killable; the guard is for the user's real one.
   if (!process.env.OVERLORD_STATE_DIR) _ptyHostReady.then(() => startKillGuard({ getChildPids: () => app.getAppMetrics().map(m => m.pid), log: flog }));

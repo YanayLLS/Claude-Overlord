@@ -9,14 +9,15 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { appendBuf } = require('./term-pane-core');
+const { appendBuf, plainTail } = require('./term-pane-core');
 
 // A bat an agent runs carries the agent's shell env. Claude Code sets NoDefaultCurrentDirectoryInExePath there,
 // which stops cmd finding `dev.bat` in its own folder ("'dev.bat' is not recognized"); a console you open never has it.
 const AGENT_ONLY = /^(NoDefaultCurrentDirectoryInExePath|CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID)$/i;
 const tabEnv = (env) => Object.fromEntries(Object.entries(env || process.env).filter(([k]) => !AGENT_ONLY.test(k)));
 
-function createTermPane({ stateDir, ptyFactory, ptyHost, send, log = () => {}, appDir = __dirname }) {
+// enabled(): the Terminals setting. Off = no port file, so ovl-start falls back to plain `start` windows.
+function createTermPane({ stateDir, ptyFactory, ptyHost, send, log = () => {}, appDir = __dirname, enabled = () => true }) {
   const tabs = new Map(); // name -> { name, cwd, mode, line, env, proc, key, buf, running, code }
   const tabsFile = path.join(stateDir, 'term-tabs.json');
   const infoFile = path.join(stateDir, 'term-pane.json');
@@ -124,7 +125,14 @@ function createTermPane({ stateDir, ptyFactory, ptyHost, send, log = () => {}, a
     await restore();
     server = http.createServer((req, res) => { onRequest(req, res).catch(() => { try { res.writeHead(500); res.end(); } catch {} }); });
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-    fs.writeFileSync(infoFile, JSON.stringify({ port: server.address().port, token, pid: process.pid }));
+    sync();
+  }
+
+  // Publish or withdraw the port file to match the setting (call after it changes).
+  function sync() {
+    if (!server) return;
+    if (enabled()) fs.writeFileSync(infoFile, JSON.stringify({ port: server.address().port, token, pid: process.pid }));
+    else try { fs.unlinkSync(infoFile); } catch {}
   }
 
   // Quit leaves the servers running in the pty host (an update restart must not drop the dev stack).
@@ -134,7 +142,15 @@ function createTermPane({ stateDir, ptyFactory, ptyHost, send, log = () => {}, a
     if (server) server.close();
   }
 
-  return { start, stop, handle, open, tabs };
+  // For agents (MCP terminal_* tools): what's running, and what it printed.
+  const need = (name) => { const t = tabs.get(name); if (!t) throw new Error(`No terminal "${name}". Open ones: ${[...tabs.keys()].join(', ') || 'none'}`); return t; };
+  const api = {
+    list: () => [...tabs.values()].map(t => `${t.name} — ${t.running ? 'running' : `stopped${t.code != null ? ` (exit ${t.code})` : ''}`} — ${t.cwd} — ${t.line}`).join('\n') || 'No terminals open.',
+    read: (name, opts) => plainTail(need(name).buf, opts) || '(no output yet)',
+    restart: (name) => { handle({ type: 'tp:restart', name: need(name).name }); return `Restarted "${name}".`; },
+  };
+
+  return { start, stop, handle, open, sync, tabs, api };
 }
 
 // The pty-host keys the pane owns, so the startup sweep of orphan agent ptys leaves the dev servers alone.

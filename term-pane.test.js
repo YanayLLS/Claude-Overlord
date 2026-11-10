@@ -42,6 +42,10 @@ test('ovl-start opens a tab over HTTP; same title replaces it; the key is kept f
 
     pty.spawned[0].dataCb('hello');
     assert.ok(sent.some(m => m.type === 'tp:data' && m.d === 'hello'));
+    pty.spawned[0].dataCb('\r\n\x1b[31mError: EADDRINUSE\x1b[0m\r\n');
+    assert.strictEqual(pane.api.read('FL AI Chat', { grep: 'error' }), 'Error: EADDRINUSE', 'agents read plain text');
+    assert.match(pane.api.list(), /^FL AI Chat — running — /);
+    assert.throws(() => pane.api.read('nope'), /Open ones: FL AI Chat/);
 
     assert.strictEqual(await run(['FL AI Chat', '/D', dir, 'cmd', '/k', 'npm run dev']), 0);
     assert.strictEqual(pty.spawned[0].killed, true, 'old process killed on replace');
@@ -67,5 +71,20 @@ test('a request without the token is refused', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/open`, { method: 'POST', body: JSON.stringify({ name: 'x', cwd: dir, line: 'calc' }) });
     assert.strictEqual(res.status, 403);
     assert.strictEqual(pane.tabs.size, 0);
+  } finally { pane.stop(); }
+});
+
+test('with the setting off, ovl-start finds no port file and falls back to plain start windows', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-'));
+  let on = true;
+  const pane = createTermPane({ stateDir: dir, ptyFactory: fakePty().factory, ptyHost: null, send: () => {}, enabled: () => on });
+  await pane.start();
+  try {
+    const info = path.join(dir, 'term-pane.json');
+    assert.ok(fs.existsSync(info));
+    on = false; pane.sync();
+    assert.ok(!fs.existsSync(info));
+    on = true; pane.sync();
+    assert.ok(fs.existsSync(info));
   } finally { pane.stop(); }
 });

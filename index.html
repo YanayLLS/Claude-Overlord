@@ -1364,6 +1364,11 @@ button:focus-visible { outline-offset:0; }
       </label>
       <div class="settings-hint">Agents show under their chat title in the app and at claude.ai/code. Switching it also connects or disconnects running agents as soon as each is idle.</div>
       <label class="settings-label">
+        <input type="checkbox" id="chk-terminals-in-app" checked onchange="api.send({ type: 'saveSettings', settings: { terminalsInApp: this.checked } })" />
+        <span>Dev-server terminals inside Overlord</span>
+      </label>
+      <div class="settings-hint">Off: scripts like start-full.bat open their own console windows.</div>
+      <label class="settings-label">
         <input type="checkbox" id="chk-english-focus" checked onchange="api.send({ type: 'saveSettings', settings: { englishOnFocus: this.checked } })" />
         <span>Switch the keyboard to English when Overlord gets focus (Windows)</span>
       </label>
@@ -5298,6 +5303,7 @@ function applySettings(s) {
     if (chk) chk.checked = bypassPermissions;
   }
   if (s.remoteControl !== undefined) document.getElementById('chk-remote-control').checked = s.remoteControl;
+  document.getElementById('chk-terminals-in-app').checked = s.terminalsInApp !== false;
   if (s.englishOnFocus !== undefined) document.getElementById('chk-english-focus').checked = s.englishOnFocus;
   if (s.dictationHasKey !== undefined) { document.getElementById('inp-dict-key').placeholder = s.dictationHasKey ? 'Cloud key saved · paste a new one to replace it' : 'This computer · paste an OpenAI or Groq key for cloud'; document.getElementById('dict-local-btn').style.display = s.dictationHasKey ? '' : 'none'; }
   if (s.notifications !== undefined) {

@@ -24,3 +24,11 @@ test('the output buffer keeps the newest BUF_MAX chars', () => {
   assert.strictEqual(b.length, BUF_MAX);
   assert.ok(b.endsWith('yz'));
 });
+
+test('plainTail strips colours, keeps the last state of a \r progress line, tails and greps', () => {
+  const { plainTail } = require('./term-pane-core');
+  const buf = '\x1b]0;title\x07\x1b[32mready\x1b[0m on 5173\r\nloading 10%\rloading 100%\r\nERROR: boom\r\nok\r\n';
+  assert.strictEqual(plainTail(buf), 'ready on 5173\nloading 100%\nERROR: boom\nok');
+  assert.strictEqual(plainTail(buf, { lines: 2 }), 'ERROR: boom\nok');
+  assert.strictEqual(plainTail(buf, { grep: 'error' }), 'ERROR: boom');
+});

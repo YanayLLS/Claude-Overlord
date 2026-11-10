@@ -28,4 +28,17 @@ function parseStartArgs(argv, defaultCwd) {
 const BUF_MAX = 256 * 1024; // chars of output kept per tab for a reloaded window
 const appendBuf = (buf, d) => { const b = buf + d; return b.length > BUF_MAX ? b.slice(-BUF_MAX) : b; };
 
-module.exports = { parseStartArgs, quoteArg, appendBuf, BUF_MAX };
+// Terminal output as an agent reads it: colours and cursor moves gone, \r-overwritten progress lines collapsed
+// to what's left on screen. Last `lines` lines, optionally only those matching `grep` (a regex, case-insensitive).
+function plainTail(buf, { lines = 200, grep } = {}) {
+  const text = String(buf)
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '') // OSC (window titles)
+    .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '') // CSI (colours, cursor)
+    .replace(/\x1b[@-_]/g, '');
+  let rows = text.split(/\r?\n/).map(l => { const parts = l.split('\r'); return parts[parts.length - 1] || parts.filter(Boolean).pop() || ''; });
+  if (grep) { const re = new RegExp(grep, 'i'); rows = rows.filter(l => re.test(l)); }
+  while (rows.length && !rows[rows.length - 1].trim()) rows.pop();
+  return rows.slice(-Math.max(1, Math.min(lines, 5000))).join('\n');
+}
+
+module.exports = { parseStartArgs, quoteArg, appendBuf, plainTail, BUF_MAX };
