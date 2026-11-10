@@ -3646,7 +3646,7 @@ async function sendUsageCost(usage) {
   costScanning = true;
   try {
     const now = Date.now();
-    if (now - lastCostScanAt >= COST_SCAN_MS) { lastCostScanAt = now; await scanCosts(path.join(os.homedir(), '.claude', 'projects'), now); }
+    if (now - lastCostScanAt >= COST_SCAN_MS) { lastCostScanAt = now; await scanCosts(path.join(os.homedir(), '.claude', 'projects'), now, path.join(STATE_DIR, 'cost-cache.json')); } // kept on disk: a restart reads only what's new
     const cost = {};
     for (const m of usageMeters(usage)) {
       const end = m.reset > now ? m.reset : now;
