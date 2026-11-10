@@ -207,7 +207,7 @@
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset" title="Resets ${escH(clock(new Date(at).toISOString()))}">Resets <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}" data-armed="Retrying at ${escH(clock(new Date(at).toISOString()))} · Cancel">Retry at ${escH(clock(new Date(at).toISOString()))}</button></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}" data-armed="Retrying at ${escH(clock(new Date(at).toISOString()))} · Cancel">Retry at ${escH(clock(new Date(at).toISOString()))}</button></div></div></div>`;
     }
     else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
@@ -460,7 +460,7 @@
     if (sp) {
       // A new file: the CLI draws "Create file / name / 1 line…"; shown as the file's chip and its lines as an added diff.
       const file = (/create\s+(.+?)\?$/i.exec(sp.question) || [])[1], body = sp.body.filter(l => !/^\s*(create|edit|update|write)\s+file\s*$/i.test(l) && !(file && l.trim() === file));
-      const nums = file && body.length && body.every(l => /^\s*\d+\s/.test(l)), view = nums ? `<div class="perm-file"><span class="mono">${escH(file)}</span><span class="stat"><b class="add">+${body.length}</b></span></div>${diffHtml('', body.map(l => l.replace(/^\s*\d+\s/, '')).join('\n'), file).html}` : body.length ? `<pre class="perm-screen">${escH(body.join('\n'))}</pre>` : '';
+      const nums = file && body.length && body.every(l => /^\s*\d+\s/.test(l)), view = nums ? `${diffHtml('', body.map(l => l.replace(/^\s*\d+\s/, '')).join('\n'), file).html}` : body.length ? `<pre class="perm-screen">${escH(body.join('\n'))}</pre>` : '';
       return `<div class="card perm"><div class="card-h">${ICON[toolView({ name: /^bash|command/i.test(sp.body[0] || '') ? 'Bash' : /edit|write|create/i.test(sp.question) ? 'Edit' : '' }).kind] || ICON.shield}<span>${escH(sp.question.replace(/^Do you want to (\w)/, (m, c) => c.toUpperCase()))}</span></div>${view}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
     }
     if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new, a.file_path).html}`;
@@ -568,7 +568,7 @@
   // (/login waiting on the browser) Cancel is the one button.
   function choiceHtml(sc) {
     const yes = sc.options.findIndex(o => /^yes\b/i.test(o)), prim = yes >= 0 ? yes : 0;
-    const label = (o) => /trust this folder/i.test(o) ? 'Trust' : /^no,?\s*exit$/i.test(o) ? 'Exit' : o;
+    const label = (o) => /trust this folder/i.test(o) ? 'Trust' : /^no,?\s*exit$/i.test(o) ? "Don't trust" : o;
     // /login: the sign-in link the CLI prints (Open is the primary, for when no browser opened by itself), and a field
     // for the code when it asks for one.
     const url = (sc.lines.join(' ').match(chatUrlRe()) || [])[0], code = sc.lines.some(l => /paste (the )?code/i.test(l)), login = /^(log ?in|sign ?in)/i.test(sc.title);
@@ -583,7 +583,7 @@
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
     // The plan in full (it scrolls inside past ~360px), then the CLI's choices as one footer: Approve filled, the rest quiet.
-    const lab = (l) => /auto-?accept/i.test(l) ? 'Auto-accept edits' : /manual/i.test(l) ? 'Review each edit' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
+    const lab = (l) => /auto-?accept/i.test(l) ? 'Approve' : /manual/i.test(l) ? 'Approve, review edits' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
     return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${/keep planning|^no\b/i.test(l) ? 'Esc' : k + 1}</kbd></button>`).join('')}</div></div>`;
   }
   // Which step of a several-question prompt the CLI is on: it only shows that by colour (the step's name on a filled
@@ -975,6 +975,7 @@
     }
     // Your words aren't lost: back in the reply box (images too) when it's empty, to edit and send again.
     if (p.restore) chatComposer.restoreDraft(id, p.restore);
+    document.getElementById('term-order-input')?.focus({ preventScroll: true });
     rerender();
   }
 

@@ -987,7 +987,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .plan-ask .md.sub.plan code { font-family: 'Geist Mono', monospace; font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--surface1); vertical-align: baseline; }
 /* Tables: scroll sideways inside their frame with the first column pinned (the frame's overflow:hidden cut them off). */
 :root body :is(#conversation, #chat-shell) .md table { overflow-x: auto; }
-:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: sticky; left: 0; background: var(--surface0); z-index: 1; }
+:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: static; }
 /* Small type and targets. */
 :root body :is(#conversation, #chat-shell) .md-code-head { font-size: 11px; padding-top: 4px; padding-bottom: 4px; }
 :root body :is(#conversation, #chat-shell) .md-code-head button { min-height: 28px; padding: 0 10px; }
@@ -1005,8 +1005,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .turnfoot.latest:hover .tf-acts, :root body :is(#conversation, #chat-shell) .turnfoot.latest .tf-acts:focus-within { opacity: 1; }
 :root body :is(#conversation, #chat-shell) .tf-acts { gap: 8px; }
 /* Tables: the pinned first column only where a table really scrolls (a narrow column), drawn in the table's own fill. */
-:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: static; background: inherit; }
-@container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: sticky; left: 0; z-index: 1; background: var(--bg); } }
+:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: static; }
+@container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: static; } }
 /* Question focus: a neutral ring (an orange one inside the orange card read as already chosen); rows 8px apart. */
 :root body #conversation .card.ask .choices button.focus { box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 45%, transparent); border-color: transparent; }
 :root body :is(#conversation, #chat-shell) .choices { gap: 8px; }
@@ -1047,7 +1047,7 @@ body.world-mode #hdr-chat { display: none; }
   :root body :is(#conversation, #chat-shell) .md table td::before { content: attr(data-label); color: var(--dim); font-size: 12px; }
   :root body :is(#conversation, #chat-shell) .md table td:not([data-label])::before { content: none; }
 }
-:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: static; background: inherit; }
+:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: static; }
 /* Short threads sit at the bottom, by the reply box (a card answered where you type), as long ones do. */
 :root body #conversation > .thread { margin-top: auto; }
 /* Notices keep the rhythm: a gap before the next paragraph. */
@@ -1100,7 +1100,6 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary::before, :root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary::after { content: ''; flex: 1; height: 1px; background: var(--border-hi); }
 /* Tables: one header fill, the first column like the rest. */
 :root body :is(#conversation, #chat-shell) .md table td:first-child { background: none; }
-:root body :is(#conversation, #chat-shell) .md table th:first-child { background: unset; }
 /* Stacked footer: label left, key hint right, so they read as one row. */
 @container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .card .btns button { justify-content: flex-start; padding: 0 44px 0 14px; } :root body :is(#conversation, #chat-shell) .card .btns button.dec { justify-content: flex-start; } }
 /* Queued: the clock is a dim state mark, smaller than the take-back. */
@@ -1116,3 +1115,12 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.ask .ask-tabs span { height: 32px; } :root body #conversation .card.ask .ask-tabs { gap: 8px; }
 :root body #chat-att .att-x { width: 24px; height: 24px; opacity: 1; }
 :root body #chat-find button { width: 32px; height: 32px; }
+
+/* ── /improve after round 7 ── */
+:root:root body :is(#conversation, #chat-shell) kbd, :root:root body #term-order kbd { font-size: 11px; }
+:root:root body :is(#conversation, #chat-shell) .io-r .lbl { font-size: 11px; }
+@container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .card .btns button.dec:first-child { margin-left: 0; } }
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q:has(.q-x)::before { font-size: 13px; opacity: 1; color: var(--subtext); }
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q-x { color: var(--subtext); font-size: 18px; }
+:root body :is(#conversation, #chat-shell, #chat-bg) .bga-dot { background: var(--purple); }
+:root body #chat-att .att-x { width: 32px; height: 32px; right: -10px; top: -10px; }
