@@ -204,10 +204,11 @@
     else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
+    else if (ev.type === 'apierror' && ev._dismissed) h = `<div class="msg note cli" data-i="${i}">Usage limit · resets ${escH(clock(new Date(resetOf(ev) || Date.now()).toISOString()))}</div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}" data-armed="Retrying at ${escH(clock(new Date(at).toISOString()))} · Cancel">Retry at ${escH(clock(new Date(at).toISOString()))}</button></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}" data-armed="Retrying at ${escH(clock(new Date(at).toISOString()))} · Cancel">Retry at ${escH(clock(new Date(at).toISOString()))}</button><button type="button" data-act="switch-acct">Switch account</button><button type="button" class="dec" data-act="dismiss-limit" data-i="${i}">Dismiss<kbd>Esc</kbd></button></div></div></div>`;
     }
     else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
@@ -576,7 +577,7 @@
       : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">${ICON.ext}Open link<kbd>1</kbd></button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}<span>Copy link</span><kbd>2</kbd></button>` : '');
     const cancel = sc.options.length ? '' : `<div class="btns"><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div>`;
     const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
-    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : `<p${/^([a-z]:[\\/]|~|\/)/i.test(l) ? ' class="mono"' : ''}>${escH(l)}</p>`).join('');
+    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : (/^([a-z]:[\\/]|~|\/)/i.test(l) ? (() => { const parts = l.split(/[\\/]/), last = parts.pop(); return `<p class="mono path" title="${escH(l)}"><span class="pp">${escH(parts.join('\\') + '\\')}</span><b>${escH(last)}</b></p>`; })() : `<p>${escH(l)}</p>`)).join('');
     const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled>Sign in</button></div>' : '';
     return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${login ? 'Sign in' : escH(sc.title)}</span></div>${lines}${btns ? `<div class="btns">${btns}</div>` : ''}${field}${cancel}</div>`;
   }
@@ -940,13 +941,13 @@
     return list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
       const queued = busy && !p.held;
-      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x" data-unqueue="${k}" title="Take back (the agent keeps working)" aria-label="Take back">×</button>` : ''}</span></div>`;
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
     }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
   // the queued messages into the input; if that's what came up, Ctrl+C on the (non-empty) input clears it — it only
   // interrupts on an empty input, which is checked first — and the others still wanted are queued again.
-  async function unqueue(id, k) {
+  async function unqueue(id, k, drop = false) {
     const list = pending.get(id) || [], p = list[k]; if (!p) return;
     const x = typeof xterms !== 'undefined' && xterms.get(id), t = x && x.terminal;
     const box = () => (t && typeof readPromptBox === 'function' ? norm(readPromptBox(t)) : null);
@@ -974,7 +975,8 @@
       if (had) { chatComposer.sendText(id, sentOf(o), (o.restore && o.restore.list) || []); await wait(400); }
     }
     // Your words aren't lost: back in the reply box (images too) when it's empty, to edit and send again.
-    if (p.restore) chatComposer.restoreDraft(id, p.restore);
+    if (p.restore && !drop) chatComposer.restoreDraft(id, p.restore);
+    else if (p.restore) showToast('Removed · Undo', () => chatComposer.restoreDraft(id, p.restore)); // gone from the queue; Undo puts its words back in the reply box
     document.getElementById('term-order-input')?.focus({ preventScroll: true });
     rerender();
   }
@@ -1236,6 +1238,9 @@
     el._evs = evs; // block keys read the events now on screen
     const old = el._blocks || [];
     let newReply = null; const changed = []; // only these get the link, image and diagram passes below (a long chat is thousands of nodes)
+    // An empty thread (opening a chat): one parse of the whole list, not one per block (a long chat opened ~2x faster).
+    // Each block must come out as exactly one element; if one doesn't, the per-block path below rebuilds it.
+    if (!thread.children.length && list.length > 1) { thread.innerHTML = list.join(''); if (thread.children.length === list.length) { changed.push(...thread.children); el._blocks = old.length ? old : []; for (let k = 0; k < list.length; k++) old[k] = list[k]; } else thread.innerHTML = ''; }
     for (let k = 0; k < list.length; k++) {
       if (old[k] === list[k]) continue;
       const tmp = document.createElement('div'); tmp.innerHTML = list[k];
@@ -1526,6 +1531,8 @@
 
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
+    const sw = e.target.closest('[data-act="switch-acct"]'); if (sw && selectedId != null) { chatComposer.sendText(selectedId, '/login'); return; } // another account: the CLI's /login (its card follows)
+    const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); } return; }
     if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
@@ -1535,7 +1542,7 @@
     if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
     if (tab) { if (askTab(+tab.dataset.tab - +tab.parentElement.dataset.on)) for (const t of tab.parentElement.children) t.classList.toggle('on', t === tab); return; }
-    const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); return; } // /login's link
+    const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); ou.classList.remove('primary'); ou.innerHTML = ICON.check + 'Opened'; ou.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // /login's link
     const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => { const t = cu.querySelector('span'); if (t) { t.textContent = 'Copied'; setTimeout(() => { t.textContent = 'Copy link'; }, 1500); } }, () => {}); return; } // the result on the button you pressed, not a toast
     const ae = e.target.closest('[data-ask-esc]'); if (ae) { keys(['\x1b']); answered(ae); return; } // a question's Skip: Esc, as in the CLI
     const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); return; }
@@ -1555,7 +1562,7 @@
     const ar = e.target.closest('button[data-autoretry]'); // "Retry at 3:00 PM": arm it; again: undo
     if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; autoRetry.has(key) ? autoRetry.delete(key) : autoRetry.add(key); rerender(); return; }
     const uq = e.target.closest('[data-unqueue]'); if (uq) uq.closest('.msg')?.classList.add('leaving'); // ✕ on a queued prompt: take it back, the agent keeps working (it fades at once)
-    if (uq) { const m = uq.closest('.msg'); Promise.resolve(unqueue(selectedId, +uq.dataset.unqueue)).finally(() => m && m.isConnected && m.classList.remove('leaving')); return; }
+    if (uq) { const m = uq.closest('.msg'); Promise.resolve(unqueue(selectedId, +uq.dataset.unqueue, !!uq.dataset.drop)).finally(() => m && m.isConnected && m.classList.remove('leaving')); return; }
     const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
     if (art) { if (art.dataset.artOpen) api.send({ type: 'openUrl', url: art.dataset.artOpen }); else navigator.clipboard.writeText(art.dataset.artCopy).then(() => { art.classList.add('done'); setTimeout(() => art.classList.remove('done'), 1200); }); return; }
     const pn = e.target.closest('[data-pn]'); // a pasted text's chip in a message on its way: its text in the panel

@@ -1128,3 +1128,12 @@ body.world-mode #hdr-chat { display: none; }
    agent streams). Each remembers its real height once drawn; the place-holding anchor (chat-ui holdPlace) absorbs the
    rest. */
 :root body #conversation > .thread > * { content-visibility: auto; contain-intrinsic-size: auto 80px; }
+
+/* ── /improve round 8 ── */
+:root body :is(#conversation, #chat-shell) .q-x.q-ed .ic { width: 13px; height: 13px; }
+/* Trust: one line, the folder name bold, its parents cut from the left. */
+:root body :is(#conversation, #chat-shell) .card.choice p.path { display: flex; min-width: 0; white-space: nowrap; }
+:root body :is(#conversation, #chat-shell) .card.choice p.path .pp { overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; color: var(--dim); min-width: 0; }
+:root body :is(#conversation, #chat-shell) .card.choice p.path b { color: var(--text); font-weight: 600; flex: none; }
+/* Question rows: the number on the right, like every other card's key hint. */
+:root body #conversation .card.ask .choices button kbd { order: 2; margin-left: auto; }
