@@ -1092,17 +1092,21 @@
   // changes height after a redraw (link titles, diagrams, images, tool rows filling in): only the redraw itself
   // re-anchored, so later growth above pushed what you were reading away. Chromium's own anchoring is off (chat.css):
   // it shifted again on top of this.
-  const blockKey = (n) => n && (n.dataset.i || (n.querySelector('[data-i]') || {}).dataset?.i);
+  // Keyed by the event itself, not its index: a long chat keeps its last 1000 events, so every new one shifted all
+  // indices by one and the anchor latched onto the next block down - the view hopped on each update.
+  const blockKey = (n) => { const i = n && (n.dataset.i || (n.querySelector('[data-i]') || {}).dataset?.i); if (i == null) return null; const c = n.closest('#conversation'), ev = c && c._evs && c._evs[i]; return ev ? `${n.className.split(' ')[0]}|${ev.type}|${ev.ts}|${String(ev.text || ev.name || '').slice(0, 40)}` : null; };
+  // The first block whose bottom is below the view's top: binary search (blocks are stacked), ~10 rects per scroll, not thousands.
+  function firstVisible(thread, top) { const ch = thread.children; let lo = 0, hi = ch.length - 1, at = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (ch[m].getBoundingClientRect().bottom > top) { at = m; hi = m - 1; } else lo = m + 1; } return at; }
   function holdPlace(el) { // what's at the top of the view now (called on every scroll)
     el._anc = null;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) return; // following the bottom
     const thread = el.querySelector(':scope > .thread'), top = el.getBoundingClientRect().top; if (!thread) return;
-    for (const n of thread.children) { const r = n.getBoundingClientRect(); if (r.bottom > top && blockKey(n)) { el._anc = { i: blockKey(n), y: r.top - top }; return; } }
+    const ch = thread.children; for (let k = Math.max(0, firstVisible(thread, top)); k < ch.length; k++) { const key = blockKey(ch[k]); if (key) { el._anc = { i: key, y: ch[k].getBoundingClientRect().top - top }; return; } }
   }
   const placeRO = new ResizeObserver(() => {
     const el = document.getElementById('conversation'), a = el._anc; if (!a || !el.classList.contains('open') || Date.now() < pinUntil) return;
     const n = [...(el.querySelector(':scope > .thread')?.children || [])].find(x => blockKey(x) === a.i); if (!n) return;
-    const d = n.getBoundingClientRect().top - el.getBoundingClientRect().top - a.y; if (Math.abs(d) >= 1) el.scrollTop += d;
+    const d = n.getBoundingClientRect().top - el.getBoundingClientRect().top - a.y; if (Math.abs(d) >= 0.5) el.scrollTop += d;
   });
   function pinBottom() {
     pinUntil = Date.now() + 2000; const el = document.getElementById('conversation');
@@ -1175,7 +1179,8 @@
     // oldest into "Earlier", blocks get rebuilt).
     const keyOf = blockKey;
     let anchor = null;
-    if (stuck) { const top = el.getBoundingClientRect().top; for (const n of thread.children) { const r = n.getBoundingClientRect(); if (r.bottom > top && keyOf(n)) { anchor = { i: keyOf(n), y: r.top }; break; } } }
+    if (stuck) { const top = el.getBoundingClientRect().top, ch = thread.children; for (let k = Math.max(0, firstVisible(thread, top)); k < ch.length; k++) { const key = keyOf(ch[k]); if (key) { anchor = { i: key, y: ch[k].getBoundingClientRect().top }; break; } } }
+    el._evs = evs; // block keys read the events now on screen
     const old = el._blocks || [];
     let newReply = null; const changed = []; // only these get the link, image and diagram passes below (a long chat is thousands of nodes)
     for (let k = 0; k < list.length; k++) {
@@ -1189,7 +1194,7 @@
     }
     while (thread.children.length > list.length) thread.lastElementChild.remove();
     el._blocks = list;
-    if (anchor) { const n = [...thread.children].find(c => keyOf(c) === anchor.i); if (n) el.scrollTop += n.getBoundingClientRect().top - anchor.y; }
+    if (anchor) { const n = [...thread.children].find(c => keyOf(c) === anchor.i), d = n ? n.getBoundingClientRect().top - anchor.y : 0; if (Math.abs(d) >= 0.5) el.scrollTop += d; } // no write when nothing moved: any write cancels a wheel scroll in flight (the live tick redraws every second)
     if (stuck) holdPlace(el); else el._anc = null;
     // The live tail ticks every second (elapsed, the CLI's verb, agent timers). When only that text changed, swap the
     // text in place: rebuilding would replay the slide-in and restart the spark and shimmer on every tick.
