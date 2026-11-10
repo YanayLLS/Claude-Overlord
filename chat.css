@@ -1207,3 +1207,16 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-bg .bg-pill { height: 32px; }
 :root body #chat-chips { gap: 8px; }
 :root body :is(#conversation, #chat-shell) .msg.user.pending:has(.q-x) .q { animation: none; } /* its pulse animated opacity over the at-rest hide */
+
+/* ── /improve round 14 ── */
+/* Sign in: Open link with a copy icon beside it; once there's a code, Submit is the primary and Open link steps back. */
+:root body :is(#conversation, #chat-shell) .card .btns button.icon-only { width: 40px; padding: 0; justify-content: center; }
+@container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .card.choice .btns:has(.icon-only) { flex-direction: row; } :root body :is(#conversation, #chat-shell) .card.choice .btns:has(.icon-only) button.primary { flex: 1; } :root body :is(#conversation, #chat-shell) .card.choice .code-in { flex-direction: column; } :root body :is(#conversation, #chat-shell) .card.choice .code-in :is(input, button) { height: 40px; } }
+:root body :is(#conversation, #chat-shell) .card.choice:has(.code-in input:not(:placeholder-shown)) .btns button.primary { background: transparent; color: var(--text); border-color: var(--border-hi); }
+:root body :is(#conversation, #chat-shell) .card.choice .code-in:has(input:not(:placeholder-shown)) button:not(:disabled) { background: var(--text); color: var(--bg); border-color: var(--text); }
+:root body :is(#conversation, #chat-shell) .card.choice .code-in input { background: var(--surface1); }
+/* Queued text readable: full text colour; the clock and a dashed edge say "not sent yet". */
+:root body :is(#conversation, #chat-shell) .msg.user.pending:has(.q-x) .bubble { opacity: 1; color: var(--subtext); background: transparent; border: 1px dashed var(--border-hi); }
+/* Question: no tint on the CLI's cursor row at rest, only a brighter edge. */
+:root body #conversation .card.ask .choices button.focus { background: transparent; border-color: color-mix(in srgb, var(--text) 35%, var(--border-hi)); }
+@container (max-width: 520px) { :root body :is(#conversation, #chat-shell) .card.choice .code-in input { flex: none; } } /* stacked: the field keeps its 40px (flex:1 squashed it in a column) */
