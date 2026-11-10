@@ -197,7 +197,7 @@
     else if (ev.type === 'compact') h = `<details class="msg divider compacted"${ev._restored && ev._restored.length ? '' : ' data-empty'}><summary><span>Conversation compacted</span>${ev._restored && ev._restored.length ? ICON.chev : ''}</summary>${ev._restored && ev._restored.length ? `<div class="cp-list">${ev._restored.map(t => `<div>${escH(t)}</div>`).join('')}</div>` : ''}</details>`;
     else if (ev.type === 'note' && ev.kind === 'sub' && contextUsage(ev.text)) { // /context: one bar of what fills the window, the categories under it
       const u = contextUsage(ev.text), used = u.cats.filter(c => !/^free/i.test(c.name)), hue = (k) => `var(${['--claude', '--cyan', '--purple', '--yellow', '--green', '--peach', '--red'][k % 7]})`; // theme tokens, one per category
-      h = `<div class="msg ctx-use"><div class="cu-h"><b title="${u.pct}% used">${escH(u.used)}</b><span class="cu-m">${escH(u.model.replace(/^claude-(\w+)-(\d+)-(\d+).*$/i, (m, f, a2, b2) => f[0].toUpperCase() + f.slice(1) + ' ' + a2 + '.' + b2))}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.filter(c => !/^free/i.test(c.name)).map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
+      h = `<div class="msg ctx-use"><div class="cu-h"><b title="${u.pct}% used">${escH(u.used.replace(/(\d)([km])\b/g, (m, d, s) => d + s.toUpperCase()))}</b><span class="cu-m">${escH(u.model.replace(/^claude-(\w+)-(\d+)-(\d+).*$/i, (m, f, a2, b2) => f[0].toUpperCase() + f.slice(1) + ' ' + a2 + '.' + b2))}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.filter(c => !/^free/i.test(c.name)).map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
     }
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
     else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span>${/fail/i.test(m[2]) ? ICON.alert : ICON.check}</div>`; }
@@ -267,7 +267,7 @@
     return '';
   }
   function footHtml(textAt, turn, sum, mark) {
-    const meta = turn ? `<span class="tf-meta">${SPARK}${Number.isFinite(turn.ms) && turn.ms > 0 ? 'Worked ' + escH(dur(turn.ms)) + (turn.ts ? ' · ' : '') : ''}${turn.ts ? escH(clock(turn.ts)) : Number.isFinite(turn.ms) && turn.ms > 0 ? '' : 'Done'}</span>` : ''; // a turn without its duration says Done, not "NaNh"
+    const meta = turn ? `<span class="tf-meta">${SPARK}${Number.isFinite(turn.ms) && turn.ms > 0 ? 'Worked ' + escH(dur(turn.ms)) : 'Ran'}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : ''; // a turn without its duration says Done, not "NaNh"
     let files = '', cost = '';
     if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
     if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
@@ -580,7 +580,7 @@
     const cancel = sc.options.length ? '' : `<div class="btns"><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div>`;
     const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
     const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : (/^([a-z]:[\\/]|~|\/)/i.test(l) ? (() => { const parts = l.split(/[\\/]/), last = parts.pop(); return `<p class="fname" title="${escH(l)}"><b>${escH(last)}</b></p><p class="mono path" title="${escH(l)}">${escH((p => p.length > 4 ? [...p.slice(0, 2), '…', ...p.slice(-2)] : p)(parts.filter(Boolean)).join('\\'))}</p>`; })() : `<p>${escH(l)}</p>`)).join('');
-    const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled>Sign in</button></div>' : '';
+    const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled>Submit</button></div>' : '';
     return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${login ? 'Sign in' : escH(sc.title)}</span></div>${lines}${btns ? `<div class="btns">${btns}</div>` : ''}${field}${cancel}</div>`;
   }
   function planHtml(ev, cwd) {
@@ -912,7 +912,7 @@
     // /btw isn't queued: the CLI answers it at once in its own panel (shown as the terminal) and never writes it to the
     // transcript, so its bubble would wait "Queued" forever.
     if (list) for (let k = list.length - 1; k >= 0; k--) if (!list[k].held && /^\/btw\s/.test(list[k].text || '') && Date.now() - list[k].at > 1500) list.splice(k, 1);
-    const rq = removedQ.get(id), undoRow = rq && Date.now() - rq.at < 6000 ? `<div class="msg note cli qremoved">Removed “${escH(String(rq.text || '').slice(0, 60))}” <button type="button" class="q-x undo" data-act="unremove">Undo</button></div>` : '';
+    const rq = removedQ.get(id), undoRow = rq && Date.now() - rq.at < 10000 ? `<div class="msg note cli qremoved">Removed “${escH(String(rq.text || '').slice(0, 60))}” <button type="button" class="q-x undo" data-act="unremove">Undo</button></div>` : '';
     if (!list || !list.length) return undoRow + cliQueue(id, evs);
     // Each message sent from here becomes the next message of yours in the transcript, in the order sent, so they clear
     // in that order: the first one of yours written after a message was sent is that message, whatever the CLI made of its
@@ -980,7 +980,7 @@
     }
     // Your words aren't lost: back in the reply box (images too) when it's empty, to edit and send again.
     if (p.restore && !drop) chatComposer.restoreDraft(id, p.restore);
-    else if (p.restore) { removedQ.set(id, { text: p.text, restore: p.restore, at: Date.now() }); setTimeout(() => { const r = removedQ.get(id); if (r && Date.now() - r.at >= 6000) { removedQ.delete(id); rerender(); } }, 6100); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } // gone from the queue; Undo puts its words back in the reply box
+    else if (p.restore) { removedQ.set(id, { text: p.text, restore: p.restore, at: Date.now() }); setTimeout(() => { const r = removedQ.get(id); if (r && Date.now() - r.at >= 10000 && !document.activeElement?.matches?.('[data-act="unremove"]')) { removedQ.delete(id); rerender(); } }, 10100); rerender(); requestAnimationFrame(() => document.querySelector('#conversation [data-act="unremove"]')?.focus({ preventScroll: true })); } // gone from the queue; Undo puts its words back in the reply box
     document.getElementById('term-order-input')?.focus({ preventScroll: true });
     rerender();
   }
@@ -1560,7 +1560,7 @@
     const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); ou.classList.remove('primary'); ou.innerHTML = ICON.check + 'Opened'; ou.closest('.card')?.classList.add('opened'); ou.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // /login's link
     const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => { const t = cu.querySelector('span'); if (t) { t.textContent = 'Copied'; setTimeout(() => { t.textContent = 'Copy link'; }, 1500); } }, () => {}); return; } // the result on the button you pressed, not a toast
     const ae = e.target.closest('[data-ask-esc]'); if (ae) { keys(['\x1b']); answered(ae); return; } // a question's Skip: Esc, as in the CLI
-    const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) { api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); i.disabled = true; ls.disabled = true; ls.innerHTML = '<span class="loading"></span>Signing in'; } return; }
+    const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) { api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); i.disabled = true; ls.disabled = true; ls.innerHTML = '<span class="loading"></span>Submitting'; } return; }
     const ch = e.target.closest('[data-choice]'); // trust / login card: arrows onto the choice, then Enter; Cancel is Esc
     if (ch && selectedId != null) { const sc = screenChoice(screenOf(selectedId, 40, true)); if (!sc) return; answered(ch); const k = +ch.dataset.choice; if (k < 0) { api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); return; } const d = k - sc.focus; api.send({ type: 'termInput', id: selectedId, data: (d > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(d)) + '\r' }); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
