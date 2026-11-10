@@ -6555,7 +6555,7 @@ app.whenReady().then(() => {
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, cb) => cb(true));
   browserRegistry = createRegistry({
     makeView: (partition) => new WebContentsView({
-      webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true },
+      webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }, // the agent works the page while its pane is hidden: throttled, an app sat on its loader (rAF and timers stop for hidden views)
     }),
     attach: (view) => mainWindow.contentView.addChildView(view),
     detach: (view) => mainWindow.contentView.removeChildView(view),
