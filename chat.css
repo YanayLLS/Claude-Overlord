@@ -880,3 +880,4 @@ body.world-mode #hdr-chat { display: none; }
 
 /* Scrolled-up reading position is held by chat-ui.js (holdPlace); the browser's own anchoring shifted it a second time. */
 #conversation { overflow-anchor: none; }
+:root body :is(#conversation, #chat-shell) .msg.note.cli.sub { white-space: pre-wrap; } /* /context, /cost: the CLI lays its output out in lines */

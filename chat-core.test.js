@@ -229,3 +229,8 @@ test('screenPermRows: a sub-agent\'s permission dialog with a long command keeps
   assert.strictEqual(screenPermRows(['─'.repeat(40), ' Do you want to keep it?', ' ❯ 1. Yes', '   2. No', ' Enter to select · ↑/↓ to navigate · Esc to cancel']), null);
   assert.strictEqual(screenPermRows(['just a reply']), null);
 });
+
+test('screenPermRows: the dialog rule wrapped onto the question row is not part of the question', () => {
+  const { screenPermRows } = require('./chat-core');
+  assert.strictEqual(screenPermRows(['x', '─'.repeat(40) + 'Do you want to create hello.txt?', ' ❯ 1. Yes', '   2. No']).question, 'Do you want to create hello.txt?');
+});

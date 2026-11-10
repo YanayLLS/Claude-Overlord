@@ -369,6 +369,6 @@ function screenPermRows(rows) {
   if (q < 0 || rows.slice(q).some(r => /Enter\s+to\s+select/.test(r))) return null;
   let top = q - 1; while (top >= 0 && !/^\s*─{10,}/.test(rows[top])) top--; // ponytail: a long command can fill the screen; the rule is the dialog's top
   const body = rows.slice(top + 1, q).map(r => r.replace(/╌{3,}/g, '').replace(/^ /, '').replace(/\s+$/, '')).filter(r => r.trim() && !/^[\s─│]*$/.test(r) && !/^\s*Tip:/.test(r));
-  return { question: rows[q].trim(), body };
+  return { question: rows[q].replace(/^[\s─━]+/, '').trim(), body }; // the dialog's top rule, wrapped onto the question's row, isn't part of it
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = { relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };

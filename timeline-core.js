@@ -126,7 +126,7 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     // A local command (/rename, /resume…): the CLI prints its line and, under it, its output ("⎿ Session renamed to: x").
     if (r.type === 'system' && r.subtype === 'local_command' && typeof r.content === 'string') {
       const out = /<local-command-std(?:out|err)>([\s\S]*?)<\/local-command-std(?:out|err)>/.exec(r.content);
-      if (out) return out[1].trim() ? [{ type: 'note', ts, kind: 'sub', text: cap(out[1].trim(), 2000) }] : null;
+      if (out) { const t = out[1].replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/[ \t]+$/gm, '').trim(); return t ? [{ type: 'note', ts, kind: 'sub', text: cap(t, 2000) }] : null; } // /context and friends colour their output
       return promptEvents(ts, [{ type: 'text', text: r.content }], isSystemMessage);
     }
     // Lines the CLI prints between turns: its "※ recap:", a notice ("Compacted while idle…", "x is idle"), and what a
