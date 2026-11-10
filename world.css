@@ -146,7 +146,7 @@ body.world-mode .group-header:hover { background: rgba(255,255,255,.03); }
 body.world-mode .group-name { font-family: var(--w-display); font-size: 12px; letter-spacing: .14em; color: var(--w-gold); display: inline-flex; align-items: center; gap: 8px; }
 body.world-mode .group-name::before { content: ''; width: 9px; height: 10px; clip-path: var(--w-hex); background: currentColor; flex: none; }
 body.world-mode .group-path { opacity: .5; }
-body.world-mode .group-actions button, body.world-mode .group-menu-btn, body.world-mode .server-badge, body.world-mode .wt-port { border-radius: 0 !important; clip-path: var(--w-hexw); border-color: transparent !important; background: rgba(255,255,255,.06); padding-left: 12px; padding-right: 12px; }
+body.world-mode .server-badge, body.world-mode .wt-port { border-radius: 0 !important; clip-path: var(--w-hexw); border-color: transparent !important; background: rgba(255,255,255,.06); padding-left: 12px; padding-right: 12px; }
 body.world-mode .feature-header, body.world-mode .feature-wrap > .feature-header { border-radius: 0; }
 body.world-mode .agent { height: 36px; border-radius: 0; border: 0; border-left: 2px solid transparent; padding: 0 10px 0 12px; gap: 8px; }
 body.world-mode .agent:hover { background: rgba(255,255,255,.04); border-color: transparent; }
@@ -279,8 +279,26 @@ body.world-mode #world-extra { flex: 0 1 auto; min-height: 0; max-height: 42%; o
 body.world-mode .group-header { padding: 8px 10px 3px 10px; gap: 5px; }
 body.world-mode .group-info { flex: 1 1 100px; }
 body.world-mode .group-name { font-size: 11px; letter-spacing: .06em; }
-body.world-mode .group-actions button { padding: 2px 8px; font-size: 10px; }
-body.world-mode .group-menu-btn { padding: 2px 6px; }
+/* One line: hex + NAME + count, then one hex-shaped + AGENT ★ ▾ unit, ⋮ only on hover */
+body.world-mode .group-header { align-items: center; }
+body.world-mode .group-chevron { flex: none; }
+body.world-mode .group-info { display: flex; align-items: center; gap: 8px; }
+body.world-mode .group-info .group-name { flex: 0 1 auto; min-width: 0; }
+body.world-mode .group-info .group-path { display: none; }
+body.world-mode .group-count { flex: none; margin: 0; font-family: var(--w-mono); font-size: 10px; color: var(--dim); opacity: 1; }
+body.world-mode .group-actions { order: 1; opacity: 1; }
+body.world-mode .group-actions .split-btn { height: 22px; clip-path: var(--w-hexw); background: rgba(255,255,255,.07); }
+body.world-mode .group-actions .split-btn:hover { background: rgba(255,255,255,.12); }
+body.world-mode .group-actions .split-btn button { height: 22px; margin: 0 !important; padding: 0 6px; border: 0 !important; border-radius: 0 !important; background: transparent; color: var(--text);
+  font-family: var(--w-display); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+body.world-mode .group-actions .split-btn button:first-child { padding-left: 12px; }
+body.world-mode .group-actions .split-btn .split-chev { padding: 0 11px 0 4px; color: var(--dim); }
+body.world-mode .group-actions .split-btn .fav-star { color: var(--w-gold); }
+body.world-mode .group-actions .split-btn button:hover { background: rgba(255,255,255,.08); color: #fff; }
+body.world-mode .group-menu-wrap { order: 2; }
+body.world-mode .group-menu-btn { width: 18px; height: 22px; padding: 0; border: 0; background: transparent; color: var(--dim); opacity: 0; transition: opacity .12s; }
+body.world-mode .group-header:hover .group-menu-btn, body.world-mode .group-menu-btn:focus-visible, body.world-mode .group-menu-wrap:has(.group-dropdown.open) .group-menu-btn { opacity: 1; }
+body.world-mode .group-menu-btn:hover { color: var(--text); }
 body.world-mode .wt-port, body.world-mode .server-badge { padding: 1px 7px; font-size: 10px; }
 body.world-mode .feature > .group .group-header { padding-left: 18px; }
 
