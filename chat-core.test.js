@@ -234,3 +234,23 @@ test('screenPermRows: the dialog rule wrapped onto the question row is not part 
   const { screenPermRows } = require('./chat-core');
   assert.strictEqual(screenPermRows(['x', '─'.repeat(40) + 'Do you want to create hello.txt?', ' ❯ 1. Yes', '   2. No']).question, 'Do you want to create hello.txt?');
 });
+
+test('permLabel: the CLI\'s long permission options read as short buttons', () => {
+  const { permLabel } = require('./chat-core');
+  assert.strictEqual(permLabel('Yes'), 'Allow');
+  assert.strictEqual(permLabel('Yes, allow all edits during this session (shift+tab)'), 'Allow session');
+  assert.strictEqual(permLabel("Yes, and don't ask again for npm test commands in C:\proj"), 'Always allow');
+  assert.strictEqual(permLabel('No, and tell Claude what to do differently (esc)'), 'Decline');
+  assert.strictEqual(permLabel('Deny'), 'Decline');
+  assert.strictEqual(permLabel('Yes, and auto-accept edits'), 'Yes, and auto-accept edits');
+});
+
+test('screenChoice: the CLI\'s unnumbered dialogs (folder trust, /login) as a title, lines and choices', () => {
+  const { screenChoice } = require('./chat-core');
+  const trust = ['', '─'.repeat(60), ' Accessing workspace:', '', ' C:/Users/me/proj', '', ' Quick safety check: Is this a project you created or one you trust?', '', ' Security guide', '', ' ❯ No, exit', '   Yes, I trust this folder', '', ' Enter to confirm · Esc to cancel'];
+  assert.deepStrictEqual(screenChoice(trust), { title: 'Trust this folder?', lines: ['C:/Users/me/proj'], options: ['No, exit', 'Yes, I trust this folder'], focus: 0 });
+  const login = ['─'.repeat(60), '  Login', '', '  · Opening browser to sign in…', '', '  Esc to cancel'];
+  assert.deepStrictEqual(screenChoice(login), { title: 'Login', lines: ['Opening browser to sign in…'], options: [], focus: -1 });
+  assert.strictEqual(screenChoice(['❯ 1. Yes', '  2. No', 'Esc to cancel']), null); // numbered: the question card's
+  assert.strictEqual(screenChoice(['some reply', '─'.repeat(60), '❯ ', '─'.repeat(60), '  ? for shortcuts']), null); // the idle prompt box
+});

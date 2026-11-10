@@ -881,3 +881,7 @@ body.world-mode #hdr-chat { display: none; }
 /* Scrolled-up reading position is held by chat-ui.js (holdPlace); the browser's own anchoring shifted it a second time. */
 #conversation { overflow-anchor: none; }
 :root body :is(#conversation, #chat-shell) .msg.note.cli.sub { white-space: pre-wrap; } /* /context, /cost: the CLI lays its output out in lines */
+/* Permission and plan footers: one filled primary, a quiet secondary, Decline as a text button at the end. */
+:root body :is(#conversation, #chat-shell) .card .btns button.dec { margin-left: auto; border-color: transparent; color: var(--subtext); }
+:root body :is(#conversation, #chat-shell) .card .btns button.dec:hover { color: var(--text); background: var(--hover-strong); }
+:root body :is(#conversation, #chat-shell) .card.perm, :root body :is(#conversation, #chat-shell) .card.ask { box-shadow: none; animation: chat-in .14s var(--chat-ease) both; }

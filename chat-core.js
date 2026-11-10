@@ -371,4 +371,31 @@ function screenPermRows(rows) {
   const body = rows.slice(top + 1, q).map(r => r.replace(/╌{3,}/g, '').replace(/^ /, '').replace(/\s+$/, '')).filter(r => r.trim() && !/^[\s─│]*$/.test(r) && !/^\s*Tip:/.test(r));
   return { question: rows[q].replace(/^[\s─━]+/, '').trim(), body }; // the dialog's top rule, wrapped onto the question's row, isn't part of it
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };
+// A dialog the CLI draws without numbers (the folder trust check, /login), read off the bottom of its screen: its
+// title, its other lines, and its choices (the ❯ row and the rows aligned with it). null when the screen shows none
+// (a numbered menu is the question card's; the idle prompt box has no "Enter to confirm / Esc to cancel" under it).
+function screenChoice(rows) {
+  rows = rows || [];
+  const foot = rows.findLastIndex(r => /\b(Enter to (confirm|select|continue)|Esc to (cancel|go back|exit))\b/i.test(r));
+  if (foot < 0 || rows.slice(foot + 1).some(r => r.trim())) return null;
+  const top = rows.findLastIndex((r, i) => i < foot && /^\s*[─━]{10,}\s*$/.test(r));
+  const body = rows.slice(top + 1, foot);
+  if (body.some(r => /^\s*[❯›>]?\s*\d+\.\s/.test(r))) return null;
+  const f = body.findIndex(r => /^\s*❯\s+\S/.test(r)), col = f < 0 ? -1 : body[f].indexOf('❯') + 2;
+  let a = f, b = f; const opt = (r) => r.trim() && r.search(/\S/) === col;
+  if (f >= 0) { while (a > 0 && opt(body[a - 1])) a--; while (b < body.length - 1 && opt(body[b + 1])) b++; }
+  const options = f < 0 ? [] : body.slice(a, b + 1).map(r => r.replace(/^\s*❯?\s*/, '').trim());
+  const text = body.filter((r, i) => r.trim() && (f < 0 || i < a || i > b)).map(r => r.trim().replace(/^[·•]\s*/, ''));
+  if (!text.length && !options.length) return null;
+  if (options.some(o => /trust this folder/i.test(o))) return { title: 'Trust this folder?', lines: text.filter(t => /^([a-z]:[\\/]|~|\/)/i.test(t)), options, focus: f - a };
+  return { title: text[0].replace(/:$/, ''), lines: text.slice(1).filter(t => !/^security guide$/i.test(t)), options, focus: f < 0 ? -1 : f - a };
+}
+// A permission menu option as a button label. The CLI words them as sentences ("No, and tell Claude what to do
+// differently (esc)"); the card's buttons say what they do.
+function permLabel(l) {
+  if (/^(no|deny)\b/i.test(l)) return 'Decline';
+  if (/^yes$/i.test(l)) return 'Allow';
+  if (/^yes,?\s+(and\s+)?(allow|don'?t ask)/i.test(l)) return /session/i.test(l) ? 'Allow session' : 'Always allow';
+  return l;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = { screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };

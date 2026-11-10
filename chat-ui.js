@@ -155,7 +155,7 @@
     else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o.label ?? o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
     else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${termHtml(out)}</pre></div>` : ''}</div>`;
     else if (out) body = `<pre class="out${err ? ' err' : ''}">${termHtml(out)}</pre>`;
-    const cls = `trow k-${v.kind}${running ? ' running' : ''}${err ? ' err' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
+    const cls = `trow k-${v.kind}${running ? ' running' : ''}${err && !declined ? ' err' : declined ? ' declined' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
     const head = `${ICON[v.kind] || ICON.tool}<span class="verb">${declined ? 'Declined' : escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}${running && ev.ts ? `<span class="el" data-t="${Date.parse(ev.ts)}"></span>` : ''}`;
     const h = v.kind === 'agent' ? `<div class="${cls}" data-agent-tid="${escH(ev.toolId || '')}" role="button" tabindex="0" title="Show its steps"><div class="sumrow">${head}${ICON.chev}</div></div>`
       : body ? `<details class="${cls}" data-tid="${escH(ev.toolId || '')}"><summary>${head}${ICON.chev}</summary><div class="tbody">${body}</div></details>` : `<div class="${cls}"><div class="sumrow">${head}</div></div>`;
@@ -321,6 +321,7 @@
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
       if (t === 'bgdone' && ev.text) { if (turn) close(); flush(); out.push(msgHtml({ type: 'note', text: ev.text }, i, cwd)); return; } // the CLI's "Background command "x" completed" line; it opens a turn, after the last one's footer
       if (t === 'tool_done' || t === 'mode' || t === 'bgdone' || t === 'queue') return;
+      if (t === 'interrupt' && i > 0 && evs[i - 1].type === 'tool_done' && evs[i - 1].err && /\buser (rejected|denied|declined)\b/i.test(evs[i - 1].text || '')) return; // your "No" ends the turn: the "Declined" row says it, an "Interrupted" note reads like a failure
       // The "[Image: source: …]" record after a prompt: only shown when that prompt had no thumbnails of its own.
       // …or the prompt it comes just before (the CLI can write it first: the picture showed twice, above the bubble too).
       const hasImgs = (p) => p && p.type === 'prompt' && ((p.images || []).length || (p.paths || []).length);
@@ -460,8 +461,9 @@
   const menuUp = (id) => !!permMenu(id);
   // Its buttons are the menu's own choices (a Yes/No prompt has no "always"); the usual ones before it has drawn.
   function permBtns(id, attr, kbd) {
-    const o = permMenu(id), list = o ? o.slice(0, 4).map((l, k) => [String(k + 1), l.length > 42 ? l.slice(0, 40) + '…' : l]) : [['1', 'Allow once'], ['2', 'Always allow']];
-    const b = (k, l, j) => `<button type="button"${j ? '' : ' class="primary"'} ${attr}="${k}" title="${escH(l)}">${escH(l)}${kbd ? `<kbd>${k === 'esc' ? 'Esc' : k}</kbd>` : ''}</button>`;
+    const o = permMenu(id), list = o ? o.slice(0, 4).map((l, k) => [String(k + 1), l]) : [['1', 'Yes'], ['2', 'Yes, always allow']];
+    // Short labels on the buttons (the CLI's full wording stays in the tooltip); "No…" is a quiet text button at the end.
+    const b = (k, l, j) => `<button type="button" class="${j ? '' : 'primary'}${/^(no|deny)\b/i.test(l) ? ' dec' : ''}" ${attr}="${k}" title="${escH(l)}">${escH(permLabel(l))}${kbd ? `<kbd>${k === 'esc' ? 'Esc' : k}</kbd>` : ''}</button>`;
     return list.map(([k, l], j) => b(k, l, j)).join('') + (list.some(([, l]) => /^no\b/i.test(l)) ? '' : b('esc', 'Deny', 1));
   }
   // The open question as the CLI draws it: the line above its menu, and each option with the lines under it. A question
@@ -542,9 +544,19 @@
   function rewindPick(k) { const rw = screenRewind(selectedId); if (!rw) return; const d = k - rw.focus; keys([...arrowKeys(d), '\r']); setTimeout(rerender, Math.abs(d) * 70 + 400); }
   function rewindStep(d) { const rw = screenRewind(selectedId); if (!rw) return false; keys([d > 0 ? '\x1b[B' : '\x1b[A']); setTimeout(rerender, 200); return true; }
   // A proposed plan waiting for approval: the plan itself, rendered, and the CLI's own choices as buttons.
+  // The CLI's unnumbered dialogs (chat-core screenChoice). The option that says yes is the primary; with no options
+  // (/login waiting on the browser) Cancel is the one button.
+  function choiceHtml(sc) {
+    const yes = sc.options.findIndex(o => /^yes\b/i.test(o)), prim = yes >= 0 ? yes : 0;
+    const label = (o) => /trust this folder/i.test(o) ? 'Trust' : /^no,?\s*exit$/i.test(o) ? 'Exit' : o;
+    const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o]) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}</button>`).join('') : '<button type="button" data-choice="-1">Cancel<kbd>Esc</kbd></button>';
+    return `<div class="card perm choice"><div class="card-h">${ICON.shield}<span>${escH(sc.title)}</span></div>${sc.lines.map(l => `<p class="mono">${escH(l)}</p>`).join('')}<div class="btns">${btns}</div></div>`;
+  }
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
-    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Ready to code? Here's the plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="choices">${labels.map((l, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(l)}</b></span></button>`).join('')}</div></div>`;
+    // The plan in full (it scrolls inside past ~360px), then the CLI's choices as one footer: Approve filled, the rest quiet.
+    const lab = (l) => /auto-?accept/i.test(l) ? 'Approve' : /manual/i.test(l) ? 'Review each edit' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
+    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${k + 1}</kbd></button>`).join('')}</div></div>`;
   }
   // Which step of a several-question prompt the CLI is on: it only shows that by colour (the step's name on a filled
   // background), and the question isn't in the transcript until it's answered. -1 when it can't tell.
@@ -813,7 +825,12 @@
       + bg.map(e => { const a2 = e.args || {};
         return `<button type="button" role="menuitem" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
     // A menu on the CLI's screen that main didn't flag (a question with previews, say): still a question card, not the raw terminal.
-    if (!perm) { const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw); const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + (permMenu(selectedId) && screenPerm(selectedId) ? permHtml({}, evs, doneBy) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), null)); }
+    if (!perm) {
+      const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw);
+      const sa = screenAsk(selectedId), plan = lastTool(evs, 'ExitPlanMode', doneBy);
+      if (sa.dialog && sa.options.length >= 2) return h + (permMenu(selectedId) && screenPerm(selectedId) ? permHtml({}, evs, doneBy) : plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), null)); // a plan waiting on you shows the plan, flagged by main or not
+      const sc = screenChoice(screenOf(selectedId, 40, true)); if (sc) return h + choiceHtml(sc); // folder trust, /login: a card, not the raw terminal
+    }
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${termHtml(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -1208,7 +1225,9 @@
       tailEl._h = tail; tailEl._k = key; changed.push(tailEl);
     }
     { const box = document.getElementById('term-order-input'), sg = tail.includes('class="qreplies"') ? nextSuggestion(id, evs) : ''; // the chip's text, greyed in the box: Tab takes it
-      if (box && (box.dataset.sugg || '') !== sg) { box.dataset.sugg = sg; box.placeholder = sg ? sg + '  (Tab)' : 'Reply…'; } }
+      // A permission or plan waiting: what you type goes with "No" (the CLI's own "tell Claude what to do differently").
+      const ph = sg ? sg + '  (Tab)' : /class="card (perm|ask plan-ask)/.test(tail) ? 'Tell Claude instead…' : 'Reply…';
+      if (box && box.placeholder !== ph) { box.dataset.sugg = sg; box.placeholder = ph; } }
     drawDock(); applyAskHover(); keepAskInput(); // a hovered option keeps its preview through redraws, a typed answer its text
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
     announce(st === 'question' ? 'The agent has a question' : st === 'permission' ? 'The agent needs approval' : busy ? 'The agent is working' : a.crashed === 'fatal' ? 'The agent stopped' : 'The agent is done');
@@ -1477,6 +1496,8 @@
     if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
     if (tab) { if (askTab(+tab.dataset.tab - +tab.parentElement.dataset.on)) for (const t of tab.parentElement.children) t.classList.toggle('on', t === tab); return; }
+    const ch = e.target.closest('[data-choice]'); // trust / login card: arrows onto the choice, then Enter; Cancel is Esc
+    if (ch && selectedId != null) { const sc = screenChoice(screenOf(selectedId, 40, true)); if (!sc) return; const k = +ch.dataset.choice; if (k < 0) { api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); return; } const d = k - sc.focus; api.send({ type: 'termInput', id: selectedId, data: (d > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(d)) + '\r' }); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
     if (pick && e.target.closest('.ask-in')) return; // typing an answer in it
     // A box of a pick-several question: its number toggles it, as in the CLI; the card stays for the rest and Submit.
@@ -2067,7 +2088,7 @@
     // else repaints: redraw whenever what it shows changed.
     if (x && termTab === 'conversation' && cv && cv.classList.contains('open')) {
       const sa = screenAsk(selectedId), rw = screenRewind(selectedId);
-      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, liveMode(selectedId), cliSuggestion(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
+      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, JSON.stringify(screenChoice(screenOf(selectedId, 40, true))), liveMode(selectedId), cliSuggestion(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
       if (sig !== screenSig) { screenSig = sig; rerender(); }
     }
     // A panel drawn inline above the prompt box (/btw's answer, a skill's own UI): the terminal opens beside the chat
@@ -2075,7 +2096,7 @@
     const rows = x && screenRows(x, 80), panel = !!(rows && x && termTab === 'conversation' && cv && cv.classList.contains('open') && screenDialog(rows) && !screenDialog(rows, false));
     if (panel) { panelOff = 0; if (!t.classList.contains('split')) { autoSplitFor = selectedId; t.classList.add('split'); switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); } }
     else if (autoSplitFor != null && ++panelOff >= 2) { autoSplitFor = null; t.classList.remove('split'); if (termTab === 'conversation') switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); }
-    const up = !!(x && !panel && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(rows) && !(screenAsk(selectedId).dialog && screenAsk(selectedId).options.length >= 2) && !screenRewind(selectedId)); // a question menu gets its card instead
+    const up = !!(x && !panel && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(rows) && !(screenAsk(selectedId).dialog && screenAsk(selectedId).options.length >= 2) && !screenRewind(selectedId) && !screenChoice(rows)); // a question menu, the trust check, /login: their cards instead
     if (up) { peekOff = 0; peek(true); return; }
     if (t && t.classList.contains('peek') && termPeekFor === selectedId && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
     peek(false);
