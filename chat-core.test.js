@@ -238,8 +238,8 @@ test('screenPermRows: the dialog rule wrapped onto the question row is not part 
 test('permLabel: the CLI\'s long permission options read as short buttons', () => {
   const { permLabel } = require('./chat-core');
   assert.strictEqual(permLabel('Yes'), 'Allow');
-  assert.strictEqual(permLabel('Yes, allow all edits during this session (shift+tab)'), 'Allow session');
-  assert.strictEqual(permLabel("Yes, and don't ask again for npm test commands in C:\proj"), 'Always allow');
+  assert.strictEqual(permLabel('Yes, allow all edits during this session (shift+tab)'), 'Allow all edits');
+  assert.strictEqual(permLabel("Yes, and don't ask again for npm test commands in C:\proj"), "Don't ask again");
   assert.strictEqual(permLabel('No, and tell Claude what to do differently (esc)'), 'Decline');
   assert.strictEqual(permLabel('Deny'), 'Decline');
   assert.strictEqual(permLabel('Yes, and auto-accept edits'), 'Yes, and auto-accept edits');

@@ -10,6 +10,7 @@
     cmd: svg('<path d="m4 17 6-5-6-5"/><path d="M12 19h8"/>'),
     read: svg('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>'),
     edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
+    ban: svg('<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>'),
     key: svg('<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.8-8.8"/><path d="m16 7 3 3"/><path d="m19 4 2 2"/>'),
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>'),
     web: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/>'),
@@ -157,7 +158,7 @@
     else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${termHtml(out)}</pre></div>` : ''}</div>`;
     else if (out) body = `<pre class="out${err ? ' err' : ''}">${termHtml(out)}</pre>`;
     const cls = `trow k-${v.kind}${running ? ' running' : ''}${err && !declined ? ' err' : declined ? ' declined' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
-    const head = `${ICON[v.kind] || ICON.tool}<span class="verb">${declined ? 'Declined' : escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}${running && ev.ts ? `<span class="el" data-t="${Date.parse(ev.ts)}"></span>` : ''}`;
+    const head = `${declined ? ICON.ban : ICON[v.kind] || ICON.tool}<span class="verb">${declined ? 'Declined' : escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}${running && ev.ts ? `<span class="el" data-t="${Date.parse(ev.ts)}"></span>` : ''}`;
     const h = v.kind === 'agent' ? `<div class="${cls}" data-agent-tid="${escH(ev.toolId || '')}" role="button" tabindex="0" title="Show its steps"><div class="sumrow">${head}${ICON.chev}</div></div>`
       : body ? `<details class="${cls}" data-tid="${escH(ev.toolId || '')}"><summary>${head}${ICON.chev}</summary><div class="tbody">${body}</div></details>` : `<div class="${cls}"><div class="sumrow">${head}</div></div>`;
     toolCache.set(ev, [done, h]);
@@ -193,16 +194,17 @@
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
     else if (ev.type === 'note' && ev.kind === 'sub' && contextUsage(ev.text)) { // /context: one bar of what fills the window, the categories under it
-      const u = contextUsage(ev.text), used = u.cats.filter(c => !/^free/i.test(c.name)), hue = (k) => `color-mix(in srgb, var(--claude) ${Math.max(25, 95 - k * 12)}%, var(--surface1))`; // one accent, stepped: theme tokens only
-      h = `<div class="msg ctx-use"><div class="cu-h"><b>${escH(u.used)}</b><span>${u.pct}%</span><span class="cu-m">${escH(u.model)}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b>${escH(c.size)}</b><em>${c.pct}%</em></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
+      const u = contextUsage(ev.text), used = u.cats.filter(c => !/^free/i.test(c.name)), hue = (k) => `var(${['--claude', '--cyan', '--purple', '--yellow', '--green', '--peach', '--red'][k % 7]})`; // theme tokens, one per category
+      h = `<div class="msg ctx-use"><div class="cu-h"><b>${escH(u.used)}</b><span>${u.pct}%</span><span class="cu-m">${escH(u.model)}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
     }
+    else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>${escH(String(ev.text).split(/[.·(]|\s[-–]\s/)[0].replace(/…$/, '').trim())}</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
     else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset">Resets ${escH(clock(new Date(at).toISOString()))} · <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}">Retry at ${escH(clock(new Date(at).toISOString()))}</button></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset">Resets ${escH(clock(new Date(at).toISOString()))} · <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Auto-retry">Auto-retry</button></div></div></div>`;
     }
     else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
@@ -452,7 +454,7 @@
     if (sp) {
       // A new file: the CLI draws "Create file / name / 1 line…"; shown as the file's chip and its lines as an added diff.
       const file = (/create\s+(.+?)\?$/i.exec(sp.question) || [])[1], body = sp.body.filter(l => !/^\s*(create|edit|update|write)\s+file\s*$/i.test(l) && !(file && l.trim() === file));
-      const nums = file && body.length && body.every(l => /^\s*\d+\s/.test(l)), view = nums ? `<div class="perm-file">${ICON.edit}<span class="mono">${escH(file)}</span><span class="stat"><b class="add">+${body.length}</b></span></div>${diffHtml('', body.map(l => l.replace(/^\s*\d+\s/, '')).join('\n'), file).html}` : body.length ? `<pre class="perm-screen">${escH(body.join('\n'))}</pre>` : '';
+      const nums = file && body.length && body.every(l => /^\s*\d+\s/.test(l)), view = nums ? `<div class="perm-file"><span class="mono">${escH(file)}</span><span class="stat"><b class="add">+${body.length}</b></span></div>${diffHtml('', body.map(l => l.replace(/^\s*\d+\s/, '')).join('\n'), file).html}` : body.length ? `<pre class="perm-screen">${escH(body.join('\n'))}</pre>` : '';
       return `<div class="card perm"><div class="card-h">${ICON[toolView({ name: /^bash|command/i.test(sp.body[0] || '') ? 'Bash' : /edit|write|create/i.test(sp.question) ? 'Edit' : '' }).kind] || ICON.shield}<span>${escH(sp.question.replace(/^Do you want to (\w)/, (m, c) => c.toUpperCase()))}</span></div>${view}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
     }
     if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new, a.file_path).html}`;
@@ -636,7 +638,7 @@
       const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.replace(/^\s*[│┃]/, '').trim()).filter(Boolean).reduce((acc, r) => { if (acc.length && !/^[●⚠→]/.test(r)) acc[acc.length - 1] += ' ' + r; else acc.push(r); return acc; }, []) : [];
       rv = body.length ? `<div class="ask-review">${body.map(r => /^⚠/.test(r) ? `<div class="warn">${escH(r.replace(/^⚠\s*/, ''))}</div>` : /^→/.test(r) ? `<div class="ans">${escH(r.replace(/^→\s*/, ''))}</div>` : `<div class="rq">${escH(r.replace(/^●\s*/, ''))}</div>`).join('')}</div>` : '';
     }
-    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${s.options.length && s.options[askFocus(s)]?.bare && k === s.pf ? ' pv' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(/^type something.?$/i.test(o.label ?? o) ? 'Other…' : (o.label ?? o))}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) && o.desc.trim().toLowerCase() !== String(o.label ?? '').trim().toLowerCase() ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div></div>`
+    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${s.options.length && s.options[askFocus(s)]?.bare && k === s.pf ? ' pv' : ''}${o.sep ? ' sep' : ''}${/^type something/i.test(o.label ?? o) ? ' free' : ''}"><kbd>${k + 1 - opts.slice(0, k).filter(x => /^type something/i.test(x.label ?? x)).length}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) && o.desc.trim().toLowerCase() !== String(o.label ?? '').trim().toLowerCase() ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
@@ -862,7 +864,8 @@
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
       const toolRuns = evs.some(e => e.type === 'tool' && e.toolId && !doneBy.get(e.toolId) && e.name !== 'AskUserQuestion' && e.name !== 'ExitPlanMode'); // a running call's row carries its own clock: one clock on screen
       const meta = [a.activeAt && !toolRuns ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
-      return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? 'Waiting…' : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd title="Esc stops the agent">Esc</kbd></span></div>`;
+      if (toolRuns && !a.spinnerText) return h + '<div class="live-reply" hidden></div>'; // the running call's row is the live indicator
+      return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? 'Waiting…' : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span></span></div>`;
     }
     return h;
   }
@@ -929,7 +932,7 @@
     return list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
       const queued = busy && !p.held;
-      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? 'Queued' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x" data-unqueue="${k}" title="Take back (the agent keeps working)">Cancel</button>` : ''}</span></div>`;
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? 'Queued' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x" data-unqueue="${k}" title="Take back (the agent keeps working)" aria-label="Take back">×</button>` : ''}</span></div>`;
     }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
@@ -1249,7 +1252,8 @@
       // A permission or plan waiting: what you type goes with "No" (the CLI's own "tell Claude what to do differently").
       // Trust / login: Claude can't take a message yet. A question: typed text is your own answer. Nothing said yet: ask.
       const lastEv = evs && evs.length ? evs[evs.length - 1] : null, declinedLast = !!(lastEv && lastEv.type === 'interrupt' && evs.length > 1 && evs[evs.length - 2].err && /\buser (rejected|denied|declined)\b/i.test(evs[evs.length - 2].text || ''));
-      const ph = sg ? sg + '  (Tab)' : tail.includes('class="card perm choice"') ? 'Choose above' : /class="card (perm|ask plan-ask)"/.test(tail) ? 'Tell Claude instead…' : tail.includes('class="card ask') ? 'Other answer…' : evs && !evs.length ? 'Ask Claude…' : declinedLast ? 'What should Claude do instead?' : 'Reply…';
+      const locked = tail.includes('class="card perm choice"'); document.getElementById('term-order')?.classList.toggle('locked', locked);
+      const ph = sg ? sg + '  (Tab)' : locked ? '' : /class="card (perm|ask)/.test(tail) ? 'Tell Claude instead…' : evs && !evs.length ? 'Ask Claude…' : declinedLast ? 'What should Claude do instead?' : 'Reply…';
       if (box && box.placeholder !== ph) { box.dataset.sugg = sg; box.placeholder = ph; } }
     drawDock(); applyAskHover(); keepAskInput(); // a hovered option keeps its preview through redraws, a typed answer its text
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
@@ -1268,6 +1272,7 @@
       for (const i of changed.flatMap(n => [...n.querySelectorAll('img')])) if (!i.complete && !i._pin && (i._pin = 1)) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
     }
     jumpOnce = false;
+    syncJump(el); // new blocks while you read above: the jump button counts them
     // What ticks (running calls, usage-limit cards) is in the last few blocks.
     const recent = [...thread.children].slice(-12), inRecent = (sel) => recent.flatMap(n => [...n.querySelectorAll(sel)]);
     for (const s of inRecent('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
@@ -1292,10 +1297,11 @@
   // The round "jump to latest" button over the composer, shown while you're scrolled up; the prompt rail follows too.
   // Scroll fires many times a frame: the measuring waits for the next frame, once.
   let jumpRaf = 0;
-  function syncJump(el) { if (!jumpRaf) jumpRaf = requestAnimationFrame(() => { jumpRaf = 0; const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 40); railActive(el); }); }
+  function syncJump(el) { if (!jumpRaf) jumpRaf = requestAnimationFrame(() => { jumpRaf = 0; const b = document.getElementById('chat-jump'); if (b) { const up = el.scrollTop + el.clientHeight < el.scrollHeight - 40, n = el.querySelector(':scope > .thread')?.children.length || 0; if (!up || el._jumpN == null) el._jumpN = up ? n : null; const fresh = up ? Math.max(0, n - el._jumpN) : 0; b.classList.toggle('show', up); if (b.dataset.n !== String(fresh)) b.dataset.n = fresh; b.title = fresh ? `${fresh} new below` : 'Jump to bottom'; } railActive(el); }); } // scrolled up: how many new blocks arrived below
 
   // ── Prompt rail, as on the terminal: a dash per prompt down the right edge, hover lists them, click jumps there ──
-  const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
+  const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.tabIndex = 0; rail.setAttribute('aria-label', 'Your messages');
+  rail.addEventListener('keydown', (e) => { const items = [...rail.querySelectorAll('.cr-pop [data-i]')]; if (!items.length) return; const at = items.indexOf(document.activeElement); if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[Math.max(0, Math.min(items.length - 1, at < 0 ? items.length - 1 : at + (e.key === 'ArrowDown' ? 1 : -1)))].focus(); } else if ((e.key === 'Enter' || e.key === ' ') && at >= 0) { e.preventDefault(); items[at].click(); } else if (e.key === 'Escape') { rail.blur(); document.activeElement?.blur(); } }); /* keyboard: Tab to it, arrows through your messages, Enter jumps */ rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
   document.getElementById('term').appendChild(rail);
   // ```mermaid blocks in a reply draw as diagrams (flowchart, sequence, pie, xychart, gantt…). mermaid.min.js (2.5 MB)
   // loads the first time one shows up; each source's SVG is kept, so a redrawn block doesn't render it again. The
@@ -1382,7 +1388,7 @@
     if (rail._k === key) return; rail._k = key; rail._on = undefined; // new dashes: light the current one again
     const label = (t) => escH(String(t || '').replace(/\[Image #\d+\]/g, '🖼').replace(/[#*`>_]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) || '🖼');
     rail.querySelector('.cr-dashes').innerHTML = ps.map(([e, i]) => `<i data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}></i>`).join('');
-    rail.querySelector('.cr-pop').innerHTML = ps.map(([e, i]) => `<div data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}>${e.type === 'text' ? '★ ' : ''}${label(e.text)}</div>`).join('');
+    rail.querySelector('.cr-pop').innerHTML = ps.map(([e, i]) => `<div tabindex="0" role="button" data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}>${e.type === 'text' ? '★ ' : ''}${label(e.text)}</div>`).join('');
     railActive(el);
   }
   // The prompt at the top of the view is the one lit.

@@ -329,6 +329,7 @@
   function cardKey(e) {
     if (box().value) return false;
     const tail = document.querySelector('#conversation .tail');
+    if (/^[1-9]$/.test(e.key) && tail && tail.querySelector('.card.ask .choices button.free')) { const b = tail.querySelectorAll('.card.ask .choices button:not(.free)')[+e.key - 1]; if (b) { b.click(); return true; } } // the visible rows' numbers
     if (/^[1-9]$/.test(e.key)) { const b = tail && (tail.querySelector(`[data-pick="${+e.key - 1}"]`) || tail.querySelector(`[data-keys="${e.key}"]`) || tail.querySelectorAll('.choices button')[+e.key - 1]); if (b) { b.click(); return true; } }
     // Folder trust / login: 1–9 pick, Enter takes the primary, Esc the way out (Cancel, Exit).
     const choice = tail && tail.querySelector('.card.choice');

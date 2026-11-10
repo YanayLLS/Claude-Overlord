@@ -413,7 +413,7 @@ function contextUsage(text) {
 function permLabel(l) {
   if (/^(no|deny)\b/i.test(l)) return 'Decline';
   if (/^yes$/i.test(l)) return 'Allow';
-  if (/^yes,?\s+(and\s+)?(allow|don'?t ask)/i.test(l)) return /session/i.test(l) ? 'Allow session' : 'Always allow';
+  if (/^yes,?\s+(and\s+)?(allow|don'?t ask)/i.test(l)) return /don'?t ask/i.test(l) ? "Don't ask again" : /edits/i.test(l) ? 'Allow all edits' : 'Always allow';
   return l;
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = { contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };

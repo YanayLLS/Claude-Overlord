@@ -946,3 +946,55 @@ body.world-mode #hdr-chat { display: none; }
 :root body .thread:has(> .chat-skel) { flex: 1; display: flex; flex-direction: column; }
 @keyframes chat-skel { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
 :root body :is(#conversation, #chat-shell) .btns button[hidden] { display: none; }
+/* Scrolled up: the jump button is a pill that counts what arrived below; the thread fades out above the reply box. */
+:root body #chat-jump:not([data-n="0"]) { width: auto; padding: 0 12px 0 10px; gap: 6px; border-radius: 17px; }
+:root body #chat-jump:not([data-n="0"])::after { content: attr(data-n) " new"; font-size: 12px; font-weight: 500; }
+/* Queued messages: a tight stack (dim bubble, "Queued", a 28px × to take one back) instead of full-size sent bubbles. */
+:root body :is(#conversation, #chat-shell) .msg.user.pending { margin-top: 4px; }
+:root body :is(#conversation, #chat-shell) .msg.user.pending .bubble { padding-top: 6px; padding-bottom: 6px; font-size: 13.5px; }
+:root body :is(#conversation, #chat-shell) .q-x { width: 28px; height: 28px; min-height: 28px; padding: 0; margin: -6px -6px -6px 0; font-size: 16px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+/* Rail dashes: a 10px-tall hit area each (the 2px line drawn in its middle). */
+:root body #chat-rail .cr-dashes { gap: 0; }
+:root body #chat-rail .cr-dashes i { padding: 4px 0; background-clip: content-box; box-sizing: content-box; }
+
+/* ── /improve round 2 ── */
+/* Key hints stay in stacked footers, at the button's right edge. */
+@container (max-width: 520px) {
+  :root body :is(#conversation, #chat-shell) .card .btns button { position: relative; }
+  :root body :is(#conversation, #chat-shell) .card .btns button kbd { display: inline-block; position: absolute; right: 12px; }
+}
+/* A quiet escape that leads its row lines up with the card's text. */
+:root body :is(#conversation, #chat-shell) .card .btns button.dec:first-child { margin-left: -12px; }
+/* Question: the typed-answer row goes (the reply box takes your own words); focus is a ring, not a chosen-looking fill. */
+:root body #conversation .card.ask .choices button.free { display: none; }
+:root body #conversation .card.ask .choices button.focus { background: transparent; border-color: var(--border-hi); box-shadow: 0 0 0 2px color-mix(in srgb, var(--claude) 35%, transparent); }
+/* Trust / login waiting: the reply box rests until the card is answered. */
+:root body #term-order.locked { opacity: .55; }
+:root body #term-order.locked #term-order-input { pointer-events: none; }
+/* CLI notices (compaction, "Agent … finished", monitors): quiet one-line rows in the text column, the whole text on hover. */
+:root body :is(#conversation, #chat-shell) .msg.note.cli:not(.sub) { margin: 2px 0 6px; font-family: inherit; font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root body :is(#conversation, #chat-shell) .msg.note.cli:not(.sub):hover { white-space: normal; }
+:root body :is(#conversation, #chat-shell) .msg.note.cli.recap { white-space: normal; font-style: normal; }
+/* Turn footer: cost and tokens show on hover; the time and actions stay. */
+:root body :is(#conversation, #chat-shell) .turnfoot .tf-cost { opacity: 0; transition: opacity .15s; }
+:root body :is(#conversation, #chat-shell) .turnfoot:hover .tf-cost, :root body :is(#conversation, #chat-shell) .turnfoot:focus-within .tf-cost { opacity: 1; }
+/* The bookmark star and footer actions show on keyboard focus too, not only hover. */
+:root body :is(#conversation, #chat-shell) .turnfoot:focus-within .tf-acts, :root body :is(#conversation, #chat-shell) .tf-acts button:focus-visible { opacity: 1; }
+/* /context spans the column like the other cards. */
+:root body :is(#conversation, #chat-shell) .msg.ctx-use { max-width: none; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-l li { grid-template-columns: 10px 1fr auto; }
+/* Inline code inside the plan keeps its chip. */
+:root body :is(#conversation, #chat-shell) .plan-ask .md.sub.plan code { font-family: 'Geist Mono', monospace; font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--surface1); vertical-align: baseline; }
+/* Tables: scroll sideways inside their frame with the first column pinned (the frame's overflow:hidden cut them off). */
+:root body :is(#conversation, #chat-shell) .md table { overflow-x: auto; }
+:root body :is(#conversation, #chat-shell) .md table :is(th, td):first-child { position: sticky; left: 0; background: var(--surface0); z-index: 1; }
+/* Small type and targets. */
+:root body :is(#conversation, #chat-shell) .md-code-head { font-size: 11px; padding-top: 4px; padding-bottom: 4px; }
+:root body :is(#conversation, #chat-shell) .md-code-head button { min-height: 28px; padding: 0 10px; }
+:root body :is(#conversation, #chat-shell) .io-r .lbl, :root body #conversation .card.ask .ask-tabs i { font-size: 11px; }
+:root body :is(#conversation, #chat-shell) .q-x { width: 32px; height: 32px; min-height: 32px; margin: -8px -8px -8px 0; }
+/* The prompt rail never sits on text: the thread keeps a gutter for it. */
+:root body #term:has(#chat-rail.has) #conversation .thread { padding-right: 28px; }
+/* Keyboard: the rail opens its list on focus. */
+:root body #chat-rail:focus-within .cr-pop { visibility: visible; opacity: 1; transition-delay: 0s; }
+:root body #chat-rail .cr-pop div:focus-visible { outline: 2px solid color-mix(in srgb, var(--claude) 50%, transparent); }
