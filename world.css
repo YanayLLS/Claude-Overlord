@@ -224,6 +224,10 @@ body.world-mode #hdr-world::after { content: ' World'; font-family: var(--w-disp
 /* Roster column order: warning, filter, Needs you, list, extras, dropdowns, then the foot (PRs, Releases, usage) */
 body.world-mode #ctx-warning { order: -4; }
 body.world-mode #filter-bar { order: -2; }
+body.world-mode #filter-bar { padding: 10px 36px 4px 10px; gap: 6px; } /* right end: the roster's ‹ hide button */
+body.world-mode #world-roster-hide { top: 13px; }
+body.world-mode #new-btn { border-radius: 0; clip-path: var(--w-hexw); width: 36px; }
+body.world-mode #filter-mode { border-radius: 0; clip-path: var(--w-hexw); padding: 0 12px; }
 body.world-mode #world-attn { order: -1; }
 body.world-mode #list { order: 0; }
 body.world-mode #world-extra { order: 1; }
