@@ -12,6 +12,7 @@
   // The pane opens beside the chat on its own once the agent browses (as in Claude's app) and follows the focused
   // agent: shown for one with a page, hidden for one without. × keeps it shut for that agent until you reopen it.
   const pages = new Set(), shut = new Set(); let auto = false;
+  let termWidthBefore = null; // chat width before the pane split the row into thirds; restored on close
   function toggle(byUser = true) {
     if (byUser && activeAgentId != null) { if (visible) shut.add(activeAgentId); else shut.delete(activeAgentId); }
     auto = !byUser && !visible;
@@ -21,12 +22,15 @@
     refs.handle.classList.toggle('open', visible);
     refs.toggleBtn.classList.toggle('active', visible);
     content.classList.toggle('preview-open', visible);
+    const term = document.getElementById('term');
     if (visible) {
       // Equal-third pixel widths on toggle ON; drag handles can adjust afterwards.
-      const term = document.getElementById('term');
       const w = Math.max(280, Math.floor((content.clientWidth - 8) / 3));
-      if (term) term.style.width = w + 'px';
+      if (term) { termWidthBefore = term.style.width; term.style.width = w + 'px'; }
       refs.col.style.width = w + 'px';
+    } else if (term && termWidthBefore != null) {
+      // Closing (incl. switching to an agent without a page) gives the chat its old width back, not the list.
+      term.style.width = termWidthBefore; termWidthBefore = null;
     }
     api.send({ type: 'previewToggle', visible });
     if (visible) { reportBounds(); showUrl(currentUrl); }
