@@ -1088,6 +1088,7 @@
   // After you send: the bottom for a moment, through what still grows the thread (its bubble, markdown, images, blocks
   // getting their real height). Scrolling up yourself lets go.
   let pinUntil = 0;
+  const places = new Map(); // agent id -> where you were reading it (a block key + offset); null/absent = its bottom
   // Scrolled up reading: the block at the top of the view stays exactly where it is while anything in the thread
   // changes height after a redraw (link titles, diagrams, images, tool rows filling in): only the redraw itself
   // re-anchored, so later growth above pushed what you were reading away. Chromium's own anchoring is off (chat.css):
@@ -1170,7 +1171,7 @@
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
     if (fresh && window.chatComposer) chatComposer.drawAtt(); // another agent: its own pending images
-    if (fresh && el._agent != null && el._agent !== id) onAgentSwitch(); el._agent = id;
+    if (fresh && el._agent != null && el._agent !== id) { places.set(el._agent, el._follow === false ? el._anc : null); onAgentSwitch(); } el._agent = id;
     if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); el._shown = null; el._anc = null; placeRO.disconnect(); placeRO.observe(thread); }
     // The history landing after the loading spinner is opening the chat too: always at the bottom, nothing slides in
     // (else the last reply counted as "just arrived" and a long one parked you at its first line).
@@ -1217,6 +1218,7 @@
     // A long reply that just arrived: land on its first line, to read it top-down (from then on you're "scrolled up",
     // so the live ticks leave it there).
     if (!stuck && !jumpOnce && Date.now() >= pinUntil && newReply && newReply.offsetHeight > el.clientHeight * 0.6) { el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24; holdPlace(el); }
+    else if (opening && evs && places.get(id) && (() => { const p = places.get(id), n = [...thread.children].find(c => keyOf(c) === p.i); if (!n) return false; el.scrollTop += n.getBoundingClientRect().top - el.getBoundingClientRect().top - p.y; holdPlace(el); return true; })()) places.delete(id); // back to a chat you were reading: the same spot, not its bottom
     else if (!stuck) {
       el.scrollTop = el.scrollHeight;
       // Images grow the thread as they load: stay pinned to the bottom through that.
