@@ -1246,3 +1246,13 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-queue { right: 37px; gap: 8px; padding-bottom: 6px; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .ctx-use .cu-l li:last-child, :root body :is(#conversation, #chat-shell, #chat-queue) .ctx-use .cu-l li:has(i[style*="surface1"]) { color: var(--dim); }
 :root body #chat-queue .msg.user.pending:has(.q-x) { margin: 0; }
+/* ── round 17 ── */
+:root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary .rt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary .ic { order: 0; }
+/* Sign in: the code's submit is always there (an arrow with its Enter key), disabled until a code is in. */
+:root body :is(#conversation, #chat-shell, #chat-queue) .card.choice .code-in:has(input:placeholder-shown) button { display: inline-flex; }
+/* Queue dock: no scrollbar strip beside the pills. */
+:root body #chat-queue { scrollbar-width: none; }
+:root body #chat-queue::-webkit-scrollbar { display: none; }
+/* A turn ends with room before the next one starts. */
+:root body :is(#conversation, #chat-shell) .turnfoot { margin-bottom: 20px; }
