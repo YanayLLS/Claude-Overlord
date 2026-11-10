@@ -228,21 +228,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   cursor:pointer; transition:background .15s;
 }
 .badge-perm:hover { background:rgba(249,226,175,.2); }
-#addBtn {
-  font-family:inherit; font-size:11px; padding:4px 12px; color:var(--title-bg); border:none; cursor:pointer;
-  font-weight:600; letter-spacing:.3px; border-radius:4px;
-  background:var(--accent); transition:opacity .15s;
-}
-#addBtn:hover { opacity:.85; }
-#addBtn:active { opacity:.7; }
-#featBtn {
-  font-family:inherit; font-size:11px; padding:4px 12px; cursor:pointer;
-  font-weight:600; letter-spacing:.3px; border-radius:4px;
-  color:var(--accent); background:transparent; border:1px solid var(--accent);
-  transition:background .15s, color .15s;
-}
-#featBtn:hover { background:var(--accent); color:var(--title-bg); }
-#featBtn:active { opacity:.8; }
 .hdr-btn {
   font-family:inherit; font-size:14px; padding:4px 6px; background:transparent;
   color:var(--dim); border:none; border-radius:4px; cursor:pointer;
@@ -1275,8 +1260,6 @@ button:focus-visible { outline-offset:0; }
       <button class="hdr-btn" id="hdr-more-btn" onclick="toggleHdrMore(event)" title="More"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
       <div id="hdr-more"><button class="hdr-menu-item" id="perf-btn" onclick="togglePerfMenu(event)" aria-haspopup="dialog" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>Performance</span></button><button class="hdr-menu-item" id="zoom-btn" onclick="toggleZoomMenu(event)" aria-haspopup="dialog" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3M11 8v6M8 11h6"/></svg><span>UI size <b id="zoom-btn-val">100%</b></span></button><button class="hdr-menu-item" onclick="toggleHelp()"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg><span>Keyboard shortcuts</span></button><button class="hdr-menu-item" onclick="window.api.send({type:'fullRestart'})"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg><span>Restart app</span></button></div>
     </div>
-    <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Agent</button>
-    <button id="featBtn" onclick="openNewFeature()" title="Create a feature: one branch across multiple repos"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Feature</button>
     <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account" aria-label="Account"></button>
   </div>
   <div id="content">
@@ -1288,6 +1271,7 @@ button:focus-visible { outline-offset:0; }
       <span id="filter-count"></span>
       <button id="filter-close" onclick="closeFilter()" aria-label="Clear search">&times;</button>
       <button id="filter-mode" onclick="toggleFilterMenu(event)" onmouseenter="filterMenuHoverIn(event)" onmouseleave="filterMenuHoverOut()" aria-haspopup="menu" aria-expanded="false" title="Filter agents"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span id="filter-mode-label">All</span><span id="filter-mode-clear" onclick="event.stopPropagation();setFilterMode('all')" role="button" aria-label="Clear filter" title="Clear filter" hidden>&times;</span></button>
+      <button id="new-btn" onclick="toggleNewMenu(event)" aria-haspopup="menu" aria-expanded="false" title="New"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
     </div>
     <div id="world-attn"></div>
     <div id="list"></div>
@@ -1778,6 +1762,29 @@ function filterMenuHoverIn(e) {
 }
 function filterMenuHoverOut() {
   if (document.getElementById('filter-menu')?.dataset.hover) filterMenuHoverTimer = setTimeout(closeFilterMenu, 250);
+}
+// Sidebar + : new agent / new feature, created where they'll appear.
+function toggleNewMenu(e) {
+  e.stopPropagation();
+  if (document.getElementById('new-menu')) { closeNewMenu(); return; }
+  const m = document.createElement('div');
+  m.id = 'new-menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = `<button role="menuitem" data-act="agent"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Agent</span><span class="fm-n">Ctrl+N</span></button>`
+    + `<button role="menuitem" data-act="feature"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Feature</span></button>`;
+  m.onclick = (ev) => { const b = ev.target.closest('button[data-act]'); if (!b) return; closeNewMenu(); b.dataset.act === 'agent' ? browseAndAdd() : openNewFeature(); };
+  m.onkeydown = (ev) => { if (ev.key === 'Escape') { closeNewMenu(); document.getElementById('new-btn').focus(); } };
+  const r = e.currentTarget.getBoundingClientRect();
+  m.style.top = (r.bottom + 4) + 'px'; m.style.right = (innerWidth - r.right) + 'px';
+  document.body.appendChild(m);
+  e.currentTarget.setAttribute('aria-expanded', 'true');
+  m.querySelector('button').focus();
+  setTimeout(() => document.addEventListener('mousedown', closeNewMenuOutside));
+}
+function closeNewMenuOutside(ev) { if (!ev.target.closest('#new-menu, #new-btn')) closeNewMenu(); }
+function closeNewMenu() {
+  document.getElementById('new-menu')?.remove();
+  document.getElementById('new-btn')?.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('mousedown', closeNewMenuOutside);
 }
 function closeFilterMenuOutside(ev) { if (!ev.target.closest('#filter-menu, #filter-mode')) closeFilterMenu(); }
 function closeFilterMenu() {
@@ -3102,7 +3109,7 @@ function render() {
   if (_listPressed) { _renderHeld = true; return; }
   const list = document.getElementById('list');
   if (agents.size === 0 && knownProjects.size === 0) {
-    list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
+    list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
     document.getElementById('headerBadges').innerHTML = '';
     document.title = 'Overlord';
     if (worldView) worldSync();

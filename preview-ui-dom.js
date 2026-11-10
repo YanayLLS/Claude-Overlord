@@ -8,7 +8,7 @@
     toggleBtn.onclick = actions.onToggle;
     const more = document.getElementById('hdr-more'); // the header ⋯ menu, when the page has one
     if (more) { toggleBtn.className = 'hdr-menu-item'; toggleBtn.removeAttribute('title'); toggleBtn.innerHTML = '<span class="mi-glyph">⧉</span><span>Web preview</span>'; more.appendChild(toggleBtn); }
-    else document.getElementById('header').insertBefore(toggleBtn, document.getElementById('addBtn'));
+    else document.getElementById('header').insertBefore(toggleBtn, document.getElementById('account-btn'));
 
     const content = document.getElementById('content');
     const handle = document.createElement('div');

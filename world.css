@@ -133,11 +133,8 @@ body.world-mode .hdr-btn { border-radius: 0; clip-path: var(--w-hexw); backgroun
 body.world-mode .hdr-btn:hover { background: rgba(255,255,255,.12); }
 body.world-mode .hdr-btn.active { clip-path: var(--w-hexw); }
 body.world-mode #hdr-world.on { background: var(--w-gold); color: #1a1408; }
+body.world-mode #new-btn { background: var(--w-gold); color: #1a1408; }
 body.world-mode #update-btn { clip-path: var(--w-hexw); border-radius: 0 !important; }
-body.world-mode #addBtn, body.world-mode #featBtn { border-radius: 0; clip-path: var(--w-hexw); font-family: var(--w-display); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; padding: 6px 16px; border: 0; }
-body.world-mode #addBtn { background: var(--w-gold); color: #1a1408; }
-body.world-mode #featBtn { background: rgba(255,255,255,.08); color: var(--text); }
-body.world-mode #featBtn:hover { background: rgba(255,255,255,.14); color: #fff; }
 body.world-mode #account-btn { border: 0; border-radius: 0; clip-path: var(--w-hexw); background: rgba(255,255,255,.08); color: var(--text); padding: 5px 16px; }
 body.world-mode #bookmarks > * { border-radius: 0 !important; clip-path: var(--w-hexw); }
 
@@ -267,7 +264,6 @@ body.world-mode .empty-icon { display: none; }
 body.world-mode #header { flex-wrap: nowrap; overflow: hidden; gap: 6px; }
 body.world-mode .hdr-btn { padding: 5px 10px; }
 body.world-mode .wc { padding: 0 10px; height: 26px; gap: 5px; }
-body.world-mode #addBtn, body.world-mode #featBtn { padding: 5px 12px; }
 body.world-mode #account-btn { max-width: 150px; }
 body.world-mode .group-header { flex-wrap: nowrap; }
 body.world-mode .group-info { min-width: 0; flex: 1 1 auto; overflow: hidden; }
