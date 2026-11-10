@@ -199,7 +199,7 @@
     }
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
     else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
-    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/s*(disable recaps in /config)s*$/i, '') : ev.text)}</div>`;
+    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
