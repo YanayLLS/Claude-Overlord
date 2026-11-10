@@ -254,3 +254,13 @@ test('screenChoice: the CLI\'s unnumbered dialogs (folder trust, /login) as a ti
   assert.strictEqual(screenChoice(['❯ 1. Yes', '  2. No', 'Esc to cancel']), null); // numbered: the question card's
   assert.strictEqual(screenChoice(['some reply', '─'.repeat(60), '❯ ', '─'.repeat(60), '  ? for shortcuts']), null); // the idle prompt box
 });
+
+test('contextUsage: /context output as model, total and categories (the glyph grid dropped)', () => {
+  const { contextUsage } = require('./chat-core');
+  const t = 'Context Usage\n⛀ ⛁ ⛀   Opus 5.5\n⛀ ⛶ ⛶   claude-opus-5-5\n⛶ ⛶ ⛶   43.3k/1m tokens (4%)\n⛶ ⛶ ⛶\n⛶ ⛶ ⛶   Estimated usage by category\n⛶ ⛶ ⛶   ⛁ System prompt: 3.1k tokens (0.3%)\n⛶ ⛝ ⛝   ⛁ Skills: 9.6k tokens (1.0%)\n            ⛶ Free space: 923.7k (92.4%)\n            ⛝ Autocompact buffer: 33k tokens (3.3%)\n\nAuto-compact window: 1m tokens\n\nLoaded\n├ a: 156 tokens';
+  const u = contextUsage(t);
+  assert.deepStrictEqual({ model: u.model, used: u.used, pct: u.pct }, { model: 'Opus 5.5', used: '43.3k/1m tokens', pct: 4 });
+  assert.deepStrictEqual(u.cats, [{ name: 'System prompt', size: '3.1k', pct: 0.3 }, { name: 'Skills', size: '9.6k', pct: 1 }, { name: 'Free space', size: '923.7k', pct: 92.4 }, { name: 'Autocompact buffer', size: '33k', pct: 3.3 }]);
+  assert.match(u.rest, /^Auto-compact window/);
+  assert.strictEqual(contextUsage('Total cost: $0.12'), null);
+});

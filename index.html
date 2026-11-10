@@ -4617,7 +4617,7 @@ function handleAgentMsg(msg) {
     case 'focused': selectedId = msg.id; scheduleRender(); break;
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
-    case 'toast': showToast(msg.text); break;
+    case 'toast': showToast(msg.text + (msg.redo ? ' · Redo' : ''), msg.redo ? () => api.send({ type: 'undoTurn', cwd: msg.redo.cwd, edits: msg.redo.edits }) : undefined); break; // Undo this turn: Redo on the toast
     case 'setupState': onSetupState(msg); break;
     case 'setupProgress': onSetupProgress(msg); break;
     case 'setupDone': su.result[msg.id] = msg.ok ? 'ok' : (msg.error || 'unknown error'); su.url[msg.id] = msg.url; break; // setupState follows and renders

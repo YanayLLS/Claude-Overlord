@@ -10,6 +10,7 @@
     cmd: svg('<path d="m4 17 6-5-6-5"/><path d="M12 19h8"/>'),
     read: svg('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>'),
     edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
+    key: svg('<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.8-8.8"/><path d="m16 7 3 3"/><path d="m19 4 2 2"/>'),
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>'),
     web: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/>'),
     agent: svg('<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>'),
@@ -57,7 +58,7 @@
     const raw = p.file.replace(/&amp;/g, '&'), attr = escH(raw);
     return `<a class="fileref pathref${p.img ? ' img' : ''}" href="#" data-file="${attr}" data-line="0" title="${attr}">${p.img ? `<img src="${escH(fileUrl(raw))}" alt="" loading="lazy">` : ''}<span>${escH(p.name)}</span>${p.dir ? `<span class="pr-dir">${escH(p.dir)}</span>` : ''}${REVEAL}</a>`;
   }
-  const REVEAL = '<span class="pr-reveal" role="button" title="Show in folder"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg></span>';
+  const REVEAL = '<span class="pr-reveal" role="button" tabindex="0" aria-label="Show in folder" title="Show in folder"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg></span>';
   const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   // A prompt's images, numbered 1, 2, … in order, and its [Image #N] tags as chips with the same numbers (the k-th tag
   // is the k-th image), so "compare [Image #1] with [Image #2]" reads against the thumbnails above it.
@@ -191,13 +192,17 @@
     else if (ev.type === 'command') h = `<div class="msg user" data-i="${i}"><div class="bubble">${tagChips(ev.text)}</div></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
     else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
+    else if (ev.type === 'note' && ev.kind === 'sub' && contextUsage(ev.text)) { // /context: one bar of what fills the window, the categories under it
+      const u = contextUsage(ev.text), used = u.cats.filter(c => !/^free/i.test(c.name)), hue = (k) => `color-mix(in srgb, var(--claude) ${Math.max(25, 95 - k * 12)}%, var(--surface1))`; // one accent, stepped: theme tokens only
+      h = `<div class="msg ctx-use"><div class="cu-h"><b>${escH(u.used)}</b><span>${u.pct}%</span><span class="cu-m">${escH(u.model)}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b>${escH(c.size)}</b><em>${c.pct}%</em></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
+    }
     else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div><p>${escH(msg)}</p><p class="reset">Resets ${escH(clock(new Date(at).toISOString()))} · <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" data-act="retry" data-reset="${at}">Retry</button><label class="auto"><input type="checkbox" data-autoretry="${at}"> Retry when it resets</label></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset">Resets ${escH(clock(new Date(at).toISOString()))} · <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}">Retry at ${escH(clock(new Date(at).toISOString()))}</button></div></div></div>`;
     }
     else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
@@ -220,9 +225,8 @@
     const eds = evs.slice(from, to + 1).filter(e => e.type === 'tool' && e.args && (e.args.old != null || e.args.new != null) && done.get(e.toolId) && !done.get(e.toolId).err);
     if (!eds.length || !eds.every(undoable)) return;
     const files = new Set(eds.map(e => e.args.file_path));
-    showConfirm(`Undo this turn's ${eds.length} edit${eds.length > 1 ? 's' : ''} in ${files.size} file${files.size > 1 ? 's' : ''}?`, 'Undo edits').then(ok => {
-      if (ok) api.send({ type: 'undoTurn', id: selectedId, cwd: a && a.cwd, edits: eds.map(e => ({ file: e.args.file_path, old: e.args.old, new: e.args.new, all: !!e.args.all })) });
-    });
+    // At once, with Redo on the toast (undo over confirm).
+    api.send({ type: 'undoTurn', id: selectedId, cwd: a && a.cwd, edits: eds.map(e => ({ file: e.args.file_path, old: e.args.old, new: e.args.new, all: !!e.args.all })) });
   }
   // Claude ended by asking you something: its choices (or Yes / No) as one-click answers under the reply.
   // Claude's own suggestion for your next message: the CLI draws it greyed in its empty input box once a turn ends
@@ -445,7 +449,12 @@
     // The call isn't in the transcript until it's answered: what the CLI shows above its question is what's asked
     // ("Edit file / hello.txt / the change", "Bash command / git push"), and its question is the card's title.
     const sp = !ev && screenPerm(selectedId);
-    if (sp) return `<div class="card perm"><div class="card-h">${ICON[toolView({ name: /^bash|command/i.test(sp.body[0] || '') ? 'Bash' : /edit|write|create/i.test(sp.question) ? 'Edit' : '' }).kind] || ICON.shield}<span>${escH(sp.question)}</span></div>${sp.body.length ? `<pre class="perm-screen">${escH(sp.body.join('\n'))}</pre>` : ''}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
+    if (sp) {
+      // A new file: the CLI draws "Create file / name / 1 line…"; shown as the file's chip and its lines as an added diff.
+      const file = (/create\s+(.+?)\?$/i.exec(sp.question) || [])[1], body = sp.body.filter(l => !/^\s*(create|edit|update|write)\s+file\s*$/i.test(l) && !(file && l.trim() === file));
+      const nums = file && body.length && body.every(l => /^\s*\d+\s/.test(l)), view = nums ? `<div class="perm-file">${ICON.edit}<span class="mono">${escH(file)}</span><span class="stat"><b class="add">+${body.length}</b></span></div>${diffHtml('', body.map(l => l.replace(/^\s*\d+\s/, '')).join('\n'), file).html}` : body.length ? `<pre class="perm-screen">${escH(body.join('\n'))}</pre>` : '';
+      return `<div class="card perm"><div class="card-h">${ICON[toolView({ name: /^bash|command/i.test(sp.body[0] || '') ? 'Bash' : /edit|write|create/i.test(sp.question) ? 'Edit' : '' }).kind] || ICON.shield}<span>${escH(sp.question.replace(/^Do you want to (\w)/, (m, c) => c.toUpperCase()))}</span></div>${view}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
+    }
     if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new, a.file_path).html}`;
     else if (a.command) what = `<pre>${escH(a.command)}</pre>${a.description ? `<p class="perm-desc">${escH(a.description)}</p>` : ''}`;
     else if (a.url || a.query) what = `<pre>${escH(a.url || a.query)}</pre>`;
@@ -460,6 +469,9 @@
   const permMenu = (id) => { const o = menuOptions(id); return o.length >= 2 && /^yes\b/i.test(o[0]) ? o : null; };
   const menuUp = (id) => !!permMenu(id);
   // Its buttons are the menu's own choices (a Yes/No prompt has no "always"); the usual ones before it has drawn.
+  // A card answered: the pressed button shows it at once (the CLI takes a moment to move on), and the reply box has focus
+  // for the next instruction.
+  function answered(btn) { const c = btn.closest('.card'); if (c) { c.classList.add('picked-card'); btn.classList.add('picked'); } document.getElementById('term-order-input')?.focus({ preventScroll: true }); }
   function permBtns(id, attr, kbd) {
     const o = permMenu(id), list = o ? o.slice(0, 4).map((l, k) => [String(k + 1), l]) : [['1', 'Yes'], ['2', 'Yes, always allow']];
     // Short labels on the buttons (the CLI's full wording stays in the tooltip); "No…" is a quiet text button at the end.
@@ -549,8 +561,14 @@
   function choiceHtml(sc) {
     const yes = sc.options.findIndex(o => /^yes\b/i.test(o)), prim = yes >= 0 ? yes : 0;
     const label = (o) => /trust this folder/i.test(o) ? 'Trust' : /^no,?\s*exit$/i.test(o) ? 'Exit' : o;
-    const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o]) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}</button>`).join('') : '<button type="button" data-choice="-1">Cancel<kbd>Esc</kbd></button>';
-    return `<div class="card perm choice"><div class="card-h">${ICON.shield}<span>${escH(sc.title)}</span></div>${sc.lines.map(l => `<p class="mono">${escH(l)}</p>`).join('')}<div class="btns">${btns}</div></div>`;
+    // /login: the sign-in link the CLI prints (Open is the primary, for when no browser opened by itself), and a field
+    // for the code when it asks for one.
+    const url = (sc.lines.join(' ').match(chatUrlRe()) || [])[0], code = sc.lines.some(l => /paste (the )?code/i.test(l)), login = /^(log ?in|sign ?in)/i.test(sc.title);
+    const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${n + 1}</kbd></button>`).join('')
+      : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">Open link</button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}Copy link</button>` : '') + `<button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button>`;
+    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l)).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l)}</p>` : `<p${/^([a-z]:[\\/]|~|\/)/i.test(l) ? ' class="mono"' : ''}>${escH(l)}</p>`).join('');
+    const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" class="primary" data-login-send>Sign in</button></div>' : '';
+    return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${escH(sc.title)}</span></div>${lines}${field}<div class="btns">${btns}</div></div>`;
   }
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
@@ -618,7 +636,7 @@
       const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.replace(/^\s*[│┃]/, '').trim()).filter(Boolean).reduce((acc, r) => { if (acc.length && !/^[●⚠→]/.test(r)) acc[acc.length - 1] += ' ' + r; else acc.push(r); return acc; }, []) : [];
       rv = body.length ? `<div class="ask-review">${body.map(r => /^⚠/.test(r) ? `<div class="warn">${escH(r.replace(/^⚠\s*/, ''))}</div>` : /^→/.test(r) ? `<div class="ans">${escH(r.replace(/^→\s*/, ''))}</div>` : `<div class="rq">${escH(r.replace(/^●\s*/, ''))}</div>`).join('')}</div>` : '';
     }
-    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${s.options.length && s.options[askFocus(s)]?.bare && k === s.pf ? ' pv' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) && o.desc.trim().toLowerCase() !== String(o.label ?? '').trim().toLowerCase() ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div></div>`
+    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${s.options.length && s.options[askFocus(s)]?.bare && k === s.pf ? ' pv' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(/^type something.?$/i.test(o.label ?? o) ? 'Other…' : (o.label ?? o))}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) && o.desc.trim().toLowerCase() !== String(o.label ?? '').trim().toLowerCase() ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div></div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
@@ -842,8 +860,9 @@
       // shows as the running row just above, so it isn't repeated here.
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
-      const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
-      return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
+      const toolRuns = evs.some(e => e.type === 'tool' && e.toolId && !doneBy.get(e.toolId) && e.name !== 'AskUserQuestion' && e.name !== 'ExitPlanMode'); // a running call's row carries its own clock: one clock on screen
+      const meta = [a.activeAt && !toolRuns ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
+      return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? 'Waiting…' : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd title="Esc stops the agent">Esc</kbd></span></div>`;
     }
     return h;
   }
@@ -943,6 +962,8 @@
       const had = got.includes(head(o)) || (sentOf(o).length > 800 && placeholders > 0 && placeholders--);
       if (had) { chatComposer.sendText(id, sentOf(o), (o.restore && o.restore.list) || []); await wait(400); }
     }
+    // Your words aren't lost: back in the reply box (images too) when it's empty, to edit and send again.
+    if (p.restore) chatComposer.restoreDraft(id, p.restore);
     rerender();
   }
 
@@ -1176,7 +1197,7 @@
     order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
     const chips = document.getElementById('chat-chips'); if (chips) { const ch = chipsHtml(a, mode); if (chips._h !== ch) chips.innerHTML = chips._h = ch; }
     let list;
-    if (!evs) list = ['<div class="chat-empty"><span class="loading"></span></div>'];
+    if (!evs) list = ['<div class="chat-skel" aria-label="Loading"><i class="sk-u"></i><i class="sk-t"></i><i class="sk-t s"></i><i class="sk-p"></i><i class="sk-p m"></i><i class="sk-p s"></i></div>']; // the thread's shape while it loads, not a spinner in an empty column
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
     else { holdFold = el.dataset.for === String(id) && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40 ? id : null; list = blocks(evs, doneBy, a.cwd, id); }
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
@@ -1226,7 +1247,9 @@
     }
     { const box = document.getElementById('term-order-input'), sg = tail.includes('class="qreplies"') ? nextSuggestion(id, evs) : ''; // the chip's text, greyed in the box: Tab takes it
       // A permission or plan waiting: what you type goes with "No" (the CLI's own "tell Claude what to do differently").
-      const ph = sg ? sg + '  (Tab)' : /class="card (perm|ask plan-ask)/.test(tail) ? 'Tell Claude instead…' : 'Reply…';
+      // Trust / login: Claude can't take a message yet. A question: typed text is your own answer. Nothing said yet: ask.
+      const lastEv = evs && evs.length ? evs[evs.length - 1] : null, declinedLast = !!(lastEv && lastEv.type === 'interrupt' && evs.length > 1 && evs[evs.length - 2].err && /\buser (rejected|denied|declined)\b/i.test(evs[evs.length - 2].text || ''));
+      const ph = sg ? sg + '  (Tab)' : tail.includes('class="card perm choice"') ? 'Choose above' : /class="card (perm|ask plan-ask)"/.test(tail) ? 'Tell Claude instead…' : tail.includes('class="card ask') ? 'Other answer…' : evs && !evs.length ? 'Ask Claude…' : declinedLast ? 'What should Claude do instead?' : 'Reply…';
       if (box && box.placeholder !== ph) { box.dataset.sugg = sg; box.placeholder = ph; } }
     drawDock(); applyAskHover(); keepAskInput(); // a hovered option keeps its preview through redraws, a typed answer its text
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
@@ -1250,8 +1273,8 @@
     for (const s of inRecent('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
     // Usage-limit cards: the countdown, Retry held until the reset, and the retry the user asked for once it's passed.
     for (const s of inRecent('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
-    for (const b of inRecent('button[data-reset]')) b.disabled = +b.dataset.reset > now;
-    for (const c of inRecent('input[data-autoretry]')) c.checked = autoRetry.has(id + ':' + c.dataset.autoretry);
+    for (const b of inRecent('button[data-reset]')) b.hidden = +b.dataset.reset > now; // Retry once it has reset
+    for (const c of inRecent('button[data-autoretry]')) { const on = autoRetry.has(id + ':' + c.dataset.autoretry), due = +c.dataset.autoretry <= now; c.hidden = due; c.classList.toggle('primary', !on); c.textContent = on ? 'Scheduled · Undo' : c.dataset.label; } // one button before the reset: arm it, then it reads as armed and undoes
     for (const key of [...autoRetry]) { const [aid, at] = key.split(':').map(Number); if (aid !== id || at > now) continue; autoRetry.delete(key); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); } // only this agent's: each agent remembers its own
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
@@ -1491,13 +1514,16 @@
     const cwd = a && a.cwd;
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
     // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
-    if (k && selectedId != null) { if (stillWaiting(selectedId) && menuUp(selectedId)) keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
+    if (k && selectedId != null) { if (stillWaiting(selectedId) && menuUp(selectedId)) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); answered(k); } return; }
     const rw = e.target.closest('[data-rw], [data-rwx]'); // rewind card: a point, or Cancel (Esc, as in the CLI)
     if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
     if (tab) { if (askTab(+tab.dataset.tab - +tab.parentElement.dataset.on)) for (const t of tab.parentElement.children) t.classList.toggle('on', t === tab); return; }
+    const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); return; } // /login's link
+    const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => showToast('Link copied'), () => {}); return; }
+    const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); return; }
     const ch = e.target.closest('[data-choice]'); // trust / login card: arrows onto the choice, then Enter; Cancel is Esc
-    if (ch && selectedId != null) { const sc = screenChoice(screenOf(selectedId, 40, true)); if (!sc) return; const k = +ch.dataset.choice; if (k < 0) { api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); return; } const d = k - sc.focus; api.send({ type: 'termInput', id: selectedId, data: (d > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(d)) + '\r' }); return; }
+    if (ch && selectedId != null) { const sc = screenChoice(screenOf(selectedId, 40, true)); if (!sc) return; answered(ch); const k = +ch.dataset.choice; if (k < 0) { api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); return; } const d = k - sc.focus; api.send({ type: 'termInput', id: selectedId, data: (d > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(d)) + '\r' }); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
     if (pick && e.target.closest('.ask-in')) return; // typing an answer in it
     // A box of a pick-several question: its number toggles it, as in the CLI; the card stays for the rest and Submit.
@@ -1509,8 +1535,8 @@
     if (tag) { lightbox(tag.dataset.src); return; }
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
     if (img) { lightbox(img.src); return; }
-    const ar = e.target.closest('input[data-autoretry]'); // "Retry when it resets"
-    if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; ar.checked ? autoRetry.add(key) : autoRetry.delete(key); rerender(); return; }
+    const ar = e.target.closest('button[data-autoretry]'); // "Retry at 3:00 PM": arm it; again: undo
+    if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; autoRetry.has(key) ? autoRetry.delete(key) : autoRetry.add(key); rerender(); return; }
     const uq = e.target.closest('[data-unqueue]'); // ✕ on a queued prompt: take it back, the agent keeps working
     if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
     const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
@@ -1922,7 +1948,7 @@
     if (e.target.closest('#chat-bg, #chat-hover, [data-agent-tid], [data-jump], [data-bgout], [data-pn]')) return; // what opens one swaps it instead
     closeShell();
   });
-  document.getElementById('conversation').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-agent-tid]')) { e.preventDefault(); e.target.click(); } });
+  document.getElementById('conversation').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-agent-tid], [role="button"][tabindex]')) { e.preventDefault(); e.target.click(); } });
   function drawSteps(evs) {
     const box = document.querySelector('#chat-shell.agentp .agent-steps'); if (!box) return;
     const doneBy = new Map(); for (const ev of evs) if (ev.type === 'tool_done') doneBy.set(ev.toolId, ev);

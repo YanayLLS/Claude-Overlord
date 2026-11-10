@@ -5075,7 +5075,7 @@ function handleIpc(msg) {
       const crlf = (f, s) => files.get(f) && files.get(f).includes('\r\n') && !String(s).includes('\r') ? String(s).replace(/\n/g, '\r\n') : String(s);
       const r = require('./chat-core').undoEdits(new Map([...files].filter(([, c]) => c != null)), edits.map(e => { const f = abs(String(e.file || '')); return { file: f, old: crlf(f, e.old), new: crlf(f, e.new), all: !!e.all }; }));
       if (r.error) { send({ type: 'toast', text: `Couldn't undo: ${r.error}` }); break; }
-      try { for (const [f, c] of r.files) if (c !== files.get(f)) fs.writeFileSync(f, c); send({ type: 'toast', text: `Undid ${edits.length} edit${edits.length > 1 ? 's' : ''} in ${r.files.size} file${r.files.size > 1 ? 's' : ''}` }); }
+      try { for (const [f, c] of r.files) if (c !== files.get(f)) fs.writeFileSync(f, c); send({ type: 'toast', text: `Undid ${edits.length} edit${edits.length > 1 ? 's' : ''} in ${r.files.size} file${r.files.size > 1 ? 's' : ''}`, redo: { cwd, edits: edits.map(e => ({ file: e.file, old: e.new, new: e.old, all: !!e.all })) } }); } // the toast's Redo applies them back
       catch (e) { send({ type: 'toast', text: `Couldn't undo: ${e.message}` }); }
       break;
     }

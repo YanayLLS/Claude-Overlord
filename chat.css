@@ -885,3 +885,64 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .card .btns button.dec { margin-left: auto; border-color: transparent; color: var(--subtext); }
 :root body :is(#conversation, #chat-shell) .card .btns button.dec:hover { color: var(--text); background: var(--hover-strong); }
 :root body :is(#conversation, #chat-shell) .card.perm, :root body :is(#conversation, #chat-shell) .card.ask { box-shadow: none; animation: chat-in .14s var(--chat-ease) both; }
+
+/* ── /improve round 1 ── */
+:root body :is(#conversation, #chat-shell) kbd, :root body #term-order kbd { font-size: 11px; }
+/* Card footers: primary, secondary, then the quiet escape right beside them (it was pushed to the far edge, and wrapped alone). */
+:root body :is(#conversation, #chat-shell) .card .btns button.dec { margin-left: 0; }
+/* Narrow column: the footer stacks full width, primary first, the escape last; the digit hints go (the keys still work). */
+@container (max-width: 520px) {
+  :root body :is(#conversation, #chat-shell) .card .btns { flex-direction: column; align-items: stretch; }
+  :root body :is(#conversation, #chat-shell) .card .btns button { height: 40px; justify-content: center; }
+  :root body :is(#conversation, #chat-shell) .card .btns button kbd { display: none; }
+}
+/* A prompt waiting: it is the focus, the empty-chat greeting goes. */
+:root body #conversation:has(> .tail .card) .chat-empty.hello { display: none; }
+:root body #conversation:has(> .tail .card) .thread:has(> .chat-empty) { flex: 0; }
+/* The plan reads as the card's own content: one surface, the card's UI font, flush with the title. */
+:root body :is(#conversation, #chat-shell) .plan-ask .md.sub.plan { font-family: inherit; font-size: 13.5px; line-height: 1.6; background: none; border: 0; padding: 0; margin: 0 0 4px; }
+:root body :is(#conversation, #chat-shell) .plan-ask .md.sub.plan :is(ol, ul) { padding-left: 20px; margin: 4px 0; }
+/* Question rows: one even gap; the CLI cursor is a quiet fill, not an accent outline that reads as already chosen. */
+:root body #conversation .card.ask .choices button.sep { margin-top: 0; }
+:root body #conversation .card.ask .choices button.sep::before { display: none; }
+:root body #conversation .card.ask .choices button.focus { border-color: var(--border-hi); background: var(--hover-strong); }
+/* Login / trust status lines in the UI font; paths stay mono. */
+:root body :is(#conversation, #chat-shell) .card.choice p { color: var(--subtext); margin: 0 0 4px; overflow-wrap: anywhere; }
+:root body :is(#conversation, #chat-shell) .card.choice p.mono { font-family: 'Geist Mono', monospace; font-size: 12px; }
+/* While a permission card is open, the call's own running row above it says the same thing with a clock that isn't Claude working. */
+:root body #conversation:has(> .tail .card.perm:not(.choice)) .thread > .tools:last-child .trow.running,
+:root body #conversation:has(> .tail .card.perm:not(.choice)) .thread > .tools:last-child:has(> .trow.running:only-child) { display: none; }
+/* Targets: queued Cancel, the turn footer's icon actions. */
+:root body :is(#conversation, #chat-shell) .q-x { min-height: 28px; padding: 0 8px; margin: -6px -8px -6px 0; border-radius: 6px; text-decoration: none; }
+:root body :is(#conversation, #chat-shell) .q-x:hover { background: var(--hover-strong); color: var(--text); }
+:root body :is(#conversation, #chat-shell) .tf-acts { gap: 6px; }
+:root body :is(#conversation, #chat-shell) .tf-acts button { min-width: 32px; min-height: 32px; }
+:root body :is(#conversation, #chat-shell) .card.choice p.status { display: flex; align-items: center; gap: 8px; }
+:root body :is(#conversation, #chat-shell) .card.choice .code-in { display: flex; gap: 8px; margin-top: 10px; }
+:root body :is(#conversation, #chat-shell) .card.choice .code-in input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-hi); background: var(--bg2); color: var(--text); font: inherit; font-family: 'Geist Mono', monospace; font-size: 12.5px; }
+:root body :is(#conversation, #chat-shell) .card.choice .code-in button { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--text); background: var(--text); color: var(--bg); font: inherit; font-size: 13px; cursor: pointer; }
+/* /context: a usage card (bar + legend), the CLI's text one click away. */
+:root body :is(#conversation, #chat-shell) .msg.ctx-use { margin: 4px 0 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface0); font-size: 13px; max-width: 520px; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; color: var(--text); }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-h span { color: var(--subtext); }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-h .cu-m { margin-left: auto; color: var(--dim); font-size: 12px; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface1); }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-bar i { display: block; min-width: 2px; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-l { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-l li { display: grid; grid-template-columns: 10px 1fr auto 48px; align-items: center; gap: 8px; color: var(--subtext); }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-l li i { width: 8px; height: 8px; border-radius: 2px; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-l li b { font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-l li em { font-style: normal; color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-more { margin-top: 8px; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-more summary { cursor: pointer; color: var(--dim); font-size: 12px; }
+:root body :is(#conversation, #chat-shell) .ctx-use .cu-more pre { margin: 6px 0 0; max-height: 240px; overflow: auto; font-family: 'Geist Mono', monospace; font-size: 11.5px; color: var(--subtext); white-space: pre-wrap; }
+:root body :is(#conversation, #chat-shell) .card .btns button.picked { outline: 2px solid color-mix(in srgb, var(--claude) 60%, transparent); outline-offset: 1px; }
+:root body :is(#conversation, #chat-shell) .card.picked-card .btns button:not(.picked) { opacity: .45; }
+:root body :is(#conversation, #chat-shell) .chat-skel { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding: 12px 0; }
+:root body :is(#conversation, #chat-shell) .chat-skel i { display: block; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--surface0), var(--surface1), var(--surface0)); background-size: 200% 100%; animation: chat-skel 1.4s ease-in-out infinite; }
+:root body :is(#conversation, #chat-shell) .chat-skel .sk-u { align-self: flex-end; width: 38%; height: 40px; border-radius: 18px; margin-bottom: 10px; }
+:root body :is(#conversation, #chat-shell) .chat-skel .sk-t { width: 46%; height: 10px; } :root body :is(#conversation, #chat-shell) .chat-skel .sk-t.s { width: 30%; margin-bottom: 8px; }
+:root body :is(#conversation, #chat-shell) .chat-skel .sk-p { width: 92%; } :root body :is(#conversation, #chat-shell) .chat-skel .sk-p.m { width: 84%; } :root body :is(#conversation, #chat-shell) .chat-skel .sk-p.s { width: 58%; }
+:root body .thread:has(> .chat-skel) { flex: 1; display: flex; flex-direction: column; }
+@keyframes chat-skel { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+:root body :is(#conversation, #chat-shell) .btns button[hidden] { display: none; }

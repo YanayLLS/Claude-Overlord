@@ -330,6 +330,12 @@
     if (box().value) return false;
     const tail = document.querySelector('#conversation .tail');
     if (/^[1-9]$/.test(e.key)) { const b = tail && (tail.querySelector(`[data-pick="${+e.key - 1}"]`) || tail.querySelector(`[data-keys="${e.key}"]`) || tail.querySelectorAll('.choices button')[+e.key - 1]); if (b) { b.click(); return true; } }
+    // Folder trust / login: 1–9 pick, Enter takes the primary, Esc the way out (Cancel, Exit).
+    const choice = tail && tail.querySelector('.card.choice');
+    if (choice) {
+      const b = /^[1-9]$/.test(e.key) ? choice.querySelectorAll('[data-choice]')[+e.key - 1] : e.key === 'Enter' && !e.shiftKey ? choice.querySelector('button.primary[data-choice]') : e.key === 'Escape' ? choice.querySelector('[data-choice="-1"], button.dec[data-choice]') : null;
+      if (b) { b.click(); return true; }
+    }
     if (e.key === 'Escape') { const b = tail && tail.querySelector('[data-keys="esc"]'); if (b) { b.click(); return true; } }
     if (e.key === 'Escape' && tail && tail.querySelector('.card.ask')) { chatUi.keys(['\x1b']); return true; } // an open question or plan: Esc closes it, as in the CLI
     // The rewind list: ↑/↓ move, Enter picks, Esc cancels, as in the CLI.
