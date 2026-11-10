@@ -11,6 +11,7 @@
     read: svg('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>'),
     edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
     ban: svg('<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>'),
+    ext: svg('<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6"/>'),
     key: svg('<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.8-8.8"/><path d="m16 7 3 3"/><path d="m19 4 2 2"/>'),
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>'),
     web: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/>'),
@@ -195,9 +196,10 @@
     else if (ev.type === 'compact') h = `<details class="msg divider compacted"${ev._restored && ev._restored.length ? '' : ' data-empty'}><summary><span>Conversation compacted</span>${ev._restored && ev._restored.length ? ICON.chev : ''}</summary>${ev._restored && ev._restored.length ? `<div class="cp-list">${ev._restored.map(t => `<div>${escH(t)}</div>`).join('')}</div>` : ''}</details>`;
     else if (ev.type === 'note' && ev.kind === 'sub' && contextUsage(ev.text)) { // /context: one bar of what fills the window, the categories under it
       const u = contextUsage(ev.text), used = u.cats.filter(c => !/^free/i.test(c.name)), hue = (k) => `var(${['--claude', '--cyan', '--purple', '--yellow', '--green', '--peach', '--red'][k % 7]})`; // theme tokens, one per category
-      h = `<div class="msg ctx-use"><div class="cu-h"><b title="${u.pct}% used">${escH(u.used)}</b><span class="cu-m">${escH(u.model)}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.filter(c => !/^free/i.test(c.name)).map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
+      h = `<div class="msg ctx-use"><div class="cu-h"><b title="${u.pct}% used">${escH(u.used)}</b><span class="cu-m">${escH(u.model.replace(/^claude-(\w+)-(\d+)-(\d+).*$/i, (m, f, a2, b2) => f[0].toUpperCase() + f.slice(1) + ' ' + a2 + '.' + b2))}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.filter(c => !/^free/i.test(c.name)).map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
     }
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
+    else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span><em>${escH(m[2])}</em></div>`; }
     else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
     else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
@@ -205,7 +207,7 @@
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset">Resets ${escH(clock(new Date(at).toISOString()))} · <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry when it resets" data-armed="Will retry · Cancel">Retry when it resets</button></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<p class="reset" title="Resets ${escH(clock(new Date(at).toISOString()))}">Resets <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Auto-retry" data-armed="Auto-retry on · Cancel">Auto-retry</button></div></div></div>`;
     }
     else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
@@ -571,11 +573,11 @@
     // for the code when it asks for one.
     const url = (sc.lines.join(' ').match(chatUrlRe()) || [])[0], code = sc.lines.some(l => /paste (the )?code/i.test(l)), login = /^(log ?in|sign ?in)/i.test(sc.title);
     const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${n + 1}</kbd></button>`).join('')
-      : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">Open link</button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}Copy link</button>` : '');
+      : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">${ICON.ext}Open link<kbd>1</kbd></button><button type="button" data-copy-url="${escH(url)}">${ICON.copy}<span>Copy link</span><kbd>2</kbd></button>` : '');
     const cancel = sc.options.length ? '' : `<div class="btns"><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div>`;
     const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
     const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l)}</p>` : `<p${/^([a-z]:[\\/]|~|\/)/i.test(l) ? ' class="mono"' : ''}>${escH(l)}</p>`).join('');
-    const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send>Sign in</button></div>' : '';
+    const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled>Sign in</button></div>' : '';
     return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${login ? 'Sign in' : escH(sc.title)}</span></div>${lines}${btns ? `<div class="btns">${btns}</div>` : ''}${field}${cancel}</div>`;
   }
   function planHtml(ev, cwd) {
@@ -644,7 +646,7 @@
       const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.replace(/^\s*[│┃]/, '').trim()).filter(Boolean).reduce((acc, r) => { if (acc.length && !/^[●⚠→]/.test(r)) acc[acc.length - 1] += ' ' + r; else acc.push(r); return acc; }, []) : [];
       rv = body.length ? `<div class="ask-review">${body.map(r => /^⚠/.test(r) ? `<div class="warn">${escH(r.replace(/^⚠\s*/, ''))}</div>` : /^→/.test(r) ? `<div class="ans">${escH(r.replace(/^→\s*/, ''))}</div>` : `<div class="rq">${escH(r.replace(/^●\s*/, ''))}</div>`).join('')}</div>` : '';
     }
-    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${s.options.length && s.options[askFocus(s)]?.bare && k === s.pf ? ' pv' : ''}${o.sep ? ' sep' : ''}${/^type something/i.test(o.label ?? o) ? ' free' : ''}"><kbd>${k + 1 - opts.slice(0, k).filter(x => /^type something/i.test(x.label ?? x)).length}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) && o.desc.trim().toLowerCase() !== String(o.label ?? '').trim().toLowerCase() ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div></div>`
+    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${s.options.length && s.options[askFocus(s)]?.bare && k === s.pf ? ' pv' : ''}${o.sep ? ' sep' : ''}${/^type something/i.test(o.label ?? o) ? ' free' : ''}"><kbd>${k + 1 - opts.slice(0, k).filter(x => /^type something/i.test(x.label ?? x)).length}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) && o.desc.trim().toLowerCase() !== String(o.label ?? '').trim().toLowerCase() ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div>${s.options.length && !review ? '<div class="btns"><button type="button" class="dec" data-ask-esc>Skip<kbd>Esc</kbd></button></div>' : ''}</div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
@@ -1279,7 +1281,7 @@
     }
     jumpOnce = false;
     syncJump(el); // new blocks while you read above: the jump button counts them
-    for (const t of changed.flatMap(n => [...n.querySelectorAll('.md table')])) { const hs = [...t.querySelectorAll('thead th')].map(h => h.textContent.trim()); for (const r of t.querySelectorAll('tbody tr')) [...r.children].forEach((c, k) => { if (hs[k]) c.dataset.label = hs[k]; }); } // a narrow column stacks each row as label: value
+    for (const t of changed.flatMap(n => [...n.querySelectorAll('.md table')])) { const hs = [...t.querySelectorAll('thead th')].map(h => h.textContent.trim()); t.classList.toggle('wide', hs.length >= 3); for (const r of t.querySelectorAll('tbody tr')) [...r.children].forEach((c, k) => { if (hs[k]) c.dataset.label = hs[k]; }); } // a narrow column stacks each row as label: value
     // What ticks (running calls, usage-limit cards) is in the last few blocks.
     const recent = [...thread.children].slice(-12), inRecent = (sel) => recent.flatMap(n => [...n.querySelectorAll(sel)]);
     for (const s of inRecent('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
@@ -1533,7 +1535,8 @@
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
     if (tab) { if (askTab(+tab.dataset.tab - +tab.parentElement.dataset.on)) for (const t of tab.parentElement.children) t.classList.toggle('on', t === tab); return; }
     const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); return; } // /login's link
-    const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => showToast('Link copied'), () => {}); return; }
+    const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => { const t = cu.querySelector('span'); if (t) { t.textContent = 'Copied'; setTimeout(() => { t.textContent = 'Copy link'; }, 1500); } }, () => {}); return; } // the result on the button you pressed, not a toast
+    const ae = e.target.closest('[data-ask-esc]'); if (ae) { keys(['\x1b']); answered(ae); return; } // a question's Skip: Esc, as in the CLI
     const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); return; }
     const ch = e.target.closest('[data-choice]'); // trust / login card: arrows onto the choice, then Enter; Cancel is Esc
     if (ch && selectedId != null) { const sc = screenChoice(screenOf(selectedId, 40, true)); if (!sc) return; answered(ch); const k = +ch.dataset.choice; if (k < 0) { api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); return; } const d = k - sc.focus; api.send({ type: 'termInput', id: selectedId, data: (d > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(d)) + '\r' }); return; }
@@ -1550,7 +1553,7 @@
     if (img) { lightbox(img.src); return; }
     const ar = e.target.closest('button[data-autoretry]'); // "Retry at 3:00 PM": arm it; again: undo
     if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; autoRetry.has(key) ? autoRetry.delete(key) : autoRetry.add(key); rerender(); return; }
-    const uq = e.target.closest('[data-unqueue]'); // ✕ on a queued prompt: take it back, the agent keeps working
+    const uq = e.target.closest('[data-unqueue]'); if (uq) uq.closest('.msg')?.classList.add('leaving'); // ✕ on a queued prompt: take it back, the agent keeps working (it fades at once)
     if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
     const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
     if (art) { if (art.dataset.artOpen) api.send({ type: 'openUrl', url: art.dataset.artOpen }); else navigator.clipboard.writeText(art.dataset.artCopy).then(() => { art.classList.add('done'); setTimeout(() => art.classList.remove('done'), 1200); }); return; }
@@ -1961,6 +1964,7 @@
     if (e.target.closest('#chat-bg, #chat-hover, [data-agent-tid], [data-jump], [data-bgout], [data-pn]')) return; // what opens one swaps it instead
     closeShell();
   });
+  document.getElementById('conversation').addEventListener('input', (e) => { if (e.target.matches && e.target.matches('[data-login-code]')) { const b = e.target.parentElement.querySelector('[data-login-send]'); if (b) b.disabled = !e.target.value.trim(); } });
   document.getElementById('conversation').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-agent-tid], [role="button"][tabindex]')) { e.preventDefault(); e.target.click(); } });
   function drawSteps(evs) {
     const box = document.querySelector('#chat-shell.agentp .agent-steps'); if (!box) return;

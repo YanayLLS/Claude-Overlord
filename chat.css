@@ -1063,3 +1063,31 @@ body.world-mode #hdr-chat { display: none; }
 /* Compaction divider: its chevron says it opens. */
 :root body :is(#conversation, #chat-shell) details.msg.divider.compacted > summary .ic { width: 12px; height: 12px; margin-left: 4px; }
 :root body :is(#conversation, #chat-shell) details.msg.divider.compacted[open] > summary .ic { transform: rotate(90deg); }
+
+/* ── /improve round 5 ── */
+/* Only real tables (3+ columns) stack in a narrow column; a small one stays a table. */
+@container (max-width: 520px) {
+  :root body :is(#conversation, #chat-shell) .md table:not(.wide) { display: table; border: 1px solid var(--border); }
+  :root body :is(#conversation, #chat-shell) .md table:not(.wide) thead { display: table-header-group; }
+  :root body :is(#conversation, #chat-shell) .md table:not(.wide) tbody { display: table-row-group; }
+  :root body :is(#conversation, #chat-shell) .md table:not(.wide) tr { display: table-row; padding: 0; border: 0; }
+  :root body :is(#conversation, #chat-shell) .md table:not(.wide) td { display: table-cell; padding: 6px 10px; }
+  :root body :is(#conversation, #chat-shell) .md table:not(.wide) td::before { content: none; }
+}
+/* Queued: a clock cue on the bubble; its × sits inside it; taken back, it fades at once. */
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q:has(.q-x)::before { content: '◷'; color: var(--dim); font-size: 14px; } /* waiting: a clock beside its take-back × */
+:root body :is(#conversation, #chat-shell) .msg.user.pending.leaving { opacity: .3; transition: opacity .15s; pointer-events: none; }
+/* Plan: its steps line up with the title's text. */
+:root body :is(#conversation, #chat-shell) .plan-ask .md.sub.plan { margin-left: 23px; }
+:root body :is(#conversation, #chat-shell) .plan-ask .md.sub.plan :is(ol, ul) { padding-left: 18px; }
+/* Agent finished: an icon row. */
+:root body :is(#conversation, #chat-shell) .msg.note.agentdone { display: flex; align-items: center; gap: 8px; font-family: inherit; }
+:root body :is(#conversation, #chat-shell) .msg.note.agentdone .ic { width: 14px; height: 14px; flex: none; }
+:root body :is(#conversation, #chat-shell) .msg.note.agentdone span { color: var(--subtext); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:root body :is(#conversation, #chat-shell) .msg.note.agentdone em { font-style: normal; color: var(--dim); }
+/* Disabled Sign in reads disabled. */
+:root body :is(#conversation, #chat-shell) .card.choice .code-in button:disabled { opacity: .45; cursor: default; }
+:root body :is(#conversation, #chat-shell) .card .btns button .ic { width: 14px; height: 14px; }
+/* 32px rows and actions. */
+:root body :is(#conversation, #chat-shell) :is(.sumrow, .tools summary) { min-height: 32px; }
+:root body :is(#conversation, #chat-shell) .act { width: 32px; height: 32px; }

@@ -334,7 +334,7 @@
     // Folder trust / login: 1–9 pick, Enter takes the primary, Esc the way out (Cancel, Exit).
     const choice = tail && tail.querySelector('.card.choice');
     if (choice) {
-      const b = /^[1-9]$/.test(e.key) ? choice.querySelectorAll('[data-choice]')[+e.key - 1] : e.key === 'Enter' && !e.shiftKey ? choice.querySelector('button.primary[data-choice]') : e.key === 'Escape' ? choice.querySelector('[data-choice="-1"], button.dec[data-choice]') : null;
+      const b = /^[1-9]$/.test(e.key) ? choice.querySelectorAll('.btns button:not([data-choice="-1"])')[+e.key - 1] : e.key === 'Enter' && !e.shiftKey ? choice.querySelector('button.primary[data-choice]') : e.key === 'Escape' ? choice.querySelector('[data-choice="-1"], button.dec[data-choice]') : null;
       if (b) { b.click(); return true; }
     }
     if (e.key === 'Enter' && !e.shiftKey) { const b = tail && tail.querySelector('.card.perm:not(.choice) .btns button.primary, .card.plan-ask .btns button.primary'); if (b) { b.click(); return true; } }
