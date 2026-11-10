@@ -1255,6 +1255,7 @@ button:focus-visible { outline-offset:0; }
 <link rel="stylesheet" href="./docs.css" />
 <link rel="stylesheet" href="./chat.css" />
 <link rel="stylesheet" href="./folders.css" />
+<link rel="stylesheet" href="./term-pane.css" />
 </head>
 <body>
 <div id="app">
@@ -1695,6 +1696,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./chat-core.js"></script>
 <script src="./chat-ui.js"></script>
 <script src="./chat-composer.js"></script>
+<script src="./term-pane-ui.js"></script>
 <script>
 document.querySelector('#header h1').title = api.version ? 'Overlord v' + api.version : ''; // version in the tooltip, not the title bar
 
@@ -2660,6 +2662,7 @@ function setTheme(name, persist = true) {
   document.documentElement.dataset.theme = currentTheme;
   try { localStorage.setItem('theme', currentTheme); } catch {}
   for (const [, x] of xterms) x.terminal.options.theme = xtermTheme(currentTheme);
+  if (window.TermPane) TermPane.setTheme(currentTheme);
   const sel = document.getElementById('sel-theme'); if (sel) sel.value = currentTheme;
   api.send({ type: 'setTheme', theme: currentTheme });
   if (persist) api.send({ type: 'saveSettings', settings: { theme: currentTheme } });

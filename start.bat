@@ -22,9 +22,13 @@ if not exist "node_modules\" (
 )
 
 echo Starting Overlord...
-call npm start
+rem Same steps as "npm start", but Electron is started detached so this console closes at once
+rem instead of sitting on screen for the app's whole life (the app logs to overlord.log anyway).
+call node scripts/bundle-xterm.js && call node scripts/bundle-three.js && call node scripts/bundle-md.js
 if %errorlevel% neq 0 (
-    echo [ERROR] App failed to start.
+    echo [ERROR] Bundling failed.
     pause
     exit /b 1
 )
+start "" "%~dp0node_modules\electron\dist\electron.exe" .
+exit

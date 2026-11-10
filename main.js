@@ -19,6 +19,7 @@ const { writeAgentConfig, settingsFlags, removeAgentConfig, askFile } = require(
 const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
 const { createPtyClient, pipePathFor, hostLauncher } = require('./pty-client');
+const { createTermPane, termPaneKeys } = require('./term-pane');
 const { startKillGuard } = require('./kill-guard');
 const { agentShell } = require('./shell-core');
 const { scanCatalog, BUILTINS } = require('./catalog-core');
@@ -384,6 +385,7 @@ let browserRegistry = null;
 let mcpServer = null;
 let preview = null;
 let docs = null; // markdown documents (docs-main.js)
+let termPane = null; // Terminals pane: dev-script windows as tabs (term-pane.js)
 // Agent terminals live in pty-host.js, a process of their own, so an app restart
 // doesn't kill the Claude sessions inside them. Until it's connected (or if it
 // can't start) agents fall back to in-process ptys, which die with the app.
@@ -1575,7 +1577,8 @@ function restoreAgents(state) {
     const live = new Set((await _ptyHostReady) ? (await ptyHost.list()).map(p => p.key) : []);
     const survivors = agentEntries.filter(({ entry }) => entry.ptyKey && live.has(entry.ptyKey));
     const fresh = agentEntries.filter(x => !survivors.includes(x));
-    for (const key of live) if (!survivors.some(({ entry }) => entry.ptyKey === key)) ptyHost.kill(key); // a spare or closed agent nobody will reattach
+    const paneKeys = termPaneKeys(STATE_DIR); // the Terminals pane's dev servers are not orphans
+    for (const key of live) if (!paneKeys.has(key) && !survivors.some(({ entry }) => entry.ptyKey === key)) ptyHost.kill(key); // a spare or closed agent nobody will reattach
     const startTimes = await processStartTimes(survivors.map(({ entry }) => entry.pid));
     for (const { id, entry } of survivors) {
       const proc = await ptyHost.attach(entry.ptyKey);
@@ -4684,6 +4687,7 @@ function featureAgentArgs(cwd) {
 function handleIpc(msg) {
   if (releases.handle(msg)) return;
   if (docs && docs.handle(msg)) return;
+  if (termPane && /^tp:/.test(msg.type || '')) return termPane.handle(msg);
   switch (msg.type) {
     case 'continueInterrupted': continueInterrupted(msg.ids || []); break;
     case 'createAgent': createAgent(msg.cwd, msg.prompt, undefined, !!msg.prefill); break;
@@ -6559,6 +6563,8 @@ app.whenReady().then(() => {
   mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
+  termPane = createTermPane({ stateDir: STATE_DIR, ptyFactory: agentPty, ptyHost, send, log: flog });
+  _ptyHostReady.then(() => termPane.start()).catch((e) => flog(`Terminals pane failed to start: ${e.message}`));
   // A scratch instance (own state dir: tests, verification runs) stays killable; the guard is for the user's real one.
   if (!process.env.OVERLORD_STATE_DIR) _ptyHostReady.then(() => startKillGuard({ getChildPids: () => app.getAppMetrics().map(m => m.pid), log: flog }));
   preview = createPreviewController({ window: mainWindow, registry: browserRegistry, send, writeToAgent: (id, text) => handleTermInput(id, text) });
@@ -6670,6 +6676,7 @@ app.on('before-quit', () => {
   try { releases.flush(); } catch {} // releases.json writes are debounced 2 s
   if (remoteServer) { try { remoteServer.close(); } catch {} }
   if (mcpServer) { try { mcpServer.stop(); } catch {} }
+  if (termPane) { try { termPane.stop(); } catch {} } // its servers keep running in the pty host
   if (preview) { try { preview.destroy(); } catch {} }
   if (browserRegistry) { try { browserRegistry.destroyAll(); } catch {} }
   // Agents live on in the pty host. A restart keeps all of them; a real close
