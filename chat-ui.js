@@ -655,6 +655,21 @@
   }
   // ── Background shells and subagents: one small pill above the reply box ("10 agents · 1 shell"). Hover it for the list,
   // click to keep the list open; a row's hover card peeks, a click opens its full panel. ──
+  // Queued messages (and a removed one's Undo row) dock above the reply box, right-aligned, out of the scrolling thread:
+  // they belong to what you'll send next, not to what was said. Moved out of the tail each time it's rebuilt; the
+  // thread keeps room under its last line so the stack never covers it.
+  function dockQueue(el, tailEl) {
+    let q = document.getElementById('chat-queue');
+    if (!q) {
+      q = document.createElement('div'); q.id = 'chat-queue'; q.setAttribute('aria-label', 'Queued messages');
+      document.getElementById('term-order').prepend(q);
+      q.addEventListener('click', (e) => onClick(e, selectedId != null ? agents.get(selectedId) : null, null));
+    }
+    const items = [...tailEl.querySelectorAll(':scope > .msg.user.pending, :scope > .msg.qremoved')].filter(n => n.classList.contains('qremoved') || n.querySelector('.q-x'));
+    q.replaceChildren(...items);
+    const h = items.length ? q.offsetHeight + 12 : 0, was = el._qh || 0;
+    if (h !== was) { el._qh = h; el.style.setProperty('--qh', h + 'px'); if (el._follow !== false) el.scrollTop = el.scrollHeight; }
+  }
   let dockHtml = '', dockCount = { agents: 0, shells: 0 };
   function drawDock() {
     let el = document.getElementById('chat-bg');
@@ -1263,7 +1278,7 @@
     if (tailEl._h !== tail) {
       const key = liveKey(tail);
       if (tailEl._k === key) { const tmp = document.createElement('div'); tmp.innerHTML = tail; for (const n of tmp.querySelectorAll('[data-live]')) { const c = tailEl.querySelector(`[data-live="${CSS.escape(n.dataset.live)}"]`); if (c && c.textContent !== n.textContent) c.textContent = n.textContent; } }
-      else { tailEl.innerHTML = tail; if (opening) for (const n of tailEl.children) n.classList.add('still'); } // opening a chat: there already, nothing slides in
+      else { tailEl.innerHTML = tail; if (opening) for (const n of tailEl.children) n.classList.add('still'); dockQueue(el, tailEl); } // opening a chat: there already, nothing slides in
       tailEl._h = tail; tailEl._k = key; changed.push(tailEl);
     }
     { const box = document.getElementById('term-order-input'), sg = tail.includes('class="qreplies"') ? nextSuggestion(id, evs) : ''; // the chip's text, greyed in the box: Tab takes it
