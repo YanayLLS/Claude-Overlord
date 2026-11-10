@@ -104,7 +104,7 @@
     if (!t) return;
     if (replay && t.term) { t.term.reset(); }
     if (t.term) t.term.write(d);
-    else { t.pending = (replay ? '' : t.pending) + d; if (t.pending.length > 262144) t.pending = t.pending.slice(-262144); }
+    else { t.pending = (replay ? '' : t.pending) + d; if (t.pending.length > 393216) t.pending = t.pending.slice(-262144); }
   }
 
   api.on((m) => {

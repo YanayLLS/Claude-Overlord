@@ -26,7 +26,8 @@ function parseStartArgs(argv, defaultCwd) {
 }
 
 const BUF_MAX = 256 * 1024; // chars of output kept per tab for a reloaded window
-const appendBuf = (buf, d) => { const b = buf + d; return b.length > BUF_MAX ? b.slice(-BUF_MAX) : b; };
+// Trimmed only once it's half again over the cap: a slice per chunk copied 256 KB on every line a chatty server logged.
+const appendBuf = (buf, d) => { const b = buf + d; return b.length > BUF_MAX * 1.5 ? b.slice(-BUF_MAX) : b; };
 
 // Terminal output as an agent reads it: colours and cursor moves gone, \r-overwritten progress lines collapsed
 // to what's left on screen. Last `lines` lines, optionally only those matching `grep` (a regex, case-insensitive).

@@ -19,8 +19,9 @@ test('nothing to run is null', () => {
   assert.strictEqual(parseStartArgs(['T', '/D', 'C:\\x'], 'C:\\D'), null);
 });
 
-test('the output buffer keeps the newest BUF_MAX chars', () => {
-  const b = appendBuf('x'.repeat(BUF_MAX), 'yz');
+test('the output buffer keeps the newest output, trimmed back to BUF_MAX only past 1.5x (not a copy per chunk)', () => {
+  assert.strictEqual(appendBuf('x'.repeat(BUF_MAX), 'yz').length, BUF_MAX + 2);
+  const b = appendBuf('x'.repeat(BUF_MAX * 1.5), 'yz');
   assert.strictEqual(b.length, BUF_MAX);
   assert.ok(b.endsWith('yz'));
 });
