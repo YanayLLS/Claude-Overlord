@@ -376,6 +376,7 @@ process.on('uncaughtException', (e) => flog('uncaughtException:', e));
 process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
 // Freeze trail: the main loop held up 300ms+ (the window's own long tasks come in as perfLog).
 { let t = Date.now(); setInterval(() => { const lag = Date.now() - t - 100; t = Date.now(); if (lag > 300) flog(`main stalled ${lag}ms agents=${agents.size}`); }, 100).unref(); }
+try { require('./stall-prof').startStallProfiler(flog); } catch (e) { flog('stall profiler: ' + e.message); } // temporary: names what a stall ran
 
 let mainWindow = null;
 // Nobody can see the window (minimized, hidden to tray): background ticks that only feed the
