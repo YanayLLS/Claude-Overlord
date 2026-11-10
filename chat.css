@@ -1137,3 +1137,21 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell) .card.choice p.path b { color: var(--text); font-weight: 600; flex: none; }
 /* Question rows: the number on the right, like every other card's key hint. */
 :root body #conversation .card.ask .choices button kbd { order: 2; margin-left: auto; }
+
+/* ── /improve round 9 ── */
+/* Trust: the folder name whole, its parent path dim under it. */
+:root body :is(#conversation, #chat-shell) .card.choice p.fname { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+:root body :is(#conversation, #chat-shell) .card.choice p.path { margin: 0 0 4px; }
+/* Sign in: Copy link reads as the fallback. */
+:root body :is(#conversation, #chat-shell) .card .btns button.quiet { border-color: transparent; color: var(--subtext); }
+/* Usage limit: a prompt card's border. */
+:root body :is(#conversation, #chat-shell) .card.err.limit { border-color: color-mix(in srgb, var(--claude) 55%, var(--border-hi)); }
+/* Queued: at rest only the dim clock; Edit and Remove on hover or focus. */
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q-x { opacity: 0; transition: opacity .12s; }
+:root body :is(#conversation, #chat-shell) .msg.user.pending:is(:hover, :focus-within) .q-x { opacity: 1; }
+:root body :is(#conversation, #chat-shell) .msg.user.pending .q:has(.q-x)::before { color: var(--dim); }
+/* Question options: regular weight like the other cards' buttons; the CLI cursor as a quiet left mark. */
+:root body #conversation .card.ask .choices button .ch-t b { font-weight: 500; }
+:root body #conversation .card.ask .choices button.focus { box-shadow: inset 2px 0 0 var(--subtext); border-color: var(--border); }
+/* The transcript's right edge doesn't move when the rail shows. */
+:root body #conversation .thread { padding-right: 28px; }

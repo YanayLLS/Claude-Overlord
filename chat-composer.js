@@ -331,6 +331,8 @@
     const tail = document.querySelector('#conversation .tail');
     if (/^[1-9]$/.test(e.key) && tail && tail.querySelector('.card.ask .choices button.free')) { const b = tail.querySelectorAll('.card.ask .choices button:not(.free)')[+e.key - 1]; if (b) { b.click(); return true; } } // the visible rows' numbers
     if (/^[1-9]$/.test(e.key)) { const b = tail && (tail.querySelector(`[data-pick="${+e.key - 1}"]`) || tail.querySelector(`[data-keys="${e.key}"]`) || tail.querySelectorAll('.choices button')[+e.key - 1]); if (b) { b.click(); return true; } }
+    const lim = !(tail && tail.querySelector('.card')) && document.querySelector('#conversation .thread > .msg.apierr:last-child .card.limit');
+    if (lim) { const b = e.key === '1' || (e.key === 'Enter' && !e.shiftKey) ? lim.querySelector('button[data-autoretry]:not([hidden]), button[data-act="retry"]:not([hidden])') : e.key === '2' ? lim.querySelector('[data-act="switch-acct"]') : e.key === 'Escape' ? lim.querySelector('[data-act="dismiss-limit"]') : null; if (b) { b.click(); return true; } }
     // Folder trust / login: 1–9 pick, Enter takes the primary, Esc the way out (Cancel, Exit).
     const choice = tail && tail.querySelector('.card.choice');
     if (choice) {
