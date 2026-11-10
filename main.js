@@ -4845,7 +4845,7 @@ function handleIpc(msg) {
       send({ type: 'focused', id: msg.id });
       break;
     case 'previewToggle': if (preview) (msg.visible ? preview.show() : preview.hide()); break;
-    case 'previewSetBounds': if (preview) preview.setBounds(msg.bounds); break;
+    case 'previewSetBounds': if (preview && msg.bounds) { const z = mainWindow.webContents.getZoomFactor(), b = msg.bounds; preview.setBounds({ x: b.x * z, y: b.y * z, width: b.width * z, height: b.height * z }); } break; // CSS px -> DIP (app zoom)
     case 'previewLoad': if (preview) preview.load(msg.url); break;
     case 'previewReload': if (preview) preview.reload(); break;
     case 'reclaimFocus': if (preview) preview.reclaimFocus(); break;
