@@ -95,10 +95,11 @@ html, body { font-family: 'Geist', 'Segoe UI Variable Text', 'Segoe UI', system-
 .agent[data-status="waiting"] .agent-dot { box-shadow: 0 0 0 3px rgba(74,222,128,.16); }
 .agent[data-status="permission"] .agent-dot { box-shadow: 0 0 0 3px rgba(250,204,21,.18); }
 .agent[data-status="crashed"] .agent-dot { box-shadow: 0 0 0 3px rgba(248,113,113,.18); }
-/* Context used is the % at the right; the fill behind the text read as a half-applied selection */
+/* No context fill: it read as a half-applied selection */
 .agent-fill { display: none; }
-/* Model chip takes no room until you hover the row: the name runs right up to the % */
-.agent-right { gap: 0; }
+/* Nothing on the right takes room: the name runs to the row edge; chip + close overlay it on hover */
+.agent-right { gap: 0; margin-left: -7px; }
+.agent-tail > :not(.agent-actions) { margin-left: 7px; }
 .agent-model-slot { display: none; width: auto; }
 .agent:hover .agent-model-slot { display: flex; position: absolute; right: 34px; top: 50%; transform: translateY(-50%); z-index: 2;
   padding-left: 28px; background: linear-gradient(90deg, transparent, var(--row-solid) 24px); }
