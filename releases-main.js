@@ -10,6 +10,7 @@ const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix, isReleaseHead
 const createHistory = require('./release-history');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
+const { createFlagRelease, summarize, sameSummary, prLine, outcome, any: anyFlags } = require('./flag-release');
 const { runProgress, releaseEtaMs } = require('./deploy-eta');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
@@ -34,7 +35,8 @@ const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
-module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: ghGraphqlRaw, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask, away = () => false }) {
+module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: ghGraphqlRaw, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask, away = () => false, flagTokens = () => ({}), setFlagTokens = () => {} }) {
+  const flagRelease = createFlagRelease({ fetch: (...a) => fetch(...a), tokens: flagTokens });
   // GitHub's limit is shared by every tool and teammate on the account: when it answers "rate limit",
   // background polling here pauses until it lifts (what you click still goes through), so we don't
   // keep the lockout going. pausedUntil is also shown in the modal.
@@ -1158,6 +1160,55 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     R.status = 'done'; R.detail = 'every wave merged and deployed';
   }
 
+  // flagGap's result plus the flag release preview: prod's missing flags drop the ones this release brings
+  function withFlagPlan(gap, plan) {
+    if (!plan) return gap;
+    const out = { ...(gap || {}) };
+    if (plan.needsTokens) out.releaseNeedsTokens = true;
+    else if (plan.error) out.releaseError = plan.error;
+    else {
+      out.release = summarize(plan);
+      if (out.missing) out.missing = out.missing.filter(k => !out.release.new.includes(k));
+    }
+    return out;
+  }
+  const FLAG_LINE_RE = /^> 🚩 \*\*Feature flags with this release:\*\*[^\n]*\n\n/;
+
+  // After a prod release is deployed: apply the flags it carries, when they are still what its PRs showed.
+  // Anything else (no tokens, a different set, a failure) waits on the release card's Promote flags.
+  function flagNote(id, note) {
+    push({ flagPromo: { ...(state.flagPromo || {}), [id]: { ...note, at: Date.now() } } });
+    persist();
+  }
+  async function promoteFlags(R) {
+    if (R.env !== 'prod' || R.status !== 'done' || !R.id) return;
+    const m = ((state.history && state.history.items) || []).find(x => x.id === R.id);
+    if (!m || (m.kind || 'release') !== 'release') return;
+    let p;
+    try { p = await flagRelease.preview(); } catch (e) { return flagNote(R.id, { text: 'Flags not promoted: ' + e.message, tone: 'bad', act: 'promote' }); }
+    if (p.needsTokens) return flagNote(R.id, { text: 'Flags not promoted: connect the back office', tone: 'bad', act: 'tokens' });
+    if (!anyFlags(summarize(p))) return flagNote(R.id, { text: 'Flags: nothing to promote', tone: 'ok' });
+    const opened = m.flags && m.flags.release;
+    if (!opened || !sameSummary(opened, p)) return flagNote(R.id, { text: 'Flags changed since the release opened', tone: 'warn', act: 'promote', review: summarize(p) });
+    await applyFlags(R.id, p);
+  }
+  async function applyFlags(id, p) {
+    try {
+      const r = await flagRelease.apply(p);
+      const backup = path.join(runsDir(), `flags-before-${id}-${stamp()}.json`);
+      fs.writeFileSync(backup, JSON.stringify(r.backup, null, 2));
+      flagNote(id, { text: outcome(r), tone: r.failed.length || (r.blocked || []).length ? 'warn' : 'ok', act: r.failed.length ? 'promote' : null, backup });
+    } catch (e) { flagNote(id, { text: 'Flags not promoted: ' + e.message, tone: 'bad', act: 'promote' }); }
+  }
+  // the card's Promote flags: whatever dev and prod say now (the card showed it), applied at once
+  async function promoteFlagsNow(id) {
+    const p = await flagRelease.preview();
+    if (p.needsTokens) return flagNote(id, { text: 'Flags not promoted: connect the back office', tone: 'bad', act: 'tokens' });
+    if (!anyFlags(summarize(p))) return flagNote(id, { text: 'Flags: nothing to promote', tone: 'ok' });
+    flagNote(id, { text: 'Promoting flags…', tone: 'run' });
+    await applyFlags(id, p);
+  }
+
   // pending non-prod releases opened within 30 min of release id: they go out in the same Release all
   function companions(id) {
     const items = (state.history && state.history.items) || [], m = id && items.find(x => x.id === id);
@@ -1260,6 +1311,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       for (const R of rels) if (R.status === 'running' && run.tick - R.offset >= R.waves.length) {
         if (R.early && R.early.length) { const bad = (await Promise.all(R.early.splice(0))).find(Boolean); if (bad) { stopR(R, bad.detail, bad.url); continue; } } // shipped early: done once it's deployed
         finishRel(R);
+        await promoteFlags(R);
       }
       const active = rels.filter(R => R.status === 'running' && run.tick >= R.offset);
       if (releaseAllStop) { for (const R of rels.filter(R => R.status === 'running')) stopR(R, 'Stopped by you'); return; }
@@ -1439,6 +1491,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const cwd = await configCheckout();
     const flagScript = path.join(cwd, '.claude', 'skills', 'release', 'flag-gap.cjs');
     const flags = envs.includes('prod') && fs.existsSync(flagScript) ? flagGap(cwd, flagScript) : Promise.resolve(null);
+    // the flags this release carries (Ready for release on dev), diffed against prod: shown now, applied by Release all
+    const flagPlan = envs.includes('prod') && !hotfix ? flagRelease.preview().catch(e => ({ error: e.message })) : Promise.resolve(null);
     let n = 0;
     const writeJson = (payload) => { const p = path.join(runsDir(), `pr-${stamp()}-${n++}.json`); fs.writeFileSync(p, JSON.stringify(payload)); return p; };
     const onRow = (i, row) => { run.rows[i] = { ...row }; push({ releaseRun: { ...run } }); };
@@ -1454,7 +1508,20 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       for (const r of bumps) r.dbschemas = { ...r.dbschemas, prodRepos };
       push({ releaseRun: { ...run } });
     }
-    run.flags = await flags;
+    run.flags = withFlagPlan(await flags, await flagPlan);
+    // the flags this release carries, at the top of every open prod release PR (replacing an earlier line)
+    if (run.flags && run.flags.release) {
+      const line = prLine(run.flags.release);
+      await Promise.all(run.rows.filter(r => r.env === 'prod' && r.pr && !r.merged && !r.closed).map(async (r) => {
+        const cur = r.body != null ? { data: { body: r.body } } : await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
+        if (cur.error) return;
+        const old = (cur.data && cur.data.body) || '';
+        const body = line + old.replace(FLAG_LINE_RE, '');
+        if (body === old) return;
+        r.body = body;
+        await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeJson({ body })]);
+      }));
+    }
     // missing prod flags: say so at the top of every open prod release PR (opened now or in an
     // earlier run), once — a PR that already carries the warning is left alone
     if (run.flags && run.flags.missing && run.flags.missing.length) {
@@ -1613,6 +1680,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       }
       case 'releasesState': send({ type: 'releases', state }); return true; // a (re)loaded page: what the PR panel's holds need, now
       case 'releasesRefresh': refresh(); return true;
+      case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagNote(String(msg.id), { text: 'Flags not promoted: ' + e.message, tone: 'bad', act: 'promote' })); return true;
+      case 'releasesFlagTokens': setFlagTokens({ dev: String(msg.dev || '').trim(), prod: String(msg.prod || '').trim() }); if (msg.id) promoteFlagsNow(String(msg.id)).catch(e => flagNote(String(msg.id), { text: 'Flags not promoted: ' + e.message, tone: 'bad', act: 'promote' })); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
       case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;
       // the picker's branch boxes: a repo's branches (cached for the session)

@@ -107,3 +107,14 @@ console.log('manifest-core: all passed');
   assert.strictEqual(M.signLate(l, 'bob').repos[0].lateSigners.length, 1, 'once');
   console.log('manifest-core: late sign passed');
 }
+
+// flags: the manifest keeps prod's missing flags and the flags the release carries, nothing else
+{
+  const release = { new: ['IsA'], changed: [], blocked: [] };
+  assert.deepStrictEqual(M.manifestFlags({ missing: ['IsX'], release, error: 'x' }), { missing: ['IsX'], release });
+  assert.deepStrictEqual(M.manifestFlags({ release }), { release });
+  assert.strictEqual(M.manifestFlags({ error: 'boom' }), null);
+  assert.strictEqual(M.manifestFlags(null), null);
+  assert.deepStrictEqual(M.newManifest({ id: 'x', rows: [], flags: { release } }).flags, { release });
+  console.log('manifest-core: flags passed');
+}

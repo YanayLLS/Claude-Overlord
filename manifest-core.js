@@ -25,6 +25,16 @@ function nextId(existing, now = new Date()) {
   return `${day}-${String(n + 1).padStart(2, '0')}`;
 }
 
+// What a manifest keeps of a run's flag checks: prod's missing flags, and the flags the release carries
+// (flag-release.js summary), which Release all compares before it promotes them.
+function manifestFlags(flags) {
+  if (!flags) return null;
+  const out = {};
+  if (flags.missing) out.missing = flags.missing;
+  if (flags.release) out.release = flags.release;
+  return Object.keys(out).length ? out : null;
+}
+
 // A new pending manifest from a release run's prod rows (the ones with a PR).
 // kind 'rollback' carries rollbackOf = the release it restores.
 function newManifest({ id, kind = 'release', rollbackOf = null, env = 'prod', rows, opener, manual = [], flags = null, scope = null, now = Date.now() }) {
@@ -38,7 +48,7 @@ function newManifest({ id, kind = 'release', rollbackOf = null, env = 'prod', ro
       mergeSha: null, mergedAt: null, closed: false, signers: [], deploy: r.deploy ? { workflow: r.deploy, state: 'waiting', url: null, at: null } : null,
     })),
     manual: (manual || []).map(m => ({ repo: m.repo, label: m.label, branch: m.branch, live: m.live || null })),
-    flags: flags && flags.missing ? { missing: flags.missing } : null,
+    flags: manifestFlags(flags),
   };
 }
 
@@ -163,7 +173,7 @@ function signLate(m, login) {
   return { ...m, repos };
 }
 
-const api = { cancel, signLate, SCHEMA, DIR, MANIFESTS_REPO, manifestPath, releaseIdMark, nextId, newManifest, deriveStatus, groupPast, applyPr, applyDeploy, rollbackPlan, releaseIdOf };
+const api = { manifestFlags, cancel, signLate, SCHEMA, DIR, MANIFESTS_REPO, manifestPath, releaseIdMark, nextId, newManifest, deriveStatus, groupPast, applyPr, applyDeploy, rollbackPlan, releaseIdOf };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ManifestCore = api;
 })(this);
