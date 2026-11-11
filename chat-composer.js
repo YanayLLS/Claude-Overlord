@@ -416,6 +416,12 @@
   pane.addEventListener('drop', (e) => { order().classList.remove('drop'); if (!chat() || !e.dataTransfer?.files.length) return; e.preventDefault(); e.stopPropagation(); addFiles([...e.dataTransfer.files]); box().focus(); });
 
   document.getElementById('term-order-input').addEventListener('paste', onPaste);
+  // Inserting a character scrolled the chat itself up ~45 px (the browser revealing the caret walks scroll containers),
+  // then the bring-to-latest below smooth-scrolled it back: every key bounced the thread. Its scroll is put back
+  // between the insert and the paint.
+  { let st = null; const c = () => document.getElementById('conversation');
+    document.getElementById('term-order-input').addEventListener('beforeinput', () => { const el = c(); st = el ? el.scrollTop : null; });
+    document.getElementById('term-order-input').addEventListener('input', () => { const el = c(); if (el && st != null && el.scrollTop !== st) el.scrollTop = st; st = null; }); }
   document.getElementById('term-order-input').addEventListener('input', onInput);
   document.getElementById('term-order-input').addEventListener('blur', () => setTimeout(closeAt, 150));
   document.getElementById('chat-at').addEventListener('mousedown', (e) => { const i = e.target.closest('.at-i'); if (i) { e.preventDefault(); pickAt(+i.dataset.k); } });
