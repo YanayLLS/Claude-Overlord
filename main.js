@@ -6714,9 +6714,11 @@ app.whenReady().then(() => {
   if (process.platform === 'win32') mainWindow.setAppDetails({ appId: APP_ID, appIconPath: APP_ICON, appIconIndex: 0 });
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, cb) => cb(true));
   browserRegistry = createRegistry({
-    makeView: (partition) => new WebContentsView({
+    // Sites see plain Chrome: with "Electron/…" in the user agent, a site that also ships a desktop app (Frontline) took
+    // itself for that app, waited for its native login window and sat on its loader forever.
+    makeView: (partition) => { const ua = (app.userAgentFallback || '').replace(/\s+(Electron|overlord)\/\S+/gi, ''); try { require('electron').session.fromPartition(partition).setUserAgent(ua); } catch {} const v = new WebContentsView({
       webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }, // the agent works the page while its pane is hidden: throttled, an app sat on its loader (rAF and timers stop for hidden views)
-    }),
+    }); v.webContents.setUserAgent(ua); return v; },
     attach: (view) => mainWindow.contentView.addChildView(view),
     detach: (view) => mainWindow.contentView.removeChildView(view),
     // Partitions are keyed off the agent's sessionId UUID, not its numeric id:
