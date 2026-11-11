@@ -1256,3 +1256,6 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-queue::-webkit-scrollbar { display: none; }
 /* A turn ends with room before the next one starts. */
 :root body :is(#conversation, #chat-shell) .turnfoot { margin-bottom: 20px; }
+/* Reply type closer to Claude's: the serif a touch lighter (variable weight), bold at 600, optical size from the font. */
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.ai .md { font-weight: 380; font-optical-sizing: auto; -webkit-font-smoothing: antialiased; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.ai .md :is(strong, b, h1, h2, h3, h4) { font-weight: 600; }
