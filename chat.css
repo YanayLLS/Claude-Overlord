@@ -6,7 +6,7 @@
   --chat-w: 740px;
   --claude: #d97757;
   --chat-fs: 14.5px;
-  --chat-serif: 'Tiempos Text', Charter, 'Iowan Old Style', Georgia, Cambria, serif;
+  --chat-serif: 'Tiempos Text', 'Source Serif 4', Charter, 'Iowan Old Style', Georgia, Cambria, serif;
   --chat-ease: cubic-bezier(.2, .8, .2, 1);
 }
 :root body #tab-conversation { display: inline-block; }
