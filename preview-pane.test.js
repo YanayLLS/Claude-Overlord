@@ -9,9 +9,11 @@ function fakeRegistry() {
   const views = new Map();
   const created = [];
   const shown = [];
+  const checked = [];
   let hideAllCalls = 0;
   const reg = {
-    created, shown, views,
+    created, shown, views, checked,
+    checkHealth: async (id) => { checked.push(id); return 'ok'; },
     hideAllCalls: () => hideAllCalls,
     ensure(id) {
       if (!views.has(id)) {
@@ -40,7 +42,7 @@ function fakeRegistry() {
   return reg;
 }
 
-function build({ alive = [1, 2, 3] } = {}) {
+function build({ alive = [1, 2, 3], healthCheckDelayMs } = {}) {
   const registry = fakeRegistry();
   const sent = [];
   const written = [];
@@ -51,6 +53,7 @@ function build({ alive = [1, 2, 3] } = {}) {
     send: (m) => sent.push(m),
     writeToAgent: (id, text) => written.push([id, text]),
     isAlive: (id) => liveSet.has(id),
+    healthCheckDelayMs,
   });
   return { preview, registry, sent, written, kill: (id) => liveSet.delete(id) };
 }
@@ -214,4 +217,27 @@ test('reclaimFocus: hands focus back after an agent load or when the pane is hid
   recent = true; c.reclaimFocus(); assert.strictEqual(focused, 1, 'a view just loaded: reclaim');
   recent = false; c.hide(); c.reclaimFocus(); assert.strictEqual(focused, 2, 'pane hidden: any steal is reclaimed');
   winFocused = false; c.reclaimFocus(); assert.strictEqual(focused, 2, 'user switched apps: leave it');
+});
+
+// A view can die black while the URL bar still shows its page. Each time the pane puts an agent's
+// browser on screen it checks, a moment later, that the view is alive and painting.
+test('showing an agent in the pane checks its browser is alive, once, a moment later', async () => {
+  const { preview, registry } = build({ healthCheckDelayMs: 5 });
+  preview.setBounds(BOUNDS);
+  preview.show();
+  preview.setAgent(2);
+  for (let i = 0; i < 10; i++) preview.setBounds({ ...BOUNDS, width: 400 + i }); // resize storm: no extra checks
+  assert.deepStrictEqual(registry.checked, []);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepStrictEqual(registry.checked, [2]);
+});
+
+test('no health check for an agent the pane has hidden again', async () => {
+  const { preview, registry } = build({ healthCheckDelayMs: 5 });
+  preview.setBounds(BOUNDS);
+  preview.show();
+  preview.setAgent(2);
+  preview.hide();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepStrictEqual(registry.checked, []);
 });

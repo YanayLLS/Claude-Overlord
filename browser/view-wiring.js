@@ -64,4 +64,16 @@ function unwireNetworkErrors(partition) {
   } catch {}
 }
 
-module.exports = { normalizeConsole, wireErrors, wireNavigation, wireNetworkErrors, unwireNetworkErrors };
+// A renderer that dies (crash, kill, OOM) leaves the view black while its URL bar
+// still names the page. clean-exit is our own close. A hung renderer reports
+// unresponsive, and responsive again if it comes back.
+function wireHealth(webContents, { onGone, onUnresponsive, onResponsive }) {
+  webContents.on('render-process-gone', (_e, details) => {
+    const reason = (details && details.reason) || 'gone';
+    if (reason !== 'clean-exit') onGone(reason);
+  });
+  webContents.on('unresponsive', onUnresponsive);
+  webContents.on('responsive', onResponsive);
+}
+
+module.exports = { normalizeConsole, wireErrors, wireNavigation, wireNetworkErrors, unwireNetworkErrors, wireHealth };

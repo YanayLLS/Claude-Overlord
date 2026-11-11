@@ -2,12 +2,18 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { createRegistry, DEFAULT_VIEW_WIDTH, DEFAULT_VIEW_HEIGHT } = require('./registry');
 
+// toBitmap() is BGRA. A white frame is content; an all-black one is what a dead view shows.
+const imageOf = (v) => ({ isEmpty: () => false, toBitmap: () => Buffer.alloc(4 * 4000, v).map((b, i) => (i % 4 === 3 ? 255 : b)), toPNG: () => Buffer.from(v ? 'PAGE' : 'BLACK') });
+const okImage = () => imageOf(255);
+const blackImage = () => imageOf(0);
+
 function harness(opts = {}) {
   const made = [];
   const attached = [];
   const counts = [];
   const navigations = [];
   const calls = [];
+  const recovered = [];
   const makeView = (partition) => {
     const handlers = {};
     const onceHandlers = {};
@@ -32,6 +38,14 @@ function harness(opts = {}) {
           setTimeout(() => onceHandlers['did-finish-load'] && onceHandlers['did-finish-load'](), 0);
         },
         emit: (evt, ...args) => handlers[evt] && handlers[evt](...args),
+        image: opts.image ? opts.image() : okImage(),
+        captures: 0,
+        capturePage() { this.captures += 1; return Promise.resolve(this.image); },
+        probe: opts.probe || (() => Promise.resolve(['rgb(255, 255, 255)', 'rgba(0, 0, 0, 0)'])),
+        executeJavaScript(src) { return this.probe(src); },
+        crashed: false,
+        isCrashed() { return this.crashed; },
+        forcefullyCrashRenderer() { this.crashed = true; },
       },
     };
     made.push(view);
@@ -44,8 +58,9 @@ function harness(opts = {}) {
     detach: (v) => { const i = attached.indexOf(v); if (i >= 0) attached.splice(i, 1); },
     onErrorCount: (id, count) => counts.push([id, count]),
     onNavigated: (id, url) => navigations.push([id, url]),
+    onRecovered: (id, reason, ok, url) => recovered.push({ id, reason, ok, url }),
   });
-  return { registry, made, attached, counts, navigations, calls };
+  return { registry, made, attached, counts, navigations, calls, recovered };
 }
 
 test('ensure creates one view per agent with its own partition', () => {
@@ -319,4 +334,229 @@ test('prime: a dev-server URL loads only once the browser is first needed, and t
   registry.destroy(1);
   registry.ensure(1);
   assert.strictEqual(made[1].webContents.url, 'about:blank', 'destroy forgets the primed URL');
+});
+
+// --- screenshots of a hidden view -------------------------------------------------------------
+// Measured on Electron 33: a view that is setVisible(false), or visible but clipped out of its
+// window (PARKED), has no compositor surface at all. capturePage rejects, CDP never answers,
+// stayHidden changes nothing. The capture host lends the view to an invisible window for the
+// capture, where it paints without a pixel reaching the screen.
+function fakeCaptureHost() {
+  const runs = [];
+  return {
+    runs,
+    async run(view, size, fn, restore) {
+      runs.push({ view, size });
+      view.lent = true;
+      try { return await fn(); } finally { view.lent = false; restore(); }
+    },
+  };
+}
+
+test('screenshot of a hidden view is taken while it is lent to the capture host, at its own size', async () => {
+  const captureHost = fakeCaptureHost();
+  const { registry, made } = harness({ captureHost });
+  const png = await registry.actionsFor(1).screenshot();
+  assert.strictEqual(png, Buffer.from('PAGE').toString('base64'));
+  assert.strictEqual(captureHost.runs.length, 1);
+  assert.deepStrictEqual(captureHost.runs[0].size, { width: DEFAULT_VIEW_WIDTH, height: DEFAULT_VIEW_HEIGHT });
+  assert.strictEqual(made[0].visible, false, 'hidden again afterwards');
+  assert.ok(!overWindow(made[0].bounds), 'parked again afterwards');
+});
+
+test('after a lend the view is re-attached to the main window', async () => {
+  const captureHost = fakeCaptureHost();
+  const { registry, made, attached } = harness({ captureHost });
+  registry.ensure(1);
+  attached.length = 0; // the host's window took it
+  await registry.actionsFor(1).screenshot();
+  assert.deepStrictEqual(attached, [made[0]]);
+});
+
+test('screenshot of the view showing in the pane is captured in place, never lent', async () => {
+  const captureHost = fakeCaptureHost();
+  const { registry, made } = harness({ captureHost });
+  registry.show(1, { x: 300, y: 80, width: 400, height: 300 });
+  await registry.actionsFor(1).screenshot();
+  assert.strictEqual(captureHost.runs.length, 0);
+  assert.strictEqual(made[0].visible, true);
+  assert.deepStrictEqual(made[0].bounds, { x: 300, y: 80, width: 400, height: 300 });
+});
+
+test('a view last shown at the pane size is captured at that size, so the page does not relayout', async () => {
+  const captureHost = fakeCaptureHost();
+  const { registry } = harness({ captureHost });
+  registry.show(1, { x: 300, y: 80, width: 400, height: 300 });
+  registry.hideAll();
+  await registry.actionsFor(1).screenshot();
+  assert.deepStrictEqual(captureHost.runs[0].size, { width: 400, height: 300 });
+});
+
+test('the pane focusing an agent mid-capture shows it once the capture is done', async () => {
+  let release;
+  const captureHost = {
+    run: async (view, size, fn, restore) => { await new Promise((r) => { release = r; }); try { return await fn(); } finally { restore(); } },
+  };
+  const { registry, made } = harness({ captureHost });
+  registry.ensure(1);
+  const shot = registry.actionsFor(1).screenshot();
+  await new Promise((r) => setImmediate(r));
+  registry.show(1, { x: 300, y: 80, width: 400, height: 300 });
+  release();
+  await shot;
+  assert.strictEqual(made[0].visible, true);
+  assert.deepStrictEqual(made[0].bounds, { x: 300, y: 80, width: 400, height: 300 });
+});
+
+test('hideAll does not touch a view while it is lent (parking it would clip it out of the capture)', async () => {
+  let inside;
+  const captureHost = { run: async (view, size, fn, restore) => { view.setBounds({ x: 0, y: 0, ...size }); view.setVisible(true); try { inside(); return await fn(); } finally { restore(); } } };
+  const { registry, made } = harness({ captureHost });
+  registry.ensure(1);
+  inside = () => { registry.hideAll(); assert.strictEqual(made[0].visible, true); assert.strictEqual(made[0].bounds.x, 0); };
+  await registry.actionsFor(1).screenshot();
+  assert.strictEqual(made[0].visible, false);
+});
+
+// --- dead views recover ------------------------------------------------------------------------
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test('a renderer that dies is replaced: new view, same partition, last URL reloaded', async () => {
+  const { registry, made, recovered } = harness();
+  await registry.actionsFor(1).navigate('http://localhost:3000/checkout');
+  made[0].webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+  await tick();
+  assert.strictEqual(made.length, 2);
+  assert.strictEqual(made[0].destroyed, true, 'old view closed');
+  assert.strictEqual(made[1].partition, made[0].partition, 'same partition: logins survive');
+  assert.strictEqual(made[1].webContents.url, 'http://localhost:3000/checkout');
+  assert.strictEqual(registry.ensure(1), made[1]);
+  assert.deepStrictEqual(recovered.map((r) => [r.id, r.ok]), [[1, true]]);
+});
+
+test('a dead view that was showing in the pane is shown again in its place', async () => {
+  const { registry, made } = harness();
+  registry.show(1, { x: 300, y: 80, width: 400, height: 300 });
+  made[0].webContents.emit('render-process-gone', {}, { reason: 'killed' });
+  await tick();
+  assert.strictEqual(made[1].visible, true);
+  assert.deepStrictEqual(made[1].bounds, { x: 300, y: 80, width: 400, height: 300 });
+});
+
+test('a dead hidden view comes back hidden', async () => {
+  const { registry, made } = harness();
+  registry.ensure(1);
+  made[0].webContents.emit('render-process-gone', {}, { reason: 'oom' });
+  await tick();
+  assert.strictEqual(made[1].visible, false);
+  assert.ok(!overWindow(made[1].bounds));
+});
+
+test('actions taken after recovery drive the new view', async () => {
+  const { registry, made } = harness();
+  const before = registry.actionsFor(1);
+  made[0].webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+  await tick();
+  await registry.actionsFor(1).navigate('http://localhost:3000/next');
+  assert.strictEqual(made[1].webContents.url, 'http://localhost:3000/next');
+  assert.notStrictEqual(registry.actionsFor(1), before);
+});
+
+test('a clean renderer exit is not a crash', async () => {
+  const { registry, made } = harness();
+  registry.ensure(1);
+  made[0].webContents.emit('render-process-gone', {}, { reason: 'clean-exit' });
+  await tick();
+  assert.strictEqual(made.length, 1);
+});
+
+test('destroying an agent never brings its browser back', async () => {
+  const { registry, made } = harness();
+  registry.ensure(1);
+  registry.destroy(1);
+  made[0].webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+  await tick();
+  assert.strictEqual(made.length, 1);
+  assert.strictEqual(registry.has(1), false);
+});
+
+test('an unresponsive renderer that answers again within the grace period is left alone', async () => {
+  const { registry, made } = harness({ unresponsiveGraceMs: 20 });
+  registry.ensure(1);
+  made[0].webContents.emit('unresponsive');
+  made[0].webContents.emit('responsive');
+  await new Promise((r) => setTimeout(r, 40));
+  assert.strictEqual(made.length, 1);
+});
+
+test('an unresponsive renderer that stays hung is replaced', async () => {
+  const { registry, made, recovered } = harness({ unresponsiveGraceMs: 10 });
+  registry.ensure(1);
+  made[0].webContents.emit('unresponsive');
+  await new Promise((r) => setTimeout(r, 30));
+  assert.strictEqual(made.length, 2);
+  assert.strictEqual(made[0].webContents.crashed, true, 'the hung process is killed, not left running');
+  assert.match(recovered[0].reason, /unresponsive/);
+});
+
+test('a view that keeps dying is given up on after three recoveries a minute', async () => {
+  const { registry, made, recovered } = harness();
+  registry.ensure(1);
+  for (let i = 0; i < 5; i++) { made[made.length - 1].webContents.emit('render-process-gone', {}, { reason: 'crashed' }); await tick(); }
+  assert.strictEqual(made.length, 4, 'three replacements, then stop');
+  assert.deepStrictEqual(recovered.map((r) => r.ok), [true, true, true, false]);
+});
+
+test('checkHealth: a healthy view is ok and untouched', async () => {
+  const { registry, made } = harness();
+  registry.show(1, { x: 0, y: 0, width: 400, height: 300 });
+  assert.strictEqual(await registry.checkHealth(1), 'ok');
+  assert.strictEqual(made.length, 1);
+});
+
+test('checkHealth: an all-black frame over a page that is not dark is a dead view, and is replaced', async () => {
+  const { registry, made } = harness({ image: blackImage });
+  await registry.actionsFor(1).navigate('http://localhost:3000/');
+  registry.show(1, { x: 0, y: 0, width: 400, height: 300 });
+  assert.strictEqual(await registry.checkHealth(1), 'recovered');
+  assert.strictEqual(made.length, 2);
+  assert.strictEqual(made[1].webContents.url, 'http://localhost:3000/');
+  assert.strictEqual(made[1].visible, true);
+});
+
+test('checkHealth: an all-black frame of a page that really is black is fine', async () => {
+  const { registry, made } = harness({ image: blackImage, probe: () => Promise.resolve(['rgb(0, 0, 0)', 'rgb(0, 0, 0)']) });
+  registry.show(1, { x: 0, y: 0, width: 400, height: 300 });
+  assert.strictEqual(await registry.checkHealth(1), 'ok');
+  assert.strictEqual(made.length, 1);
+});
+
+test('checkHealth: a renderer that never answers is replaced', async () => {
+  const { registry, made } = harness({ probe: () => new Promise(() => {}), probeTimeoutMs: 20 });
+  registry.ensure(1);
+  assert.strictEqual(await registry.checkHealth(1), 'recovered');
+  assert.strictEqual(made.length, 2);
+});
+
+test('checkHealth: a crashed renderer is replaced', async () => {
+  const { registry, made } = harness();
+  registry.ensure(1);
+  made[0].webContents.crashed = true;
+  assert.strictEqual(await registry.checkHealth(1), 'recovered');
+  assert.strictEqual(made.length, 2);
+});
+
+test('checkHealth on an agent with no browser builds nothing', async () => {
+  const { registry, made } = harness();
+  assert.strictEqual(await registry.checkHealth(7), 'none');
+  assert.strictEqual(made.length, 0);
+});
+
+test('a black screenshot of a dead view recovers it and returns a real frame from the new one', async () => {
+  let n = 0;
+  const { registry, made } = harness({ image: () => (n++ === 0 ? blackImage() : okImage()) });
+  await registry.actionsFor(1).navigate('http://localhost:3000/');
+  const png = await registry.actionsFor(1).screenshot();
+  assert.strictEqual(made.length, 2);
+  assert.strictEqual(png, Buffer.from('PAGE').toString('base64'));
 });

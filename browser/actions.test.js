@@ -17,7 +17,7 @@ function fakeWc(overrides = {}) {
   return wc;
 }
 
-const build = (wc) => createActions({ getWebContents: () => wc, errors: createErrorBuffer(() => {}) });
+const build = (wc) => createActions({ getWebContents: () => wc, errors: createErrorBuffer(() => {}), captureTimeoutMs: 300 });
 
 test('navigate loads and returns the final URL', async () => {
   const loaded = [];
@@ -129,14 +129,37 @@ test('screenshot retries an empty image until a frame arrives', async () => {
   assert.strictEqual(calls, 3);
 });
 
-// The hidden case must stay instant: it rejects and will never recover, so
-// burning the whole timeout budget on retries would waste the agent's turn.
-test('a rejecting capture is not retried — the hidden answer comes back at once', async () => {
+// A view just lent to the capture window has no surface for its first ~100ms:
+// capturePage rejects "not available" until the first frame lands.
+test('a rejecting capture is retried until the first frame lands', async () => {
   let calls = 0;
-  const wc = fakeWc({ capturePage: async () => { calls += 1; throw new Error('Current display surface not available for capture'); } });
+  const wc = fakeWc({
+    capturePage: async () => {
+      calls += 1;
+      if (calls < 3) throw new Error('Current display surface not available for capture');
+      return { isEmpty: () => false, toPNG: () => Buffer.from('FRAME') };
+    },
+  });
   const actions = createActions({ getWebContents: () => wc, errors: createErrorBuffer(() => {}), captureTimeoutMs: 4000 });
-  await assert.rejects(() => actions.screenshot(), /Screenshot unavailable/i);
-  assert.strictEqual(calls, 1);
+  assert.strictEqual(await actions.screenshot(), Buffer.from('FRAME').toString('base64'));
+  assert.strictEqual(calls, 3);
+});
+
+test('a capture that keeps rejecting gives up at the timeout with the cause attached', async () => {
+  const wc = fakeWc({ capturePage: async () => { throw new Error('Current display surface not available for capture'); } });
+  const actions = createActions({ getWebContents: () => wc, errors: createErrorBuffer(() => {}), captureTimeoutMs: 60 });
+  await assert.rejects(() => actions.screenshot(), /Screenshot unavailable.*not available for capture/i);
+});
+
+test('the capture runs inside withCapturable, which can make a hidden view paint for it', async () => {
+  const order = [];
+  const wc = fakeWc({ capturePage: async () => { order.push('capture'); return { isEmpty: () => false, toPNG: () => Buffer.from('X') }; } });
+  const actions = createActions({
+    getWebContents: () => wc, errors: createErrorBuffer(() => {}),
+    withCapturable: async (fn) => { order.push('lend'); const img = await fn(); order.push('return'); return img; },
+  });
+  await actions.screenshot();
+  assert.deepStrictEqual(order, ['lend', 'capture', 'return']);
 });
 
 test('screenshot settles rather than hanging when capturePage never resolves', async () => {

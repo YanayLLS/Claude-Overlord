@@ -8,11 +8,12 @@
 const MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const IPAD_UA = 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
-function createPreviewController({ window, registry, send, writeToAgent, isAlive = () => true }) {
+function createPreviewController({ window, registry, send, writeToAgent, isAlive = () => true, healthCheckDelayMs = 1500 }) {
   let agentId = null;
   let visible = false;
   let bounds = null;
   const defaultUA = new Map(); // agentId -> the UA that agent's view was born with
+  let healthTimer = null;
 
   const live = (id) => id != null && isAlive(id);
   const wc = () => (live(agentId) && registry.has(agentId) ? registry.ensure(agentId).webContents : null);
@@ -33,9 +34,23 @@ function createPreviewController({ window, registry, send, writeToAgent, isAlive
     restoreParentFocus();
   }
 
+  // A view can die black while the URL bar still shows its page. Whenever the pane puts an agent's
+  // browser on screen, check a moment later (once its first frame is up) that it is alive and
+  // painting; the registry replaces it in place if not. Not on bounds changes: a resize storm
+  // would capture every frame.
+  function scheduleHealthCheck() {
+    clearTimeout(healthTimer);
+    healthTimer = setTimeout(() => {
+      healthTimer = null;
+      if (!visible || !live(agentId) || !registry.has(agentId) || !registry.checkHealth) return;
+      registry.checkHealth(agentId).catch(() => {});
+    }, healthCheckDelayMs);
+  }
+
   function setAgent(id) {
     agentId = typeof id === 'number' && live(id) ? id : null;
     apply();
+    if (visible && agentId != null) scheduleHealthCheck();
     const w = wc();
     if (w) send({ type: 'previewLoaded', id: agentId, url: w.getURL() });
   }
@@ -89,7 +104,7 @@ function createPreviewController({ window, registry, send, writeToAgent, isAlive
     onAgentNavigated,
     onAgentClosed,
     setBounds: (b) => { bounds = b; apply(); },
-    show: () => { visible = true; apply(); },
+    show: () => { visible = true; apply(); if (agentId != null) scheduleHealthCheck(); },
     hide: () => { visible = false; registry.hideAll(); },
     reload: () => { const w = wc(); if (w) { try { w.reload(); } catch {} restoreParentFocus(); } },
     // The terminal just lost keyboard focus. Hand it back when an agent's browser
@@ -100,7 +115,7 @@ function createPreviewController({ window, registry, send, writeToAgent, isAlive
       if (!visible || registry.navigatedWithin(2000)) restoreParentFocus();
     },
     clearErrors: (id) => { if (typeof id === 'number' && registry.has(id)) registry.errorsFor(id).clear(); },
-    destroy: () => { agentId = null; visible = false; defaultUA.clear(); },
+    destroy: () => { clearTimeout(healthTimer); agentId = null; visible = false; defaultUA.clear(); },
   };
 }
 

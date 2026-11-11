@@ -6,13 +6,14 @@ const STALE = 'That ref is stale or missing — call browser_snapshot again to g
 
 // Measured on Electron 33: a WebContentsView that is not visible produces no
 // compositor frames at all. capturePage() rejects with "Current display surface
-// not available for capture", and CDP Page.captureScreenshot never resolves —
-// it waits for a frame that will never arrive. There is therefore no
-// screenshot path for a hidden view; the honest answer is a bounded wait and a
-// message that points the agent at the tool that does work headlessly.
+// not available for capture", and CDP Page.captureScreenshot never resolves.
+// withCapturable (the registry's) makes a hidden view paint for the capture by
+// lending it to an invisible window (browser/capture-host.js). Until its first
+// frame lands capturePage still rejects, so a rejection and an empty image are
+// both retried up to a bounded deadline. It always settles.
 const CAPTURE_TIMEOUT_MS = 5000;
-const CAPTURE_RETRY_MS = 200;
-const NO_SCREENSHOT = 'Screenshot unavailable: this agent\'s browser is running hidden, and a hidden view renders no frames to capture. Use browser_snapshot to read the page — it works headlessly — or open the preview pane for this agent to make screenshots possible.';
+const CAPTURE_RETRY_MS = 100;
+const NO_SCREENSHOT = 'Screenshot unavailable: no frame could be captured from this agent\'s browser. Use browser_snapshot to read the page — it works without a frame.';
 
 function withTimeout(promise, ms) {
   let timer;
@@ -22,7 +23,7 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
 }
 
-function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIMEOUT_MS, rebindInput = async () => {} }) {
+function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIMEOUT_MS, rebindInput = async () => {}, withCapturable = (fn) => fn() }) {
   function wc() {
     const w = getWebContents();
     if (!w) throw new Error('This agent has no browser available.');
@@ -56,25 +57,32 @@ function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIME
     return errors.count() === 0 ? 'No errors.' : `${errors.count()} error(s):\n${errors.format()}`;
   }
 
-  // A view that has only just been shown has not composited a frame yet and
-  // capturePage resolves empty for a second or two. A hidden view instead
-  // REJECTS outright and never recovers, so only the empty case is retried —
-  // that keeps the hidden answer instant and the pane answer reliable.
+  // A view that has only just been shown (or lent) has not composited a frame
+  // yet: capturePage rejects, then resolves empty, then returns the page.
   async function capture(w, deadline) {
     for (;;) {
-      const image = await withTimeout(w.capturePage(), Math.max(1, deadline - Date.now()));
+      let image = null;
+      let failure = null;
+      try { image = await withTimeout(w.capturePage(), Math.max(1, deadline - Date.now())); } catch (e) { failure = e; }
       if (image && !image.isEmpty()) return image;
-      if (Date.now() + CAPTURE_RETRY_MS >= deadline) throw new Error('capturePage returned an empty image');
+      if (failure && /timed out/.test(failure.message)) throw failure;
+      if (Date.now() + CAPTURE_RETRY_MS >= deadline) throw failure || new Error('capturePage returned an empty image');
       await new Promise((r) => setTimeout(r, CAPTURE_RETRY_MS));
     }
+  }
+
+  // The page's current frame as a NativeImage, painted even when the view is hidden.
+  async function frame() {
+    const w = wc();
+    return withCapturable(() => capture(w, Date.now() + captureTimeoutMs));
   }
 
   // Always settles: either a PNG or an explanation. It must never leave the
   // agent's tool call hanging.
   async function screenshot() {
-    const w = wc();
+    wc();
     try {
-      return (await capture(w, Date.now() + captureTimeoutMs)).toPNG().toString('base64');
+      return (await frame()).toPNG().toString('base64');
     } catch (e) {
       throw new Error(`${NO_SCREENSHOT} (${(e && e.message) || e})`);
     }
@@ -122,7 +130,7 @@ function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIME
     return `Typed into ${ref}${submit ? ' and submitted' : ''}`;
   }
 
-  return { navigate, snapshot, screenshot, click, type, consoleErrors, evaluate };
+  return { navigate, snapshot, screenshot, frame, click, type, consoleErrors, evaluate };
 }
 
 module.exports = { createActions, CAPTURE_TIMEOUT_MS };

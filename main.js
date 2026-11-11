@@ -14,6 +14,7 @@ const pc = require('./peer-core');
 const wc = require('./watch-core');
 const timelineCore = require('./timeline-core');
 const { createRegistry } = require('./browser/registry');
+const { createCaptureHost, makeCaptureWindow } = require('./browser/capture-host');
 const { createMcpServer } = require('./mcp/server');
 const { createApi, ApiError, newToken } = require('./api-core');
 const { createApiServer } = require('./api-server');
@@ -397,6 +398,7 @@ let mainWindow = null;
 // screen — stats fallback, PR/CI watch, port probes — skip, and catch up on the first tick after.
 const appQuiet = () => { try { return !!mainWindow && !mainWindow.isDestroyed() && (mainWindow.isMinimized() || !mainWindow.isVisible()); } catch { return false; } };
 let browserRegistry = null;
+let browserCaptureHost = null; // its hidden window would keep the app alive after the main window closes
 let mcpServer = null;
 let preview = null;
 let docs = null; // markdown documents (docs-main.js)
@@ -6726,6 +6728,9 @@ app.whenReady().then(() => {
     },
     onErrorCount: (id, count, last) => send({ type: 'previewError', id, count, last }),
     onNavigated: (id, url) => { if (preview) preview.onAgentNavigated(id, url); }, // it sends previewLoaded
+    // Screenshots of a hidden view: lent to an invisible window for the capture (see browser/capture-host.js).
+    captureHost: browserCaptureHost = createCaptureHost({ makeWindow: () => makeCaptureWindow({ BrowserWindow, screen: require('electron').screen }) }),
+    onRecovered: (id, reason, ok, url) => flog(ok ? `agent ${id} browser died (${reason}): recreated${url ? `, reloading ${url}` : ''}` : `agent ${id} browser died (${reason}) again: giving up for now`),
   });
   mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
@@ -6822,6 +6827,7 @@ app.whenReady().then(() => {
   mainWindow.on('closed', () => {
     saveState();
     mainWindow = null;
+    if (browserCaptureHost) { try { browserCaptureHost.destroy(); } catch {} }
   });
   // Check for updates — only runs when packaged (not in dev, not in a sandboxed test instance)
   // Re-check so a long-running app catches new releases without a restart: every UPDATE_CHECK_MS,
