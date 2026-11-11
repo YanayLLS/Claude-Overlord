@@ -2,64 +2,63 @@
 const assert = require('assert');
 const { createFlagRelease, summarize, sameSummary, prLine, outcome } = require('./flag-release');
 
-(async () => {
+const line = (o) => `flags\tUNKNOWN STEP\t2026-11-11T10:00:00Z FLAG_RELEASE_RESULT ${Buffer.from(JSON.stringify(o)).toString('base64')}`;
+
+// a fake `gh`: dispatch records the inputs, the run list shows the run after a poll, the log carries the result
+function fakeGh({ result, conclusion = 'success', appearAfter = 1, dispatchError = null, noResult = false }) {
   const calls = [];
-  const replies = {
-    getFlagReleaseSource: { code: 1, data: JSON.stringify({ docs: [{ Key: 'IsA' }, { Key: 'IsB' }] }) },
-    previewFlagRelease: { code: 1, data: JSON.stringify({ new: ['IsA'], changed: [{ key: 'IsB', fields: ['DefaultValue'] }], unchanged: [], blocked: [], fingerprint: 'fp' }) },
-    applyFlagRelease: { code: 1, data: JSON.stringify({ written: ['IsA'], failed: [{ key: 'IsB', message: 'no' }], blocked: [], backup: { kinds: ['featureFlags'] } }) },
-    markFlagsReleased: { code: 1, data: JSON.stringify({ written: ['IsA'], failed: [] }) },
+  let polls = 0, request = null;
+  const gh = async (args) => {
+    calls.push(args);
+    if (args[0] === 'workflow') {
+      if (dispatchError) return { error: dispatchError };
+      request = args.find(a => a.startsWith('request=')).slice(8);
+      return { stdout: '' };
+    }
+    if (args[0] === 'run' && args[1] === 'list') {
+      polls++;
+      const runs = polls > appearAfter ? [{ databaseId: 7, displayTitle: `flag-release x ${request}`, status: 'completed', conclusion }] : [];
+      return { stdout: JSON.stringify([{ databaseId: 1, displayTitle: 'flag-release preview other', status: 'completed', conclusion: 'success' }, ...runs]) };
+    }
+    if (args[0] === 'run' && args[1] === 'view') return { stdout: noResult ? 'boom' : `noise\n${line(result)}\nmore` };
+    throw new Error('unexpected ' + args.join(' '));
   };
-  const fetch = async (url, init) => {
-    const name = url.split('/api/')[1];
-    calls.push({ host: url.split('/api/')[0], name, auth: init.headers.Authorization, body: JSON.parse(init.body || '{}') });
-    return { ok: true, status: 200, json: async () => replies[name] };
-  };
-  const fr = createFlagRelease({ fetch, tokens: () => ({ dev: 'flt_dev', prod: 'flt_prod' }) });
+  return { gh, calls };
+}
+const fast = { sleep: async () => {}, newId: () => 'req1' };
 
-  // preview: dev hands out the docs, prod diffs them; each side with its own token
-  const p = await fr.preview();
-  assert.deepStrictEqual(calls.map(c => [c.name, c.auth]), [['getFlagReleaseSource', 'Bearer flt_dev'], ['previewFlagRelease', 'Bearer flt_prod']]);
-  assert.deepStrictEqual(calls[1].body.docs.map(d => d.Key), ['IsA', 'IsB']);
+(async () => {
+  const plan = { new: ['IsA'], changed: [{ key: 'IsB', fields: ['DefaultValue'] }], unchanged: [], blocked: [], fingerprint: 'fp' };
+
+  // preview: dispatches the workflow on master with mode and request, then reads the run's result line
+  const a = fakeGh({ result: { ok: true, result: plan } });
+  const p = await createFlagRelease({ gh: a.gh, ...fast }).preview();
+  assert.deepStrictEqual(a.calls[0], ['workflow', 'run', 'flag-release.yml', '-R', 'LLSLtd/back-office', '--ref', 'master', '-f', 'mode=preview', '-f', 'expect=', '-f', 'request=req1']);
+  assert.deepStrictEqual(a.calls.slice(-1)[0].slice(0, 4), ['run', 'view', '7', '-R']);
   assert.deepStrictEqual(summarize(p), { new: ['IsA'], changed: [{ key: 'IsB', fields: ['DefaultValue'] }], blocked: [] });
-  assert.ok(calls[0].host.includes('dev') && !calls[1].host.includes('dev'));
 
-  // apply: prod writes against the preview's fingerprint, then dev marks only what landed Released
-  calls.length = 0;
-  const r = await fr.apply(p);
-  assert.deepStrictEqual(calls.map(c => c.name), ['applyFlagRelease', 'markFlagsReleased']);
-  assert.strictEqual(calls[0].body.expect, 'fp');
-  assert.deepStrictEqual(calls[1].body.keys, ['IsA']);
-
-  // unchanged flags already match prod: dev marks them Released too (a retry after a dev failure)
-  calls.length = 0;
-  await fr.apply({ ...p, unchanged: ['IsU'] });
-  assert.deepStrictEqual(calls[1].body.keys, ['IsA', 'IsU']);
-
-  // dev failing after prod was written: reported on the result, not thrown
-  const saved = replies.markFlagsReleased;
-  replies.markFlagsReleased = { code: 2, message: 'dev down' };
-  const half = await fr.apply(p);
-  assert.strictEqual(half.markError, 'dev down');
-  assert.strictEqual(outcome(half), 'Flags: 1 promoted · IsB failed: no · dev not marked Released: dev down');
-  replies.markFlagsReleased = saved;
+  // apply: sends the preview's fingerprint
+  const b = fakeGh({ result: { ok: true, result: { written: ['IsA'], failed: [], blocked: [], backup: {} } } });
+  const r = await createFlagRelease({ gh: b.gh, ...fast }).apply(p);
+  assert.ok(b.calls[0].includes('mode=apply') && b.calls[0].includes('expect=fp'));
   assert.deepStrictEqual(r.written, ['IsA']);
 
-  // nothing written and nothing unchanged on prod: dev is not touched
-  replies.applyFlagRelease = { code: 1, data: JSON.stringify({ written: [], failed: [], blocked: [], backup: {} }) };
-  calls.length = 0;
-  await fr.apply(p);
-  assert.deepStrictEqual(calls.map(c => c.name), ['applyFlagRelease']);
+  // the run's own error comes back as the error
+  const c = fakeGh({ result: { ok: false, error: 'applyFlagRelease: Flags changed on dev or prod since the preview.' }, conclusion: 'failure' });
+  await assert.rejects(createFlagRelease({ gh: c.gh, ...fast }).apply(p), /Flags changed on dev or prod/);
 
-  // a refusal from back-office (message) or the token scope (error) is thrown with its words
-  replies.applyFlagRelease = { code: 2, message: 'Prod flags changed since the preview. Preview again before applying.' };
-  await assert.rejects(fr.apply(p), /changed since the preview/);
-  const denied = createFlagRelease({ fetch: async () => ({ ok: false, status: 403, json: async () => ({ error: 'This API token does not grant access to this endpoint' }) }), tokens: () => ({ dev: 'a', prod: 'b' }) });
-  await assert.rejects(denied.preview(), /does not grant access/);
+  // a run that ended without a result line
+  const d = fakeGh({ noResult: true, conclusion: 'cancelled' });
+  await assert.rejects(createFlagRelease({ gh: d.gh, ...fast }).preview(), /flag-release run 7 ended cancelled without a result/);
 
-  // no tokens: a state, not an error
-  const none = createFlagRelease({ fetch, tokens: () => ({}) });
-  assert.deepStrictEqual(await none.preview(), { needsTokens: true });
+  // the workflow not on master yet (before back-office ships it to prod)
+  const e = fakeGh({ dispatchError: 'HTTP 404: workflow flag-release.yml not found on the default branch (https://api.github.com/repos/LLSLtd/back-office/actions/workflows/flag-release.yml)' });
+  await assert.rejects(createFlagRelease({ gh: e.gh, ...fast }).preview(), /flag-release workflow is not on back-office master yet/);
+
+  // a run that never shows up
+  const f = fakeGh({ result: {}, appearAfter: 1e9 });
+  let t = 0;
+  await assert.rejects(createFlagRelease({ gh: f.gh, sleep: async () => {}, newId: () => 'x', now: () => (t += 60e3) }).preview(), /did not finish/);
 
   // the summary is what the release opened with; a different one at Release all time means re-review
   assert.ok(sameSummary(p, { ...p, fingerprint: 'other' }));
@@ -73,6 +72,7 @@ const { createFlagRelease, summarize, sameSummary, prLine, outcome } = require('
 
   // the line a release card shows after apply
   assert.strictEqual(outcome({ written: ['IsA'], failed: [{ key: 'IsB', message: 'no' }], blocked: [] }), 'Flags: 1 promoted · IsB failed: no');
+  assert.strictEqual(outcome({ written: ['IsA'], failed: [], blocked: [], markError: 'dev down' }), 'Flags: 1 promoted · dev not marked Released: dev down');
   assert.strictEqual(outcome({ written: [], failed: [], blocked: [] }), 'Flags: nothing to promote');
 
   console.log('flag-release ok');

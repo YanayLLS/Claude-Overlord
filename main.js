@@ -664,7 +664,7 @@ function logToRenderer(...args) {
 // the ClickUp API token stays in the main process, only its presence is reported.
 // The header is 44 CSS px; the window buttons Windows draws over it are device px, so scale them with the UI zoom.
 function titleBarOverlay(theme) { return { ...titleBarColors(theme), height: Math.round(44 * (settings.zoom || 100) / 100) }; }
-function publicSettings() { const { clickupToken, dictationKey, backofficeTokens, prCache, actionsCache, apiToken, apiWebhooks, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken, dictationHasKey: !!dictationKey }; }
+function publicSettings() { const { clickupToken, dictationKey, prCache, actionsCache, apiToken, apiWebhooks, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken, dictationHasKey: !!dictationKey }; }
 function sendFullState() {
   send({ type: 'settings', settings: publicSettings() });
   sendApiState();
@@ -3305,8 +3305,6 @@ const ghCache = require('./gh-cache').createGhCache({ run: ghJsonRaw, fetch, tok
 const ghJson = ghCache.ghJson;
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
   away: userAway,
-  flagTokens: () => settings.backofficeTokens || {}, // the releaser's own back-office API tokens (dev, prod): flag-release.js
-  setFlagTokens: (t) => { settings.backofficeTokens = t; saveState(); },
   startAgent: (cwd, prompt) => createAgent(cwd, null, prompt),
   fixRun: (run) => fixActionRun(run),
   fixPr: (pr) => fixPr(pr),

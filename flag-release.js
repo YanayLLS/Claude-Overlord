@@ -1,45 +1,49 @@
 // Feature flags travel with a prod release: the flags marked Ready for release on dev's back office
 // are previewed against prod when the release opens, and applied once Release all has deployed prod.
-// Back-office owns the rules (what travels, what prod keeps, what is blocked: flagReleaseLogic.js);
-// this only calls it, with the releaser's own API tokens (scope "Feature flag releases"), so prod's
-// activity log names the person who released.
+// Back-office owns the rules (what travels, what prod keeps, what is blocked: flagReleaseLogic.js)
+// and the access: its flag-release workflow is the only caller the endpoints accept (GitHub's token
+// for that workflow on master). Overlord only starts that workflow with `gh` and reads its result,
+// so no one holds a key.
 
-const SOURCE = 'https://backoffice.dev.frontline.io';
-const TARGET = 'https://backoffice.frontline.io';
+const REPO = 'LLSLtd/back-office';
+const WORKFLOW = 'flag-release.yml';
+const POLL_MS = 5e3;
+const WAIT_MS = 10 * 60e3;
 
-function createFlagRelease({ fetch, tokens }) {
-  async function call(base, token, name, body = {}) {
-    const res = await fetch(`${base}/api/${name}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json().catch(() => null);
-    const why = json && (json.message || json.error);
-    if (why || !res.ok || !json || !json.data) throw new Error(why || `${name}: HTTP ${res.status}`);
-    return JSON.parse(json.data);
+function createFlagRelease({ gh, sleep = ms => new Promise(r => setTimeout(r, ms)), now = Date.now, newId = () => Math.random().toString(36).slice(2, 10) }) {
+  const ok = async (args) => {
+    const r = await gh(args);
+    if (r.error) throw new Error(r.error);
+    return r.stdout;
+  };
+
+  async function dispatch(mode, expect = '') {
+    const request = newId();
+    await ok(['workflow', 'run', WORKFLOW, '-R', REPO, '--ref', 'master', '-f', `mode=${mode}`, '-f', `expect=${expect}`, '-f', `request=${request}`])
+      .catch((e) => { throw /could not find any workflows|not found on the default branch/i.test(e.message) ? new Error('flag-release workflow is not on back-office master yet') : e; });
+    // the run is named after the request (run-name), which is how this call finds its own run
+    const until = now() + WAIT_MS;
+    let run = null;
+    while (now() < until) {
+      await sleep(POLL_MS);
+      const runs = JSON.parse(await ok(['run', 'list', '-R', REPO, '-w', WORKFLOW, '-L', '20', '--json', 'databaseId,displayTitle,status,conclusion']));
+      run = runs.find(x => String(x.displayTitle || '').endsWith(` ${request}`));
+      if (run && run.status === 'completed') break;
+    }
+    if (!run || run.status !== 'completed') throw new Error(`flag-release ${mode} did not finish in ${WAIT_MS / 60e3} min`);
+    const log = await ok(['run', 'view', String(run.databaseId), '-R', REPO, '--log']);
+    const m = log.match(/FLAG_RELEASE_RESULT ([A-Za-z0-9+/=]+)/);
+    if (!m) throw new Error(`flag-release run ${run.databaseId} ended ${run.conclusion} without a result`);
+    const out = JSON.parse(Buffer.from(m[1], 'base64').toString());
+    if (!out.ok) throw new Error(out.error);
+    return out.result;
   }
 
-  async function preview() {
-    const t = tokens() || {};
-    if (!t.dev || !t.prod) return { needsTokens: true };
-    const { docs } = await call(SOURCE, t.dev, 'getFlagReleaseSource');
-    const plan = await call(TARGET, t.prod, 'previewFlagRelease', { docs });
-    return { ...plan, docs };
-  }
-
-  // A failure halfway leaves the first half written: applying the same preview again finishes it.
-  async function apply(p) {
-    const t = tokens() || {};
-    const result = await call(TARGET, t.prod, 'applyFlagRelease', { docs: p.docs, expect: p.fingerprint });
-    // prod is written now: a dev failure is reported, never thrown (it would read as "not promoted").
-    // Unchanged flags already match prod, so they are shipped too; marking them is what a retry finishes.
-    const keys = [...result.written, ...(p.unchanged || [])];
-    if (keys.length) await call(SOURCE, t.dev, 'markFlagsReleased', { keys }).catch((e) => { result.markError = e.message; });
-    return result;
-  }
-
-  return { preview, apply };
+  return {
+    preview: () => dispatch('preview'),
+    // A failure halfway leaves the first half written: applying the same preview again finishes it.
+    apply: p => dispatch('apply', p.fingerprint),
+  };
 }
 
 const summarize = p => ({ new: p.new || [], changed: p.changed || [], blocked: p.blocked || [] });
@@ -67,4 +71,4 @@ function outcome(r) {
   return `Flags: ${bits.length ? bits.join(' · ') : 'nothing to promote'}`;
 }
 
-module.exports = { createFlagRelease, summarize, sameSummary, prLine, outcome, any, SOURCE, TARGET };
+module.exports = { createFlagRelease, summarize, sameSummary, prLine, outcome, any, REPO, WORKFLOW };

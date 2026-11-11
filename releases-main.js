@@ -35,8 +35,11 @@ const HISTORY_SHOWN = 10;
 const RUNS_SHOWN = 15; // deploy runs per env for the Timeline — same call as the latest-run check
 const HISTORY_SCAN = 40; // enough raw history to walk HISTORY_SHOWN first-parent steps
 
-module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: ghGraphqlRaw, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask, away = () => false, flagTokens = () => ({}), setFlagTokens = () => {} }) {
-  const flagRelease = createFlagRelease({ fetch: (...a) => fetch(...a), tokens: flagTokens });
+module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: ghGraphqlRaw, stateDir, findLocal, startAgent, whoami, notify, fixRun, fixPr, clickupFindTask, away = () => false }) {
+  // back-office's flag-release workflow, started and read with `gh` (flag-release.js): no keys here
+  const ghText = (args) => new Promise(resolve => execFile('gh', args, { timeout: 60e3, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 16 * 1024 * 1024 },
+    (err, stdout, stderr) => resolve(err ? { error: String(stderr || err.message).trim().split(/\r?\n/).pop() } : { stdout })));
+  const flagRelease = createFlagRelease({ gh: ghText });
   // GitHub's limit is shared by every tool and teammate on the account: when it answers "rate limit",
   // background polling here pauses until it lifts (what you click still goes through), so we don't
   // keep the lockout going. pausedUntil is also shown in the modal.
@@ -1164,8 +1167,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   function withFlagPlan(gap, plan) {
     if (!plan) return gap;
     const out = { ...(gap || {}) };
-    if (plan.needsTokens) out.releaseNeedsTokens = true;
-    else if (plan.error) out.releaseError = plan.error;
+    if (plan.error) out.releaseError = plan.error;
     else {
       out.release = summarize(plan);
       if (out.missing) out.missing = out.missing.filter(k => !out.release.new.includes(k));
@@ -1180,11 +1182,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     push({ flagPromo: { ...(state.flagPromo || {}), [id]: { ...note, at: Date.now() } } });
     persist();
   }
-  // an expired, revoked or wrong-scope token (back-office apiTokenAuth's words) needs new tokens, not a retry
-  const TOKEN_ERR_RE = /invalid or expired api token|does not grant access|HTTP 401/i;
   function flagFail(id, e) {
-    const msg = (e && e.message) || String(e);
-    flagNote(id, { text: 'Flags not promoted: ' + msg, tone: 'bad', act: TOKEN_ERR_RE.test(msg) ? 'tokens' : 'promote' });
+    flagNote(id, { text: 'Flags not promoted: ' + ((e && e.message) || String(e)), tone: 'bad', act: 'promote' });
   }
   async function promoteFlags(R) {
     if (R.env !== 'prod' || R.status !== 'done' || !R.id) return;
@@ -1192,7 +1191,6 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (!m || (m.kind || 'release') !== 'release') return;
     let p;
     try { p = await flagRelease.preview(); } catch (e) { return flagFail(R.id, e); }
-    if (p.needsTokens) return flagNote(R.id, { text: 'Flags not promoted: connect the back office', tone: 'bad', act: 'tokens' });
     if (!anyFlags(summarize(p))) return flagNote(R.id, { text: 'Flags: nothing to promote', tone: 'ok' });
     const opened = m.flags && m.flags.release;
     if (!opened || !sameSummary(opened, p)) return flagNote(R.id, { text: 'Flags changed since the release opened', tone: 'warn', act: 'promote', review: summarize(p) });
@@ -1209,7 +1207,6 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // the card's Promote flags: whatever dev and prod say now (the card showed it), applied at once
   async function promoteFlagsNow(id) {
     const p = await flagRelease.preview();
-    if (p.needsTokens) return flagNote(id, { text: 'Flags not promoted: connect the back office', tone: 'bad', act: 'tokens' });
     if (!anyFlags(summarize(p)) && !(p.unchanged || []).length) return flagNote(id, { text: 'Flags: nothing to promote', tone: 'ok' });
     flagNote(id, { text: 'Promoting flags…', tone: 'run' });
     await applyFlags(id, p);
@@ -1687,7 +1684,6 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesState': send({ type: 'releases', state }); return true; // a (re)loaded page: what the PR panel's holds need, now
       case 'releasesRefresh': refresh(); return true;
       case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
-      case 'releasesFlagTokens': setFlagTokens({ dev: String(msg.dev || '').trim(), prod: String(msg.prod || '').trim() }); if (!msg.id && state.releaseRun && state.releaseRun.flags) flagRelease.preview().catch(e => ({ error: e.message })).then(p => { const { releaseNeedsTokens, releaseError, ...gap } = state.releaseRun.flags; push({ releaseRun: { ...state.releaseRun, flags: withFlagPlan(gap, p) } }); persist(); }); if (msg.id) promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
       case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;
       // the picker's branch boxes: a repo's branches (cached for the session)

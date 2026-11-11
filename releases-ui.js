@@ -146,14 +146,6 @@
     },
     deselect: () => { sel = null; render(); },
     flagPromote: (el) => { const id = el.dataset.id; state = { ...state, flagPromo: { ...(state.flagPromo || {}), [id]: { text: 'Promoting flags…', tone: 'run' } } }; render(); api.send({ type: 'releasesPromoteFlags', id }); },
-    flagTokOpen: (el) => { flagTokFor = el.dataset.id; render(); },
-    flagTokSave: (el) => {
-      const dev = modal.querySelector('#rl-tok-dev').value.trim(), prod = modal.querySelector('#rl-tok-prod').value.trim();
-      if (!dev || !prod) return;
-      flagTokFor = null;
-      api.send({ type: 'releasesFlagTokens', dev, prod, id: el.dataset.id || null });
-      if (el.dataset.id) actions.flagPromote(el); else render();
-    },
     // the Release tab's picker ("start another release")
     releaseMenu: () => { tab = 'release'; apprOpen = false; if (!relOpen) openPicker(); render(); },
     releaseClose: () => { relOpen = false; render(); },
@@ -771,7 +763,6 @@
       el.classList.add('locked', 'show'); el.setAttribute('aria-disabled', 'true'); el.dataset.act = 'busy';
     }
   }
-  let flagTokFor = null; // the release whose back-office token form is open ('' = the run card)
   // The feature flags a prod release carries (flag-release.js): what it brings, then what happened to them.
   function flagChips(rel) {
     if (!rel) return '';
@@ -779,21 +770,14 @@
       ...rel.blocked.map(b => `<span class="bad" title="${esc(b.why)}">${esc(b.key)} blocked</span>`)];
     return bits.length ? `🚩 ${bits.join(' · ')}` : '';
   }
-  function flagTokForm(id) {
-    return `<div class="rl-flag-tok"><input id="rl-tok-dev" type="password" data-src="" placeholder="Dev token" spellcheck="false"><input id="rl-tok-prod" type="password" data-src="" placeholder="Prod token" spellcheck="false">`
-      + `<button class="rl-hist-btn go" data-act="flagTokSave" data-id="${esc(id)}">Save</button></div>`;
-  }
-  function flagLines(s, id, rel, needsTokens, error, deployed = false) {
+  function flagLines(s, id, rel, error, deployed = false) {
     const promo = (s.flagPromo || {})[id];
     let h = '';
     const chips = flagChips((promo && promo.review) || rel);
     if (chips) h += `<div class="rl-hist-man">${chips}</div>`;
     if (promo) h += `<div class="rl-hist-man ${esc(promo.tone || '')}"${promo.backup ? ` title="Prod before: ${esc(promo.backup)} (back office › Import restores it)"` : ''}>${esc(promo.text)}</div>`;
-    else if (needsTokens) h += '<div class="rl-hist-man bad">Flags: connect the back office</div>';
     else if (error) h += `<div class="rl-hist-man bad">Flags: ${esc(error)}</div>`;
-    const wantsTokens = (promo && promo.act === 'tokens') || (!promo && needsTokens);
-    if (wantsTokens) h += flagTokFor === id ? flagTokForm(id) : `<button class="rl-hist-btn" data-act="flagTokOpen" data-id="${esc(id)}">🔑 Connect back office</button>`;
-    else if ((promo && promo.act === 'promote') || (!promo && deployed && chips)) h += `<button class="rl-hist-btn go" data-act="flagPromote" data-id="${esc(id)}">🚩 Promote flags</button>`;
+    if ((promo && promo.act === 'promote') || (!promo && deployed && chips)) h += `<button class="rl-hist-btn go" data-act="flagPromote" data-id="${esc(id)}">🚩 Promote flags</button>`;
     return h;
   }
 
@@ -1104,7 +1088,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       if (manOther.length) h += `<div class="rl-hist-man" title="${esc(manOther.map(x => x.label + (x.live && x.live.sha ? ': live ' + x.live.sha.slice(0, 7) : '')).join(' · '))}">Not in this release (deployed by hand): ${manOther.map(x => esc(x.label)).join(', ')}</div>`;
       if (m.warnings && m.warnings.length) h += `<div class="rl-hist-man bad">⚠ Not rolled back (data changes): ${m.warnings.map(w => esc(w.label) + ': ' + w.files.map(esc).join(', ')).join(' · ')}</div>`;
       if (m.flags && m.flags.missing && m.flags.missing.length) h += `<div class="rl-hist-man bad">Flags to seed: ${esc(m.flags.missing.join(', '))}</div>`;
-      if ((m.env || 'prod') === 'prod' && (m.kind || 'release') === 'release') h += flagLines(s, m.id, m.flags && m.flags.release, false, null, m.status === 'deployed');
+      if ((m.env || 'prod') === 'prod' && (m.kind || 'release') === 'release') h += flagLines(s, m.id, m.flags && m.flags.release, null, m.status === 'deployed');
       // actions
       const acts = [];
       if (signs && pending && a.isApprover && m.repos.some(r => toSign.has(r.repo + '#' + r.pr.number))) acts.push(signBtn(s, 'rl-hist-btn go', '✍ Sign'));
@@ -1260,7 +1244,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     if (run.flags && run.flags.missing && run.flags.missing.length) h += `<div class="rl-rr-flag bad">⚠ Seed these prod feature flags before merging: ${esc(run.flags.missing.join(', '))}</div>`;
     else if (run.flags && run.flags.missing) h += '<div class="rl-rr-flag">Prod feature flags: nothing missing</div>';
     else if (run.flags && run.flags.error) h += `<div class="rl-rr-flag">Flag check failed: ${esc(run.flags.error)}</div>`;
-    if (run.flags && (run.flags.release || run.flags.releaseNeedsTokens || run.flags.releaseError)) h += flagLines(s, '', run.flags.release, run.flags.releaseNeedsTokens, run.flags.releaseError);
+    if (run.flags && (run.flags.release || run.flags.releaseError)) h += flagLines(s, '', run.flags.release, run.flags.releaseError);
     const blocked = run.running ? 0 : run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
     const a = s.approvers || {};
     const meL = (a.me || '').toLowerCase();
