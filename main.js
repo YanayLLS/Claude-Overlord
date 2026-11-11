@@ -15,6 +15,20 @@ const wc = require('./watch-core');
 const timelineCore = require('./timeline-core');
 const { createRegistry } = require('./browser/registry');
 const { createMcpServer } = require('./mcp/server');
+const { createApi, ApiError, newToken } = require('./api-core');
+const { createApiServer } = require('./api-server');
+const { keepAwake, dueToSleep } = require('./cpu-saver-core');
+let focusedAgentId = null; // the agent open in the window (focusAgent): CPU saving never puts it to sleep
+// Messages after which an agent may have just become sleepable (a turn ended, a tool or dialog cleared).
+// Declared up here: send() runs from the first line of startup.
+const SLEEP_TRIGGERS = new Set(['status', 'permClear', 'toolDone', 'toolsClear', 'compacting', 'crashCleared']);
+let _saveSweepQueued = false;
+function queueSaveSweep() {
+  if (_saveSweepQueued) return;
+  _saveSweepQueued = true;
+  setTimeout(() => { _saveSweepQueued = false; cpuSaveSweep(); }, 0); // after the message's own state change lands; it checks the setting
+}
+let localApi = null, localApiServer = null; // the local API (Settings → Local API); send() feeds it, so declared before any send
 const { writeAgentConfig, settingsFlags, removeAgentConfig, askFile } = require('./mcp/agent-config');
 const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
@@ -635,6 +649,8 @@ function send(data) {
     lastStatusSent.set(data.id, data.status);
   }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
+  if (localApi) localApi.publish(data); // the local API's events are the renderer's messages, translated (api-core.js)
+  if (SLEEP_TRIGGERS.has(data.type)) queueSaveSweep(); // CPU saving: a turn ended, a tool or dialog cleared → check at once
 }
 function logToRenderer(...args) {
   const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
@@ -646,9 +662,10 @@ function logToRenderer(...args) {
 // the ClickUp API token stays in the main process, only its presence is reported.
 // The header is 44 CSS px; the window buttons Windows draws over it are device px, so scale them with the UI zoom.
 function titleBarOverlay(theme) { return { ...titleBarColors(theme), height: Math.round(44 * (settings.zoom || 100) / 100) }; }
-function publicSettings() { const { clickupToken, dictationKey, prCache, actionsCache, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken, dictationHasKey: !!dictationKey }; }
+function publicSettings() { const { clickupToken, dictationKey, prCache, actionsCache, apiToken, apiWebhooks, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken, dictationHasKey: !!dictationKey }; }
 function sendFullState() {
   send({ type: 'settings', settings: publicSettings() });
+  sendApiState();
   for (const [p, sv] of devServers) send({ type: 'wtServer', path: p, running: true, port: sv.port, url: sv.url });
   for (const [p, sv] of externalServers) send({ type: 'wtServer', path: p, running: true, port: sv.port, url: sv.url });
   if (lastClickup.fetchedAt || lastClickup.error) send({ type: 'clickupList', ...lastClickup }); // a reloaded renderer gets the raids back at once
@@ -657,6 +674,7 @@ function sendFullState() {
   if (settings.actionsCache) send({ type: 'actionsList', runs: settings.actionsCache, error: null });
   for (const [id, a] of agents) {
     send({ type: 'agentCreated', id, cwd: a.cwd, sessionId: a.sessionId, title: a.title, customName: a.customName || false, createdAt: a.createdAt, agentName: a.agentName, archived: a.archived || false, archivedAt: a.archivedAt || null, account: a.account || null, procAt: (terminals.get(id) && terminals.get(id)._at) || null, chatHides: a.chatHides || [] });
+    if (a.sleeping) send({ type: 'sleeping', id, on: true });
     if (a.lastPrompt) send({ type: 'prompt', id, text: a.lastPrompt });
     if (a.promptHistory.length) send({ type: 'promptHistory', id, prompts: [...a.promptHistory] });
     if (a.lastText) send({ type: 'preview', id, text: a.lastText });
@@ -1153,6 +1171,7 @@ const sentNorm = (t) => String(t || '').replace(/<\/?pasted_content[^>]*>/g, '')
 const sentKey = (t) => sentNorm(t).slice(0, 40);
 const unconfirmed = new Map(); // agent id → [{ key, at, done, resend }]: handed to its CLI, not in the transcript yet
 function chatDeliver(id, text, parts, erase, onSubmit, intoDialog = false) {
+  wakeAgent(id); // asleep (CPU saving): the send waits for the resumed CLI
   const e = { key: sentKey(parts ? parts.filter(p => p.text).map(p => p.text).join('') : text), at: 0, done: false, tries: 0 };
   const failed = () => { e.done = true; flog('send to agent ' + id + ' failed: no CLI took it'); send({ type: 'sendFailed', id, text: parts ? parts.map(p => p.text || p.image || '').join('') : text }); };
   const opts = { intoDialog, still: () => !e.done, onFail: failed, onSent: () => {
@@ -1172,6 +1191,12 @@ function confirmSent(id, text, ts) {
   const n = sentNorm(text), at = Date.parse(ts) || Date.now();
   for (const e of l) if (!e.done && at >= e.at - 5000 && (!e.key || n.includes(e.key))) { e.done = true; if (!e.key) break; }
   unconfirmed.set(id, l.filter(e => !e.done));
+}
+// Esc: stops the sends, then the Esc itself once no paste is half-written; the page hears when it's out.
+function cliCancel(id, esc = true) {
+  const ag = agents.get(id); if (ag && ag.ptyPerm) { clearPtyPerm(id, ag); ag.permSent = false; send({ type: 'permClear', id }); } // as an Esc typed into the terminal does
+  unconfirmed.delete(id); // taken back: never sent again
+  cliSend.cancel(id, esc, () => send({ type: 'cliEscSent', id }));
 }
 // Its CLI died: what it took but never wrote down goes again, into the next one.
 function resendUnconfirmed(id) {
@@ -1709,7 +1734,10 @@ function restoreAgents(state) {
       // startups race-write ~/.claude.json) so clicking an agent connects instantly
       // instead of paying `claude --resume` cold-start on click. The old freeze that
       // killed pre-warming came from sync wmic kills, not from spawning itself.
-      if (!agent.archived) queuePrewarm(id);
+      // CPU saving: nothing to warm. It sleeps until opened; one cut off mid-turn still resumes now.
+      if (agent.archived) continue;
+      if (settings.cpuSaving && !agent._crashNudge && id !== focusedAgentId && !terminals.has(id) && !spawningTerms.has(id)) { agent.sleeping = true; send({ type: 'sleeping', id, on: true }); }
+      else queuePrewarm(id);
     }
     // After the resumes: warm a spare where the newest agent lives — likely where the next one goes.
     const newest = [...agents.values()].filter(a => !a.archived).sort((a, b) => b.createdAt - a.createdAt)[0];
@@ -1886,6 +1914,7 @@ function doSpawnTerminal(id, attached) {
   try {
     const proc = attached || agentPty().spawn(sh, args, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(a.cwd), env: cleanAgentEnv({ ...feat.env, ...acctEnv }) });
     terminals.set(id, proc);
+    if (a.sleeping) { a.sleeping = false; a._idleSince = 0; send({ type: 'sleeping', id, on: false }); }
     noteProcStart(id, proc, !!attached);
     // ponytail: an adopted pty's Remote Control state is unknown; assume the setting. Toggling off/on fixes a stray one.
     if (!attached || a.rc === undefined) a.rc = settings.remoteControl !== false;
@@ -1974,7 +2003,7 @@ function doSpawnTerminal(id, attached) {
         }
       }
     });
-    proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
+    proc.onExit((e) => { proc._ovKilled = true; if (!proc._ovSlept) handleTermExit(id, e?.exitCode); }); // put to sleep: not a crash, and a woken CLI may already be in terminals
   } catch (e) {
     console.log(`[Overlord] Failed to spawn terminal for agent ${id}:`, e.message);
     send({ type: 'termData', id, data: `\r\n\x1b[31mFailed to start terminal: ${e.message}\x1b[0m\r\n` });
@@ -2064,7 +2093,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team) {
   const shellArgs = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
   send({ type: 'stats', id, stats: agent.stats });
-  send({ type: 'focused', id });
+  send({ type: 'focused', id }); focusedAgentId = id;
 
   const agentEnv = cleanAgentEnv(team ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env } : feat.env);
   try {
@@ -2119,7 +2148,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team) {
     // Replay what the spare painted while idle — minus its boot-time terminal queries (XTVERSION, DA, DSR, kitty ?u,
     // OSC ?): xterm would answer them now, long after boot, and claude reads the late replies as keys that wipe the prompt.
     if (warm && warm.buf) onData(warm.buf.replace(/\x1b\[(?:[>=]?[0-9;]*c|[56]n|>[0-9]*q|\?u)|\x1b\][0-9]+;\?(?:\x07|\x1b\\)/g, ''));
-    proc.onExit((e) => { proc._ovKilled = true; handleTermExit(id, e?.exitCode); });
+    proc.onExit((e) => { proc._ovKilled = true; if (!proc._ovSlept) handleTermExit(id, e?.exitCode); });
     // Fallback: send prompt after timeout if ready-detection didn't fire
     if (initialPrompt) {
       setTimeout(() => { if (!promptSent) { promptSent = true; try { writeInitialPrompt(proc, initialPrompt); } catch {} } }, 8000);
@@ -2170,7 +2199,7 @@ function closeAgent(id) {
 function archiveAgent(id) {
   const a = agents.get(id);
   if (!a || a.archived) return;
-  a.archived = true;
+  a.archived = true; a.sleeping = false; // archived is its own kind of stopped; unarchive resumes it
   a.archivedAt = Date.now(); // Ctrl+Shift+T reopens the newest first, across restarts (reopen-core.js)
   // Kill pty + watchers to free resources; keep agent metadata + jsonl intact.
   const w = watchers.get(id); if (w) { try { w.close(); } catch {} watchers.delete(id); }
@@ -2212,6 +2241,41 @@ function unarchiveAgent(id) {
   spawnTerminal(id);
   saveState();
 }
+
+// ── CPU saving (cpu-saver-core.js) ─────────────────────
+// Its Claude closes; card, transcript watcher and terminal history stay. wakeAgent (opening it, a message,
+// a key) runs `claude --resume` on the same session, and doSpawnTerminal clears `sleeping`.
+function sleepAgent(id) {
+  const a = agents.get(id), t = terminals.get(id);
+  if (!a || !t) return;
+  t._ovSlept = true; // its onExit skips handleTermExit: not a crash, and the woken CLI may already be in terminals
+  a.sleeping = true; a._idleSince = 0; a.claudeReady = false;
+  if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
+  send({ type: 'termData', id, data: '\r\n\x1b[90m[CPU saving: Claude closed while idle. Opening this agent resumes the session.]\x1b[0m\r\n' });
+  killPty(t); terminals.delete(id);
+  flog(`agent ${id} "${String(a.title || '').slice(0, 30)}" asleep (CPU saving)`);
+  send({ type: 'sleeping', id, on: true });
+  saveState();
+}
+function wakeAgent(id) {
+  const a = agents.get(id);
+  if (a && a.sleeping && !a.archived) spawnTerminal(id);
+}
+function cpuSaveSweep() {
+  if (!settings.cpuSaving) return;
+  const list = [];
+  for (const [id, a] of agents) {
+    const t = terminals.get(id);
+    list.push({ id, a, why: keepAwake(a, {
+      focused: id === focusedAgentId, hasTerm: !!t, shell: !!(t && t._ovShell),
+      unsent: !!((unconfirmed.get(id) || []).length || (pendingPeerMsgs.get(id) || []).length || (pendingTermInput.get(id) || []).length),
+    }) });
+  }
+  for (const id of dueToSleep(list, Date.now())) sleepAgent(id);
+}
+// Checked the moment something could make an agent sleepable (send(), focusAgent: queueSaveSweep); the
+// interval is the fallback.
+setInterval(cpuSaveSweep, 3000);
 
 // ── JSONL watching ─────────────────────────────────────
 function startWatch(id) {
@@ -4317,7 +4381,9 @@ function handleTermInput(id, data, shown) {
     if (answered) { clearPtyPerm(id, a); a.permSent = false; send({ type: 'permClear', id }); } }
   const t = terminals.get(id);
   if (!t) {
-    // PTY not yet spawned — queue input, flushed after spawn.
+    // PTY not yet spawned — queue input, flushed after spawn. A key for an agent asleep (CPU saving) wakes it;
+    // a terminal's focus in/out report does not.
+    if (!/^\x1b\[[IO]$/.test(data)) wakeAgent(id);
     const q = pendingTermInput.get(id) || [];
     q.push(data);
     // cap queue to prevent unbounded growth if spawn never happens
@@ -4852,7 +4918,8 @@ function handleIpc(msg) {
       break;
     }
     case 'focusAgent':
-      spawnTerminal(msg.id);
+      focusedAgentId = msg.id; queueSaveSweep(); // the agent you left sleeps now if it's idle
+      spawnTerminal(msg.id); // also wakes it from CPU saving
       if (preview) preview.setAgent(msg.id);
       send({ type: 'focused', id: msg.id });
       break;
@@ -5130,12 +5197,8 @@ function handleIpc(msg) {
     case 'dictateWarm': if (!settings.dictationKey && require('./whisper').installed(WHISPER_DIR())) require('./whisper').warm(WHISPER_DIR()).catch(() => {}); break;
     case 'dictateRemove': { const n = require('./whisper').remove(WHISPER_DIR()); send({ type: 'dictation', setup: true, reset: true, toast: n ? `Speech engine removed (${(n / 1e9).toFixed(1)} GB freed)` : 'Speech engine is not installed' }); break; }
     case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); chatDeliver(msg.id, text, null, +msg.erase || 0, () => markSessionSwitch(msg.id, text), !!msg.intoDialog); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
-    case 'cliCancel': { // Esc: stops the sends, then the Esc itself once no paste is half-written; the page hears when it's out
-      const ag = agents.get(msg.id); if (ag && ag.ptyPerm) { clearPtyPerm(msg.id, ag); ag.permSent = false; send({ type: 'permClear', id: msg.id }); } // as an Esc typed into the terminal does
-      unconfirmed.delete(msg.id); // taken back: never sent again
-      cliSend.cancel(msg.id, msg.esc !== false, () => send({ type: 'cliEscSent', id: msg.id }));
-      break;
-    } // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
+    case 'apiNewToken': settings.apiToken = newToken(); saveState(); if (localApiServer) { stopLocalApi(); startLocalApi(); } else sendApiState(); break; // a restart also drops streams opened with the old one
+    case 'cliCancel': cliCancel(msg.id, msg.esc !== false); break; // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;
       if (typeof port !== 'number' || port < 1024 || port > 65535) break;
@@ -5325,6 +5388,8 @@ function handleIpc(msg) {
       Object.assign(settings, msg.settings); saveState();
       if ('worldEnabled' in msg.settings) armClickupTimer();
       if ('remoteControl' in msg.settings) syncRemoteControl();
+      if ('apiEnabled' in msg.settings) { if (settings.apiEnabled) startLocalApi(); else { stopLocalApi(); sendApiState(); } }
+      if ('cpuSaving' in msg.settings) { if (!settings.cpuSaving) { for (const [id, a] of agents) if (a.sleeping) queuePrewarm(id); } else for (const a of agents.values()) a._idleSince = 0; } // off: everyone back up, staggered
       if ('terminalsInApp' in msg.settings && termPane) try { termPane.sync(); } catch {}
       if (msg.settings.englishOnFocus) kbdHelper(() => {}); // build the helper now so the next focus switches at once
       if ('dictationKey' in msg.settings) { settings.dictationKey = String(msg.settings.dictationKey || '').trim() || null; saveState(); send({ type: 'settings', settings: publicSettings() }); send({ type: 'dictation', setup: true, reset: true, toast: settings.dictationKey ? 'Dictation: cloud' : 'Dictation: this computer' }); } // the mic re-checks the engine on its next click
@@ -5714,6 +5779,97 @@ function hasActiveAgents() { for (const a of agents.values()) { if (!a.isWaiting
 function isUsageStale() { return !lastUsage || (Date.now() - lastUsage.fetchedAt > USAGE_STALE_MS); }
 setInterval(() => { if (isUserActive() || hasActiveAgents() || isUsageStale()) fetchUsage(); }, USAGE_POLL_MS);
 
+// ── Local API (api-core.js, api-server.js, docs/local-api.md) ──────────────
+// Other programs on this machine drive Overlord: REST + SSE + webhooks + MCP on 127.0.0.1, behind a bearer token
+// that ~/.overlord/api.json holds while it runs. Off until Settings → Local API turns it on; off = no port, no file,
+// no webhooks firing.
+const API_FILE = path.join(STATE_DIR, 'api.json');
+const API_DEFAULT_PORT = 7790;
+const TERM_ESC_RE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Z0-9]|\x1b[78=>]/g;
+
+// What the agent waits on you for: a dialog seen on its screen, or a tool the transcript left waiting.
+function apiPending(a) {
+  if (a.archived) return null;
+  if (a.ptyPerm) return a.ptyPerm === 'ask' ? 'question' : 'permission';
+  if (a.permSent) return a.askIds?.size ? 'question' : 'permission';
+  return null;
+}
+function apiAgent(a, full) {
+  const pending = apiPending(a);
+  const o = { id: a.id, name: a.agentName || '', title: a.title || '', cwd: a.cwd, status: shownStatus(a), pending, archived: !!a.archived, sleeping: !!a.sleeping, crashed: !!a.crashed, createdAt: a.createdAt, sessionId: a.sessionId, model: a.stats?.model || null };
+  if (!full) return o;
+  return { ...o, lastPrompt: a.lastPrompt || '', lastReply: a.fullText || a.lastText || '', spinner: a.spinnerText || '',
+    tools: [...a.toolIds].map(t => ({ id: t, name: a.toolNames.get(t) || '', status: a.toolStatuses.get(t) || '' })),
+    question: pending === 'question' ? (a.askInput || null) : null, stats: a.stats };
+}
+function apiHost() {
+  const need = (id) => { if (!agents.has(id)) throw new ApiError(404, `no agent ${id}`); return id; };
+  return {
+    info: () => ({ version: app.getVersion(), agents: [...agents.values()].filter(a => !a.archived).length, peersEnabled: !!settings.peersEnabled, peersOnline: connectedPeerNames().length }),
+    // Switches that change what an integration will see. bypassPermissions: agents start with
+    // --dangerously-skip-permissions, so permission prompts (agent.pending kind permission) are rare.
+    features: () => ({ peerChat: !!settings.peersEnabled, bypassPermissions: !!settings.bypassPermissions, remoteControl: settings.remoteControl !== false, cpuSaving: !!settings.cpuSaving }),
+    getAgentRaw: (id) => agents.get(id) || null,
+    listAgents: (withArchived) => [...agents.values()].filter(a => withArchived || !a.archived).map(a => apiAgent(a, false)),
+    getAgent: (id) => (agents.has(id) ? apiAgent(agents.get(id), true) : null),
+    createAgent: (cwd, prompt) => {
+      let dir = false; try { dir = path.isAbsolute(cwd) && fs.statSync(cwd).isDirectory(); } catch {}
+      if (!dir) throw new ApiError(400, `not an absolute path to a folder: ${cwd}`);
+      return createAgent(cwd, prompt || undefined);
+    },
+    send: (id, text, intoDialog) => { const t = String(text).slice(0, 200000); chatDeliver(need(id), t, null, 0, () => markSessionSwitch(id, t), intoDialog); },
+    keys: (id, data) => handleTermInput(need(id), String(data)),
+    interrupt: (id) => cliCancel(need(id)),
+    archive: (id) => archiveAgent(need(id)),
+    unarchive: (id) => unarchiveAgent(need(id)),
+    wake: (id) => wakeAgent(need(id)),
+    close: (id) => closeAgent(need(id)),
+    transcript: (id) => getFullTimeline(id),
+    screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
+    chatList: () => {
+      const c = chats();
+      return { peersEnabled: !!settings.peersEnabled, me: myPeerName(), online: connectedPeerNames(), conversations: [
+        ...Object.entries(c.peers).map(([peer, m]) => ({ peer, count: m.length, last: m[m.length - 1] || null })),
+        ...Object.values(c.groups).map(g => ({ group: g.id, name: g.name, members: g.members, count: (g.msgs || []).length, last: (g.msgs || []).slice(-1)[0] || null })),
+      ] };
+    },
+    chatRead: (to) => (to.peer ? chats().peers[String(to.peer).toLowerCase()] : chats().groups[to.group]?.msgs) || null,
+    chatSend: (to, text) => (to.group && !chats().groups[to.group] ? { error: 'no such group' } : chatSendText(to, text)),
+    loadWebhooks: () => settings.apiWebhooks || [],
+    saveWebhooks: (list) => { settings.apiWebhooks = list; saveState(); },
+    fetch: (url, opts) => fetch(url, opts),
+    log: flog,
+  };
+}
+async function startLocalApi() {
+  if (localApiServer) return;
+  if (!settings.apiToken) { settings.apiToken = newToken(); saveState(); }
+  const api = createApi(apiHost());
+  const srv = createApiServer({ api, getToken: () => settings.apiToken, log: flog });
+  localApiServer = srv;
+  try {
+    const port = await srv.start(+settings.apiPort || API_DEFAULT_PORT);
+    if (localApiServer !== srv) { srv.stop(); return; } // switched off while it was starting
+    localApi = api;
+    const base = `http://127.0.0.1:${port}`;
+    // The token file lives in the user's profile folder: other Windows users can't read it.
+    fs.writeFileSync(API_FILE, JSON.stringify({ apiVersion: require('./api-core').API_VERSION, pid: process.pid, port, baseUrl: base + '/v1', mcpUrl: base + '/mcp', eventsUrl: base + '/v1/events', token: settings.apiToken }, null, 2), { mode: 0o600 });
+    flog(`local API on ${base} (token in ${API_FILE})`);
+  } catch (e) {
+    if (localApiServer === srv) localApiServer = null;
+    flog(`local API failed to start: ${e.message}`);
+    send({ type: 'toast', text: `✕ Local API failed to start: ${e.message}` });
+  }
+  sendApiState();
+}
+function stopLocalApi() {
+  const srv = localApiServer;
+  localApiServer = null; localApi = null;
+  try { fs.rmSync(API_FILE, { force: true }); } catch {}
+  if (srv) srv.stop().catch(() => {});
+}
+function sendApiState() { send({ type: 'apiState', enabled: !!settings.apiEnabled, running: !!localApi, port: localApi && localApiServer ? localApiServer.port() : 0, file: API_FILE }); }
+
 // ── LAN peer server (/peer) ──────────────
 let remoteServer = null;
 
@@ -5974,6 +6130,7 @@ function queuePeerInjection(agentId, env) {
   const a = agents.get(agentId);
   if (!a) return;
   if (!terminals.has(agentId) || !a.claudeReady || a.crashed) {
+    wakeAgent(agentId); // asleep (CPU saving): resume it so the message lands
     const q = pendingPeerMsgs.get(agentId) || [];
     q.push(env); if (q.length > 50) q.shift();
     pendingPeerMsgs.set(agentId, q);
@@ -6339,9 +6496,9 @@ function chatTargets(to) {
 
 function chatSendText(to, text) {
   text = String(text || '').trim();
-  if (!text) return;
+  if (!text) return { error: 'empty message' };
   const { conns, group, missing } = chatTargets(to);
-  if (!conns.length) { send({ type: 'toast', text: group ? '✕ No group members are online' : `✕ ${to.peer} is offline — message not sent` }); return; }
+  if (!conns.length) { const why = group ? 'No group members are online' : `${to.peer} is offline — message not sent`; send({ type: 'toast', text: '✕ ' + why }); return { error: why }; }
   const gref = group ? { id: group.id, name: group.name, members: group.members } : undefined;
   const wire = pc.buildChatMsg({ text, group: gref });
   const entry = { id: wire.id, from: 'me', text: wire.text, ts: wire.ts, deliveredBy: [], readBy: [] };
@@ -6350,6 +6507,7 @@ function chatSendText(to, text) {
   const key = group ? { type: 'group', id: group.id } : { type: 'peer', id: conns[0].name.toLowerCase() };
   send({ type: 'chatMsg', key, msg: entry });
   if (missing.length) send({ type: 'toast', text: `⚠ Not delivered to ${missing.join(', ')} (offline)` });
+  return { conversation: key, message: entry, offline: missing };
 }
 
 async function chatSendFile(to, filePath) {
@@ -6571,6 +6729,7 @@ app.whenReady().then(() => {
   });
   mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
+  if (settings.apiEnabled) startLocalApi();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
   termPane = createTermPane({ stateDir: STATE_DIR, ptyFactory: agentPty, ptyHost, send, log: flog, enabled: () => settings.terminalsInApp !== false });
   _ptyHostReady.then(() => termPane.start()).catch((e) => flog(`Terminals pane failed to start: ${e.message}`));
@@ -6687,6 +6846,7 @@ app.on('before-quit', () => {
   try { releases.flush(); } catch {} // releases.json writes are debounced 2 s
   if (remoteServer) { try { remoteServer.close(); } catch {} }
   if (mcpServer) { try { mcpServer.stop(); } catch {} }
+  stopLocalApi(); // its api.json goes with it: a client finding none knows Overlord's API is down
   if (termPane) { try { termPane.stop(); } catch {} } // its servers keep running in the pty host
   if (preview) { try { preview.destroy(); } catch {} }
   if (browserRegistry) { try { browserRegistry.destroyAll(); } catch {} }
