@@ -650,7 +650,17 @@
   // A proposed plan waiting for approval: the plan itself, rendered, and the CLI's own choices as buttons.
   // The CLI's unnumbered dialogs (chat-core screenChoice). The option that says yes is the primary; with no options
   // (/login waiting on the browser) Cancel is the one button.
+  const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+  // Where the CLI's /effort slider stands: the ▲ along its rule, as a level index. null when the screen isn't it.
+  function effortOf(sc) {
+    if (!/^effort$/i.test(sc.title || '')) return null;
+    const bar = sc.lines.find(l => /▲/.test(l)), names = sc.lines.find(l => /\blow\b.*\bmax\b/.test(l)); if (!bar || !names) return null;
+    const rule = bar.replace(/\s*ultracode.*$/i, ''), at = rule.indexOf('▲') / Math.max(1, rule.length - 1);
+    return { level: Math.max(0, Math.min(4, Math.round(at * 4))), ultra: /ultracode\s+on/i.test(bar) };
+  }
   function choiceHtml(sc) {
+    const ef = effortOf(sc);
+    if (ef) return `<div class="card perm choice effort"><div class="card-h">${ICON.shield}<span>Effort</span></div><div class="btns">${EFFORTS.map((n, k) => `<button type="button" data-effort="${k}" class="${k === ef.level ? 'primary' : ''}">${n}<kbd>${k + 1}</kbd></button>`).join('')}</div><div class="btns"><button type="button" data-effort-ultra>${ef.ultra ? ICON.check : ''}Ultracode ${ef.ultra ? 'on' : 'off'}<kbd>Tab</kbd></button><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div></div>`;
     const yes = sc.options.findIndex(o => /^yes\b/i.test(o)), prim = yes >= 0 ? yes : 0;
     const label = (o) => /trust this folder/i.test(o) ? 'Trust' : /^no,?\s*exit$/i.test(o) ? "Don't trust" : o;
     // /login: the sign-in link the CLI prints (Open is the primary, for when no browser opened by itself), and a field
@@ -1660,6 +1670,10 @@
     const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => { cu.innerHTML = ICON.check; cu.title = 'Copied'; setTimeout(() => { cu.innerHTML = ICON.copy; cu.title = 'Copy link'; }, 1500); }, () => {}); cu.closest('.card')?.classList.add('opened'); cu.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // the result on the button you pressed, not a toast
     const ae = e.target.closest('[data-ask-esc]'); if (ae) { keys(['\x1b']); answered(ae); return; } // a question's Skip: Esc, as in the CLI
     const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) { api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); i.disabled = true; ls.disabled = true; ls.innerHTML = '<span class="loading"></span>Submitting'; } return; }
+    const efb = e.target.closest('[data-effort], [data-effort-ultra]'); // /effort: arrows to the level then Enter; Tab toggles Ultracode
+    if (efb && selectedId != null) { const sc = screenChoice(screenOf(selectedId, 40, true)), ef = sc && effortOf(sc); if (!ef) return;
+      if (efb.hasAttribute('data-effort-ultra')) { api.send({ type: 'termInput', id: selectedId, data: '\t' }); return; }
+      const d = +efb.dataset.effort - ef.level; api.send({ type: 'termInput', id: selectedId, data: (d > 0 ? '\x1b[C' : '\x1b[D').repeat(Math.abs(d)) + '\r' }); answered(efb); return; }
     const ch = e.target.closest('[data-choice]'); // trust / login card: arrows onto the choice, then Enter; Cancel is Esc
     if (ch && selectedId != null) { const sc = screenChoice(screenOf(selectedId, 40, true)); if (!sc) return; answered(ch); const k = +ch.dataset.choice; if (k < 0) { api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); return; } const d = k - sc.focus; api.send({ type: 'termInput', id: selectedId, data: (d > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(d)) + '\r' }); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
