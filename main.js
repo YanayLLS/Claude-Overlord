@@ -33,6 +33,7 @@ const { writeAgentConfig, settingsFlags, removeAgentConfig, askFile } = require(
 const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
 const { createPtyClient, pipePathFor, hostLauncher } = require('./pty-client');
+const { createTermPane, termPaneKeys } = require('./term-pane');
 const { startKillGuard } = require('./kill-guard');
 const { agentShell } = require('./shell-core');
 const { scanCatalog, BUILTINS } = require('./catalog-core');
@@ -389,6 +390,7 @@ process.on('uncaughtException', (e) => flog('uncaughtException:', e));
 process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
 // Freeze trail: the main loop held up 300ms+ (the window's own long tasks come in as perfLog).
 { let t = Date.now(); setInterval(() => { const lag = Date.now() - t - 100; t = Date.now(); if (lag > 300) flog(`main stalled ${lag}ms agents=${agents.size}`); }, 100).unref(); }
+try { require('./stall-prof').startStallProfiler(flog); } catch (e) { flog('stall profiler: ' + e.message); } // temporary: names what a stall ran
 
 let mainWindow = null;
 // Nobody can see the window (minimized, hidden to tray): background ticks that only feed the
@@ -398,6 +400,7 @@ let browserRegistry = null;
 let mcpServer = null;
 let preview = null;
 let docs = null; // markdown documents (docs-main.js)
+let termPane = null; // Terminals pane: dev-script windows as tabs (term-pane.js)
 // Agent terminals live in pty-host.js, a process of their own, so an app restart
 // doesn't kill the Claude sessions inside them. Until it's connected (or if it
 // can't start) agents fall back to in-process ptys, which die with the app.
@@ -1600,7 +1603,8 @@ function restoreAgents(state) {
     const live = new Set((await _ptyHostReady) ? (await ptyHost.list()).map(p => p.key) : []);
     const survivors = agentEntries.filter(({ entry }) => entry.ptyKey && live.has(entry.ptyKey));
     const fresh = agentEntries.filter(x => !survivors.includes(x));
-    for (const key of live) if (!survivors.some(({ entry }) => entry.ptyKey === key)) ptyHost.kill(key); // a spare or closed agent nobody will reattach
+    const paneKeys = termPaneKeys(STATE_DIR); // the Terminals pane's dev servers are not orphans
+    for (const key of live) if (!paneKeys.has(key) && !survivors.some(({ entry }) => entry.ptyKey === key)) ptyHost.kill(key); // a spare or closed agent nobody will reattach
     const startTimes = await processStartTimes(survivors.map(({ entry }) => entry.pid));
     for (const { id, entry } of survivors) {
       const proc = await ptyHost.attach(entry.ptyKey);
@@ -1949,7 +1953,7 @@ function doSpawnTerminal(id, attached) {
           a._readyTimer = setTimeout(() => {
             a._readyTimer = null; a.claudeReady = true;
             // Resumed after a crash at the prompt: nothing else will clear 'resuming' until the next turn
-            if (a.crashed && !a._crashNudge) { a.crashed = false; send({ type: 'crashCleared', id }); send({ type: 'status', id, status: shownStatus(a) }); } // the window's "auto-resuming" line goes too
+            if (a.crashed) { a.crashed = false; send({ type: 'crashCleared', id }); send({ type: 'status', id, status: shownStatus(a) }); } // Claude is back at its prompt: the window's "Crashed — auto-resuming" line goes, nudge or not (with a nudge it waited for the transcript to move, and an agent that died looking busy kept the line after a good resume)
             sendCrashNudge(id); flushPeerMsgs(id);
           }, 4000);
         } else {
@@ -3706,7 +3710,7 @@ async function sendUsageCost(usage) {
   costScanning = true;
   try {
     const now = Date.now();
-    if (now - lastCostScanAt >= COST_SCAN_MS) { lastCostScanAt = now; await scanCosts(path.join(os.homedir(), '.claude', 'projects'), now); }
+    if (now - lastCostScanAt >= COST_SCAN_MS) { lastCostScanAt = now; await scanCosts(path.join(os.homedir(), '.claude', 'projects'), now, path.join(STATE_DIR, 'cost-cache.json')); } // kept on disk: a restart reads only what's new
     const cost = {};
     for (const m of usageMeters(usage)) {
       const end = m.reset > now ? m.reset : now;
@@ -4137,20 +4141,26 @@ function buildTeamPrompt(task, roles) {
 }
 
 // ── Team detection ────────────────────────────────────
-function scanTeams() {
+// Async, and a team's config is re-read only when its file changes: with hundreds of team dirs under ~/.claude/teams the
+// sync version (exists + read + parse of each, every 3 s) stalled the main process 300-650 ms per tick.
+const teamCfgCache = new Map(); // team dir -> { mtimeMs, config }
+let teamScanBusy = false;
+async function scanTeams() {
+  if (teamScanBusy) return; teamScanBusy = true;
   try {
-    if (!fs.existsSync(TEAMS_DIR)) return;
+    if (!(await fs.promises.stat(TEAMS_DIR).catch(() => null))) return;
     // Build sessionId -> agentId lookup from our agents
     const sessionToAgent = new Map();
     for (const [id, a] of agents) sessionToAgent.set(a.sessionId, id);
     if (!sessionToAgent.size && !teams.size) return; // nobody could lead a team: no reason to read every team dir
-    const teamDirs = fs.readdirSync(TEAMS_DIR);
+    const teamDirs = await fs.promises.readdir(TEAMS_DIR);
 
     for (const teamName of teamDirs) {
       const configPath = path.join(TEAMS_DIR, teamName, 'config.json');
-      if (!fs.existsSync(configPath)) continue;
-      let config;
-      try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { continue; }
+      const st = await fs.promises.stat(configPath).catch(() => null); if (!st) { teamCfgCache.delete(teamName); continue; }
+      let config, hit = teamCfgCache.get(teamName);
+      if (hit && hit.mtimeMs === st.mtimeMs) config = hit.config;
+      else { try { config = JSON.parse(await fs.promises.readFile(configPath, 'utf-8')); } catch { continue; } teamCfgCache.set(teamName, { mtimeMs: st.mtimeMs, config }); }
       if (!config.leadSessionId || !config.members) continue;
 
       // Match team to one of our agents via leadSessionId
@@ -4160,12 +4170,12 @@ function scanTeams() {
       // Read tasks
       let taskList = [];
       const tasksDir = path.join(TASKS_DIR, teamName);
-      if (fs.existsSync(tasksDir)) {
+      if (await fs.promises.stat(tasksDir).catch(() => null)) {
         try {
-          const taskFiles = fs.readdirSync(tasksDir).filter(f => f.endsWith('.json'));
+          const taskFiles = (await fs.promises.readdir(tasksDir)).filter(f => f.endsWith('.json'));
           for (const tf of taskFiles) {
             try {
-              const task = JSON.parse(fs.readFileSync(path.join(tasksDir, tf), 'utf-8'));
+              const task = JSON.parse(await fs.promises.readFile(path.join(tasksDir, tf), 'utf-8'));
               taskList.push({ id: task.id, subject: task.subject, status: task.status, owner: task.owner, activeForm: task.activeForm });
             } catch {}
           }
@@ -4210,6 +4220,7 @@ function scanTeams() {
       }
     }
   } catch (e) { console.log('[Overlord] Team scan error:', e.message); }
+  finally { teamScanBusy = false; }
 }
 
 // ── @Mention detection + context injection ─────────────
@@ -4750,6 +4761,7 @@ function featureAgentArgs(cwd) {
 function handleIpc(msg) {
   if (releases.handle(msg)) return;
   if (docs && docs.handle(msg)) return;
+  if (termPane && /^tp:/.test(msg.type || '')) return termPane.handle(msg);
   switch (msg.type) {
     case 'continueInterrupted': continueInterrupted(msg.ids || []); break;
     case 'createAgent': createAgent(msg.cwd, msg.prompt, undefined, !!msg.prefill); break;
@@ -4912,7 +4924,7 @@ function handleIpc(msg) {
       send({ type: 'focused', id: msg.id });
       break;
     case 'previewToggle': if (preview) (msg.visible ? preview.show() : preview.hide()); break;
-    case 'previewSetBounds': if (preview) preview.setBounds(msg.bounds); break;
+    case 'previewSetBounds': if (preview && msg.bounds) { const z = mainWindow.webContents.getZoomFactor(), b = msg.bounds; preview.setBounds({ x: b.x * z, y: b.y * z, width: b.width * z, height: b.height * z }); } break; // CSS px -> DIP (app zoom)
     case 'previewLoad': if (preview) preview.load(msg.url); break;
     case 'previewReload': if (preview) preview.reload(); break;
     case 'reclaimFocus': if (preview) preview.reclaimFocus(); break;
@@ -5142,7 +5154,7 @@ function handleIpc(msg) {
       const crlf = (f, s) => files.get(f) && files.get(f).includes('\r\n') && !String(s).includes('\r') ? String(s).replace(/\n/g, '\r\n') : String(s);
       const r = require('./chat-core').undoEdits(new Map([...files].filter(([, c]) => c != null)), edits.map(e => { const f = abs(String(e.file || '')); return { file: f, old: crlf(f, e.old), new: crlf(f, e.new), all: !!e.all }; }));
       if (r.error) { send({ type: 'toast', text: `Couldn't undo: ${r.error}` }); break; }
-      try { for (const [f, c] of r.files) if (c !== files.get(f)) fs.writeFileSync(f, c); send({ type: 'toast', text: `Undid ${edits.length} edit${edits.length > 1 ? 's' : ''} in ${r.files.size} file${r.files.size > 1 ? 's' : ''}` }); }
+      try { for (const [f, c] of r.files) if (c !== files.get(f)) fs.writeFileSync(f, c); send({ type: 'toast', text: `Undid ${edits.length} edit${edits.length > 1 ? 's' : ''} in ${r.files.size} file${r.files.size > 1 ? 's' : ''}`, redo: { cwd, edits: edits.map(e => ({ file: e.file, old: e.new, new: e.old, all: !!e.all })) } }); } // the toast's Redo applies them back
       catch (e) { send({ type: 'toast', text: `Couldn't undo: ${e.message}` }); }
       break;
     }
@@ -5378,6 +5390,7 @@ function handleIpc(msg) {
       if ('remoteControl' in msg.settings) syncRemoteControl();
       if ('apiEnabled' in msg.settings) { if (settings.apiEnabled) startLocalApi(); else { stopLocalApi(); sendApiState(); } }
       if ('cpuSaving' in msg.settings) { if (!settings.cpuSaving) { for (const [id, a] of agents) if (a.sleeping) queuePrewarm(id); } else for (const a of agents.values()) a._idleSince = 0; } // off: everyone back up, staggered
+      if ('terminalsInApp' in msg.settings && termPane) try { termPane.sync(); } catch {}
       if (msg.settings.englishOnFocus) kbdHelper(() => {}); // build the helper now so the next focus switches at once
       if ('dictationKey' in msg.settings) { settings.dictationKey = String(msg.settings.dictationKey || '').trim() || null; saveState(); send({ type: 'settings', settings: publicSettings() }); send({ type: 'dictation', setup: true, reset: true, toast: settings.dictationKey ? 'Dictation: cloud' : 'Dictation: this computer' }); } // the mic re-checks the engine on its next click
       break;
@@ -6700,7 +6713,7 @@ app.whenReady().then(() => {
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, cb) => cb(true));
   browserRegistry = createRegistry({
     makeView: (partition) => new WebContentsView({
-      webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true },
+      webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }, // the agent works the page while its pane is hidden: throttled, an app sat on its loader (rAF and timers stop for hidden views)
     }),
     attach: (view) => mainWindow.contentView.addChildView(view),
     detach: (view) => mainWindow.contentView.removeChildView(view),
@@ -6712,12 +6725,14 @@ app.whenReady().then(() => {
       return `persist:overlord-agent-${a && a.sessionId ? a.sessionId : id}`;
     },
     onErrorCount: (id, count, last) => send({ type: 'previewError', id, count, last }),
-    onNavigated: (id, url) => { send({ type: 'previewLoaded', id, url }); if (preview) preview.onAgentNavigated(id, url); },
+    onNavigated: (id, url) => { if (preview) preview.onAgentNavigated(id, url); }, // it sends previewLoaded
   });
-  mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null) });
+  mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.apiEnabled) startLocalApi();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
+  termPane = createTermPane({ stateDir: STATE_DIR, ptyFactory: agentPty, ptyHost, send, log: flog, enabled: () => settings.terminalsInApp !== false });
+  _ptyHostReady.then(() => termPane.start()).catch((e) => flog(`Terminals pane failed to start: ${e.message}`));
   // A scratch instance (own state dir: tests, verification runs) stays killable; the guard is for the user's real one.
   if (!process.env.OVERLORD_STATE_DIR) _ptyHostReady.then(() => startKillGuard({ getChildPids: () => app.getAppMetrics().map(m => m.pid), log: flog }));
   preview = createPreviewController({ window: mainWindow, registry: browserRegistry, send, writeToAgent: (id, text) => handleTermInput(id, text) });
@@ -6830,6 +6845,7 @@ app.on('before-quit', () => {
   if (remoteServer) { try { remoteServer.close(); } catch {} }
   if (mcpServer) { try { mcpServer.stop(); } catch {} }
   stopLocalApi(); // its api.json goes with it: a client finding none knows Overlord's API is down
+  if (termPane) { try { termPane.stop(); } catch {} } // its servers keep running in the pty host
   if (preview) { try { preview.destroy(); } catch {} }
   if (browserRegistry) { try { browserRegistry.destroyAll(); } catch {} }
   // Agents live on in the pty host. A restart keeps all of them; a real close

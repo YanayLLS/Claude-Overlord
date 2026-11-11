@@ -417,4 +417,14 @@ assert.strictEqual(age('garbage', now), '');
   const deploys = { 'o/f|dev': { runs: [{ sha: 's1', state: 'success', started: at }] } };
   assert.deepStrictEqual(activeHolds([h, { ...h, id: 'b', repo: 'o/x' }], cfg, deploys, t + 1000).map(x => x.id), ['b']);
 }
+{ // deployJobsState: a deploy is done when its own jobs are; the ClickUp bookkeeping jobs after it don't count
+  const { deployJobsState } = require('./releases-core');
+  const J = (name, status, conclusion = null) => ({ name, status, conclusion });
+  assert.strictEqual(deployJobsState([J('build-and-deploy', 'completed', 'success'), J('clickup-sweep / ClickUp status', 'in_progress')]), 'success');
+  assert.strictEqual(deployJobsState([J('build-and-deploy', 'in_progress'), J('clickup-released / ClickUp status', 'queued')]), 'running');
+  assert.strictEqual(deployJobsState([J('build-and-deploy', 'completed', 'failure'), J('clickup-released / ClickUp status', 'completed', 'skipped')]), 'failure');
+  assert.strictEqual(deployJobsState([J('plan', 'completed', 'success'), J('apply', 'completed', 'skipped'), J('prod / apply', 'in_progress')]), 'running');
+  assert.strictEqual(deployJobsState([J('clickup-released / ClickUp status', 'in_progress')]), 'running', 'only bookkeeping jobs: not done');
+  assert.strictEqual(deployJobsState([]), 'running');
+}
 console.log('releases-core: all passed');

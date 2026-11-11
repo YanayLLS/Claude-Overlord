@@ -10,6 +10,10 @@
     cmd: svg('<path d="m4 17 6-5-6-5"/><path d="M12 19h8"/>'),
     read: svg('<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>'),
     edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
+    ban: svg('<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>'),
+    ext: svg('<path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6"/>'),
+    clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    key: svg('<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.8-8.8"/><path d="m16 7 3 3"/><path d="m19 4 2 2"/>'),
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>'),
     web: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/>'),
     agent: svg('<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>'),
@@ -57,7 +61,7 @@
     const raw = p.file.replace(/&amp;/g, '&'), attr = escH(raw);
     return `<a class="fileref pathref${p.img ? ' img' : ''}" href="#" data-file="${attr}" data-line="0" title="${attr}">${p.img ? `<img src="${escH(fileUrl(raw))}" alt="" loading="lazy">` : ''}<span>${escH(p.name)}</span>${p.dir ? `<span class="pr-dir">${escH(p.dir)}</span>` : ''}${REVEAL}</a>`;
   }
-  const REVEAL = '<span class="pr-reveal" role="button" title="Show in folder"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg></span>';
+  const REVEAL = '<span class="pr-reveal" role="button" tabindex="0" aria-label="Show in folder" title="Show in folder"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4a1 1 0 0 1 1-1h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg></span>';
   const fileUrl = (p) => 'file:///' + encodeURI(String(p).replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23');
   // A prompt's images, numbered 1, 2, … in order, and its [Image #N] tags as chips with the same numbers (the k-th tag
   // is the k-th image), so "compare [Image #1] with [Image #2]" reads against the thumbnails above it.
@@ -147,15 +151,16 @@
     const c = toolCache.get(ev); if (c && c[0] === done) return c[1];
     const running = !done && !!ev.toolId, a = ev.args || {}, v = toolView(ev, running), err = !!(done && done.err);
     const out = done && done.text ? done.text.replace(/\s+$/, '') : '';
+    const declined = err && /\b(user (rejected|denied|declined)|doesn't want to proceed|was rejected)\b/i.test(out); // you said no: it didn't happen, so not "Wrote hello.txt"
     let body = '', stat = '';
-    if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new, a.file_path); body = d.html; stat = `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (err && out) body += `<pre class="out">${escH(out)}</pre>`; }
+    if (a.old != null || a.new != null) { const d = diffHtml(a.old, a.new, a.file_path); body = d.html; stat = declined ? '' : `<span class="stat"><b class="add">+${d.add}</b> <b class="del">−${d.del}</b></span>`; if (err && out) body += `<pre class="out">${escH(out)}</pre>`; }
     else if (a.todos) body = `<div class="plan-card past">${todoHtml(a.todos)}</div>`; // the live plan card's frame, without its bar
     else if (a.plan) body = `<div class="md sub plan">${md(a.plan.replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div>`;
     else if (v.kind === 'ask') body = (a.options || []).length ? '<ul class="opts">' + a.options.map(o => `<li>${escH(o.label ?? o)}</li>`).join('') + '</ul>' + (out && !err ? `<div class="answer">${escH(out)}</div>` : '') : '';
     else if (v.kind === 'cmd') body = `<div class="io${err ? ' err' : ''}"><div class="io-r"><span class="lbl">IN</span><pre>${escH(a.command || '')}</pre></div>${out ? `<div class="io-r"><span class="lbl">OUT</span><pre>${termHtml(out)}</pre></div>` : ''}</div>`;
     else if (out) body = `<pre class="out${err ? ' err' : ''}">${termHtml(out)}</pre>`;
-    const cls = `trow k-${v.kind}${running ? ' running' : ''}${err ? ' err' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
-    const head = `${ICON[v.kind] || ICON.tool}<span class="verb">${escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}${running && ev.ts ? `<span class="el" data-t="${Date.parse(ev.ts)}"></span>` : ''}`;
+    const cls = `trow k-${v.kind}${running ? ' running' : ''}${err && !declined ? ' err' : declined ? ' declined' : ''}${ev.type === 'subtask' ? ' sub' : ''}`;
+    const head = `${declined ? ICON.ban : ICON[v.kind] || ICON.tool}<span class="verb">${declined ? 'Declined' : escH(v.verb)}</span>${v.target ? `<span class="tgt${v.mono ? ' mono' : ''}" title="${escH(v.target)}">${escH(v.target)}</span>` : ''}${stat}${running && ev.ts ? `<span class="el" data-t="${Date.parse(ev.ts)}"></span>` : ''}`;
     const h = v.kind === 'agent' ? `<div class="${cls}" data-agent-tid="${escH(ev.toolId || '')}" role="button" tabindex="0" title="Show its steps"><div class="sumrow">${head}${ICON.chev}</div></div>`
       : body ? `<details class="${cls}" data-tid="${escH(ev.toolId || '')}"><summary>${head}${ICON.chev}</summary><div class="tbody">${body}</div></details>` : `<div class="${cls}"><div class="sumrow">${head}</div></div>`;
     toolCache.set(ev, [done, h]);
@@ -171,7 +176,7 @@
     // While a call runs the line names it ("Running npm test"), with a dot; once all are done, the summary.
     const live = [...tools].reverse().find(ev => ev.toolId && !doneBy.get(ev.toolId)), lv = live && toolView(live, true);
     const label = lv ? `${escH(lv.verb)}${lv.target ? ` <span class="mono">${escH(lv.target)}</span>` : ''}` : escH(groupSummary(tools));
-    return done(`<div class="tools"><details class="tgroup${live ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary>${live ? '<span class="dot"></span>' : ''}<span class="gl">${label}</span><span class="gl gs">${tools.length} actions</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`);
+    return done(`<div class="tools"><details class="tgroup${live ? ' running' : ''}" data-tid="g:${escH(tools[0].toolId || '')}"><summary>${live ? '<span class="dot"></span>' : ''}<span class="gl">${label}</span>${errs ? `<span class="errs">${errs} failed</span>` : ''}${ICON.chev}</summary><div class="tlist">${rows.join('')}</div></details></div>`);
   }
 
   function msgHtml(ev, i, cwd) {
@@ -189,14 +194,23 @@
     // A /command (a skill, /compact…) is something you sent: your message bubble, the command tinted as in the reply box.
     else if (ev.type === 'command') h = `<div class="msg user" data-i="${i}"><div class="bubble">${tagChips(ev.text)}</div></div>`;
     else if (ev.type === 'interrupt') h = '<div class="msg note">⎿ Interrupted</div>';
-    else if (ev.type === 'compact') h = '<div class="msg divider"><span>Conversation compacted</span></div>';
-    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>※ recap:</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.text)}</div>`;
+    else if (ev.type === 'compact') h = `<details class="msg divider compacted"${ev._restored && ev._restored.length ? '' : ' data-empty'}><summary><span>Conversation compacted</span>${ev._restored && ev._restored.length ? ICON.chev : ''}</summary>${ev._restored && ev._restored.length ? `<div class="cp-list">${ev._restored.map(t => `<div>${escH(t)}</div>`).join('')}</div>` : ''}</details>`;
+    else if (ev.type === 'note' && ev.kind === 'sub' && contextUsage(ev.text)) { // /context: one bar of what fills the window, the categories under it
+      const u = contextUsage(ev.text), used = u.cats.filter(c => !/^free/i.test(c.name)), hue = (k) => `var(${['--claude', '--cyan', '--purple', '--yellow', '--green', '--peach', '--red'][k % 7]})`; // theme tokens, one per category
+      h = `<div class="msg ctx-use"><div class="cu-h"><b title="${u.pct}% used">${escH(u.used.replace(/(\d)m\b/g, '$1M').replace(/\//, ' / '))}</b><span class="cu-m">${escH(u.model.replace(/^claude-(\w+)-(\d+)-(\d+).*$/i, (m, f, a2, b2) => f[0].toUpperCase() + f.slice(1) + ' ' + a2 + '.' + b2))}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
+    }
+    else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
+    else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span>${/fail/i.test(m[2]) ? ICON.alert : ICON.check}</div>`; }
+    else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
+    else if (ev.type === 'note' && ev.kind === 'recap') h = `<details class="msg note cli recap"><summary><b>Recap</b><span class="rt">${escH(String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '').split('\n')[0])}</span>${ICON.chev}</summary><div>${escH(String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, ''))}</div></details>`;
+    else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>Recap</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
     else if (ev.type === 'resumed') h = `<div class="msg divider"><span>${escH(String(ev.text || '').replace(/^Your /, ''))} · resumed</span></div>`;
+    else if (ev.type === 'apierror' && ev._dismissed) h = `<div class="msg note cli" data-i="${i}">Usage limit · resets ${escH(clock(new Date(resetOf(ev) || Date.now()).toISOString()))} <button type="button" class="q-x undo" data-act="undismiss-limit" data-i="${i}">Undo</button></div>`;
     else if (ev.type === 'apierror' && /limit|rate/i.test(ev.kind + ' ' + ev.text) && resetOf(ev)) {
       // A usage limit with a known reset: when it resets and how long until, Retry waits for it, or retry by itself then.
       const at = resetOf(ev), msg = String(ev.text).replace(/\|\d{10}\b/, '').trim();
-      h = `<div class="msg apierr" data-i="${i}"><div class="card err" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div><p>${escH(msg)}</p><p class="reset">Resets ${escH(clock(new Date(at).toISOString()))} · <span class="countdown" data-reset="${at}"></span></p><div class="btns"><button type="button" data-act="retry" data-reset="${at}">Retry</button><label class="auto"><input type="checkbox" data-autoretry="${at}"> Retry when it resets</label></div></div></div>`;
+      h = `<div class="msg apierr" data-i="${i}"><div class="card err limit" role="alert"><div class="card-h">${ICON.alert}<span>Usage limit reached</span></div>${/reset/i.test(msg) ? '' : `<p>${escH(msg)}</p>`}<div class="btns"><button type="button" class="primary" data-act="retry" data-reset="${at}">Retry</button><button type="button" class="primary" data-autoretry="${at}" data-label="Retry at ${escH(clock(new Date(at).toISOString()))}" data-armed="Retrying at ${escH(clock(new Date(at).toISOString()))} · Cancel">Retry at ${escH(clock(new Date(at).toISOString()))}</button><button type="button" data-act="switch-acct">Switch account<kbd>2</kbd></button><button type="button" class="dec" data-act="dismiss-limit" data-i="${i}">Dismiss<kbd>Esc</kbd></button></div></div></div>`;
     }
     else if (ev.type === 'apierror') { // overload, login trouble: a card that says so, with Retry
       const limit = /limit|rate/i.test(ev.kind + ' ' + ev.text);
@@ -219,9 +233,8 @@
     const eds = evs.slice(from, to + 1).filter(e => e.type === 'tool' && e.args && (e.args.old != null || e.args.new != null) && done.get(e.toolId) && !done.get(e.toolId).err);
     if (!eds.length || !eds.every(undoable)) return;
     const files = new Set(eds.map(e => e.args.file_path));
-    showConfirm(`Undo this turn's ${eds.length} edit${eds.length > 1 ? 's' : ''} in ${files.size} file${files.size > 1 ? 's' : ''}?`, 'Undo edits').then(ok => {
-      if (ok) api.send({ type: 'undoTurn', id: selectedId, cwd: a && a.cwd, edits: eds.map(e => ({ file: e.args.file_path, old: e.args.old, new: e.args.new, all: !!e.args.all })) });
-    });
+    // At once, with Redo on the toast (undo over confirm).
+    api.send({ type: 'undoTurn', id: selectedId, cwd: a && a.cwd, edits: eds.map(e => ({ file: e.args.file_path, old: e.args.old, new: e.args.new, all: !!e.args.all })) });
   }
   // Claude ended by asking you something: its choices (or Yes / No) as one-click answers under the reply.
   // Claude's own suggestion for your next message: the CLI draws it greyed in its empty input box once a turn ends
@@ -254,7 +267,7 @@
     return '';
   }
   function footHtml(textAt, turn, sum, mark) {
-    const meta = turn ? `<span class="tf-meta">${SPARK}${Number.isFinite(turn.ms) && turn.ms > 0 ? 'Worked ' + escH(dur(turn.ms)) : 'Done'}${turn.ts ? ' · ' + escH(clock(turn.ts)) : ''}</span>` : ''; // a turn without its duration says Done, not "NaNh"
+    const meta = turn ? `<span class="tf-meta">${SPARK}${Number.isFinite(turn.ms) && turn.ms > 0 ? 'Worked ' + escH(dur(turn.ms)) + (turn.ts ? ' · ' : '') : ''}${turn.ts ? escH(clock(turn.ts)) : ''}</span>` : ''; // a turn without its duration says Done, not "NaNh"
     let files = '', cost = '';
     if (sum && sum.files.size) files = `<button type="button" class="tf-files" data-act="turn-edits" data-from="${sum.from}" data-to="${sum.to}" title="Show this turn's edits">${ICON.edit}${sum.files.size} file${sum.files.size > 1 ? 's' : ''} <b class="add">+${sum.add}</b> <b class="del">−${sum.del}</b></button>`;
     if (sum && sum.o && typeof calcCost === 'function') { const c = calcCost({ modelFamily: famOf(sum.m), inTok: sum.i + sum.cr + sum.cw, outTok: sum.o, cacheTok: sum.cw, cacheRead: sum.cr }); cost = `<span class="tf-cost" title="This turn's cost and tokens written">${escH(fmtCost(c))} · ↓ ${escH(sum.o >= 1000 ? (sum.o / 1000).toFixed(1) + 'k' : String(sum.o))}</span>`; }
@@ -310,9 +323,12 @@
     // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
     const mk = marksOf(id);
     const close = () => { flush(); if (!turn) return; if (open) out.push(footHtml(textAt, turn, sum, textAt >= 0 && evs[textAt].ts ? { ts: evs[textAt].ts, on: mk.has(evs[textAt].ts) } : null)); textAt = -1; turn = null; open = false; sum = fresh(); };
+    const folded = new Set(); // CLI lines a compaction printed (files re-read, skills restored): under its divider
     evs.forEach((ev, i) => {
-      if (i < start) return;
+      if (i < start || folded.has(i)) return;
       const t = ev.type;
+      if (t === 'compact' && !ev._restored) { ev._restored = []; for (let j = i + 1; j < evs.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { ev._restored.push(String(evs[j].text || '').replace(/^⎿\s*/, '').split('\n')[0]); folded.add(j); } }
+      else if (t === 'compact') for (let j = i + 1, n = 0; j < evs.length && n < ev._restored.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { folded.add(j); n++; }
       tally(ev, i);
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
       // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.
@@ -320,6 +336,7 @@
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
       if (t === 'bgdone' && ev.text) { if (turn) close(); flush(); out.push(msgHtml({ type: 'note', text: ev.text }, i, cwd)); return; } // the CLI's "Background command "x" completed" line; it opens a turn, after the last one's footer
       if (t === 'tool_done' || t === 'mode' || t === 'bgdone' || t === 'queue') return;
+      if (t === 'interrupt' && i > 0 && evs[i - 1].type === 'tool_done' && evs[i - 1].err && /\buser (rejected|denied|declined)\b/i.test(evs[i - 1].text || '')) return; // your "No" ends the turn: the "Declined" row says it, an "Interrupted" note reads like a failure
       // The "[Image: source: …]" record after a prompt: only shown when that prompt had no thumbnails of its own.
       // …or the prompt it comes just before (the CLI can write it first: the picture showed twice, above the bubble too).
       const hasImgs = (p) => p && p.type === 'prompt' && ((p.images || []).length || (p.paths || []).length);
@@ -424,13 +441,10 @@
   // At the bottom and the chat's box shrinks (the reply box grows a line as you type): stay at the bottom. It slid off
   // and back on every key, flashing the jump button.
   { const c = document.getElementById('conversation'); let end = true;
-    c.addEventListener('scroll', () => { end = c.scrollHeight - c.scrollTop - c.clientHeight < 40; }, { passive: true });
+    c.addEventListener('scroll', () => { end = c.scrollHeight - c.scrollTop - c.clientHeight < 40; holdPlace(c); }, { passive: true });
+
     new ResizeObserver(() => { if (end && c.classList.contains('open')) c.scrollTop = c.scrollHeight; }).observe(c);
-    // ponytail: temporary trace - "typing scrolls the chat off the bottom" (not reproduced): who moves it right after a key. Remove once found.
-    let keyAt = 0, logged = 0; const d = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
-    document.getElementById('term-order-input')?.addEventListener('input', () => { keyAt = Date.now(); });
-    Object.defineProperty(c, 'scrollTop', { get() { return d.get.call(this); }, set(v) { const b = d.get.call(this); d.set.call(this, v); if (Date.now() - keyAt < 400 && logged < 40 && Math.abs(d.get.call(this) - b) > 20) { logged++; api.send({ type: 'perfLog', text: `chat scroll on key ${Math.round(b)}->${Math.round(d.get.call(this))} h=${this.scrollHeight} ch=${this.clientHeight} ${(new Error().stack || '').split('\n').slice(2, 6).map(s => s.trim()).join(' | ')}` }); } }, configurable: true });
-    c.addEventListener('scroll', () => { if (Date.now() - keyAt < 400 && logged < 40 && c.scrollHeight - c.scrollTop - c.clientHeight > 40) { logged++; api.send({ type: 'perfLog', text: `chat off-bottom after key gap=${Math.round(c.scrollHeight - c.scrollTop - c.clientHeight)} ch=${c.clientHeight}` }); } }, { passive: true }); }
+  }
   document.getElementById('conversation').addEventListener('input', (e) => { if (e.target.matches && e.target.matches('.edit-ta')) { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; } });
   // ── Live tail: what the CLI shows under the transcript ──
   const lastTool = (evs, name, doneBy) => { for (let k = evs.length - 1; k >= 0; k--) { const e = evs[k]; if (e.type === 'tool' && e.name === name) return doneBy && doneBy.get(e.toolId) ? null : e; if (e.type === 'prompt') return null; } return null; };
@@ -442,7 +456,12 @@
     // The call isn't in the transcript until it's answered: what the CLI shows above its question is what's asked
     // ("Edit file / hello.txt / the change", "Bash command / git push"), and its question is the card's title.
     const sp = !ev && screenPerm(selectedId);
-    if (sp) return `<div class="card perm"><div class="card-h">${ICON[toolView({ name: /^bash|command/i.test(sp.body[0] || '') ? 'Bash' : /edit|write|create/i.test(sp.question) ? 'Edit' : '' }).kind] || ICON.shield}<span>${escH(sp.question)}</span></div>${sp.body.length ? `<pre class="perm-screen">${escH(sp.body.join('\n'))}</pre>` : ''}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
+    if (sp) {
+      // A new file: the CLI draws "Create file / name / 1 line…"; shown as the file's chip and its lines as an added diff.
+      const file = (/create\s+(.+?)\?$/i.exec(sp.question) || [])[1], body = sp.body.filter(l => !/^\s*(create|edit|update|write)\s+file\s*$/i.test(l) && !(file && l.trim() === file));
+      const nums = file && body.length && body.every(l => /^\s*\d+\s/.test(l)), view = nums ? `${diffHtml('', body.map(l => l.replace(/^\s*\d+\s/, '')).join('\n'), file).html}` : body.length ? `<pre class="perm-screen">${escH(body.join('\n'))}</pre>` : '';
+      return `<div class="card perm"><div class="card-h">${ICON[toolView({ name: /^bash|command/i.test(sp.body[0] || '') ? 'Bash' : /edit|write|create/i.test(sp.question) ? 'Edit' : '' }).kind] || ICON.shield}<span>${escH(sp.question.replace(/^Do you want to (\w)/, (m, c) => c.toUpperCase()))}</span></div>${view}<div class="btns">${permBtns(selectedId, 'data-keys', true)}</div></div>`;
+    }
     if (a.old != null || a.new != null) what = `<div class="perm-file">${ICON.edit}<span class="mono">${escH(a.file_path || '')}</span></div>${diffHtml(a.old, a.new, a.file_path).html}`;
     else if (a.command) what = `<pre>${escH(a.command)}</pre>${a.description ? `<p class="perm-desc">${escH(a.description)}</p>` : ''}`;
     else if (a.url || a.query) what = `<pre>${escH(a.url || a.query)}</pre>`;
@@ -457,9 +476,13 @@
   const permMenu = (id) => { const o = menuOptions(id); return o.length >= 2 && /^yes\b/i.test(o[0]) ? o : null; };
   const menuUp = (id) => !!permMenu(id);
   // Its buttons are the menu's own choices (a Yes/No prompt has no "always"); the usual ones before it has drawn.
+  // A card answered: the pressed button shows it at once (the CLI takes a moment to move on), and the reply box has focus
+  // for the next instruction.
+  function answered(btn) { const c = btn.closest('.card'); if (c) { c.classList.add('picked-card'); btn.classList.add('picked'); } document.getElementById('term-order-input')?.focus({ preventScroll: true }); }
   function permBtns(id, attr, kbd) {
-    const o = permMenu(id), list = o ? o.slice(0, 4).map((l, k) => [String(k + 1), l.length > 42 ? l.slice(0, 40) + '…' : l]) : [['1', 'Allow once'], ['2', 'Always allow']];
-    const b = (k, l, j) => `<button type="button"${j ? '' : ' class="primary"'} ${attr}="${k}" title="${escH(l)}">${escH(l)}${kbd ? `<kbd>${k === 'esc' ? 'Esc' : k}</kbd>` : ''}</button>`;
+    const o = permMenu(id), list = o ? o.slice(0, 4).map((l, k) => [String(k + 1), l]) : [['1', 'Yes'], ['2', 'Yes, always allow']];
+    // Short labels on the buttons (the CLI's full wording stays in the tooltip); "No…" is a quiet text button at the end.
+    const b = (k, l, j) => { const no = /^(no|deny)\b/i.test(l); return `<button type="button" class="${j ? '' : 'primary'}${no ? ' dec' : ''}" ${attr}="${k}" title="${escH(l)}">${escH(permLabel(l))}${kbd ? `<kbd>${k === 'esc' || no ? 'Esc' : k}</kbd>` : ''}</button>`; };
     return list.map(([k, l], j) => b(k, l, j)).join('') + (list.some(([, l]) => /^no\b/i.test(l)) ? '' : b('esc', 'Deny', 1));
   }
   // The open question as the CLI draws it: the line above its menu, and each option with the lines under it. A question
@@ -540,9 +563,27 @@
   function rewindPick(k) { const rw = screenRewind(selectedId); if (!rw) return; const d = k - rw.focus; keys([...arrowKeys(d), '\r']); setTimeout(rerender, Math.abs(d) * 70 + 400); }
   function rewindStep(d) { const rw = screenRewind(selectedId); if (!rw) return false; keys([d > 0 ? '\x1b[B' : '\x1b[A']); setTimeout(rerender, 200); return true; }
   // A proposed plan waiting for approval: the plan itself, rendered, and the CLI's own choices as buttons.
+  // The CLI's unnumbered dialogs (chat-core screenChoice). The option that says yes is the primary; with no options
+  // (/login waiting on the browser) Cancel is the one button.
+  function choiceHtml(sc) {
+    const yes = sc.options.findIndex(o => /^yes\b/i.test(o)), prim = yes >= 0 ? yes : 0;
+    const label = (o) => /trust this folder/i.test(o) ? 'Trust' : /^no,?\s*exit$/i.test(o) ? "Don't trust" : o;
+    // /login: the sign-in link the CLI prints (Open is the primary, for when no browser opened by itself), and a field
+    // for the code when it asks for one.
+    const url = (sc.lines.join(' ').match(chatUrlRe()) || [])[0], code = sc.lines.some(l => /paste (the )?code/i.test(l)), login = /^(log ?in|sign ?in)/i.test(sc.title);
+    const btns = sc.options.length ? sc.options.map((o, k) => [k, o]).sort((x, y) => (x[0] === prim ? -1 : y[0] === prim ? 1 : 0)).map(([k, o], n) => `<button type="button" data-choice="${k}" title="${escH(o)}" class="${k === prim ? 'primary' : 'dec'}">${escH(label(o))}<kbd>${k === prim ? '1' : 'Esc'}</kbd></button>`).join('')
+      : (url ? `<button type="button" class="primary" data-open-url="${escH(url)}">${ICON.ext}Open link<kbd>1</kbd></button><button type="button" class="icon-only" data-copy-url="${escH(url)}" title="Copy link" aria-label="Copy link">${ICON.copy}<span class="sr-only">Copy link</span></button>` : '');
+    const cancel = sc.options.length ? '' : `<div class="btns"><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div>`;
+    const helper = (l) => /url below|browser (did not|didn'?t) open/i.test(l);
+    const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : (/^([a-z]:[\\/]|~|\/)/i.test(l) ? (() => { const parts = l.split(/[\\/]/), last = parts.pop(); return `<p class="fname" title="${escH(l)}"><b>${escH(last)}</b></p><p class="mono path" title="${escH(l)}">${escH((p => p.length > 4 ? [...p.slice(0, 2), '…', ...p.slice(-2)] : p)([...parts.filter(Boolean), last]).join('\\'))}</p>`; })() : `<p>${escH(l)}</p>`)).join('');
+    const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled aria-label="Submit code">Submit<kbd>Enter</kbd></button></div>' : '';
+    return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${login ? 'Sign in' : escH(sc.title)}</span></div>${lines}${btns ? `<div class="btns">${btns}</div>` : ''}${field}${cancel}</div>`;
+  }
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
-    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Ready to code? Here's the plan</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="choices">${labels.map((l, k) => `<button type="button" data-pick="${k}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${escH(l)}</b></span></button>`).join('')}</div></div>`;
+    // The plan in full (it scrolls inside past ~360px), then the CLI's choices as one footer: Approve filled, the rest quiet.
+    const lab = (l) => /auto-?accept/i.test(l) ? 'Approve, auto-edit' : /manual/i.test(l) ? 'Approve, ask first' : /keep planning|^no\b/i.test(l) ? 'Keep planning' : l;
+    return `<div class="card ask plan-ask"><div class="card-h">${ICON.plan}<span>Approve plan?</span></div><div class="md sub plan">${md(String(ev.args.plan || '').replace(/^#{1,6}\s*plan\s*\n+/i, ''), cwd)}</div><div class="btns">${labels.slice(0, 4).map((l, k) => `<button type="button" data-pick="${k}" title="${escH(l)}" class="${k ? '' : 'primary'}${/keep planning|^no\b/i.test(l) ? ' dec' : ''}">${escH(lab(l))}<kbd>${/keep planning|^no\b/i.test(l) ? 'Esc' : k + 1}</kbd></button>`).join('')}</div></div>`;
   }
   // Which step of a several-question prompt the CLI is on: it only shows that by colour (the step's name on a filled
   // background), and the question isn't in the transcript until it's answered. -1 when it can't tell.
@@ -604,12 +645,27 @@
       const body = from >= 0 && to > from ? rows.slice(from + 1, to).map(r => r.replace(/^\s*[│┃]/, '').trim()).filter(Boolean).reduce((acc, r) => { if (acc.length && !/^[●⚠→]/.test(r)) acc[acc.length - 1] += ' ' + r; else acc.push(r); return acc; }, []) : [];
       rv = body.length ? `<div class="ask-review">${body.map(r => /^⚠/.test(r) ? `<div class="warn">${escH(r.replace(/^⚠\s*/, ''))}</div>` : /^→/.test(r) ? `<div class="ans">${escH(r.replace(/^→\s*/, ''))}</div>` : `<div class="rq">${escH(r.replace(/^●\s*/, ''))}</div>`).join('')}</div>` : '';
     }
-    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${s.options.length && s.options[askFocus(s)]?.bare && k === s.pf ? ' pv' : ''}${o.sep ? ' sep' : ''}"><kbd>${k + 1}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div></div>`
+    return `<div class="card ask">${tabs}${rv}<div class="card-h">${ICON.ask}<span>${escH(q)}</span></div><div class="choices">${opts.map((o, k) => s.options.length && k === askFocus(s) && /^type something/i.test(o.label ?? o) ? `<div class="ask-typing focus${o.sep ? ' sep' : ''}" data-pick="${k}"><kbd>${k + 1}</kbd><input class="ask-in" type="text" placeholder="Type your answer, Enter to send" aria-label="Your answer"></div>` : `<button type="button" data-pick="${k}"${s.options.length ? ' data-hov="1"' : ''}${o.bare ? ' data-bare="1"' : ''} class="${s.options.length && k === askFocus(s) ? 'focus' : ''}${s.options.length && s.options[askFocus(s)]?.bare && k === s.pf ? ' pv' : ''}${o.sep ? ' sep' : ''}${/^type something/i.test(o.label ?? o) ? ' free' : ''}"><kbd>${k + 1 - opts.slice(0, k).filter(x => /^type something/i.test(x.label ?? x)).length}</kbd><span class="ch-t"><b>${o.typed ? escH(o.typed) : boxLabel(o.label ?? o)}${o.chosen || o.typed ? `<span class="chosen" aria-label="Your answer">${ICON.check}</span>` : ''}</b>${o.desc && !/^submit$/i.test(o.desc) && o.desc.trim().toLowerCase() !== String(o.label ?? '').trim().toLowerCase() ? `<small>${escH(o.desc)}</small>` : ''}</span></button>`).join('')}${multi ? `<button type="button" class="other submit" data-act="ask-submit"><span>Submit</span></button>` : review || opts.some(o => /^(\[.?\]\s*)?(type something|other|chat about this)\b/i.test(o.label ?? o)) ? '' : `<button type="button" class="other" data-act="answer"><kbd>${opts.length + 1}</kbd><span>${opts.length ? 'Something else' : 'Answer in terminal'}</span></button>`}</div>${prevHtml(q, s, a)}</div>${s.options.length && !review ? '<div class="btns"><button type="button" class="dec" data-ask-esc>Skip<kbd>Esc</kbd></button></div>' : ''}</div>`
       .replace('<div class="choices">', `<div class="ask-body"><div class="choices">`)
       .replace('<div class="card ask">', `<div class="card ask${lastAskQ === stepKey ? ' still' : ''}">`) + (lastAskQ = stepKey, ''); // one card through its steps: no slide-in at each
   }
   // ── Background shells and subagents: one small pill above the reply box ("10 agents · 1 shell"). Hover it for the list,
   // click to keep the list open; a row's hover card peeks, a click opens its full panel. ──
+  // Queued messages (and a removed one's Undo row) dock above the reply box, right-aligned, out of the scrolling thread:
+  // they belong to what you'll send next, not to what was said. Moved out of the tail each time it's rebuilt; the
+  // thread keeps room under its last line so the stack never covers it.
+  function dockQueue(el, tailEl) {
+    let q = document.getElementById('chat-queue');
+    if (!q) {
+      q = document.createElement('div'); q.id = 'chat-queue'; q.setAttribute('aria-label', 'Queued messages');
+      document.getElementById('term-order').prepend(q);
+      q.addEventListener('click', (e) => onClick(e, selectedId != null ? agents.get(selectedId) : null, null));
+    }
+    const items = [...tailEl.querySelectorAll(':scope > .msg.user.pending, :scope > .msg.qremoved')].filter(n => n.classList.contains('qremoved') || n.querySelector('.q-x'));
+    q.replaceChildren(...items);
+    const h = items.length ? q.offsetHeight + 12 : 0, was = el._qh || 0;
+    if (h !== was) { el._qh = h; el.style.setProperty('--qh', h + 'px'); if (el._follow !== false) el.scrollTop = el.scrollHeight; }
+  }
   let dockHtml = '', dockCount = { agents: 0, shells: 0 };
   function drawDock() {
     let el = document.getElementById('chat-bg');
@@ -811,7 +867,12 @@
       + bg.map(e => { const a2 = e.args || {};
         return `<button type="button" role="menuitem" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
     // A menu on the CLI's screen that main didn't flag (a question with previews, say): still a question card, not the raw terminal.
-    if (!perm) { const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw); const sa = screenAsk(selectedId); if (sa.dialog && sa.options.length >= 2) return h + (permMenu(selectedId) && screenPerm(selectedId) ? permHtml({}, evs, doneBy) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), null)); }
+    if (!perm) {
+      const rw = screenRewind(selectedId); if (rw) return h + rewindHtml(rw);
+      const sa = screenAsk(selectedId), plan = lastTool(evs, 'ExitPlanMode', doneBy);
+      if (sa.dialog && sa.options.length >= 2) return h + (permMenu(selectedId) && screenPerm(selectedId) ? permHtml({}, evs, doneBy) : plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), null)); // a plan waiting on you shows the plan, flagged by main or not
+      const sc = screenChoice(screenOf(selectedId, 40, true)); if (sc) return h + choiceHtml(sc); // folder trust, /login: a card, not the raw terminal
+    }
     if (perm && perm.perm === 'ask') { const plan = lastTool(evs, 'ExitPlanMode', doneBy); return h + (plan && plan.args && plan.args.plan ? planHtml(plan, a.cwd) : askHtml(lastTool(evs, 'AskUserQuestion', doneBy), perm)); }
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${termHtml(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
@@ -823,8 +884,10 @@
       // shows as the running row just above, so it isn't repeated here.
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
       const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
-      const meta = [a.activeAt ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
-      return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? `Waiting for ${bg.length} background agent${bg.length > 1 ? 's' : ''}…` : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span>${meta ? ' · ' : ''}<kbd>Esc</kbd><span class="w-x"> to interrupt</span></span></div>`;
+      const toolRuns = evs.some(e => e.type === 'tool' && e.toolId && !doneBy.get(e.toolId) && e.name !== 'AskUserQuestion' && e.name !== 'ExitPlanMode'); // a running call's row carries its own clock: one clock on screen
+      const meta = [a.activeAt && !toolRuns ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
+      if (toolRuns && !a.spinnerText) return h + '<div class="live-reply" hidden></div>'; // the running call's row is the live indicator
+      return h + `<div class="live-reply" hidden></div><div class="working">${SPARK}<span class="shimmer" data-live="v">${escH(a.spinnerText || (bg.length ? 'Waiting…' : 'Thinking…'))}</span><span class="w-hint"><span data-live="m">${meta}</span></span></div>`;
     }
     return h;
   }
@@ -860,7 +923,8 @@
     // /btw isn't queued: the CLI answers it at once in its own panel (shown as the terminal) and never writes it to the
     // transcript, so its bubble would wait "Queued" forever.
     if (list) for (let k = list.length - 1; k >= 0; k--) if (!list[k].held && /^\/btw\s/.test(list[k].text || '') && Date.now() - list[k].at > 1500) list.splice(k, 1);
-    if (!list || !list.length) return cliQueue(id, evs);
+    const rq = removedQ.get(id), undoRow = rq && Date.now() - rq.at < 10000 ? `<div class="msg note cli qremoved">Removed “${escH(String(rq.text || '').slice(0, 60))}” <button type="button" class="q-x undo" data-act="unremove">Undo</button></div>` : '';
+    if (!list || !list.length) return undoRow + cliQueue(id, evs);
     // Each message sent from here becomes the next message of yours in the transcript, in the order sent, so they clear
     // in that order: the first one of yours written after a message was sent is that message, whatever the CLI made of its
     // text (its own image numbers, a long paste's wrapper, text left in its box…). Matching the text broke on each of those.
@@ -888,16 +952,17 @@
       // Only once main has handed it over (else it's still waiting for a CLI: main says when it fails); a page reload lost that word: 15 min.
       if (!busy && (p.sentAt ? Date.now() - Math.max(p.busyAt || 0, p.sentAt) > 30000 : Date.now() - p.at > 15 * 60e3)) list.splice(list.indexOf(p), 1);
     }
-    return list.map((p, k) => {
+    return undoRow + list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
       const queued = busy && !p.held;
-      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? 'Queued' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x" data-unqueue="${k}" title="Take back (the agent keeps working)">Cancel</button>` : ''}</span></div>`;
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
     }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
   // the queued messages into the input; if that's what came up, Ctrl+C on the (non-empty) input clears it — it only
   // interrupts on an empty input, which is checked first — and the others still wanted are queued again.
-  async function unqueue(id, k) {
+  const removedQ = new Map(); // agent id -> the queued message just removed (its Undo row shows 6 s)
+  async function unqueue(id, k, drop = false) {
     const list = pending.get(id) || [], p = list[k]; if (!p) return;
     const x = typeof xterms !== 'undefined' && xterms.get(id), t = x && x.terminal;
     const box = () => (t && typeof readPromptBox === 'function' ? norm(readPromptBox(t)) : null);
@@ -924,6 +989,10 @@
       const had = got.includes(head(o)) || (sentOf(o).length > 800 && placeholders > 0 && placeholders--);
       if (had) { chatComposer.sendText(id, sentOf(o), (o.restore && o.restore.list) || []); await wait(400); }
     }
+    // Your words aren't lost: back in the reply box (images too) when it's empty, to edit and send again.
+    if (p.restore && !drop) chatComposer.restoreDraft(id, p.restore);
+    else if (p.restore) { removedQ.set(id, { text: p.text, restore: p.restore, at: Date.now() }); setTimeout(() => { const r = removedQ.get(id); if (r && Date.now() - r.at >= 10000 && !document.activeElement?.matches?.('[data-act="unremove"]')) { removedQ.delete(id); rerender(); } }, 10100); rerender(); requestAnimationFrame(() => document.querySelector('#conversation [data-act="unremove"]')?.focus({ preventScroll: true })); } // gone from the queue; Undo puts its words back in the reply box
+    document.getElementById('term-order-input')?.focus({ preventScroll: true });
     rerender();
   }
 
@@ -1087,6 +1156,28 @@
   // After you send: the bottom for a moment, through what still grows the thread (its bubble, markdown, images, blocks
   // getting their real height). Scrolling up yourself lets go.
   let pinUntil = 0;
+  const places = new Map(); // agent id -> where you were reading it (a block key + offset); null/absent = its bottom
+  // Scrolled up reading: the block at the top of the view stays exactly where it is while anything in the thread
+  // changes height after a redraw (link titles, diagrams, images, tool rows filling in): only the redraw itself
+  // re-anchored, so later growth above pushed what you were reading away. Chromium's own anchoring is off (chat.css):
+  // it shifted again on top of this.
+  // Keyed by the event itself, not its index: a long chat keeps its last 1000 events, so every new one shifted all
+  // indices by one and the anchor latched onto the next block down - the view hopped on each update.
+  const blockKey = (n) => { if (!n) return null; if (n._bi === undefined) n._bi = n.dataset.i ?? (n.querySelector('[data-i]') || {}).dataset?.i ?? null; const i = n._bi; if (i == null) return null; /* the index lookup once per node: its html (data-i included) never changes, a changed block is a new node */ const c = n.closest('#conversation'), ev = c && c._evs && c._evs[i]; return ev ? `${n.className.split(' ')[0]}|${ev.type}|${ev.ts}|${String(ev.text || ev.name || '').slice(0, 40)}` : null; };
+  // The first block whose bottom is below the view's top: binary search (blocks are stacked), ~10 rects per scroll, not thousands.
+  function firstVisible(thread, top) { const ch = thread.children; let lo = 0, hi = ch.length - 1, at = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (ch[m].getBoundingClientRect().bottom > top) { at = m; hi = m - 1; } else lo = m + 1; } return at; }
+  function holdPlace(el) { // what's at the top of the view now (called on every scroll)
+    el._anc = null; el._follow = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (el._follow) return; // following the bottom
+    const thread = el.querySelector(':scope > .thread'), top = el.getBoundingClientRect().top; if (!thread) return;
+    const ch = thread.children; for (let k = Math.max(0, firstVisible(thread, top)); k < ch.length; k++) { const key = blockKey(ch[k]); if (key) { el._anc = { i: key, y: ch[k].getBoundingClientRect().top - top }; return; } }
+  }
+  const placeRO = new ResizeObserver(() => {
+    const el = document.getElementById('conversation'), a = el._anc; if (!el.classList.contains('open') || Date.now() < pinUntil) return;
+    if (!a) { if (el._follow !== false && el.scrollHeight - el.scrollTop - el.clientHeight >= 1) el.scrollTop = el.scrollHeight; return; } // following: late growth (markdown, rows, diagrams) after the redraw left you short of the bottom, with the jump button up and new output arriving out of sight
+    const n = [...(el.querySelector(':scope > .thread')?.children || [])].find(x => blockKey(x) === a.i); if (!n) return;
+    const d = n.getBoundingClientRect().top - el.getBoundingClientRect().top - a.y; if (Math.abs(d) >= 0.5) el.scrollTop += d;
+  });
   function pinBottom() {
     pinUntil = Date.now() + 2000; const el = document.getElementById('conversation');
     if (!el._pinWired) { el._pinWired = 1; el.addEventListener('wheel', (e) => { if (e.deltaY < 0) pinUntil = 0; }, { passive: true }); }
@@ -1135,7 +1226,7 @@
     order.classList.toggle('busy', busy); order.classList.toggle('dead', a.crashed === 'fatal');
     const chips = document.getElementById('chat-chips'); if (chips) { const ch = chipsHtml(a, mode); if (chips._h !== ch) chips.innerHTML = chips._h = ch; }
     let list;
-    if (!evs) list = ['<div class="chat-empty"><span class="loading"></span></div>'];
+    if (!evs) list = ['<div class="chat-skel" aria-label="Loading"><i class="sk-u"></i><i class="sk-t"></i><i class="sk-t s"></i><i class="sk-p"></i><i class="sk-p m"></i><i class="sk-p s"></i></div>']; // the thread's shape while it loads, not a spinner in an empty column
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
     else { holdFold = el.dataset.for === String(id) && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40 ? id : null; list = blocks(evs, doneBy, a.cwd, id); }
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
@@ -1148,19 +1239,23 @@
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
     if (fresh && window.chatComposer) chatComposer.drawAtt(); // another agent: its own pending images
-    if (fresh && el._agent != null && el._agent !== id) onAgentSwitch(); el._agent = id;
-    if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); el._shown = null; }
+    if (fresh && el._agent != null && el._agent !== id) { places.set(el._agent, el._follow === false ? el._anc : null); onAgentSwitch(); } el._agent = id;
+    if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); el._shown = null; el._anc = null; placeRO.disconnect(); placeRO.observe(thread); }
     // The history landing after the loading spinner is opening the chat too: always at the bottom, nothing slides in
     // (else the last reply counted as "just arrived" and a long one parked you at its first line).
     const opening = fresh || (!!evs && el._shown !== id); if (evs) el._shown = id;
     const stuck = !opening && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
     // Scrolled up reading: the message at the top of the view stays put whatever changes above it (a new turn folds the
     // oldest into "Earlier", blocks get rebuilt).
-    const keyOf = (n) => n && (n.dataset.i || (n.querySelector('[data-i]') || {}).dataset?.i);
+    const keyOf = blockKey;
     let anchor = null;
-    if (stuck) { const top = el.getBoundingClientRect().top; for (const n of thread.children) { const r = n.getBoundingClientRect(); if (r.bottom > top && keyOf(n)) { anchor = { i: keyOf(n), y: r.top }; break; } } }
+    if (stuck) { const top = el.getBoundingClientRect().top, ch = thread.children; for (let k = Math.max(0, firstVisible(thread, top)); k < ch.length; k++) { const key = keyOf(ch[k]); if (key) { anchor = { i: key, y: ch[k].getBoundingClientRect().top }; break; } } }
+    el._evs = evs; // block keys read the events now on screen
     const old = el._blocks || [];
     let newReply = null; const changed = []; // only these get the link, image and diagram passes below (a long chat is thousands of nodes)
+    // An empty thread (opening a chat): one parse of the whole list, not one per block (a long chat opened ~2x faster).
+    // Each block must come out as exactly one element; if one doesn't, the per-block path below rebuilds it.
+    if (!thread.children.length && list.length > 1) { thread.innerHTML = list.join(''); if (thread.children.length === list.length) { changed.push(...thread.children); el._blocks = old.length ? old : []; for (let k = 0; k < list.length; k++) old[k] = list[k]; } else thread.innerHTML = ''; }
     for (let k = 0; k < list.length; k++) {
       if (old[k] === list[k]) continue;
       const tmp = document.createElement('div'); tmp.innerHTML = list[k];
@@ -1172,17 +1267,23 @@
     }
     while (thread.children.length > list.length) thread.lastElementChild.remove();
     el._blocks = list;
-    if (anchor) { const n = [...thread.children].find(c => keyOf(c) === anchor.i); if (n) el.scrollTop += n.getBoundingClientRect().top - anchor.y; }
+    if (anchor) { const n = [...thread.children].find(c => keyOf(c) === anchor.i), d = n ? n.getBoundingClientRect().top - anchor.y : 0; if (Math.abs(d) >= 0.5) el.scrollTop += d; } // no write when nothing moved: any write cancels a wheel scroll in flight (the live tick redraws every second)
+    if (stuck) holdPlace(el); else el._anc = null;
     // The live tail ticks every second (elapsed, the CLI's verb, agent timers). When only that text changed, swap the
     // text in place: rebuilding would replay the slide-in and restart the spark and shimmer on every tick.
     if (tailEl._h !== tail) {
       const key = liveKey(tail);
       if (tailEl._k === key) { const tmp = document.createElement('div'); tmp.innerHTML = tail; for (const n of tmp.querySelectorAll('[data-live]')) { const c = tailEl.querySelector(`[data-live="${CSS.escape(n.dataset.live)}"]`); if (c && c.textContent !== n.textContent) c.textContent = n.textContent; } }
-      else { tailEl.innerHTML = tail; if (opening) for (const n of tailEl.children) n.classList.add('still'); } // opening a chat: there already, nothing slides in
+      else { tailEl.innerHTML = tail; if (opening) for (const n of tailEl.children) n.classList.add('still'); dockQueue(el, tailEl); } // opening a chat: there already, nothing slides in
       tailEl._h = tail; tailEl._k = key; changed.push(tailEl);
     }
     { const box = document.getElementById('term-order-input'), sg = tail.includes('class="qreplies"') ? nextSuggestion(id, evs) : ''; // the chip's text, greyed in the box: Tab takes it
-      if (box && (box.dataset.sugg || '') !== sg) { box.dataset.sugg = sg; box.placeholder = sg ? sg + '  (Tab)' : 'Reply…'; } }
+      // A permission or plan waiting: what you type goes with "No" (the CLI's own "tell Claude what to do differently").
+      // Trust / login: Claude can't take a message yet. A question: typed text is your own answer. Nothing said yet: ask.
+      const lastEv = evs && evs.length ? evs[evs.length - 1] : null, declinedLast = !!(lastEv && lastEv.type === 'interrupt' && evs.length > 1 && evs[evs.length - 2].err && /\buser (rejected|denied|declined)\b/i.test(evs[evs.length - 2].text || ''));
+      const locked = tail.includes('class="card perm choice"'); document.getElementById('term-order')?.classList.toggle('locked', locked);
+      const ph = sg ? sg + '  (Tab)' : locked ? 'Answer above' : /class="card (perm|ask)/.test(tail) ? 'Tell Claude instead…' : evs && !evs.length ? 'Ask Claude…' : declinedLast ? 'What should Claude do instead?' : 'Reply…';
+      if (box && box.placeholder !== ph) { box.dataset.sugg = sg; box.placeholder = ph; } }
     drawDock(); applyAskHover(); keepAskInput(); // a hovered option keeps its preview through redraws, a typed answer its text
     const lr = tailEl.querySelector('.live-reply'); if (lr) { const t = busy ? screenReply(id, evs) : ''; if (lr._t !== t) { lr._t = t; lr.textContent = t; lr.hidden = !t; } }
     announce(st === 'question' ? 'The agent has a question' : st === 'permission' ? 'The agent needs approval' : busy ? 'The agent is working' : a.crashed === 'fatal' ? 'The agent stopped' : 'The agent is done');
@@ -1192,20 +1293,23 @@
     else if (!busy && tick) { clearInterval(tick); tick = null; }
     // A long reply that just arrived: land on its first line, to read it top-down (from then on you're "scrolled up",
     // so the live ticks leave it there).
-    if (!stuck && !jumpOnce && Date.now() >= pinUntil && newReply && newReply.offsetHeight > el.clientHeight * 0.6) el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24;
+    if (!stuck && !jumpOnce && Date.now() >= pinUntil && newReply && newReply.offsetHeight > el.clientHeight * 0.6) { el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24; holdPlace(el); }
+    else if (opening && evs && places.get(id) && (() => { const p = places.get(id), n = [...thread.children].find(c => keyOf(c) === p.i); if (!n) return false; el.scrollTop += n.getBoundingClientRect().top - el.getBoundingClientRect().top - p.y; holdPlace(el); return true; })()) places.delete(id); // back to a chat you were reading: the same spot, not its bottom
     else if (!stuck) {
       el.scrollTop = el.scrollHeight;
       // Images grow the thread as they load: stay pinned to the bottom through that.
       for (const i of changed.flatMap(n => [...n.querySelectorAll('img')])) if (!i.complete && !i._pin && (i._pin = 1)) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
     }
     jumpOnce = false;
+    syncJump(el); // new blocks while you read above: the jump button counts them
+    for (const t of changed.flatMap(n => [...n.querySelectorAll('.md table')])) { const hs = [...t.querySelectorAll('thead th')].map(h => h.textContent.trim()); t.classList.toggle('wide', hs.length >= 3); for (const r of t.querySelectorAll('tbody tr')) [...r.children].forEach((c, k) => { if (hs[k]) c.dataset.label = hs[k]; }); } // a narrow column stacks each row as label: value
     // What ticks (running calls, usage-limit cards) is in the last few blocks.
     const recent = [...thread.children].slice(-12), inRecent = (sel) => recent.flatMap(n => [...n.querySelectorAll(sel)]);
     for (const s of inRecent('.trow.running .el')) s.textContent = '· ' + dur(now - +s.dataset.t); // running calls tick in place
     // Usage-limit cards: the countdown, Retry held until the reset, and the retry the user asked for once it's passed.
     for (const s of inRecent('.countdown[data-reset]')) { const left = +s.dataset.reset - now; s.textContent = left > 0 ? 'in ' + dur(left) : 'now'; }
-    for (const b of inRecent('button[data-reset]')) b.disabled = +b.dataset.reset > now;
-    for (const c of inRecent('input[data-autoretry]')) c.checked = autoRetry.has(id + ':' + c.dataset.autoretry);
+    for (const b of inRecent('button[data-reset]')) b.hidden = +b.dataset.reset > now; // Retry once it has reset
+    for (const c of inRecent('button[data-autoretry]')) { const on = autoRetry.has(id + ':' + c.dataset.autoretry), due = +c.dataset.autoretry <= now; c.hidden = due; c.classList.toggle('primary', !on); c.classList.toggle('dec', on); c.innerHTML = on ? ICON.check + escH(c.dataset.armed) : escH(c.dataset.label) + '<kbd>1</kbd>'; } // one button before the reset: arm it, then it reads as armed and undoes
     for (const key of [...autoRetry]) { const [aid, at] = key.split(':').map(Number); if (aid !== id || at > now) continue; autoRetry.delete(key); const t = [...evs].reverse().find(e => e.type === 'prompt' && e.text); if (t) chatComposer.sendText(id, t.text); } // only this agent's: each agent remembers its own
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
@@ -1223,10 +1327,11 @@
   // The round "jump to latest" button over the composer, shown while you're scrolled up; the prompt rail follows too.
   // Scroll fires many times a frame: the measuring waits for the next frame, once.
   let jumpRaf = 0;
-  function syncJump(el) { if (!jumpRaf) jumpRaf = requestAnimationFrame(() => { jumpRaf = 0; const b = document.getElementById('chat-jump'); if (b) b.classList.toggle('show', el.scrollTop + el.clientHeight < el.scrollHeight - 40); railActive(el); }); }
+  function syncJump(el) { if (!jumpRaf) jumpRaf = requestAnimationFrame(() => { jumpRaf = 0; const b = document.getElementById('chat-jump'); if (b) { const up = el.scrollTop + el.clientHeight < el.scrollHeight - 40, n = el.querySelector(':scope > .thread')?.children.length || 0; if (!up || el._jumpN == null) el._jumpN = up ? n : null; const fresh = up ? Math.max(0, n - el._jumpN) : 0; b.classList.toggle('show', up); if (b.dataset.n !== String(fresh)) b.dataset.n = fresh; b.title = fresh ? `${fresh} new below` : 'Jump to bottom'; } railActive(el); }); } // scrolled up: how many new blocks arrived below
 
   // ── Prompt rail, as on the terminal: a dash per prompt down the right edge, hover lists them, click jumps there ──
-  const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
+  const rail = document.createElement('div'); rail.id = 'chat-rail'; rail.tabIndex = 0; rail.setAttribute('aria-label', 'Your messages');
+  rail.addEventListener('keydown', (e) => { const items = [...rail.querySelectorAll('.cr-pop [data-i]')]; if (!items.length) return; const at = items.indexOf(document.activeElement); if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[Math.max(0, Math.min(items.length - 1, at < 0 ? items.length - 1 : at + (e.key === 'ArrowDown' ? 1 : -1)))].focus(); } else if ((e.key === 'Enter' || e.key === ' ') && at >= 0) { e.preventDefault(); items[at].click(); } else if (e.key === 'Escape') { rail.blur(); document.activeElement?.blur(); } }); /* keyboard: Tab to it, arrows through your messages, Enter jumps */ rail.innerHTML = '<div class="cr-dashes"></div><div class="cr-pop"></div>';
   document.getElementById('term').appendChild(rail);
   // ```mermaid blocks in a reply draw as diagrams (flowchart, sequence, pie, xychart, gantt…). mermaid.min.js (2.5 MB)
   // loads the first time one shows up; each source's SVG is kept, so a redrawn block doesn't render it again. The
@@ -1313,7 +1418,7 @@
     if (rail._k === key) return; rail._k = key; rail._on = undefined; // new dashes: light the current one again
     const label = (t) => escH(String(t || '').replace(/\[Image #\d+\]/g, '🖼').replace(/[#*`>_]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140) || '🖼');
     rail.querySelector('.cr-dashes').innerHTML = ps.map(([e, i]) => `<i data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}></i>`).join('');
-    rail.querySelector('.cr-pop').innerHTML = ps.map(([e, i]) => `<div data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}>${e.type === 'text' ? '★ ' : ''}${label(e.text)}</div>`).join('');
+    rail.querySelector('.cr-pop').innerHTML = ps.map(([e, i]) => `<div tabindex="0" role="button" data-i="${i}"${e.type === 'text' ? ' class="mark"' : ''}>${e.type === 'text' ? '★ ' : ''}${label(e.text)}</div>`).join('');
     railActive(el);
   }
   // The prompt at the top of the view is the one lit.
@@ -1325,10 +1430,19 @@
     if (rail._on === on) return; rail._on = on; // same prompt as last time: nothing to move
     for (const n of rail.querySelectorAll('[data-i]')) n.classList.toggle('on', n.dataset.i === on);
   }
+  // Jump to a message: land with its top 8px under the view's top, and keep it there while the blocks around it get their
+  // real heights (off-screen blocks carry an estimate until drawn; a smooth scroll aimed at where the message *was* fell
+  // short of it). The place-holding anchor is pinned to it, and a few frames re-align it.
+  function jumpTo(m) {
+    const el = document.getElementById('conversation'); if (!el || !m) return;
+    const align = () => { const d = m.getBoundingClientRect().top - el.getBoundingClientRect().top - 8; if (Math.abs(d) >= 1) el.scrollTop += d; };
+    align(); holdPlace(el);
+    let n = 0; const again = () => { align(); holdPlace(el); if (++n < 8) requestAnimationFrame(again); }; requestAnimationFrame(again);
+  }
   let scrubEnd = 0;
   rail.addEventListener('click', (e) => {
     const t = e.target.closest('[data-i]'); if (!t || Date.now() - scrubEnd < 300) return;
-    const go = () => { const m = document.querySelector(`#conversation .thread > [data-i="${t.dataset.i}"]`); if (m) { m.scrollIntoView({ block: 'start', behavior: 'smooth' }); m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash'); } return !!m; };
+    const go = () => { const m = document.querySelector(`#conversation .thread > [data-i="${t.dataset.i}"]`); if (m) { jumpTo(m); m.classList.remove('flash'); void m.offsetWidth; m.classList.add('flash'); } return !!m; };
     if (!go()) { expanded.add(selectedId); rerender(); setTimeout(go, 50); } // it's in the folded earlier turns: open them first
   });
   rail.addEventListener('mouseenter', () => { const on = rail.querySelector('.cr-pop .on'); if (on) on.scrollIntoView({ block: 'nearest' }); });
@@ -1341,7 +1455,7 @@
     scrub.last = d.dataset.i; scrub.moved = true;
     let m = document.querySelector(`#conversation .thread > [data-i="${d.dataset.i}"]`);
     if (!m && !expanded.has(selectedId)) { expanded.add(selectedId); rerender(); m = document.querySelector(`#conversation .thread > [data-i="${d.dataset.i}"]`); } // folded earlier turns: open them
-    if (m) m.scrollIntoView({ block: 'start', behavior: 'auto' });
+    if (m) jumpTo(m);
   };
   rail.querySelector('.cr-dashes').addEventListener('pointerdown', (e) => { if (e.button) return; scrub = { last: null, moved: false }; rail.setPointerCapture(e.pointerId); rail.classList.add('scrub'); scrubTo(e.clientY); e.preventDefault(); });
   rail.addEventListener('pointermove', (e) => { if (scrub) scrubTo(e.clientY); });
@@ -1441,15 +1555,25 @@
 
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
+    const sw = e.target.closest('[data-act="switch-acct"]'); if (sw && selectedId != null) { chatComposer.sendText(selectedId, '/login'); return; } // another account: the CLI's /login (its card follows)
+    const ur = e.target.closest('[data-act="unremove"]'); if (ur && selectedId != null) { const r = removedQ.get(selectedId); if (r) { removedQ.delete(selectedId); chatComposer.restoreDraft(selectedId, r.restore); rerender(); } return; } // its words back in the reply box
+    const ud = e.target.closest('[data-act="undismiss-limit"]'); if (ud && evs) { const ev = evs[+ud.dataset.i]; if (ev) { ev._dismissed = false; cache.delete(ev); rerender(); } return; }
+    const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } return; }
     if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
     // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
-    if (k && selectedId != null) { if (stillWaiting(selectedId) && menuUp(selectedId)) keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); return; }
+    if (k && selectedId != null) { if (stillWaiting(selectedId) && menuUp(selectedId)) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); answered(k); } return; }
     const rw = e.target.closest('[data-rw], [data-rwx]'); // rewind card: a point, or Cancel (Esc, as in the CLI)
     if (rw && selectedId != null) { if (rw.dataset.rwx) { keys(['\x1b']); setTimeout(rerender, 300); } else rewindPick(+rw.dataset.rw); return; }
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
     if (tab) { if (askTab(+tab.dataset.tab - +tab.parentElement.dataset.on)) for (const t of tab.parentElement.children) t.classList.toggle('on', t === tab); return; }
+    const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); ou.classList.remove('primary'); ou.innerHTML = ICON.check + 'Opened'; ou.closest('.card')?.classList.add('opened'); ou.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // /login's link
+    const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => { cu.innerHTML = ICON.check; cu.title = 'Copied'; setTimeout(() => { cu.innerHTML = ICON.copy; cu.title = 'Copy link'; }, 1500); }, () => {}); cu.closest('.card')?.classList.add('opened'); cu.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // the result on the button you pressed, not a toast
+    const ae = e.target.closest('[data-ask-esc]'); if (ae) { keys(['\x1b']); answered(ae); return; } // a question's Skip: Esc, as in the CLI
+    const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) { api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); i.disabled = true; ls.disabled = true; ls.innerHTML = '<span class="loading"></span>Submitting'; } return; }
+    const ch = e.target.closest('[data-choice]'); // trust / login card: arrows onto the choice, then Enter; Cancel is Esc
+    if (ch && selectedId != null) { const sc = screenChoice(screenOf(selectedId, 40, true)); if (!sc) return; answered(ch); const k = +ch.dataset.choice; if (k < 0) { api.send({ type: 'termInput', id: selectedId, data: '\x1b' }); return; } const d = k - sc.focus; api.send({ type: 'termInput', id: selectedId, data: (d > 0 ? '\x1b[B' : '\x1b[A').repeat(Math.abs(d)) + '\r' }); return; }
     const pick = e.target.closest('[data-pick]'); // question card: the option's number key
     if (pick && e.target.closest('.ask-in')) return; // typing an answer in it
     // A box of a pick-several question: its number toggles it, as in the CLI; the card stays for the rest and Submit.
@@ -1461,10 +1585,10 @@
     if (tag) { lightbox(tag.dataset.src); return; }
     const img = e.target.closest('.imgs img'); // a thumbnail opens full size
     if (img) { lightbox(img.src); return; }
-    const ar = e.target.closest('input[data-autoretry]'); // "Retry when it resets"
-    if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; ar.checked ? autoRetry.add(key) : autoRetry.delete(key); rerender(); return; }
-    const uq = e.target.closest('[data-unqueue]'); // ✕ on a queued prompt: take it back, the agent keeps working
-    if (uq) { unqueue(selectedId, +uq.dataset.unqueue); return; }
+    const ar = e.target.closest('button[data-autoretry]'); // "Retry at 3:00 PM": arm it; again: undo
+    if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; autoRetry.has(key) ? autoRetry.delete(key) : autoRetry.add(key); rerender(); return; }
+    const uq = e.target.closest('[data-unqueue]'); if (uq) uq.closest('.msg')?.classList.add('leaving'); // ✕ on a queued prompt: take it back, the agent keeps working (it fades at once)
+    if (uq) { const m = uq.closest('.msg'); Promise.resolve(unqueue(selectedId, +uq.dataset.unqueue, !!uq.dataset.drop)).finally(() => m && m.isConnected && m.classList.remove('leaving')); return; }
     const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
     if (art) { if (art.dataset.artOpen) api.send({ type: 'openUrl', url: art.dataset.artOpen }); else navigator.clipboard.writeText(art.dataset.artCopy).then(() => { art.classList.add('done'); setTimeout(() => art.classList.remove('done'), 1200); }); return; }
     const pn = e.target.closest('[data-pn]'); // a pasted text's chip in a message on its way: its text in the panel
@@ -1874,7 +1998,9 @@
     if (e.target.closest('#chat-bg, #chat-hover, [data-agent-tid], [data-jump], [data-bgout], [data-pn]')) return; // what opens one swaps it instead
     closeShell();
   });
-  document.getElementById('conversation').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-agent-tid]')) { e.preventDefault(); e.target.click(); } });
+  document.getElementById('conversation').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches && e.target.matches('[data-login-code]')) { e.preventDefault(); e.stopPropagation(); e.target.parentElement.querySelector('[data-login-send]:not(:disabled)')?.click(); } });
+  document.getElementById('conversation').addEventListener('input', (e) => { if (e.target.matches && e.target.matches('[data-login-code]')) { const b = e.target.parentElement.querySelector('[data-login-send]'); if (b) b.disabled = !e.target.value.trim(); } });
+  document.getElementById('conversation').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-agent-tid], [role="button"][tabindex]')) { e.preventDefault(); e.target.click(); } });
   function drawSteps(evs) {
     const box = document.querySelector('#chat-shell.agentp .agent-steps'); if (!box) return;
     const doneBy = new Map(); for (const ev of evs) if (ev.type === 'tool_done') doneBy.set(ev.toolId, ev);
@@ -1915,6 +2041,11 @@
   }
 
   // Copy from chat as clean HTML (lists, bold, links, code - no app colors/classes) + plain text that keeps list numbers.
+  // Hovering a /skill in a message shows its description (tooltip.js reads data-tip on the same mouseover, after this).
+  document.getElementById('conversation').addEventListener('mouseover', (e) => {
+    const t = e.target.closest && e.target.closest('.cmdtag'); if (!t || t.dataset.tip) return;
+    const d = window.chatComposer && chatComposer.cmdDesc(t.textContent.trim()); if (d) t.dataset.tip = d;
+  });
   document.getElementById('conversation').addEventListener('copy', (e) => {
     const sel = getSelection(); if (!sel.rangeCount || sel.isCollapsed || !e.clipboardData || e.target.closest?.('textarea,input,[contenteditable]')) return;
     const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:-9999px;top:0;white-space:normal';
@@ -2035,7 +2166,7 @@
     // else repaints: redraw whenever what it shows changed.
     if (x && termTab === 'conversation' && cv && cv.classList.contains('open')) {
       const sa = screenAsk(selectedId), rw = screenRewind(selectedId);
-      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, liveMode(selectedId), cliSuggestion(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
+      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, JSON.stringify(screenChoice(screenOf(selectedId, 40, true))), liveMode(selectedId), cliSuggestion(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
       if (sig !== screenSig) { screenSig = sig; rerender(); }
     }
     // A panel drawn inline above the prompt box (/btw's answer, a skill's own UI): the terminal opens beside the chat
@@ -2043,7 +2174,7 @@
     const rows = x && screenRows(x, 80), panel = !!(rows && x && termTab === 'conversation' && cv && cv.classList.contains('open') && screenDialog(rows) && !screenDialog(rows, false));
     if (panel) { panelOff = 0; if (!t.classList.contains('split')) { autoSplitFor = selectedId; t.classList.add('split'); switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); } }
     else if (autoSplitFor != null && ++panelOff >= 2) { autoSplitFor = null; t.classList.remove('split'); if (termTab === 'conversation') switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); }
-    const up = !!(x && !panel && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(rows) && !(screenAsk(selectedId).dialog && screenAsk(selectedId).options.length >= 2) && !screenRewind(selectedId)); // a question menu gets its card instead
+    const up = !!(x && !panel && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(rows) && !(screenAsk(selectedId).dialog && screenAsk(selectedId).options.length >= 2) && !screenRewind(selectedId) && !screenChoice(rows)); // a question menu, the trust check, /login: their cards instead
     if (up) { peekOff = 0; peek(true); return; }
     if (t && t.classList.contains('peek') && termPeekFor === selectedId && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
     peek(false);

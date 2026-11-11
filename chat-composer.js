@@ -329,8 +329,18 @@
   function cardKey(e) {
     if (box().value) return false;
     const tail = document.querySelector('#conversation .tail');
+    if (/^[1-9]$/.test(e.key) && tail && tail.querySelector('.card.ask .choices button.free')) { const b = tail.querySelectorAll('.card.ask .choices button:not(.free)')[+e.key - 1]; if (b) { b.click(); return true; } } // the visible rows' numbers
     if (/^[1-9]$/.test(e.key)) { const b = tail && (tail.querySelector(`[data-pick="${+e.key - 1}"]`) || tail.querySelector(`[data-keys="${e.key}"]`) || tail.querySelectorAll('.choices button')[+e.key - 1]); if (b) { b.click(); return true; } }
-    if (e.key === 'Escape') { const b = tail && tail.querySelector('[data-keys="esc"]'); if (b) { b.click(); return true; } }
+    const lim = !(tail && tail.querySelector('.card')) && document.querySelector('#conversation .thread > .msg.apierr:last-child .card.limit');
+    if (lim) { const b = e.key === '1' || (e.key === 'Enter' && !e.shiftKey) ? lim.querySelector('button[data-autoretry]:not([hidden]), button[data-act="retry"]:not([hidden])') : e.key === '2' ? lim.querySelector('[data-act="switch-acct"]') : e.key === 'Escape' ? lim.querySelector('[data-act="dismiss-limit"]') : null; if (b) { b.click(); return true; } }
+    // Folder trust / login: 1–9 pick, Enter takes the primary, Esc the way out (Cancel, Exit).
+    const choice = tail && tail.querySelector('.card.choice');
+    if (choice) {
+      const b = /^[1-9]$/.test(e.key) ? choice.querySelectorAll('.btns button:not([data-choice="-1"])')[+e.key - 1] : e.key === 'Enter' && !e.shiftKey ? choice.querySelector('button.primary[data-choice]') : e.key === 'Escape' ? choice.querySelector('[data-choice="-1"], button.dec[data-choice]') : null;
+      if (b) { b.click(); return true; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { const b = tail && tail.querySelector('.card.perm:not(.choice) .btns button.primary, .card.plan-ask .btns button.primary'); if (b) { b.click(); return true; } }
+    if (e.key === 'Escape') { const b = tail && (tail.querySelector('[data-keys="esc"]') || tail.querySelector('.card .btns button.dec')); if (b) { b.click(); return true; } }
     if (e.key === 'Escape' && tail && tail.querySelector('.card.ask')) { chatUi.keys(['\x1b']); return true; } // an open question or plan: Esc closes it, as in the CLI
     // The rewind list: ↑/↓ move, Enter picks, Esc cancels, as in the CLI.
     if (tail && tail.querySelector('.card.rewind')) {
@@ -342,7 +352,7 @@
     if (tail && tail.querySelector('.card.ask [data-hov]')) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') return chatUi.askStep(e.key === 'ArrowDown' ? 1 : -1);
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return chatUi.askTab(e.key === 'ArrowRight' ? 1 : -1);
-      if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) return chatUi.askTab(e.shiftKey ? -1 : 1); // as in the CLI
+      // Tab stays the browser's (out of the reply box); ←/→ move between a multi-question card's tabs.
       if (e.key === 'Enter' && !e.shiftKey) { const b = tail.querySelector('.card.ask .focus[data-pick]'); if (b) { b.click(); return true; } }
     }
     return false;
@@ -384,6 +394,8 @@
     if (!e.shiftKey && !e.altKey && ((e.key === 'ArrowUp' && firstLine) || (e.key === 'ArrowDown' && lastLine))) {
       e.preventDefault(); document.getElementById('conversation').scrollBy({ top: e.key === 'ArrowUp' ? -80 : 80 });
     }
+    // Page Up / Page Down page the chat from the reply box; Ctrl+End jumps to the latest.
+    if (chat() && (e.key === 'PageUp' || e.key === 'PageDown' || (e.key === 'End' && e.ctrlKey))) { const c = document.getElementById('conversation'); e.preventDefault(); if (e.key === 'End') c.scrollTop = c.scrollHeight; else c.scrollBy({ top: (e.key === 'PageUp' ? -1 : 1) * c.clientHeight * 0.85 }); }
   }
   // Pasted files: a screenshot goes through main like Alt+V in the terminal; an image file copied in Explorer is attached
   // by path; any other file drops its path into the box. Plain text pastes as usual.
@@ -404,6 +416,12 @@
   pane.addEventListener('drop', (e) => { order().classList.remove('drop'); if (!chat() || !e.dataTransfer?.files.length) return; e.preventDefault(); e.stopPropagation(); addFiles([...e.dataTransfer.files]); box().focus(); });
 
   document.getElementById('term-order-input').addEventListener('paste', onPaste);
+  // Inserting a character scrolled the chat itself up ~45 px (the browser revealing the caret walks scroll containers),
+  // then the bring-to-latest below smooth-scrolled it back: every key bounced the thread. Its scroll is put back
+  // between the insert and the paint.
+  { let st = null; const c = () => document.getElementById('conversation');
+    document.getElementById('term-order-input').addEventListener('beforeinput', () => { const el = c(); st = el ? el.scrollTop : null; });
+    document.getElementById('term-order-input').addEventListener('input', () => { const el = c(); if (el && st != null && el.scrollTop !== st) el.scrollTop = st; st = null; }); }
   document.getElementById('term-order-input').addEventListener('input', onInput);
   document.getElementById('term-order-input').addEventListener('blur', () => setTimeout(closeAt, 150));
   document.getElementById('chat-at').addEventListener('mousedown', (e) => { const i = e.target.closest('.at-i'); if (i) { e.preventDefault(); pickAt(+i.dataset.k); } });
@@ -626,5 +644,12 @@
   box().addEventListener('keydown', (e) => { if (!dict || (e.key !== 'Escape' && e.key !== 'Enter')) return; e.preventDefault(); e.stopImmediatePropagation(); micStop(e.key === 'Escape'); }, true);
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
-  window.chatComposer = { send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, getDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  // A /command's description (a tooltip on it in a message): from the selected agent's catalog, fetched once if needed.
+  function cmdDesc(cmd) {
+    const a = agents.get(selectedId); if (!a) return '';
+    if (!catalog.has(a.cwd)) { api.send({ type: 'catalog', cwd: a.cwd }); return ''; }
+    const i = catalog.get(a.cwd).find(x => (x.insert || '').trim() === cmd || '/' + x.name === cmd);
+    const d = i ? i.desc || '' : ''; return d.length > 280 ? d.slice(0, 279) + '…' : d;
+  }
+  window.chatComposer = { cmdDesc, send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, getDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();

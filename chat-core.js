@@ -18,7 +18,7 @@ function toolView(ev, running) {
     case 'Glob': return { kind: 'search', verb: v('Listed', 'Listing'), target: a.pattern || a.glob || '', mono: true };
     case 'WebFetch': return { kind: 'web', verb: v('Fetched', 'Fetching'), target: hostOf(a.url), mono: false };
     case 'WebSearch': return { kind: 'web', verb: v('Searched the web', 'Searching the web'), target: a.query || '', mono: false };
-    case 'Task': case 'Agent': return { kind: 'agent', verb: v('Agent', 'Agent'), target: a.description || a.subagent_type || '', mono: false };
+    case 'Task': case 'Agent': return { kind: 'agent', verb: v('Agent', 'Running'), target: a.description || a.subagent_type || '', mono: false };
     case 'TodoWrite': return { kind: 'todo', verb: v('Updated the plan', 'Updating the plan'), target: '', mono: false };
     case 'AskUserQuestion': return { kind: 'ask', verb: v('Asked', 'Asking'), target: a.question || '', mono: false };
     case 'ExitPlanMode': return { kind: 'plan', verb: v('Proposed a plan', 'Proposing a plan'), target: '', mono: false };
@@ -369,6 +369,51 @@ function screenPermRows(rows) {
   if (q < 0 || rows.slice(q).some(r => /Enter\s+to\s+select/.test(r))) return null;
   let top = q - 1; while (top >= 0 && !/^\s*─{10,}/.test(rows[top])) top--; // ponytail: a long command can fill the screen; the rule is the dialog's top
   const body = rows.slice(top + 1, q).map(r => r.replace(/╌{3,}/g, '').replace(/^ /, '').replace(/\s+$/, '')).filter(r => r.trim() && !/^[\s─│]*$/.test(r) && !/^\s*Tip:/.test(r));
-  return { question: rows[q].trim(), body };
+  return { question: rows[q].replace(/^[\s─━]+/, '').trim(), body }; // the dialog's top rule, wrapped onto the question's row, isn't part of it
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };
+// A dialog the CLI draws without numbers (the folder trust check, /login), read off the bottom of its screen: its
+// title, its other lines, and its choices (the ❯ row and the rows aligned with it). null when the screen shows none
+// (a numbered menu is the question card's; the idle prompt box has no "Enter to confirm / Esc to cancel" under it).
+function screenChoice(rows) {
+  rows = rows || [];
+  const foot = rows.findLastIndex(r => /\b(Enter to (confirm|select|continue)|Esc to (cancel|go back|exit))\b/i.test(r));
+  if (foot < 0 || rows.slice(foot + 1).some(r => r.trim())) return null;
+  const top = rows.findLastIndex((r, i) => i < foot && /^\s*[─━]{10,}\s*$/.test(r));
+  const body = rows.slice(top + 1, foot);
+  if (body.some(r => /^\s*[❯›>]?\s*\d+\.\s/.test(r))) return null;
+  const f = body.findIndex(r => /^\s*❯\s+\S/.test(r)), col = f < 0 ? -1 : body[f].indexOf('❯') + 2;
+  let a = f, b = f; const opt = (r) => r.trim() && r.search(/\S/) === col;
+  if (f >= 0) { while (a > 0 && opt(body[a - 1])) a--; while (b < body.length - 1 && opt(body[b + 1])) b++; }
+  const options = f < 0 ? [] : body.slice(a, b + 1).map(r => r.replace(/^\s*❯?\s*/, '').trim());
+  const text = body.filter((r, i) => r.trim() && (f < 0 || i < a || i > b)).map(r => r.trim().replace(/^[·•]\s*/, ''));
+  if (!text.length && !options.length) return null;
+  if (options.some(o => /trust this folder/i.test(o))) return { title: 'Trust this folder?', lines: text.filter(t => /^([a-z]:[\\/]|~|\/)/i.test(t)), options, focus: f - a };
+  return { title: text[0].replace(/:$/, ''), lines: text.slice(1).filter(t => !/^security guide$/i.test(t)), options, focus: f < 0 ? -1 : f - a };
+}
+// /context's output (a glyph grid beside the totals) as data for a usage bar: the model, "43.3k/1m tokens", the %,
+// each category, and whatever follows the categories (MCP tool lists…). null for any other output.
+function contextUsage(text) {
+  const lines = String(text || '').split('\n');
+  if (!/^\s*Context Usage\s*$/i.test(lines[0] || '')) return null;
+  const strip = (l) => l.replace(/[⛀⛁⛶⛝⛿⛃⛂]\s?/g, '').trim();
+  let model = '', used = '', pct = 0, end = 1; const cats = [];
+  for (let i = 1; i < lines.length; i++) {
+    const l = strip(lines[i]);
+    let m;
+    if ((m = /^(.*?)\s*[·•]?\s*(\d[\d.]*[km]?\/[\d.]+[km]? tokens)\s*\((\d+(?:\.\d+)?)%\)/i.exec(l))) { used = m[2]; pct = +m[3]; if (m[1] && !model) model = m[1]; }
+    else if ((m = /^(.+?):\s*([\d.]+[km]?)(?: tokens)?\s*\((\d+(?:\.\d+)?)%\)$/i.exec(l))) cats.push({ name: m[1], size: m[2], pct: +m[3] });
+    else if (l && !model && !/^claude-|usage by category/i.test(l)) model = l;
+    if (l || i < 3) end = i + 1;
+    if (!l && cats.length) break;
+  }
+  return used ? { model, used, pct, cats, rest: lines.slice(end).join('\n').trim() } : null;
+}
+// A permission menu option as a button label. The CLI words them as sentences ("No, and tell Claude what to do
+// differently (esc)"); the card's buttons say what they do.
+function permLabel(l) {
+  if (/^(no|deny)\b/i.test(l)) return 'Decline';
+  if (/^yes$/i.test(l)) return 'Allow';
+  if (/^yes,?\s+(and\s+)?(allow|don'?t ask)/i.test(l)) return /don'?t ask/i.test(l) ? "Don't ask again" : /edits/i.test(l) ? 'Allow all edits' : 'Always allow';
+  return l;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = { contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };

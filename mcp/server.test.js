@@ -51,11 +51,11 @@ test('initialize returns protocol version and tools capability', async () => {
   });
 });
 
-test('tools/list returns the seven tools', async () => {
+test('tools/list returns the seven browser tools and three terminal tools', async () => {
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 7);
+    assert.strictEqual(json.result.tools.length, 10);
   });
 });
 
@@ -138,4 +138,17 @@ test('malformed JSON returns a parse error', async () => {
     const json = await res.json();
     assert.strictEqual(json.error.code, -32700);
   });
+});
+
+test('terminal_* tools read the Terminals pane, for any agent token', async () => {
+  const terminals = { list: () => 'FL Backend — running', read: (n, o) => `${n}:${o.lines}:${o.grep}`, restart: (n) => `Restarted "${n}".` };
+  const server = createMcpServer({ resolveActions: () => null, getTerminals: () => terminals });
+  await server.start();
+  try {
+    const token = server.mintToken(1);
+    const call = (name, args) => rpc(server, token, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name, arguments: args } }).then(r => r.json.result);
+    assert.strictEqual((await call('terminal_list', {})).content[0].text, 'FL Backend — running');
+    assert.strictEqual((await call('terminal_read', { name: 'FL Backend', lines: 50, grep: 'err' })).content[0].text, 'FL Backend:50:err');
+    assert.strictEqual((await call('terminal_read', {})).isError, true);
+  } finally { await server.stop(); }
 });

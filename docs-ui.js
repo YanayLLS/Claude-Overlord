@@ -59,7 +59,7 @@
     btn.id = 'doc-toggle'; btn.className = 'hdr-btn'; btn.title = 'Documents: markdown files beside the terminal (Ctrl+Shift+D)';
     btn.innerHTML = `${ICON.doc}<b id="doc-toggle-n"></b>`;
     const world = $('hdr-world');
-    if (world) world.insertAdjacentElement('afterend', btn); else $('header').insertBefore(btn, $('addBtn'));
+    if (world) world.insertAdjacentElement('afterend', btn); else $('header').insertBefore(btn, $('account-btn'));
     btn.onclick = toggle;
 
     refs = { col, handle, btn, tablist: col.querySelector('#doc-tablist'), scroll: col.querySelector('#doc-scroll'), view: col.querySelector('#doc-view'), meta: col.querySelector('#doc-meta'), empty: col.querySelector('#doc-empty'), updated: col.querySelector('#doc-updated'), followBtn: col.querySelector('#doc-follow-btn'),

@@ -229,3 +229,39 @@ test('screenPermRows: a sub-agent\'s permission dialog with a long command keeps
   assert.strictEqual(screenPermRows(['─'.repeat(40), ' Do you want to keep it?', ' ❯ 1. Yes', '   2. No', ' Enter to select · ↑/↓ to navigate · Esc to cancel']), null);
   assert.strictEqual(screenPermRows(['just a reply']), null);
 });
+
+test('screenPermRows: the dialog rule wrapped onto the question row is not part of the question', () => {
+  const { screenPermRows } = require('./chat-core');
+  assert.strictEqual(screenPermRows(['x', '─'.repeat(40) + 'Do you want to create hello.txt?', ' ❯ 1. Yes', '   2. No']).question, 'Do you want to create hello.txt?');
+});
+
+test('permLabel: the CLI\'s long permission options read as short buttons', () => {
+  const { permLabel } = require('./chat-core');
+  assert.strictEqual(permLabel('Yes'), 'Allow');
+  assert.strictEqual(permLabel('Yes, allow all edits during this session (shift+tab)'), 'Allow all edits');
+  assert.strictEqual(permLabel("Yes, and don't ask again for npm test commands in C:\proj"), "Don't ask again");
+  assert.strictEqual(permLabel('No, and tell Claude what to do differently (esc)'), 'Decline');
+  assert.strictEqual(permLabel('Deny'), 'Decline');
+  assert.strictEqual(permLabel('Yes, and auto-accept edits'), 'Yes, and auto-accept edits');
+});
+
+test('screenChoice: the CLI\'s unnumbered dialogs (folder trust, /login) as a title, lines and choices', () => {
+  const { screenChoice } = require('./chat-core');
+  const trust = ['', '─'.repeat(60), ' Accessing workspace:', '', ' C:/Users/me/proj', '', ' Quick safety check: Is this a project you created or one you trust?', '', ' Security guide', '', ' ❯ No, exit', '   Yes, I trust this folder', '', ' Enter to confirm · Esc to cancel'];
+  assert.deepStrictEqual(screenChoice(trust), { title: 'Trust this folder?', lines: ['C:/Users/me/proj'], options: ['No, exit', 'Yes, I trust this folder'], focus: 0 });
+  const login = ['─'.repeat(60), '  Login', '', '  · Opening browser to sign in…', '', '  Esc to cancel'];
+  assert.deepStrictEqual(screenChoice(login), { title: 'Login', lines: ['Opening browser to sign in…'], options: [], focus: -1 });
+  assert.strictEqual(screenChoice(['❯ 1. Yes', '  2. No', 'Esc to cancel']), null); // numbered: the question card's
+  assert.strictEqual(screenChoice(['some reply', '─'.repeat(60), '❯ ', '─'.repeat(60), '  ? for shortcuts']), null); // the idle prompt box
+});
+
+test('contextUsage: /context output as model, total and categories (the glyph grid dropped)', () => {
+  const { contextUsage } = require('./chat-core');
+  const t = 'Context Usage\n⛀ ⛁ ⛀   Opus 5.5\n⛀ ⛶ ⛶   claude-opus-5-5\n⛶ ⛶ ⛶   43.3k/1m tokens (4%)\n⛶ ⛶ ⛶\n⛶ ⛶ ⛶   Estimated usage by category\n⛶ ⛶ ⛶   ⛁ System prompt: 3.1k tokens (0.3%)\n⛶ ⛝ ⛝   ⛁ Skills: 9.6k tokens (1.0%)\n            ⛶ Free space: 923.7k (92.4%)\n            ⛝ Autocompact buffer: 33k tokens (3.3%)\n\nAuto-compact window: 1m tokens\n\nLoaded\n├ a: 156 tokens';
+  const u = contextUsage(t);
+  assert.deepStrictEqual({ model: u.model, used: u.used, pct: u.pct }, { model: 'Opus 5.5', used: '43.3k/1m tokens', pct: 4 });
+  assert.deepStrictEqual(u.cats, [{ name: 'System prompt', size: '3.1k', pct: 0.3 }, { name: 'Skills', size: '9.6k', pct: 1 }, { name: 'Free space', size: '923.7k', pct: 92.4 }, { name: 'Autocompact buffer', size: '33k', pct: 3.3 }]);
+  assert.match(u.rest, /^Auto-compact window/);
+  assert.strictEqual(contextUsage('Total cost: $0.12'), null);
+  assert.deepStrictEqual((({ model, used }) => ({ model, used }))(contextUsage('Context Usage\n⛁ ⛀   claude-opus-5-5 · 43.7k/1m tokens (4%)')), { model: 'claude-opus-5-5', used: '43.7k/1m tokens' });
+});

@@ -18,6 +18,16 @@ const TOOL_SCHEMAS = [
     inputSchema: { type: 'object', properties: { js: str('A JavaScript expression') }, required: ['js'] } },
 ];
 
+// The Terminals pane's tabs (term-pane.js): shared by every agent, not per-agent like the browser.
+const TERMINAL_SCHEMAS = [
+  { name: 'terminal_list', description: 'List the dev-server terminals in the Terminals pane of Overlord (tabs opened by scripts like start-full.bat): name, running or exit code, folder, command.',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'terminal_read', description: 'Read what a Terminals-pane terminal printed (plain text, colours stripped). Use it to debug a local server: its errors, stack traces, request logs.',
+    inputSchema: { type: 'object', properties: { name: str('Terminal name from terminal_list, e.g. "FL Backend (S3-wired)"'), lines: { type: 'number', description: 'Last N lines (default 200, max 5000)' }, grep: str('Only lines matching this regex (case-insensitive)') }, required: ['name'] } },
+  { name: 'terminal_restart', description: 'Restart a Terminals-pane terminal: kill its process and run its command again (e.g. a backend that does not hot-reload).',
+    inputSchema: { type: 'object', properties: { name: str('Terminal name from terminal_list') }, required: ['name'] } },
+];
+
 const text = (t) => ({ content: [{ type: 'text', text: String(t) }] });
 const fail = (t) => ({ content: [{ type: 'text', text: String(t) }], isError: true });
 
@@ -53,4 +63,15 @@ function createDispatcher(actions) {
   };
 }
 
-module.exports = { TOOL_SCHEMAS, createDispatcher };
+function terminalCall(terminals, name, args = {}) {
+  try {
+    if (!terminals) return fail('The Terminals pane is not running.');
+    if (name === 'terminal_list') return text(terminals.list());
+    const g = requiredGetter(args, name);
+    if (name === 'terminal_read') return text(terminals.read(g('name'), { lines: Number(args.lines) || 200, grep: typeof args.grep === 'string' && args.grep ? args.grep : undefined }));
+    if (name === 'terminal_restart') return text(terminals.restart(g('name')));
+    return fail(`Unknown tool: ${name}`);
+  } catch (e) { return fail(e && e.message ? e.message : String(e)); }
+}
+
+module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, createDispatcher, terminalCall };

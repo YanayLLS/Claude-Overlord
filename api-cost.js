@@ -63,9 +63,24 @@ function jsonlFiles(dir, since, out) {
   return out;
 }
 
-// Reads new transcript lines under root. Async so the first (large) scan doesn't block the main process.
-async function scanCosts(root, now) {
-  const since = now - KEEP_MS;
+// The per-file cache on disk too: without it every app start re-read 15 days of transcripts (16 GB on a busy machine)
+// and held the main process for minutes. With it a start reads only what was written since the last scan.
+let cacheLoaded = false;
+async function loadCache(cachePath) {
+  if (cacheLoaded || !cachePath) return; cacheLoaded = true;
+  try { const j = JSON.parse(await fs.promises.readFile(cachePath, 'utf8')); if (j && j.v === 1) for (const [p, r] of Object.entries(j.files || {})) if (!files.has(p)) files.set(p, { size: r.s, rows: r.r.map(([k, t, m, c]) => ({ k, t, m, c })) }); } catch {}
+}
+async function saveCache(cachePath) {
+  if (!cachePath) return;
+  const out = { v: 1, files: {} }; for (const [p, r] of files) out.files[p] = { s: r.size, r: r.rows.map(x => [x.k, x.t, x.m, x.c]) };
+  try { await fs.promises.mkdir(path.dirname(cachePath), { recursive: true }); await fs.promises.writeFile(cachePath + '.tmp', JSON.stringify(out)); await fs.promises.rename(cachePath + '.tmp', cachePath); } catch {}
+}
+
+// Reads new transcript lines under root. Async, and it hands the main loop back every ~8 ms, so even a first full scan
+// never stalls the app. cachePath (optional): where the per-file cache lives between runs.
+async function scanCosts(root, now, cachePath) {
+  await loadCache(cachePath);
+  const since = now - KEEP_MS; let changed = false;
   const found = jsonlFiles(root, since, []);
   const keep = new Set(found.map(([p]) => p));
   for (const p of files.keys()) if (!keep.has(p)) files.delete(p); // transcripts that aged out of the window (rows were filtered, entries never were)
@@ -80,10 +95,12 @@ async function scanCosts(root, now) {
     } catch { continue; }
     const end = buf.lastIndexOf(10); // a half-written last line waits for the next scan
     if (end < 0) continue;
-    for (const line of buf.toString('utf8', 0, end).split('\n')) { const r = parseLine(line); if (r) rec.rows.push(r); }
-    rec.size += end + 1;
+    let at = 0, mark = Date.now();
+    while (at < end) { let nl = buf.indexOf(10, at); if (nl < 0 || nl > end) nl = end; const r = parseLine(buf.toString('utf8', at, nl)); if (r) rec.rows.push(r); at = nl + 1; if (Date.now() - mark > 8) { await new Promise(res => setImmediate(res)); mark = Date.now(); } }
+    rec.size += end + 1; changed = true;
     rec.rows = rec.rows.filter(r => r.t >= since);
   }
+  if (changed) await saveCache(cachePath);
 }
 
 // Total $ for responses in [start, end], optionally only models whose id contains `model`.
@@ -115,4 +132,4 @@ async function windowCosts(root, wins) {
   return usd;
 }
 
-module.exports = { KEEP_MS, windowCosts, priceFor, usageCost, parseLine, scanCosts, sumCost, _files: files };
+module.exports = { KEEP_MS, windowCosts, priceFor, usageCost, parseLine, scanCosts, sumCost, _files: files, _resetCache: () => { cacheLoaded = false; } };

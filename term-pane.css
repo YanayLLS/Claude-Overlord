@@ -1,0 +1,29 @@
+/* Terminals pane (term-pane-ui.js) */
+#tp-btn { position: relative; }
+#tp-btn #tp-count { font-size: 11px; color: var(--dim); }
+#tp-btn.live #tp-count { color: var(--green); }
+#tp-btn.active { background: var(--accent-soft); }
+#tp-btn.pulse::after { content: ''; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+#tp-dock { display: none; flex-direction: column; flex-shrink: 0; border-top: 1px solid var(--border); background: var(--term-bg); position: relative; min-height: 0; }
+#tp-dock.open { display: flex; }
+#tp-grip { position: absolute; top: -3px; left: 0; right: 0; height: 6px; cursor: ns-resize; z-index: 2; }
+#tp-bar { display: flex; align-items: center; height: 34px; padding: 0 6px; gap: 4px; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
+#tp-tabs { display: flex; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+#tp-hide { background: none; border: 0; color: var(--dim); cursor: pointer; padding: 4px; border-radius: var(--r-sm); display: inline-flex; }
+#tp-hide:hover { background: var(--hover-strong); color: var(--text); }
+
+.tp-tab { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 0 10px; border-radius: var(--r-sm); color: var(--dim); font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.tp-tab:hover { background: var(--hover); color: var(--text); }
+.tp-tab.on { background: var(--hover-strong); color: var(--text); }
+.tp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--surface2); flex-shrink: 0; }
+.tp-tab.run .tp-dot { background: var(--green); }
+.tp-tab.fail .tp-dot { background: var(--red); }
+.tp-tab.stop .tp-name, .tp-tab.fail .tp-name { opacity: .7; }
+.tp-act { background: none; border: 0; color: inherit; cursor: pointer; padding: 3px; border-radius: 4px; display: inline-flex; opacity: 0; }
+.tp-act .ic { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tp-tab:hover .tp-act, .tp-tab.on .tp-act, .tp-act:focus-visible { opacity: .75; }
+.tp-act:hover { opacity: 1; background: var(--hover-strong); }
+
+#tp-body { position: relative; flex: 1; min-height: 0; }
+.tp-term { position: absolute; inset: 0; padding: 4px 0 4px 8px; visibility: hidden; }

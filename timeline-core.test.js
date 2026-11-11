@@ -185,3 +185,8 @@ test('a local command (/rename) shows as its /name line, its output as a sub not
   assert.deepStrictEqual(parse({ type: 'system', subtype: 'local_command', content: '<local-command-stdout>Session renamed to: Rendered chat</local-command-stdout>' }), [{ type: 'note', ts: null, kind: 'sub', text: 'Session renamed to: Rendered chat' }]);
   assert.strictEqual(parse({ type: 'system', subtype: 'local_command', content: '<local-command-stdout></local-command-stdout>' }), null);
 });
+
+test('local command output loses its colour codes and keeps its lines', () => {
+  const l = JSON.stringify({ type: 'system', subtype: 'local_command', timestamp: '2026-01-01T00:00:00Z', content: '<local-command-stdout>\x1b[38;2;1;2;3mContext\x1b[39m usage\n  \x1b[1mSkills\x1b[22m: 9k   </local-command-stdout>' });
+  assert.deepStrictEqual(parseLineForTimeline(l, (x) => x, () => false), [{ type: 'note', ts: '2026-01-01T00:00:00Z', kind: 'sub', text: 'Context usage\n  Skills: 9k' }]);
+});

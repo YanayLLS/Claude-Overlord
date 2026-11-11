@@ -86,6 +86,18 @@ function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIME
     return point;
   }
 
+  // What you watch in the pane: a cursor glides to the target, then a ripple marks the click (a ring marks a field being
+  // typed into). Drawn in the page as a pointer-events:none overlay; a failure to draw never blocks the action.
+  const CURSOR_MS = 320;
+  const cursorSource = (x, y, ring) => `(() => { const id = '__ovl_cursor'; let c = document.getElementById(id);
+    if (!c) { c = document.createElement('div'); c.id = id; c.style.cssText = 'position:fixed;left:0;top:0;width:22px;height:22px;z-index:2147483647;pointer-events:none;transition:transform ${CURSOR_MS}ms cubic-bezier(.2,.8,.2,1),opacity .3s;transform:translate(' + (innerWidth / 2) + 'px,' + (innerHeight / 2) + 'px)';
+      c.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24"><path d="M4 3l7 17 2.5-7L21 10.5z" fill="#d97757" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>'; document.documentElement.appendChild(c); c.getBoundingClientRect(); }
+    c.style.opacity = '1'; c.style.transform = 'translate(${x - 4}px,${y - 3}px)'; clearTimeout(c._t); c._t = setTimeout(() => { c.style.opacity = '0'; }, 2500);
+    setTimeout(() => { const d = document.createElement('div'); d.style.cssText = 'position:fixed;left:${x}px;top:${y}px;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;z-index:2147483646;pointer-events:none;border:2px solid #d97757;transition:transform .45s ease-out,opacity .45s ease-out'; document.documentElement.appendChild(d); requestAnimationFrame(() => { d.style.transform = 'scale(${ring ? 2.2 : 4})'; d.style.opacity = '0'; }); setTimeout(() => d.remove(), 500); }, ${CURSOR_MS}); return true; })()`;
+  async function showCursor(w, { x, y }, ring) {
+    try { await w.executeJavaScript(cursorSource(Math.round(x), Math.round(y), ring), true); await new Promise((res) => setTimeout(res, CURSOR_MS + 40)); } catch {}
+  }
+
   async function clickAt(w, { x, y }) {
     const base = { x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 };
     w.sendInputEvent({ type: 'mouseDown', ...base });
@@ -94,13 +106,17 @@ function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIME
 
   async function click(ref) {
     const w = wc();
-    await clickAt(w, await pointFor(ref));
+    const pt = await pointFor(ref);
+    await showCursor(w, pt, false);
+    await clickAt(w, pt);
     return `Clicked ${ref}`;
   }
 
   async function type(ref, text, submit) {
     const w = wc();
-    await clickAt(w, await pointFor(ref));
+    const pt = await pointFor(ref);
+    await showCursor(w, pt, true);
+    await clickAt(w, pt);
     for (const ch of String(text)) w.sendInputEvent({ type: 'char', keyCode: ch });
     if (submit) w.sendInputEvent({ type: 'char', keyCode: 'Return' });
     return `Typed into ${ref}${submit ? ' and submitted' : ''}`;

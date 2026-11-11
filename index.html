@@ -228,21 +228,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   cursor:pointer; transition:background .15s;
 }
 .badge-perm:hover { background:rgba(249,226,175,.2); }
-#addBtn {
-  font-family:inherit; font-size:11px; padding:4px 12px; color:var(--title-bg); border:none; cursor:pointer;
-  font-weight:600; letter-spacing:.3px; border-radius:4px;
-  background:var(--accent); transition:opacity .15s;
-}
-#addBtn:hover { opacity:.85; }
-#addBtn:active { opacity:.7; }
-#featBtn {
-  font-family:inherit; font-size:11px; padding:4px 12px; cursor:pointer;
-  font-weight:600; letter-spacing:.3px; border-radius:4px;
-  color:var(--accent); background:transparent; border:1px solid var(--accent);
-  transition:background .15s, color .15s;
-}
-#featBtn:hover { background:var(--accent); color:var(--title-bg); }
-#featBtn:active { opacity:.8; }
 .hdr-btn {
   font-family:inherit; font-size:14px; padding:4px 6px; background:transparent;
   color:var(--dim); border:none; border-radius:4px; cursor:pointer;
@@ -1257,6 +1242,7 @@ button:focus-visible { outline-offset:0; }
 <link rel="stylesheet" href="./docs.css" />
 <link rel="stylesheet" href="./chat.css" />
 <link rel="stylesheet" href="./folders.css" />
+<link rel="stylesheet" href="./term-pane.css" />
 </head>
 <body>
 <div id="app">
@@ -1276,8 +1262,6 @@ button:focus-visible { outline-offset:0; }
       <button class="hdr-btn" id="hdr-more-btn" onclick="toggleHdrMore(event)" title="More"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
       <div id="hdr-more"><button class="hdr-menu-item" id="perf-btn" onclick="togglePerfMenu(event)" aria-haspopup="dialog" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span>Performance</span></button><button class="hdr-menu-item" id="zoom-btn" onclick="toggleZoomMenu(event)" aria-haspopup="dialog" aria-expanded="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3M11 8v6M8 11h6"/></svg><span>UI size <b id="zoom-btn-val">100%</b></span></button><button class="hdr-menu-item" onclick="toggleHelp()"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg><span>Keyboard shortcuts</span></button><button class="hdr-menu-item" onclick="window.api.send({type:'fullRestart'})"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg><span>Restart app</span></button></div>
     </div>
-    <button id="addBtn" onclick="browseAndAdd()" title="Browse for folder (Ctrl+N for quick add)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Agent</button>
-    <button id="featBtn" onclick="openNewFeature()" title="Create a feature: one branch across multiple repos"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>Feature</button>
     <button id="account-btn" class="no-account" onclick="showAccountMenu(event)" title="Switch account" aria-label="Account"></button>
   </div>
   <div id="content">
@@ -1289,6 +1273,7 @@ button:focus-visible { outline-offset:0; }
       <span id="filter-count"></span>
       <button id="filter-close" onclick="closeFilter()" aria-label="Clear search">&times;</button>
       <button id="filter-mode" onclick="toggleFilterMenu(event)" onmouseenter="filterMenuHoverIn(event)" onmouseleave="filterMenuHoverOut()" aria-haspopup="menu" aria-expanded="false" title="Filter agents"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span id="filter-mode-label">All</span><span id="filter-mode-clear" onclick="event.stopPropagation();setFilterMode('all')" role="button" aria-label="Clear filter" title="Clear filter" hidden>&times;</span></button>
+      <button id="new-btn" onclick="toggleNewMenu(event)" aria-haspopup="menu" aria-expanded="false" title="New"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
     </div>
     <div id="world-attn"></div>
     <div id="list"></div>
@@ -1369,6 +1354,11 @@ button:focus-visible { outline-offset:0; }
         <span>CPU saving (close idle agents' Claude until you open them)</span>
       </label>
       <div class="settings-hint">An agent you don't have open gets its Claude process closed the moment it's idle: not working, no subagent and no shell command running (☾ on its card). Its card and chat stay. Opening it, or sending it a message, resumes the same session in a few seconds. A sleeping agent isn't reachable from Remote Control until it's resumed.</div>
+      <label class="settings-label">
+        <input type="checkbox" id="chk-terminals-in-app" checked onchange="api.send({ type: 'saveSettings', settings: { terminalsInApp: this.checked } })" />
+        <span>Dev-server terminals inside Overlord</span>
+      </label>
+      <div class="settings-hint">Off: scripts like start-full.bat open their own console windows.</div>
       <label class="settings-label">
         <input type="checkbox" id="chk-english-focus" checked onchange="api.send({ type: 'saveSettings', settings: { englishOnFocus: this.checked } })" />
         <span>Switch the keyboard to English when Overlord gets focus (Windows)</span>
@@ -1715,6 +1705,7 @@ button:focus-visible { outline-offset:0; }
 <script src="./chat-core.js"></script>
 <script src="./chat-ui.js"></script>
 <script src="./chat-composer.js"></script>
+<script src="./term-pane-ui.js"></script>
 <script>
 document.querySelector('#header h1').title = api.version ? 'Overlord v' + api.version : ''; // version in the tooltip, not the title bar
 
@@ -1791,6 +1782,29 @@ function filterMenuHoverIn(e) {
 }
 function filterMenuHoverOut() {
   if (document.getElementById('filter-menu')?.dataset.hover) filterMenuHoverTimer = setTimeout(closeFilterMenu, 250);
+}
+// Sidebar + : new agent / new feature, created where they'll appear.
+function toggleNewMenu(e) {
+  e.stopPropagation();
+  if (document.getElementById('new-menu')) { closeNewMenu(); return; }
+  const m = document.createElement('div');
+  m.id = 'new-menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = `<button role="menuitem" data-act="agent"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Agent</span><span class="fm-n">Ctrl+N</span></button>`
+    + `<button role="menuitem" data-act="feature"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Feature</span></button>`;
+  m.onclick = (ev) => { const b = ev.target.closest('button[data-act]'); if (!b) return; closeNewMenu(); b.dataset.act === 'agent' ? browseAndAdd() : openNewFeature(); };
+  m.onkeydown = (ev) => { if (ev.key === 'Escape') { closeNewMenu(); document.getElementById('new-btn').focus(); } };
+  const r = e.currentTarget.getBoundingClientRect();
+  m.style.top = (r.bottom + 4) + 'px'; m.style.right = (innerWidth - r.right) + 'px';
+  document.body.appendChild(m);
+  e.currentTarget.setAttribute('aria-expanded', 'true');
+  m.querySelector('button').focus();
+  setTimeout(() => document.addEventListener('mousedown', closeNewMenuOutside));
+}
+function closeNewMenuOutside(ev) { if (!ev.target.closest('#new-menu, #new-btn')) closeNewMenu(); }
+function closeNewMenu() {
+  document.getElementById('new-menu')?.remove();
+  document.getElementById('new-btn')?.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('mousedown', closeNewMenuOutside);
 }
 function closeFilterMenuOutside(ev) { if (!ev.target.closest('#filter-menu, #filter-mode')) closeFilterMenu(); }
 function closeFilterMenu() {
@@ -2680,6 +2694,7 @@ function setTheme(name, persist = true) {
   document.documentElement.dataset.theme = currentTheme;
   try { localStorage.setItem('theme', currentTheme); } catch {}
   for (const [, x] of xterms) x.terminal.options.theme = xtermTheme(currentTheme);
+  if (window.TermPane) TermPane.setTheme(currentTheme);
   const sel = document.getElementById('sel-theme'); if (sel) sel.value = currentTheme;
   api.send({ type: 'setTheme', theme: currentTheme });
   if (persist) api.send({ type: 'saveSettings', settings: { theme: currentTheme } });
@@ -3114,7 +3129,7 @@ function render() {
   if (_listPressed) { _renderHeld = true; return; }
   const list = document.getElementById('list');
   if (agents.size === 0 && knownProjects.size === 0) {
-    list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+ Agent</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
+    list.innerHTML = '<div class="empty"><div class="empty-icon">&#x25A3;</div><div class="empty-title">No agents running</div><div class="empty-sub">Click <b>+</b> or press <b>Ctrl+N</b> to start</div><div class="empty-sub">Press <b>?</b> for keyboard shortcuts</div></div>';
     document.getElementById('headerBadges').innerHTML = '';
     document.title = 'Overlord';
     if (worldView) worldSync();
@@ -3707,6 +3722,7 @@ function createXterm(id) {
     return true;
   });
   xterms.set(id, { id, terminal, fitAddon, searchAddon, el, bidiOff, mentionSync });
+  pauseWhenHidden(xterms.get(id));
   const pend = pendingTermData.get(id);
   if (pend) { pendingTermData.delete(id); terminal.write(pend, () => terminal.scrollToBottom()); }
   sendResize(id, xterms.get(id)); // pty spawns at 120x30 — hand it the real width now
@@ -3795,10 +3811,33 @@ function fitPreservingScroll(x) {
   if (x.id != null) sendResize(x.id, x);
 }
 
+// Performance: a terminal you can't see doesn't render. Terminals are hidden with visibility (so they keep their size),
+// which xterm's own visibility check can't see: every agent's terminal re-rendered on each redraw of its CLI's spinner,
+// and each render measured glyphs, forcing a layout of the whole window (14 agents ≈ half the main thread, the app's
+// low fps). Output is still parsed into the buffer (the chat reads the screen from it); the view repaints when shown.
+function termShown(x) { return !!(x && x.el && x.el.checkVisibility && x.el.checkVisibility({ visibilityProperty: true })); }
+function pauseWhenHidden(x) {
+  const rs = x && x.terminal && x.terminal._core && x.terminal._core._renderService;
+  if (!rs || typeof rs._handleIntersectionChange !== 'function' || rs._ovPatched) return;
+  const orig = rs._handleIntersectionChange.bind(rs); rs._ovPatched = true;
+  rs._handleIntersectionChange = (e) => orig(termShown(x) ? e : { isIntersecting: false, intersectionRatio: 0 });
+  // The selection service redraws every row on its own (it bypasses the pause): a paused terminal keeps the selection and
+  // draws it when shown.
+  const sel = rs.handleSelectionChanged && rs.handleSelectionChanged.bind(rs);
+  if (sel) rs.handleSelectionChanged = (st, en, col) => { if (!rs._isPaused) return sel(st, en, col); if (rs._selectionState) { rs._selectionState.start = st; rs._selectionState.end = en; rs._selectionState.columnSelectMode = col; } rs._needsSelectionRefresh = true; };
+  x._pauseSync = () => { const show = termShown(x); if (show === x._wasShown) return; x._wasShown = show; orig({ isIntersecting: show, intersectionRatio: show ? 1 : 0 }); };
+  x._pauseSync();
+}
+// Every xterm, the Terminals pane's too (term-pane-ui.js hides its tabs the same way): paused while it can't be seen.
+const _otherTerms = new Set();
+if (window.Terminal && !Terminal.prototype._ovOpen) { const open = Terminal.prototype.open; Terminal.prototype._ovOpen = true; Terminal.prototype.open = function (parent) { open.call(this, parent); const x = { terminal: this, el: parent }; setTimeout(() => { pauseWhenHidden(x); if (x._pauseSync) _otherTerms.add(x); }, 0); this.onDispose?.(() => _otherTerms.delete(x)); }; }
+function syncTermPause() { for (const x of xterms.values()) x._pauseSync && x._pauseSync(); for (const x of _otherTerms) x._pauseSync(); }
+setInterval(syncTermPause, 500); // tab switches, the chat's split/peek, window minimise: caught within half a second
 function showXterm(id) {
   ghostClear(); // stale suggestion from the previously-shown agent
   // visibility, not display — a display:none xterm loses its dims and reflows on re-show
   for (const [xid, x] of xterms) x.el.style.visibility = xid === id ? 'visible' : 'hidden';
+  syncTermPause();
   const x = xterms.get(id);
   if (x) { x.mentionSync?.(); setTimeout(() => {
     if (!xterms.has(id)) return;
@@ -4138,7 +4177,7 @@ function jumpPrompt(dir) {
 // ── Terminal / conversation tabs ───────────────────────
 function switchTermTab(tab) {
   if (tab !== termTab && selectedId != null) chatComposer.carryDraft(termTab, tab); // what you were typing comes along
-  termTab = tab; askFlip = false;
+  termTab = tab; askFlip = false; setTimeout(syncTermPause, 0); // the terminal shown or hidden: its renderer follows
   try { localStorage.setItem('termView', tab); } catch {}
   document.getElementById('tab-terminal').classList.toggle('active', tab === 'terminal');
   document.getElementById('tab-conversation').classList.toggle('active', tab === 'conversation');
@@ -4195,7 +4234,10 @@ function handleTimelineEvent(msg) {
 // A burst of events (a restart reading a transcript's backlog) paints once per frame, not once per event: each paint
 // walks the whole thread, so the chat redrew for seconds.
 let _convPending = false;
-function scheduleConv() { if (!_convPending) { _convPending = true; requestAnimationFrame(() => { _convPending = false; if (termTab === 'conversation') renderConversation(); }); } }
+// A streaming agent writes dozens of events a second: the chat redraws at most every 100 ms (each redraw lays out the
+// whole thread), still on a frame, so a burst costs a few redraws instead of one per event.
+let _convLast = 0;
+function scheduleConv() { if (_convPending) return; _convPending = true; const go = () => requestAnimationFrame(() => { _convPending = false; _convLast = performance.now(); if (termTab === 'conversation') renderConversation(); }); const wait = 100 - (performance.now() - _convLast); if (wait > 0) setTimeout(go, wait); else go(); }
 
 // ── Global Search ──
 let _searchTimer = null;
@@ -4318,6 +4360,7 @@ focusAgent = function(id) {
   if (window.chatComposer) chatComposer.carryDraft(termTab === 'terminal' ? 'conversation' : 'terminal', termTab);
   api.send({ type: 'focusAgent', id });
   openTerm(id);
+  syncPreview(); // the web preview shows this agent's browser (this override had dropped it: the pane sat on "Waiting for localhost…")
   // Scroll selected card into view (for keyboard nav with long lists)
   const sel = document.querySelector('.agent.selected');
   if (sel) sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -4638,7 +4681,7 @@ function handleAgentMsg(msg) {
     case 'focused': selectedId = msg.id; scheduleRender(); break;
     case 'focusFromNotification': focusAgent(msg.id); break;
     case 'settings': applySettings(msg.settings); renderBookmarks(msg.settings.bookmarks || []); break;
-    case 'toast': showToast(msg.text); break;
+    case 'toast': showToast(msg.text + (msg.redo ? ' · Redo' : ''), msg.redo ? () => api.send({ type: 'undoTurn', cwd: msg.redo.cwd, edits: msg.redo.edits }) : undefined); break; // Undo this turn: Redo on the toast
     case 'setupState': onSetupState(msg); break;
     case 'setupProgress': onSetupProgress(msg); break;
     case 'setupDone': su.result[msg.id] = msg.ok ? 'ok' : (msg.error || 'unknown error'); su.url[msg.id] = msg.url; break; // setupState follows and renders
@@ -5320,6 +5363,7 @@ function applySettings(s) {
     if (chk) chk.checked = bypassPermissions;
   }
   if (s.remoteControl !== undefined) document.getElementById('chk-remote-control').checked = s.remoteControl;
+  document.getElementById('chk-terminals-in-app').checked = s.terminalsInApp !== false;
   if (s.englishOnFocus !== undefined) document.getElementById('chk-english-focus').checked = s.englishOnFocus;
   if (s.cpuSaving !== undefined) document.getElementById('chk-cpu-saving').checked = s.cpuSaving;
   if (s.dictationHasKey !== undefined) { document.getElementById('inp-dict-key').placeholder = s.dictationHasKey ? 'Cloud key saved · paste a new one to replace it' : 'This computer · paste an OpenAI or Groq key for cloud'; document.getElementById('dict-local-btn').style.display = s.dictationHasKey ? '' : 'none'; }

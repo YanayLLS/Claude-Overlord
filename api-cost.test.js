@@ -66,3 +66,24 @@ console.log('api-cost ok');
     console.log('api-cost prune ok');
   })();
 }
+
+// scanCosts keeps its per-file cache on disk: a new run (an app restart) reads only bytes written since.
+{
+  const os = require('os'), fs = require('fs'), path = require('path');
+  const { scanCosts, sumCost, _files, _resetCache } = require('./api-cost');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-cache-')), cache = path.join(root, 'cache', 'cost.json'), f = path.join(root, 'p', 's.jsonl');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  const now = Date.now(), ts = new Date(now - 60000).toISOString();
+  const row = (id) => JSON.stringify({ type: 'assistant', timestamp: ts, requestId: id, message: { id, model: 'claude-opus-5-5', usage: { output_tokens: 1e6 } } });
+  fs.writeFileSync(f, row('a') + '\n');
+  process.once('beforeExit', () => (async () => { // after the tests above (they share the module cache)
+    await scanCosts(root, now, cache);
+    assert.ok(fs.existsSync(cache), 'cache written');
+    _files.clear(); _resetCache();
+    fs.appendFileSync(f, row('b') + '\n');
+    await scanCosts(root, now, cache);
+    assert.strictEqual(_files.get(f).rows.length, 2, 'row a from the cache, row b read fresh');
+    assert.strictEqual(sumCost(now - 3600000, now, ''), 40);
+    fs.rmSync(root, { recursive: true, force: true }); console.log('api-cost cache ok');
+  })().catch(e => { console.error(e); process.exit(1); }));
+}
