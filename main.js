@@ -6602,6 +6602,8 @@ app.whenReady().then(() => {
   mainWindow.webContents.on('responsive', () => flog('renderer responsive again'));
   // Restore agents after window is visible (heavy JSONL parsing + process cleanup)
   let _didRestore = false;
+  // A chat visual (show_visual: a sandboxed srcdoc iframe) can't send its frame to another page: its HTML is the agent's.
+  mainWindow.webContents.on('will-frame-navigate', (e) => { try { if (!e.isMainFrame && e.frame && /^about:srcdoc/.test(e.frame.url || '') && !/^about:/.test(e.url || '')) e.preventDefault(); } catch {} });
   mainWindow.webContents.on('did-finish-load', () => {
     releases.handle({ type: 'releasesClose' }); // a reloaded page has no Releases modal open: stop its live polling
     docs.restore(); // documents left open last time (or before a page reload) come back, unselected
