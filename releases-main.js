@@ -1180,12 +1180,18 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     push({ flagPromo: { ...(state.flagPromo || {}), [id]: { ...note, at: Date.now() } } });
     persist();
   }
+  // an expired, revoked or wrong-scope token (back-office apiTokenAuth's words) needs new tokens, not a retry
+  const TOKEN_ERR_RE = /invalid or expired api token|does not grant access|HTTP 401/i;
+  function flagFail(id, e) {
+    const msg = (e && e.message) || String(e);
+    flagNote(id, { text: 'Flags not promoted: ' + msg, tone: 'bad', act: TOKEN_ERR_RE.test(msg) ? 'tokens' : 'promote' });
+  }
   async function promoteFlags(R) {
     if (R.env !== 'prod' || R.status !== 'done' || !R.id) return;
     const m = ((state.history && state.history.items) || []).find(x => x.id === R.id);
     if (!m || (m.kind || 'release') !== 'release') return;
     let p;
-    try { p = await flagRelease.preview(); } catch (e) { return flagNote(R.id, { text: 'Flags not promoted: ' + e.message, tone: 'bad', act: 'promote' }); }
+    try { p = await flagRelease.preview(); } catch (e) { return flagFail(R.id, e); }
     if (p.needsTokens) return flagNote(R.id, { text: 'Flags not promoted: connect the back office', tone: 'bad', act: 'tokens' });
     if (!anyFlags(summarize(p))) return flagNote(R.id, { text: 'Flags: nothing to promote', tone: 'ok' });
     const opened = m.flags && m.flags.release;
@@ -1197,14 +1203,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const r = await flagRelease.apply(p);
       const backup = path.join(runsDir(), `flags-before-${id}-${stamp()}.json`);
       fs.writeFileSync(backup, JSON.stringify(r.backup, null, 2));
-      flagNote(id, { text: outcome(r), tone: r.failed.length || (r.blocked || []).length ? 'warn' : 'ok', act: r.failed.length ? 'promote' : null, backup });
-    } catch (e) { flagNote(id, { text: 'Flags not promoted: ' + e.message, tone: 'bad', act: 'promote' }); }
+      flagNote(id, { text: outcome(r), tone: r.failed.length || r.markError || (r.blocked || []).length ? 'warn' : 'ok', act: r.failed.length || r.markError ? 'promote' : null, backup });
+    } catch (e) { flagFail(id, e); }
   }
   // the card's Promote flags: whatever dev and prod say now (the card showed it), applied at once
   async function promoteFlagsNow(id) {
     const p = await flagRelease.preview();
     if (p.needsTokens) return flagNote(id, { text: 'Flags not promoted: connect the back office', tone: 'bad', act: 'tokens' });
-    if (!anyFlags(summarize(p))) return flagNote(id, { text: 'Flags: nothing to promote', tone: 'ok' });
+    if (!anyFlags(summarize(p)) && !(p.unchanged || []).length) return flagNote(id, { text: 'Flags: nothing to promote', tone: 'ok' });
     flagNote(id, { text: 'Promoting flags…', tone: 'run' });
     await applyFlags(id, p);
   }
@@ -1680,8 +1686,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       }
       case 'releasesState': send({ type: 'releases', state }); return true; // a (re)loaded page: what the PR panel's holds need, now
       case 'releasesRefresh': refresh(); return true;
-      case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagNote(String(msg.id), { text: 'Flags not promoted: ' + e.message, tone: 'bad', act: 'promote' })); return true;
-      case 'releasesFlagTokens': setFlagTokens({ dev: String(msg.dev || '').trim(), prod: String(msg.prod || '').trim() }); if (msg.id) promoteFlagsNow(String(msg.id)).catch(e => flagNote(String(msg.id), { text: 'Flags not promoted: ' + e.message, tone: 'bad', act: 'promote' })); return true;
+      case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
+      case 'releasesFlagTokens': setFlagTokens({ dev: String(msg.dev || '').trim(), prod: String(msg.prod || '').trim() }); if (!msg.id && state.releaseRun && state.releaseRun.flags) flagRelease.preview().catch(e => ({ error: e.message })).then(p => { const { releaseNeedsTokens, releaseError, ...gap } = state.releaseRun.flags; push({ releaseRun: { ...state.releaseRun, flags: withFlagPlan(gap, p) } }); persist(); }); if (msg.id) promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
       case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;
       // the picker's branch boxes: a repo's branches (cached for the session)

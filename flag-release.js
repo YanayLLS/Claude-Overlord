@@ -32,7 +32,10 @@ function createFlagRelease({ fetch, tokens }) {
   async function apply(p) {
     const t = tokens() || {};
     const result = await call(TARGET, t.prod, 'applyFlagRelease', { docs: p.docs, expect: p.fingerprint });
-    if (result.written.length) await call(SOURCE, t.dev, 'markFlagsReleased', { keys: result.written });
+    // prod is written now: a dev failure is reported, never thrown (it would read as "not promoted").
+    // Unchanged flags already match prod, so they are shipped too; marking them is what a retry finishes.
+    const keys = [...result.written, ...(p.unchanged || [])];
+    if (keys.length) await call(SOURCE, t.dev, 'markFlagsReleased', { keys }).catch((e) => { result.markError = e.message; });
     return result;
   }
 
@@ -60,6 +63,7 @@ function outcome(r) {
     ...r.failed.map(f => `${f.key} failed: ${f.message}`),
     ...(r.blocked || []).map(b => `${b.key} blocked: ${b.why}`),
   ];
+  if (r.markError) bits.push(`dev not marked Released: ${r.markError}`);
   return `Flags: ${bits.length ? bits.join(' · ') : 'nothing to promote'}`;
 }
 

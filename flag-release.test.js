@@ -30,9 +30,22 @@ const { createFlagRelease, summarize, sameSummary, prLine, outcome } = require('
   assert.deepStrictEqual(calls.map(c => c.name), ['applyFlagRelease', 'markFlagsReleased']);
   assert.strictEqual(calls[0].body.expect, 'fp');
   assert.deepStrictEqual(calls[1].body.keys, ['IsA']);
+
+  // unchanged flags already match prod: dev marks them Released too (a retry after a dev failure)
+  calls.length = 0;
+  await fr.apply({ ...p, unchanged: ['IsU'] });
+  assert.deepStrictEqual(calls[1].body.keys, ['IsA', 'IsU']);
+
+  // dev failing after prod was written: reported on the result, not thrown
+  const saved = replies.markFlagsReleased;
+  replies.markFlagsReleased = { code: 2, message: 'dev down' };
+  const half = await fr.apply(p);
+  assert.strictEqual(half.markError, 'dev down');
+  assert.strictEqual(outcome(half), 'Flags: 1 promoted · IsB failed: no · dev not marked Released: dev down');
+  replies.markFlagsReleased = saved;
   assert.deepStrictEqual(r.written, ['IsA']);
 
-  // nothing written on prod: dev is not touched
+  // nothing written and nothing unchanged on prod: dev is not touched
   replies.applyFlagRelease = { code: 1, data: JSON.stringify({ written: [], failed: [], blocked: [], backup: {} }) };
   calls.length = 0;
   await fr.apply(p);
