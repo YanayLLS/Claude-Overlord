@@ -97,7 +97,6 @@ html, body { font-family: 'Geist', 'Segoe UI Variable Text', 'Segoe UI', system-
 .agent[data-status="crashed"] .agent-dot { box-shadow: 0 0 0 3px rgba(248,113,113,.18); }
 /* Context used is the % at the right; the fill behind the text read as a half-applied selection */
 .agent-fill { display: none; }
-.ctx-pct { font-size: 11px; color: var(--dim); }
 /* Model chip takes no room until you hover the row: the name runs right up to the % */
 .agent-right { gap: 0; }
 .agent-model-slot { display: none; width: auto; }
