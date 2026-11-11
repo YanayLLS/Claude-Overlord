@@ -28,6 +28,24 @@ const TERMINAL_SCHEMAS = [
     inputSchema: { type: 'object', properties: { name: str('Terminal name from terminal_list') }, required: ['name'] } },
 ];
 
+// A visual drawn inline in the agent's chat (chat-ui.js renders the call itself): nothing to do here but answer.
+const VISUAL_SCHEMAS = [
+  { name: 'show_visual', description: 'Show a visual inline in the user\'s chat: a UI mockup, diagram, chart, table or comparison drawn as self-contained HTML/SVG (inline CSS and JS only; no network, so no external fonts, images or scripts; data: URIs are fine). It renders live in a sandboxed frame as wide as the chat column, sized to its content. Pass variants to let the user flip between alternatives (e.g. "Dense" / "Roomy" / "With icons"). The frame predefines CSS variables matching the chat theme: --bg, --fg, --muted, --surface, --border, --accent, --font.',
+    inputSchema: { type: 'object', properties: {
+      title: str('Short title shown above the visual'),
+      html: str('Self-contained HTML/SVG (body content or a whole document). Use this or variants'),
+      variants: { type: 'array', description: 'Alternatives the user flips between with tabs', items: { type: 'object', properties: { label: str('Tab label, 1-3 words'), html: str('Self-contained HTML/SVG') }, required: ['label', 'html'] } },
+    } } },
+];
+
+function visualCall(args = {}) {
+  const ok = (h) => typeof h === 'string' && h.trim() !== '';
+  const vs = Array.isArray(args.variants) ? args.variants.filter((v) => v && ok(v.html)) : [];
+  if (vs.length) return text(`Shown in the chat${vs.length > 1 ? ` (${vs.length} variants)` : ''}.`);
+  if (ok(args.html)) return text('Shown in the chat.');
+  return fail('show_visual: pass "html" or "variants" (each with label and html)');
+}
+
 const text = (t) => ({ content: [{ type: 'text', text: String(t) }] });
 const fail = (t) => ({ content: [{ type: 'text', text: String(t) }], isError: true });
 
@@ -74,4 +92,4 @@ function terminalCall(terminals, name, args = {}) {
   } catch (e) { return fail(e && e.message ? e.message : String(e)); }
 }
 
-module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, createDispatcher, terminalCall };
+module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, visualCall, createDispatcher, terminalCall };

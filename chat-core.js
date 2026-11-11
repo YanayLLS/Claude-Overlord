@@ -26,7 +26,8 @@ function toolView(ev, running) {
     // Loading deferred tools: the CLI says "Calling overlord-browser…" (the MCP servers named in "select:…"), not ToolSearch.
     case 'ToolSearch': { const sv = [...new Set([...String(a.query || '').matchAll(/mcp__([^_]+(?:_[^_]+)*?)__/g)].map(m => m[1]))]; return { kind: 'tool', verb: v('Called', 'Calling'), target: sv.join(', ') || String(a.query || '').replace(/^select:/, ''), mono: false }; }
     case 'Skill': return { kind: 'tool', verb: v('Used skill', 'Using skill'), target: a.skill || '', mono: true };
-    default: return { kind: 'tool', verb: n.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '').replace(/_/g, ' ') || 'Tool', target: '', mono: false };
+    default: if (isVisualTool(n)) return { kind: 'tool', verb: v('Showed', 'Drawing'), target: a.title || 'a visual', mono: false };
+      return { kind: 'tool', verb: n.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '').replace(/_/g, ' ') || 'Tool', target: '', mono: false };
   }
 }
 
@@ -357,6 +358,28 @@ function sketchHtml(src) {
   return `<div class="sketch">${out}</div>`;
 }
 
+// ── Inline visuals: an agent's show_visual call (or a ```html-visual block) drawn live in a sandboxed frame ──
+const isVisualTool = (n) => /(^|__)show_visual$/.test(n || '');
+// { title, variants: [{ label, html }] } from the call's args, or null when there's nothing to draw.
+function visualSpec(a) {
+  if (!a || typeof a !== 'object') return null;
+  const has = (h) => typeof h === 'string' && h.trim() !== '';
+  let vs = Array.isArray(a.variants) ? a.variants.filter(v => v && has(v.html)).map((v, k) => ({ label: String(v.label || '').trim() || `Option ${k + 1}`, html: v.html })) : [];
+  if (!vs.length && has(a.html)) vs = [{ label: '', html: a.html }];
+  return vs.length ? { title: typeof a.title === 'string' ? a.title.trim() : '', variants: vs } : null;
+}
+// The frame's whole document: a policy that blocks every network load first, the chat's colours as CSS variables, and a
+// reporter that tells the chat its height (the frame has no same-origin access, so it can only postMessage). It doesn't
+// scroll until the chat says it's capped (ovCapped): fitting content never shows a scrollbar.
+const VIS_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'";
+const VIS_REPORT = "(()=>{let l=0;const s=()=>{const d=document.documentElement,b=document.body,h=Math.ceil(Math.max(d.getBoundingClientRect().height,b?b.scrollHeight:0));if(h&&h!==l){l=h;parent.postMessage({ovVisual:1,h:h},'*')}};const r=new ResizeObserver(s);r.observe(document.documentElement);addEventListener('DOMContentLoaded',()=>{document.body&&r.observe(document.body);s()});addEventListener('load',s);setTimeout(s,60);addEventListener('message',e=>{if(e.source===parent&&e.data&&e.data.ovCapped!=null)document.documentElement.style.overflowY=e.data.ovCapped?'auto':'hidden'})})()";
+function visualDoc(html, t = {}) {
+  const c = (v, d) => String(v || d).replace(/[<>;{}]/g, '');
+  const vars = `--bg:${c(t.bg, '#1f1e1d')};--fg:${c(t.fg, '#f0eee6')};--muted:${c(t.muted, '#a6a39a')};--surface:${c(t.surface, '#2a2927')};--border:${c(t.border, '#3d3c39')};--accent:${c(t.accent, '#d97757')};--font:${c(t.font, 'system-ui, sans-serif')}`;
+  const body = String(html || '').replace(/<meta\b[^>]*http-equiv\s*=\s*["']?refresh[^>]*>/gi, ''); // a refresh would navigate the frame off to anywhere
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${VIS_CSP}"><meta name="viewport" content="width=device-width"><style>:root{${vars};color-scheme:${t.dark === false ? 'light' : 'dark'}}*,*::before,*::after{box-sizing:border-box}html{background:var(--bg);color:var(--fg);font:14px/1.5 var(--font);-webkit-font-smoothing:antialiased;overflow-y:hidden}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:6px;border:2px solid var(--bg)}::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}body{margin:0;padding:20px}</style><script>${VIS_REPORT}</script></head><body>${body}</body></html>`;
+}
+
 // The CLI's "[Crashed — auto-resuming 1/3...]" while Overlord restarts a crashed Claude; '' otherwise.
 const crashLine = (a) => a && a.crashed === 'resuming' ? `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…` : '';
 
@@ -416,4 +439,4 @@ function permLabel(l) {
   if (/^yes,?\s+(and\s+)?(allow|don'?t ask)/i.test(l)) return /don'?t ask/i.test(l) ? "Don't ask again" : /edits/i.test(l) ? 'Allow all edits' : 'Always allow';
   return l;
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };

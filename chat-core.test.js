@@ -265,3 +265,40 @@ test('contextUsage: /context output as model, total and categories (the glyph gr
   assert.strictEqual(contextUsage('Total cost: $0.12'), null);
   assert.deepStrictEqual((({ model, used }) => ({ model, used }))(contextUsage('Context Usage\n⛁ ⛀   claude-opus-5-5 · 43.7k/1m tokens (4%)')), { model: 'claude-opus-5-5', used: '43.7k/1m tokens' });
 });
+
+const { visualSpec, visualDoc, isVisualTool } = require('./chat-core');
+
+test('show_visual: any MCP server prefix, never a lookalike', () => {
+  assert.ok(isVisualTool('mcp__overlord-browser__show_visual'));
+  assert.ok(isVisualTool('show_visual'));
+  assert.ok(!isVisualTool('show_visuals'));
+  assert.ok(!isVisualTool('Bash'));
+  assert.deepStrictEqual(toolView({ name: 'mcp__overlord-browser__show_visual', args: { title: 'Card layouts' } }), { kind: 'tool', verb: 'Showed', target: 'Card layouts', mono: false });
+});
+
+test('visualSpec: one html is one unnamed variant; variants keep their labels, drop empties, number the unnamed', () => {
+  assert.deepStrictEqual(visualSpec({ title: 'T', html: '<b>x</b>' }), { title: 'T', variants: [{ label: '', html: '<b>x</b>' }] });
+  assert.deepStrictEqual(visualSpec({ variants: [{ label: 'Dense', html: 'a' }, { label: '', html: 'b' }, { label: 'Empty', html: '' }] }),
+    { title: '', variants: [{ label: 'Dense', html: 'a' }, { label: 'Option 2', html: 'b' }] });
+  assert.strictEqual(visualSpec({}), null);
+  assert.strictEqual(visualSpec({ html: '   ' }), null);
+  assert.strictEqual(visualSpec({ variants: 'nope' }), null);
+  assert.strictEqual(visualSpec(null), null);
+});
+
+test('visualDoc: CSP blocks the network, theme tokens are set, the height reporter rides along', () => {
+  const d = visualDoc('<div id="x">hi</div>', { bg: '#111', fg: '#eee', muted: '#999', surface: '#222', border: '#333', accent: '#d97757', font: 'Geist', dark: true });
+  assert.match(d, /<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">/);
+  assert.ok(d.indexOf('Content-Security-Policy') < d.indexOf('<div id="x">'), 'the policy comes before any agent markup');
+  assert.match(d, /--bg:\s*#111/);
+  assert.match(d, /color-scheme:\s*dark/);
+  assert.match(d, /postMessage\(/);
+  assert.match(d, /ovCapped/, 'scrolls only when the chat caps its height');
+  assert.match(d, /<div id="x">hi<\/div>/);
+});
+
+test('visualDoc: a meta refresh (navigating the frame away) is stripped', () => {
+  const d = visualDoc('<meta http-equiv="refresh" content="0;url=https://x.test"><p>a</p>', {});
+  assert.doesNotMatch(d, /refresh/i);
+  assert.match(d, /<p>a<\/p>/);
+});

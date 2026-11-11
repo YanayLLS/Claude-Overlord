@@ -190,3 +190,15 @@ test('local command output loses its colour codes and keeps its lines', () => {
   const l = JSON.stringify({ type: 'system', subtype: 'local_command', timestamp: '2026-01-01T00:00:00Z', content: '<local-command-stdout>\x1b[38;2;1;2;3mContext\x1b[39m usage\n  \x1b[1mSkills\x1b[22m: 9k   </local-command-stdout>' });
   assert.deepStrictEqual(parseLineForTimeline(l, (x) => x, () => false), [{ type: 'note', ts: '2026-01-01T00:00:00Z', kind: 'sub', text: 'Context usage\n  Skills: 9k' }]);
 });
+
+test('show_visual keeps its html and variants whole (well past the usual caps)', () => {
+  const big = '<div>' + 'x'.repeat(50000) + '</div>';
+  const [ev] = parse({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'v1', name: 'mcp__overlord-browser__show_visual', input: { title: 'Layouts', html: big, variants: [{ label: 'Dense', html: big }, { label: 'Roomy', html: 'r' }] } }] } });
+  assert.strictEqual(ev.args.title, 'Layouts');
+  assert.strictEqual(ev.args.html, big);
+  assert.deepStrictEqual(ev.args.variants.map(v => v.label), ['Dense', 'Roomy']);
+  assert.strictEqual(ev.args.variants[0].html, big);
+  const huge = 'y'.repeat(300000);
+  const [ev2] = parse({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'v2', name: 'show_visual', input: { html: huge } }] } });
+  assert.ok(ev2.args.html.length <= 200001, 'capped at ~200 KB');
+});

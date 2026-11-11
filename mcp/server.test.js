@@ -51,11 +51,11 @@ test('initialize returns protocol version and tools capability', async () => {
   });
 });
 
-test('tools/list returns the seven browser tools and three terminal tools', async () => {
+test('tools/list returns the seven browser tools, three terminal tools and show_visual', async () => {
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 10);
+    assert.strictEqual(json.result.tools.length, 11);
   });
 });
 
@@ -151,4 +151,19 @@ test('terminal_* tools read the Terminals pane, for any agent token', async () =
     assert.strictEqual((await call('terminal_read', { name: 'FL Backend', lines: 50, grep: 'err' })).content[0].text, 'FL Backend:50:err');
     assert.strictEqual((await call('terminal_read', {})).isError, true);
   } finally { await server.stop(); }
+});
+
+test('show_visual answers even when the agent has no browser', async () => {
+  await withServer(async (server) => {
+    const token = server.mintToken(1);
+    const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'show_visual', arguments: { html: '<b>hi</b>' } } });
+    assert.strictEqual(json.result.content[0].text, 'Shown in the chat.');
+  }, () => null);
+});
+
+test('initialize tells agents to show visuals in the chat', async () => {
+  await withServer(async (server) => {
+    const { json } = await rpc(server, server.mintToken(1), { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    assert.match(json.result.instructions, /show_visual/);
+  });
 });

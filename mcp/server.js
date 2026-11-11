@@ -2,12 +2,12 @@
 // The token in the path is the whole identity mechanism: one agent, one browser.
 const http = require('http');
 const crypto = require('crypto');
-const { TOOL_SCHEMAS, TERMINAL_SCHEMAS, createDispatcher, terminalCall } = require('./tools');
+const { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, createDispatcher, terminalCall, visualCall } = require('./tools');
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_INFO = { name: 'overlord-browser', version: '1.0.0' };
 // Agents kept popping Chrome/Playwright windows on the user's screen: this browser opens in Overlord beside their chat.
-const INSTRUCTIONS = "Your own browser inside Overlord: it opens in a pane beside your chat, where the user watches. Use it for every look at a web page (checking a UI, a localhost app, a flow) instead of opening Chrome, Edge or a headed Playwright window, which pop up on the user's screen. Whenever you check or show how something looks or behaves (a screen, a flow, a fix, a design review), do it here, step by step with browser_navigate / browser_click / browser_type / browser_screenshot, so the user sees you work: a headless Playwright script is invisible to them. Headless Playwright is for automated test suites and bulk screenshot runs only (never headless: false). Never open URLs with start/Start-Process/explorer. Dev servers started by scripts like start-full.bat run in Overlord's Terminals pane: read their output with terminal_list / terminal_read (and terminal_restart) to debug a local server.";
+const INSTRUCTIONS = "Your own browser inside Overlord: it opens in a pane beside your chat, where the user watches. Use it for every look at a web page (checking a UI, a localhost app, a flow) instead of opening Chrome, Edge or a headed Playwright window, which pop up on the user's screen. Whenever you check or show how something looks or behaves (a screen, a flow, a fix, a design review), do it here, step by step with browser_navigate / browser_click / browser_type / browser_screenshot, so the user sees you work: a headless Playwright script is invisible to them. Headless Playwright is for automated test suites and bulk screenshot runs only (never headless: false). Never open URLs with start/Start-Process/explorer. Dev servers started by scripts like start-full.bat run in Overlord's Terminals pane: read their output with terminal_list / terminal_read (and terminal_restart) to debug a local server. Whenever a visual explains better than prose (a UI mockup, a diagram, a chart, a comparison), show it in the chat with show_visual: self-contained HTML/SVG with inline CSS/JS and no network, and variants when there are alternatives to choose from.";
 const MAX_BODY = 1024 * 1024;
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
@@ -38,9 +38,10 @@ async function handleRpc(msg, resolveActions, agentId, getTerminals) {
     return ok(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
   }
   if (method === 'ping') return ok(id, {});
-  if (method === 'tools/list') return ok(id, { tools: [...TOOL_SCHEMAS, ...TERMINAL_SCHEMAS] });
+  if (method === 'tools/list') return ok(id, { tools: [...TOOL_SCHEMAS, ...TERMINAL_SCHEMAS, ...VISUAL_SCHEMAS] });
   if (method === 'tools/call') {
     const name = (params || {}).name || '';
+    if (name === 'show_visual') return ok(id, visualCall((params || {}).arguments || {})); // drawn by the chat from the call itself
     if (name.startsWith('terminal_')) return ok(id, terminalCall(getTerminals(), name, (params || {}).arguments || {}));
     const actions = resolveActions(agentId);
     if (!actions) {

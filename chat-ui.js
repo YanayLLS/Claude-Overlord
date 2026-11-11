@@ -34,6 +34,9 @@
     fwd: svg('<path d="m15 5 6 6-6 6"/><path d="M21 11H9a6 6 0 0 0-6 6v2"/>'),
     undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
     retry: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'),
+    visual: svg('<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 15 3.2-3.4 2.8 2.4 4-4.5"/>'),
+    expand: svg('<path d="M14 4h6v6"/><path d="M10 20H4v-6"/><path d="m20 4-6.5 6.5"/><path d="m4 20 6.5-6.5"/>'),
+    close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
     alert: svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
   };
   // Claude's spark: turning while the agent works, popping once when a turn lands.
@@ -142,6 +145,86 @@
   function artifactCard(ev, url) {
     const a = ev.args || {}, title = a.title || baseName(a.file_path) || 'Artifact', id = url.split('/').pop();
     return `<div class="art-card" data-tid="${escH(ev.toolId)}"><div class="ac-ic">${ICON.artifact}</div><div class="ac-t"><b>${escH(title)}</b>${a.description ? `<small>${escH(a.description)}</small>` : ''}<span class="ac-u">claude.ai · ${escH(id.slice(0, 8))}</span></div><div class="ac-b"><button type="button" class="primary" data-art-open="${escH(url)}">Open</button><button type="button" class="ic-only" data-art-copy="${escH(url)}" title="Copy link" aria-label="Copy link">${ICON.copy}</button></div></div>`;
+  }
+  // ── Inline visuals (an agent's show_visual call, a ```html-visual block): live HTML in a sandboxed frame, variants as
+  // tabs. The block's html is only the frame's chrome and never changes, so a redraw doesn't rebuild it (and reload the
+  // frames); the frames are mounted after paint (drawVisuals), from visStore. Agent HTML never enters this DOM. ──
+  const visStore = new Map(), visActive = new Map(), visH = new Map(), visCache = new WeakMap(); // key → spec · shown variant · each frame's last height
+  function visFrame(key, spec, full) {
+    const tabs = spec.variants.length > 1 ? `<div class="vis-tabs" role="tablist" aria-label="Variants">${spec.variants.map((v, k) => `<button type="button" role="tab" data-vis-tab="${k}" aria-selected="${k === 0}" tabindex="${k ? -1 : 0}"${k < 9 ? ` title="${k + 1}"` : ''}>${escH(v.label)}</button>`).join('')}</div>` : '';
+    const act = full ? `<button type="button" class="vis-btn" data-vis-close title="Close (Esc)" aria-label="Close">${ICON.close}</button>` : `<button type="button" class="vis-btn" data-vis-open title="Open larger" aria-label="Open larger">${ICON.expand}</button>`;
+    return `<div class="vis${full ? ' vis-big' : ''}" data-vis="${escH(key)}"><div class="vis-h">${ICON.visual}<span class="vis-t">${escH(spec.title || 'Visual')}</span>${tabs}${act}</div><div class="vis-body"></div></div>`;
+  }
+  function visualHtml(ev) {
+    if (visCache.has(ev)) return visCache.get(ev);
+    const spec = visualSpec(ev.args), key = 't:' + (ev.toolId || ev.ts || Math.random());
+    if (spec) visStore.set(key, spec);
+    const h = spec ? visFrame(key, spec) : '';
+    visCache.set(ev, h); return h;
+  }
+  // The frame's colours: the chat's own, read when it's drawn (the frame can't read the app's CSS).
+  function visTheme() {
+    const cs = getComputedStyle(document.documentElement), v = (n) => cs.getPropertyValue(n).trim();
+    const c = getComputedStyle(document.body).backgroundColor.match(/\d+/g) || [0, 0, 0];
+    return { bg: v('--bg'), fg: v('--text'), muted: v('--subtext'), surface: v('--surface0'), border: v('--border-hi'), accent: '#d97757', font: getComputedStyle(document.body).fontFamily, dark: (+c[0] * 0.3 + +c[1] * 0.59 + +c[2] * 0.11) < 128 };
+  }
+  const visMaxH = () => { const el = document.getElementById('conversation'); return Math.max(320, Math.min(900, (el && el.clientHeight || 900) - 96)); }; // taller scrolls inside: never more than the view
+  function visShow(box, k, focus) {
+    const key = box && box.dataset.vis, spec = key && visStore.get(key); if (!spec) return;
+    const n = spec.variants.length; k = ((k % n) + n) % n; visActive.set(key, k);
+    for (const t of box.querySelectorAll('[data-vis-tab]')) { const on = +t.dataset.visTab === k; t.setAttribute('aria-selected', on); t.tabIndex = on ? 0 : -1; if (on && focus) t.focus({ preventScroll: true }); }
+    const body = box.querySelector('.vis-body');
+    for (const fr of body.children) fr.hidden = +fr.dataset.k !== k;
+    if (body.querySelector(`iframe[data-k="${k}"]`)) return;
+    const fr = document.createElement('iframe'); fr.className = 'vis-f'; fr.dataset.k = k;
+    fr.setAttribute('sandbox', 'allow-scripts'); fr.setAttribute('referrerpolicy', 'no-referrer'); // scripts run, in an opaque origin: no app access
+    fr.title = spec.variants[k].label || spec.title || 'Visual';
+    if (!box.classList.contains('vis-big')) fr.style.height = Math.min(visH.get(key + ':' + k) || 200, visMaxH()) + 'px'; // its last height: a redraw doesn't jump
+    fr.srcdoc = visualDoc(spec.variants[k].html, visTheme());
+    body.appendChild(fr);
+  }
+  let visSeq = 0; const visKeyOf = new Map(); // a fenced block's source → its key
+  function drawVisuals(roots) {
+    for (const b of roots.flatMap(r => [...r.querySelectorAll('.md-code')])) {
+      if (b.querySelector('.md-code-head span')?.textContent !== 'html-visual') continue;
+      const src = b.querySelector('code').textContent; let key = visKeyOf.get(src);
+      if (!key) { key = 'f:' + ++visSeq; visKeyOf.set(src, key); visStore.set(key, { title: '', variants: [{ label: '', html: src }] }); }
+      const tmp = document.createElement('div'); tmp.innerHTML = visFrame(key, visStore.get(key)); b.replaceWith(tmp.firstElementChild);
+    }
+    for (const box of roots.flatMap(r => [...(r.matches && r.matches('.vis') ? [r] : []), ...r.querySelectorAll('.vis')])) if (!box._on) { box._on = 1; visShow(box, visActive.get(box.dataset.vis) || 0); }
+  }
+  // A frame says how tall its page is: it grows to that (up to visMaxH), staying at the bottom if you were there.
+  window.addEventListener('message', (e) => {
+    const d = e.data; if (!d || d.ovVisual !== 1 || !(d.h > 0)) return;
+    const fr = [...document.querySelectorAll('iframe.vis-f')].find(x => x.contentWindow === e.source); if (!fr) return;
+    const box = fr.closest('[data-vis]'); if (!box) return;
+    if (box.classList.contains('vis-big')) { e.source.postMessage({ ovCapped: true }, '*'); return; } // the big view fills its dialog, scrolling what's taller
+    visH.set(box.dataset.vis + ':' + fr.dataset.k, Math.ceil(d.h));
+    const cap = visMaxH(), h = Math.min(Math.ceil(d.h), cap);
+    e.source.postMessage({ ovCapped: Math.ceil(d.h) > cap }, '*'); // only a capped page scrolls inside (a fitting one never shows a scrollbar)
+    if (parseFloat(fr.style.height) === h) return;
+    const el = document.getElementById('conversation'), atEnd = el && el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    fr.style.height = h + 'px';
+    if (atEnd) el.scrollTop = el.scrollHeight;
+  });
+  // On a visual's tabs: 1–9 pick a variant, ←/→ step through them.
+  function visKey(e) {
+    const box = e.target.closest && e.target.closest('[data-vis]'); if (!box || e.altKey || e.ctrlKey || e.metaKey) return;
+    const k = visActive.get(box.dataset.vis) || 0, n = /^[1-9]$/.test(e.key) ? +e.key - 1 : e.key === 'ArrowRight' ? k + 1 : e.key === 'ArrowLeft' ? k - 1 : null;
+    if (n == null || !box.querySelector('[data-vis-tab]') || n >= (visStore.get(box.dataset.vis) || { variants: [] }).variants.length) return;
+    e.preventDefault(); e.stopPropagation(); visShow(box, n, true);
+  }
+  document.getElementById('conversation').addEventListener('keydown', visKey);
+  // Open larger: the same visual in a dialog over the app, on the variant you were on; Esc or the backdrop closes it.
+  function openVisual(key, from) {
+    const spec = visStore.get(key); if (!spec) return;
+    const d = document.createElement('div'); d.id = 'chat-vis-full'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true'); d.setAttribute('aria-label', spec.title || 'Visual');
+    d.innerHTML = visFrame(key, spec, true); const box = d.firstElementChild;
+    const close = () => { d.remove(); document.removeEventListener('keydown', esc, true); if (from && from.isConnected) { visShow(from, visActive.get(key) || 0); from.querySelector('[data-vis-open]')?.focus({ preventScroll: true }); } };
+    const esc = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+    d.addEventListener('click', (e) => { const t = e.target.closest('[data-vis-tab]'); if (t) visShow(box, +t.dataset.visTab, true); else if (e.target === d || e.target.closest('[data-vis-close]')) close(); });
+    d.addEventListener('keydown', visKey); document.addEventListener('keydown', esc, true); trapFocus(d);
+    document.body.appendChild(d); visShow(box, visActive.get(key) || 0); (box.querySelector('[data-vis-tab][aria-selected="true"]') || box.querySelector('[data-vis-close]')).focus();
   }
   function todoHtml(todos) {
     return '<ul class="todos">' + todos.map(t => `<li class="${escH(t.status)}">${t.status === 'completed' ? ICON.check : '<span class="box"></span>'}<span>${escH(t.text)}</span></li>`).join('') + '</ul>';
@@ -333,6 +416,8 @@
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
       // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.
       if (t === 'tool' && ev.name === 'Artifact' && doneBy.get(ev.toolId) && doneBy.get(ev.toolId).artifactUrl) { flush(); out.push(artifactCard(ev, doneBy.get(ev.toolId).artifactUrl)); open = true; return; }
+      // An inline visual (show_visual) is drawn in the thread, not folded into a run of calls.
+      if (t === 'tool' && isVisualTool(ev.name)) { const vh = visualHtml(ev); if (vh) { flush(); out.push(vh); open = true; return; } }
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }
       if (t === 'bgdone' && ev.text) { if (turn) close(); flush(); out.push(msgHtml({ type: 'note', text: ev.text }, i, cwd)); return; } // the CLI's "Background command "x" completed" line; it opens a turn, after the last one's footer
       if (t === 'tool_done' || t === 'mode' || t === 'bgdone' || t === 'queue') return;
@@ -1314,6 +1399,7 @@
     if (autoRetry.size && !retryTimer) retryTimer = setInterval(() => { if (!autoRetry.size) { clearInterval(retryTimer); retryTimer = null; } else rerender(); }, 30000);
     drawRail(el, evs);
     drawDiagrams(changed);
+    drawVisuals(changed);
     prettyLinks(changed);
     syncJump(el);
   }
@@ -1555,6 +1641,8 @@
 
   // Clicks inside the view and on the composer chips.
   function onClick(e, a, evs) {
+    const vt = e.target.closest('[data-vis-tab]'); if (vt) { visShow(vt.closest('[data-vis]'), +vt.dataset.visTab, true); return; } // a visual's variant
+    const vo = e.target.closest('[data-vis-open]'); if (vo) { const b = vo.closest('[data-vis]'); openVisual(b.dataset.vis, b); return; }
     const sw = e.target.closest('[data-act="switch-acct"]'); if (sw && selectedId != null) { chatComposer.sendText(selectedId, '/login'); return; } // another account: the CLI's /login (its card follows)
     const ur = e.target.closest('[data-act="unremove"]'); if (ur && selectedId != null) { const r = removedQ.get(selectedId); if (r) { removedQ.delete(selectedId); chatComposer.restoreDraft(selectedId, r.restore); rerender(); } return; } // its words back in the reply box
     const ud = e.target.closest('[data-act="undismiss-limit"]'); if (ud && evs) { const ev = evs[+ud.dataset.i]; if (ev) { ev._dismissed = false; cache.delete(ev); rerender(); } return; }

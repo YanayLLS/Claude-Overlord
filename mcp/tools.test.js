@@ -70,3 +70,15 @@ test('an action that throws becomes an error result', async () => {
   assert.strictEqual(res.isError, true);
   assert.match(res.content[0].text, /ERR_CONNECTION_REFUSED/);
 });
+
+const { VISUAL_SCHEMAS, visualCall } = require('./tools');
+
+test('show_visual: html or variants, and it only says where the visual went', () => {
+  assert.deepStrictEqual(VISUAL_SCHEMAS.map((t) => t.name), ['show_visual']);
+  const props = VISUAL_SCHEMAS[0].inputSchema.properties;
+  assert.ok(props.html && props.variants && props.title);
+  assert.deepStrictEqual(visualCall({ html: '<b>x</b>' }), { content: [{ type: 'text', text: 'Shown in the chat.' }] });
+  assert.deepStrictEqual(visualCall({ variants: [{ label: 'A', html: 'a' }, { label: 'B', html: 'b' }] }), { content: [{ type: 'text', text: 'Shown in the chat (2 variants).' }] });
+  assert.strictEqual(visualCall({}).isError, true);
+  assert.strictEqual(visualCall({ variants: [{ label: 'A' }] }).isError, true);
+});

@@ -318,7 +318,7 @@
     const paste = ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') || (e.shiftKey && e.key === 'Insert'); // Ctrl+V pastes into it too (code: any layout)
     if (!shown() || e.altKey || e.isComposing || (!paste && (e.ctrlKey || e.metaKey || e.key.length !== 1))) return;
     const ae = document.activeElement, t = box();
-    if (ae === t || (ae && (ae.matches('input, textarea, select, [contenteditable="true"]') || ae.closest('.xterm, [role="dialog"], [role="menu"], [role="listbox"]')))) return;
+    if (ae === t || (ae && (ae.matches('input, textarea, select, [contenteditable="true"]') || ae.closest('.xterm, [role="dialog"], [role="menu"], [role="listbox"], [data-vis]')))) return; // a visual's tabs take 1–9 and arrows
     if (typeof _renaming !== 'undefined' && _renaming) return;
     if (document.querySelector('.chat-lightbox, #settings-overlay[style*="flex"], #search-overlay[style*="flex"]') || order().classList.contains('dead')) return;
     if (!paste && cardKey(e)) { e.preventDefault(); return; } // an open question/permission card takes 1–9 first, as in the terminal

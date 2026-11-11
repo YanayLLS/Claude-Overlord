@@ -1,6 +1,6 @@
 // Transcript (.jsonl) lines → the events the Chat view and world mode's Conversation tab draw.
 // Pure: main.js passes its tool labeller (fmtTool) and its system-message test.
-const TL_TEXT_MAX = 20000, TL_OUT_MAX = 4000, TL_DIFF_MAX = 6000, TL_IMG_MAX = 400000;
+const TL_TEXT_MAX = 20000, TL_OUT_MAX = 4000, TL_DIFF_MAX = 6000, TL_IMG_MAX = 400000, TL_VIS_MAX = 200000;
 const cap = (t, n) => t.length > n ? t.slice(0, n) + '…' : t;
 // A command's output keeps its end too: a failing test run or a build says what happened last.
 const capEnds = (t, n) => t.length > n ? t.slice(0, n * 0.4) + '\n…\n' + t.slice(-n * 0.6) : t;
@@ -20,6 +20,8 @@ function toolArgs(name, inp) {
   else if (name === 'ExitPlanMode' && typeof inp.plan === 'string') o.plan = cap(inp.plan, TL_TEXT_MAX);
   else if (name === 'Artifact') { for (const k of ['title', 'description', 'action', 'icon']) if (typeof inp[k] === 'string') o[k] = cap(inp[k], 400); }
   else if ((name === 'Agent' || name === 'Task') && typeof inp.prompt === 'string') o.prompt = cap(inp.prompt, TL_TEXT_MAX);
+  // An inline visual (mcp show_visual): the chat draws its HTML, so it survives whole up to TL_VIS_MAX per variant.
+  else if (/(^|__)show_visual$/.test(name || '')) { if (typeof inp.title === 'string') o.title = cap(inp.title, 200); if (typeof inp.html === 'string') o.html = cap(inp.html, TL_VIS_MAX); if (Array.isArray(inp.variants)) o.variants = inp.variants.slice(0, 12).filter(v => v && typeof v === 'object').map(v => ({ label: cap(String(v.label || ''), 60), html: cap(String(v.html || ''), TL_VIS_MAX) })); }
   else if (name === 'TodoWrite' && Array.isArray(inp.todos)) o.todos = inp.todos.map(t => ({ text: cap(String(t.content || ''), 300), status: t.status }));
   return o;
 }
