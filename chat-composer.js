@@ -645,11 +645,14 @@
   document.addEventListener('keydown', (e) => { if (e.ctrlKey && e.shiftKey && e.code === 'KeyM' && chat()) { e.preventDefault(); micToggle(); } });
 
   // A /command's description (a tooltip on it in a message): from the selected agent's catalog, fetched once if needed.
-  function cmdDesc(cmd) {
-    const a = agents.get(selectedId); if (!a) return '';
-    if (!catalog.has(a.cwd)) { api.send({ type: 'catalog', cwd: a.cwd }); return ''; }
-    const i = catalog.get(a.cwd).find(x => (x.insert || '').trim() === cmd || '/' + x.name === cmd);
-    const d = i ? i.desc || '' : ''; return d.length > 280 ? d.slice(0, 279) + '…' : d;
+  function cmdItem(cmd) {
+    const a = agents.get(selectedId); if (!a) return null;
+    if (!catalog.has(a.cwd)) { api.send({ type: 'catalog', cwd: a.cwd }); return null; }
+    return catalog.get(a.cwd).find(x => (x.insert || '').trim() === cmd || '/' + x.name === cmd) || null;
   }
-  window.chatComposer = { cmdDesc, send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, getDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
+  const cmdPath = (cmd) => cmdItem(cmd)?.path || '';
+  function cmdDesc(cmd) {
+    const i = cmdItem(cmd), d = i ? i.desc || '' : ''; return d.length > 280 ? d.slice(0, 279) + '…' : d;
+  }
+  window.chatComposer = { cmdDesc, cmdPath, send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, getDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();

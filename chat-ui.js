@@ -2155,6 +2155,11 @@
     const t = e.target.closest && e.target.closest('.cmdtag'); if (!t || t.dataset.tip) return;
     const d = window.chatComposer && chatComposer.cmdDesc(t.textContent.trim()); if (d) t.dataset.tip = d;
   });
+  // Clicking a /skill (or /command) opens its .md in the Docs column; built-ins have no file and stay inert.
+  document.getElementById('conversation').addEventListener('click', (e) => {
+    const t = e.target.closest && e.target.closest('.cmdtag'); if (!t || getSelection().toString()) return;
+    const p = window.chatComposer && chatComposer.cmdPath(t.textContent.trim()); if (p) api.send({ type: 'docOpen', paths: [p] });
+  });
   document.getElementById('conversation').addEventListener('copy', (e) => {
     const sel = getSelection(); if (!sel.rangeCount || sel.isCollapsed || !e.clipboardData || e.target.closest?.('textarea,input,[contenteditable]')) return;
     const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:-9999px;top:0;white-space:normal';
