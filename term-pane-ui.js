@@ -58,10 +58,11 @@
     try { t.fit.fit(); api.send({ type: 'tp:resize', cols: t.term.cols, rows: t.term.rows }); } catch {}
   }
 
-  function select(name) {
+  // focus only on a click: list updates and new servers must not pull the caret out of the chat reply box
+  function select(name, focus) {
     active = name;
     for (const [n, t] of tabs) { t.el.style.visibility = n === name ? 'visible' : 'hidden'; t.tabEl.classList.toggle('on', n === name); t.tabEl.setAttribute('aria-selected', String(n === name)); }
-    if (open) { ensureTerm(name); fitActive(); const t = tabs.get(name); if (t && t.term) t.term.focus(); }
+    if (open) { ensureTerm(name); fitActive(); const t = tabs.get(name); if (focus && t && t.term) t.term.focus(); }
   }
 
   function state(info) { return info.running ? 'run' : (info.code ? 'fail' : 'stop'); }
@@ -118,7 +119,7 @@
   tabsEl.addEventListener('click', (e) => {
     const tab = e.target.closest('.tp-tab'); if (!tab) return;
     const name = tab.dataset.name, act = e.target.closest('.tp-act');
-    if (!act) return select(name);
+    if (!act) return select(name, true);
     if (act.dataset.a === 'restart') { const t = tabs.get(name); if (t && t.term) t.term.reset(); api.send({ type: 'tp:restart', name }); }
     else api.send({ type: 'tp:close', name });
   });
