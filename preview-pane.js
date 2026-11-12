@@ -110,9 +110,9 @@ function createPreviewController({ window, registry, send, writeToAgent, isAlive
     // The terminal just lost keyboard focus. Hand it back when an agent's browser
     // took it by loading (an agent-driven refresh, in any view, shown or hidden) —
     // but not when the user clicked into the visible pane to use the page.
-    reclaimFocus: () => {
+    reclaimFocus: (typing = false) => {
       if (!window || window.isDestroyed() || !window.isFocused()) return; // user left the app; nothing to reclaim
-      if (!visible || registry.navigatedWithin(2000)) restoreParentFocus();
+      if (typing || !visible || registry.navigatedWithin(2000)) restoreParentFocus();
     },
     clearErrors: (id) => { if (typeof id === 'number' && registry.has(id)) registry.errorsFor(id).clear(); },
     destroy: () => { clearTimeout(healthTimer); agentId = null; visible = false; defaultUA.clear(); },
