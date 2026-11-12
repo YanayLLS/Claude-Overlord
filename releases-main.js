@@ -1201,7 +1201,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const r = await flagRelease.apply(p);
       const backup = path.join(runsDir(), `flags-before-${id}-${stamp()}.json`);
       fs.writeFileSync(backup, JSON.stringify(r.backup, null, 2));
-      flagNote(id, { text: outcome(r), tone: r.failed.length || r.markError || (r.blocked || []).length ? 'warn' : 'ok', act: r.failed.length || r.markError ? 'promote' : null, backup });
+      flagNote(id, { text: outcome(r), tone: r.failed.length || (r.blocked || []).length ? 'warn' : 'ok', act: r.failed.length ? 'promote' : null, backup });
     } catch (e) { flagFail(id, e); }
   }
   // the card's Promote flags: whatever dev and prod say now (the card showed it), applied at once
@@ -1494,7 +1494,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const cwd = await configCheckout();
     const flagScript = path.join(cwd, '.claude', 'skills', 'release', 'flag-gap.cjs');
     const flags = envs.includes('prod') && fs.existsSync(flagScript) ? flagGap(cwd, flagScript) : Promise.resolve(null);
-    // the flags this release carries (Ready for release on dev), diffed against prod: shown now, applied by Release all
+    // the flags this release carries (every active dev flag), diffed against prod: shown now, applied by Release all
     const flagPlan = envs.includes('prod') && !hotfix ? flagRelease.preview().catch(e => ({ error: e.message })) : Promise.resolve(null);
     let n = 0;
     const writeJson = (payload) => { const p = path.join(runsDir(), `pr-${stamp()}-${n++}.json`); fs.writeFileSync(p, JSON.stringify(payload)); return p; };

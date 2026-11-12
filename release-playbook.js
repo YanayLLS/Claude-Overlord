@@ -90,7 +90,7 @@ Flags are rows in each cluster's \`global.featureflags\`; a flag added on dev ne
 - \`catalogueMissingOnProd\` → a real gap. Put a **⚠ Seed before merging** line naming the keys at the top of the frontend, backend and back-office prod PR bodies and in the report, with the seed command per key, dry run first: \`cd C:/Work/back-office && node server/scripts/syncFlagCatalog.js --only <Key> --allow-prod\` (then \`--apply\`). **Never run \`--apply\` yourself.** A default-ON flag switches the feature on for every prod workspace.
 - \`frontendMissingOnProd\` with \`onDev: false\` → exists on no cluster; mention once. \`devOnlyRows\` → ignore.
 - Script errors → report "flag check failed: <message>" and continue.
-- A flag marked **Ready for release** on dev is not a gap: Overlord previews it on the release card and PR, and Release all promotes it to prod once prod is deployed. Seed only catalogue flags that are not Ready.
+- A flag that exists on dev is not a gap: Release all carries every active dev flag to prod once prod is deployed (a new one lands off and In development; turning it on is done in prod's back office). Seed only catalogue flags missing on dev too.
 `);
   }
 

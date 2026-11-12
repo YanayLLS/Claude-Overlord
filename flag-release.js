@@ -1,6 +1,7 @@
-// Feature flags travel with a prod release: the flags marked Ready for release on dev's back office
-// are previewed against prod when the release opens, and applied once Release all has deployed prod.
-// Back-office owns the rules (what travels, what prod keeps, what is blocked: flagReleaseLogic.js)
+// Feature flags travel with a prod release: every active flag on dev's back office is previewed
+// against prod when the release opens, and applied once Release all has deployed prod. Prod keeps
+// its own stage and on/off. Back-office owns the rules (what travels, what prod keeps, what is
+// blocked: flagRelease.js)
 // and the access: its flag-release workflow is the only caller the endpoints accept (GitHub's token
 // for that workflow on master). Overlord only starts that workflow with `gh` and reads its result,
 // so no one holds a key.
@@ -67,7 +68,6 @@ function outcome(r) {
     ...r.failed.map(f => `${f.key} failed: ${f.message}`),
     ...(r.blocked || []).map(b => `${b.key} blocked: ${b.why}`),
   ];
-  if (r.markError) bits.push(`dev not marked Released: ${r.markError}`);
   return `Flags: ${bits.length ? bits.join(' · ') : 'nothing to promote'}`;
 }
 

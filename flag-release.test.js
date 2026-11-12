@@ -72,7 +72,6 @@ const fast = { sleep: async () => {}, newId: () => 'req1' };
 
   // the line a release card shows after apply
   assert.strictEqual(outcome({ written: ['IsA'], failed: [{ key: 'IsB', message: 'no' }], blocked: [] }), 'Flags: 1 promoted · IsB failed: no');
-  assert.strictEqual(outcome({ written: ['IsA'], failed: [], blocked: [], markError: 'dev down' }), 'Flags: 1 promoted · dev not marked Released: dev down');
   assert.strictEqual(outcome({ written: [], failed: [], blocked: [] }), 'Flags: nothing to promote');
 
   console.log('flag-release ok');
