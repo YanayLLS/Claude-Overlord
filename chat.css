@@ -6,8 +6,7 @@
   --chat-w: 740px;
   --claude: #d97757;
   --chat-fs: 14.5px;
-  --chat-sans: 'Anthropic Sans', 'Inter', 'Geist', 'Segoe UI Variable Text', system-ui, sans-serif;
-  --chat-serif: 'Literata', Charter, 'Iowan Old Style', Georgia, Cambria, serif;
+  --chat-serif: var(--font-serif); /* the empty-chat greeting: serif whatever the chat font, as in Claude Desktop */
   --chat-ease: cubic-bezier(.2, .8, .2, 1);
 }
 :root body #tab-conversation { display: inline-block; }
@@ -21,7 +20,6 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation.open { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding: 32px 24px 28px; background: var(--bg); user-select: text; scrollbar-gutter: stable both-edges; container-type: inline-size; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .thread, :root body :is(#conversation, #chat-shell, #chat-queue) .tail { width: 100%; max-width: var(--chat-w); align-self: center; flex: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-:root body :is(#conversation, #chat-shell, #chat-queue, #chat-bg, #chat-vis-full, #chat-at, #chat-att, #chat-chips, #chat-toasts, #chat-changes, #chat-find, #chat-quote, #chat-view-menu, #chat-mode-menu, #chat-fwd-menu, #chat-hl), :root body #term-order { font-family: var(--chat-sans); }
 :root body :is(#conversation, #chat-shell, #chat-queue) kbd, :root body #term-order kbd { font-family: 'Geist Mono', monospace; font-size: 10.5px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-hi); color: var(--dim); background: none; }
 /* New blocks slide in; a finished turn's spark pops */
 :root body :is(#conversation, #chat-shell, #chat-queue) .enter { animation: chat-in .38s var(--chat-ease) both; }
@@ -33,7 +31,7 @@ body.world-mode #hdr-chat { display: none; }
 /* Your prompts */
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin: 26px 0 20px; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .thread > .msg.user:first-child { margin-top: 0; }
-:root body :is(#conversation, #chat-shell, #chat-queue) .bubble { max-width: min(85%, 600px); padding: 10px 16px; border-radius: 18px; background: var(--surface0); color: var(--text); font-size: var(--chat-fs); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .bubble { font-family: var(--chat-font); max-width: min(85%, 600px); padding: 10px 16px; border-radius: 18px; background: var(--surface0); color: var(--text); font-size: var(--chat-fs); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .bubble.long:not(.open) { max-height: 220px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.user .more { border: 0; border-radius: 999px; padding: 3px 10px; margin-top: -2px; background: none; color: var(--dim); font: inherit; font-size: 12px; cursor: pointer; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.user .more:hover { background: var(--hover-strong); color: var(--text); }
@@ -47,7 +45,7 @@ body.world-mode #hdr-chat { display: none; }
 
 /* Replies: Claude's serif, prose-sized */
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.ai { margin: 6px 0 10px; }
-:root body :is(#conversation, #chat-shell, #chat-queue) .msg.ai .md { font-family: var(--chat-sans); font-size: 16px; line-height: 1.65; color: var(--text); letter-spacing: -.008em; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.ai .md { font-family: var(--chat-font); font-size: 16px; line-height: 1.65; color: var(--text); letter-spacing: 0; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg p { font-size: inherit; line-height: inherit; white-space: normal; color: inherit; background: none; border: 0; padding: 0; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md > :last-child { margin-bottom: 0; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md p, :root body :is(#conversation, #chat-shell, #chat-queue) .md ul, :root body :is(#conversation, #chat-shell, #chat-queue) .md ol, :root body :is(#conversation, #chat-shell, #chat-queue) .md blockquote, :root body :is(#conversation, #chat-shell, #chat-queue) .md table, :root body :is(#conversation, #chat-shell, #chat-queue) .md .md-code { margin: 0 0 14px; }
@@ -57,13 +55,13 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md > :first-child { margin-top: 0; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md .md-anchor { display: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md :not(pre) > code { font-family: 'Geist Mono', monospace; font-size: .8em; padding: .15em .4em; border-radius: 5px; background: var(--surface0); border: 0; }
-:root body :is(#conversation, #chat-shell, #chat-queue) .md table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-family: var(--chat-sans); font-size: 13.5px; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .md table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-family: var(--ui-font); font-size: 13.5px; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md th, :root body :is(#conversation, #chat-shell, #chat-queue) .md td { padding: 7px 14px 7px 0; border: 0; border-bottom: 1px solid var(--border); text-align: left; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md th { font-weight: 600; border-bottom-color: var(--border-hi); }
-:root body :is(#conversation, #chat-shell, #chat-queue) .md .md-code { border-radius: 12px; font-family: var(--chat-sans); }
+:root body :is(#conversation, #chat-shell, #chat-queue) .md .md-code { border-radius: 12px; font-family: var(--ui-font); }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md blockquote { border-left: 3px solid var(--border-hi); padding-left: 14px; color: var(--subtext); }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md p.plain { white-space: pre-wrap; }
-:root body :is(#conversation, #chat-shell, #chat-queue) .md.sub { font-family: var(--chat-sans); font-size: 13.5px; line-height: 1.6; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); color: var(--subtext); }
+:root body :is(#conversation, #chat-shell, #chat-queue) .md.sub { font-family: var(--ui-font); font-size: 13.5px; line-height: 1.6; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); color: var(--subtext); }
 
 /* Turn footer: copy · worked for · finished at */
 :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px -6px; min-height: 28px; font-size: 12px; color: var(--dim); }
@@ -242,7 +240,7 @@ body.world-mode #hdr-chat { display: none; }
 /* Round 4 */
 :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot:not(.latest) .act.copy { opacity: 0; transition: opacity .15s; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot:hover .act.copy, :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot .act.copy:focus-visible { opacity: 1; }
-:root body :is(#conversation, #chat-shell, #chat-queue) .md.sub.plan { font-family: var(--chat-sans); font-size: 15px; color: var(--text); }
+:root body :is(#conversation, #chat-shell, #chat-queue) .md.sub.plan { font-family: var(--chat-font); font-size: 15px; color: var(--text); }
 :root body :is(#conversation, #chat-shell, #chat-queue) .el { flex: none; font-family: 'Geist Mono', monospace; font-size: 11px; color: var(--dim); }
 :root body :is(#conversation, #chat-shell, #chat-bg) button.bga { background: none; font: inherit; font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s; }
 :root body :is(#conversation, #chat-shell, #chat-bg) button.bga:hover { background: var(--hover-strong); border-color: var(--claude); }
@@ -306,13 +304,13 @@ body.world-mode #hdr-chat { display: none; }
 
 /* Numbered images: thumbnails carry the number their [Image #N] tag uses; tags in a sent prompt show as chips */
 :root body :is(#conversation, #chat-shell, #chat-queue) .imgs .th { position: relative; display: inline-flex; }
-:root body :is(#conversation, #chat-shell, #chat-queue) .imgs .th b, :root body #chat-att .att b { position: absolute; left: 6px; top: 6px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: rgba(0,0,0,.65); color: #fff; font: 600 11px/18px var(--chat-sans); text-align: center; pointer-events: none; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .imgs .th b, :root body #chat-att .att b { position: absolute; left: 6px; top: 6px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: rgba(0,0,0,.65); color: #fff; font: 600 11px/18px var(--ui-font); text-align: center; pointer-events: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .imgtag { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px 0 4px; margin: 0 1px; border-radius: 6px; background: color-mix(in srgb, var(--claude) 16%, transparent); color: var(--text); font-size: .88em; font-weight: 500; vertical-align: 1px; white-space: nowrap; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .imgtag .ic { width: 12px; height: 12px; color: var(--claude); }
 :root body #chat-att .att { position: relative; display: inline-flex; animation: chat-pop .35s var(--chat-ease); }
 :root body #chat-att .att img { animation: none; }
 :root body #chat-att .att.saving img { opacity: .5; }
-:root body #chat-att .att-x { position: absolute; right: -6px; top: -6px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid var(--border-hi); background: var(--surface0); color: var(--text); font: 600 13px/1 var(--chat-sans); cursor: pointer; opacity: 0; transition: opacity .15s; }
+:root body #chat-att .att-x { position: absolute; right: -6px; top: -6px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid var(--border-hi); background: var(--surface0); color: var(--text); font: 600 13px/1 var(--ui-font); cursor: pointer; opacity: 0; transition: opacity .15s; }
 :root body #chat-att .att:hover .att-x, :root body #chat-att .att-x:focus-visible { opacity: 1; }
 :root body :is(#conversation, #chat-shell, #chat-queue) button.imgtag { border: 0; font-family: inherit; cursor: zoom-in; padding: 1px 6px 1px 2px; }
 :root body :is(#conversation, #chat-shell, #chat-queue) button.imgtag:hover { background: color-mix(in srgb, var(--claude) 28%, transparent); }
@@ -420,7 +418,7 @@ body.world-mode #hdr-chat { display: none; }
 #chat-changes .cc-f:hover { background: var(--hover); }
 #chat-changes .cc-f.on { background: var(--hover-strong); box-shadow: inset 2px 0 0 var(--claude); }
 #chat-changes .cc-n { font-family: 'Geist Mono', monospace; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#chat-changes .cc-n em { font-style: normal; font-family: var(--chat-sans); font-size: 10px; margin-left: 6px; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+#chat-changes .cc-n em { font-style: normal; font-family: var(--ui-font); font-size: 10px; margin-left: 6px; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
 #chat-changes .cc-d { grid-column: 1; font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 #chat-changes .cc-s { grid-column: 2; grid-row: 1 / 3; align-self: center; font-family: 'Geist Mono', monospace; font-size: 11px; }
 #chat-changes .cc-diff { overflow: auto; padding: 10px 14px 18px; }
@@ -472,7 +470,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-att .att.doc { align-items: center; gap: 8px; height: 56px; padding: 0 30px 0 10px; border-radius: 10px; border: 1px solid var(--border-hi); background: var(--bg2); cursor: pointer; }
 :root body #chat-att .att.doc .doc-i { font-size: 20px; color: #d97757; }
 :root body #chat-att .att.doc .doc-t { display: flex; flex-direction: column; }
-:root body #chat-att .att.doc .doc-t b { position: static; background: none; color: var(--text); font: 500 12.5px var(--chat-sans); padding: 0; height: auto; min-width: 0; text-align: left; }
+:root body #chat-att .att.doc .doc-t b { position: static; background: none; color: var(--text); font: 500 12.5px var(--ui-font); padding: 0; height: auto; min-width: 0; text-align: left; }
 :root body #chat-att .att.doc .doc-t small { font-size: 11px; color: var(--dim); }
 :root body #chat-att .att.doc .att-x { right: 4px; top: 4px; }
 
@@ -541,7 +539,7 @@ body.world-mode #hdr-chat { display: none; }
 
 /* ⋯ chip: a count while other agents need you */
 :root body #chat-chips .chip.icon[data-act="view-menu"] { position: relative; }
-:root body #chat-chips .chip.icon.alert::after { content: attr(data-count); position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: #d97757; color: #fff; font: 600 10px/16px var(--chat-sans); box-shadow: 0 0 0 2px var(--surface0); }
+:root body #chat-chips .chip.icon.alert::after { content: attr(data-count); position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: #d97757; color: #fff; font: 600 10px/16px var(--ui-font); box-shadow: 0 0 0 2px var(--surface0); }
 
 /* ⋯ menu: Needs you rows, a separator, the side-by-side switch */
 :root body #chat-view-menu { max-height: 70vh; overflow: auto; width: 300px; }
@@ -706,11 +704,11 @@ body.world-mode #hdr-chat { display: none; }
 /* A CLI dialog with no chat card (rewind, /config, /model…): the real terminal floats over the chat while it's up */
 :root body #term.peek > #term-container { display: block !important; position: absolute; left: 16px; right: 16px; top: 16px; bottom: 16px; z-index: 7; border-radius: 12px; border: 1px solid var(--border-hi); box-shadow: 0 16px 48px rgba(0,0,0,.35); overflow: hidden; animation: chat-in .18s var(--chat-ease); }
 #term-peek-x { display: none; }
-:root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 var(--chat-sans); cursor: pointer; }
+:root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 var(--ui-font); cursor: pointer; }
 /* A CLI dialog with no chat card (rewind, /config, /model…): the real terminal floats over the chat while it's up */
 :root body #term.peek > #term-container { display: block !important; position: absolute; left: 16px; right: 16px; top: 16px; bottom: 16px; z-index: 7; border-radius: 12px; border: 1px solid var(--border-hi); box-shadow: 0 16px 48px rgba(0,0,0,.35); overflow: hidden; animation: chat-in .18s var(--chat-ease); }
 #term-peek-x { display: none; }
-:root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 var(--chat-sans); cursor: pointer; }
+:root body #term.peek > #term-peek-x { display: block; position: absolute; top: 24px; right: 28px; z-index: 8; width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.45); color: #fff; font: 600 16px/1 var(--ui-font); cursor: pointer; }
 :root body #chat-chips .chip.name { font-family: 'Geist Mono', monospace; font-size: 12px; color: var(--dim); }
 :root body #chat-chips .chip.name:hover { color: var(--text); }
 /* Their hover card */
@@ -820,7 +818,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation details.msg.peer[open] > summary .ic:last-child { transform: rotate(90deg); }
 :root body #conversation details.msg.peer > .md { padding: 0 12px 10px; }
 /* Chips read the same in your messages and Claude's replies, whatever the text around them is set in */
-:root body :is(#conversation, #chat-shell, #chat-queue) :is(.imgtag, a.plink) { font-family: 'Geist', 'Segoe UI', system-ui, sans-serif; font-size: 13px; }
+:root body :is(#conversation, #chat-shell, #chat-queue) :is(.imgtag, a.plink) { font-family: var(--ui-font); font-size: 13px; }
 /* "Agent finished" in the agent-list stack: green check, one quiet line */
 #chat-toasts .ctoast.fin { border-color: color-mix(in srgb, var(--green, #4ade80) 45%, var(--border-hi)); cursor: pointer; }
 #chat-toasts .ctoast.fin .ct-h .ic { stroke: var(--green, #4ade80); }
@@ -1263,7 +1261,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.ai .md :is(strong, b, h1, h2, h3, h4) { font-weight: 600; }
 
 /* ── Inline visuals (show_visual, ```html-visual): a framed live page, variants as a segmented control, Open larger ── */
-:root body :is(#conversation, #chat-shell, #chat-queue, #chat-vis-full) .vis { margin: 6px 0 16px; font-family: var(--chat-sans); font-weight: 400; border: 1px solid var(--border-hi); border-radius: 14px; overflow: hidden; background: var(--bg); }
+:root body :is(#conversation, #chat-shell, #chat-queue, #chat-vis-full) .vis { margin: 6px 0 16px; font-family: var(--ui-font); font-weight: 400; border: 1px solid var(--border-hi); border-radius: 14px; overflow: hidden; background: var(--bg); }
 :root body :is(#conversation, #chat-shell, #chat-queue, #chat-vis-full) .vis-h { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 6px 6px 14px; background: var(--surface0); border-bottom: 1px solid var(--border-hi); }
 :root body :is(#conversation, #chat-shell, #chat-queue, #chat-vis-full) .vis-h > .ic { color: var(--claude); width: 16px; height: 16px; }
 :root body :is(#conversation, #chat-shell, #chat-queue, #chat-vis-full) .vis-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

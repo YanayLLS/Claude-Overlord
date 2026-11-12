@@ -1415,6 +1415,14 @@ button:focus-visible { outline-offset:0; }
         <span>Theme</span>
         <select id="sel-theme" onchange="setTheme(this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
       </label>
+      <label class="settings-label">
+        <span>Interface font</span>
+        <select id="sel-ui-font" onchange="setFont('ui', this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
+      </label>
+      <label class="settings-label">
+        <span>Chat font</span>
+        <select id="sel-chat-font" onchange="setFont('chat', this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
+      </label>
       </div>
       </details>
 
@@ -2698,6 +2706,35 @@ function setTheme(name, persist = true) {
 }
 document.getElementById('sel-theme').innerHTML = Object.entries(THEMES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
 document.getElementById('sel-theme').value = currentTheme;
+// Fonts (Settings > Appearance), like Claude Desktop's: Interface font for everything, Chat font for the messages.
+// theme.css maps html[data-ui-font] / [data-chat-font] to the stacks. Cached locally like the theme, so a reload doesn't flash.
+const FONT_OPTS = {
+  geist: ['Geist', 'Geist', '--font-geist'],
+  sans: ['Sans', 'Anthropic Sans when installed, otherwise Inter', '--font-sans'],
+  serif: ['Serif', 'Anthropic Serif when installed, otherwise Literata', '--font-serif'],
+  system: ['System', 'Your system font (Segoe UI)', '--font-system'],
+  legible: ['High legibility', 'Atkinson Hyperlegible: similar letters like I, l and 1 are drawn to tell apart', '--font-legible'],
+};
+const FONTS = {
+  ui: { key: 'uiFont', def: 'geist', opts: ['geist', 'sans', 'system', 'legible'] },
+  chat: { key: 'chatFont', def: 'sans', opts: ['sans', 'serif', 'geist', 'system', 'legible'] },
+};
+function setFont(kind, name, persist = true) {
+  const f = FONTS[kind];
+  const v = f.opts.includes(name) ? name : f.def;
+  document.documentElement.dataset[f.key] = v;
+  try { localStorage.setItem(f.key, v); } catch {}
+  const sel = document.getElementById(`sel-${kind}-font`); if (sel) sel.value = v;
+  if (persist) api.send({ type: 'saveSettings', settings: { [f.key]: v } });
+}
+for (const kind of Object.keys(FONTS)) {
+  document.getElementById(`sel-${kind}-font`).innerHTML = FONTS[kind].opts.map(k => {
+    const [label, title, cssVar] = FONT_OPTS[k];
+    return `<option value="${k}" title="${title}" style="font-family:var(${cssVar})">${label}</option>`;
+  }).join('');
+  let saved = null; try { saved = localStorage.getItem(FONTS[kind].key); } catch {}
+  setFont(kind, saved, false);
+}
 function focusAgent(id) { if (_renaming) return; const changed = selectedId !== id; selectedId = id; if (agents.get(id)) agents.get(id).unread = false; if (agents.get(id)) hotCwd = agents.get(id).cwd; api.send({ type: 'focusAgent', id }); if (changed) render(); syncPreview(); }
 // The Chat view's reply box takes focus, unless you're typing somewhere else (renaming an agent, the search box…):
 // a double-click to rename is two clicks, and the focus a click schedules would land after the rename box opened.
@@ -5351,6 +5388,8 @@ function applySettings(s) {
   if (Array.isArray(s.agentPrefixes)) { _prefixes = s.agentPrefixes; _prefixDefault = s.agentPrefixDefault || ''; }
   else { try { const old = JSON.parse(localStorage.getItem('agentPrefixes') || '[]'); if (old.length) { savePrefixes(old); setDefaultPrefix(localStorage.getItem('agentPrefixDefault') || ''); } } catch {} } // one-time move off localStorage
   if (s.theme) setTheme(s.theme, false);
+  if (s.uiFont) setFont('ui', s.uiFont, false);
+  if (s.chatFont) setFont('chat', s.chatFont, false);
   if (s.zoom) setUiZoom(s.zoom, false);
   if (s.termWidth) { settings_termWidth = s.termWidth; applyLayout(); }
   if (s.bypassPermissions !== undefined) {
