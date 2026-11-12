@@ -654,5 +654,23 @@
   function cmdDesc(cmd) {
     const i = cmdItem(cmd), d = i ? i.desc || '' : ''; return d.length > 280 ? d.slice(0, 279) + '…' : d;
   }
+  // Focus guard: while you're typing in the reply box, nothing but your own click or shortcut may take the caret
+  // (a terminal, a peek, a redraw). A theft right after a plain keystroke goes straight back, and its caller is logged.
+  { let typedAt = 0, userAt = 0;
+    document.addEventListener('pointerdown', () => { userAt = performance.now(); }, true);
+    document.addEventListener('keydown', (e) => {
+      if (e.target === box() && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== 'Tab' && e.key !== 'Escape') typedAt = performance.now();
+      else userAt = performance.now();
+    }, true);
+    document.addEventListener('focusin', (e) => {
+      const t = box(), now = performance.now();
+      if (!t || e.target === t || e.relatedTarget !== t || now - typedAt > 2000 || userAt > typedAt) return;
+      if (e.target.closest && e.target.closest('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+      const who = (new Error().stack || '').split('\n').slice(2, 6).map(l => l.trim()).join(' < ');
+      api.send({ type: 'perfLog', text: 'focus-guard: ' + (e.target.id || e.target.className || e.target.tagName) + ' took the reply box: ' + who });
+      t.focus();
+    }, true);
+    window.addEventListener('blur', () => { const now = performance.now(); if (now - typedAt < 2000 && userAt < typedAt && document.activeElement === box()) api.send({ type: 'perfLog', text: 'focus-guard: the window lost focus while typing (an embedded view or another app took it)' }); });
+  }
   window.chatComposer = { cmdDesc, cmdPath, send, insert, onKey, onFiles, onSessions, setDraft, restoreDraft, getDraft, carryDraft, clearCliBox, sendText, onCatalog, onImageSaved, drawAtt, onDictation, micStop };
 })();
