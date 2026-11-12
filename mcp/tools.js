@@ -14,6 +14,8 @@ const TOOL_SCHEMAS = [
     inputSchema: { type: 'object', properties: { ref: str('A ref_N handle from browser_snapshot'), text: str('Text to type'), submit: { type: 'boolean', description: 'Press Enter afterwards' } }, required: ['ref', 'text'] } },
   { name: 'browser_console', description: 'Read buffered console warnings, console errors, failed loads and failed network requests for this page.',
     inputSchema: { type: 'object', properties: {} } },
+  { name: 'browser_viewport', description: 'Set the width (and optionally height) the page lays out at, e.g. 1440 for the desktop layout or 390 for a phone, whatever size the user\'s pane is: it is drawn scaled to fit. Use it instead of asking the user to resize the pane or the window. width 0 goes back to the pane\'s own size.',
+    inputSchema: { type: 'object', properties: { width: { type: 'number', description: 'Layout width in CSS px (320-3840), 0 to reset' }, height: { type: 'number', description: 'Layout height in CSS px; omit to fill the pane' } }, required: ['width'] } },
   { name: 'browser_eval', description: 'Evaluate a JavaScript expression in the page and return the JSON-serialized result.',
     inputSchema: { type: 'object', properties: { js: str('A JavaScript expression') }, required: ['js'] } },
 ];
@@ -56,6 +58,7 @@ const HANDLERS = {
   browser_type: (a, g, args) => a.type(g('ref'), g('text'), args.submit === true),
   browser_console: (a) => a.consoleErrors(),
   browser_eval: (a, g) => a.evaluate(g('js')),
+  browser_viewport: (a, _g, args) => a.viewport(args.width, args.height),
 };
 
 function requiredGetter(args, name) {

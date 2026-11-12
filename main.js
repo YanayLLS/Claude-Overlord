@@ -1443,7 +1443,7 @@ function saveState() {
     let jsonlSize = 0;
     try { jsonlSize = fs.statSync(a.jsonlFile).size; } catch {}
     const termProc = terminals.get(id);
-    agentEntries.push({ chatHides: a.chatHides || [], cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, account: a.account || null, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, archivedAt: a.archivedAt || null, termSize: lastTermSize.get(a.id) || null, servers: [...(serverPorts.get(a.id) || [])] });
+    agentEntries.push({ chatHides: a.chatHides || [], cwd: a.cwd, sessionId: a.sessionId, lastPrompt: a.lastPrompt, lastText: a.lastText, title: a.title, aiTitle: a.aiTitle || '', customName: a.customName || false, createdAt: a.createdAt, wasActive, jsonlSize, pid: termProc?.pid || null, ptyKey: termProc?.key || null, mcpToken: termProc?.key && mcpServer ? mcpServer.mintToken(id) : null, agentName: a.agentName, account: a.account || null, stats: a.stats, promptHistory: a.promptHistory, cronCount: a.cronCount, archived: a.archived || false, archivedAt: a.archivedAt || null, termSize: lastTermSize.get(a.id) || null, pageUrl: a.pageUrl || null, servers: [...(serverPorts.get(a.id) || [])] });
   }
   const state = { agents: agentEntries, settings };
   try {
@@ -1568,7 +1568,7 @@ function restoreAgents(state) {
       promptHistory: entry.promptHistory || [], chatHides: Array.isArray(entry.chatHides) ? entry.chatHides : [], titlePending: false, createdAt: createdAt || Date.now(),
       crashCount: 0, cronCount: entry.cronCount || 0, compacting: false, orphanAlive: false, agentName: agentName, spinnerText: '',
       archived: entry.archived || false, archivedAt: entry.archivedAt || null, account: entry.account || null,
-      stats: savedStats,
+      stats: savedStats, pageUrl: entry.pageUrl || '', // the page its browser showed, reopened when you next focus it
     };
     // ponytail: one sync JSONL read per agent, only until aiTitle is in saved state
     if (!agent.customName && !agent.aiTitle) agent.title = agent.aiTitle = readSessionTitle(jsonlFile).ai;
@@ -4956,6 +4956,7 @@ function handleIpc(msg) {
     case 'focusAgent':
       focusedAgentId = msg.id; queueSaveSweep(); // the agent you left sleeps now if it's idle
       spawnTerminal(msg.id); // also wakes it from CPU saving
+      { const ag = agents.get(msg.id); if (ag && ag.pageUrl && browserRegistry && !browserRegistry.has(msg.id)) browserRegistry.actionsFor(msg.id)?.navigate(ag.pageUrl).catch(() => {}); }
       if (preview) preview.setAgent(msg.id);
       send({ type: 'focused', id: msg.id });
       break;
@@ -6747,6 +6748,7 @@ app.whenReady().then(() => {
   // icon, even when run from start.bat). Setting it on the window itself wins over that shortcut.
   if (process.platform === 'win32') mainWindow.setAppDetails({ appId: APP_ID, appIconPath: APP_ICON, appIconIndex: 0 });
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, cb) => cb(true));
+  require('./browser/jar-migrate').migrateJars({ session: require('electron').session, userData: app.getPath('userData'), target: 'persist:overlord-browser', log: flog }).catch(() => {});
   browserRegistry = createRegistry({
     // Sites see plain Chrome: with "Electron/…" in the user agent, a site that also ships a desktop app (Frontline) took
     // itself for that app, waited for its native login window and sat on its loader forever.
@@ -6755,15 +6757,11 @@ app.whenReady().then(() => {
     }); v.webContents.setUserAgent(ua); return v; },
     attach: (view) => mainWindow.contentView.addChildView(view),
     detach: (view) => mainWindow.contentView.removeChildView(view),
-    // Partitions are keyed off the agent's sessionId UUID, not its numeric id:
-    // ids restart at 1 each launch while partitions persist on disk, so numeric
-    // keys would hand a new agent a previous one's cookies and logins.
-    partitionFor: (id) => {
-      const a = agents.get(id);
-      return `persist:overlord-agent-${a && a.sessionId ? a.sessionId : id}`;
-    },
+    // One cookie jar for every agent, kept on disk, as in your own browser: log in to an app once and every agent,
+    // now and after a restart, is logged in. (It was one jar per agent, so each new agent asked for the login again.)
+    partitionFor: () => 'persist:overlord-browser',
     onErrorCount: (id, count, last) => send({ type: 'previewError', id, count, last }),
-    onNavigated: (id, url) => { if (preview) preview.onAgentNavigated(id, url); }, // it sends previewLoaded
+    onNavigated: (id, url) => { const ag = agents.get(id); if (ag && /^https?:/.test(url || '')) ag.pageUrl = url; if (preview) preview.onAgentNavigated(id, url); }, // it sends previewLoaded
     // Screenshots of a hidden view: lent to an invisible window for the capture (see browser/capture-host.js).
     captureHost: browserCaptureHost = createCaptureHost({ makeWindow: () => makeCaptureWindow({ BrowserWindow, screen: require('electron').screen }) }),
     onRecovered: (id, reason, ok, url) => flog(ok ? `agent ${id} browser died (${reason}): recreated${url ? `, reloading ${url}` : ''}` : `agent ${id} browser died (${reason}) again: giving up for now`),

@@ -23,7 +23,7 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
 }
 
-function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIMEOUT_MS, rebindInput = async () => {}, withCapturable = (fn) => fn() }) {
+function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIMEOUT_MS, rebindInput = async () => {}, withCapturable = (fn) => fn(), inputScale = () => 1 }) {
   function wc() {
     const w = getWebContents();
     if (!w) throw new Error('This agent has no browser available.');
@@ -107,7 +107,7 @@ function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIME
   }
 
   async function clickAt(w, { x, y }) {
-    const base = { x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 };
+    const k = inputScale(), base = { x: Math.round(x * k), y: Math.round(y * k), button: 'left', clickCount: 1 };
     w.sendInputEvent({ type: 'mouseDown', ...base });
     w.sendInputEvent({ type: 'mouseUp', ...base });
   }

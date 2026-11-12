@@ -58,6 +58,24 @@ function createRegistry({
   function place(entry) {
     if (entry.lent) return;
     if (entry.shown) { entry.view.setBounds(entry.shown); entry.view.setVisible(true); } else park(entry.view);
+    emulate(entry);
+  }
+  // The agent's chosen layout width (browser_viewport): the page lays out that wide whatever the pane's size,
+  // drawn scaled down to fit when the pane is narrower, so it never has to ask you to widen the pane.
+  function emulate(entry) {
+    const vp = entry.viewport, wc = entry.view.webContents;
+    if (!vp) { entry.scale = 1; if (entry.emulated) { entry.emulated = false; try { wc.disableDeviceEmulation(); } catch {} } return; }
+    const pane = entry.shown || { width: vp.width, height: vp.height || DEFAULT_VIEW_HEIGHT };
+    const scale = Math.min(1, pane.width / vp.width) || 1, size = { width: vp.width, height: vp.height || Math.round(pane.height / scale) };
+    entry.emulated = true; entry.scale = scale;
+    try { wc.enableDeviceEmulation({ screenPosition: 'desktop', screenSize: size, viewSize: size, viewPosition: { x: 0, y: 0 }, deviceScaleFactor: 0, scale }); } catch {}
+  }
+  function setViewport(id, width, height) {
+    ensure(id);
+    const entry = entries.get(id), w = Math.round(+width || 0), h = Math.round(+height || 0);
+    entry.viewport = w > 0 ? { width: Math.max(320, Math.min(3840, w)), height: h > 0 ? Math.max(240, Math.min(2160, h)) : 0 } : null;
+    emulate(entry);
+    return entry.viewport;
   }
 
   // Order is load-bearing: bounds and visibility only take effect once the view
@@ -100,10 +118,11 @@ function createRegistry({
     const errors = createErrorBuffer((count, last) => onErrorCount(id, count, last), rebinder.isSuppressed);
     wireErrors(view.webContents, errors);
     // Any load, even a suppressed re-bind one, can yank keyboard focus into the view.
-    const entry = { view, errors: null, actions: null, partition, lastNavAt: 0, shown: null, lent: false, dead: false, lastBlank: false, hungTimer: null };
+    const wcId = view.webContents.id;
+    const entry = { view, wcId, errors: null, actions: null, partition, lastNavAt: 0, shown: null, lent: false, dead: false, lastBlank: false, hungTimer: null };
     const current = () => entries.get(id) === entry;
     wireNavigation(id, view.webContents, onNavigated, rebinder.isSuppressed, () => { entry.lastNavAt = Date.now(); });
-    wireNetworkErrors(partition, errors);
+    wireNetworkErrors(partition, errors, wcId);
     wireHealth(view.webContents, {
       onGone: (reason) => { if (current()) setTimeout(() => { if (current()) recover(id, `renderer ${reason}`); }, 0); },
       onUnresponsive: () => {
@@ -117,6 +136,7 @@ function createRegistry({
       errors,
       rebindInput: rebinder.rebind,
       withCapturable: (fn) => capturable(entry, fn),
+      inputScale: () => entry.scale || 1, // a scaled-down layout (browser_viewport) takes input in drawn pixels
     });
     const settle = async () => { if (entry.priming) { await entry.priming.catch(() => {}); entry.priming = null; } };
     const actions = {};
@@ -128,6 +148,10 @@ function createRegistry({
       const png = await raw.screenshot();
       if (entry.lastBlank && current() && (await looksDead(entry)) && recover(id, 'blank frame')) return entries.get(id).actions.screenshot();
       return png;
+    };
+    actions.viewport = async (width, height) => {
+      const vp = setViewport(id, width, height);
+      return vp ? `The page now lays out ${vp.width}px wide${vp.height ? ` x ${vp.height}px` : ''} (scaled to fit the pane when it is narrower); screenshots show that layout.` : 'Back to the pane\'s own size.';
     };
     entry.errors = errors; entry.actions = actions;
     entries.set(id, entry);
@@ -167,6 +191,7 @@ function createRegistry({
     try { detach(old.view); } catch {}
     try { old.view.webContents.forcefullyCrashRenderer(); } catch {} // a hung renderer would otherwise live on
     try { old.view.webContents.close(); } catch {}
+    unwireNetworkErrors(old.partition, old.wcId);
     if (/^https?:\/\//i.test(url)) primed.set(id, url);
     ensure(id);
     if (shown) show(id, shown);
@@ -222,7 +247,7 @@ function createRegistry({
     clearTimeout(entry.hungTimer);
     try { detach(entry.view); } catch {}
     try { entry.view.webContents.close(); } catch {}
-    unwireNetworkErrors(entry.partition);
+    unwireNetworkErrors(entry.partition, entry.wcId);
   }
 
   const has = (id) => entries.has(id);
@@ -232,7 +257,7 @@ function createRegistry({
   // True when some agent view loaded within the last `ms` — the moment a view steals focus from the terminal.
   const navigatedWithin = (ms, now = Date.now()) => [...entries.values()].some(e => now - e.lastNavAt < ms);
 
-  return { ensure, show, hideAll, has, errorsFor, actionsFor, prime, destroy, destroyAll, navigatedWithin, checkHealth };
+  return { setViewport, ensure, show, hideAll, has, errorsFor, actionsFor, prime, destroy, destroyAll, navigatedWithin, checkHealth };
 }
 
 module.exports = { createRegistry, DEFAULT_VIEW_WIDTH, DEFAULT_VIEW_HEIGHT };

@@ -51,11 +51,11 @@ test('initialize returns protocol version and tools capability', async () => {
   });
 });
 
-test('tools/list returns the seven browser tools, three terminal tools and show_visual', async () => {
+test('tools/list returns the eight browser tools, three terminal tools and show_visual', async () => {
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 11);
+    assert.strictEqual(json.result.tools.length, 12);
   });
 });
 

@@ -14,6 +14,8 @@ function normalizeConsole(args) {
   return { level: e.level, message: e.message, line: e.lineNumber, source: e.sourceId };
 }
 
+const LOCAL_HTTP = /^http:\/\/(localhost|127\.0\.0\.1|([\w-]+\.)*lvh\.me)(:\d+)?\//i;
+
 function wireErrors(webContents, errors) {
   webContents.on('console-message', (...args) => {
     const { level, message, line, source } = normalizeConsole(args);
@@ -22,6 +24,8 @@ function wireErrors(webContents, errors) {
   });
   webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
+    // A local dev server on https (vite --https) answers http with an empty reply: retry the same address on https once.
+    if ((code === -324 || code === -100) && LOCAL_HTTP.test(url || '')) { webContents.loadURL('https' + url.slice(4)).catch(() => {}); return; }
     errors.push({ kind: 'load', level: 'error', message: `Failed to load ${url}: ${desc} (${code})`, source: url, line: 0 });
   });
 }
@@ -41,27 +45,33 @@ function wireNavigation(id, webContents, onNavigated, isSuppressed = () => false
   webContents.on('did-navigate-in-page', notify);
 }
 
-// Network failures arrive on the session, not the webContents. Each agent has
-// its own partition, so the hook is installed per agent. Guarded because the
-// unit tests run without Electron.
-function wireNetworkErrors(partition, errors) {
-  try {
-    require('electron').session.fromPartition(partition)
-      .webRequest.onErrorOccurred({ urls: ['<all_urls>'] }, (d) => {
-        if (!d.error || d.error === 'net::ERR_ABORTED') return;
-        errors.push({ kind: 'network', level: 'error', message: `${d.error} ${d.url}`, source: d.url, line: 0 });
-      });
-  } catch {}
+// Network failures arrive on the session, not the webContents, and a session takes one listener per event.
+// Agents share a partition (one cookie jar, so a login sticks), so one listener per partition routes each
+// failure to the buffer of the view that made the request. Guarded because the unit tests run without Electron.
+const netRoutes = new Map(); // partition -> Map(webContentsId -> errors)
+function onNetError(routes, d) {
+  if (!d.error || d.error === 'net::ERR_ABORTED') return;
+  if (d.resourceType === 'mainFrame' && /ERR_EMPTY_RESPONSE|ERR_CONNECTION_CLOSED/.test(d.error) && LOCAL_HTTP.test(d.url)) return; // retried on https, see wireErrors
+  const errors = routes.get(d.webContentsId); if (!errors) return;
+  errors.push({ kind: 'network', level: 'error', message: `${d.error} ${d.url}`, source: d.url, line: 0 });
+}
+function wireNetworkErrors(partition, errors, wcId) {
+  let routes = netRoutes.get(partition);
+  if (!routes) {
+    netRoutes.set(partition, routes = new Map());
+    try { require('electron').session.fromPartition(partition).webRequest.onErrorOccurred({ urls: ['<all_urls>'] }, (d) => onNetError(routes, d)); } catch {}
+  }
+  routes.set(wcId, errors);
 }
 
-// Sessions outlive the WebContents they're paired with, so wireNetworkErrors'
-// listener has to be unregistered explicitly on destroy — otherwise it keeps
-// firing into a dead errors buffer for the rest of the app's life. Passing
-// null is Electron's way of clearing a webRequest listener.
-function unwireNetworkErrors(partition) {
-  try {
-    require('electron').session.fromPartition(partition).webRequest.onErrorOccurred(null);
-  } catch {}
+// Sessions outlive their views: a closed view leaves the routes, and the last one out clears the listener
+// (passing null is Electron's way), so nothing fires into a dead buffer for the rest of the app's life.
+function unwireNetworkErrors(partition, wcId) {
+  const routes = netRoutes.get(partition); if (!routes) return;
+  routes.delete(wcId);
+  if (routes.size) return;
+  netRoutes.delete(partition);
+  try { require('electron').session.fromPartition(partition).webRequest.onErrorOccurred(null); } catch {}
 }
 
 // A renderer that dies (crash, kill, OOM) leaves the view black while its URL bar
@@ -76,4 +86,4 @@ function wireHealth(webContents, { onGone, onUnresponsive, onResponsive }) {
   webContents.on('responsive', onResponsive);
 }
 
-module.exports = { normalizeConsole, wireErrors, wireNavigation, wireNetworkErrors, unwireNetworkErrors, wireHealth };
+module.exports = { onNetError, normalizeConsole, wireErrors, wireNavigation, wireNetworkErrors, unwireNetworkErrors, wireHealth };
