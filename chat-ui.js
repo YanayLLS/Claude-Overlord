@@ -1626,7 +1626,14 @@
     setTimeout(() => { const l = escWaiters.get(id); if (l && l.includes(fn)) { l.splice(l.indexOf(fn), 1); fn(); } }, 4000);
     return true;
   }
-  function onEscSent(id) { const l = escWaiters.get(id) || []; escWaiters.delete(id); for (const fn of l) setTimeout(fn, 700); }
+  // After the Esc: as soon as the CLI's box holds text (your message back), not a fixed 700 ms later (the message came
+  // back to the reply box with a noticeable lag); 700 ms stays the ceiling.
+  function onEscSent(id) {
+    const l = escWaiters.get(id) || []; escWaiters.delete(id); if (!l.length) return;
+    const t0 = Date.now(), boxText = () => { const x = typeof xterms !== 'undefined' && xterms.get(id); return x && typeof readPromptBox === 'function' ? readPromptBox(x.terminal) : ''; };
+    const tick = () => { if ((boxText() || '').trim() || Date.now() - t0 >= 700) { for (const fn of l) fn(); } else setTimeout(tick, 50); };
+    setTimeout(tick, 50);
+  }
   // Text into an agent's reply box, after what's already there.
   function appendDraft(id, text) { const box = document.getElementById('term-order-input'), cur = id === selectedId ? box.value : ''; chatComposer.setDraft(id, cur.trim() ? cur.replace(/\s*$/, '\n') + text : text); }
   function keys(list) { const id = selectedId; list.forEach((k, n) => setTimeout(() => api.send({ type: 'termInput', id, data: k }), n * 70)); }
