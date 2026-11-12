@@ -6273,6 +6273,8 @@ let prCollapsed = new Set(['__archived__']); // archived stays out of sight unti
 // Someone approved it (and nobody since asked for changes). Green means this, not just "GitHub
 // would let me merge": repos without a required review are mergeable before anyone looks.
 function prApproved(p) {
+  // A repo whose rules name approver teams counts only their approvals (main.js stamps approvedByApprover).
+  if (p.approverTeams) return !!p.approvedByApprover && p.reviewDecision !== 'CHANGES_REQUESTED';
   return p.reviewDecision === 'APPROVED' || (!!(p.approvedBy && p.approvedBy.length) && p.reviewDecision !== 'CHANGES_REQUESTED');
 }
 function prMergeInfo(p) {
@@ -6366,7 +6368,9 @@ function prRowHtml(p, dim) {
     ? `<span class="pr-chip bad" title="Changes requested by ${names(p.changesBy)}">Changes requested</span>`
     : prApproved(p)
       ? `<span class="pr-chip good" title="Approved by ${names(p.approvedBy)}">Approved${p.approvedBy && p.approvedBy.length > 1 ? ' ×' + p.approvedBy.length : ''}</span>`
-      : `<span class="pr-chip">Needs review</span>`;
+      : p.approverTeams
+        ? `<span class="pr-chip" title="Only ${names(p.approverTeams)} can approve this PR${p.canApprove ? '' : '. You are not on that team'}">Needs ${names(p.approverTeams)}</span>`
+        : `<span class="pr-chip">Needs review</span>`;
   const eta = p.checksEta ? ' · ' + escapeHtml(etaWords(p.checksEta, Date.now())) : ''; // pr-eta.js
   const checksChip = p.checks === 'pending'
     ? `<span class="pr-chip warn" title="Checks are still running on GitHub${p.checksEta ? ' — ' + escapeHtml(p.checksEta.name) + ', from its recent runs' : ''}">Testing${eta}</span>`
