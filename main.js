@@ -145,6 +145,7 @@ async function releaseChanges(from, to) {
 const { pullBlocker, needsInstall, npmRewriteOnly } = require('./update-core');
 const { buildBehindQuery, parseBehind } = require('./pr-behind');
 const { durationStats, runningWorkflows, checksEta, checkSummary } = require('./pr-eta');
+const prGate = require('./pr-gate');
 const { sessionSwitchKind } = require('./resume-core');
 const { interruptedBy } = require('./interrupt-core');
 const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
@@ -2942,6 +2943,37 @@ async function fetchWorkflowDurations(repo) {
   return by;
 }
 
+// Which teams must approve each PR (repo rulesets' required reviewers, per base branch) and who is in them: pr-gate.js.
+// Both cached for 15 min; a failed lookup keeps the last answer, and with none the PR is treated as not gated.
+const GATE_TTL = 15 * 60000;
+const gateRules = new Map(); // 'repo@base' → { at, ids: [team id] | null }
+const gateTeams = new Map(); // org → { at, teams: Map(id → { slug, members }) | null }
+async function prGateFor(prs) {
+  const now = Date.now();
+  const keys = [...new Set(prs.filter(p => p.baseRef).map(p => p.repo + '@' + p.baseRef))];
+  await Promise.all(keys.map(async (k) => {
+    const c = gateRules.get(k);
+    if (c && now - c.at < GATE_TTL) return;
+    const at = k.lastIndexOf('@'), repo = k.slice(0, at), base = k.slice(at + 1);
+    const res = await ghJson(['api', `/repos/${repo}/rules/branches/${encodeURIComponent(base)}`]);
+    gateRules.set(k, { at: now, ids: res.error ? (c ? c.ids : null) : prGate.requiredTeamIds(res.data) });
+  }));
+  const orgs = [...new Set(keys.filter(k => (gateRules.get(k).ids || []).length).map(k => k.split('/')[0]))];
+  await Promise.all(orgs.map(async (org) => {
+    const c = gateTeams.get(org);
+    if (c && now - c.at < GATE_TTL) return;
+    const res = await ghGraphql(prGate.orgTeamsQuery(org));
+    gateTeams.set(org, { at: now, teams: (!res.error && prGate.parseOrgTeams(res.data)) || (c ? c.teams : null) });
+  }));
+  return (p) => {
+    const ids = (gateRules.get(p.repo + '@' + p.baseRef) || {}).ids;
+    const teams = ids && ids.length && (gateTeams.get(p.repo.split('/')[0]) || {}).teams;
+    if (!teams) return null;
+    const found = ids.map(id => teams.get(id));
+    return found.every(Boolean) ? found : null; // a team we can't see: don't guess who may approve
+  };
+}
+
 // Stamp mute/snooze/archive state from settings onto the PR list.
 function applyPrFlags(prs) {
   const muted = new Set(settings.prMuted || []);
@@ -3054,6 +3086,8 @@ async function pollPRsOnce() {
     prGhErrorLogged = true;
   }
   if (!failedRepos.length) prGhErrorLogged = false;
+  // Others' PRs only a team I'm not in can approve go to "All open" — before the new-PR toasts below.
+  Object.assign(res, prGate.applyGates(res.prs, res.extra, await prGateFor(res.prs.concat(res.extra || [])), ghLogin));
   const prs = res.prs;
   const currentKeys = prs.map(p => p.key);
   applyPrFlags(prs);
