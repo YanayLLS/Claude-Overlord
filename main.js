@@ -399,6 +399,7 @@ let mainWindow = null;
 // screen — stats fallback, PR/CI watch, port probes — skip, and catch up on the first tick after.
 const appQuiet = () => { try { return !!mainWindow && !mainWindow.isDestroyed() && (mainWindow.isMinimized() || !mainWindow.isVisible()); } catch { return false; } };
 let browserRegistry = null;
+let browserLogins = null; const { createLogins, wireLogins } = require('./browser/logins');
 let browserCaptureHost = null; // its hidden window would keep the app alive after the main window closes
 let mcpServer = null;
 let preview = null;
@@ -6754,7 +6755,10 @@ app.whenReady().then(() => {
     // itself for that app, waited for its native login window and sat on its loader forever.
     makeView: (partition) => { const ua = (app.userAgentFallback || '').replace(/\s+(Electron|overlord)\/\S+/gi, ''); try { require('electron').session.fromPartition(partition).setUserAgent(ua); } catch {} const v = new WebContentsView({
       webPreferences: { partition, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }, // the agent works the page while its pane is hidden: throttled, an app sat on its loader (rAF and timers stop for hidden views)
-    }); v.webContents.setUserAgent(ua); return v; },
+    }); v.webContents.setUserAgent(ua);
+      // saved logins: typed once in any agent's page, filled in on that site's login page from then on (browser/logins.js)
+      if (!browserLogins) browserLogins = createLogins({ file: path.join(STATE_DIR, 'browser-logins.json'), safeStorage: require('electron').safeStorage, log: flog });
+      wireLogins(v.webContents, browserLogins, flog); return v; },
     attach: (view) => mainWindow.contentView.addChildView(view),
     detach: (view) => mainWindow.contentView.removeChildView(view),
     // One cookie jar for every agent, kept on disk, as in your own browser: log in to an app once and every agent,
