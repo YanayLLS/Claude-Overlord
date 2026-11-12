@@ -137,6 +137,15 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
     const made = await releaseRow(fresh, { ...row, pin: true }, opts);
     assert.ok(seen.some(x => x.includes('-X POST') && x.includes('ref=refs/heads/overlord/promote-dev-to-master')), 'a missing snapshot branch is created');
     assert.ok(!made.error, 'and the PR opens from it');
+    // the release candidate: the snapshot is pinned at the commit the nightly tested, dev's tip is never read
+    seen.length = 0;
+    const rc = await releaseRow(fake('overlord/promote-dev-to-master'), { ...row, pin: true, pinSha: 'tested7' }, opts);
+    assert.ok(!rc.error && seen.some(x => x.includes('-X PATCH') && x.includes('sha=tested7')) && seen.some(x => x.includes('compare/master...tested7')), 'candidate: pinned at the tested commit');
+    assert.ok(!seen.some(x => x.includes('git/ref/heads/dev')), 'candidate: dev tip not read');
+    // an old PR straight from dev can't carry a pinned commit: say so, change nothing
+    seen.length = 0;
+    const stuck = await releaseRow(fake('dev'), { ...row, pin: true, pinSha: 'tested7' }, opts);
+    assert.ok(/close it/.test(stuck.error) && !seen.some(x => x.includes('git/refs')), 'candidate: refuses an unpinnable open PR');
   }
 
   // prHealth: GitHub never decides mergeability → conflict is null (unknown), not false

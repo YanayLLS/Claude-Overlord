@@ -167,10 +167,15 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   if (found.error) return { error: found.error };
   const legacy = !!(found.pr && found.pr.head.ref === source);
   let head = found.pr ? found.pr.head.ref : source, pinSha = null;
+  // row.pinSha (the release candidate): ship that commit of `source`, the one the nightly tested, not its tip
+  if (row.pinSha && legacy) return { error: `an older release PR straight from ${source} is open (#${found.pr.number}): close it to release the tested commit` };
   if (row.pin && !legacy) {
-    const tip = await api(`repos/${repo}/git/ref/heads/${source}`);
-    pinSha = tip.data && tip.data.object && tip.data.object.sha;
-    if (!pinSha) return { error: tip.error || `could not read ${source}` };
+    if (row.pinSha) pinSha = row.pinSha;
+    else {
+      const tip = await api(`repos/${repo}/git/ref/heads/${source}`);
+      pinSha = tip.data && tip.data.object && tip.data.object.sha;
+      if (!pinSha) return { error: tip.error || `could not read ${source}` };
+    }
     head = pinSha;
   }
   const cmp = await api(`repos/${repo}/compare/${target}...${head}`);

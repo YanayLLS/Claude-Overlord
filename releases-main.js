@@ -8,6 +8,7 @@ const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
 const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix, isReleaseHead, prodDbschemas } = require('./release-run');
 const createHistory = require('./release-history');
+const createRc = require('./rc-main');
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
 const { createFlagRelease, summarize, sameSummary, prLine, outcome, any: anyFlags } = require('./flag-release');
@@ -54,6 +55,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   };
   const ghJson = async (args) => noteLimit(await ghJsonRaw(args));
   const ghGraphql = async (q) => noteLimit(await ghGraphqlRaw(q));
+  const rc = createRc({ ghJson, stateDir });
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
@@ -300,11 +302,54 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       loadHolds().catch(() => {});
       reconcileHistory().catch(() => {});
       scanStray().catch(() => {});
+      refreshRc().catch(() => {});
     } finally {
       inFlight = false;
       push({ loading: false });
       persist();
     }
+  }
+
+  // ── the nightly release candidate (rc-main.js): graded from what the nightly and its fixer published ──
+  const RC_EVERY_MS = 30 * 60 * 1000; // a night's evidence settles once; this is how soon a finished verify run shows
+  let rcBusy = false, rcAt = 0;
+  // flag keys prod hasn't released: the ones this release would add (back-office's preview), plus the ones it
+  // reports as still staged on prod when it says so. Read once per night; a failed read is shown, not hidden.
+  async function rcFlags(nightlyId) {
+    const had = state.rc && state.rc.flags;
+    if (had && had.nightlyId === nightlyId && !had.error) return had;
+    try {
+      const p = await flagRelease.preview();
+      return { nightlyId, keys: [...new Set([...(p.new || []), ...(p.unreleased || [])])] };
+    } catch (e) { return { nightlyId, keys: [], error: e.message }; }
+  }
+  async function refreshRc(force = false) {
+    if (!state.config || rcBusy || (!force && (limited() || Date.now() - rcAt < RC_EVERY_MS))) return;
+    rcBusy = true; rcAt = Date.now();
+    if (force) push({ rc: { ...(state.rc || {}), loading: true } });
+    try {
+      const cfg = state.config, before = state.rc || {};
+      let next = await rc.compute({ cfg, unreleased: (before.flags && before.flags.keys) || [] });
+      if (next.off || next.error || next.running) return push({ rc: { ...next, flags: before.flags || null } });
+      const flags = await rcFlags(next.nightlyId);
+      if (JSON.stringify(flags.keys) !== JSON.stringify(next.unreleased)) next = await rc.compute({ cfg, unreleased: flags.keys });
+      // the explanation is asked once per graded night, and again only when the grade's inputs changed
+      const same = before.nightlyId === next.nightlyId && before.evidence && before.evidence.runId === next.evidence.runId && before.headline === next.headline;
+      push({ rc: { ...next, flags, ai: same ? before.ai || null : null } });
+      if (notify && (before.nightlyId !== next.nightlyId || before.level !== next.level)) {
+        notify({ ship: '🟢 Release candidate ready', look: '🟡 Release candidate: look first', hold: '🔴 Release candidate: hold' }[next.level], next.headline, next.evidence.reportUrl);
+      }
+      if (!same || !state.rc.ai || state.rc.ai.error) {
+        const ai = await rc.explain(next, cfg);
+        if (state.rc && state.rc.nightlyId === next.nightlyId) push({ rc: { ...state.rc, ai } });
+      }
+    } finally { rcBusy = false; if (state.rc && state.rc.loading) push({ rc: { ...state.rc, loading: false } }); persist(); }
+  }
+  // Release the candidate: prod, every repo, each pinned at the commit the nightly tested
+  function releaseRc() {
+    const c = state.rc;
+    if (!c || !c.shas || !Object.keys(c.shas).length) { send({ type: 'toast', text: 'No release candidate to release yet' }); return Promise.resolve(); }
+    return release(['prod'], null, null, false, null, false, Object.fromEntries(Object.entries(c.shas).map(([repo, v]) => [repo, v.sha])));
   }
 
   // A deploy just went red: say so once (the transition, not every poll), click opens the run.
@@ -1446,14 +1491,15 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }
     push({ branches: { ...(state.branches || {}), [repo]: names }, branchesMore: { ...(state.branchesMore || {}), [repo]: false } });
   }
-  async function release(envs, repos, of, separate = false, sources = null, hotfix = false) {
+  async function release(envs, repos, of, separate = false, sources = null, hotfix = false, pins = null) {
     if (state.busy && state.busy.release) return; // a double click
-    return withBusy('release', 'Starting…', () => releaseNow(envs, repos, of, separate, sources, hotfix));
+    return withBusy('release', 'Starting…', () => releaseNow(envs, repos, of, separate, sources, hotfix, pins));
   }
   // sources (the picker's Advanced mode): { 'owner/repo|env': branch } — release that repo into that env from
   // this branch instead of its usual source (a fix branched off prod, a branch someone prepared)
   // hotfix (the picker's Hotfix mode): prod only, every repo from its own fix branch, recorded as its own hotfix release
-  async function releaseNow(envs, repos, of, separate, sources, hotfix = false) {
+  // pins (the release candidate): { 'owner/repo': sha } — that repo's prod release ships this commit of its source
+  async function releaseNow(envs, repos, of, separate, sources, hotfix = false, pins = null) {
     if (hotfix) {
       envs = ['prod']; separate = true;
       const need = (Array.isArray(repos) ? repos : []).filter(r => !(sources && sources[`${r}|prod`]));
@@ -1489,6 +1535,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const same = plan.prs.filter(p => p.source === p.target);
       if (same.length) { send({ type: 'toast', text: `Can't release a branch into itself: ${same.map(p => `${p.label} ${p.source}`).join(', ')}` }); return; }
     }
+    if (pins) plan.prs = plan.prs.map(p => (p.env === 'prod' && pins[p.repo] ? { ...p, pinSha: pins[p.repo] } : p));
     const run = { ...(Array.isArray(repos) && repos.length ? { scope: { repos: plan.prs.map(p => p.label).filter((v, i, a) => a.indexOf(v) === i), of: Number(of) || null } } : {}), envs, startedAt: Date.now(), running: true, rows: plan.prs.map(p => ({ ...p, running: true })), manual: plan.manual, flags: null };
     push({ releaseRun: run });
     const cwd = await configCheckout();
@@ -1683,6 +1730,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       }
       case 'releasesState': send({ type: 'releases', state }); return true; // a (re)loaded page: what the PR panel's holds need, now
       case 'releasesRefresh': refresh(); return true;
+      case 'releasesRc': refreshRc(true).catch(e => push({ rc: { ...(state.rc || {}), loading: false, error: e.message } })); return true;
+      case 'releasesRcRelease': releaseRc().catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
       case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;

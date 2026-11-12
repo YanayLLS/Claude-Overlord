@@ -43,7 +43,7 @@
       apprOpen = false;
       if (!e.target.closest('.rl-nav')) { render(); return; } // a tab click closes it and switches in one go
     }
-    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"], [data-act="queueAll"]')) { armed = null; render(); }
+    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"], [data-act="queueAll"], [data-act="rcRelease"]')) { armed = null; render(); }
     if (e.target === overlay) return show(false);
     const a = e.target.closest('[data-url]');
     if (a) { e.stopPropagation(); return api.send({ type: 'openUrl', url: a.dataset.url }); }
@@ -138,6 +138,10 @@
   const actions = {
     close: () => show(false),
     refresh: () => api.send({ type: 'releasesRefresh' }),
+    rcRefresh: () => { if (state && state.rc) state = { ...state, rc: { ...state.rc, loading: true } }; render(); api.send({ type: 'releasesRc' }); },
+    rcMore: () => { rcOpen = !rcOpen; render(); },
+    // a Hold is released only on a second, deliberate click
+    rcRelease: (el) => { if (state.rc && state.rc.level === 'hold' && armed !== 'rc') return arm('rc'); armed = null; clearTimeout(armTimer); markBusy(el, 'Opening…'); render(); api.send({ type: 'releasesRcRelease' }); },
     editSource: () => { state = { ...(state || {}), editing: true }; render(); },
     saveSource: () => {
       const v = modal.querySelector('#rl-src-input').value;
@@ -1399,6 +1403,38 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
   // ── The Release tab: everything about the release in flight, in one place. A run in progress (or one
   // with rows that never became a release PR), then each release in flight as its card; the picker when
   // nothing is in flight, or on "Start another release" ──
+  // The nightly release candidate: its grade, why, the report, and one button that opens the release pinned at
+  // the commits the nightly tested. Rules that passed fold into one line; the ones that didn't stay open.
+  let rcOpen = false;
+  const RC_LEVEL = { ship: ['ok', 'Ship'], look: ['warn', 'Look first'], hold: ['bad', 'Hold'] };
+  const RC_ICON = { ship: '✓', look: '!', hold: '✕' };
+  function rcCardHtml(s) {
+    const c = s.rc;
+    if (!c || c.off) return '';
+    const day = c.night ? new Date(c.night).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+    const head = (pill) => `<div class="rl-rc-head"><b>Release candidate</b><span class="rl-rc-day">${esc(day)}</span>${pill}`
+      + `<button class="rl-rc-ref${c.loading ? ' spin' : ''}" data-act="rcRefresh" title="Read the night again"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button></div>`;
+    if (c.error) return `<div class="rl-rc">${head('')}<div class="rl-rc-why bad">${esc(c.error)}</div></div>`;
+    if (c.running) return `<div class="rl-rc">${head('<span class="rl-rc-pill run">Nightly running</span>')}</div>`;
+    if (!c.level) return `<div class="rl-rc">${head('')}</div>`;
+    const [cls, word] = RC_LEVEL[c.level];
+    const ruleHtml = (r) => `<div class="rl-rc-rule ${r.level}"><i>${RC_ICON[r.level]}</i><span>${esc(r.text)}</span></div>`
+      + (r.level !== 'ship' || rcOpen ? r.items.map(i => `<div class="rl-rc-item" title="${esc(i.text)}">${i.url ? link(i.url, esc(i.text)) : esc(i.text)}</div>`).join('') : '');
+    const open = c.rules.filter(r => r.level !== 'ship'), passed = c.rules.filter(r => r.level === 'ship');
+    const repos = Object.entries(c.shas || {}).map(([repo, v]) => `<span class="rl-rc-sha${v.tested ? '' : ' dim'}" title="${esc(repo)} at ${esc(v.sha)}${v.tested ? ': the commit the nightly tested' : ': where its branch stood when the nightly started (the nightly has no suite for it)'}">${esc(repo.split('/')[1])} <code>${esc(v.sha.slice(0, 7))}</code></span>`).join('');
+    const said = c.ai && c.ai.text;
+    const can = s.approvers && s.approvers.isApprover;
+    const btn = `<button class="rl-hist-btn ${c.level === 'hold' ? 'danger' : 'go'}" data-act="rcRelease"${can ? '' : ' disabled title="Only release approvers can release"'}>${c.level === 'hold' ? (armed === 'rc' ? 'Confirm: release a Hold' : 'Release anyway') : '🚀 Release it'}</button>`;
+    return `<div class="rl-rc ${cls}">${head(`<span class="rl-rc-pill">${word}</span>`)}`
+      + `<div class="rl-rc-why" title="${said ? 'Written by AI from the rules below. The grade comes from the rules.' : c.ai && c.ai.error ? esc('AI note failed: ' + c.ai.error) : 'From the rules below'}">${said ? '<span class="rl-rc-ai">✨</span>' : ''}${esc(said || c.headline)}</div>`
+      + `<div class="rl-rc-rules">${open.map(ruleHtml).join('')}`
+      + (passed.length ? (rcOpen ? passed.map(ruleHtml).join('') : '') + `<button class="rl-rc-more" data-act="rcMore">${rcOpen ? 'Hide passed' : `${passed.length} passed`}</button>` : '') + '</div>'
+      + (c.flags && c.flags.error ? `<div class="rl-rc-item bad" title="${esc(c.flags.error)}">Unreleased flags not read</div>` : '')
+      + `<div class="rl-rc-shas">${repos}</div>`
+      + `<div class="rl-rc-acts">${btn}${link(c.evidence.reportUrl, '📊 Report', 'rl-hist-btn')}${link(c.evidence.runUrl, c.evidence.kind === 'verify' ? 'Verify run' : 'Nightly run', 'rl-hist-btn')}`
+      + (c.fixPr ? link(c.fixPr.url, `Fixer PR #${c.fixPr.number}${c.fixPr.merged ? ' ✓' : ''}`, 'rl-hist-btn') : '') + '</div></div>';
+  }
+
   function releaseTabHtml(s) {
     const run = s.releaseRun, items = (s.history && s.history.items) || [];
     const recorded = (r) => items.some(m => m.repos.some(x => x.repo === r.repo && x.pr && r.pr && x.pr.number === r.pr.number));
@@ -1406,7 +1442,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const active = activeRelease(s);
     if (run && run.running) { relOpen = false; relHot = false; } // a run just started: its results take the picker's place
     if (!active && !showRun && !relOpen) openPicker();
-    let h = '<div class="rl-reltab">' + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
+    let h = '<div class="rl-reltab">' + (active || showRun ? '' : rcCardHtml(s)) + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
     if (relOpen) h += releasePickerHtml(s);
     else if (active || showRun) h += '<button class="rl-hist-btn rl-reltab-new" data-act="releaseMenu" title="Pick envs and repos for another release (or to add to the pending one)">🚀 Start another release</button>';
     return h + '</div>';
