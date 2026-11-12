@@ -241,3 +241,18 @@ test('no health check for an agent the pane has hidden again', async () => {
   await new Promise((r) => setTimeout(r, 30));
   assert.deepStrictEqual(registry.checked, []);
 });
+
+test('a menu over the pane swaps the live page for a still frame, and closing it puts the page back', async () => {
+  const reg = fakeRegistry(), sent = [];
+  reg.ensure(1).webContents.capturePage = async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA' });
+  const p = createPreviewController({ window: null, registry: reg, send: (m) => sent.push(m), writeToAgent: () => {} });
+  p.setAgent(1); p.setBounds({ x: 0, y: 0, width: 100, height: 100 }); p.show();
+  const shownBefore = reg.shown.length, hiddenBefore = reg.hideAllCalls();
+  await p.occlude(true);
+  assert.ok(sent.some(m => m.type === 'previewFrame' && m.url.startsWith('data:image/png')));
+  assert.ok(reg.hideAllCalls() > hiddenBefore);
+  p.setBounds({ x: 0, y: 0, width: 120, height: 100 }); // a resize while covered keeps it hidden
+  assert.strictEqual(reg.shown.length, shownBefore);
+  await p.occlude(false);
+  assert.strictEqual(reg.shown.length, shownBefore + 1);
+});

@@ -28,8 +28,20 @@ function createPreviewController({ window, registry, send, writeToAgent, isAlive
   // must never reach it: previewSetBounds fires continuously during a window
   // resize and would otherwise build a fresh view and partition per frame for
   // an agent that has already been closed.
+  // A menu or dialog over the pane: the live page (a native view, drawn above all HTML) steps aside and the
+  // renderer shows a still frame of it under the menu (previewFrame).
+  let occluded = false, occSeq = 0;
+  async function occlude(on) {
+    const seq = ++occSeq; occluded = !!on;
+    if (!on) { apply(); return; }
+    const w = wc(); let url = '';
+    if (w) try { const img = await w.capturePage(); if (!img.isEmpty()) url = img.toDataURL(); } catch {}
+    if (seq !== occSeq) return; // closed again while capturing
+    send({ type: 'previewFrame', url });
+    apply();
+  }
   function apply() {
-    if (!visible || !live(agentId) || !bounds) { registry.hideAll(); return; }
+    if (!visible || occluded || !live(agentId) || !bounds) { registry.hideAll(); return; }
     registry.show(agentId, bounds);
     restoreParentFocus();
   }
@@ -103,6 +115,7 @@ function createPreviewController({ window, registry, send, writeToAgent, isAlive
     sendErrors,
     onAgentNavigated,
     onAgentClosed,
+    occlude,
     setBounds: (b) => { bounds = b; apply(); },
     show: () => { visible = true; apply(); if (agentId != null) scheduleHealthCheck(); },
     hide: () => { visible = false; registry.hideAll(); },

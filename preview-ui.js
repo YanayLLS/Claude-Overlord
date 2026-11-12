@@ -36,6 +36,29 @@
     if (visible) { reportBounds(); showUrl(currentUrl); }
   }
 
+  // Anything drawn over the pane (a menu, popover, dialog) is hidden by the native page view, whatever its z-index.
+  // A hit-test grid over the pane finds it, whatever it is; while covered, main swaps the page for a still frame.
+  let occluded = false, occPending = false;
+  function checkOcclusion() {
+    occPending = false;
+    let hit = false;
+    if (visible) {
+      const r = refs.host.getBoundingClientRect();
+      // every 40px: catches a menu that only clips the pane's edge (~1 ms; only re-run when something outside the chat changes)
+      for (let x = r.left + 4; x < r.right && !hit; x += 40) for (let y = r.top + 4; y < r.bottom && !hit; y += 40) {
+        const el = document.elementFromPoint(x, y);
+        if (el && !refs.col.contains(el)) hit = true;
+      }
+    }
+    if (hit === occluded) return;
+    occluded = hit;
+    if (!hit) refs.host.style.backgroundImage = '';
+    api.send({ type: 'previewOcclude', on: hit });
+  }
+  const busy = (t) => t && t.closest && t.closest('#conversation, #term-container, #chat-queue');
+  const queueOcclusion = (recs) => { if (recs && recs.every(m => busy(m.target.nodeType === 1 ? m.target : m.target.parentElement))) return; // streaming chat/terminal: never a menu over the pane
+    if (!occPending && visible) { occPending = true; requestAnimationFrame(checkOcclusion); } else if (!visible && occluded) checkOcclusion(); };
+
   function reportBounds() {
     if (!visible || pendingFrame) return;
     pendingFrame = true;
@@ -131,10 +154,12 @@
     deviceCtl.bind(refs);
     window.PreviewDom.setupResize(refs.handle, refs.col, reportBounds);
     window.addEventListener('resize', reportBounds);
+    new MutationObserver(queueOcclusion).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'] });
     api.on((msg) => {
       if (msg.type === 'previewError') onPreviewError(msg);
       else if (msg.type === 'previewLoaded') onPreviewLoaded(msg);
       else if (msg.type === 'previewLoadFailed') onPreviewLoadFailed(msg);
+      else if (msg.type === 'previewFrame') { refs.host.style.backgroundImage = occluded && msg.url ? `url("${msg.url}")` : ''; refs.host.style.backgroundSize = '100% 100%'; }
     });
     window.preview = { toggle, setUrl, setActiveAgent };
   }

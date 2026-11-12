@@ -4965,6 +4965,7 @@ function handleIpc(msg) {
     case 'previewSetBounds': if (preview && msg.bounds) { const z = mainWindow.webContents.getZoomFactor(), b = msg.bounds; preview.setBounds({ x: b.x * z, y: b.y * z, width: b.width * z, height: b.height * z }); } break; // CSS px -> DIP (app zoom)
     case 'previewLoad': if (preview) preview.load(msg.url); break;
     case 'previewReload': if (preview) preview.reload(); break;
+    case 'previewOcclude': if (preview) preview.occlude(!!msg.on); break;
     case 'reclaimFocus': if (preview) preview.reclaimFocus(!!msg.typing); break;
     case 'previewSetDevice': if (preview) preview.setDevice(msg.device); break;
     case 'previewSendErrors': if (preview) preview.sendErrors(msg.id); break;
