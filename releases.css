@@ -657,3 +657,5 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-rc-acts { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
 .rl-rc-acts a.rl-hist-btn { text-decoration:none; }
 .rl-rc-acts button[disabled] { opacity:.5; cursor:default; }
+.rl-rc-pill.demo { color:var(--purple,#cba6f7); border-color:var(--purple,#cba6f7); }
+.rl-rc-plan { margin:0 0 10px; font-size:12px; } .rl-rc-plan .rl-rc-item { margin-left:0; } .rl-rc-plan code { font-family:'Geist Mono',ui-monospace,Consolas,monospace; color:var(--text); }

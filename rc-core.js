@@ -214,6 +214,24 @@ function finish(rules, counts) {
   return { level, rules, headline, counts };
 }
 
+// Demo mode (OVERLORD_RC_DEMO): the same night, shown as it would look on a clean one, so the whole
+// path can be walked without a real release. It says so on the card.
+function demoCandidate(c) {
+  if (!c || !c.shas) return c;
+  const rules = ['Every module reported', 'No new critical failure', 'No new minor failure', 'Coverage held', 'Fixer: test-only fixes', 'No suite turned red']
+    .map((text, i) => ({ id: 'demo' + i, level: 'ship', text, items: [] }));
+  return { ...c, demo: true, level: 'ship', headline: 'Release.', rules, counts: {}, context: null,
+    ai: { text: 'Release. Every module reported and nothing new is failing since the last prod release.' } };
+}
+// Is this `gh` call a read? Demo mode lets only these through. `gh api` is a GET unless it names
+// another method or carries fields without saying GET.
+function ghIsRead(args) {
+  if (!Array.isArray(args) || args[0] !== 'api') return false;
+  const x = args.indexOf('-X'), method = x >= 0 ? String(args[x + 1] || '').toUpperCase() : args.indexOf('--method') >= 0 ? String(args[args.indexOf('--method') + 1] || '').toUpperCase() : null;
+  if (method) return method === 'GET';
+  return !args.some(a => ['-f', '-F', '--field', '--raw-field', '--input'].includes(a));
+}
+
 // The AI only explains; the grade is already decided. It may not lift a hold.
 function aiPrompt(result, extra = {}) {
   const lines = result.rules.map(r => `- [${r.level}] ${r.text}${r.items.length ? ': ' + r.items.map(i => i.text).join('; ') : ''}`);
@@ -247,4 +265,4 @@ function testedShas(page, apply, frontend = 'frontlineio-frontend') {
   return out;
 }
 
-module.exports = { POLICY, parseRunPage, flagsOn, failureUrl, categoryOf, rootCauses, prodNight, redAt, grade, aiPrompt, nightChain, testedShas };
+module.exports = { POLICY, parseRunPage, flagsOn, demoCandidate, ghIsRead, failureUrl, categoryOf, rootCauses, prodNight, redAt, grade, aiPrompt, nightChain, testedShas };

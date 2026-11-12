@@ -1425,12 +1425,14 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const said = c.ai && c.ai.text;
     const can = s.approvers && s.approvers.isApprover;
     const btn = `<button class="rl-hist-btn ${c.level === 'hold' ? 'danger' : 'go'}" data-act="rcRelease"${can ? '' : ' disabled title="Only release approvers can release"'}>${c.level === 'hold' ? (armed === 'rc' ? 'Confirm: release a Hold' : 'Release anyway') : '🚀 Release it'}</button>`;
-    return `<div class="rl-rc ${cls}">${head(`<span class="rl-rc-pill">${word}</span>`)}`
+    const plan = c.demo && c.plan ? '<div class="rl-rc-plan"><b>Would open</b>' + c.plan.filter(x => x.error || x.ahead).map(x => `<div class="rl-rc-item">${link(x.url, `${esc(x.label)} → ${esc(x.target)}`)} <code>${esc(x.sha.slice(0, 7))}</code> ${x.error ? `<span class="rl-bad">${esc(x.error)}</span>` : `${x.ahead} commit${x.ahead === 1 ? '' : 's'}`}</div>`).join('')
+      + (c.plan.some(x => x.ahead === 0) ? `<div class="rl-rc-item">Nothing new: ${c.plan.filter(x => x.ahead === 0).map(x => esc(x.label)).join(', ')}</div>` : '') + '</div>' : '';
+    return `<div class="rl-rc ${cls}">${head((c.demo ? '<span class="rl-rc-pill demo" title="A demo candidate: the same night shown as a clean one. Nothing is written to GitHub.">Demo</span>' : '') + `<span class="rl-rc-pill">${word}</span>`)}`
       + `<div class="rl-rc-why" title="${said ? 'Written by AI from the rules below. The grade comes from the rules.' : c.ai && c.ai.error ? esc('AI note failed: ' + c.ai.error) : 'From the rules below'}">${said ? '<span class="rl-rc-ai">✨</span>' : ''}${esc(said || c.headline)}</div>`
       + `<div class="rl-rc-rules">${open.map(ruleHtml).join('')}`
       + (passed.length ? (rcOpen ? passed.map(ruleHtml).join('') : '') + `<button class="rl-rc-more" data-act="rcMore">${rcOpen ? 'Hide passed' : `${passed.length} passed`}</button>` : '') + '</div>'
       + (c.flags && c.flags.error ? `<div class="rl-rc-item bad" title="${esc(c.flags.error)}">Unreleased flags not read</div>` : '')
-      + `<div class="rl-rc-shas">${repos}</div>`
+      + `<div class="rl-rc-shas">${repos}</div>` + plan
       + `<div class="rl-rc-acts">${btn}${link(c.evidence.reportUrl, '📊 Report', 'rl-hist-btn')}${link(c.evidence.runUrl, c.evidence.kind === 'verify' ? 'Verify run' : 'Nightly run', 'rl-hist-btn')}`
       + (c.fixPr ? link(c.fixPr.url, `Fixer PR #${c.fixPr.number}${c.fixPr.merged ? ' ✓' : ''}`, 'rl-hist-btn') : '') + '</div></div>';
   }

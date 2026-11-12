@@ -9,6 +9,11 @@ const { releaseFixBrief } = require('./release-playbook');
 const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix, isReleaseHead, prodDbschemas } = require('./release-run');
 const createHistory = require('./release-history');
 const createRc = require('./rc-main');
+const { demoCandidate, ghIsRead } = require('./rc-core');
+// Demo mode (a sandboxed instance started with OVERLORD_RC_DEMO=1): the Releases board can be walked end to
+// end, but it only ever READS GitHub. Every write this board would make is refused before it leaves.
+const DEMO = !!process.env.OVERLORD_RC_DEMO;
+const DEMO_REFUSED = 'demo mode: nothing is written to GitHub';
 const { signoff, releaseSignoff, reviewMark, hasSigned, openerMark, OPENER_LINE_RE } = require('./signoff-core');
 const { releaseIdOf } = require('./manifest-core');
 const { createFlagRelease, summarize, sameSummary, prLine, outcome, any: anyFlags } = require('./flag-release');
@@ -40,7 +45,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // back-office's flag-release workflow, started and read with `gh` (flag-release.js): no keys here
   const ghText = (args) => new Promise(resolve => execFile('gh', args, { timeout: 60e3, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 16 * 1024 * 1024 },
     (err, stdout, stderr) => resolve(err ? { error: String(stderr || err.message).trim().split(/\r?\n/).pop() } : { stdout })));
-  const flagRelease = createFlagRelease({ gh: ghText });
+  const flagRelease = createFlagRelease({ gh: (args) => (DEMO ? Promise.resolve({ error: DEMO_REFUSED }) : ghText(args)) });
   // GitHub's limit is shared by every tool and teammate on the account: when it answers "rate limit",
   // background polling here pauses until it lifts (what you click still goes through), so we don't
   // keep the lockout going. pausedUntil is also shown in the modal.
@@ -53,8 +58,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (e && /rate limit|secondary rate/i.test(String(e))) { pausedUntil = Date.now() + RATE_PAUSE_MS; try { push({ rateLimitedUntil: pausedUntil }); } catch {} }
     return r;
   };
-  const ghJson = async (args) => noteLimit(await ghJsonRaw(args));
-  const ghGraphql = async (q) => noteLimit(await ghGraphqlRaw(q));
+  const ghJson = async (args) => (DEMO && !ghIsRead(args) ? { error: DEMO_REFUSED } : noteLimit(await ghJsonRaw(args)));
+  const ghGraphql = async (q) => (DEMO && /\bmutation\b/.test(String(q)) ? { error: DEMO_REFUSED } : noteLimit(await ghGraphqlRaw(q)));
   const rc = createRc({ ghJson, stateDir });
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
@@ -331,6 +336,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const cfg = state.config, before = state.rc || {};
       let next = await rc.compute({ cfg, unreleased: (before.flags && before.flags.keys) || [] });
       if (next.off || next.error || next.running) return push({ rc: { ...next, flags: before.flags || null } });
+      if (DEMO) { // the same night dressed as a clean one; no flag preview (it starts a workflow), no AI call
+        push({ rc: { ...demoCandidate(next), flags: null, plan: (before.demo && before.plan) || null } });
+        if (notify && before.nightlyId !== next.nightlyId) notify('🟢 Release candidate ready (demo)', 'Release.', next.evidence.reportUrl);
+        return;
+      }
       const flags = await rcFlags(next.nightlyId);
       if (JSON.stringify(flags.keys) !== JSON.stringify(next.unreleased)) next = await rc.compute({ cfg, unreleased: flags.keys });
       // the explanation is asked once per graded night, and again only when the grade's inputs changed
@@ -346,7 +356,19 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     } finally { rcBusy = false; if (state.rc && state.rc.loading) push({ rc: { ...state.rc, loading: false } }); persist(); }
   }
   // Release the candidate: prod, every repo, each pinned at the commit the nightly tested
+  // Demo: what Release it would open, read from GitHub, opened nowhere
+  async function releaseRcDemo() {
+    const c = state.rc, rows = releasePlan(state.config, ['prod']).prs.filter(p => c.shas[p.repo]);
+    const plan = await Promise.all(rows.map(async (p) => {
+      const sha = c.shas[p.repo].sha;
+      const cmp = await ghJson(['api', `repos/${p.repo}/compare/${p.target}...${sha}`]);
+      return { label: p.label, target: p.target, sha, ahead: cmp.data ? cmp.data.ahead_by : null, error: cmp.error || null,
+        url: `https://github.com/${p.repo}/compare/${p.target}...${sha}` };
+    }));
+    push({ rc: { ...state.rc, plan } }); persist();
+  }
   function releaseRc() {
+    if (DEMO && state.rc && state.rc.shas) return withBusy('release', 'Reading…', releaseRcDemo);
     const c = state.rc;
     if (!c || !c.shas || !Object.keys(c.shas).length) { send({ type: 'toast', text: 'No release candidate to release yet' }); return Promise.resolve(); }
     return release(['prod'], null, null, false, null, false, Object.fromEntries(Object.entries(c.shas).map(([repo, v]) => [repo, v.sha])));
@@ -1500,6 +1522,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // hotfix (the picker's Hotfix mode): prod only, every repo from its own fix branch, recorded as its own hotfix release
   // pins (the release candidate): { 'owner/repo': sha } — that repo's prod release ships this commit of its source
   async function releaseNow(envs, repos, of, separate, sources, hotfix = false, pins = null) {
+    if (DEMO) { send({ type: 'toast', text: 'Demo mode: releases are off here. Use the release candidate card' }); return; }
     if (hotfix) {
       envs = ['prod']; separate = true;
       const need = (Array.isArray(repos) ? repos : []).filter(r => !(sources && sources[`${r}|prod`]));

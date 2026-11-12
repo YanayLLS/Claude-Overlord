@@ -1,6 +1,6 @@
 // Run: node rc-core.test.js
 const assert = require('assert');
-const { parseRunPage, flagsOn, categoryOf, grade, nightChain, testedShas, prodNight, redAt, aiPrompt } = require('./rc-core');
+const { demoCandidate, ghIsRead, parseRunPage, flagsOn, categoryOf, grade, nightChain, testedShas, prodNight, redAt, aiPrompt } = require('./rc-core');
 
 // ── a night, built small ──────────────────────────────
 const fail = (module, name, o = {}) => ({ key: `${module}|${name}`, module, name, tags: o.tags || [], step: o.step || 'a step', error: 'boom',
@@ -152,5 +152,23 @@ assert.strictEqual(redAt({ scenarios: {} }, 'k', 0), false);
   const p = aiPrompt(r, { failures: '- a: Logs in | boom' });
   assert.ok(p.includes('HOLD') && p.includes('Do not contradict the grade') && p.includes('Logs in | boom'));
 }
+
+// ── demo mode ─────────────────────────────────────────
+{
+  const real = { ...g({ page: page([crit]), history: history({ 'a|Logs in': 'FP' }) }), shas: { 'o/web': { sha: 'abc', tested: true } }, evidence: { reportUrl: 'u' } };
+  const d = demoCandidate(real);
+  assert.strictEqual(real.level, 'hold');
+  assert.ok(d.demo && d.level === 'ship' && d.rules.every(r => r.level === 'ship') && d.shas === real.shas && d.evidence === real.evidence);
+  assert.deepStrictEqual(demoCandidate({ error: 'x' }), { error: 'x' }); // nothing graded: nothing to dress up
+}
+// only reads get through a demo
+assert.ok(ghIsRead(['api', 'repos/o/r/pulls/1']));
+assert.ok(ghIsRead(['api', '-X', 'GET', 'repos/o/r/pulls', '-f', 'state=open']));
+assert.ok(!ghIsRead(['api', '-X', 'POST', 'repos/o/r/pulls', '--input', 'f.json']));
+assert.ok(!ghIsRead(['api', '-X', 'PATCH', 'repos/o/r/git/refs/heads/x', '-f', 'sha=1']));
+assert.ok(!ghIsRead(['api', 'repos/o/r/pulls', '-f', 'title=x']));        // fields with no method: a POST
+assert.ok(!ghIsRead(['api', '--method', 'DELETE', 'repos/o/r/git/refs/heads/x']));
+assert.ok(!ghIsRead(['api', '-X', 'PUT', 'repos/o/r/pulls/1/merge']));
+assert.ok(!ghIsRead(['pr', 'merge', '1']) && !ghIsRead(['workflow', 'run', 'x.yml']) && !ghIsRead(null));
 
 console.log('rc-core: ok');
