@@ -58,7 +58,7 @@ function failureUrl(f, pageUrl) {
 // is right · product = the app is broken · unexamined = nobody looked (over the nightly cap, or no verdict).
 // ponytail: the env/spec split reads the diagnosis's opening words until every verdict carries `category`.
 function categoryOf(c) {
-  if (c.category) return c.category;
+  if (c.category) return c.category === 'environment' ? 'env' : c.category; // the fixer's own word (bdd-autofix-review causeCategory)
   if (c.verdict === 'fixed') return c.riskTier === 'T2' ? 'repaired' : 'test';
   if (c.verdict === 'folded') return 'test';
   if (c.verdict !== 'declined' || c.declineReason === 'over-group-cap') return 'unexamined';

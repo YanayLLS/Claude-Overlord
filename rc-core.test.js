@@ -42,6 +42,8 @@ assert.strictEqual(categoryOf(cause({ verdict: 'declined', declineReason: 'over-
 assert.strictEqual(categoryOf(cause({ verdict: 'declined', diagnosis: 'environmental: mongod hung' })), 'env');
 assert.strictEqual(categoryOf(cause({ verdict: 'declined', diagnosis: 'spec-change: moved on purpose', productQuestions: ['which?'] })), 'spec');
 assert.strictEqual(categoryOf(cause({ verdict: 'declined', category: 'product', diagnosis: 'environmental' })), 'product'); // its own word wins
+assert.strictEqual(categoryOf(cause({ verdict: 'declined', category: 'environment' })), 'env');
+assert.strictEqual(categoryOf(cause({ verdict: 'fixed', category: 'repaired', riskTier: 'T1' })), 'repaired');
 // the test was wrong and the fixer fixed it: no risk on the nightly's own evidence…
 assert.strictEqual(g({ page: page([crit]), history: history({ 'a|Logs in': 'FP' }), phase: { causes: [cause({ verdict: 'fixed', riskTier: 'T1' })] } }).level, 'ship');
 // …but still red in the verify run means the fix did not hold
