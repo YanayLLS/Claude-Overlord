@@ -2069,7 +2069,7 @@ function takeSpare(cwd) {
 // typed initialPrompt. Must already be shell-safe (see fixRunPlan). A spare is already
 // running, so it can't take one.
 // team: turn on agent teams (only the team dialog's lead needs teammates)
-function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team) {
+function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team, quiet) { // quiet: opens in the background, the user stays where they are
   const cwd = folderPath || os.homedir();
   protectClaudeConfig();
   const warm = argPrompt || team ? null : takeSpare(cwd);
@@ -2095,9 +2095,9 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team) {
   const claudeCmd = `${claudeBin()} --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}${argPrompt ? ` "${argPrompt}"` : ''}`;
   const shell = agentShell();
   const shellArgs = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
-  send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName });
+  send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName, quiet: !!quiet });
   send({ type: 'stats', id, stats: agent.stats });
-  send({ type: 'focused', id }); focusedAgentId = id;
+  if (!quiet) { send({ type: 'focused', id }); focusedAgentId = id; }
 
   const agentEnv = cleanAgentEnv(team ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env } : feat.env);
   try {
@@ -3022,7 +3022,7 @@ function runAutoMerge(prs, failedRepos = []) {
       const fixer = autoFixAgents.get(url);
       if (fixer === 'starting' || fixer === 'failed' || (fixer != null && agents.has(fixer))) continue; // already on it, or can't (its toast said why; re-arm retries)
       autoFixAgents.set(url, 'starting');
-      fixPr(p).then(id => { const ok = typeof id === 'number'; autoFixAgents.set(url, ok ? id : 'failed'); if (!ok) autoFixReason.set(url, (id && id.error) || 'Fix agent didn\'t start'); })
+      fixPr(p, true).then(id => { const ok = typeof id === 'number'; autoFixAgents.set(url, ok ? id : 'failed'); if (!ok) autoFixReason.set(url, (id && id.error) || 'Fix agent didn\'t start'); })
         .catch(e => { autoFixAgents.delete(url); send({ type: 'toast', text: `Auto-fix ${name} failed: ${e.message || e}` }); });
       continue;
     }
@@ -3408,7 +3408,7 @@ async function fixActionRun(run) { return startFixAgent(fixRunPlan, run); }
 
 // "Fix" on a PR with failing checks: a normal agent in the repo's checkout (no worktree) that
 // pushes fixes to the PR until its checks are green (actions-core.js fixPrPlan).
-async function fixPr(pr) { return startFixAgent(fixPrPlan, pr); } // → the new agent's id
+async function fixPr(pr, quiet) { return startFixAgent(fixPrPlan, pr, quiet); } // → the new agent's id
 
 // Fix chat (the chat's ⋯ menu): the chat as shown and its terminal (pictured offscreen from the renderer's buffer
 // HTML, so the user sees nothing) are saved, and a new agent in Overlord's repo finds why they differ and fixes the
@@ -3438,7 +3438,7 @@ async function fixChat(msg) {
   createAgent(APP_DIR, null, `Read ${p('prompt.md')} and do what it says.`);
 }
 
-async function startFixAgent(planFor, target) {
+async function startFixAgent(planFor, target, quiet) {
   // The last actions poll already walked every checkout; rescan only if it missed this repo.
   const wts = (settings.worktrees || []).map(w => w.path);
   let plan = planFor(target, lastCheckoutInfos || [], wts);
@@ -3447,7 +3447,7 @@ async function startFixAgent(planFor, target) {
     plan = planFor(target, (await Promise.all(localCheckoutDirs().map(checkoutInfo))).filter(Boolean), wts);
   }
   if (plan.error) { send({ type: 'toast', text: plan.error }); return { error: plan.error }; }
-  if (!plan.branch) return createAgent(plan.repoDir, null, plan.prompt); // PR fix: no worktree
+  if (!plan.branch) return createAgent(plan.repoDir, null, plan.prompt, false, undefined, quiet); // PR fix: no worktree
   // Reuse by folder, not by settings entry: an earlier click (or another checkout of the
   // same repo) may have made it without a matching entry, and git refuses to re-add it.
   let dir = wt.worktreePath(plan.repoDir, wt.safeBranch(plan.branch));
@@ -3460,7 +3460,7 @@ async function startFixAgent(planFor, target) {
     projectConfig(plan.repoDir).defaultBase = prevBase || 'dev'; saveState();
   }
   protectClaudeConfig([{ repo: plan.repoDir, path: dir }]);
-  return createAgent(dir, null, plan.prompt);
+  return createAgent(dir, null, plan.prompt, false, undefined, quiet);
 }
 
 // The local checkouts Overlord already knows about: every agent's cwd plus every

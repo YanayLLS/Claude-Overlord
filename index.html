@@ -4596,7 +4596,7 @@ function handleAgentMsg(msg) {
         setCollapsed('folder:' + _pendingFolder.fid, false);
         _pendingFolder = null;
       }
-      if (isNew && !msg.title) focusAgent(msg.id); // new agent (not restored) — open its terminal
+      if (isNew && !msg.title && !msg.quiet) focusAgent(msg.id); // new agent (not restored) — open its terminal; quiet (auto-merge fixer) stays in the background
       else { scheduleRender(); if (!autoOpenDone) { clearTimeout(autoOpenTimer); autoOpenTimer = setTimeout(autoOpenFirstAgent, 400); } }
       break;
     }
