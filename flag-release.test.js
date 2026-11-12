@@ -54,6 +54,9 @@ const fast = { sleep: async () => {}, newId: () => 'req1' };
   // the workflow not on master yet (before back-office ships it to prod)
   const e = fakeGh({ dispatchError: 'HTTP 404: workflow flag-release.yml not found on the default branch (https://api.github.com/repos/LLSLtd/back-office/actions/workflows/flag-release.yml)' });
   await assert.rejects(createFlagRelease({ gh: e.gh, ...fast }).preview(), /flag-release workflow is not on back-office master yet/);
+  // …which GitHub words this way once the file is on dev: it knows the workflow, master has no such file to dispatch
+  const e2 = fakeGh({ dispatchError: "could not create workflow dispatch event: HTTP 422: Workflow does not have 'workflow_dispatch' trigger (https://api.github.com/repos/LLSLtd/back-office/actions/workflows/415114482/dispatches)" });
+  await assert.rejects(createFlagRelease({ gh: e2.gh, ...fast }).preview(), /flag-release workflow is not on back-office master yet/);
 
   // a run that never shows up
   const f = fakeGh({ result: {}, appearAfter: 1e9 });

@@ -21,7 +21,7 @@ function createFlagRelease({ gh, sleep = ms => new Promise(r => setTimeout(r, ms
   async function dispatch(mode, expect = '') {
     const request = newId();
     await ok(['workflow', 'run', WORKFLOW, '-R', REPO, '--ref', 'master', '-f', `mode=${mode}`, '-f', `expect=${expect}`, '-f', `request=${request}`])
-      .catch((e) => { throw /could not find any workflows|not found on the default branch/i.test(e.message) ? new Error('flag-release workflow is not on back-office master yet') : e; });
+      .catch((e) => { throw /could not find any workflows|not found on the default branch|does not have 'workflow_dispatch' trigger/i.test(e.message) ? new Error('flag-release workflow is not on back-office master yet') : e; });
     // the run is named after the request (run-name), which is how this call finds its own run
     const until = now() + WAIT_MS;
     let run = null;
