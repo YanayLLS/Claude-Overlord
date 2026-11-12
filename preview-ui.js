@@ -33,7 +33,7 @@
       term.style.width = termWidthBefore; termWidthBefore = null;
     }
     api.send({ type: 'previewToggle', visible });
-    if (visible) { reportBounds(); showUrl(currentUrl); }
+    if (visible) { reportBounds(); showUrl(currentUrl); } else setMax(false);
   }
 
   // Anything drawn over the pane (a menu, popover, dialog) is hidden by the native page view, whatever its z-index.
@@ -58,6 +58,14 @@
   const busy = (t) => t && t.closest && t.closest('#conversation, #term-container, #chat-queue');
   const queueOcclusion = (recs) => { if (recs && recs.every(m => busy(m.target.nodeType === 1 ? m.target : m.target.parentElement))) return; // streaming chat/terminal: never a menu over the pane
     if (!occPending && visible) { occPending = true; requestAnimationFrame(checkOcclusion); } else if (!visible && occluded) checkOcclusion(); };
+
+  // Expanded: the page fills the window over everything else (Esc, a click outside or the button again restores it).
+  function setMax(on) {
+    on = !!on && visible;
+    refs.col.classList.toggle('max', on); refs.maxBtn.setAttribute('aria-pressed', String(on));
+    refs.maxBtn.title = on ? 'Restore (Esc)' : 'Expand (Esc to close)';
+    reportBounds();
+  }
 
   function reportBounds() {
     if (!visible || pendingFrame) return;
@@ -145,6 +153,7 @@
     refs = window.PreviewDom.build({
       onToggle: toggle,
       onReload: () => api.send({ type: 'previewReload' }),
+      onMax: () => setMax(!refs.col.classList.contains('max')),
       onDevice: (e) => deviceCtl.showMenu(e),
       onRotate: () => deviceCtl.toggleOrientation(),
       onSend: () => { if (activeAgentId != null) api.send({ type: 'previewSendErrors', id: activeAgentId }); },
@@ -154,6 +163,8 @@
     deviceCtl.bind(refs);
     window.PreviewDom.setupResize(refs.handle, refs.col, reportBounds);
     window.addEventListener('resize', reportBounds);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && refs.col.classList.contains('max')) { e.stopPropagation(); setMax(false); } }, true);
+    document.addEventListener('mousedown', (e) => { if (refs.col.classList.contains('max') && !refs.col.contains(e.target)) setMax(false); }, true);
     new MutationObserver(queueOcclusion).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'] });
     api.on((msg) => {
       if (msg.type === 'previewError') onPreviewError(msg);

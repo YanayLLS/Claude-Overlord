@@ -1213,6 +1213,8 @@ button:focus-visible { outline-offset:0; }
 #preview-resize.open { display:block; }
 #preview-col { display:none; flex-direction:column; flex-shrink:0; width:520px; min-width:280px; border-left:1px solid var(--border); background:var(--editor-bg); position:relative; }
 #preview-col.open { display:flex; }
+#preview-col.max { position:fixed; inset:20px 28px; width:auto !important; max-width:none; z-index:900; border:1px solid var(--border); border-radius:10px; overflow:hidden; box-shadow:0 0 0 100vmax rgba(0,0,0,.5), 0 20px 60px rgba(0,0,0,.4); }
+#preview-max[aria-pressed="true"] { color:var(--cyan); background:rgba(148,226,213,.12); }
 /* List-col stays flex:1 (fills leftover); term + preview-col use inline px widths set on toggle and by the drag handles. */
 #content.preview-open #list-col { min-width: 200px; }
 #preview-header { display:flex; align-items:center; gap:6px; padding:0 6px; height:35px; background:var(--panel-bg); border-bottom:1px solid var(--border); flex-shrink:0; }

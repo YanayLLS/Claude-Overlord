@@ -22,6 +22,7 @@
         <input id="preview-url" type="text" spellcheck="false" placeholder="Enter URL or wait for localhost…" />
         <button id="preview-device" title="Device">&#x1F5A5;</button>
         <button id="preview-rotate" title="Rotate orientation" style="display:none">&#x21BB;&#x1F4D0;</button>
+        <button id="preview-max" title="Expand (Esc to close)" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
         <button id="preview-reload" title="Reload">&#x21BB;</button>
         <button id="preview-close" title="Hide preview">&times;</button>
       </div>
@@ -46,6 +47,7 @@
       rotateBtn: col.querySelector('#preview-rotate'),
     };
     col.querySelector('#preview-reload').onclick = actions.onReload;
+    refs.maxBtn = col.querySelector('#preview-max'); refs.maxBtn.onclick = () => actions.onMax();
     col.querySelector('#preview-close').onclick = actions.onToggle;
     refs.deviceBtn.onclick = actions.onDevice;
     refs.rotateBtn.onclick = actions.onRotate;
