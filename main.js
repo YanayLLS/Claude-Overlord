@@ -3000,7 +3000,7 @@ function runAutoMerge(prs, failedRepos = []) {
       });
       continue;
     }
-    const green = (p.checks === 'pass' || p.checks === 'none') && ['CLEAN', 'HAS_HOOKS'].includes(p.mergeState);
+    const green = (p.checks === 'pass' || p.checks === 'none') && ['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState); // UNSTABLE: an older run of a now-green check still counts on GitHub; the panel calls it mergeable too
     if (!green || releases.holdOn(p.repo, p.baseRef)) continue;
     keep.pop();
     autoMerging.add(url);
