@@ -202,3 +202,24 @@ const { fixPrPlan } = require('./actions-core');
   assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'CLEAN' }, { merging: true }), 'merging');
 }
 console.log('autoPhase ok');
+
+// ── PR claims: one agent per PR ──
+{
+  const { prClaimKey: prKey, prOwner, prClaim, prRelease } = require('./actions-core');
+  const k = 'https://github.com/llsltd/fe/pull/12';
+  for (const r of ['https://github.com/LLSLtd/fe/pull/12', 'https://github.com/LLSLtd/fe/pull/12/files', 'LLSLtd/fe#12', 'github.com/LLSLtd/fe/pull/12?x=1']) assert.strictEqual(prKey(r), k, r);
+  assert.strictEqual(prKey('nonsense'), null);
+  const alive = new Set(['A', 'B']), live = (s) => alive.has(s), c = {};
+  assert.deepStrictEqual(prClaim(c, k, 'A', live), { ok: true });
+  assert.deepStrictEqual(prClaim(c, k, 'B', live), { ok: false, owner: 'A' }); // second agent told who has it
+  assert.deepStrictEqual(prClaim(c, k, 'A', live), { ok: true }); // re-claim by the owner is fine
+  assert.strictEqual(prOwner(c, k, live), 'A');
+  assert.strictEqual(prRelease(c, k, 'B'), false); // only the owner releases
+  alive.delete('A'); // owner closed (or gone after a restart)
+  assert.strictEqual(prOwner(c, k, live), null);
+  assert.ok(!(k in c)); // dead claim dropped
+  assert.deepStrictEqual(prClaim(c, k, 'B', live), { ok: true });
+  assert.strictEqual(prRelease(c, k, 'B'), true);
+  assert.strictEqual(prOwner(c, k, live), null);
+  console.log('prClaim ok');
+}

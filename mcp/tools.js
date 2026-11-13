@@ -40,6 +40,19 @@ const VISUAL_SCHEMAS = [
     } } },
 ];
 
+// PR claims (main.js prClaimFor): one agent per pull request, so auto-merge or the Fix button never sends a second one.
+const PR_SCHEMAS = [
+  { name: 'pr_claim', description: 'Tell Overlord you are working on a GitHub pull request (fixing its checks or conflicts, updating its branch, getting it merged), so it never sends a second agent to the same PR. Call it before you start. If another agent already holds the PR you are told which: leave the PR to it. The claim lasts until you call pr_release or your session is closed, and survives Overlord restarting.',
+    inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
+  { name: 'pr_release', description: 'Hand back a PR you claimed with pr_claim, once it is merged or you stop working on it, so Overlord can send another agent if it goes red again.',
+    inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
+];
+function prCall(claims, agentId, name, args = {}) {
+  if (!claims) return fail('PR claims are unavailable.');
+  const r = (name === 'pr_claim' ? claims.claim : claims.release)(agentId, args.pr);
+  return r.error ? fail(r.error) : text(r.text);
+}
+
 function visualCall(args = {}) {
   const ok = (h) => typeof h === 'string' && h.trim() !== '';
   const vs = Array.isArray(args.variants) ? args.variants.filter((v) => v && ok(v.html)) : [];
@@ -95,4 +108,4 @@ function terminalCall(terminals, name, args = {}) {
   } catch (e) { return fail(e && e.message ? e.message : String(e)); }
 }
 
-module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, visualCall, createDispatcher, terminalCall };
+module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, prCall, visualCall, createDispatcher, terminalCall };

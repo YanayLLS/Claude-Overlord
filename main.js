@@ -2650,6 +2650,7 @@ function reassignAgentToFile(id, newFilePath, startAt = 0) {
   send({ type: 'status', id, status: shownStatus(a) });
   // Switch to new file
   const newSessionId = path.basename(newFilePath, '.jsonl');
+  for (const c of Object.values(settings.prClaims || {})) if (c.session === a.sessionId) c.session = newSessionId; // its PRs stay its own
   a.sessionId = newSessionId;
   a.chatHides = []; // what the chat hid belonged to the old session
   send({ type: 'sessionChanged', id, sessionId: newSessionId }); // the page files drafts and hidden messages by session
@@ -3001,17 +3002,18 @@ function applyPrFlags(prs) {
 // "Fix & merge" on my PR ("I'm gone, land it"): red or conflicting → one Fix agent (it loops until green, actions-core.js
 // fixPrPlan); behind → update the branch; green → merge. Runs here, not as GitHub's auto-merge, so the release
 // gate (SOC2) and teammates' holds still apply. ponytail: only while Overlord runs.
-const autoFixAgents = new Map(); // url → agent id (or 'starting'); one fixer per PR at a time
+const autoFixAgents = new Map(); // url → 'starting' while its fixer spawns, 'failed' if it couldn't; the fixer itself is the PR's claim (prClaimFor)
+const autoNudged = new Map(); // url → the red head sha its idle claimant was already sent back to
 const autoUpdatedSha = new Map(); // url → head sha we already asked GitHub to update
 const autoMerging = new Set(); // urls whose merge call is in flight
 const autoFixReason = new Map(); // url → why its fixer couldn't start
 function autoPhaseOf(p) {
   const f = autoFixAgents.get(p.url);
-  return autoPhase(p, { fixing: f === 'starting' || (f != null && agents.has(f)), fixFailed: f === 'failed', merging: autoMerging.has(p.url), held: !!releases.holdOn(p.repo, p.baseRef) });
+  return autoPhase(p, { fixing: f === 'starting' || !!prClaimFor(p.url), fixFailed: f === 'failed', merging: autoMerging.has(p.url), held: !!releases.holdOn(p.repo, p.baseRef) });
 }
 function runAutoMerge(prs, failedRepos = []) {
   const armed = settings.prAutoMerge || [];
-  if (!armed.length) return;
+  if (!armed.length || !_stateRestored) return; // agents (and so PR claims) not back yet
   const keep = [];
   for (const url of armed) {
     const p = prs.find(x => x.url === url);
@@ -3021,9 +3023,11 @@ function runAutoMerge(prs, failedRepos = []) {
     const conflict = p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY';
     if (conflict || p.checks === 'fail') {
       const fixer = autoFixAgents.get(url);
-      if (fixer === 'starting' || fixer === 'failed' || (fixer != null && agents.has(fixer))) continue; // already on it, or can't (its toast said why; re-arm retries)
+      if (fixer === 'starting' || fixer === 'failed') continue; // on its way, or can't (re-arm retries)
+      const owner = prClaimFor(url);
+      if (owner) { nudgeClaimant(owner, p); continue; } // an agent already holds this PR (survives restarts)
       autoFixAgents.set(url, 'starting');
-      fixPr(p, true).then(id => { const ok = typeof id === 'number'; autoFixAgents.set(url, ok ? id : 'failed'); if (!ok) autoFixReason.set(url, (id && id.error) || 'Fix agent didn\'t start'); })
+      fixPr(p, { quiet: true }).then(id => { const ok = typeof id === 'number'; if (ok) autoFixAgents.delete(url); else { autoFixAgents.set(url, 'failed'); autoFixReason.set(url, (id && id.error) || 'Fix agent didn\'t start'); } })
         .catch(e => { autoFixAgents.delete(url); send({ type: 'toast', text: `Auto-fix ${name} failed: ${e.message || e}` }); });
       continue;
     }
@@ -3227,7 +3231,7 @@ function armPrTimer() {
 }
 
 // ── GitHub Actions tracking ───────────────────────────
-const { runState, nextPollDelay, diffNewFailures, fixRunPlan, fixPrPlan, autoPhase, REPO_RE: WF_REPO_RE } = require('./actions-core');
+const { runState, nextPollDelay, diffNewFailures, fixRunPlan, fixPrPlan, autoPhase, prClaimKey, prOwner, prClaim, prRelease, REPO_RE: WF_REPO_RE } = require('./actions-core');
 const { git: gitIn, checkoutInfo, aheadOf, aheadSummary } = require('./branch-ahead');
 const WF_FILE_RE = /^[\w.-]+\.ya?ml$/i;
 let actionsTimer = null;
@@ -3409,7 +3413,47 @@ async function fixActionRun(run) { return startFixAgent(fixRunPlan, run); }
 
 // "Fix" on a PR with failing checks: a normal agent in the repo's checkout (no worktree) that
 // pushes fixes to the PR until its checks are green (actions-core.js fixPrPlan).
-async function fixPr(pr, quiet) { return startFixAgent(fixPrPlan, pr, quiet); } // → the new agent's id
+// → the fixing agent's id. One agent per PR: if one already holds it (prClaimFor) that one is the answer, and the
+// Fix button opens it instead of starting another.
+async function fixPr(pr, { quiet = false, open = false } = {}) {
+  const owner = prClaimFor(pr && pr.url);
+  if (owner) {
+    if (open) { send({ type: 'focused', id: owner.id }); focusedAgentId = owner.id; send({ type: 'toast', text: `@${owner.agentName || 'An agent'} is already on #${pr.number}` }); }
+    return owner.id;
+  }
+  const id = await startFixAgent(fixPrPlan, pr, quiet);
+  const a = typeof id === 'number' && agents.get(id), key = prClaimKey(pr && pr.url);
+  if (a && key) { prClaim(prClaims(), key, a.sessionId, sessionLive); saveState(); }
+  return id;
+}
+const prClaims = () => settings.prClaims || (settings.prClaims = {}); // key → { session, at }; saved with settings, so restarts keep it
+const sessionAgent = (s) => { for (const a of agents.values()) if (a.sessionId === s && !a.archived) return a; return null; };
+const sessionLive = (s) => !_stateRestored || !!sessionAgent(s); // before agents are restored nobody is dead yet
+function prClaimFor(url) { const key = prClaimKey(url), s = key && prOwner(prClaims(), key, sessionLive); return s ? sessionAgent(s) : null; } // → the open agent holding this PR
+// The holder is idle while its PR is red (a new failure, a new conflict): send it back once per head sha rather
+// than start a second agent. A holder mid-turn or on a permission prompt is left alone.
+function nudgeClaimant(a, p) {
+  if (!a.isWaiting || a.permSent || autoNudged.get(p.url) === p.headSha) return;
+  autoNudged.set(p.url, p.headSha);
+  const what = [(p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') && 'conflicts', p.checks === 'fail' && 'has failing checks'].filter(Boolean).join(' and ');
+  queuePeerInjection(a.id, { id: 'automerge-' + Date.now(), hop: 0, header: `Overlord auto-merge: ${p.url} ${what} (head ${String(p.headSha || '').slice(0, 7)}). You hold this PR: get it mergeable and green. If you can't, call pr_release so another agent takes it.` });
+}
+// pr_claim / pr_release from any agent (mcp/tools.js)
+const prClaimsApi = {
+  claim(agentId, ref) {
+    const a = agents.get(agentId), key = prClaimKey(ref);
+    if (!a || !key) return { error: `Not a PR: "${ref}". Pass its url or owner/repo#number.` };
+    const r = prClaim(prClaims(), key, a.sessionId, sessionLive);
+    if (!r.ok) { const o = sessionAgent(r.owner); return { error: `@${(o && o.agentName) || 'another agent'} is already working on this PR. Leave it to them.` }; }
+    saveState(); return { text: 'Claimed. No other agent will be sent to this PR until you call pr_release or your session closes.' };
+  },
+  release(agentId, ref) {
+    const a = agents.get(agentId), key = prClaimKey(ref);
+    if (!a || !key) return { error: `Not a PR: "${ref}".` };
+    if (!prRelease(prClaims(), key, a.sessionId)) return { text: 'You did not hold this PR.' };
+    saveState(); return { text: 'Released.' };
+  },
+};
 
 // Fix chat (the chat's ⋯ menu): the chat as shown and its terminal (pictured offscreen from the renderer's buffer
 // HTML, so the user sees nothing) are saved, and a new agent in Overlord's repo finds why they differ and fixes the
@@ -5056,7 +5100,7 @@ function handleIpc(msg) {
     case 'perfLog': flog(String(msg.text || '').slice(0, 500)); break;
     case 'ramSample': send({ type: 'ramUsage', total: os.totalmem(), free: os.freemem() }); break;
     case 'fixActionRun': fixActionRun(msg.run || {}).catch(e => { flog('fixActionRun failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
-    case 'fixPr': fixPr(msg.pr || {}).catch(e => { flog('fixPr failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
+    case 'fixPr': fixPr(msg.pr || {}, { open: true }).catch(e => { flog('fixPr failed:', e); send({ type: 'toast', text: 'Fix failed: ' + (e.message || 'error') }); }); break;
     case 'saveClickupSettings': {
       const c = msg.clickupSettings || {}, prev = clickupCfg();
       settings.clickupSettings = {
@@ -6782,7 +6826,7 @@ app.whenReady().then(() => {
     captureHost: browserCaptureHost = createCaptureHost({ makeWindow: () => makeCaptureWindow({ BrowserWindow, screen: require('electron').screen }) }),
     onRecovered: (id, reason, ok, url) => flog(ok ? `agent ${id} browser died (${reason}): recreated${url ? `, reloading ${url}` : ''}` : `agent ${id} browser died (${reason}) again: giving up for now`),
   });
-  mcpServer = createMcpServer({ resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null), getTerminals: () => (termPane ? termPane.api : null) });
+  mcpServer = createMcpServer({ prClaims: prClaimsApi, resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.apiEnabled) startLocalApi();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });

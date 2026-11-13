@@ -182,6 +182,26 @@ function fixPrPlan(pr, infos, worktreeDirs) {
   return { repoDir: pick.dir, prompt: shellSafe(prompt) };
 }
 
+// One agent per PR. claims: key → { session, at } (Claude session id: stable across restarts, unlike agent ids).
+// A claim lasts while its agent is open (live(session)), so a restart keeps it and a closed agent frees it.
+function prClaimKey(ref) { // a PR url (any tab of it) or owner/repo#n → https://github.com/owner/repo/pull/n, lower case
+  const m = String(ref || '').trim().match(/^(?:(?:https?:\/\/)?github\.com\/)?([\w.-]+\/[\w.-]+?)(?:\/pull\/|#)(\d+)(?:[/?#].*)?$/i);
+  return m ? `https://github.com/${m[1]}/pull/${m[2]}`.toLowerCase() : null;
+}
+function prOwner(claims, key, live) { // → the live owner's session, or null (a dead claim is dropped)
+  const c = claims[key];
+  if (c && live(c.session)) return c.session;
+  delete claims[key];
+  return null;
+}
+function prClaim(claims, key, session, live) { // → { ok } or { ok: false, owner } when another live agent holds it
+  const owner = prOwner(claims, key, live);
+  if (owner && owner !== session) return { ok: false, owner };
+  claims[key] = { session, at: Date.now() };
+  return { ok: true };
+}
+function prRelease(claims, key, session) { if (claims[key] && claims[key].session === session) { delete claims[key]; return true; } return false; }
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { autoPhase, parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, fixRunPlan, fixPrPlan, REPO_RE };
+  module.exports = { autoPhase, prClaimKey, prOwner, prClaim, prRelease, parseWorkflowInput, runState, actionsRollup, nextPollDelay, diffNewFailures, groupRunsByRepo, fixRunPlan, fixPrPlan, REPO_RE };
 }

@@ -12,8 +12,8 @@ const ACTIONS = {
   evaluate: async () => '1',
 };
 
-async function withServer(fn, resolveActions = () => ACTIONS) {
-  const server = createMcpServer({ resolveActions });
+async function withServer(fn, resolveActions = () => ACTIONS, prClaims = null) {
+  const server = createMcpServer({ resolveActions, prClaims });
   await server.start();
   try { await fn(server); } finally { await server.stop(); }
 }
@@ -51,11 +51,11 @@ test('initialize returns protocol version and tools capability', async () => {
   });
 });
 
-test('tools/list returns the eight browser tools, three terminal tools and show_visual', async () => {
+test('tools/list returns the eight browser tools, three terminal tools, show_visual and the two PR claim tools', async () => {
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 12);
+    assert.strictEqual(json.result.tools.length, 14);
   });
 });
 
@@ -166,4 +166,19 @@ test('initialize tells agents to show visuals in the chat', async () => {
     const { json } = await rpc(server, server.mintToken(1), { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
     assert.match(json.result.instructions, /show_visual/);
   });
+});
+
+test("pr_claim and pr_release reach the claims host with the calling agent's id", async () => {
+  const seen = [];
+  const claims = { claim: (id, pr) => (seen.push(['claim', id, pr]), id === 1 ? { text: 'Claimed.' } : { error: '@Ada is already working on this PR.' }), release: (id, pr) => (seen.push(['release', id, pr]), { text: 'Released.' }) };
+  await withServer(async (server) => {
+    const t1 = server.mintToken(1), t2 = server.mintToken(2);
+    const call = (t, name) => rpc(server, t, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name, arguments: { pr: 'o/r#5' } } }).then((r) => r.json.result);
+    assert.strictEqual((await call(t1, 'pr_claim')).content[0].text, 'Claimed.');
+    const second = await call(t2, 'pr_claim');
+    assert.strictEqual(second.isError, true);
+    assert.match(second.content[0].text, /already working/);
+    assert.strictEqual((await call(t1, 'pr_release')).content[0].text, 'Released.');
+    assert.deepStrictEqual(seen, [['claim', 1, 'o/r#5'], ['claim', 2, 'o/r#5'], ['release', 1, 'o/r#5']]);
+  }, () => ACTIONS, claims);
 });

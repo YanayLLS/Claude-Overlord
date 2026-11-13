@@ -2,7 +2,7 @@
 // The token in the path is the whole identity mechanism: one agent, one browser.
 const http = require('http');
 const crypto = require('crypto');
-const { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, createDispatcher, terminalCall, visualCall } = require('./tools');
+const { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, prCall, createDispatcher, terminalCall, visualCall } = require('./tools');
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_INFO = { name: 'overlord-browser', version: '1.0.0' };
@@ -32,16 +32,17 @@ function reply(res, status, payload) {
   res.end(body);
 }
 
-async function handleRpc(msg, resolveActions, agentId, getTerminals) {
+async function handleRpc(msg, resolveActions, agentId, getTerminals, prClaims) {
   const { id, method, params } = msg;
   if (method === 'initialize') {
     return ok(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
   }
   if (method === 'ping') return ok(id, {});
-  if (method === 'tools/list') return ok(id, { tools: [...TOOL_SCHEMAS, ...TERMINAL_SCHEMAS, ...VISUAL_SCHEMAS] });
+  if (method === 'tools/list') return ok(id, { tools: [...TOOL_SCHEMAS, ...TERMINAL_SCHEMAS, ...VISUAL_SCHEMAS, ...PR_SCHEMAS] });
   if (method === 'tools/call') {
     const name = (params || {}).name || '';
     if (name === 'show_visual') return ok(id, visualCall((params || {}).arguments || {})); // drawn by the chat from the call itself
+    if (name.startsWith('pr_')) return ok(id, prCall(prClaims, agentId, name, (params || {}).arguments || {}));
     if (name.startsWith('terminal_')) return ok(id, terminalCall(getTerminals(), name, (params || {}).arguments || {}));
     const actions = resolveActions(agentId);
     if (!actions) {
@@ -52,7 +53,7 @@ async function handleRpc(msg, resolveActions, agentId, getTerminals) {
   return err(id, -32601, `Method not found: ${method}`);
 }
 
-function createMcpServer({ resolveActions, getTerminals = () => null }) {
+function createMcpServer({ resolveActions, getTerminals = () => null, prClaims = null }) {
   const tokens = new Map(); // token -> agentId
   const byAgent = new Map(); // agentId -> token
   let server = null;
@@ -79,7 +80,7 @@ function createMcpServer({ resolveActions, getTerminals = () => null }) {
     try { msg = JSON.parse(await readBody(req)); }
     catch { return reply(res, 400, err(null, -32700, 'Parse error')); }
     if (msg.id === undefined) return reply(res, 202, null); // notification
-    try { reply(res, 200, await handleRpc(msg, resolveActions, tokens.get(token), getTerminals)); }
+    try { reply(res, 200, await handleRpc(msg, resolveActions, tokens.get(token), getTerminals, prClaims)); }
     catch (e) { reply(res, 200, err(msg.id, -32603, e.message || 'Internal error')); }
   }
 
