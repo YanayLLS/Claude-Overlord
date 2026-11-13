@@ -192,7 +192,7 @@ function grade(input) {
     if (was - now >= P.coverageDropMin && (was - now) / was > P.coverageDrop) shrunk.push({ text: m.title, tag: `${was} → ${now}`, url: moduleUrl(m.name) });
   }
   if (shrunk.length) add('coverage', 'look', `${plural(shrunk.length, 'module')} ran fewer scenarios than last night`, shrunk.slice(0, P.shown), shrunk.length);
-  else add('coverage', 'ship', 'Coverage held');
+  else add('coverage', 'ship', 'Scenario counts held');
 
   // 6 ─ what the fixer did to the app, and whether its verify run stands
   const appFix = (apply && (apply.commits || []).filter(c => c.riskTier === 'T2')) || [];
@@ -232,7 +232,7 @@ function finish(rules, counts) {
 // path can be walked without a real release. It says so on the card.
 function demoCandidate(c) {
   if (!c || !c.shas) return c;
-  const rules = ['Every module reported', 'No new critical failure', 'No new minor failure', 'Coverage held', 'Fixer: test-only fixes', 'No suite turned red']
+  const rules = ['Every module reported', 'No new critical failure', 'No new minor failure', 'Scenario counts held', 'Fixer: test-only fixes', 'No suite turned red']
     .map((text, i) => ({ id: 'demo' + i, level: 'ship', text, items: [] }));
   return { ...c, demo: true, level: 'ship', headline: 'Release.', rules, counts: {}, context: null,
     ai: { text: 'Release. Every module reported and nothing new is failing since the last prod release.' } };
