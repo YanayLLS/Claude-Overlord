@@ -393,6 +393,17 @@ function flog(...args) {
 // killer is written down as it starts, so a run that ends with no quit line still shows who was doing what.
 // RUN_MARK lives while the app runs: finding it at start means the last run was killed or crashed.
 let quitWhy = null;
+// The native crash dump (Electron's own, kept on disk, never uploaded): a hard crash leaves no JS trace at all.
+try { require('electron').crashReporter.start({ uploadToServer: false }); } catch {}
+// Each agent-browser call is written down before it runs (synchronously, so it survives a crash it causes).
+function loggedActions(id, actions) {
+  if (!actions) return actions;
+  const a = agents.get(id), who = `agent ${id} "${String((a && a.title) || '').slice(0, 40)}"`;
+  return new Proxy(actions, { get: (t, k) => typeof t[k] !== 'function' ? t[k] : (...args) => {
+    flog(`${who} browser.${String(k)} ${JSON.stringify(args).slice(0, 160)}`);
+    return t[k](...args);
+  } });
+}
 function quitBecause(why) { quitWhy = why; flog('quit asked: ' + why); }
 const RUN_MARK = path.join(STATE_DIR, 'running.mark');
 const KILLER_RE = /taskkill|Stop-Process|\bpkill\b|\bkillall\b|\bkill\s+-?\d|process\.kill|wmic\s+process|port\.js\s+kill|Stop-Computer|Restart-Computer|\bshutdown\b|electron\.exe|overlord\.exe/i;
@@ -402,7 +413,7 @@ function noteShell(id, a, tn, inp) {
 }
 try {
   if (!process.env.OVERLORD_STATE_DIR) {
-    if (fs.existsSync(RUN_MARK)) flog(`previous run (${fs.readFileSync(RUN_MARK, 'utf8')}) ended without quitting: killed, crashed or the machine went down. Look above for "ran a process command" and "quit asked".`);
+    if (fs.existsSync(RUN_MARK)) flog(`previous run (${fs.readFileSync(RUN_MARK, 'utf8')}) ended without quitting: killed, crashed or the machine went down. Look above for "ran a process command", "quit asked" and the last "browser." lines; a native crash leaves a dump in ${(() => { try { return app.getPath("crashDumps"); } catch { return "the crashDumps folder"; } })()}.`);
     fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(RUN_MARK, `pid ${process.pid}, started ${new Date().toISOString()}`);
   }
 } catch {}
@@ -6848,7 +6859,7 @@ app.whenReady().then(() => {
     captureHost: browserCaptureHost = createCaptureHost({ makeWindow: () => makeCaptureWindow({ BrowserWindow, screen: require('electron').screen }) }),
     onRecovered: (id, reason, ok, url) => flog(ok ? `agent ${id} browser died (${reason}): recreated${url ? `, reloading ${url}` : ''}` : `agent ${id} browser died (${reason}) again: giving up for now`),
   });
-  mcpServer = createMcpServer({ prClaims: prClaimsApi, resolveActions: (id) => (agents.has(id) ? browserRegistry.actionsFor(id) : null), getTerminals: () => (termPane ? termPane.api : null) });
+  mcpServer = createMcpServer({ prClaims: prClaimsApi, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.apiEnabled) startLocalApi();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
