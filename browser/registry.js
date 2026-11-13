@@ -39,7 +39,7 @@ const within = (promise, ms) => new Promise((resolve, reject) => {
 });
 
 function createRegistry({
-  makeView, attach, detach, onErrorCount, onNavigated = () => {}, onRecovered = () => {},
+  makeView, attach, detach, onErrorCount, onNavigated = () => {}, onRecovered = () => {}, onClosed = () => {},
   partitionFor = defaultPartitionFor, captureHost = null,
   unresponsiveGraceMs = UNRESPONSIVE_GRACE_MS, probeTimeoutMs = PROBE_TIMEOUT_MS,
 }) {
@@ -153,6 +153,8 @@ function createRegistry({
       const vp = setViewport(id, width, height);
       return vp ? `The page now lays out ${vp.width}px wide${vp.height ? ` x ${vp.height}px` : ''} (scaled to fit the pane when it is narrower); screenshots show that layout.` : 'Back to the pane\'s own size.';
     };
+    // Done with the page: the view goes away and the pane beside the chat closes (the next browser_navigate reopens it).
+    actions.close = async () => { setImmediate(() => { destroy(id); onClosed(id); }); return 'Closed the browser pane.'; };
     entry.errors = errors; entry.actions = actions;
     entries.set(id, entry);
     establishViewport(view);

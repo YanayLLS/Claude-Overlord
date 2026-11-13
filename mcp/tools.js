@@ -16,6 +16,8 @@ const TOOL_SCHEMAS = [
     inputSchema: { type: 'object', properties: {} } },
   { name: 'browser_viewport', description: 'Set the width (and optionally height) the page lays out at, e.g. 1440 for the desktop layout or 390 for a phone, whatever size the user\'s pane is: it is drawn scaled to fit. Use it instead of asking the user to resize the pane or the window. width 0 goes back to the pane\'s own size.',
     inputSchema: { type: 'object', properties: { width: { type: 'number', description: 'Layout width in CSS px (320-3840), 0 to reset' }, height: { type: 'number', description: 'Layout height in CSS px; omit to fill the pane' } }, required: ['width'] } },
+  { name: 'browser_close', description: 'Close your browser pane beside the chat when you are done with the page (a test or check finished). The next browser_navigate opens it again; logins are kept.',
+    inputSchema: { type: 'object', properties: {} } },
   { name: 'browser_eval', description: 'Evaluate a JavaScript expression in the page and return the JSON-serialized result.',
     inputSchema: { type: 'object', properties: { js: str('A JavaScript expression') }, required: ['js'] } },
 ];
@@ -72,6 +74,7 @@ const HANDLERS = {
   browser_console: (a) => a.consoleErrors(),
   browser_eval: (a, g) => a.evaluate(g('js')),
   browser_viewport: (a, _g, args) => a.viewport(args.width, args.height),
+  browser_close: (a) => a.close(),
 };
 
 function requiredGetter(args, name) {

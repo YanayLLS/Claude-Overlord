@@ -170,6 +170,7 @@
       if (msg.type === 'previewError') onPreviewError(msg);
       else if (msg.type === 'previewLoaded') onPreviewLoaded(msg);
       else if (msg.type === 'previewLoadFailed') onPreviewLoadFailed(msg);
+      else if (msg.type === 'previewClosed') { pages.delete(msg.id); if (msg.id === activeAgentId && visible) toggle(false); } // the agent closed its browser
       else if (msg.type === 'previewFrame') { refs.host.style.backgroundImage = occluded && msg.url ? `url("${msg.url}")` : ''; refs.host.style.backgroundSize = '100% 100%'; }
     });
     window.preview = { toggle, setUrl, setActiveAgent };

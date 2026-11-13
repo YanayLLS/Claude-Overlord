@@ -16,10 +16,10 @@ function fakeActions(overrides = {}) {
   return { actions: { ...base, ...overrides }, calls };
 }
 
-test('exposes exactly the eight browser tools', () => {
+test('exposes exactly the nine browser tools', () => {
   const names = TOOL_SCHEMAS.map((t) => t.name).sort();
   assert.deepStrictEqual(names, [
-    'browser_click', 'browser_console', 'browser_eval', 'browser_navigate',
+    'browser_click', 'browser_close', 'browser_console', 'browser_eval', 'browser_navigate',
     'browser_screenshot', 'browser_snapshot', 'browser_type', 'browser_viewport',
   ]);
 });
@@ -81,6 +81,15 @@ test('show_visual: html or variants, and it only says where the visual went', ()
   assert.deepStrictEqual(visualCall({ variants: [{ label: 'A', html: 'a' }, { label: 'B', html: 'b' }] }), { content: [{ type: 'text', text: 'Shown in the chat (2 variants).' }] });
   assert.strictEqual(visualCall({}).isError, true);
   assert.strictEqual(visualCall({ variants: [{ label: 'A' }] }).isError, true);
+});
+
+test('browser_close closes the view', async () => {
+  const { createDispatcher } = require('./tools');
+  let closed = false;
+  const call = createDispatcher({ close: async () => { closed = true; return 'Closed'; } });
+  const r = await call('browser_close', {});
+  assert.ok(closed);
+  assert.strictEqual(r.content[0].text, 'Closed');
 });
 
 test('browser_viewport hands width and height to the view', async () => {

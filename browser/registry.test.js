@@ -560,3 +560,14 @@ test('a black screenshot of a dead view recovers it and returns a real frame fro
   assert.strictEqual(made.length, 2);
   assert.strictEqual(png, Buffer.from('PAGE').toString('base64'));
 });
+
+test('actions.close (browser_close) destroys the view and tells main so the pane shuts', async () => {
+  const closed = [];
+  const { registry, made } = harness({ onClosed: (id) => closed.push(id) });
+  const r = await registry.actionsFor(1).close();
+  assert.match(r, /Closed/);
+  await new Promise((res) => setImmediate(res));
+  assert.strictEqual(made[0].destroyed, true);
+  assert.strictEqual(registry.has(1), false);
+  assert.deepStrictEqual(closed, [1]);
+});

@@ -6821,6 +6821,7 @@ app.whenReady().then(() => {
     // now and after a restart, is logged in. (It was one jar per agent, so each new agent asked for the login again.)
     partitionFor: () => 'persist:overlord-browser',
     onErrorCount: (id, count, last) => send({ type: 'previewError', id, count, last }),
+    onClosed: (id) => { const ag = agents.get(id); if (ag) ag.pageUrl = null; send({ type: 'previewClosed', id }); }, // browser_close: the pane shuts, and stays shut after a restart
     onNavigated: (id, url) => { const ag = agents.get(id); if (ag && /^https?:/.test(url || '')) ag.pageUrl = url; if (preview) preview.onAgentNavigated(id, url); }, // it sends previewLoaded
     // Screenshots of a hidden view: lent to an invisible window for the capture (see browser/capture-host.js).
     captureHost: browserCaptureHost = createCaptureHost({ makeWindow: () => makeCaptureWindow({ BrowserWindow, screen: require('electron').screen }) }),
