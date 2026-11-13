@@ -202,3 +202,11 @@ test('show_visual keeps its html and variants whole (well past the usual caps)',
   const [ev2] = parse({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'v2', name: 'show_visual', input: { html: huge } }] } });
   assert.ok(ev2.args.html.length <= 200001, 'capped at ~200 KB');
 });
+
+test('the CLI\'s "No response requested." placeholder on resume is not shown as a reply', () => {
+  const { parseLineForTimeline } = require('./timeline-core');
+  const line = JSON.stringify({ type: 'assistant', timestamp: 't', message: { model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: 'No response requested.' }], usage: { input_tokens: 0, output_tokens: 0 } } });
+  assert.strictEqual(parseLineForTimeline(line, () => '', () => false), null);
+  const err = JSON.stringify({ type: 'assistant', isApiErrorMessage: true, timestamp: 't', message: { model: '<synthetic>', content: [{ type: 'text', text: 'Rate limit' }] } });
+  assert.strictEqual(parseLineForTimeline(err, () => '', () => false)[0].type, 'apierror');
+});

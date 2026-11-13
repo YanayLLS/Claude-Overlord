@@ -66,6 +66,9 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     const ts = r.timestamp || null;
     if (r.type === 'assistant' && Array.isArray(r.message?.content)) {
       // An API failure (rate limit, overload, login) is written as a synthetic assistant message: its own event.
+      // Resuming a session cut off mid-turn, the CLI writes a placeholder reply ("No response requested.") under the
+      // model <synthetic> to keep the turns paired: nobody said it, so it is not shown.
+      if (r.message.model === '<synthetic>' && !r.isApiErrorMessage) return null;
       if (r.isApiErrorMessage) { const t = r.message.content.filter(b => b.type === 'text').map(b => b.text).join('\n'); return [{ type: 'apierror', ts, text: cap(t, 2000), kind: r.error || '' }]; }
       const events = [];
       for (const b of r.message.content) {

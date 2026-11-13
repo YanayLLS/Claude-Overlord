@@ -1631,7 +1631,7 @@ function restoreAgents(state) {
           try {
             const r = JSON.parse(l);
             // end_turn = the model finished; turns woken by a teammate message write no turn_duration
-            if (r.type === 'assistant') midTurn = r.message?.stop_reason !== 'end_turn';
+            if (r.type === 'assistant' && r.message?.model !== '<synthetic>') midTurn = r.message?.stop_reason !== 'end_turn'; // not the resume placeholder
             else if (r.type === 'system' && r.subtype === 'turn_duration') midTurn = false;
             if (Date.parse(r.timestamp) >= since) { applyBgRecord(ag.bgTasks, r); applyAskRecord(ag.askIds, r); }
           } catch {}
@@ -2371,6 +2371,7 @@ function parseLine(id, line) {
       }
       return;
     }
+    if (r.type === 'assistant' && r.message?.model === '<synthetic>' && !r.isApiErrorMessage) return; // the CLI's "No response requested." placeholder on resume (timeline-core.js)
     if (r.type === 'assistant') {
       a._limitHit = !!r.isApiErrorMessage && /limit|rate/i.test((r.error || '') + ' ' + JSON.stringify(r.message?.content || '')); // ponytail: same test as chat-ui's limit card
       if (a._limitHit) moveIfIdle(id);
