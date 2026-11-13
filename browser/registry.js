@@ -2,7 +2,7 @@
 // objects; makeView/attach/detach/partitionFor are injected so this stays
 // testable and so it never has to reach for agent state it does not own.
 const { createErrorBuffer } = require('./errors');
-const { createActions } = require('./actions');
+const { createActions, nextTask } = require('./actions');
 const { wireErrors, wireNavigation, wireNetworkErrors, unwireNetworkErrors, wireHealth } = require('./view-wiring');
 const { createInputRebinder } = require('./input-rebind');
 const { isBlankImage, isDarkBackground, BACKGROUND_PROBE } = require('./health');
@@ -141,7 +141,8 @@ function createRegistry({
       withCapturable: (fn) => capturable(entry, fn),
       inputScale: () => entry.scale || 1, // a scaled-down layout (browser_viewport) takes input in drawn pixels
     });
-    const settle = async () => { if (entry.priming) { await entry.priming.catch(() => {}); entry.priming = null; } };
+    // The fresh task: a priming load that fails is rejected inside a navigation event (see nextTask in actions.js).
+    const settle = async () => { if (entry.priming) { await entry.priming.catch(() => {}); entry.priming = null; await nextTask(); } };
     const actions = {};
     for (const [k, f] of Object.entries(raw)) actions[k] = async (...a) => { await settle(); return f(...a); };
     // An all-black frame of a page that is not black is a dead view: replace it and capture the new one.

@@ -15,6 +15,12 @@ const CAPTURE_TIMEOUT_MS = 5000;
 const CAPTURE_RETRY_MS = 100;
 const NO_SCREENSHOT = 'Screenshot unavailable: no frame could be captured from this agent\'s browser. Use browser_snapshot to read the page — it works without a frame.';
 
+// Electron runs promise jobs inside the native event that settled them: a pending loadURL is rejected from inside
+// the did-start-navigation of the navigation replacing it. A load (loadURL, reload) or a view move started there
+// destroys the navigation Chromium is still starting, a native crash that took Overlord down (null+0x30 in
+// WebContentsImpl::DidStartNavigation, 2026-11-13). Everything that drives a view first waits for a fresh task.
+const nextTask = () => new Promise((resolve) => setImmediate(resolve));
+
 function withTimeout(promise, ms) {
   let timer;
   const limit = new Promise((_, reject) => {
@@ -32,6 +38,7 @@ function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIME
 
   async function navigate(url) {
     if (!/^https?:\/\//i.test(url)) throw new Error(`Only http(s) URLs are supported, got: ${url}`);
+    await nextTask();
     const w = wc();
     errors.clear();
     await w.loadURL(url);
@@ -133,4 +140,4 @@ function createActions({ getWebContents, errors, captureTimeoutMs = CAPTURE_TIME
   return { navigate, snapshot, screenshot, frame, click, type, consoleErrors, evaluate };
 }
 
-module.exports = { createActions, CAPTURE_TIMEOUT_MS };
+module.exports = { createActions, nextTask, CAPTURE_TIMEOUT_MS };

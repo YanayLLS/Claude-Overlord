@@ -10,9 +10,11 @@ function wired() {
   return { wc, loads, errors };
 }
 
-test('an https-only local dev server answering http empty is retried on https, with no error', () => {
+test('an https-only local dev server answering http empty is retried on https, with no error', async () => {
   const { wc, loads, errors } = wired();
   wc.emit('did-fail-load', {}, -324, 'ERR_EMPTY_RESPONSE', 'http://localhost:5173/', true);
+  assert.deepStrictEqual(loads, [], 'not from inside the failing navigation event');
+  await new Promise((r) => setImmediate(r));
   assert.deepStrictEqual(loads, ['https://localhost:5173/']);
   assert.strictEqual(errors.length, 0);
 });

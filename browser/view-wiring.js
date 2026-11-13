@@ -25,7 +25,7 @@ function wireErrors(webContents, errors) {
   webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
     // A local dev server on https (vite --https) answers http with an empty reply: retry the same address on https once.
-    if ((code === -324 || code === -100) && LOCAL_HTTP.test(url || '')) { webContents.loadURL('https' + url.slice(4)).catch(() => {}); return; }
+    if ((code === -324 || code === -100) && LOCAL_HTTP.test(url || '')) { setImmediate(() => { try { webContents.loadURL('https' + url.slice(4)).catch(() => {}); } catch {} }); return; } // not inside the failing navigation's event
     errors.push({ kind: 'load', level: 'error', message: `Failed to load ${url}: ${desc} (${code})`, source: url, line: 0 });
   });
 }

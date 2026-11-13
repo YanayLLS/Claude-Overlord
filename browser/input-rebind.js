@@ -30,7 +30,8 @@ function createInputRebinder({ timeoutMs = REBIND_TIMEOUT_MS } = {}) {
       const finish = () => { clearTimeout(timer); resolve(); };
       w.once('did-finish-load', finish);
       w.once('did-fail-load', finish);
-      w.reload();
+      // Not from inside the did-finish-load that resolved the first load (see nextTask in actions.js).
+      setImmediate(() => { try { w.reload(); } catch { finish(); } });
     });
   }
 

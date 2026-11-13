@@ -322,11 +322,13 @@ test('prime: a dev-server URL loads only once the browser is first needed, and t
   assert.strictEqual(made.length, 0, 'no renderer for a URL nobody looked at');
   const actions = registry.actionsFor(1);
   assert.strictEqual(made.length, 1);
+  await new Promise(r => setImmediate(r)); // loads start on a fresh task (never inside a navigation event)
   assert.strictEqual(made[0].webContents.url, 'http://localhost:3000');
   await actions.navigate('http://localhost:3000/b');
   assert.strictEqual(made[0].webContents.url, 'http://localhost:3000/b');
   // the browser exists now: a later prime navigates it directly
   registry.prime(1, 'http://localhost:4000');
+  await new Promise(r => setImmediate(r));
   await new Promise(r => setImmediate(r));
   assert.strictEqual(made[0].webContents.url, 'http://localhost:4000');
   registry.destroy(1);
@@ -426,6 +428,7 @@ test('a renderer that dies is replaced: new view, same partition, last URL reloa
   await registry.actionsFor(1).navigate('http://localhost:3000/checkout');
   made[0].webContents.emit('render-process-gone', {}, { reason: 'crashed' });
   await tick();
+  await tick(); // the reload starts on a fresh task
   assert.strictEqual(made.length, 2);
   assert.strictEqual(made[0].destroyed, true, 'old view closed');
   assert.strictEqual(made[1].partition, made[0].partition, 'same partition: logins survive');
@@ -520,6 +523,7 @@ test('checkHealth: an all-black frame over a page that is not dark is a dead vie
   registry.show(1, { x: 0, y: 0, width: 400, height: 300 });
   assert.strictEqual(await registry.checkHealth(1), 'recovered');
   assert.strictEqual(made.length, 2);
+  await new Promise(r => setImmediate(r)); // the reload starts on a fresh task
   assert.strictEqual(made[1].webContents.url, 'http://localhost:3000/');
   assert.strictEqual(made[1].visible, true);
 });
@@ -570,4 +574,39 @@ test('actions.close (browser_close) destroys the view and tells main so the pane
   assert.strictEqual(made[0].destroyed, true);
   assert.strictEqual(registry.has(1), false);
   assert.deepStrictEqual(closed, [1]);
+});
+
+// Overlord died (native crash, null+0x30 in content::WebContentsImpl::DidStartNavigation) on 2026-11-13. Electron
+// rejects a pending loadURL from INSIDE the did-start-navigation of the navigation that replaces it, and runs the
+// promise jobs right there. A browser call waiting on the dev-server load then started its own load in that callback,
+// which destroyed the navigation Chromium was still starting. Reproduced on Electron 33.4.11 at the same instruction.
+test('a call waiting on the dev-server load never starts its navigation inside a navigation event', async () => {
+  let inEvent = false;
+  const startedInEvent = [], loads = [], pending = [];
+  const wc = {
+    id: 7, url: 'about:blank', on() {}, once(evt, fn) { if (evt === 'did-finish-load') setImmediate(fn); },
+    getURL() { return this.url; }, isDestroyed: () => false, getZoomFactor: () => 1, setZoomFactor() {}, reload() {},
+    executeJavaScript: () => Promise.resolve(),
+    loadURL(u) {
+      loads.push(u);
+      if (inEvent) startedInEvent.push(u);
+      // A newer main-frame navigation rejects the older pending loadURL from inside did-start-navigation.
+      for (const p of pending.splice(0)) { inEvent = true; p.reject(Object.assign(new Error('ERR_ABORTED (-3)'), { code: 'ERR_ABORTED' })); setImmediate(() => { inEvent = false; }); }
+      this.url = u;
+      return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+    },
+  };
+  const view = { webContents: wc, setVisible() {}, setBounds() {}, getBounds: () => ({ x: 0, y: 0, width: 1280, height: 800 }) };
+  const registry = createRegistry({ makeView: () => view, attach() {}, detach() {}, onErrorCount() {} });
+  registry.prime(1, 'http://lvh.me:5173/');
+  const nav = registry.actionsFor(1).navigate('http://lvh.me:5173/b').catch(() => {}); // waits for the primed load
+  const tick = () => new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 3 && !loads.length; i++) await tick();
+  assert.deepStrictEqual(loads, ['http://lvh.me:5173/']);
+  wc.loadURL('http://lvh.me:5173/login').catch(() => {}); // something else navigates while the primed load is pending
+  for (let i = 0; i < 5; i++) await tick();
+  assert.deepStrictEqual(startedInEvent, [], 'a load started inside the event that aborted the previous one');
+  assert.strictEqual(loads[loads.length - 1], 'http://lvh.me:5173/b');
+  pending.splice(0).forEach((p) => p.resolve());
+  await nav;
 });
