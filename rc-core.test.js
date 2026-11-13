@@ -34,6 +34,22 @@ assert.strictEqual(g({ page: page([crit]), history: history({ 'a|Logs in': 'FF' 
 // passed on its rerun: flaky, not a failure
 assert.strictEqual(g({ page: page([fail('a', 'Logs in', { tags: ['@critical'], flaky: true })]) }).level, 'ship');
 
+// a module whose stack died before it reported: the runner's fact, named once, never a failure of the app
+{
+  const dead = fail('a', 'a did not report: its cloud stack ended first', { step: 'Given the cloud stack runs a to the end' });
+  const r = g({ page: page([dead], [mod('a', 0, 1), mod('b')]) });
+  assert.strictEqual(r.level, 'look');
+  assert.deepStrictEqual(rule(r, 'evidence').items.map(i => i.text), ['a']);
+  assert.strictEqual(rule(r, 'minor').level, 'ship');
+  assert.strictEqual(rule(r, 'coverage').level, 'ship'); // 10 → 1 scenarios, but already said above
+}
+// an item carries its parts; the headline reads them as one line
+{
+  const r = g({ page: page([crit, fail('a', 'Logs out', { tags: ['@critical'] })]), history: history({ 'a|Logs in': 'FP' }) });
+  assert.deepStrictEqual({ ...rule(r, 'critical').items[0], url: 0 }, { text: 'Logs in', tag: 'a', more: 1, url: 0 });
+  assert.ok(r.headline.includes('Logs in (a)'));
+}
+
 // ── what the fixer concluded ──────────────────────────
 const cause = (o) => ({ key: 'k1', profile: 'a', scenarios: [{ profile: 'a', scenario: 'Logs in' }], ...o });
 assert.strictEqual(categoryOf(cause({ verdict: 'fixed', riskTier: 'T1' })), 'test');
@@ -86,7 +102,7 @@ assert.deepStrictEqual(flagsOn([{ name: 'the "IsCommentsEnabled" feature flag is
   assert.strictEqual(g({ page: page([hidden]), history: hist }).level, 'hold');
   const r = g({ page: page([hidden]), history: hist, unreleased: ['IsCommentsEnabled'] });
   assert.strictEqual(r.level, 'ship');
-  assert.ok(rule(r, 'unreleased').items[0].text.startsWith('IsCommentsEnabled'));
+  assert.ok(rule(r, 'unreleased').items[0].tag === 'IsCommentsEnabled');
 }
 
 // ── is the evidence whole ─────────────────────────────

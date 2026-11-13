@@ -107,7 +107,8 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
       after = after.filter(x => Date.parse(x.createdAt) > Date.parse(r.createdAt));
       break;
     }
-    if (nightly.status !== 'completed') return { night: nightly.createdAt, nightlyId: nightly.id, running: true };
+    const runUrlOf = (r) => `https://github.com/${S.repo}/actions/runs/${r.id}`;
+    if (nightly.status !== 'completed') return { night: nightly.createdAt, nightlyId: nightly.id, running: true, runUrl: runUrlOf(nightly) };
 
     const [verify, pr, apply, phase] = await Promise.all([verifyRun(S.repo, after), fixPr(S.repo, nightly.id),
       artifact(S.repo, nightly.id, 'bdd-autofix-apply-result', 'bdd-apply-result.json'),
@@ -130,16 +131,16 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
     const shas = {};
     await Promise.all(prodRow.map(async (p) => {
       const known = tested[p.repo.split('/')[1]];
-      if (known) { shas[p.repo] = { sha: known, tested: true }; return; }
+      if (known) { shas[p.repo] = { sha: known, tested: true, source: p.source, target: p.target }; return; }
       const at = await api('-X', 'GET', `repos/${p.repo}/commits`, '-f', `sha=${p.source}`, '-f', `until=${nightly.createdAt}`, '-f', 'per_page=1');
       const c = (at.data || [])[0];
-      if (c && c.sha) shas[p.repo] = { sha: c.sha, tested: false };
+      if (c && c.sha) shas[p.repo] = { sha: c.sha, tested: false, source: p.source, target: p.target };
     }));
     return { night: nightly.createdAt, nightlyId: nightly.id, manual, evidence: { kind: decision === 'pr' ? 'verify' : 'nightly', runId: evidence.id, reportUrl: pageUrl,
-      runUrl: `https://github.com/${S.repo}/actions/runs/${evidence.id}` }, fixPr: pr, ...result, shas, unreleased, computedAt: now(),
+      runUrl: runUrlOf(evidence) }, fixPr: pr, ...result, shas, unreleased, computedAt: now(),
       // what the AI is given beyond the rules: each failure's first error line, and the fixer's own words
       context: page ? {
-        failures: page.failures.filter(f => !f.flaky).slice(0, 25).map(f => `- ${f.module}: ${f.name} | ${f.error}`).join('\n'),
+        failures: page.failures.filter(f => !f.flaky).slice(0, 25).map(f => `- ${(page.modules.find(m => m.name === f.module) || {}).title || f.module}: ${f.name} | ${f.error}`).join('\n'),
         fixer: ((phase && phase.causes) || []).filter(c => c.diagnosis && c.declineReason !== 'over-group-cap').slice(0, 12)
           .map(c => `- ${c.profile} (${(c.scenarios || []).length} scenarios): ${String(c.diagnosis).slice(0, 300)}`).join('\n'),
       } : null };
