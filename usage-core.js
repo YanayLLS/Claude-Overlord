@@ -228,7 +228,9 @@ function usageFillGradient(points, key, start, end, pct, now) {
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1], b = pts[i], dv = b.v - a.v;
     if (dv <= 0 || b.t <= a.t) continue;
-    const heat = Math.round(Math.max(0, Math.min(1, (dv / (b.t - a.t) / pace - 1) / 2)) * 100);
+    // Heat = how far the running total is ahead of an even pace at that moment (20 points ahead → fully red).
+    // Not the slice's burn rate: idle hours are skipped, so every working hour looked like 3x pace.
+    const heat = Math.round(Math.max(0, Math.min(1, (b.v - (b.t - start) * pace) / 20)) * 100);
     const c = `color-mix(in srgb, var(--red) ${heat}%, var(--accent))`;
     stops.push(`${c} ${(a.v / pct * 100).toFixed(1)}%`, `${c} ${(b.v / pct * 100).toFixed(1)}%`);
   }

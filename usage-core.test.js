@@ -158,15 +158,17 @@ assert.deepStrictEqual(parseOauthUsage({ five_hour: { utilization: 5 }, seven_da
 
 console.log('ok — all usage-core checks passed');
 
-// ── usageFillGradient: each slice of the used % colored by its burn rate vs an even pace
+// ── usageFillGradient: each slice colored by how far the running total is ahead of an even pace
 {
   const { usageFillGradient } = require('./usage-core');
   const H = 3600000, span = 5 * H;
-  // 0→10% over 1h (half pace: calm), then 10→40% over 1h (1.5x... 30%/h vs 20%/h pace = 1.5x → 25% red)
-  const g = usageFillGradient([{ t: H, h: 10 }], 'h', 0, span, 40, 2 * H);
-  assert.ok(g.includes('var(--red) 0%, var(--accent)) 0.0%') && g.includes('25.0%'), g);
+  // pace 20%/h. At 1h: 10% (behind → calm). At 2h: 45% vs 40% expected → 5 ahead → 25% red
+  const g = usageFillGradient([{ t: H, h: 10 }], 'h', 0, span, 45, 2 * H);
+  assert.ok(g.includes('var(--red) 0%, var(--accent)) 0.0%'), g);
   assert.ok(g.includes('var(--red) 25%'), g);
-  // 3x pace or more → fully red
+  // a fast burst that stays on pace overall is not red (idle hours used to make every burst red)
+  assert.ok(usageFillGradient([{ t: 3 * H, h: 0 }], 'h', 0, span, 70, 3.5 * H).includes('var(--red) 0%'));
+  // 20+ points ahead → fully red
   assert.ok(usageFillGradient([], 'h', 0, span, 60, H).includes('var(--red) 100%'));
   assert.strictEqual(usageFillGradient([], 'h', 0, span, 0, H), null);
 }
