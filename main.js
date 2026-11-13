@@ -3881,17 +3881,25 @@ function getCurrentAccountInfo() {
   };
 }
 
-function switchAccount(label, auto) {
+async function switchAccount(label, auto) {
       const data = loadAccounts();
       const target = data.accounts.find(a => a.label === label);
       if (!target) return;
-      // Save current credentials under active label before switching
+      // Save current credentials under active label before switching (a login the CLI blanked after a
+      // failed refresh is not saved over the last good copy)
       if (data.activeLabel) {
         try {
           const curCreds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
           const curIdx = data.accounts.findIndex(a => a.label === data.activeLabel);
-          if (curIdx >= 0) { data.accounts[curIdx].credentials = curCreds; data.accounts[curIdx].meta = getAccountMeta(); }
+          if (curIdx >= 0 && curCreds?.claudeAiOauth?.accessToken) { data.accounts[curIdx].credentials = curCreds; data.accounts[curIdx].meta = getAccountMeta(); }
         } catch {}
+      }
+      // A saved token near expiry makes the CLI refresh it right after the swap, which the credential
+      // guard below would take for the old login's refresh and undo, leaving a revoked refresh token.
+      // Mint a fresh one first so the new login runs for hours without refreshing.
+      const so = target.credentials?.claudeAiOauth;
+      if (so?.refreshToken && !acctCore.validToken(so, Date.now())) {
+        try { await acctCore.mintUsageToken(target); } catch (e) { flog('switch: refresh of saved login failed:', e.message); }
       }
       const fromLabel = data.activeLabel;
       fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(target.credentials, null, 2));
@@ -3947,7 +3955,7 @@ async function maybeAutoSwitch(usage) {
     if (!to) return;
     flog('auto-switch:', data.activeLabel, '->', to, JSON.stringify(usage));
     send({ type: 'toast', text: `⇄ ${data.activeLabel} near its limit — agents moved to ${to}` });
-    switchAccount(to, true);
+    switchAccount(to, true).catch(e => flog('auto-switch failed:', e));
   } finally { autoSwitching = false; }
 }
 // Claude caches its token, so a credentials swap only reaches a running agent through a restart.
@@ -4042,6 +4050,8 @@ function spawnAfterAgentLogin(id) {
 async function accountUsage(label) {
   const data = loadAccounts(), acct = findAccount(data, label);
   if (!acct) return null;
+  // The active login's saved refresh token is the CLI's: minting from it would revoke the CLI's copy.
+  if (label === data.activeLabel) return requestOauthUsage(getApiKey());
   let t = acctCore.validToken(acct.usageToken, Date.now());
   if (!t) { t = await acctCore.mintUsageToken(acct); saveAccountsFile(data); }
   return requestOauthUsage(t);
@@ -5688,7 +5698,7 @@ function handleIpc(msg) {
       send({ type: 'accountInfo', ...getCurrentAccountInfo() });
       break;
     }
-    case 'switchAccount': switchAccount(msg.label); break;
+    case 'switchAccount': switchAccount(msg.label).catch(e => flog('switch failed:', e)); break;
     case 'addAccount': {
       // Auto-save current credentials before login flow
       const curData = loadAccounts();
