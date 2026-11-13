@@ -210,3 +210,8 @@ test('the CLI\'s "No response requested." placeholder on resume is not shown as 
   const err = JSON.stringify({ type: 'assistant', isApiErrorMessage: true, timestamp: 't', message: { model: '<synthetic>', content: [{ type: 'text', text: 'Rate limit' }] } });
   assert.strictEqual(parseLineForTimeline(err, () => '', () => false)[0].type, 'apierror');
 });
+
+test('a refused Artifact publish carries no artifactUrl (no card for a page that was not made)', () => {
+  const [d] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a2', is_error: true, content: '<artifact-deleted url="https://claude.ai/artifact/H6Pv"/> deleted' }] } });
+  assert.strictEqual(d.artifactUrl, undefined);
+});

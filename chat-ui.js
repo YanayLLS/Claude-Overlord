@@ -415,7 +415,8 @@
       tally(ev, i);
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
       // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.
-      if (t === 'tool' && ev.name === 'Artifact' && doneBy.get(ev.toolId) && doneBy.get(ev.toolId).artifactUrl) { flush(); out.push(artifactCard(ev, doneBy.get(ev.toolId).artifactUrl)); open = true; return; }
+      // only a publish made a page: quickstart, read and list results quote other links (an Artifact type's)
+      if (t === 'tool' && ev.name === 'Artifact' && !((ev.args || {}).action || 'publish').match(/^(quickstart|read|list|delete|pin|unpin)$/) && doneBy.get(ev.toolId) && doneBy.get(ev.toolId).artifactUrl) { flush(); out.push(artifactCard(ev, doneBy.get(ev.toolId).artifactUrl)); open = true; return; }
       // An inline visual (show_visual) is drawn in the thread, not folded into a run of calls.
       if (t === 'tool' && isVisualTool(ev.name)) { const vh = visualHtml(ev); if (vh) { flush(); out.push(vh); open = true; return; } }
       if (t === 'tool' || t === 'subtask') { run.push(ev); open = true; return; }

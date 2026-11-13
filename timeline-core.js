@@ -98,7 +98,7 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
               const bg = /running in background with ID: (\w+)\. Output is being written to: (.+?\.output)/.exec(out);
               if (bg) { ev.bgId = bg[1]; ev.bgOut = bg[2]; }
               const art = /https:\/\/claude\.ai\/[\w/.-]*artifact\/[\w-]+/.exec(out); // a published Artifact's page
-              if (art) ev.artifactUrl = art[0];
+              if (art && !b.is_error) ev.artifactUrl = art[0]; // a refused publish names the artifact it could not update
               const ag = /agentId: (\w+)/.exec(out); // an Agent call's subagent, for its steps
               if (ag) ev.agentId = ag[1];
               events.push(ev);
