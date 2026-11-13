@@ -140,7 +140,7 @@
   const actions = {
     close: () => show(false),
     refresh: () => api.send({ type: 'releasesRefresh' }),
-    rcRefresh: () => { if (!state || !state.rc || state.rc.loading) return; state = { ...state, rc: { ...state.rc, loading: true } }; say('Reading the night again'); render(); api.send({ type: 'releasesRc' }); },
+    rcRefresh: () => { if (!state || !state.rc || state.rc.loading) return; state = { ...state, rc: { ...state.rc, loading: true } }; if (armed === 'rc') { armed = null; clearTimeout(armTimer); } say('Reading the night again'); render(); api.send({ type: 'releasesRc' }); },
     rcRetry: () => actions.rcRefresh(), rcRetryAi: () => actions.rcRefresh(), rcRetryFlags: () => actions.rcRefresh(),
     rcMore: () => { rcOpen = !rcOpen; render(); },
     rcShas: () => { rcShas = !rcShas; render(); },
@@ -1428,6 +1428,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     report: '<path d="M5 20V11M12 20V4M19 20v-6"/>',
     refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
     busy: '<path d="M12 3a9 9 0 1 0 9 9"/>',
+    gap: '<circle cx="12" cy="12" r="9" stroke-dasharray="3 3.6"/><path d="M12 8v5M12 16.2v.1"/>',
     stop: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5h5v5h-5z"/>',
     lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
     check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
@@ -1455,9 +1456,9 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const word = (cls, icon, text) => `<span class="rl-rc-verdict ${cls}">${icon}${text}</span>`;
     const retry = (act) => c.loading ? `<button class="rl-rc-retry on" data-act="${act}" aria-disabled="true">${rcIc(RC_IC.busy, ' turn')}Retrying</button>` : `<button class="rl-rc-retry" data-act="${act}">Retry</button>`;
     const bars = '<div class="rl-rc-skel" aria-hidden="true"><i></i><i></i><i></i></div>'; // holds the card's shape while it reads
-    if (c.error) return `<div class="rl-rc bad${c.loading ? ' busy' : ''}">${head(word('', rcIc(RC_IC.hold), "Can't read"))}<div class="rl-rc-why note bad"><span>${esc(c.error)}</span>${retry('rcRetry')}</div></div>`;
-    if (c.running) return `<div class="rl-rc">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Running'))}</div>`;
-    if (!c.level) return `<div class="rl-rc busy">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Reading'))}${bars}</div>`;
+    if (c.error) return `<div class="rl-rc bad${c.loading ? ' busy' : ''}">${head(word('', rcIc(RC_IC.hold), "Can't read nightly"))}<div class="rl-rc-why note bad"><span>${esc(c.error)}</span>${retry('rcRetry')}</div></div>`;
+    if (c.running) return `<div class="rl-rc">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Nightly running'))}</div>`;
+    if (!c.level) return `<div class="rl-rc busy">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Reading nightly'))}${bars}</div>`;
     const [cls, verdict] = RC_LEVEL[c.level];
     const hold = c.level === 'hold';
     const flagsBad = c.flags && c.flags.error;
@@ -1470,7 +1471,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     };
     // names (modules, suites) are one line that opens the report; the full list is its tooltip
     const namesHtml = (r) => rcLink(`rl-rc-rule rl-rc-line ${r.level}`, c.evidence.reportUrl, `${rcIc(r.id === 'checks' ? RC_IC[r.level] : RC_IC.stop)}<span>${esc(RC_GROUP[r.id])}</span><span class="rl-rc-txt">${r.items.slice(0, 2).map(i => esc(i.text)).join(', ')}${r.total > 2 ? ` and ${r.total - 2} more` : ''}</span>${rcIc(RC_IC.out)}`,
-      ` title="${esc(r.text + ': ' + r.items.map(i => i.text).join(', ') + (r.total > r.items.length ? '…' : ''))}"`);
+      ` title="${esc(r.text + ': ' + r.items.map(i => i.text).join(', ') + (r.total > r.items.length ? '…' : ''))}" aria-label="${esc(r.text + ': ' + r.items.map(i => i.text).join(', ') + (r.total > r.items.length ? ' and more. Opens the report.' : '. Opens the report.'))}"`);
     // the rows a rule has beyond the ones shown: one quiet link to the report
     const restHtml = (r) => r.total > r.items.length && c.evidence ? rcLink('rl-rc-rest', c.evidence.reportUrl, `${r.total - r.items.length} more${rcIc(RC_IC.out)}`) : '';
     const ruleHtml = (r) => {
@@ -1478,7 +1479,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       if (named && RC_NAMES[r.id]) return `<div class="rl-rc-group lv-${r.level}">${namesHtml(r)}</div>`;
       const rows = !named ? '' : r.items.map(itemHtml(r.id === 'spec')).join('') + restHtml(r);
       return `<div class="rl-rc-group lv-${r.level}"><div class="rl-rc-rule ${r.level}" title="${esc(r.text)}">${rcIc(r.id === 'spec' ? RC_IC.ask : RC_IC[r.level])}<span>${esc((named && RC_GROUP[r.id]) || r.text)}</span>`
-        + (flagsBad && r.id === 'minor' && named ? '<span class="rl-rc-sub" title="Feature flags could not be read, so failures of unreleased features are still counted here">may include unreleased</span>' : '') + `</div>${rows}</div>`;
+        + (flagsBad && r.id === 'minor' && named ? '<span class="rl-rc-sub" title="Feature flags could not be read, so failures of unreleased features are still counted here">may include unreleased features</span>' : '') + `</div>${rows}</div>`;
     };
     const lv = { hold: 0, look: 1 };
     const open = c.rules.filter(r => r.level !== 'ship').sort((x, y) => lv[x.level] - lv[y.level] || (RC_ORDER[x.id] ?? 9) - (RC_ORDER[y.id] ?? 9)), passed = c.rules.filter(r => r.level === 'ship');
@@ -1494,15 +1495,16 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const left = armed === 'rc' ? Math.max(0, 1 - (Date.now() - armAt) / ARM_MS) : 0;
     const wait = c.loading ? ' aria-disabled="true" title="Reading the night again"' : '';
     const release = !can ? `<span class="rl-rc-lock">${rcIc(RC_IC.lock)}Approvers only</span>` : hold
-      ? (armed === 'rc' ? `<button class="rl-hist-btn rl-rc-cancel" data-act="rcCancel">Cancel</button><button class="rl-hist-btn rl-rc-any armed-bad" data-act="rcRelease" style="--left:${left.toFixed(3)};--ms:${Math.round(left * ARM_MS)}ms">Confirm: release a Hold</button>`
-        : `<button class="rl-hist-btn rl-rc-any${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>Release anyway</button>`)
-      : `<button class="rl-hist-btn go${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>🚀 Release</button>`;
+      ? (armed === 'rc' ? `<button class="rl-hist-btn rl-rc-cancel" data-act="rcCancel">Cancel</button><button class="rl-hist-btn rl-rc-any armed-bad" data-act="rcRelease" style="--left:${left.toFixed(3)};--ms:${Math.round(left * ARM_MS)}ms">Release despite Hold</button>`
+        : `<button class="rl-hist-btn rl-rc-any${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : ''}Release anyway</button>`)
+      : `<button class="rl-hist-btn go${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : '🚀 '}Release</button>`;
     const report = rcLink(`rl-hist-btn${hold ? ' go' : ''}`, c.evidence.reportUrl, rcIc(RC_IC.report) + 'Report');
     // the fixer's PR matters while it is still to be merged
     const fixer = c.fixPr && !c.fixPr.merged ? rcLink('rl-hist-btn', c.fixPr.url, rcIc(RC_IC.pr) + 'Auto-fix PR', ` title="The nightly fixer's pull request: ${c.fixPr.open ? 'open' : 'closed'}"`) : '';
     const fold = (act, on, label) => `<button class="rl-rc-fold${on ? ' on' : ''}" data-act="${act}" aria-expanded="${on}">${rcIc(RC_IC.chev)}${label}</button>`;
-    const plan = c.demo && c.plan ? `<div class="rl-rc-group"><div class="rl-rc-rule ship">${rcIc(RC_IC.pr)}<span>Release PRs</span></div>`
-      + c.plan.filter(x => x.error || x.ahead).map(x => rcLink('rl-rc-item', x.url, `<span class="rl-rc-txt">${esc(x.label)} → ${esc(x.target)}</span>${x.error ? `<span class="rl-rc-tag bad">${esc(x.error)}</span>` : ''}${rcIc(RC_IC.out)}`)).join('') + '</div>' : '';
+    const plan = c.demo && c.plan ? `<div class="rl-rc-group"><div class="rl-rc-rule ship">${rcIc(RC_IC.pr)}<span>Would open</span></div>`
+      + c.plan.filter(x => x.error || x.ahead).map(x => rcLink('rl-rc-item', x.url, `<span class="rl-rc-txt">${esc(x.label)} → ${esc(x.target)}</span>${x.error ? `<span class="rl-rc-tag bad">${esc(x.error)}</span>` : ''}`, ' title="Open the comparison this pull request would carry"')).join('')
+      + (c.plan.some(x => x.ahead === 0) ? `<div class="rl-rc-item dim"><span class="rl-rc-txt">Nothing new: ${c.plan.filter(x => x.ahead === 0).map(x => esc(x.label)).join(', ')}</span></div>` : '') + '</div>' : '';
     // the one line of AI wording, with its place held while it is written; a failed note says why. A clean Ship needs no line.
     const aiBad = ai && ai.error;
     const why = !open.length && !flagsBad && !aiBad ? ''
@@ -1510,13 +1512,12 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       : said ? `<div class="rl-rc-why" title="AI wording. The grade comes from the rules below.">${rcIc(RC_IC.ai)}<span>${esc(said)}</span></div>`
       : aiBad && !flagsBad ? `<div class="rl-rc-why note quiet" title="${esc(ai.error)}">${rcIc(RC_IC.ai)}<span>AI note failed</span>${retry('rcRetry')}</div>` : '';
     // a failed flag read changes what the grade can be trusted to say: it sits right under the verdict
-    const flags = flagsBad && !c.loading ? `<div class="rl-rc-why note" title="${esc('Feature flags: ' + c.flags.error + (aiBad ? '\nAI note: ' + ai.error : ''))}">${rcIc(RC_IC.look)}<span>Flags unread${aiBad ? ' · AI note failed' : ''}</span>${retry('rcRetry')}</div>` : '';
+    const flags = flagsBad ? `<div class="rl-rc-why note" title="${esc('Feature flags: ' + c.flags.error + (aiBad ? '\nAI note: ' + ai.error : ''))}">${rcIc(RC_IC.gap)}<span>Couldn't read feature flags${aiBad ? ' or write the AI note' : ''}</span>${retry('rcRetry')}</div>` : '';
     return `<div class="rl-rc ${cls}${c.loading ? ' busy' : ''}"${c.loading ? ' aria-busy="true"' : ''}>${head(word('', rcIc(RC_IC[c.level]), verdict) + (c.demo ? '<span class="rl-rc-pill demo" title="A demo candidate: the same night shown as a clean one. Nothing is written to GitHub.">Demo</span>' : ''))}${why}${flags}`
       + (open.length || plan ? `<div class="rl-rc-rules">${open.map(ruleHtml).join('')}${plan}</div>` : '')
       + (!open.length && passed.length ? `<div class="rl-rc-rules sub ship">${passed.map(ruleHtml).join('')}</div>` : '')
-      + `<div class="rl-rc-folds">${open.length && passed.length ? fold('rcMore', rcOpen, 'Passed') : ''}${shas.length ? fold('rcShas', rcShas, 'Commits') : ''}</div>`
-      + (open.length && rcOpen && passed.length ? `<div class="rl-rc-rules sub">${passed.map(ruleHtml).join('')}</div>` : '')
-      + (rcShas && shas.length ? `<div class="rl-rc-shas">${repos}</div>` : '')
+      + `<div class="rl-rc-folds">${open.length && passed.length ? fold('rcMore', rcOpen, 'Passed') + (rcOpen ? `<div class="rl-rc-rules sub">${passed.map(ruleHtml).join('')}</div>` : '') : ''}`
+      + `${shas.length ? fold('rcShas', rcShas, 'Commits') + (rcShas ? `<div class="rl-rc-shas">${repos}</div>` : '') : ''}</div>`
       + `<div class="rl-rc-acts">${hold ? report + fixer + '<span class="rl-rc-gap"></span>' + release : release + report + fixer}</div></div>`;
   }
 
