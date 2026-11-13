@@ -60,16 +60,19 @@ function createRegistry({
     if (entry.shown) { entry.view.setBounds(entry.shown); entry.view.setVisible(true); } else park(entry.view);
     emulate(entry);
   }
-  // The agent's chosen layout width (browser_viewport): the page lays out that wide whatever the pane's size,
-  // drawn scaled down to fit when the pane is narrower, so it never has to ask you to widen the pane.
+  // The agent's chosen layout width (browser_viewport): the page lays out that wide whatever the pane's size.
+  // Done with the page's zoom: at zoom z a pane w wide lays the page out w/z wide, so z = pane / chosen width.
+  // Not device emulation: enableDeviceEmulation took the whole app down (a native crash, no exit path) three
+  // times on 2026-11-13, each within seconds of an agent's browser_viewport call.
+  // ponytail: height is not emulated, the page keeps the pane's height (scaled); add it back only with a safe API.
   function emulate(entry) {
     const vp = entry.viewport, wc = entry.view.webContents;
-    if (!vp) { entry.scale = 1; if (entry.emulated) { entry.emulated = false; try { wc.disableDeviceEmulation(); } catch {} } return; }
-    const pane = entry.shown || { width: vp.width, height: vp.height || DEFAULT_VIEW_HEIGHT };
-    const scale = Math.min(1, pane.width / vp.width) || 1, size = { width: vp.width, height: vp.height || Math.round(pane.height / scale) };
-    entry.emulated = true; entry.scale = scale;
-    try { wc.enableDeviceEmulation({ screenPosition: 'desktop', screenSize: size, viewSize: size, viewPosition: { x: 0, y: 0 }, deviceScaleFactor: 0, scale }); } catch {}
+    const pane = entry.shown || { width: DEFAULT_VIEW_WIDTH };
+    const zoom = vp ? Math.max(0.25, Math.min(5, pane.width / vp.width)) : 1;
+    entry.scale = zoom;
+    try { if (!wc.isDestroyed() && wc.getZoomFactor() !== zoom) wc.setZoomFactor(zoom); } catch {}
   }
+  const rezoom = (entry) => { if (entry && entry.viewport) emulate(entry); };
   function setViewport(id, width, height) {
     ensure(id);
     const entry = entries.get(id), w = Math.round(+width || 0), h = Math.round(+height || 0);
@@ -121,7 +124,7 @@ function createRegistry({
     const wcId = view.webContents.id;
     const entry = { view, wcId, errors: null, actions: null, partition, lastNavAt: 0, shown: null, lent: false, dead: false, lastBlank: false, hungTimer: null };
     const current = () => entries.get(id) === entry;
-    wireNavigation(id, view.webContents, onNavigated, rebinder.isSuppressed, () => { entry.lastNavAt = Date.now(); });
+    wireNavigation(id, view.webContents, onNavigated, rebinder.isSuppressed, () => { entry.lastNavAt = Date.now(); rezoom(entry); });
     wireNetworkErrors(partition, errors, wcId);
     wireHealth(view.webContents, {
       onGone: (reason) => { if (current()) setTimeout(() => { if (current()) recover(id, `renderer ${reason}`); }, 0); },
