@@ -41,7 +41,7 @@ assert.strictEqual(g({ page: page([fail('a', 'Logs in', { tags: ['@critical'], f
   assert.strictEqual(r.level, 'look');
   assert.deepStrictEqual(rule(r, 'evidence').items.map(i => i.text), ['a']);
   assert.strictEqual(rule(r, 'minor').level, 'ship');
-  assert.strictEqual(rule(r, 'coverage').level, 'ship'); // 10 → 1 scenarios, but already said above
+  assert.strictEqual(rule(r, 'coverage'), undefined); // 10 → 1 scenarios is already said above, and counts are not claimed to have held
 }
 // an item carries its parts; the headline reads them as one line
 {

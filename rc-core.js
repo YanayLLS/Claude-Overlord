@@ -192,7 +192,7 @@ function grade(input) {
     if (was - now >= P.coverageDropMin && (was - now) / was > P.coverageDrop) shrunk.push({ text: m.title, tag: `${was} → ${now}`, url: moduleUrl(m.name) });
   }
   if (shrunk.length) add('coverage', 'look', `${plural(shrunk.length, 'module')} ran fewer scenarios than last night`, shrunk.slice(0, P.shown), shrunk.length);
-  else add('coverage', 'ship', 'Scenario counts held');
+  else if (!known.length && !stopped.size) add('coverage', 'ship', 'Scenario counts held'); // not claimed for a night with modules that never ran to the end
 
   // 6 ─ what the fixer did to the app, and whether its verify run stands
   const appFix = (apply && (apply.commits || []).filter(c => c.riskTier === 'T2')) || [];
@@ -200,7 +200,7 @@ function grade(input) {
   else if (appFix.length || of('repaired').length) add('fixer', 'look', 'The fixer changed app code: this release needs that patch merged',
     appFix.slice(0, P.shown).map(c => ({ text: String(c.cause || '').slice(0, 160), tag: titleOf[c.module] || c.module, url: null })));
   else if (apply && (apply.commits || []).length) add('fixer', 'ship', 'Fixer: test-only fixes');
-  else add('fixer', 'ship', input.phase || apply ? 'Fixer changed nothing' : 'No fixer run');
+  else if (input.phase || apply) add('fixer', 'ship', 'Fixer changed nothing'); // no fixer on this run: nothing to say
 
   // 7 ─ the other suites the nightly runs (unit, integration, build): only one that turned red since the night before
   const red = (p) => new Set(((p && p.suites) || []).filter(s => s.status === 'fail' || s.status === 'error').map(s => s.id));
