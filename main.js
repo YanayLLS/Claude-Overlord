@@ -245,6 +245,7 @@ async function doGitPull() {
     send({ type: 'gitUpdateProgress', text: 'Restarting…' });
     // before-quit already hands running agents to detached processes that the
     // next launch reattaches, so a relaunch is a supported path, not a kill.
+    quitBecause('restart after pulling a new Overlord version (update button)');
     forceQuit = true; // this restart was explicitly asked for — skip the close prompt
     _restarting = true;
     setTimeout(() => { app.relaunch({ args: relaunchArgs() }); app.quit(); }, 400);
@@ -388,6 +389,25 @@ function flog(...args) {
   try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.appendFileSync(LOG_FILE, line); } catch {}
   try { process.stdout.write(line); } catch {}
 }
+// Why the app went down. Every path that quits says so first; an agent's shell command that names a process
+// killer is written down as it starts, so a run that ends with no quit line still shows who was doing what.
+// RUN_MARK lives while the app runs: finding it at start means the last run was killed or crashed.
+let quitWhy = null;
+function quitBecause(why) { quitWhy = why; flog('quit asked: ' + why); }
+const RUN_MARK = path.join(STATE_DIR, 'running.mark');
+const KILLER_RE = /taskkill|Stop-Process|\bpkill\b|\bkillall\b|\bkill\s+-?\d|process\.kill|wmic\s+process|port\.js\s+kill|Stop-Computer|Restart-Computer|\bshutdown\b|electron\.exe|overlord\.exe/i;
+function noteShell(id, a, tn, inp) {
+  const cmd = (tn === 'Bash' || tn === 'PowerShell') && inp && typeof inp.command === 'string' ? inp.command : '';
+  if (cmd && KILLER_RE.test(cmd)) flog(`agent ${id} "${String(a.title || '').slice(0, 40)}" ran a process command: ${cmd.replace(/\s+/g, ' ').slice(0, 400)}`);
+}
+try {
+  if (!process.env.OVERLORD_STATE_DIR) {
+    if (fs.existsSync(RUN_MARK)) flog(`previous run (${fs.readFileSync(RUN_MARK, 'utf8')}) ended without quitting: killed, crashed or the machine went down. Look above for "ran a process command" and "quit asked".`);
+    fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(RUN_MARK, `pid ${process.pid}, started ${new Date().toISOString()}`);
+  }
+} catch {}
+process.on('exit', (code) => { flog(`exit code=${code} why=${quitWhy || 'none recorded'}`); if (!process.env.OVERLORD_STATE_DIR) { try { fs.rmSync(RUN_MARK, { force: true }); } catch {} } });
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) process.on(sig, () => { quitBecause('signal ' + sig + ' from outside the app'); app.quit(); });
 process.on('uncaughtException', (e) => flog('uncaughtException:', e));
 process.on('unhandledRejection', (e) => flog('unhandledRejection:', e));
 // Freeze trail: the main loop held up 300ms+ (the window's own long tasks come in as perfLog).
@@ -2392,6 +2412,7 @@ function parseLine(id, line) {
           if (b.type === 'tool_use' && b.id) {
             const tn = b.name || '', inp = b.input || {}, st = fmtTool(tn, inp);
             a.toolIds.add(b.id); a.toolStatuses.set(b.id, st); a.toolNames.set(b.id, tn); a.turnTools++;
+            noteShell(id, a, tn, inp);
             a.stats.tools[tn] = (a.stats.tools[tn] || 0) + 1;
             if (inp.file_path && ['Read', 'Write', 'Edit'].includes(tn)) a.stats.files++;
             if (!EXEMPT.has(tn)) nonExempt = true;
@@ -5564,10 +5585,10 @@ function handleIpc(msg) {
     }
     case 'relaunch': if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reloadIgnoringCache(); break;
     // quit, not exit: exit skips before-quit, so nothing would get saved for the reattach.
-    case 'fullRestart': forceQuit = true; _restarting = true; app.relaunch({ args: relaunchArgs() }); app.quit(); break;
+    case 'fullRestart': quitBecause('full restart asked from the window (restart button or shortcut)'); forceQuit = true; _restarting = true; app.relaunch({ args: relaunchArgs() }); app.quit(); break;
     // The host runs from the app's own files, so it has to go before the installer replaces them.
     // the pty host is Overlord.exe too: the installer can't replace Overlord until it's gone, so wait for it to exit
-    case 'installUpdate': try { fs.writeFileSync(UPDATE_MARK, ''); } catch {} forceQuit = true; ptyHost.stopAndWait(5000).catch(() => {}).then(() => autoUpdater && autoUpdater.quitAndInstall()); break;
+    case 'installUpdate': quitBecause('install update asked from the window'); try { fs.writeFileSync(UPDATE_MARK, ''); } catch {} forceQuit = true; ptyHost.stopAndWait(5000).catch(() => {}).then(() => autoUpdater && autoUpdater.quitAndInstall()); break;
     case 'checkGitUpdate': checkGitUpdate(); break;
     case 'gitPull': doGitPull(); break;
     case 'approvePr': {
@@ -6917,6 +6938,7 @@ app.whenReady().then(() => {
       noLink: true,
     });
     if (choice !== 0) { e.preventDefault(); return; }
+    quitBecause('window closed and the Close Overlord prompt was confirmed');
     forceQuit = true; // don't ask again on the quit that follows
   });
   mainWindow.on('closed', () => {
@@ -6942,6 +6964,7 @@ const UPDATE_CHECK_MS = 5 * 60 * 1000;
 let _checkUpdates = null, _lastUpdateCheck = 0;
 function checkUpdatesNow() { if (!_checkUpdates) return; _lastUpdateCheck = Date.now(); _checkUpdates(); }
 app.on('before-quit', () => {
+  flog(`quitting: ${quitWhy || 'no reason recorded: the window was closed with nothing to confirm, the OS asked, or a second quit'} restarting=${_restarting} agents=${agents.size}`);
   try { require('./whisper').stop(); fs.rmSync(path.join(WHISPER_DIR(), 'last-take.wav'), { force: true }); } catch {}
   clearTimeout(_spareTimer); dropSpare();
   try { releases.flush(); } catch {} // releases.json writes are debounced 2 s
@@ -6965,4 +6988,4 @@ app.on('before-quit', () => {
     }
   }
 });
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => { if (!quitWhy) quitBecause('the last window closed'); app.quit(); });
