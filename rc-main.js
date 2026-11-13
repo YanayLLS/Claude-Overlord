@@ -8,7 +8,7 @@ const path = require('path');
 const https = require('https');
 const zlib = require('zlib');
 const { execFile, spawn } = require('child_process');
-const { parseRunPage, grade, aiPrompt, nightChain, testedShas } = require('./rc-core');
+const { parseRunPage, grade, aiPrompt, nightChain, isFullRun, testedShas } = require('./rc-core');
 const { releasePlan } = require('./releases-core');
 
 // The repo whose nightly gates a release, and where its report pages are served. `rc` in the release
@@ -17,6 +17,7 @@ const DEFAULTS = { repo: 'LLSLtd/frontlineio-frontend', workflow: 'bdd-regressio
 const AI_TIMEOUT_MS = 120e3;
 const SIGN_OFF = /^I (AM DONE|NEED YOU\b.*|AM WORKING\b.*)$/;
 const SIGN_OFF_TAIL = /\s*I (AM DONE|NEED YOU:.*|AM WORKING.*)$/;
+const MANUAL_SCAN = 3; // dispatches after the nightly looked at for a full manual run
 const VERIFY_SCAN = 5; // dispatches after the nightly looked at for its verify run
 
 const httpText = (url) => new Promise((resolve) => {
@@ -55,6 +56,7 @@ const findFile = (dir, name) => {
 module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, download = ghDownload, ask = claudeAsk, now = Date.now }) {
   const api = (...a) => ghJson(['api', ...a]);
   const settings = (cfg) => ({ ...DEFAULTS, ...((cfg && cfg.rc) || {}) });
+  const full = new Map(); // run id → is it a full manual run (a finished run never changes)
 
   // a run's artifact, kept on disk: a night's artifacts never change
   async function artifact(repo, run, name, file) {
@@ -91,21 +93,29 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
     const S = settings(cfg);
     const listed = await api('-X', 'GET', `repos/${S.repo}/actions/workflows/${S.workflow}/runs`, '-f', 'per_page=40');
     if (listed.error || !listed.data) return { error: listed.error || 'could not list the nightly runs' };
-    const chain = nightChain((listed.data.workflow_runs || []).map(r => ({ id: r.id, event: r.event, status: r.status, conclusion: r.conclusion, createdAt: r.created_at, attempt: r.run_attempt || 1 })));
+    const chain = nightChain((listed.data.workflow_runs || []).map(r => ({ id: r.id, event: r.event, status: r.status, conclusion: r.conclusion, createdAt: r.created_at, attempt: r.run_attempt || 1, title: r.display_title || '' })));
     if (!chain) return { error: 'no scheduled nightly run found' };
-    const { nightly, previous } = chain;
+    const pageUrlOf = (r) => `${S.reports}/${r.id}-${r.attempt}/results/cucumber-report.run.html`;
+    const prodRow = releasePlan(cfg, ['prod']).prs;
+    const mine = prodRow.find(p => p.repo.toLowerCase() === S.repo.toLowerCase());
+    // A full regression someone ran by hand after the last scheduled night is the newer evidence: grade that.
+    let { nightly, previous, after } = chain, manual = false;
+    for (const r of [...after].reverse().filter(x => x.status === 'completed' && x.conclusion !== 'cancelled' && !/rs-web/.test(x.title)).slice(0, MANUAL_SCAN)) {
+      if (!full.has(r.id)) { const p = await fetchText(pageUrlOf(r)); if (p.text) full.set(r.id, isFullRun(parseRunPage(p.text), S.repo.split('/')[1], (mine && mine.source) || 'dev')); }
+      if (!full.get(r.id)) continue;
+      previous = nightly; nightly = r; manual = true;
+      after = after.filter(x => Date.parse(x.createdAt) > Date.parse(r.createdAt));
+      break;
+    }
     if (nightly.status !== 'completed') return { night: nightly.createdAt, nightlyId: nightly.id, running: true };
 
-    const pageUrlOf = (r) => `${S.reports}/${r.id}-${r.attempt}/results/cucumber-report.run.html`;
-    const [verify, pr, apply, phase] = await Promise.all([verifyRun(S.repo, chain.after), fixPr(S.repo, nightly.id),
+    const [verify, pr, apply, phase] = await Promise.all([verifyRun(S.repo, after), fixPr(S.repo, nightly.id),
       artifact(S.repo, nightly.id, 'bdd-autofix-apply-result', 'bdd-apply-result.json'),
       artifact(S.repo, nightly.id, 'bdd-autofix-results', 'phase-summary.json')]);
     // the verify run is the evidence only when it stands: it ran, and its PR isn't marked invalid
     const decision = !verify ? null : verify.cancelled ? 'cancelled' : !pr ? 'discarded' : pr.invalid ? 'invalid' : 'pr';
     const evidence = decision === 'pr' ? verify.run : nightly;
     const pageUrl = pageUrlOf(evidence);
-    const prodRow = releasePlan(cfg, ['prod']).prs;
-    const mine = prodRow.find(p => p.repo.toLowerCase() === S.repo.toLowerCase());
     const [pageRes, histRes, prevRes, prodTip] = await Promise.all([fetchText(pageUrl), fetchText(pageUrl.replace('cucumber-report.run.html', 'history.json')),
       previous ? fetchText(pageUrlOf(previous)) : null, mine ? api(`repos/${S.repo}/commits/${mine.target}`) : null]);
     const page = pageRes.text ? parseRunPage(pageRes.text) : null;
@@ -125,7 +135,7 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
       const c = (at.data || [])[0];
       if (c && c.sha) shas[p.repo] = { sha: c.sha, tested: false };
     }));
-    return { night: nightly.createdAt, nightlyId: nightly.id, evidence: { kind: decision === 'pr' ? 'verify' : 'nightly', runId: evidence.id, reportUrl: pageUrl,
+    return { night: nightly.createdAt, nightlyId: nightly.id, manual, evidence: { kind: decision === 'pr' ? 'verify' : 'nightly', runId: evidence.id, reportUrl: pageUrl,
       runUrl: `https://github.com/${S.repo}/actions/runs/${evidence.id}` }, fixPr: pr, ...result, shas, unreleased, computedAt: now(),
       // what the AI is given beyond the rules: each failure's first error line, and the fixer's own words
       context: page ? {

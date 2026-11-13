@@ -36,7 +36,7 @@ function parseRunPage(html) {
     modules: (j.profiles || []).map(p => ({ name: p.name, title: p.title || p.name, passed: p.passed || 0, failed: p.failed || 0, flaky: p.flaky || 0, skipped: p.skipped || 0 })),
     failures: (j.failures || []).map(f => ({ key: keyOf(f.profile, f.name), module: f.profile, name: f.name, tags: f.tags || [], step: f.step || '',
       error: String(f.error || '').split('\n')[0].slice(0, 240), flaky: f.rerun === 'passed on rerun', report: f.report || null, anchor: f.anchor || null, flags: flagsOn(f.steps) })),
-    suites: ((j.checks && j.checks.suites) || []).map(s => ({ id: s.id, title: s.title || s.id, repo: s.repo, sha: s.sha || null, status: s.status, failed: s.failed || 0 })),
+    suites: ((j.checks && j.checks.suites) || []).map(s => ({ id: s.id, title: s.title || s.id, repo: s.repo, ref: s.ref || null, sha: s.sha || null, status: s.status, failed: s.failed || 0 })),
   };
 }
 // Feature flags a scenario switches on in its own steps: `the "IsCommentsEnabled" feature flag is "enabled"`.
@@ -188,7 +188,7 @@ function grade(input) {
   else if (appFix.length || of('repaired').length) add('fixer', 'look', 'The fixer changed app code: this release needs that patch merged',
     appFix.slice(0, P.shown).map(c => ({ text: `${c.module}: ${String(c.cause || '').slice(0, 160)}`, url: null })));
   else if (apply && (apply.commits || []).length) add('fixer', 'ship', 'Fixer: test-only fixes');
-  else add('fixer', 'ship', 'Fixer changed nothing');
+  else add('fixer', 'ship', input.phase || apply ? 'Fixer changed nothing' : 'No fixer ran on this run');
 
   // 7 ─ the other suites the nightly runs (unit, integration, build): only one that turned red since the night before
   const red = (p) => new Set(((p && p.suites) || []).filter(s => s.status === 'fail' || s.status === 'error').map(s => s.id));
@@ -256,6 +256,12 @@ function nightChain(runs) {
     after: list.slice(0, i).filter(r => r.event === 'workflow_dispatch').reverse() };
 }
 
+// A manual run that counts as a night: it ran the unit/build suites too (only a full run asks for them; a
+// verify run never does), and the gating repo's own suites tested its release source branch.
+// ponytail: only the gating repo's ref is checked; the nightly tests some repos on a branch the release
+// doesn't promote from (remote-support-web: dev vs staging), so the others can't be held to their source.
+const isFullRun = (page, repo, ref) => !!page && page.suites.some(s => s.repo === repo) && page.suites.every(s => s.repo !== repo || !s.ref || s.ref === ref);
+
 // The commit each repo was tested at: the frontend from the fixer's base (or its build suite), the rest
 // from the nightly's own suites. { 'frontlineio-frontend': sha, … } keyed by repo name (no owner).
 function testedShas(page, apply, frontend = 'frontlineio-frontend') {
@@ -265,4 +271,4 @@ function testedShas(page, apply, frontend = 'frontlineio-frontend') {
   return out;
 }
 
-module.exports = { POLICY, parseRunPage, flagsOn, demoCandidate, ghIsRead, failureUrl, categoryOf, rootCauses, prodNight, redAt, grade, aiPrompt, nightChain, testedShas };
+module.exports = { POLICY, parseRunPage, flagsOn, demoCandidate, ghIsRead, failureUrl, categoryOf, rootCauses, prodNight, redAt, grade, aiPrompt, nightChain, isFullRun, testedShas };

@@ -1,6 +1,6 @@
 // Run: node rc-core.test.js
 const assert = require('assert');
-const { demoCandidate, ghIsRead, parseRunPage, flagsOn, categoryOf, grade, nightChain, testedShas, prodNight, redAt, aiPrompt } = require('./rc-core');
+const { demoCandidate, ghIsRead, parseRunPage, flagsOn, categoryOf, grade, nightChain, isFullRun, testedShas, prodNight, redAt, aiPrompt } = require('./rc-core');
 
 // ── a night, built small ──────────────────────────────
 const fail = (module, name, o = {}) => ({ key: `${module}|${name}`, module, name, tags: o.tags || [], step: o.step || 'a step', error: 'boom',
@@ -143,6 +143,9 @@ assert.strictEqual(redAt({ scenarios: {} }, 'k', 0), false);
   assert.strictEqual(c.nightly.id, 3);
   assert.strictEqual(c.previous.id, 1);
   assert.deepStrictEqual(c.after.map(r => r.id), [4, 5]);
+  // a manual run is a night only with its unit/build suites, all on the source branch
+  assert.ok(isFullRun({ suites: [{ repo: 'web', ref: 'dev' }, { repo: 'web', ref: null }, { repo: 'other', ref: 'x' }] }, 'web', 'dev'));
+  assert.ok(!isFullRun({ suites: [] }, 'web', 'dev') && !isFullRun({ suites: [{ repo: 'other', ref: 'dev' }] }, 'web', 'dev') && !isFullRun({ suites: [{ repo: 'web', ref: 'my-branch' }] }, 'web', 'dev') && !isFullRun(null, 'web', 'dev'));
   assert.strictEqual(nightChain([{ id: 9, event: 'workflow_dispatch', createdAt: '2026-11-12T05:00:00Z' }]), null);
 }
 

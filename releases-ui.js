@@ -1433,7 +1433,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       + (passed.length ? (rcOpen ? passed.map(ruleHtml).join('') : '') + `<button class="rl-rc-more" data-act="rcMore">${rcOpen ? 'Hide passed' : `${passed.length} passed`}</button>` : '') + '</div>'
       + (c.flags && c.flags.error ? `<div class="rl-rc-item bad" title="${esc(c.flags.error)}">Unreleased flags not read</div>` : '')
       + `<div class="rl-rc-shas">${repos}</div>` + plan
-      + `<div class="rl-rc-acts">${btn}${link(c.evidence.reportUrl, '📊 Report', 'rl-hist-btn')}${link(c.evidence.runUrl, c.evidence.kind === 'verify' ? 'Verify run' : 'Nightly run', 'rl-hist-btn')}`
+      + `<div class="rl-rc-acts">${btn}${link(c.evidence.reportUrl, '📊 Report', 'rl-hist-btn')}${link(c.evidence.runUrl, c.evidence.kind === 'verify' ? 'Verify run' : c.manual ? 'Manual run' : 'Nightly run', 'rl-hist-btn')}`
       + (c.fixPr ? link(c.fixPr.url, `Fixer PR #${c.fixPr.number}${c.fixPr.merged ? ' ✓' : ''}`, 'rl-hist-btn') : '') + '</div></div>';
   }
 
