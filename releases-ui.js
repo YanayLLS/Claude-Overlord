@@ -1455,7 +1455,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const word = (cls, icon, text) => `<span class="rl-rc-verdict ${cls}">${icon}${text}</span>`;
     const retry = (act) => c.loading ? `<button class="rl-rc-retry on" data-act="${act}" aria-disabled="true">${rcIc(RC_IC.busy, ' turn')}Retrying</button>` : `<button class="rl-rc-retry" data-act="${act}">Retry</button>`;
     const bars = '<div class="rl-rc-skel" aria-hidden="true"><i></i><i></i><i></i></div>'; // holds the card's shape while it reads
-    if (c.error) return `<div class="rl-rc bad${c.loading ? ' busy' : ''}">${head(word('', rcIc(RC_IC.hold), "Can't read"))}<div class="rl-rc-why note bad">${rcIc(RC_IC.hold)}<span>${esc(c.error)}</span>${retry('rcRetry')}</div></div>`;
+    if (c.error) return `<div class="rl-rc bad${c.loading ? ' busy' : ''}">${head(word('', rcIc(RC_IC.hold), "Can't read"))}<div class="rl-rc-why note bad"><span>${esc(c.error)}</span>${retry('rcRetry')}</div></div>`;
     if (c.running) return `<div class="rl-rc">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Running'))}</div>`;
     if (!c.level) return `<div class="rl-rc busy">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Reading'))}${bars}</div>`;
     const [cls, verdict] = RC_LEVEL[c.level];
@@ -1469,13 +1469,15 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       return i.url ? rcLink('rl-rc-item', i.url, body + rcIc(RC_IC.out), ` title="${tip}" aria-label="${tip}"`) : `<div class="rl-rc-item" title="${tip}">${body}</div>`;
     };
     // names (modules, suites) are one line that opens the report; the full list is its tooltip
-    const namesHtml = (r) => rcLink('rl-rc-item', c.evidence.reportUrl, `<span class="rl-rc-txt">${r.items.slice(0, 3).map(i => esc(i.text)).join(', ')}${r.total > 3 ? ` and ${r.total - 3} more` : ''}</span>${rcIc(RC_IC.out)}`, ` title="${esc(r.text)}"`);
+    const namesHtml = (r) => rcLink(`rl-rc-rule rl-rc-line ${r.level}`, c.evidence.reportUrl, `${rcIc(r.id === 'checks' ? RC_IC[r.level] : RC_IC.stop)}<span>${esc(RC_GROUP[r.id])}</span><span class="rl-rc-txt">${r.items.slice(0, 2).map(i => esc(i.text)).join(', ')}${r.total > 2 ? ` and ${r.total - 2} more` : ''}</span>${rcIc(RC_IC.out)}`,
+      ` title="${esc(r.text + ': ' + r.items.map(i => i.text).join(', ') + (r.total > r.items.length ? '…' : ''))}"`);
     // the rows a rule has beyond the ones shown: one quiet link to the report
     const restHtml = (r) => r.total > r.items.length && c.evidence ? rcLink('rl-rc-rest', c.evidence.reportUrl, `${r.total - r.items.length} more${rcIc(RC_IC.out)}`) : '';
     const ruleHtml = (r) => {
       const named = r.level !== 'ship' && r.items.length;
-      const rows = !named ? '' : RC_NAMES[r.id] ? namesHtml(r) : r.items.map(itemHtml(r.id === 'spec')).join('') + restHtml(r);
-      return `<div class="rl-rc-group lv-${r.level}"><div class="rl-rc-rule ${r.level}" title="${esc(r.text)}">${rcIc(r.id === 'spec' ? RC_IC.ask : named && RC_NAMES[r.id] && r.id !== 'checks' ? RC_IC.stop : RC_IC[r.level])}<span>${esc((named && RC_GROUP[r.id]) || r.text)}</span>`
+      if (named && RC_NAMES[r.id]) return `<div class="rl-rc-group lv-${r.level}">${namesHtml(r)}</div>`;
+      const rows = !named ? '' : r.items.map(itemHtml(r.id === 'spec')).join('') + restHtml(r);
+      return `<div class="rl-rc-group lv-${r.level}"><div class="rl-rc-rule ${r.level}" title="${esc(r.text)}">${rcIc(r.id === 'spec' ? RC_IC.ask : RC_IC[r.level])}<span>${esc((named && RC_GROUP[r.id]) || r.text)}</span>`
         + (flagsBad && r.id === 'minor' && named ? '<span class="rl-rc-sub" title="Feature flags could not be read, so failures of unreleased features are still counted here">may include unreleased</span>' : '') + `</div>${rows}</div>`;
     };
     const lv = { hold: 0, look: 1 };
@@ -1502,16 +1504,18 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const plan = c.demo && c.plan ? `<div class="rl-rc-group"><div class="rl-rc-rule ship">${rcIc(RC_IC.pr)}<span>Release PRs</span></div>`
       + c.plan.filter(x => x.error || x.ahead).map(x => rcLink('rl-rc-item', x.url, `<span class="rl-rc-txt">${esc(x.label)} → ${esc(x.target)}</span>${x.error ? `<span class="rl-rc-tag bad">${esc(x.error)}</span>` : ''}${rcIc(RC_IC.out)}`)).join('') + '</div>' : '';
     // the one line of AI wording, with its place held while it is written; a failed note says why. A clean Ship needs no line.
-    const why = !open.length && !flagsBad && !(ai && ai.error) ? ''
+    const aiBad = ai && ai.error;
+    const why = !open.length && !flagsBad && !aiBad ? ''
       : c.loading || (!ai && !c.demo) ? `<div class="rl-rc-why wait" aria-hidden="true">${rcIc(RC_IC.ai)}<i></i></div>`
       : said ? `<div class="rl-rc-why" title="AI wording. The grade comes from the rules below.">${rcIc(RC_IC.ai)}<span>${esc(said)}</span></div>`
-      : ai && ai.error ? `<div class="rl-rc-why note">${rcIc(RC_IC.look)}<span>AI note failed · ${esc(ai.error)}</span>${retry('rcRetryAi')}</div>` : '';
+      : aiBad && !flagsBad ? `<div class="rl-rc-why note quiet" title="${esc(ai.error)}">${rcIc(RC_IC.ai)}<span>AI note failed</span>${retry('rcRetry')}</div>` : '';
     // a failed flag read changes what the grade can be trusted to say: it sits right under the verdict
-    const flags = flagsBad ? `<div class="rl-rc-why note">${rcIc(RC_IC.look)}<span>Couldn't check feature flags · ${esc(c.flags.error)}</span>${retry('rcRetryFlags')}</div>` : '';
-    return `<div class="rl-rc ${cls}${c.loading ? ' busy' : ''}"${c.loading ? ' aria-busy="true"' : ''}>${head(word('', rcIc(RC_IC[c.level]), verdict) + (c.demo ? '<span class="rl-rc-pill demo" title="A demo candidate: the same night shown as a clean one. Nothing is written to GitHub.">Demo</span>' : ''))}${said || !flags ? why + flags : flags + why}`
+    const flags = flagsBad && !c.loading ? `<div class="rl-rc-why note" title="${esc('Feature flags: ' + c.flags.error + (aiBad ? '\nAI note: ' + ai.error : ''))}">${rcIc(RC_IC.look)}<span>Flags unread${aiBad ? ' · AI note failed' : ''}</span>${retry('rcRetry')}</div>` : '';
+    return `<div class="rl-rc ${cls}${c.loading ? ' busy' : ''}"${c.loading ? ' aria-busy="true"' : ''}>${head(word('', rcIc(RC_IC[c.level]), verdict) + (c.demo ? '<span class="rl-rc-pill demo" title="A demo candidate: the same night shown as a clean one. Nothing is written to GitHub.">Demo</span>' : ''))}${why}${flags}`
       + (open.length || plan ? `<div class="rl-rc-rules">${open.map(ruleHtml).join('')}${plan}</div>` : '')
-      + `<div class="rl-rc-folds">${passed.length ? fold('rcMore', rcOpen, rcIc(RC_IC.check, ' ok') + 'Passed') : ''}${shas.length ? fold('rcShas', rcShas, rcIc(RC_IC.pr) + 'Commits' + (untested.length ? '<i class="rl-rc-dot" title="Some repos have no tests: open to see which"></i>' : '')) : ''}</div>`
-      + (rcOpen && passed.length ? `<div class="rl-rc-rules sub">${passed.map(ruleHtml).join('')}</div>` : '')
+      + (!open.length && passed.length ? `<div class="rl-rc-rules sub ship">${passed.map(ruleHtml).join('')}</div>` : '')
+      + `<div class="rl-rc-folds">${open.length && passed.length ? fold('rcMore', rcOpen, 'Passed') : ''}${shas.length ? fold('rcShas', rcShas, 'Commits') : ''}</div>`
+      + (open.length && rcOpen && passed.length ? `<div class="rl-rc-rules sub">${passed.map(ruleHtml).join('')}</div>` : '')
       + (rcShas && shas.length ? `<div class="rl-rc-shas">${repos}</div>` : '')
       + `<div class="rl-rc-acts">${hold ? report + fixer + '<span class="rl-rc-gap"></span>' + release : release + report + fixer}</div></div>`;
   }
