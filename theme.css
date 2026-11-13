@@ -491,8 +491,9 @@ body.pr-open #pr-fire .pr-fire-cta { display: none; }
 #pr-dropdown .pr-l1 .pr-title { flex: 0 1 auto; font-size: 12.5px; }
 #pr-dropdown .pr-main { grid-column: 3; grid-row: 1 / span 2; }
 #pr-dropdown .pr-main .pr-approve { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#pr-dropdown .pr-l2 { grid-column: 2; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+#pr-dropdown .pr-l2 { grid-column: 2; min-height: 16px; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
 #pr-dropdown .pr-l2-tail { display: flex; gap: 10px; min-width: 0; margin-left: 4px; }
+#pr-dropdown .pr-l2-tail:first-child { margin-left: 0; }
 #pr-dropdown .pr-l2-tail > * { flex-shrink: 0; }
 #pr-dropdown .pr-l2-tail > .pr-refs { flex-shrink: 1; min-width: 0; }
 #pr-dropdown .pr-row:hover .pr-num { visibility: visible; }
@@ -808,14 +809,18 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
   color: var(--c); background: var(--bg); box-shadow: inset 0 0 0 1px var(--bd); animation: pr-am-in .22s cubic-bezier(.2,.8,.2,1); }
 #pr-dropdown .pr-am.armed .face { fill: currentColor; fill-opacity: .3; }
 #pr-dropdown .pr-am.armed.l-busy { --c: #11111b; --bg: #89b4fa; --bd: #89b4fa; --dv: rgba(17,17,27,.28); font-weight: 700; }
-#pr-dropdown .pr-am.armed.l-y { --c: var(--yellow, #f9e2af); --bg: rgba(249,226,175,.08); --bd: var(--yellow, #f9e2af); --dv: rgba(249,226,175,.55); }
+/* waiting on someone else: nothing for you to do, so it stays quiet; only the icon keeps the yellow */
+#pr-dropdown .pr-am.armed.l-y { --c: var(--subtext); --bg: rgba(249,226,175,.07); --bd: transparent; --dv: var(--border); }
+#pr-dropdown .pr-am.armed.l-y .st svg { color: var(--yellow, #f9e2af); }
 #pr-dropdown .pr-am.armed.l-act { --c: #11111b; --bg: var(--yellow, #f9e2af); --bd: var(--yellow, #f9e2af); --dv: rgba(17,17,27,.28); font-weight: 700; }
 #pr-dropdown .pr-am .st { flex: 1; min-width: 0; height: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 2px 0 4px;
   font: inherit; color: inherit; background: none; border: 0; white-space: nowrap; }
 #pr-dropdown .pr-am button.st { cursor: pointer; }
 #pr-dropdown .pr-am button.st:hover { background: rgba(255,255,255,.22); }
 #pr-dropdown .pr-am .cx { flex: none; width: 27px; height: 100%; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; cursor: pointer;
-  background: none; color: inherit; opacity: .85; box-shadow: inset 1px 0 0 var(--dv); }
+  background: none; color: inherit; opacity: 0; box-shadow: inset 1px 0 0 var(--dv); transition: opacity .12s; }
+/* ✕ on every row read as a wall of close buttons: it shows on the row you point at */
+#pr-dropdown .pr-row:is(:hover, :focus-within) .pr-am .cx { opacity: .85; }
 #pr-dropdown .pr-am .cx svg { width: 12px; height: 12px; }
 #pr-dropdown .pr-am .cx:hover, #pr-dropdown .pr-am .cx:focus-visible { opacity: 1; background: rgba(243,139,168,.22); }
 #pr-dropdown .pr-am:not(.l-busy):not(.l-act) .cx:hover svg, #pr-dropdown .pr-am:not(.l-busy):not(.l-act) .cx:focus-visible svg { color: var(--red, #f38ba8); }

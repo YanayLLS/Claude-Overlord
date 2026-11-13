@@ -6402,22 +6402,30 @@ function prBranchHtml(p) {
     + `${escapeHtml(p.headRef)} <span class="pr-arrow">→</span> ${escapeHtml(p.baseRef)}${behind}</div>`;
 }
 
+// What needs you first: your review or a ready Merge (or a stuck fix), then the rest, then armed PRs that only wait.
+function prRank(p) {
+  if (p.requested || (p.mine && p.autoPhase === 'stuck' && p.autoMerge) || (p.mine && prMergeInfo(p).enabled && prApproved(p))) return 0;
+  return p.mine && p.autoMerge ? 2 : 1;
+}
 function prRowHtml(p, dim) {
   const u = p.url.replace(/'/g, "\\'");
   const k = p.key.replace(/'/g, "\\'");
   const showReq = p.requested && !dim;
   // Line 2 leads with what you scan for — review state, then checks — as chips; the rest is quiet text.
   const names = (l) => escapeHtml((l || []).join(', '));
-  const reviewChip = p.reviewDecision === 'CHANGES_REQUESTED'
+  // An armed Fix & merge already says what it waits on (Needs review / Testing / Fixing): line 2 doesn't repeat it.
+  const phase = p.mine && p.autoMerge ? (PR_AUTO_PH[p.autoPhase] ? p.autoPhase : 'waiting') : '';
+  const reviewChip = phase === 'review' && !prApproved(p) && p.reviewDecision !== 'CHANGES_REQUESTED' && !p.approverTeams ? '' : p.reviewDecision === 'CHANGES_REQUESTED'
     ? `<span class="pr-chip bad" title="Changes requested by ${names(p.changesBy)}">Changes requested</span>`
     : prApproved(p)
       ? `<span class="pr-chip good" title="Approved by ${names(p.approvedBy)}">Approved${p.approvedBy && p.approvedBy.length > 1 ? ' ×' + p.approvedBy.length : ''}</span>`
       : p.approverTeams
         ? `<span class="pr-chip" title="Only ${names(p.approverTeams)} can approve this PR${p.canApprove ? '' : '. You are not on that team'}">Needs ${names(p.approverTeams)}</span>`
-        : `<span class="pr-chip">Needs review</span>`;
+        : showReq ? '' : `<span class="pr-chip">Needs review</span>`;
   const eta = p.checksEta ? ' · ' + escapeHtml(etaWords(p.checksEta, Date.now())) : ''; // pr-eta.js
-  const checksChip = p.checks === 'pending'
-    ? `<span class="pr-chip warn" title="Checks are still running on GitHub${p.checksEta ? ' — ' + escapeHtml(p.checksEta.name) + ', from its recent runs' : ''}">Testing${eta}</span>`
+  const checksChip = phase === 'fixing' ? (p.failed ? `<span class="pr-chip bad" title="Checks failed on GitHub">${p.failed} failed</span>` : '')
+    : p.checks === 'pending'
+    ? (phase === 'waiting' && !p.checksEta ? '' : `<span class="pr-chip warn" title="Checks are still running on GitHub${p.checksEta ? ' — ' + escapeHtml(p.checksEta.name) + ', from its recent runs' : ''}">${phase === 'waiting' ? eta.slice(3) : 'Testing' + eta}</span>`)
       + (p.failed ? `<span class="pr-chip bad" title="${p.failed} check(s) already failed while others still run">${p.failed} failed</span>` : '')
     : p.checks === 'fail' ? `<span class="pr-chip bad" title="Checks failed on GitHub">${p.failed > 1 ? p.failed + ' checks failed' : 'Checks failed'}</span>` : '';
   const hold = prHoldOn(p);
@@ -6425,7 +6433,8 @@ function prRowHtml(p, dim) {
     + (hold ? `<span class="pr-chip warn" title="@${escapeHtml(hold.by)} asked not to merge into ${escapeHtml(hold.branch)}${hold.note ? ': ' + escapeHtml(hold.note) : ''}">${prPauseIc(10)}${escapeHtml(hold.branch)} held</span>` : '');
   const behindChip = p.behindBy > 0 ? `<span class="pr-chip warn" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">${p.behindBy} behind</span>` : '';
   // One table row per PR: each piece in its own column so rows line up (headers: prDropdownHead).
-  const refs = p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${prRefHtml(p.headRef)} → ${prRefHtml(p.baseRef)}</span>` : '';
+  // Into dev is the norm: only a different base is worth the space
+  const refs = p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${prRefHtml(p.headRef)}${p.baseRef === 'dev' ? '' : ' → ' + prRefHtml(p.baseRef)}</span>` : '';
   const age = p.createdAt ? `<span class="pr-age" data-created="${p.createdAt}">${escapeHtml(prRelTime(p.createdAt))}</span>` : '';
   // "feat(dt-ai):" is metadata, not the headline: dim it
   const t = escapeHtml(p.title), pre = t.match(/^[a-z]+(\([^)]*\))?!?:\s*/i);
@@ -6458,7 +6467,7 @@ function prRowHtml(p, dim) {
     + `<div class="pr-l1"><span class="pr-title" title="${t}">${titleHtml}</span><span class="pr-num">#${p.number}</span></div>`
     + `<span class="pr-main">${mainBtn}</span>`
     + `<div class="pr-l2">${prAuthorHtml(p)}${reqChip}${reviewChip}${checksChip}${behindChip}`
-    + `<span class="pr-sub pr-l2-tail">${refs}${p.commitCount ? `<span>${p.commitCount} commit${p.commitCount === 1 ? '' : 's'}</span>` : ''}${age}</span></div></div>`;
+    + `<span class="pr-sub pr-l2-tail">${refs}${p.commitCount > 1 ? `<span>${p.commitCount} commits</span>` : ''}${age}</span></div></div>`;
 }
 
 // Env branches wear the Releases board's env hues (ENV_HUE in releases-ui.js); prod's branches go by several names.
@@ -6470,9 +6479,9 @@ function prRefHtml(ref) {
 
 // Who opened the PR, first on the row: GitHub avatar (a plain image URL, no API call) + login.
 function prAuthorHtml(p) {
-  if (!p.author) return '';
+  if (!p.author || p.mine) return ''; // no name = yours
   const a = escapeHtml(p.author);
-  return `<span class="pr-author" title="Opened by @${a}"><img src="https://github.com/${encodeURIComponent(p.author)}.png?size=32" alt="" loading="lazy" onerror="this.remove()">${p.mine ? 'you' : a}</span>`;
+  return `<span class="pr-author" title="Opened by @${a}"><img src="https://github.com/${encodeURIComponent(p.author)}.png?size=32" alt="" loading="lazy" onerror="this.remove()">${a}</span>`;
 }
 
 function prGroupHeader(repo, count, muted) {
@@ -6520,7 +6529,8 @@ function prDropdownHead() {
   const n = (l) => l.filter(p => !p.archived && prInScope(p)).length;
   const who = `<span class="pr-scope"><button class="pr-seg${prShowAll ? '' : ' on'}" title="Your PRs, and others' PRs nobody has approved yet" onclick="event.stopPropagation();setPrShowAll(false)">To act on<em>${n(prState.prs)}</em></button>`
     + `<button class="pr-seg${prShowAll ? ' on' : ''}" title="Every open PR in the watched repos, including drafts and PRs you already approved" onclick="event.stopPropagation();setPrShowAll(true)">All open<em>${n(prState.prs.concat(prState.extra || []))}</em></button></span>`;
-  const scope = `<span class="pr-scope">${seg('all', 'All', 'Every open PR')}${seg('dev', 'Into dev', 'Only PRs merging into dev')}${seg('norel', 'Hide releases', 'Hide PRs into alpha, staging, master, main and prod')}</span>`;
+  const scopeIdle = prScope === 'all' && live.every(p => p.baseRef === 'dev');
+  const scope = scopeIdle ? '' : `<span class="pr-scope">${seg('all', 'All', 'Every open PR')}${seg('dev', 'Into dev', 'Only PRs merging into dev')}${seg('norel', 'Hide releases', 'Hide PRs into alpha, staging, master, main and prod')}</span>`;
   return `<div class="pr-dhead"><span>Pull requests</span>${who}${scope}<span class="pr-dhead-btns">`
     + (prState.prs.some(p => p.archived) ? `<button class="pr-refresh" title="${prCollapsed.has('__archived_open__') ? 'Hide' : 'Show'} archived" style="opacity:${prCollapsed.has('__archived_open__') ? 1 : .45}" onclick="event.stopPropagation();togglePrRepo('__archived_open__')">📦</button>` : '')
     + (window.releasesUi && releasesUi.holdBranches().length ? `<button class="pr-refresh" title="Hold a branch: ask the team not to merge into it until your deploy is out" style="opacity:${prHoldForm ? 1 : .6}" onclick="event.stopPropagation();prHoldToggle()">${prPauseIc(13)}</button>` : '')
@@ -6868,7 +6878,7 @@ function prDropdownHtml() {
     html += prGroupHeader(repo, prs.length, false);
     if (prCollapsed.has(repo)) continue;
     // PRs that request my review float to the top of their repo group.
-    const sorted = [...prs].sort((a, b) => (b.requested ? 1 : 0) - (a.requested ? 1 : 0));
+    const sorted = [...prs].sort((a, b) => prRank(a) - prRank(b));
     html += sorted.map(p => prRowHtml(p, false)).join('');
   }
   // Muted repos (dimmed, no red)
