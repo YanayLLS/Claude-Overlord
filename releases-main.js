@@ -347,7 +347,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const same = before.nightlyId === next.nightlyId && before.evidence && before.evidence.runId === next.evidence.runId && before.headline === next.headline;
       push({ rc: { ...next, flags, ai: same ? before.ai || null : null } });
       if (notify && (before.nightlyId !== next.nightlyId || before.level !== next.level)) {
-        notify({ ship: '🟢 Release candidate ready', look: '🟡 Release candidate: look first', hold: '🔴 Release candidate: hold' }[next.level], next.headline, next.evidence.reportUrl);
+        notify({ ship: '🟢 Release candidate ready', look: '🟡 Release candidate: look first', hold: '🔴 Release candidate: hold' }[next.level], next.headline, null, () => send({ type: 'releases', state, open: true, tab: 'release' }));
       }
       if (!same || !state.rc.ai || state.rc.ai.error) {
         const ai = await rc.explain(next, cfg);
