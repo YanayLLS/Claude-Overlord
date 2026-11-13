@@ -45,6 +45,11 @@ test('live turn timer vs finished-turn line', () => {
   assert.ok(liveTurnIn('Thinking… (8s · esc to interrupt)'));
   assert.ok(!liveTurnIn('Cooked for 2m 44s · done 4:05 PM'));
   assert.ok(!liveTurnIn('Churned for 1h 51m 41s · done 4:07 PM · 1 shell still running'));
+  // The CLI repaints only changed cells: a long think sends the spinner's next frame, never the whole timer again.
+  assert.ok(liveTurnIn('✶'), 'spinner frame');
+  assert.ok(liveTurnIn('✽3'), 'frame + the seconds digit');
+  assert.ok(!liveTurnIn('✻ Cooked for 2m 44s'), 'the done line keeps ✻, not an animating frame');
+  assert.ok(!liveTurnIn('> '));
 });
 
 const { questionDialogIn } = require('./ask-core');

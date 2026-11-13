@@ -25,7 +25,9 @@ const permDialogIn = (text) => PERM_DIALOG_RE.test(text || '');
 
 // Claude's live turn timer — "Sublimating… (10m 17s · ↓ 61.7k tokens)" — is on screen only while a
 // turn runs (finished turns read "Cooked for 2m · done", no parenthesis). Spaces may be missing.
-const LIVE_TURN_RE = /\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\s*·/;
+// The CLI repaints only changed cells, so after the first draw a long think sends just the spinner's next frame
+// (✢ ✶ ✽ animate; ✻ also starts the done line, so it doesn't count): that alone means the turn still runs.
+const LIVE_TURN_RE = /\((?:\d+h\s*)?(?:\d+m\s*)?\d+s\s*·|[✢✶✽]/;
 const liveTurnIn = (text) => LIVE_TURN_RE.test(text || '');
 
 // Claude's question picker (AskUserQuestion / plan approval). Newer Claude Code writes the
