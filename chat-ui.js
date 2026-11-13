@@ -1563,7 +1563,10 @@
   // Stop the turn: Esc to the CLI, and the chat says so at once instead of waiting for the transcript.
   function stop(revert = true) {
     const id = selectedId, a = agents.get(id); if (!a) return;
-    a._stopAt = Date.now();
+    const escAt = a._stopAt = Date.now();
+    // You may send again before the take-back below runs (it waits for the CLI): then it must not erase the CLI's box (your
+    // new message is being typed there), put the old text back in yours, or hide the new message (it would show no "working").
+    const sentSince = () => (a._sendAt || 0) > escAt;
     // Main stops what it hasn't handed the CLI yet, then sends the Esc once no paste is half-written (straight to the
     // CLI it could land inside a long paste as text).
     api.send({ type: 'cliCancel', id });
@@ -1594,6 +1597,7 @@
     }
     if (lastMine && !a._takeBack) a._takeBack = afterEsc(id, () => { // one check per Esc burst: a second Esc doesn't take it back twice
       a._takeBack = null;
+      if (sentSince()) return rerender();
       // the CLI put it back in its box (as itself, or as its "[Pasted text]" placeholder when long): it's out of the conversation
       const x = typeof xterms !== 'undefined' && xterms.get(id), inBox = x && typeof readPromptBox === 'function' ? readPromptBox(x.terminal) : '';
       const head = String(lastMine.text || '').replace(/\s+/g, ' ').trim().slice(0, 24).toLowerCase();
@@ -1614,8 +1618,8 @@
       // transcript still writes it. It's back in yours already, so it leaves the thread too.
       const x = typeof xterms !== 'undefined' && xterms.get(id), inBox = x && typeof readPromptBox === 'function' ? readPromptBox(x.terminal) : '';
       const head = String(back[0].match || back[0].text || '').replace(/\s+/g, ' ').trim().slice(0, 24).toLowerCase();
-      if (head && inBox.replace(/\s+/g, ' ').toLowerCase().includes(head)) setHides(a, [...hidesOf(a), { from: Math.min(...back.map(p => p.at)) - 1000, until: Date.now() }]);
-      chatComposer.clearCliBox(id); rerender();
+      if (head && inBox.replace(/\s+/g, ' ').toLowerCase().includes(head)) setHides(a, [...hidesOf(a), { from: Math.min(...back.map(p => p.at)) - 1000, until: sentSince() ? a._sendAt - 1 : Date.now() }]);
+      if (!sentSince()) chatComposer.clearCliBox(id); rerender();
     });
     rerender();
   }
@@ -2302,5 +2306,5 @@
   // The CLI repainted under an open question card: redraw it next frame, not on a timer (clicks felt slow).
   let askTick = 0;
   const onTerm = (id) => { if (id === selectedId && !askTick && document.querySelector('#conversation .card.ask')) askTick = requestAnimationFrame(() => { askTick = 0; rerender(); }); };
-  window.chatUi = { onTerm, onAskInput, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, onNextSuggest, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { onTerm, onAskInput, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, onNextSuggest, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; ag._sendAt = Date.now(); } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();
