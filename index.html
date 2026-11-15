@@ -658,6 +658,37 @@ button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
   background:#11111b; border:1px solid #45475a; border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.5); }
 .branch-item { padding:5px 8px; font-size:12px; color:#cdd6f4; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .branch-item:hover { background:rgba(137,180,250,.18); }
+.ft-modal { width:520px; max-width:calc(100vw - 32px); box-sizing:border-box; padding:18px 20px 16px; background:var(--bg3); color:var(--text); border:1px solid var(--border-hi); border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.45); font-size:13px; }
+.ft-head { display:flex; align-items:center; margin-bottom:12px; }
+.ft-title { font-size:15px; font-weight:600; }
+.ft-x { margin-left:auto; width:26px; height:26px; border:none; border-radius:6px; background:none; color:var(--dim); cursor:pointer; font-size:12px; }
+.ft-x:hover { background:var(--surface1); color:var(--text); }
+.ft-name { width:100%; box-sizing:border-box; padding:10px 12px; font:inherit; font-size:15px; font-weight:500; color:var(--text); background:var(--bg); border:1px solid var(--border-hi); border-radius:8px; outline:none; }
+.ft-name:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.ft-branch { display:flex; align-items:center; gap:5px; margin:7px 2px 18px; font-family:'Geist Mono',monospace; font-size:11px; color:var(--dim); opacity:.55; min-height:15px; }
+.ft-branch.on { opacity:1; color:var(--subtext); }
+.ft-branch svg, .ft-add svg { width:13px; height:13px; flex:none; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.ft-label { font-size:11px; font-weight:600; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; margin:0 2px 6px; }
+.ft-rows { display:flex; flex-direction:column; gap:2px; }
+.ft-row { display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:8px; cursor:pointer; transition:background .1s; }
+.ft-row:hover { background:var(--surface0); }
+.ft-row input[type=checkbox] { width:15px; height:15px; margin:0; flex:none; accent-color:var(--accent); cursor:pointer; }
+.ft-repo { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+.ft-from { font-size:11px; color:var(--dim); flex:none; }
+.ft-row .branch-combo { position:relative; width:150px; flex:none; }
+.ft-row .branch-combo input { width:100%; box-sizing:border-box; padding:5px 8px; font-family:'Geist Mono',monospace; font-size:11.5px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:6px; outline:none; }
+.ft-row .branch-combo input:focus { border-color:var(--accent); }
+.ft-row.off .ft-repo { color:var(--dim); font-weight:400; }
+.ft-row.off .ft-from, .ft-row.off .branch-combo { opacity:.35; }
+.ft-add { display:flex; align-items:center; gap:8px; margin-top:4px; padding:6px 8px; width:100%; font:inherit; font-size:12px; color:var(--dim); background:none; border:none; border-radius:8px; cursor:pointer; text-align:left; }
+.ft-add:hover { color:var(--text); background:var(--surface0); }
+.ft-foot { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+.ft-btn { padding:7px 14px; font:inherit; font-size:12.5px; font-weight:500; color:var(--text); background:var(--surface1); border:none; border-radius:7px; cursor:pointer; }
+.ft-btn:hover { background:var(--surface2); }
+.ft-btn.primary { background:var(--accent); color:var(--on-accent,#0b0b0d); font-weight:600; }
+.ft-btn.primary:hover { filter:brightness(1.08); }
+.ft-btn:disabled { opacity:.4; cursor:default; filter:none; }
+@media (max-width:480px) { .ft-from { display:none; } .ft-row .branch-combo { width:110px; } }
 .server-badge .server-menu-btn {
   font-size:11px; line-height:1; opacity:.4; padding:0 2px; font-weight:bold;
   transition:opacity .12s; pointer-events:none; /* whole chip opens the menu */
@@ -2126,28 +2157,40 @@ function submitAddRepo() {
 }
 
 let _ftIdx = 0;
+// Same rules as worktree.js safeBranch, so the preview shows the branch git will get.
+function ftBranch(n) { return String(n).trim().replace(/[\x00-\x1f\x7f ~^:?*\[\\]+/g, '-').replace(/\/{2,}/g, '/').replace(/^[-/.]+|[-/.]+$/g, '').replace(/-{2,}/g, '-'); }
 function openNewFeature() {
   _ftIdx = 0;
   // Repos to offer: current project repos + any remembered from last time (even if not active now).
   const repoSet = [...new Set([...[...knownProjects].filter(p => !worktreeAt(p)), ...lastFeatureRepos, ...worktrees.map(w => w.repo)])];
   const el = wtOverlay();
-  el.innerHTML = `<div style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:10px;padding:20px;width:660px;max-width:94vw;font-size:13px">
-    <div style="font-weight:600;font-size:15px;margin-bottom:4px">New feature</div>
-    <div style="color:#a6adc8;margin-bottom:14px">One branch name, a worktree in each chosen repo, grouped together.</div>
-    <label style="display:block;margin-bottom:4px">Feature name (used as the branch in every repo)</label>
-    <input id="ft-name" placeholder="checkout-v2" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;margin-bottom:16px">
-    <div style="margin-bottom:6px;color:#a6adc8">Repos &amp; base branch <span style="opacity:.6">(type to search branches)</span></div>
-    <div id="ft-rows"></div>
-    <button onclick="send({type:'browseFeatureRepo'})" style="margin-top:6px;padding:6px 10px;background:transparent;color:#89b4fa;border:1px dashed #45475a;border-radius:6px;cursor:pointer;font-size:12px">+ Add repo folder&#x2026;</button>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
-      <button onclick="closeWt()" style="padding:7px 14px;background:#313244;color:#cdd6f4;border:none;border-radius:6px;cursor:pointer">Cancel</button>
-      <button onclick="submitFeature()" style="padding:7px 14px;background:#89b4fa;color:#11111b;border:none;border-radius:6px;font-weight:600;cursor:pointer">Create</button>
+  el.innerHTML = `<div class="ft-modal" role="dialog" aria-label="New feature" onkeydown="if(event.key==='Escape')closeWt();else if(event.key==='Enter'&&event.target.id==='ft-name')submitFeature()">
+    <div class="ft-head"><span class="ft-title">New feature</span><button class="ft-x" onclick="closeWt()" title="Close (Esc)" aria-label="Close">&#x2715;</button></div>
+    <input id="ft-name" class="ft-name" autocomplete="off" spellcheck="false" placeholder="Feature name" oninput="ftUpdate()">
+    <div class="ft-branch" id="ft-branch"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="7" r="2.5"/><path d="M6 7.5v9M18 9.5c0 5-12 3-12 7"/></svg><span id="ft-branch-name">branch</span></div>
+    <div class="ft-label">Repos</div>
+    <div id="ft-rows" class="ft-rows"></div>
+    <button class="ft-add" onclick="send({type:'browseFeatureRepo'})"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add repo&#x2026;</button>
+    <div class="ft-foot">
+      <button class="ft-btn" onclick="closeWt()">Cancel</button>
+      <button class="ft-btn primary" id="ft-create" onclick="submitFeature()" disabled>Create</button>
     </div></div>`;
   el.style.display = 'flex';
   document.getElementById('ft-name').focus();
   // Checked if it was in the last feature, or (first-ever use) check all.
   const rememberAll = lastFeatureRepos.length === 0;
   for (const r of repoSet) addFeatureRepoRow(r, rememberAll || lastFeatureRepos.includes(r));
+  ftUpdate();
+}
+// Live branch preview, row on/off look, and a Create button that names what it will make.
+function ftUpdate() {
+  const name = (document.getElementById('ft-name') || {}).value || '';
+  const br = ftBranch(name), bEl = document.getElementById('ft-branch');
+  if (bEl) { bEl.classList.toggle('on', !!br); document.getElementById('ft-branch-name').textContent = br || 'branch'; }
+  const chks = [...document.querySelectorAll('#ft-rows input[type=checkbox]')];
+  chks.forEach(c => c.closest('.ft-row').classList.toggle('off', !c.checked));
+  const n = chks.filter(c => c.checked).length, btn = document.getElementById('ft-create');
+  if (btn) { btn.disabled = !br || !n; btn.textContent = n > 1 ? `Create in ${n} repos` : 'Create'; }
 }
 const _ftBranches = {}; // row index -> branch list (for the fuzzy filter)
 function addFeatureRepoRow(repo, checked) {
@@ -2158,15 +2201,19 @@ function addFeatureRepoRow(repo, checked) {
   const def = (projects[repo] && projects[repo].defaultBase) || 'dev';
   _ftBranches[i] = ['dev'];
   const row = document.createElement('div');
-  row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px';
-  row.innerHTML = `<input type="checkbox" id="ft-repo-${i}" data-repo="${escAttr(repo)}" ${checked ? 'checked' : ''} style="width:16px;height:16px;flex-shrink:0">
-    <span style="width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(repo)}">${esc(pathLabel(repo))}</span>
-    <div class="branch-combo" style="position:relative;flex:1;min-width:0">
-      <input id="ft-base-${i}" autocomplete="off" value="${escAttr(def)}" placeholder="base branch" title="${escAttr(def)}" style="width:100%;box-sizing:border-box;padding:5px 7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px"
-        oninput="filterBranchMenu(${i})" onfocus="filterBranchMenu(${i})" onblur="setTimeout(()=>hideBranchMenu(${i}),150)">
+  row.className = 'ft-row';
+  // The whole row toggles, except the base-branch field.
+  row.onclick = (e) => { if (e.target.closest('.branch-combo') || e.target.type === 'checkbox') return; const c = row.querySelector('input[type=checkbox]'); c.checked = !c.checked; ftUpdate(); };
+  row.innerHTML = `<input type="checkbox" id="ft-repo-${i}" data-repo="${escAttr(repo)}" ${checked ? 'checked' : ''} onchange="ftUpdate()" aria-label="${escAttr(pathLabel(repo))}">
+    <span class="ft-repo" title="${escAttr(repo)}">${esc(pathLabel(repo))}</span>
+    <span class="ft-from">from</span>
+    <div class="branch-combo">
+      <input id="ft-base-${i}" autocomplete="off" spellcheck="false" value="${escAttr(def)}" placeholder="dev" title="${escAttr(def)}"
+        oninput="filterBranchMenu(${i})" onfocus="this.select();filterBranchMenu(${i})" onblur="setTimeout(()=>hideBranchMenu(${i}),150)">
       <div id="ft-menu-${i}" class="branch-menu" style="display:none"></div>
     </div>`;
   rows.appendChild(row);
+  ftUpdate();
   _branchCbs[repo] = (branches, err) => {
     _ftBranches[i] = (err || !branches || !branches.length) ? ['dev'] : branches;
     if (document.activeElement === document.getElementById(`ft-base-${i}`)) filterBranchMenu(i);
@@ -2190,7 +2237,7 @@ function pickBranch(i, b) { const inp = document.getElementById(`ft-base-${i}`);
 function hideBranchMenu(i) { const m = document.getElementById(`ft-menu-${i}`); if (m) m.style.display = 'none'; }
 function submitFeature() {
   const name = document.getElementById('ft-name').value.trim();
-  if (!name) { document.getElementById('ft-name').focus(); return; }
+  if (!ftBranch(name)) { document.getElementById('ft-name').focus(); return; }
   const repos = [];
   document.querySelectorAll('#ft-rows [id^="ft-repo-"]').forEach((chk) => {
     const i = chk.id.replace('ft-repo-', '');
