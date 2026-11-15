@@ -302,3 +302,16 @@ test('visualDoc: a meta refresh (navigating the frame away) is stripped', () => 
   assert.doesNotMatch(d, /refresh/i);
   assert.match(d, /<p>a<\/p>/);
 });
+
+test('screenBtw: the question, the answer as paragraphs and list items, and the Answering state', () => {
+  const { screenBtw } = require('./chat-core');
+  const idle = ['❯ /btw what is 2+2? answer in two', '  short sentences', '', '  /btw what is 2+2? answer in two shor…', '', '    2+2 is 4. Basic addition always', '    gives this result.', '  ', '    - 2 + 2 = 4', '    - 4 is even', '', '  ↑/↓ to scroll · c to copy · f to fork', '  · Esc to close'];
+  assert.deepStrictEqual(screenBtw(idle), { q: 'what is 2+2? answer in two shor…', answer: '2+2 is 4. Basic addition always gives this result.\n\n- 2 + 2 = 4\n- 4 is even', answering: false });
+  // during a turn: history of asks above, the last one is current
+  const busy = ['● PowerShell(ping)', '❯ /btw name three colors', '  /btw what is 2+2? answer in two shor…', '  /btw name three colors', '', '    Three colors: red, blue, green.', '', '  ⇧←/→ to browse · c to copy · f to', '  fork · x to clear history · Esc to', '  close'];
+  assert.strictEqual(screenBtw(busy).q, 'name three colors');
+  assert.strictEqual(screenBtw(busy).answer, 'Three colors: red, blue, green.');
+  const wait = ['  /btw name three colors', '', '    · Answering…', '', '  Esc to close'];
+  assert.deepStrictEqual(screenBtw(wait), { q: 'name three colors', answer: '', answering: true });
+  assert.strictEqual(screenBtw(['❯ hi', '  Esc to close']), null);
+});

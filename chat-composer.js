@@ -327,6 +327,7 @@
 
   // With the box empty, a question or permission card takes the terminal's keys: 1–9 pick, Esc denies.
   function cardKey(e) {
+    if (e.key === 'Escape') { const b = document.querySelector('#conversation .tail [data-btw="esc"]'); if (b) { b.click(); return true; } } // /btw's card closes first, typed text or not
     if (box().value) return false;
     const tail = document.querySelector('#conversation .tail');
     if (/^[1-9]$/.test(e.key) && tail && tail.querySelector('.card.ask .choices button.free')) { const b = tail.querySelectorAll('.card.ask .choices button:not(.free)')[+e.key - 1]; if (b) { b.click(); return true; } } // the visible rows' numbers

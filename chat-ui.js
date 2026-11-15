@@ -1330,7 +1330,7 @@
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
     const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && !(a._reverted && now - a._reverted < 8000) && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
-    const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(id, evs)) : ''); // queued text waits above the spinner or an open question, as in the CLI
+    const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + btwHtml(id) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(id, evs)) : ''); // queued text waits above the spinner or an open question, as in the CLI
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
@@ -1671,6 +1671,8 @@
     const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } return; }
     if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
+    const bt = e.target.closest('[data-btw]'); // /btw card: Copy, or Close (Esc to the CLI)
+    if (bt && selectedId != null) { if (bt.dataset.btw === 'esc') { keys(['\x1b']); bt.closest('.card')?.classList.add('leaving'); setTimeout(rerender, 300); } else { const b = btwOf(selectedId); if (b) navigator.clipboard.writeText(b.answer).then(() => { bt.innerHTML = ICON.check; setTimeout(() => { bt.innerHTML = ICON.copy; }, 1500); }, () => {}); } return; }
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
     // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
     if (k && selectedId != null) { if (stillWaiting(selectedId) && menuUp(selectedId)) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); answered(k); } return; }
@@ -2268,6 +2270,17 @@
   }
   // ── A CLI dialog the chat has no card for (double-Esc rewind, /config, /model, /permissions, /mcp…): the real terminal
   // floats over the chat while it's up, keys going to it, and goes away when the dialog closes. ──
+  // /btw's answer as a card above the reply box, not the terminal in a split: the question, the answer as markdown, Copy
+  // and Close (Esc, as in the CLI). The screen cuts a long question with "…": the one you sent is shown whole.
+  const btwAsk = new Map(); // agent id -> the last /btw question sent from the chat
+  const btwOf = (id) => { const x = id != null && typeof xterms !== 'undefined' && xterms.get(id); return x ? screenBtw(screenRows(x, 80)) : null; };
+  function btwHtml(id) {
+    const ask = btwAsk.get(id), b = btwOf(id) || (ask && Date.now() - ask.at < 4000 ? { q: ask.q, answer: '', answering: true } : null); if (!b) return ''; // just sent: up before the CLI draws its panel
+    const full = ask && ask.q, cut = b.q.replace(/…$/, ''), q = full && full.startsWith(cut) ? full : b.q;
+    return `<div class="card btw" data-btw-card><div class="btw-h"><span class="btw-tag">btw</span><span class="btw-q">${escH(q)}</span>`
+      + `${b.answer ? `<button type="button" class="ic-only" data-btw="copy" title="Copy" aria-label="Copy">${ICON.copy}</button>` : ''}<button type="button" class="ic-only" data-btw="esc" title="Close (Esc)" aria-label="Close">${ICON.close}</button></div>`
+      + `<div class="btw-a">${b.answering ? '<span class="btw-wait">Answering…</span>' : md(b.answer, '')}</div></div>`;
+  }
   let peekOff = 0, screenSig = '', autoSplitFor = null, panelOff = 0; // autoSplitFor: the split an inline panel opened (not the user's)
   const screenRows = (x, n) => bufferRows(x.terminal.buffer.active, n);
   let termPeekFor = null; // the agent whose terminal the overlay shows: switching agents shows the new one's, or none
@@ -2285,15 +2298,15 @@
     // else repaints: redraw whenever what it shows changed.
     if (x && termTab === 'conversation' && cv && cv.classList.contains('open')) {
       const sa = screenAsk(selectedId), rw = screenRewind(selectedId);
-      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, JSON.stringify(screenChoice(screenOf(selectedId, 40, true))), liveMode(selectedId), cliSuggestion(selectedId)]); // the mode chip follows Shift+Tab in the terminal too
+      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, JSON.stringify(screenChoice(screenOf(selectedId, 40, true))), liveMode(selectedId), cliSuggestion(selectedId), JSON.stringify(btwOf(selectedId))]); // the mode chip follows Shift+Tab in the terminal too
       if (sig !== screenSig) { screenSig = sig; rerender(); }
     }
     // A panel drawn inline above the prompt box (/btw's answer, a skill's own UI): the terminal opens beside the chat
     // (the split) while it's up, then the split closes again unless it was yours.
-    const rows = x && screenRows(x, 80), panel = !!(rows && x && termTab === 'conversation' && cv && cv.classList.contains('open') && screenDialog(rows) && !screenDialog(rows, false));
+    const rows = x && screenRows(x, 80), btwUp = !!(rows && screenBtw(rows)), panel = !!(rows && x && !btwUp && termTab === 'conversation' && cv && cv.classList.contains('open') && screenDialog(rows) && !screenDialog(rows, false));
     if (panel) { panelOff = 0; if (!t.classList.contains('split')) { autoSplitFor = selectedId; t.classList.add('split'); switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); } }
     else if (autoSplitFor != null && ++panelOff >= 2) { autoSplitFor = null; t.classList.remove('split'); if (termTab === 'conversation') switchTermTab('conversation'); if (typeof schedFit === 'function') setTimeout(schedFit, 50); }
-    const up = !!(x && !panel && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(rows) && !(screenAsk(selectedId).dialog && screenAsk(selectedId).options.length >= 2) && !screenRewind(selectedId) && !screenChoice(rows)); // a question menu, the trust check, /login: their cards instead
+    const up = !!(x && !panel && !btwUp && termTab === 'conversation' && cv && cv.classList.contains('open') && !t.classList.contains('split') && !stillWaiting(selectedId) && screenDialog(rows) && !(screenAsk(selectedId).dialog && screenAsk(selectedId).options.length >= 2) && !screenRewind(selectedId) && !screenChoice(rows)); // a question menu, the trust check, /login: their cards instead
     if (up) { peekOff = 0; peek(true); return; }
     if (t && t.classList.contains('peek') && termPeekFor === selectedId && ++peekOff < 2) return; // gone for two looks in a row: a redraw can blank it for a moment
     peek(false);
@@ -2306,5 +2319,6 @@
   // The CLI repainted under an open question card: redraw it next frame, not on a timer (clicks felt slow).
   let askTick = 0;
   const onTerm = (id) => { if (id === selectedId && !askTick && document.querySelector('#conversation .card.ask')) askTick = requestAnimationFrame(() => { askTick = 0; rerender(); }); };
-  window.chatUi = { onTerm, onAskInput, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, onNextSuggest, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; ag._sendAt = Date.now(); } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+  window.chatUi = { onTerm, onAskInput, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, onNextSuggest, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (/^\/btw\s/.test(text || '') && !held) { btwAsk.set(id, { q: text.replace(/^\/btw\s+/, '').trim(), at: Date.now() }); return rerender(); } // its card, not a queued message (the agent isn't working on it)
+      if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; ag._sendAt = Date.now(); } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

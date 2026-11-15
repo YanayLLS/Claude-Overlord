@@ -214,6 +214,26 @@ function screenPanel(rows) {
   const above = lines[top - 1] || '', wrapped = /^\s*to (cancel|exit|go back|close|dismiss)\b/i.test(above); // "… Esc" / "to close"
   return rules.length >= 2 && dialogFooter((wrapped ? (lines[top - 2] || '') + ' ' : '') + above); // the row above the box's top rule
 }
+// /btw's panel as data for the chat's card: { q, answer, answering }. Its header is the last "/btw …" line (cut with "…"
+// in a narrow terminal; earlier asks sit above it), the answer is indented 4 under it, the footer ("↑/↓ to scroll · …
+// Esc to close") is indented 2. The terminal wraps the answer: lines are joined back into paragraphs, list items and
+// headings kept. ponytail: a code block in an answer loses its line breaks; read the CLI's own buffer if that matters.
+function screenBtw(rows) {
+  const lines = rows.map(r => r.replace(/\s+$/, '')), nb = lines.filter(r => r.trim());
+  if (!dialogFooter(nb.slice(-3).join(' '))) return null;
+  let h = -1; for (let i = lines.length - 1; i >= 0; i--) if (/^\s{1,4}\/btw\s+\S/.test(lines[i])) { h = i; break; }
+  if (h < 0) return null;
+  const body = [];
+  for (let i = h + 1; i < lines.length; i++) { const r = lines[i]; if (r.trim() && !/^\s{4}/.test(r)) break; body.push(r.slice(4)); }
+  const paras = [];
+  for (const r of body) {
+    const prev = paras.length ? paras[paras.length - 1] : '';
+    if (!r.trim()) { if (prev !== '') paras.push(''); continue; }
+    if (prev && !/^\s*([-*+]\s|\d+[.)]\s|#|>|```)/.test(r)) paras[paras.length - 1] = prev + ' ' + r.trim(); else paras.push(r);
+  }
+  const answer = paras.join('\n').trim();
+  return { q: lines[h].trim().replace(/^\/btw\s+/, ''), answer: /^\S?\s*Answering…?$/.test(answer) ? '' : answer, answering: !answer || /^\S?\s*Answering…?$/.test(answer) }; // any spinner glyph
+}
 
 // ── Shared by the Chat view's thread (chat-ui.js) and reply box (chat-composer.js), so both read text the same way ──
 // A link as it's written in text: up to the first space, a closing bracket or quote, minus trailing punctuation.
@@ -439,4 +459,4 @@ function permLabel(l) {
   if (/^yes,?\s+(and\s+)?(allow|don'?t ask)/i.test(l)) return /don'?t ask/i.test(l) ? "Don't ask again" : /edits/i.test(l) ? 'Allow all edits' : 'Always allow';
   return l;
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenPermRows, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };
