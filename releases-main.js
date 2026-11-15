@@ -11,6 +11,7 @@ const createHistory = require('./release-history');
 const createRc = require('./rc-main');
 const { demoCandidate, ghIsRead } = require('./rc-core');
 const rcFix = require('./rc-fix');
+const rcBranch = require('./rc-branch');
 // Demo mode (a sandboxed instance started with OVERLORD_RC_DEMO=1): the Releases board can be walked end to
 // end, but it only ever READS GitHub. Every write this board would make is refused before it leaves.
 const DEMO = !!process.env.OVERLORD_RC_DEMO;
@@ -335,7 +336,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (force) push({ rc: { ...(state.rc || {}), loading: true } });
     try {
       const cfg = state.config, before = state.rc || {};
-      let next = await rc.compute({ cfg, unreleased: (before.flags && before.flags.keys) || [] });
+      let next = await rc.compute({ cfg, unreleased: (before.flags && before.flags.keys) || [], rcBranch: state.rcBranch || null });
       if (next.off || next.error || next.running) return push({ rc: { ...next, flags: before.flags || null } });
       if (DEMO) { // the same night dressed as a clean one; no flag preview (it starts a workflow), no AI call
         push({ rc: { ...demoCandidate(next), flags: null, plan: (before.demo && before.plan) || null } });
@@ -343,7 +344,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         return;
       }
       const flags = await rcFlags(next.nightlyId);
-      if (JSON.stringify(flags.keys) !== JSON.stringify(next.unreleased)) next = await rc.compute({ cfg, unreleased: flags.keys });
+      if (JSON.stringify(flags.keys) !== JSON.stringify(next.unreleased)) next = await rc.compute({ cfg, unreleased: flags.keys, rcBranch: state.rcBranch || null });
+      // a run newer than the rc branch's own: the branch is done, its fixes go back to dev
+      if (rcBranch.supersededBy(state.rcBranch, next)) retireRc();
       // the explanation is asked once per graded night, and again only when the grade's inputs changed
       const same = before.nightlyId === next.nightlyId && before.evidence && before.evidence.runId === next.evidence.runId && before.headline === next.headline;
       push({ rc: { ...next, flags, ai: same ? before.ai || null : null } });
@@ -354,7 +357,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         const ai = await rc.explain(next, cfg);
         if (state.rc && state.rc.nightlyId === next.nightlyId) push({ rc: { ...state.rc, ai } });
       }
-    } finally { rcBusy = false; if (state.rc && state.rc.loading) push({ rc: { ...state.rc, loading: false } }); persist(); }
+    } finally {
+      rcBusy = false; if (state.rc && state.rc.loading) push({ rc: { ...state.rc, loading: false } }); persist();
+      if (!rcFixTimer) pollRcFix().catch(() => {}); // after a restart too: the rc branch and fixes are watched from here
+    }
   }
   // Release the candidate: prod, every repo, each pinned at the commit the nightly tested
   // Demo: what Release it would open, read from GitHub, opened nowhere
@@ -375,33 +381,94 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     return release(['prod'], null, null, false, null, false, Object.fromEntries(Object.entries(c.shas).map(([repo, v]) => [repo, v.sha])));
   }
 
-  // ── Fix blockers: one agent per blocking cause of the candidate, then Merge & re-run (rc-fix.js) ──
+  // ── Fix blockers (rc-fix.js) on the rc branch (rc-branch.js) ──
+  // Hold → Fix blockers cuts rc/<run> at the tested commits in every repo the regression can point at; one agent opens
+  // a fix PR per module into it; a teammate approves (asked automatically); once every fix is in, the card merges them
+  // and re-runs (failed modules only when the fixes touched tests alone); that grade is the next candidate and Release
+  // ships the branch. When the release lands on prod, or a newer run supersedes the branch, it merges back into dev
+  // through a PR and is deleted. Releasing from dev meanwhile is untouched: the branch only ever adds the fixes.
   const RC_FIX_POLL_MS = 2 * 60 * 1000;
   const rcRepo = () => (state.config && state.config.rc && state.config.rc.repo) || 'LLSLtd/frontlineio-frontend';
   const rcBase = () => { const p = releasePlan(state.config, ['prod']).prs.find(x => x.repo.toLowerCase() === rcRepo().toLowerCase()); return (p && p.source) || 'dev'; };
+  const IN_FLIGHT = ['queued', 'working', 'running', 'review', 'green', 'red', 'pr', 'elsewhere'];
   let rcFixTimer = null;
+  const okRef = (r) => !r.error && r.data && r.data.ref;
+  const ghMsg = (r) => r.error || (r.data && r.data.message) || 'no reply';
+  // the rc branch for this candidate: the live one when the candidate is its run (or a run of the branch), else a new one
+  async function ensureRcBranch(c) {
+    const rb = state.rcBranch;
+    if (rb && (rb.runId === c.evidence.runId || c.ref === rb.name)) return rb;
+    if (rb) retireRc();
+    const name = rcBranch.rcName(c.evidence.runId), repos = rcBranch.rcRepos(c.shas);
+    for (const [repo, v] of Object.entries(repos)) {
+      const r = await ghJson(['api', '-X', 'POST', `repos/${repo}/git/refs`, '-f', `ref=refs/heads/${name}`, '-f', `sha=${v.tested}`]);
+      if (!okRef(r) && !/already exists/i.test(ghMsg(r))) return { error: `could not cut ${name} in ${repo}: ${ghMsg(r)}` };
+    }
+    const next = { runId: c.evidence.runId, name, repos, createdAt: Date.now() };
+    push({ rcBranch: next }); persist();
+    return next;
+  }
+  // stop using the rc branch: retireStep() merges it back into dev (when it holds fixes) and deletes it
+  function retireRc() {
+    const rb = state.rcBranch;
+    if (!rb) return;
+    const repos = Object.fromEntries(Object.entries(rb.repos).map(([r, v]) => [r, { tested: v.tested }]));
+    push({ rcBranch: null, rcRetire: [...(state.rcRetire || []), { name: rb.name, repos }] }); persist();
+  }
+  async function retireStep() {
+    const list = state.rcRetire || [];
+    if (!list.length) return false;
+    const dev = rcBase();
+    for (const e of list) for (const [repo, v] of Object.entries(e.repos)) {
+      if (v.done) continue;
+      const cmp = await ghJson(['api', `repos/${repo}/compare/${v.tested}...${encodeURIComponent(e.name)}`]);
+      if (!cmp.data) { if (/404|Not Found/i.test(ghMsg(cmp))) v.done = true; continue; } // already gone
+      const act = rcBranch.retireAction({ ahead: cmp.data.ahead_by, pr: v.pr ? await prState(v.pr) : null });
+      if (act === 'delete') { await ghJson(['api', '-X', 'DELETE', `repos/${repo}/git/refs/heads/${e.name}`]); v.done = true; }
+      if (act === 'open') {
+        const body = `The release-candidate fixes from \`${e.name}\`, back into \`${dev}\`. Each was tested on its own PR and in the candidate's re-run.\n\n` + '```bdd\nscopes: []\n```\n';
+        const p = await ghJson(['api', '-X', 'POST', `repos/${repo}/pulls`, '-f', `title=chore(release): merge ${e.name} back into ${dev}`, '-f', `head=${e.name}`, '-f', `base=${dev}`, '-f', `body=${body}`]);
+        if (p.data && p.data.html_url) { v.pr = p.data.html_url; await requestReview(repo, p.data.number); }
+      }
+    }
+    const left = list.filter(e => Object.values(e.repos).some(v => !v.done));
+    push({ rcRetire: left }); persist();
+    return left.length > 0;
+  }
+  // the other approvers review fix and merge-back PRs (dev and the rc branch need one approval)
+  async function requestReview(repo, number) {
+    const me = String((state.approvers && state.approvers.me) || '').toLowerCase();
+    const who = memberLogins().filter(l => l.toLowerCase() !== me);
+    if (who.length) await ghJson(['api', '-X', 'POST', `repos/${repo}/pulls/${number}/requested_reviewers`, ...who.flatMap(l => ['-f', `reviewers[]=${l}`])]);
+  }
   async function fixBlockers() {
     const c = state.rc;
     if (!c || !c.blockers || !c.blockers.length) return send({ type: 'toast', text: 'Nothing blocking to fix' });
     if (!state.approvers || !state.approvers.isApprover) return send({ type: 'toast', text: 'Approvers only' });
     if (!startAgent) return send({ type: 'toast', text: 'Agents are not available here' });
+    const rb = await ensureRcBranch(c);
+    if (rb.error) return send({ type: 'toast', text: rb.error });
     const runId = c.evidence.runId, cwd = await configCheckout(), repo = rcRepo();
-    const fix = state.rcFix && state.rcFix.runId === runId ? state.rcFix : { runId, items: {} };
-    const testedSha = (c.shas && c.shas[repo] && c.shas[repo].sha) || '';
+    const fix = state.rcFix && state.rcFix.runId === runId ? state.rcFix : { runId, items: {}, next: 0 };
+    const view = (state.rcFixView && state.rcFixView.runId === runId && state.rcFixView.states) || {};
+    const testedSha = (rb.repos[repo] && rb.repos[repo].tested) || (c.shas && c.shas[repo] && c.shas[repo].sha) || '';
+    const others = Object.keys(rb.repos).filter(r => r !== repo);
     const skill = path.join(cwd, '.claude', 'skills', 'bdd-fix', 'SKILL.md').replace(/\\/g, '/');
     let added = 0;
-    // every blocking module gets a brief now; startQueued() hands them all to one agent
-    for (const [i, blocker] of c.blockers.entries()) {
-      if (fix.items[blocker.key]) continue;
+    // every blocking module gets a brief; one whose earlier fix is done (merged, declined, closed) gets a new one
+    for (const blocker of c.blockers) {
+      if (fix.items[blocker.key] && IN_FLIGHT.includes((view[blocker.key] || { kind: 'queued' }).kind)) continue;
+      const i = fix.next = Math.max(fix.next || 0, Object.keys(fix.items).length) + 1;
       const base = path.join(runsDir(), `rc-fix-${runId}-${i}`);
       const resultPath = (base + '.json').replace(/\\/g, '/');
-      fs.writeFileSync(base + '.md', rcFix.briefFor({ blocker, i, nightlyId: runId, repo, base: rcBase(), testedSha, reportUrl: c.evidence.reportUrl, runUrl: c.evidence.runUrl, resultPath, skill }));
+      fs.writeFileSync(base + '.md', rcFix.briefFor({ blocker, i, nightlyId: runId, repo, base: rb.name, dev: rcBase(), others, testedSha, reportUrl: c.evidence.reportUrl, runUrl: c.evidence.runUrl, resultPath, skill }));
       fix.items[blocker.key] = { i, resultPath, brief: (base + '.md').replace(/\\/g, '/'), title: blocker.tag, causeKeys: blocker.causes.map(x => x.key), startedAt: null };
       added++;
     }
     fix.cwd = cwd;
+    if (added) fix.rerunAt = null;
     push({ rcFix: fix }); persist();
-    send({ type: 'toast', text: added ? `Fixing ${added} module${added === 1 ? '' : 's'} with one agent` : 'Every blocker already has an agent' });
+    send({ type: 'toast', text: added ? `Fixing ${added} module${added === 1 ? '' : 's'} on ${rb.name}` : 'Every blocker already has an agent' });
     pollRcFix().catch(() => {});
   }
   // one agent takes every waiting module, one after another (each brief keeps its own branch, PR and result file)
@@ -411,8 +478,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const waiting = Object.values(fix.items).filter(it => !it.startedAt).sort((a, b) => a.i - b.i);
     if (!waiting.length) return false;
     for (const it of waiting) it.startedAt = Date.now();
-    startAgent(fix.cwd, `Fix the release blockers, one module at a time, in this order. For each, read and follow its brief and write its result file before moving to the next:
-${waiting.map(it => '\n- ' + it.brief).join('')}`);
+    startAgent(fix.cwd, 'Fix the release blockers, one module at a time, in this order. For each, read and follow its brief and write its result file before moving to the next:' + waiting.map(it => '\n- ' + it.brief).join(''));
     push({ rcFix: { ...fix } }); persist();
     return true;
   }
@@ -421,45 +487,98 @@ ${waiting.map(it => '\n- ' + it.brief).join('')}`);
     if (!m) return null;
     const p = await ghJson(['api', `repos/${m[1]}/pulls/${m[2]}`]);
     if (!p.data) return null;
-    const runs = await ghJson(['api', '-X', 'GET', `repos/${m[1]}/commits/${p.data.head.sha}/check-runs`, '-f', 'per_page=100']);
-    return { repo: m[1], number: Number(m[2]), state: p.data.state, merged: !!p.data.merged_at, ...rcFix.checksVerdict(runs.data && runs.data.check_runs) };
+    const [runs, reviews] = await Promise.all([ghJson(['api', '-X', 'GET', `repos/${m[1]}/commits/${p.data.head.sha}/check-runs`, '-f', 'per_page=100']),
+      ghJson(['api', '-X', 'GET', `repos/${m[1]}/pulls/${m[2]}/reviews`, '-f', 'per_page=100'])]);
+    return { repo: m[1], number: Number(m[2]), state: p.data.state, merged: !!p.data.merged_at,
+      approved: Array.isArray(reviews.data) ? rcFix.approvedBy(reviews.data) : undefined, ...rcFix.checksVerdict(runs.data && runs.data.check_runs) };
   }
+  // the re-run's run id, found among the dispatches after it was started
+  async function findRerun(rb) {
+    if (!rb || !rb.rerun || rb.rerun.id) return;
+    const wf = (state.config.rc && state.config.rc.workflow) || 'bdd-regression.yml';
+    const l = await ghJson(['api', '-X', 'GET', `repos/${rcRepo()}/actions/workflows/${wf}/runs`, '-f', 'event=workflow_dispatch', '-f', 'per_page=10']);
+    const r = ((l.data && l.data.workflow_runs) || []).filter(x => Date.parse(x.created_at) >= rb.rerun.at - 60e3 && !/rs-web/.test(x.display_title || '')).pop();
+    if (r) { push({ rcBranch: { ...rb, rerun: { ...rb.rerun, id: r.id } } }); persist(); }
+  }
+  // the rc branch reached prod (its release PR merged): it has done its job
+  async function rcReleased(rb) {
+    const [repo, v] = Object.entries(rb.repos).find(([r]) => r.toLowerCase() === rcRepo().toLowerCase()) || [];
+    if (!repo || Date.now() - rb.createdAt < 60e3) return false;
+    const cmp = await ghJson(['api', `repos/${repo}/compare/${v.target}...${encodeURIComponent(rb.name)}`]);
+    return !!cmp.data && cmp.data.ahead_by === 0;
+  }
+  let rcPolling = false; // one poll at a time: two would merge twice
   async function pollRcFix() {
-    clearTimeout(rcFixTimer); rcFixTimer = null;
-    const fix = state.rcFix;
-    if (!fix || !Object.keys(fix.items).length) return;
-    const states = {};
-    for (const [key, it] of Object.entries(fix.items)) {
-      let result = null; try { result = rcFix.readResult(fs.readFileSync(it.resultPath, 'utf8')); } catch {}
-      const pr = result && (result.status === 'pr' || result.status === 'open-elsewhere') ? await prState(result.url) : null;
-      states[key] = { ...rcFix.causeState({ started: !!it.startedAt, result, pr }), title: it.title, causeKeys: it.causeKeys || [], pr: pr ? { repo: pr.repo, number: pr.number } : null };
-    }
-    if (startQueued(states)) for (const [key, it] of Object.entries(fix.items)) if (it.startedAt && states[key].kind === 'queued') states[key] = { ...states[key], kind: 'working' };
-    push({ rcFixView: { runId: fix.runId, states, ready: rcFix.readyToMerge(states) } });
-    // the goal is a releasable candidate, so once every fix is in, merge and re-run without waiting for a click
-    if (state.rcFixView.ready && !fix.rerunAt) return mergeAndRerun();
-    if (Object.values(states).some(x => ['queued', 'working', 'running'].includes(x.kind))) rcFixTimer = setTimeout(() => pollRcFix().catch(() => {}), RC_FIX_POLL_MS);
+    if (rcPolling) return;
+    rcPolling = true;
+    try { await pollRcFixNow(); } finally { rcPolling = false; }
   }
-  // Merge every green fix PR this card opened, then start a full regression with the fixer from the base: its
-  // grade is the next candidate.
+  async function pollRcFixNow() {
+    clearTimeout(rcFixTimer); rcFixTimer = null;
+    let busy = false;
+    if (state.rcBranch && await rcReleased(state.rcBranch)) retireRc();
+    if (state.rcBranch) {
+      busy = true; // watch for its release landing
+      await findRerun(state.rcBranch);
+      const r = state.rcBranch.rerun;
+      if (r && r.id && !r.done) {
+        const run = await ghJson(['api', `repos/${rcRepo()}/actions/runs/${r.id}`]);
+        if (run.data && run.data.status === 'completed') { push({ rcBranch: { ...state.rcBranch, rerun: { ...r, done: true } } }); persist(); refreshRc(true).catch(() => {}); }
+      }
+    }
+    if (await retireStep()) busy = true;
+    const fix = state.rcFix;
+    if (fix && Object.keys(fix.items).length) {
+      const states = {};
+      for (const [key, it] of Object.entries(fix.items)) {
+        let result = null; try { result = rcFix.readResult(fs.readFileSync(it.resultPath, 'utf8')); } catch {}
+        const pr = result && (result.status === 'pr' || result.status === 'open-elsewhere') ? await prState(result.url) : null;
+        states[key] = { ...rcFix.causeState({ started: !!it.startedAt, result, pr }), title: it.title, causeKeys: it.causeKeys || [], pr: pr ? { repo: pr.repo, number: pr.number } : null };
+        if (states[key].kind === 'review' && !it.reviewAsked && pr) { it.reviewAsked = true; await requestReview(pr.repo, pr.number); persist(); }
+      }
+      if (startQueued(states)) for (const [key, it] of Object.entries(fix.items)) if (it.startedAt && states[key].kind === 'queued') states[key] = { ...states[key], kind: 'working' };
+      push({ rcFixView: { runId: fix.runId, states, ready: rcFix.readyToMerge(states), rerunAt: fix.rerunAt || null } });
+      // the goal is a releasable candidate, so once every fix is in, merge and re-run without waiting for a click
+      if (state.rcFixView.ready && !fix.rerunAt) await mergeAndRerun();
+      else if (Object.values(states).some(x => ['queued', 'working', 'running', 'review'].includes(x.kind))) busy = true;
+    }
+    if (busy) rcFixTimer = setTimeout(() => pollRcFix().catch(() => {}), RC_FIX_POLL_MS);
+  }
+  // Merge every green fix PR this card opened, then re-run: on the rc branch, failed modules only when the fixes touched
+  // tests alone (else everything); without an rc branch (fixes from before it), a full run of dev with the fixer.
   async function mergeAndRerun() {
     if (!state.approvers || !state.approvers.isApprover) return send({ type: 'toast', text: 'Approvers only' });
     const v = state.rcFixView;
     if (!v || !v.ready) return send({ type: 'toast', text: 'Not every fix is ready yet' });
-    const failed = [];
+    const failed = [], files = [];
     for (const x of Object.values(v.states).filter(x => x.kind === 'green' && x.mine && x.pr)) {
       let r = await ghJson(['api', '-X', 'PUT', `repos/${x.pr.repo}/pulls/${x.pr.number}/merge`, '-f', 'merge_method=merge']);
       if (r.error) r = await ghJson(['api', '-X', 'PUT', `repos/${x.pr.repo}/pulls/${x.pr.number}/merge`, '-f', 'merge_method=squash']);
-      if (r.error) failed.push(`#${x.pr.number}: ${r.error}`);
+      if (r.error) { failed.push(`#${x.pr.number}: ${r.error}`); continue; }
+      const f = await ghJson(['api', '-X', 'GET', `repos/${x.pr.repo}/pulls/${x.pr.number}/files`, '-f', 'per_page=100']);
+      for (const y of (Array.isArray(f.data) ? f.data : [{ filename: '?' }])) files.push({ repo: x.pr.repo, path: y.filename });
     }
     if (failed.length) return send({ type: 'toast', text: 'Merge failed, nothing re-run: ' + failed.join('; ') });
-    const base = rcBase(), wf = (state.config.rc && state.config.rc.workflow) || 'bdd-regression.yml';
-    const d = await ghJson(['api', '-X', 'POST', `repos/${rcRepo()}/actions/workflows/${wf}/dispatches`, '-f', `ref=${base}`,
-      '-f', `inputs[frontend_ref]=${base}`, '-f', `inputs[backend_ref]=${base}`, '-f', 'inputs[run_checks]=true', '-f', 'inputs[autofix_mode]=fix']);
+    const base = rcBase(), wf = (state.config.rc && state.config.rc.workflow) || 'bdd-regression.yml', rb = state.rcBranch;
+    let inputs = [`inputs[frontend_ref]=${base}`, `inputs[backend_ref]=${base}`, 'inputs[run_checks]=true', 'inputs[autofix_mode]=fix'], scopes = null;
+    const heads = {};
+    if (rb) {
+      const mods = (state.rc && state.rc.rerunModules) || [];
+      scopes = rcBranch.testOnly(files, rcRepo().split('/')[1]) && mods.length ? mods : null;
+      for (const repo of Object.keys(rb.repos)) {
+        const h = await ghJson(['api', `repos/${repo}/git/ref/heads/${rb.name}`]);
+        if (h.data && h.data.object) heads[repo] = h.data.object.sha;
+      }
+      inputs = Object.keys(rb.repos).map(repo => `inputs[${rcBranch.RC_INPUTS[repo.split('/')[1]]}]=${rb.name}`)
+        .concat([`inputs[run_checks]=${scopes ? 'false' : 'true'}`, 'inputs[autofix_mode]=', `inputs[scopes]=${scopes ? scopes.join(',') : ''}`]);
+    }
+    const d = await ghJson(['api', '-X', 'POST', `repos/${rcRepo()}/actions/workflows/${wf}/dispatches`, '-f', `ref=${base}`, ...inputs.flatMap(x => ['-f', x])]);
     if (d.error && !/Unexpected end|JSON/i.test(d.error)) return send({ type: 'toast', text: 'Merged, but the regression did not start: ' + d.error });
-    push({ rcFix: { ...state.rcFix, rerunAt: Date.now() }, rcFixView: { ...v, rerunAt: Date.now() } }); persist();
-    send({ type: 'toast', text: 'Merged. A full regression with the fixer is running; its grade is the next candidate' });
-    setTimeout(() => refreshRc(true).catch(() => {}), 60e3);
+    const at = Date.now();
+    push({ rcFix: { ...state.rcFix, rerunAt: at }, rcFixView: { ...v, rerunAt: at }, ...(rb ? { rcBranch: { ...rb, rerun: { at, scopes, heads } } } : {}) }); persist();
+    const what = scopes ? `${scopes.length} module${scopes.length === 1 ? '' : 's'}` : 'everything';
+    send({ type: 'toast', text: rb ? `Merged into ${rb.name}. Re-running ${what}` : 'Merged. A full regression with the fixer is running; its grade is the next candidate' });
+    setTimeout(() => pollRcFix().catch(() => {}), 60e3);
   }
 
   // A deploy just went red: say so once (the transition, not every poll), click opens the run.

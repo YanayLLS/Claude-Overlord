@@ -10,6 +10,7 @@ const zlib = require('zlib');
 const { execFile, spawn } = require('child_process');
 const { parseRunPage, grade, aiPrompt, nightChain, isFullRun, testedShas } = require('./rc-core');
 const { releasePlan } = require('./releases-core');
+const { overlay, failedModules } = require('./rc-branch');
 
 // The repo whose nightly gates a release, and where its report pages are served. `rc` in the release
 // config overrides any of these; `rc: false` turns the candidate off.
@@ -87,8 +88,9 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
     return pr ? { number: pr.number, url: pr.html_url, merged: !!pr.merged_at, open: pr.state === 'open', invalid: /INVALID/i.test(pr.title || '') } : null;
   }
 
-  // cfg: the release config. unreleased: flag keys prod hasn't released. → the candidate, or { off } / { error }.
-  async function compute({ cfg, unreleased = [] }) {
+  // cfg: the release config. unreleased: flag keys prod hasn't released. rcBranch: the live rc branch, if any
+  // ({ runId, name, rerun: { id, scopes, heads } }). → the candidate, or { off } / { error }.
+  async function compute({ cfg, unreleased = [], rcBranch = null }) {
     if (cfg && cfg.rc === false) return { off: true };
     const S = settings(cfg);
     const listed = await api('-X', 'GET', `repos/${S.repo}/actions/workflows/${S.workflow}/runs`, '-f', 'per_page=40');
@@ -102,7 +104,7 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
     // Cancelled counts too (e.g. its fixer was stopped): isFullRun still demands every module reported.
     let { nightly, previous, after } = chain, manual = false;
     for (const r of [...after].reverse().filter(x => x.status === 'completed' && !/rs-web/.test(x.title)).slice(0, MANUAL_SCAN)) {
-      if (!full.has(r.id)) { const p = await fetchText(pageUrlOf(r)); if (p.text) full.set(r.id, isFullRun(parseRunPage(p.text), S.repo.split('/')[1], (mine && mine.source) || 'dev')); }
+      if (!full.has(r.id)) { const p = await fetchText(pageUrlOf(r)); if (p.text) { const pg = parseRunPage(p.text), name = S.repo.split('/')[1]; full.set(r.id, isFullRun(pg, name, (mine && mine.source) || 'dev') || (!!rcBranch && isFullRun(pg, name, rcBranch.name))); } }
       if (!full.get(r.id)) continue;
       previous = nightly; nightly = r; manual = true;
       after = after.filter(x => Date.parse(x.createdAt) > Date.parse(r.createdAt));
@@ -120,7 +122,18 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
     const pageUrl = pageUrlOf(evidence);
     const [pageRes, histRes, prevRes, prodTip] = await Promise.all([fetchText(pageUrl), fetchText(pageUrl.replace('cucumber-report.run.html', 'history.json')),
       previous ? fetchText(pageUrlOf(previous)) : null, mine ? api(`repos/${S.repo}/commits/${mine.target}`) : null]);
-    const page = pageRes.text ? parseRunPage(pageRes.text) : null;
+    let page = pageRes.text ? parseRunPage(pageRes.text) : null;
+    // a partial re-run on the rc branch (failed modules only): the candidate is this run with those modules swapped in
+    const rr = rcBranch && rcBranch.rerun && rcBranch.rerun.id && rcBranch.rerun.scopes && rcBranch.runId === evidence.id ? rcBranch.rerun : null;
+    let rerun = null;
+    if (rr && page) {
+      const run = await api(`repos/${S.repo}/actions/runs/${rr.id}`);
+      if (run.data && run.data.status === 'completed') {
+        const url = pageUrlOf({ id: rr.id, attempt: run.data.run_attempt || 1 }), rp = await fetchText(url);
+        const rpage = rp.text ? parseRunPage(rp.text) : null;
+        if (rpage) { page = overlay(page, rpage, rr.scopes); rerun = { id: rr.id, reportUrl: url, runUrl: runUrlOf({ id: rr.id }) }; }
+      }
+    }
     let history = null; try { history = histRes.text ? JSON.parse(histRes.text) : null; } catch {}
     const prodAt = prodTip && prodTip.data && prodTip.data.commit ? prodTip.data.commit.committer.date : null;
     const result = grade({ page, pageUrl, prevPage: prevRes && prevRes.text ? parseRunPage(prevRes.text) : null, history, phase, apply, unreleased,
@@ -129,6 +142,7 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
     // The commits this candidate is: what the nightly tested, per repo. A repo the nightly has no suite for
     // is pinned where its source branch stood when the nightly started.
     const tested = testedShas(page, apply, S.repo.split('/')[1]);
+    const ref = ((page && page.suites.find(x => x.repo === S.repo.split('/')[1])) || {}).ref || null;
     const shas = {};
     await Promise.all(prodRow.map(async (p) => {
       const known = tested[p.repo.split('/')[1]];
@@ -137,8 +151,11 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
       const c = (at.data || [])[0];
       if (c && c.sha) shas[p.repo] = { sha: c.sha, tested: false, source: p.source, target: p.target };
     }));
-    return { night: nightly.createdAt, nightlyId: nightly.id, manual, evidence: { kind: decision === 'pr' ? 'verify' : 'nightly', runId: evidence.id, reportUrl: pageUrl,
-      runUrl: runUrlOf(evidence) }, fixPr: pr, ...result, shas, unreleased, computedAt: now(),
+    // on the rc branch: each repo at the branch head the re-run tested (a full run of the branch already reads them)
+    if (rerun) for (const [repo, sha] of Object.entries(rr.heads || {})) if (shas[repo]) shas[repo] = { ...shas[repo], sha, source: rcBranch.name };
+    if (rcBranch && ref === rcBranch.name) for (const v of Object.values(shas)) if (v.tested) v.source = rcBranch.name;
+    return { night: nightly.createdAt, nightlyId: nightly.id, manual, ref, rerun, evidence: { kind: rerun ? 'rc' : decision === 'pr' ? 'verify' : 'nightly', runId: evidence.id,
+      reportUrl: rerun ? rerun.reportUrl : pageUrl, runUrl: rerun ? rerun.runUrl : runUrlOf(evidence) }, fixPr: pr, ...result, shas, unreleased, computedAt: now(), rerunModules: failedModules(page),
       // what the AI is given beyond the rules: each failure's first error line, and the fixer's own words
       context: page ? {
         failures: page.failures.filter(f => !f.flaky).slice(0, 25).map(f => `- ${(page.modules.find(m => m.name === f.module) || {}).title || f.module}: ${f.name} | ${f.error}`).join('\n'),

@@ -1,6 +1,6 @@
 // Run: node rc-fix.test.js
 const assert = require('assert');
-const { readResult, prNumber, briefFor, causeState, readyToMerge, checksVerdict } = require('./rc-fix');
+const { readResult, prNumber, briefFor, causeState, readyToMerge, checksVerdict, approvedBy } = require('./rc-fix');
 
 // a result file is read only when it is whole and names a known status
 assert.deepStrictEqual(readResult('{"status":"pr","url":"https://github.com/o/r/pull/12"}'), { status: 'pr', url: 'https://github.com/o/r/pull/12' });
@@ -11,7 +11,7 @@ assert.strictEqual(prNumber('https://github.com/o/r/pull/12'), 12);
 // the brief tells the agent to look for someone else's fix first, on the base since the tested commit
 const blocker = { module: 'billing', tag: 'Billing', causes: [{ critical: true, scenarios: ['Resuming puts the subscription back on renewal'], step: 'the billing page should show no status banner', error: 'boom', url: 'u' }] };
 const b = briefFor({ blocker, i: 2, nightlyId: 77, repo: 'o/r', base: 'dev', testedSha: 'abc123', reportUrl: 'r', runUrl: 'run', resultPath: 'C:/x/2.json', skill: 'S.md' });
-assert.ok(b.includes('git log --oneline abc123..origin/dev') && b.includes('fixed-on-dev') && b.includes('open-elsewhere'));
+assert.ok(b.includes('git log --oneline abc123..origin/dev') && b.includes('cherry-pick'));
 assert.ok(b.includes('fix/rc-77-2') && b.includes('C:/x/2.json') && b.includes('@critical'));
 
 // what the card shows per cause
@@ -33,9 +33,19 @@ assert.strictEqual(readyToMerge({ a: green, b: { kind: 'fixed' }, c: { kind: 'ne
 assert.strictEqual(readyToMerge({ a: { kind: 'fixed' }, b: { kind: 'declined' } }), true); // nothing to merge, re-run still useful
 assert.strictEqual(readyToMerge({}), false);
 
+// green but unapproved waits for a review, and holds the merge
+assert.strictEqual(causeState({ started: true, result: { status: 'pr', url: 'p' }, pr: { state: 'open', green: true, approved: false } }).kind, 'review');
+assert.strictEqual(readyToMerge({ a: { kind: 'review', mine: true } }), false);
+const rcb = briefFor({ blocker, i: 0, nightlyId: 77, repo: 'o/r', base: 'rc/77', dev: 'dev', others: ['o/web'], testedSha: 'abc', reportUrl: 'r', runUrl: 'run', resultPath: 'x', skill: 'S' });
+assert.ok(rcb.includes('origin/rc/77') && rcb.includes('origin/dev') && rcb.includes('o/web'));
+
 // check runs
 assert.deepStrictEqual(checksVerdict([{ name: 'a', status: 'completed', conclusion: 'success' }, { name: 'b', status: 'completed', conclusion: 'skipped' }]), { green: true });
 assert.deepStrictEqual(checksVerdict([{ name: 'a', status: 'in_progress' }]), { pending: true });
 assert.deepStrictEqual(checksVerdict([{ name: 'a', status: 'completed', conclusion: 'failure' }]), { red: true });
+
+assert.strictEqual(approvedBy([{ user: { login: 'a' }, state: 'APPROVED' }]), true);
+assert.strictEqual(approvedBy([{ user: { login: 'a' }, state: 'APPROVED' }, { user: { login: 'b' }, state: 'CHANGES_REQUESTED' }]), false);
+assert.strictEqual(approvedBy([{ user: { login: 'a' }, state: 'COMMENTED' }]), false);
 
 console.log('rc-fix: ok');
