@@ -377,7 +377,6 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
 
   // ── Fix blockers: one agent per blocking cause of the candidate, then Merge & re-run (rc-fix.js) ──
   const RC_FIX_POLL_MS = 2 * 60 * 1000;
-  const RC_FIX_AT_ONCE = 6; // agents running at a time; the rest wait their turn
   const rcRepo = () => (state.config && state.config.rc && state.config.rc.repo) || 'LLSLtd/frontlineio-frontend';
   const rcBase = () => { const p = releasePlan(state.config, ['prod']).prs.find(x => x.repo.toLowerCase() === rcRepo().toLowerCase()); return (p && p.source) || 'dev'; };
   let rcFixTimer = null;
@@ -391,7 +390,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const testedSha = (c.shas && c.shas[repo] && c.shas[repo].sha) || '';
     const skill = path.join(cwd, '.claude', 'skills', 'bdd-fix', 'SKILL.md').replace(/\\/g, '/');
     let added = 0;
-    // every blocking module gets a brief now; startQueued() starts them RC_FIX_AT_ONCE at a time
+    // every blocking module gets a brief now; startQueued() hands them all to one agent
     for (const [i, blocker] of c.blockers.entries()) {
       if (fix.items[blocker.key]) continue;
       const base = path.join(runsDir(), `rc-fix-${runId}-${i}`);
@@ -402,22 +401,20 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }
     fix.cwd = cwd;
     push({ rcFix: fix }); persist();
-    send({ type: 'toast', text: added ? `Fixing ${added} module${added === 1 ? '' : 's'}, ${RC_FIX_AT_ONCE} at a time` : 'Every blocker already has an agent' });
+    send({ type: 'toast', text: added ? `Fixing ${added} module${added === 1 ? '' : 's'} with one agent` : 'Every blocker already has an agent' });
     pollRcFix().catch(() => {});
   }
-  // start waiting agents while fewer than RC_FIX_AT_ONCE are still working
-  function startQueued(states) {
+  // one agent takes every waiting module, one after another (each brief keeps its own branch, PR and result file)
+  function startQueued() {
     const fix = state.rcFix;
     if (!fix || !fix.cwd || !startAgent) return false;
-    let busy = Object.values(states).filter(x => x.kind === 'working').length, changed = false;
-    for (const it of Object.values(fix.items).sort((a, b) => a.i - b.i)) {
-      if (busy >= RC_FIX_AT_ONCE) break;
-      if (it.startedAt) continue;
-      it.startedAt = Date.now(); busy++; changed = true;
-      startAgent(fix.cwd, `Fix the release blockers in one module. Read and follow ${it.brief} and write its result file`);
-    }
-    if (changed) { push({ rcFix: { ...fix } }); persist(); }
-    return changed;
+    const waiting = Object.values(fix.items).filter(it => !it.startedAt).sort((a, b) => a.i - b.i);
+    if (!waiting.length) return false;
+    for (const it of waiting) it.startedAt = Date.now();
+    startAgent(fix.cwd, `Fix the release blockers, one module at a time, in this order. For each, read and follow its brief and write its result file before moving to the next:
+${waiting.map(it => '\n- ' + it.brief).join('')}`);
+    push({ rcFix: { ...fix } }); persist();
+    return true;
   }
   async function prState(url) {
     const m = String(url || '').match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
@@ -439,6 +436,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     }
     if (startQueued(states)) for (const [key, it] of Object.entries(fix.items)) if (it.startedAt && states[key].kind === 'queued') states[key] = { ...states[key], kind: 'working' };
     push({ rcFixView: { runId: fix.runId, states, ready: rcFix.readyToMerge(states) } });
+    // the goal is a releasable candidate, so once every fix is in, merge and re-run without waiting for a click
+    if (state.rcFixView.ready && !fix.rerunAt) return mergeAndRerun();
     if (Object.values(states).some(x => ['queued', 'working', 'running'].includes(x.kind))) rcFixTimer = setTimeout(() => pollRcFix().catch(() => {}), RC_FIX_POLL_MS);
   }
   // Merge every green fix PR this card opened, then start a full regression with the fixer from the base: its
