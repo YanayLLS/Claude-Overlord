@@ -652,6 +652,11 @@ button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
 .ft-row input[type=checkbox] { width:15px; height:15px; margin:0; flex:none; accent-color:var(--accent); cursor:pointer; }
 .ft-repo { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
 .ft-from { font-size:11px; color:var(--dim); flex:none; }
+.ft-need { flex:none; }
+.ft-need button { display:inline-flex; align-items:center; gap:4px; padding:2px 8px 2px 6px; font:inherit; font-size:11px; font-weight:600; color:var(--yellow); background:color-mix(in srgb, var(--yellow) 10%, transparent); border:1px solid color-mix(in srgb, var(--yellow) 35%, transparent); border-radius:999px; cursor:pointer; }
+.ft-need button:hover { background:color-mix(in srgb, var(--yellow) 18%, transparent); }
+.ft-need svg { width:12px; height:12px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.ft-need-line { margin:-6px 0 12px; min-height:0; }
 .ft-row .branch-combo { position:relative; width:150px; flex:none; }
 .ft-row .branch-combo input { width:100%; box-sizing:border-box; padding:5px 8px; font-family:'Geist Mono',monospace; font-size:11.5px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:6px; outline:none; }
 .ft-row .branch-combo input:focus { border-color:var(--accent); }
@@ -2092,6 +2097,7 @@ function openAddRepo(feature) {
       </select>
       <button onclick="send({type:'browseFeatureRepo'})" style="padding:7px 10px;background:transparent;color:#89b4fa;border:1px dashed #45475a;border-radius:6px;cursor:pointer;white-space:nowrap">Browse&#x2026;</button>
     </div>
+    <div class="ft-need-line"><span class="ft-need" id="add-repo-need"></span></div>
     <label style="display:block;margin-bottom:4px">Base branch <span style="opacity:.6">(type to search)</span></label>
     <div class="branch-combo" style="position:relative;width:100%;margin-bottom:16px">
       <input id="ft-base-add" autocomplete="off" placeholder="base branch" style="width:100%;box-sizing:border-box;padding:7px;background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:6px"
@@ -2104,12 +2110,14 @@ function openAddRepo(feature) {
     </div></div>`;
   el.style.display = 'flex';
   _ftBranches['add'] = ['dev'];
+  if (candidates.length) send({ type: 'repoChecks', repos: candidates });
   if (candidates.length) onAddRepoPick();
 }
 function closeAddRepo() { _addRepoFeature = null; closeWt(); }
 function onAddRepoPick() {
   const repo = document.getElementById('add-repo').value;
   if (!repo) return;
+  const need = document.getElementById('add-repo-need'); if (need) { need.dataset.needFor = repo; paintNeed(need); }
   const def = (projects[repo] && projects[repo].defaultBase) || 'dev';
   const inp = document.getElementById('ft-base-add'); if (inp && !inp.value) inp.value = def;
   _branchCbs[repo] = (branches, err) => { _ftBranches['add'] = (err || !branches || !branches.length) ? ['dev'] : branches; };
@@ -2125,6 +2133,18 @@ function submitAddRepo() {
 }
 
 let _ftIdx = 0;
+// Node each repo needs vs this machine's (main: repoChecks). A short chip where it falls short; click installs.
+const _repoChecks = new Map(); // repo -> { node: { ok, need, have, source } }
+function paintNeed(el) {
+  const c = _repoChecks.get(el.dataset.needFor), n = c && c.node;
+  if (!n || n.ok) { el.innerHTML = ''; el.title = ''; return; }
+  el.title = `Needs Node ${n.need}+ (${n.source}) · you have ${n.have || 'none'} · click to install`;
+  el.innerHTML = `<button type="button" onclick="event.stopPropagation();send({type:'installNode',major:${n.need}})"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18v.5"/></svg>Node ${n.need}</button>`;
+}
+function onRepoChecks(list) {
+  for (const c of list || []) _repoChecks.set(c.repo, c);
+  document.querySelectorAll('[data-need-for]').forEach(paintNeed);
+}
 // Same rules as worktree.js safeBranch, so the preview shows the branch git will get.
 function ftBranch(n) { return String(n).trim().replace(/[\x00-\x1f\x7f ~^:?*\[\\]+/g, '-').replace(/\/{2,}/g, '/').replace(/^[-/.]+|[-/.]+$/g, '').replace(/-{2,}/g, '-'); }
 function openNewFeature() {
@@ -2174,6 +2194,7 @@ function addFeatureRepoRow(repo, checked) {
   row.onclick = (e) => { if (e.target.closest('.branch-combo') || e.target.type === 'checkbox') return; const c = row.querySelector('input[type=checkbox]'); c.checked = !c.checked; ftUpdate(); };
   row.innerHTML = `<input type="checkbox" id="ft-repo-${i}" data-repo="${escAttr(repo)}" ${checked ? 'checked' : ''} onchange="ftUpdate()" aria-label="${escAttr(pathLabel(repo))}">
     <span class="ft-repo" title="${escAttr(repo)}">${esc(pathLabel(repo))}</span>
+    <span class="ft-need" data-need-for="${escAttr(repo)}"></span>
     <span class="ft-from">from</span>
     <div class="branch-combo">
       <input id="ft-base-${i}" autocomplete="off" spellcheck="false" value="${escAttr(def)}" placeholder="dev" title="${escAttr(def)}"
@@ -2182,6 +2203,7 @@ function addFeatureRepoRow(repo, checked) {
     </div>`;
   rows.appendChild(row);
   ftUpdate();
+  send({ type: 'repoChecks', repos: [repo] });
   _branchCbs[repo] = (branches, err) => {
     _ftBranches[i] = (err || !branches || !branches.length) ? ['dev'] : branches;
     if (document.activeElement === document.getElementById(`ft-base-${i}`)) filterBranchMenu(i);
@@ -4902,6 +4924,7 @@ function handleAgentMsg(msg) {
     case 'sessionChanged': { const a = agents.get(msg.id); if (a) { a.sessionId = msg.sessionId; a.chatHides = []; if (msg.id === selectedId) rememberAgent(); } break; } // after /clear or /resume: drafts and hidden messages are this session's
     case 'dictation': chatComposer.onDictation(msg); break;
     case 'clipboardImageSaved': chatComposer.onImageSaved(msg); break;
+    case 'repoChecks': onRepoChecks(msg.checks); break;
     case 'mentionRouted': chatUi.dropPending(msg.id); if (msg.id === selectedId) renderConversation(); break; // went to the @named agent, not this one
     case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': case 'gitReverted': case 'cliSent': case 'sendFailed': chatUi.onMsg(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;

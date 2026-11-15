@@ -60,6 +60,7 @@ Over MCP, a failed call returns `isError: true` with the message as its text.
 | Low-level control | `agent_keys` (raw keys: `"\r"` Enter, `"\u001b"` Esc, `"\u001b[B"` down arrow), `agent_interrupt` (Esc: stops the turn and drops queued sends) |
 | Lifecycle | `agent_archive`, `agent_unarchive`, `agent_close`, `agent_wake` (resume a sleeping agent) |
 | Peer chat (people and their Overlords on the LAN) | `chat_list`, `chat_read` (`peer` or `group`, `limit?`), `chat_send` (`peer` or `group`, `text`) |
+| Repos | `repo_check` (`repo`): `node.ok` false means a worktree install there will likely fail; `need`, `have`, `source` say why |
 | Events | `events_poll` (`since?`, `types?`, `timeoutSec?` max 60), `webhook_add` / `webhook_list` / `webhook_remove` |
 
 ## 5. Recipes

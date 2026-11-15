@@ -97,6 +97,7 @@ const TOOLS = [
   ['chat_send', 'Send a peer-chat message to a peer or group.', obj({ ...TO, text: S('The message.') }, ['text'])],
   ['events_poll', 'Events after a sequence number, waiting up to timeoutSec for one to arrive. For clients that can\'t hold an SSE stream (e.g. MCP).', obj({ since: N('Last seq you saw; 0 for what is buffered.'), types: { type: 'array', items: { type: 'string' }, description: 'Event types, or prefixes ending in "." (e.g. "agent."). Default all.' }, timeoutSec: N('Default 25, max 60.') })],
   ['webhook_add', 'Register a URL on this machine (http://127.0.0.1 or localhost) that gets each event POSTed as JSON, signed with X-Overlord-Signature: sha256=HMAC(secret, body). Returns the secret once.', obj({ url: S('http://127.0.0.1:<port>/<path>'), types: { type: 'array', items: { type: 'string' }, description: 'Event types or prefixes. Default all.' } }, ['url'])],
+  ['repo_check', 'Whether this machine can set up a repo: the Node major it needs (from .nvmrc, .node-version, engines.node or a locked package) against the installed one. node.ok false means its worktree install will likely fail.', obj({ repo: S('Absolute path of the repo (its main checkout).') }, ['repo'])],
   ['webhook_list', 'Registered webhooks (no secrets), with delivery failure counts.', obj({})],
   ['webhook_remove', 'Remove a webhook.', obj({ id: S('Webhook id.') }, ['id'])],
 ].map(([name, description, inputSchema]) => ({ name, description, inputSchema }));
@@ -271,6 +272,7 @@ function createApi(host) {
       hooks.push(h); persistHooks();
       return { id: h.id, url: h.url, types: h.types, secret: h.secret };
     },
+    repo_check: (x) => { if (!x.repo) throw new ApiError(400, 'repo is required'); return host.repoCheck(String(x.repo)); },
     webhook_list: () => ({ webhooks: hooks.map(({ secret, ...h }) => h) }),
     webhook_remove: (x) => { const n = hooks.length; hooks = hooks.filter(h => h.id !== x.id); if (hooks.length === n) throw missing('no such webhook'); queues.delete(x.id); persistHooks(); return { ok: true }; },
   };

@@ -57,6 +57,12 @@ test('a repo joining a feature mid-task is a public event', () => {
     { type: 'feature.repo_added', agentId: 4, feature: 'Model update', repo: 'C:/Work/back-office', path: 'C:/wt/back-office/Model-update', branch: 'Model-update' });
 });
 
+test('repo_check reports the Node a repo needs against this machine', async () => {
+  const api = createApi(fakeHost({ repoCheck: async (repo) => ({ repo, node: { ok: false, need: 24, have: '20.20.0', source: '.nvmrc' } }) }));
+  assert.deepStrictEqual(await api.call('repo_check', { repo: 'C:/Work/Designs' }), { repo: 'C:/Work/Designs', node: { ok: false, need: 24, have: '20.20.0', source: '.nvmrc' } });
+  await assert.rejects(api.call('repo_check', {}), { status: 400 });
+});
+
 test('publish numbers events, keeps them for replay, filters by type', () => {
   const api = createApi(fakeHost());
   api.publish({ type: 'status', id: 1, status: 'active' });

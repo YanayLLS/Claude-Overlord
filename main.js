@@ -11,6 +11,7 @@ let autoUpdater = null; // electron-updater: packaged builds only, loaded on app
 const pty = require('node-pty');
 const wt = require('./worktree');
 const { planRedirect } = require('./feature-redirect');
+const nodeReq = require('./node-req');
 const pc = require('./peer-core');
 const wc = require('./watch-core');
 const timelineCore = require('./timeline-core');
@@ -4641,6 +4642,16 @@ async function onFeatureEdit(agentId, input) {
     + `Do not edit its main checkout (${plan.repo}): make this change in ${target} instead, and do all further work in that repo under ${member.path}.` };
 }
 
+// The machine's `node -v` (not Electron's own Node), cached 15 s.
+let _nodeV = null;
+function installedNode() {
+  if (_nodeV && Date.now() - _nodeV.at < 15000) return _nodeV.p;
+  const p = new Promise((resolve) => execFile('node', ['-v'], { windowsHide: true, timeout: 10000 }, (e, out) => resolve(e ? '' : String(out).trim())));
+  _nodeV = { at: Date.now(), p };
+  return p;
+}
+async function repoCheck(repo) { return { repo, node: nodeReq.checkNode(nodeReq.nodeRequirement(repo), await installedNode()) }; }
+
 // Background folder deletions by lower-cased path, so re-creating a just-removed worktree
 // waits for its old folder to go instead of colliding with it halfway.
 const pendingRemovals = new Map();
@@ -4891,6 +4902,19 @@ function handleIpc(msg) {
         doCreateWorktree({ repo: r.repo, branch: name, base: r.base || 'dev', feature: name })
           .catch(e => { flog(`createFeature ${name} / ${r.repo} failed:`, e); send({ type: 'toast', text: `Feature ${name} — ${path.basename(r.repo)} failed: ${e.message || 'error'}` }); });
       }
+      break;
+    }
+    case 'repoChecks': { // the New feature / Add repo rows: does this machine have the Node each repo needs?
+      const repos = (Array.isArray(msg.repos) ? msg.repos : []).filter(r => typeof r === 'string').slice(0, 50);
+      Promise.all(repos.map(repoCheck)).then(list => send({ type: 'repoChecks', checks: list }));
+      break;
+    }
+    case 'installNode': { // one click from a "Needs Node N" row: the install runs where you can watch it (UAC prompts there)
+      _nodeV = null;
+      if (process.platform === 'win32' && termPane) {
+        try { termPane.open({ name: 'Install Node', cwd: os.homedir(), mode: '/k', line: 'winget install --id OpenJS.NodeJS.LTS --source winget --accept-package-agreements --accept-source-agreements' }); send({ type: 'toast', text: `Installing Node LTS (needs ${Number(msg.major) || 'newer'}+) in the Terminals pane` }); }
+        catch (e) { shell.openExternal('https://nodejs.org/en/download'); }
+      } else shell.openExternal('https://nodejs.org/en/download');
       break;
     }
     case 'removeWorktree': {
@@ -5892,6 +5916,7 @@ function apiHost() {
     close: (id) => closeAgent(need(id)),
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
+    repoCheck: (repo) => repoCheck(repo),
     chatList: () => {
       const c = chats();
       return { peersEnabled: !!settings.peersEnabled, me: myPeerName(), online: connectedPeerNames(), conversations: [

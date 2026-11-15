@@ -86,6 +86,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `chat_send` | `peer` or `group`, `text` | `{ conversation, message, offline }`. 409 if no recipient is online. |
 | `events_poll` | `since?`, `types?`, `timeoutSec?` (max 60) | `{ events, seq }`. Long-poll: returns as soon as one event matches. |
 | `webhook_add` | `url`, `types?` | `{ id, secret }`. The secret is shown only this once. |
+| `repo_check` | `repo` | `{ repo, node: { ok, need, have, source } }`: the Node major the repo needs (`.nvmrc`, `.node-version`, `engines.node` or a locked package, the strictest) against `node -v` on this machine |
 | `webhook_list` | | `{ webhooks }` (without secrets) |
 | `webhook_remove` | `id` | `{ ok: true }` |
 
