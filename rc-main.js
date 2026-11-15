@@ -17,7 +17,7 @@ const DEFAULTS = { repo: 'LLSLtd/frontlineio-frontend', workflow: 'bdd-regressio
 const AI_TIMEOUT_MS = 120e3;
 const SIGN_OFF = /^I (AM DONE|NEED YOU\b.*|AM WORKING\b.*)$/;
 const SIGN_OFF_TAIL = /\s*I (AM DONE|NEED YOU:.*|AM WORKING.*)$/;
-const MANUAL_SCAN = 3; // dispatches after the nightly looked at for a full manual run
+const MANUAL_SCAN = 8; // dispatches after the nightly looked at for a full manual run
 const VERIFY_SCAN = 5; // dispatches after the nightly looked at for its verify run
 
 const httpText = (url) => new Promise((resolve) => {
@@ -99,8 +99,9 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
     const prodRow = releasePlan(cfg, ['prod']).prs;
     const mine = prodRow.find(p => p.repo.toLowerCase() === S.repo.toLowerCase());
     // A full regression someone ran by hand after the last scheduled night is the newer evidence: grade that.
+    // Cancelled counts too (e.g. its fixer was stopped): isFullRun still demands every module reported.
     let { nightly, previous, after } = chain, manual = false;
-    for (const r of [...after].reverse().filter(x => x.status === 'completed' && x.conclusion !== 'cancelled' && !/rs-web/.test(x.title)).slice(0, MANUAL_SCAN)) {
+    for (const r of [...after].reverse().filter(x => x.status === 'completed' && !/rs-web/.test(x.title)).slice(0, MANUAL_SCAN)) {
       if (!full.has(r.id)) { const p = await fetchText(pageUrlOf(r)); if (p.text) full.set(r.id, isFullRun(parseRunPage(p.text), S.repo.split('/')[1], (mine && mine.source) || 'dev')); }
       if (!full.get(r.id)) continue;
       previous = nightly; nightly = r; manual = true;
