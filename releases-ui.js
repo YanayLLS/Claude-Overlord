@@ -144,6 +144,8 @@
     rcRetry: () => actions.rcRefresh(), rcRetryAi: () => actions.rcRefresh(), rcRetryFlags: () => actions.rcRefresh(),
     rcMore: () => { rcOpen = !rcOpen; render(); },
     rcShas: () => { rcShas = !rcShas; render(); },
+    rcFix: () => { api.send({ type: 'releasesRcFix' }); },
+    rcMerge: (el) => { markBusy(el, 'Merging…'); render(); api.send({ type: 'releasesRcMerge' }); },
     rcCancel: () => { armed = null; clearTimeout(armTimer); say('Release cancelled'); render(); },
     // a Hold is released only on a second, deliberate click
     rcRelease: (el) => { if (!state.rc || state.rc.loading) return; if (state.rc.level === 'hold' && armed !== 'rc') return arm('rc'); if (armed === 'rc' && Date.now() - armAt < 400) return; /* a double click is not a confirmation */ armed = null; clearTimeout(armTimer); markBusy(el, 'Opening…'); render(); api.send({ type: 'releasesRcRelease' }); },
@@ -1463,11 +1465,24 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const hold = c.level === 'hold';
     const flagsBad = c.flags && c.flags.error;
     // a row: what broke, where (said once per run of rows), and that it opens the report
+    // a blocker's fix agent, as a chip on its row: what it is doing, and where its PR is
+    const fixV = s.rcFixView && c.evidence && s.rcFixView.runId === c.evidence.runId ? s.rcFixView : null;
+    const CHIP = { working: ['run', 'Fixing'], running: ['run', 'Testing'], green: ['ok', 'Ready'], red: ['bad', 'Fix failed'], merged: ['ok', 'Merged'],
+      fixed: ['ok', 'Fixed on dev'], elsewhere: ['', 'PR open'], pr: ['', 'PR'], 'needs-you': ['warn', 'Needs you'], declined: ['', 'Declined'], closed: ['', 'Closed'] };
+    const chipHtml = (key) => {
+      const st = fixV && fixV.states[key]; if (!st || !CHIP[st.kind]) return '';
+      const [tone, label] = CHIP[st.kind];
+      const tip = esc([st.by ? 'by ' + st.by : '', st.text || ''].filter(Boolean).join(' · '));
+      const inner = (st.kind === 'working' || st.kind === 'running' ? rcIc(RC_IC.busy, ' turn') : '') + label;
+      return st.url ? rcLink(`rl-rc-chip ${tone}`, st.url, inner, tip ? ` title="${tip}"` : '') : `<span class="rl-rc-chip ${tone}"${tip ? ` title="${tip}"` : ''}>${inner}</span>`;
+    };
     const itemHtml = (wrap) => (i, n, all) => {
       const tag = i.tag && !(n && all[n - 1].tag === i.tag) ? i.tag : '';
       const body = `<span class="rl-rc-txt${wrap ? ' wrap' : ''}">${esc(i.text)}</span>${tag ? `<span class="rl-rc-tag">${esc(tag)}</span>` : ''}`;
+      const chip = i.key ? chipHtml(i.key) : '';
       const tip = esc(i.text + (i.tag ? ' · ' + i.tag : '') + (i.more ? ` · ${i.more} more with the same cause` : ''));
-      return i.url ? rcLink('rl-rc-item', i.url, body + rcIc(RC_IC.out), ` title="${tip}" aria-label="${tip}"`) : `<div class="rl-rc-item" title="${tip}">${body}</div>`;
+      const row = i.url ? rcLink('rl-rc-item', i.url, body + rcIc(RC_IC.out), ` title="${tip}" aria-label="${tip}"`) : `<div class="rl-rc-item" title="${tip}">${body}</div>`;
+      return chip ? `<div class="rl-rc-itemwrap">${row}${chip}</div>` : row;
     };
     // names (modules, suites) are one line that opens the report; the full list is its tooltip
     const namesHtml = (r) => rcLink(`rl-rc-rule rl-rc-line ${r.level}`, c.evidence.reportUrl, `${rcIc(r.id === 'checks' ? RC_IC[r.level] : RC_IC.stop)}<span>${esc(RC_GROUP[r.id])}</span><span class="rl-rc-txt">${r.items.slice(0, 2).map(i => esc(i.text)).join(', ')}${r.total > 2 ? ` and ${r.total - 2} more` : ''}</span>${rcIc(RC_IC.out)}`,
@@ -1498,7 +1513,13 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       ? (armed === 'rc' ? `<button class="rl-hist-btn rl-rc-cancel" data-act="rcCancel">Cancel</button><button class="rl-hist-btn rl-rc-any armed-bad" data-act="rcRelease" style="--left:${left.toFixed(3)};--ms:${Math.round(left * ARM_MS)}ms">Release despite Hold</button>`
         : `<button class="rl-hist-btn rl-rc-any${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : ''}Release anyway</button>`)
       : `<button class="rl-hist-btn go${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : '🚀 '}Release</button>`;
-    const report = rcLink(`rl-hist-btn${hold ? ' go' : ''}`, c.evidence.reportUrl, rcIc(RC_IC.report) + 'Report');
+    // Fix blockers until every blocker has an agent; Merge & re-run once their PRs are green
+    const blockers = c.blockers || [], untouched = blockers.slice(0, 8).filter(b => !(fixV && fixV.states[b.key]));
+    const fixBtn = !can || c.level === 'ship' || !blockers.length ? ''
+      : fixV && fixV.ready && !fixV.rerunAt ? `<button class="rl-hist-btn go" data-act="rcMerge" title="Merge the green fix PRs into dev and run a full regression with the fixer">${rcIc(RC_IC.pr)}Merge &amp; re-run</button>`
+      : untouched.length ? `<button class="rl-hist-btn${hold ? '' : ''}" data-act="rcFix" title="One agent per blocking cause, each on its own branch from dev">${rcIc(RC_IC.ai)}Fix blockers</button>`
+      : fixV && fixV.rerunAt ? `<span class="rl-rc-lock">${rcIc(RC_IC.busy, ' turn')}Re-running</span>` : '';
+    const report = rcLink(`rl-hist-btn${hold && !(fixV && fixV.ready) ? ' go' : ''}`, c.evidence.reportUrl, rcIc(RC_IC.report) + 'Report');
     // the fixer's PR matters while it is still to be merged
     const fixer = c.fixPr && !c.fixPr.merged ? rcLink('rl-hist-btn', c.fixPr.url, rcIc(RC_IC.pr) + 'Auto-fix PR', ` title="The nightly fixer's pull request: ${c.fixPr.open ? 'open' : 'closed'}"`) : '';
     const fold = (act, on, label) => `<button class="rl-rc-fold${on ? ' on' : ''}" data-act="${act}" aria-expanded="${on}">${rcIc(RC_IC.chev)}${label}</button>`;
@@ -1518,7 +1539,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       + (!open.length && passed.length ? `<div class="rl-rc-rules sub ship">${passed.map(ruleHtml).join('')}</div>` : '')
       + `<div class="rl-rc-folds">${open.length && passed.length ? fold('rcMore', rcOpen, 'Passed') + (rcOpen ? `<div class="rl-rc-rules sub">${passed.map(ruleHtml).join('')}</div>` : '') : ''}`
       + `${shas.length ? fold('rcShas', rcShas, 'Commits') + (rcShas ? `<div class="rl-rc-shas">${repos}</div>` : '') : ''}</div>`
-      + `<div class="rl-rc-acts">${hold ? report + fixer + '<span class="rl-rc-gap"></span>' + release : release + report + fixer}</div></div>`;
+      + `<div class="rl-rc-acts">${hold ? report + fixBtn + fixer + '<span class="rl-rc-gap"></span>' + release : release + report + fixBtn + fixer}</div></div>`;
   }
 
   function releaseTabHtml(s) {

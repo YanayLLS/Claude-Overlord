@@ -10,6 +10,7 @@ const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix, isReleaseHead
 const createHistory = require('./release-history');
 const createRc = require('./rc-main');
 const { demoCandidate, ghIsRead } = require('./rc-core');
+const rcFix = require('./rc-fix');
 // Demo mode (a sandboxed instance started with OVERLORD_RC_DEMO=1): the Releases board can be walked end to
 // end, but it only ever READS GitHub. Every write this board would make is refused before it leaves.
 const DEMO = !!process.env.OVERLORD_RC_DEMO;
@@ -372,6 +373,78 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const c = state.rc;
     if (!c || !c.shas || !Object.keys(c.shas).length) { send({ type: 'toast', text: 'No release candidate to release yet' }); return Promise.resolve(); }
     return release(['prod'], null, null, false, null, false, Object.fromEntries(Object.entries(c.shas).map(([repo, v]) => [repo, v.sha])));
+  }
+
+  // ── Fix blockers: one agent per blocking cause of the candidate, then Merge & re-run (rc-fix.js) ──
+  const RC_FIX_POLL_MS = 2 * 60 * 1000;
+  const rcRepo = () => (state.config && state.config.rc && state.config.rc.repo) || 'LLSLtd/frontlineio-frontend';
+  const rcBase = () => { const p = releasePlan(state.config, ['prod']).prs.find(x => x.repo.toLowerCase() === rcRepo().toLowerCase()); return (p && p.source) || 'dev'; };
+  let rcFixTimer = null;
+  async function fixBlockers() {
+    const c = state.rc;
+    if (!c || !c.blockers || !c.blockers.length) return send({ type: 'toast', text: 'Nothing blocking to fix' });
+    if (!state.approvers || !state.approvers.isApprover) return send({ type: 'toast', text: 'Approvers only' });
+    if (!startAgent) return send({ type: 'toast', text: 'Agents are not available here' });
+    const runId = c.evidence.runId, cwd = await configCheckout(), repo = rcRepo();
+    const fix = state.rcFix && state.rcFix.runId === runId ? state.rcFix : { runId, items: {} };
+    const testedSha = (c.shas && c.shas[repo] && c.shas[repo].sha) || '';
+    const skill = path.join(cwd, '.claude', 'skills', 'bdd-fix', 'SKILL.md').replace(/\\/g, '/');
+    let started = 0;
+    // ponytail: one agent per cause up to 8; the rest wait for the next click, so a broken night can't open dozens
+    for (const [i, cause] of c.blockers.slice(0, 8).entries()) {
+      if (fix.items[cause.key]) continue;
+      const base = path.join(runsDir(), `rc-fix-${runId}-${i}`);
+      const resultPath = (base + '.json').replace(/\\/g, '/');
+      fs.writeFileSync(base + '.md', rcFix.briefFor({ cause, i, nightlyId: runId, repo, base: rcBase(), testedSha, reportUrl: c.evidence.reportUrl, runUrl: c.evidence.runUrl, resultPath, skill }));
+      fix.items[cause.key] = { i, startedAt: Date.now(), resultPath, title: cause.title };
+      startAgent(cwd, `Fix one release blocker. Read and follow ${(base + '.md').replace(/\\/g, '/')} and write its result file`);
+      started++;
+    }
+    push({ rcFix: fix }); persist();
+    send({ type: 'toast', text: started ? `Started ${started} fix agent${started === 1 ? '' : 's'}` : 'Every blocker already has an agent' });
+    pollRcFix().catch(() => {});
+  }
+  async function prState(url) {
+    const m = String(url || '').match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+    if (!m) return null;
+    const p = await ghJson(['api', `repos/${m[1]}/pulls/${m[2]}`]);
+    if (!p.data) return null;
+    const runs = await ghJson(['api', '-X', 'GET', `repos/${m[1]}/commits/${p.data.head.sha}/check-runs`, '-f', 'per_page=100']);
+    return { repo: m[1], number: Number(m[2]), state: p.data.state, merged: !!p.data.merged_at, ...rcFix.checksVerdict(runs.data && runs.data.check_runs) };
+  }
+  async function pollRcFix() {
+    clearTimeout(rcFixTimer); rcFixTimer = null;
+    const fix = state.rcFix;
+    if (!fix || !Object.keys(fix.items).length) return;
+    const states = {};
+    for (const [key, it] of Object.entries(fix.items)) {
+      let result = null; try { result = rcFix.readResult(fs.readFileSync(it.resultPath, 'utf8')); } catch {}
+      const pr = result && (result.status === 'pr' || result.status === 'open-elsewhere') ? await prState(result.url) : null;
+      states[key] = { ...rcFix.causeState({ started: true, result, pr }), title: it.title, pr: pr ? { repo: pr.repo, number: pr.number } : null };
+    }
+    push({ rcFixView: { runId: fix.runId, states, ready: rcFix.readyToMerge(states) } });
+    if (Object.values(states).some(x => ['working', 'running'].includes(x.kind))) rcFixTimer = setTimeout(() => pollRcFix().catch(() => {}), RC_FIX_POLL_MS);
+  }
+  // Merge every green fix PR this card opened, then start a full regression with the fixer from the base: its
+  // grade is the next candidate.
+  async function mergeAndRerun() {
+    if (!state.approvers || !state.approvers.isApprover) return send({ type: 'toast', text: 'Approvers only' });
+    const v = state.rcFixView;
+    if (!v || !v.ready) return send({ type: 'toast', text: 'Not every fix is ready yet' });
+    const failed = [];
+    for (const x of Object.values(v.states).filter(x => x.kind === 'green' && x.mine && x.pr)) {
+      let r = await ghJson(['api', '-X', 'PUT', `repos/${x.pr.repo}/pulls/${x.pr.number}/merge`, '-f', 'merge_method=merge']);
+      if (r.error) r = await ghJson(['api', '-X', 'PUT', `repos/${x.pr.repo}/pulls/${x.pr.number}/merge`, '-f', 'merge_method=squash']);
+      if (r.error) failed.push(`#${x.pr.number}: ${r.error}`);
+    }
+    if (failed.length) return send({ type: 'toast', text: 'Merge failed, nothing re-run: ' + failed.join('; ') });
+    const base = rcBase(), wf = (state.config.rc && state.config.rc.workflow) || 'bdd-regression.yml';
+    const d = await ghJson(['api', '-X', 'POST', `repos/${rcRepo()}/actions/workflows/${wf}/dispatches`, '-f', `ref=${base}`,
+      '-f', `inputs[frontend_ref]=${base}`, '-f', `inputs[backend_ref]=${base}`, '-f', 'inputs[run_checks]=true', '-f', 'inputs[autofix_mode]=fix']);
+    if (d.error && !/Unexpected end|JSON/i.test(d.error)) return send({ type: 'toast', text: 'Merged, but the regression did not start: ' + d.error });
+    push({ rcFix: { ...state.rcFix, rerunAt: Date.now() }, rcFixView: { ...v, rerunAt: Date.now() } }); persist();
+    send({ type: 'toast', text: 'Merged. A full regression with the fixer is running; its grade is the next candidate' });
+    setTimeout(() => refreshRc(true).catch(() => {}), 60e3);
   }
 
   // A deploy just went red: say so once (the transition, not every poll), click opens the run.
@@ -1754,6 +1827,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesState': send({ type: 'releases', state }); return true; // a (re)loaded page: what the PR panel's holds need, now
       case 'releasesRefresh': refresh(); return true;
       case 'releasesRc': refreshRc(true).catch(e => push({ rc: { ...(state.rc || {}), loading: false, error: e.message } })); return true;
+      case 'releasesRcFix': fixBlockers().catch(e => send({ type: 'toast', text: 'Fix blockers failed: ' + e.message })); return true;
+      case 'releasesRcMerge': mergeAndRerun().catch(e => send({ type: 'toast', text: 'Merge & re-run failed: ' + e.message })); return true;
       case 'releasesRcRelease': releaseRc().catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;

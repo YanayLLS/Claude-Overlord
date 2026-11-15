@@ -135,7 +135,7 @@ function grade(input) {
   const link = (f) => failureUrl(f, input.pageUrl);
   const titleOf = Object.fromEntries(page.modules.map(m => [m.name, m.title]));
   // an item: text (what a person reads) · tag (where) · more (scenarios behind the same cause) · url
-  const causeItem = (g) => ({ text: g.failures[0].name, tag: titleOf[g.module] || g.module, more: g.failures.length - 1, url: link(g.failures[0]) });
+  const causeItem = (g) => ({ key: g.id, text: g.failures[0].name, tag: titleOf[g.module] || g.module, more: g.failures.length - 1, url: link(g.failures[0]) });
   const names = (list) => list.slice(0, P.shown).map(causeItem);
   const moduleUrl = (name) => { const m = page.modules.find(x => x.name === name); try { return m && m.report ? new URL(m.report, input.pageUrl).href : input.pageUrl; } catch { return input.pageUrl; } };
   const causes = rootCauses(page, input.phase, history, prodNight(history, input.prodAt), input.evidence, P, input.unreleased || []).filter(g => g.fresh);
@@ -218,8 +218,15 @@ function grade(input) {
   if (ageH > P.staleHoldH) add('age', 'hold', `Evidence is ${Math.round(ageH / 24)} days old`);
   else if (ageH > P.staleLookH) add('age', 'look', `Evidence is ${Math.round(ageH)} hours old`);
 
-  return finish(rules, { causes: causes.length, broken: broken.length, firstRed: firstRed.length, minor: minor.length, spec: spec.length,
-    env: envScenarios, test: of('test').length, flaky: page.failures.filter(f => f.flaky).length, unreported: known.length });
+  // the causes "Fix blockers" hands to agents: new, unexplained or confirmed broken, critical first
+  const rank = (g) => (g.critical && (g.category === 'product' || g.confirmed) ? 0 : g.critical ? 1 : 2);
+  const blockers = causes.filter(g => g.category === 'product' || g.category === 'unexamined')
+    // the ones holding the release first (confirmed critical), then critical seen once, then the rest
+    .sort((x, y) => rank(x) - rank(y))
+    .map(g => ({ key: g.id, module: g.module, tag: titleOf[g.module] || g.module, title: g.failures[0].name, critical: g.critical,
+      step: g.failures[0].step, error: g.failures[0].error, scenarios: g.failures.map(x => x.name), url: link(g.failures[0]) }));
+  return { ...finish(rules, { causes: causes.length, broken: broken.length, firstRed: firstRed.length, minor: minor.length, spec: spec.length,
+    env: envScenarios, test: of('test').length, flaky: page.failures.filter(f => f.flaky).length, unreported: known.length }), blockers };
 }
 
 // an item as one line of words, for the headline and the AI

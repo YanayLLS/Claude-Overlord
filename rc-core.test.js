@@ -46,8 +46,15 @@ assert.strictEqual(g({ page: page([fail('a', 'Logs in', { tags: ['@critical'], f
 // an item carries its parts; the headline reads them as one line
 {
   const r = g({ page: page([crit, fail('a', 'Logs out', { tags: ['@critical'] })]), history: history({ 'a|Logs in': 'FP' }) });
-  assert.deepStrictEqual({ ...rule(r, 'critical').items[0], url: 0 }, { text: 'Logs in', tag: 'a', more: 1, url: 0 });
+  assert.deepStrictEqual({ ...rule(r, 'critical').items[0], url: 0 }, { key: 'a::a step', text: 'Logs in', tag: 'a', more: 1, url: 0 });
   assert.ok(r.headline.includes('Logs in (a)'));
+}
+
+// the blockers handed to Fix blockers: new causes only, critical first
+{
+  const r = g({ page: page([fail('b', 'Logs out', { step: 'other step' }), crit]), history: history({ 'a|Logs in': 'FP' }) });
+  assert.deepStrictEqual(r.blockers.map(b => [b.title, b.critical]), [['Logs in', true], ['Logs out', false]]);
+  assert.strictEqual(g({ page: page() }).blockers.length, 0);
 }
 
 // ── what the fixer concluded ──────────────────────────
