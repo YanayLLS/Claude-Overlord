@@ -19,4 +19,10 @@ m.meter('rest', stack); m.meter('rest', stack); m.meter('graphql', 'Error\n    a
 assert.strictEqual(m.report(), 'gh calls, last 10 min: 2 rest, 1 graphql, 1 free (304) · top: rest releases-main:pollRcFixNow 2, graphql main:pollPrs 1');
 assert.strictEqual(m.report(), null); // counts start over
 
+// main.js meteredFetch is a wrapper too: the PR watch's calls are booked under prWatchGet, not under it
+assert.strictEqual(callerOf(`Error
+    at meteredFetch (C:\\o\\main.js:3385:60)
+    at prWatchGet (C:\\o\\main.js:3214:19)
+    at Object.tick (C:\\o\\pr-watch.js:16:27)`), 'main:prWatchGet');
+
 console.log('gh-meter: ok');

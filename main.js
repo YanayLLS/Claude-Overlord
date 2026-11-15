@@ -3211,12 +3211,12 @@ const prWatchGet = async (key, etag) => {
   const url = what === 'runs' ? 'actions/runs?event=pull_request&per_page=20'
     : what === 'checks' ? `commits/${sha}/check-runs?per_page=50` : what === 'status' ? `commits/${sha}/status`
     : 'pulls?state=all&sort=updated&direction=desc&per_page=1';
-  const r = await fetch(`https://api.github.com/repos/${repo}/${url}`, {
+  const r = await meteredFetch(`https://api.github.com/repos/${repo}/${url}`, {
     headers: { Authorization: `Bearer ${await ghTokenGet()}`, Accept: 'application/vnd.github+json', ...(etag ? { 'If-None-Match': etag } : {}) },
     signal: AbortSignal.timeout(8000),
   });
   if (r.status === 401) ghToken = null; // rotated by gh auth: fetch it again next tick
-  ghCache.noteResponse(r);
+  ghCache.noteResponse(r, r.status === 403 || r.status === 429 ? await r.json().catch(() => null) : null);
   return { status: r.status, etag: r.headers.get('etag') };
 };
 // Triggered polls spend GraphQL points (~20 each): at most one per PR_WATCH_GAP_MS (changes in the gap share it), and
@@ -3245,8 +3245,11 @@ const prWatchPoll = () => {
     pollPRs();
   }, Math.max(0, prWatchLastPoll + PR_WATCH_GAP_MS - Date.now()));
 };
-const prWatch = require('./pr-watch').createPrWatch({ get: prWatchGet, onChange: prWatchPoll });
-const prCheckWatch = require('./pr-watch').createPrWatch({ get: prWatchGet, onChange: prWatchPoll });
+// A key that just changed rests a minute: during CI the runs/check lists change every tick, and each change is a paid
+// call that can only feed a triggered poll budgeted at 30 an hour anyway.
+const PR_WATCH_PAID_GAP_MS = 60e3;
+const prWatch = require('./pr-watch').createPrWatch({ get: prWatchGet, onChange: prWatchPoll, paidGapMs: PR_WATCH_PAID_GAP_MS });
+const prCheckWatch = require('./pr-watch').createPrWatch({ get: prWatchGet, onChange: prWatchPoll, paidGapMs: PR_WATCH_PAID_GAP_MS });
 
 function armPrTimer() {
   if (prTimer) { clearInterval(prTimer); prTimer = null; }
@@ -3380,7 +3383,7 @@ async function releasesFindLocal(repo, rel, ref) {
 // Plain GETs revalidate with ETags (a 304 is free) and a rate-limited answer pauses REST until the reset: gh-cache.js.
 // the cache's REST fetches count too: a 304 is free, anything else costs a call
 const meteredFetch = (url, opts) => { const stack = new Error().stack; return fetch(url, opts).then(r => { ghMeter.meter(r.status === 304 ? 'free' : 'rest', stack); return r; }); };
-const ghCache = require('./gh-cache').createGhCache({ run: ghJsonRaw, fetch: meteredFetch, token: () => ghTokenGet() });
+const ghCache = require('./gh-cache').createGhCache({ run: ghJsonRaw, fetch: meteredFetch, token: () => ghTokenGet(), onUnauthorized: () => { ghToken = null; } });
 const ghJson = ghCache.ghJson;
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
   away: userAway,
@@ -3413,7 +3416,7 @@ const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir:
 // row; a workflow that has never run comes back with an empty list, not an error.
 async function fetchWorkflowRun(w) {
   const base = { key: wfKey(w.repo, w.file), repo: w.repo, file: w.file, name: w.name || w.file };
-  const res = await ghJson(['api', `/repos/${w.repo}/actions/workflows/${w.file}/runs?per_page=1`]);
+  const res = await ghJson(['api', `/repos/${w.repo}/actions/workflows/${w.file}/runs?per_page=1`], undefined, { paidGapMs: 30e3 }); // polled every 10 s while running: a changed answer is reused 30 s
   if (res.error) {
     return { ...base, state: 'none', error: res.error, errorCode: res.errorCode || null,
       url: `https://github.com/${w.repo}/actions/workflows/${w.file}` };
@@ -3654,6 +3657,7 @@ function notifyActionFailed(r) {
 
 // setTimeout, not setInterval: the delay depends on what the last poll saw, so
 // a deploy in flight is picked up every 10s and an idle board every intervalSec.
+let lastActionsRows = [];
 let actionsGen = 0; // re-arming bumps it, so a tick still awaiting its poll doesn't start a second chain
 function armActionsTimer() {
   if (actionsTimer) { clearTimeout(actionsTimer); actionsTimer = null; }
@@ -3661,8 +3665,12 @@ function armActionsTimer() {
   const cfg = settings.actionsSettings;
   if (!cfg || !cfg.enabled) return;
   const tick = async () => {
-    let rows = [];
-    try { rows = await pollActions(); } catch (e) { console.log('[Overlord] Actions poll error:', e.message); }
+    let rows = lastActionsRows;
+    // nobody at the PC: rest like the PR watch, at the last pace, so the first tick back catches up. Minimised still
+    // polls: that is when a failed run's notification matters.
+    if (!userAway()) {
+      try { rows = lastActionsRows = await pollActions(); } catch (e) { console.log('[Overlord] Actions poll error:', e.message); }
+    }
     const c = settings.actionsSettings;
     if (gen !== actionsGen || !c || !c.enabled) return;
     actionsTimer = setTimeout(tick, nextPollDelay(rows, c.intervalSec));

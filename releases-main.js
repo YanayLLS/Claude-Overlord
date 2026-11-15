@@ -60,7 +60,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (e && /rate limit|secondary rate/i.test(String(e))) { pausedUntil = Date.now() + RATE_PAUSE_MS; try { push({ rateLimitedUntil: pausedUntil }); } catch {} }
     return r;
   };
-  const ghJson = async (args) => (DEMO && !ghIsRead(args) ? { error: DEMO_REFUSED } : noteLimit(await ghJsonRaw(args)));
+  const ghJson = async (args, timeout, opts) => (DEMO && !ghIsRead(args) ? { error: DEMO_REFUSED } : noteLimit(await ghJsonRaw(args, timeout, opts)));
   const ghGraphql = async (q) => (DEMO && /\bmutation\b/.test(String(q)) ? { error: DEMO_REFUSED } : noteLimit(await ghGraphqlRaw(q)));
   const rc = createRc({ ghJson, stateDir });
   const file = path.join(stateDir, 'releases.json');
@@ -192,11 +192,13 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // Last run of each env's deploy workflow on its branch: a CI tag whose pipeline
   // has been red for a year shouldn't read the same as a green one. Query args go
   // through -f, not the URL, because ghJson runs through a shell on Windows ("&").
+  // a deploy in flight is re-read every 10 s; its run list changes on each step, so a changed answer is reused 30 s
+  const POLL_PAID_GAP_MS = 30e3;
   async function fetchDeploys(cfg, prev) {
     const out = {};
     await Promise.all(requestsFor(cfg).deploys.map(async (d) => {
       const key = `${d.repo}|${d.env}`;
-      const res = await ghJson(['api', '-X', 'GET', `repos/${d.repo}/actions/workflows/${d.file}/runs`, '-f', `branch=${d.branch}`, '-f', `per_page=${RUNS_SHOWN}`]);
+      const res = await ghJson(['api', '-X', 'GET', `repos/${d.repo}/actions/workflows/${d.file}/runs`, '-f', `branch=${d.branch}`, '-f', `per_page=${RUNS_SHOWN}`], undefined, { paidGapMs: POLL_PAID_GAP_MS });
       const all = (res.data && res.data.workflow_runs) || [], run = all[0];
       // finished runs for the Timeline: when each deploy went out, who ran it, did it work
       const runs = all.filter(x => x.status === 'completed' && x.conclusion !== 'cancelled' && x.conclusion !== 'skipped').map(x => ({

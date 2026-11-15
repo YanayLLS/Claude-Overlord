@@ -1,10 +1,12 @@
 // ghJson with free repeats: a plain `gh api` GET is sent as a fetch with If-None-Match, and GitHub's 304 (which
 // doesn't count against the rate limit) is answered from the cached body. Everything else — writes, --jq, --paginate,
-// unknown flags, any non-200/304 answer — runs `gh` exactly as before, so callers see the same { data } | { error }.
-// Once GitHub says the limit is hit (403/429 with remaining 0 or Retry-After), every REST call through here waits
-// until the reset instead of hammering it; blockedUntil() lets other callers (the PR watch) honour the same pause.
+// unknown flags, a failed fetch — runs `gh` exactly as before, so callers see the same { data } | { error }. Any other
+// answer GitHub gave (404, 422…) is returned the way gh returns it ({ data: { message, status } }), never asked twice.
+// Once GitHub says the limit is hit (403/429 with remaining 0, Retry-After, or a "rate limit" message such as the
+// secondary limit), every REST call through here waits until the reset (at least a minute) instead of hammering it;
+// blockedUntil() lets other callers (the PR watch) honour the same pause.
 const MAX_ENTRIES = 600; // LRU by insertion, plenty for the board's per-repo/per-sha URLs…
-const MAX_BYTES = 8 * 1024 * 1024; // …but entries are whole bodies (a workflow-run list is 50-150 KB), so the size caps first
+const MAX_BYTES = 32 * 1024 * 1024; // …but entries are whole bodies (a workflow-run list is 50-250 KB): the Releases deploy poll alone is ~38 of them, and an evicted URL's next poll is a paid 200
 
 function parseGet(args) {
   if (args[0] !== 'api' || typeof args[1] !== 'string') return null;
@@ -27,40 +29,51 @@ function parseGet(args) {
   return url.toString();
 }
 
-function createGhCache({ run, fetch, token, now = Date.now }) {
+function createGhCache({ run, fetch, token, now = Date.now, onUnauthorized = () => {} }) {
   const cache = new Map();
   let bytes = 0;
   let blocked = 0;
-  const limitedUntil = (r) => {
+  const SECONDARY_PAUSE_MS = 60e3;
+  const limitedUntil = (r, body) => {
     if (r.status !== 403 && r.status !== 429) return 0;
     const retry = Number(r.headers.get('retry-after')), reset = Number(r.headers.get('x-ratelimit-reset'));
     if (retry > 0) return now() + retry * 1000;
     if (r.headers.get('x-ratelimit-remaining') === '0' && reset > 0) return reset * 1000;
+    if (/rate limit/i.test(String(body && body.message || ''))) return now() + SECONDARY_PAUSE_MS;
     return 0;
   };
+  const readJson = async (r) => { try { return JSON.parse(await r.text()); } catch { return undefined; } };
   const pausedError = () => ({ error: `GitHub rate limit reached — paused until ${new Date(blocked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, errorCode: 'ratelimit' });
   return {
     blockedUntil: () => blocked > now() ? blocked : 0,
     // Responses that say "limit hit" from elsewhere (the PR watch's own fetches) pause this too.
-    noteResponse(r) { const u = limitedUntil(r); if (u > blocked) blocked = u; },
-    async ghJson(args, timeout) {
+    noteResponse(r, body) { const u = limitedUntil(r, body); if (u > blocked) blocked = u; },
+    // paidGapMs (pollers only): an answer that just cost a 200 is reused that long without asking, so a list that changes
+    // on every 10 s poll during a deploy costs one call per gap instead of one per poll.
+    async ghJson(args, timeout, { paidGapMs = 0 } = {}) {
       if (blocked > now()) return pausedError();
       const url = parseGet(args);
       if (!url) return run(args, timeout);
       try {
         const hit = cache.get(url);
+        if (hit && paidGapMs && now() - hit.paidAt < paidGapMs) return { data: JSON.parse(hit.text) };
         const r = await fetch(url, {
           headers: { Authorization: `Bearer ${await token()}`, Accept: 'application/vnd.github+json', ...(hit ? { 'If-None-Match': hit.etag } : {}) },
           signal: AbortSignal.timeout(timeout || 20000),
         });
-        if (r.status === 304 && hit) { cache.delete(url); cache.set(url, hit); return { data: hit.data }; }
-        const until = limitedUntil(r);
-        if (until) { if (until > blocked) blocked = until; return pausedError(); }
+        if (r.status === 304 && hit) { cache.delete(url); cache.set(url, hit); return { data: JSON.parse(hit.text) }; }
+        if (r.status !== 200 && r.status !== 304) {
+          const body = await readJson(r);
+          const until = limitedUntil(r, body);
+          if (until) { if (until > blocked) blocked = until; return pausedError(); }
+          if (r.status === 401) onUnauthorized(); // a token gh rotated: the next call reads it again
+          else if (body && typeof body === 'object') return { data: { ...body, status: String(r.status) } };
+        }
         if (r.status === 200) {
           const text = await r.text(), data = JSON.parse(text), etag = r.headers.get('etag');
           if (etag) {
             const old = cache.get(url); if (old) { bytes -= old.bytes; cache.delete(url); }
-            cache.set(url, { etag, data, bytes: text.length }); bytes += text.length;
+            cache.set(url, { etag, text, bytes: text.length, paidAt: now() }); bytes += text.length; // the text, not the parsed object, so MAX_BYTES is the memory it takes
             while (cache.size > MAX_ENTRIES || bytes > MAX_BYTES) { const k = cache.keys().next().value; bytes -= cache.get(k).bytes; cache.delete(k); }
           }
           return { data };

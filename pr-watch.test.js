@@ -30,3 +30,24 @@ test('a repo dropped from the list forgets its ETag, so re-adding it does not fi
   await w.tick(['a/x']);
   assert.strictEqual(fired, 0);
 });
+
+test('a key that keeps changing costs at most one paid answer per paidGapMs, however often it is ticked', async () => {
+  let t = 0, paid = 0;
+  const w = createPrWatch({
+    now: () => t, paidGapMs: 60e3,
+    get: async (key, etag) => { const cur = 'e' + Math.floor(t / 10e3); if (etag === cur) return { status: 304 }; paid++; return { status: 200, etag: cur }; },
+    onChange: () => {},
+  });
+  for (t = 0; t < 3600e3; t += 10e3) await w.tick(['o/busy#runs']);
+  assert.ok(paid <= 61, `paid ${paid} answers in an hour`);
+});
+
+test('a change is still noticed after the gap: onChange fires on the first tick past it', async () => {
+  let t = 0, tag = 'a', fired = 0;
+  const w = createPrWatch({ now: () => t, paidGapMs: 60e3, get: async (k, etag) => etag === tag ? { status: 304 } : { status: 200, etag: tag }, onChange: () => fired++ });
+  await w.tick(['o/r']);
+  tag = 'b'; t = 10e3; await w.tick(['o/r']);
+  assert.strictEqual(fired, 0);
+  t = 60e3; await w.tick(['o/r']);
+  assert.strictEqual(fired, 1);
+});
