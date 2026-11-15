@@ -315,3 +315,14 @@ test('screenBtw: the question, the answer as paragraphs and list items, and the 
   assert.deepStrictEqual(screenBtw(wait), { q: 'name three colors', answer: '', answering: true });
   assert.strictEqual(screenBtw(['❯ hi', '  Esc to close']), null);
 });
+
+test('screenBtw: during a turn its footer sits above the prompt box; a link cut at the line edge is joined back', () => {
+  const { screenBtw } = require('./chat-core');
+  const busy = ['✻ Recombobulating… (1m 50s)', '', '  /btw is feature not developed yet?', '', '    · Answering…', '', '  Esc to close', '────────────────────', '>', '────────────────────', '  ▸▸ bypass permissions on · 1 shell · esc to interrupt'];
+  assert.deepStrictEqual(screenBtw(busy), { q: 'is feature not developed yet?', answer: '', answering: true });
+  const link = ['  /btw links', '', '    - see https://www.electronjs.org/docs/l', '    atest/tutorial/offscreen for it', '', '  ↑/↓ to scroll · Esc to close'];
+  assert.strictEqual(screenBtw(link).answer, '- see https://www.electronjs.org/docs/latest/tutorial/offscreen for it');
+  const htt = ['  /btw l', '    - Offscreen Rendering tutorial (htt', '      ps://www.electronjs.org/docs/late', '      st/tutorial/offscreen-rendering):', '      explains the paint event.', '  Esc to close'];
+  assert.strictEqual(screenBtw(htt).answer, '- Offscreen Rendering tutorial (https://www.electronjs.org/docs/latest/tutorial/offscreen-rendering): explains the paint event.');
+  assert.strictEqual(screenBtw(['  /btw x', '    answer', '  something else']), null); // no footer: not the panel
+});

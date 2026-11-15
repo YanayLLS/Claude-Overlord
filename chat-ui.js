@@ -1671,8 +1671,8 @@
     const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } return; }
     if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
-    const bt = e.target.closest('[data-btw]'); // /btw card: Copy, or Close (Esc to the CLI)
-    if (bt && selectedId != null) { if (bt.dataset.btw === 'esc') { keys(['\x1b']); bt.closest('.card')?.classList.add('leaving'); setTimeout(rerender, 300); } else { const b = btwOf(selectedId); if (b) navigator.clipboard.writeText(b.answer).then(() => { bt.innerHTML = ICON.check; setTimeout(() => { bt.innerHTML = ICON.copy; }, 1500); }, () => {}); } return; }
+    const bt = e.target.closest('[data-btw]'); // /btw card: Close (Esc to the CLI); its Copy is the shared data-copy-url
+    if (bt && selectedId != null) { keys(['']); bt.closest('.card')?.classList.add('leaving'); setTimeout(rerender, 300); return; }
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
     // Only while it still waits: a second click, or a card answered in the terminal, never types into a live prompt.
     if (k && selectedId != null) { if (stillWaiting(selectedId) && menuUp(selectedId)) { keys([k.dataset.keys === 'esc' ? '\x1b' : k.dataset.keys]); answered(k); } return; }
@@ -1681,7 +1681,7 @@
     const tab = e.target.closest('.ask-tabs [data-tab]'); // another of its questions
     if (tab) { if (askTab(+tab.dataset.tab - +tab.parentElement.dataset.on)) for (const t of tab.parentElement.children) t.classList.toggle('on', t === tab); return; }
     const ou = e.target.closest('[data-open-url]'); if (ou) { api.send({ type: 'openUrl', url: ou.dataset.openUrl }); ou.classList.remove('primary'); ou.innerHTML = ICON.check + 'Opened'; ou.closest('.card')?.classList.add('opened'); ou.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // /login's link
-    const cu = e.target.closest('[data-copy-url]'); if (cu) { navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => { cu.innerHTML = ICON.check; cu.title = 'Copied'; setTimeout(() => { cu.innerHTML = ICON.copy; cu.title = 'Copy link'; }, 1500); }, () => {}); cu.closest('.card')?.classList.add('opened'); cu.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // the result on the button you pressed, not a toast
+    const cu = e.target.closest('[data-copy-url]'); if (cu) { const was = cu.title; navigator.clipboard.writeText(cu.dataset.copyUrl).then(() => { cu.innerHTML = ICON.check; cu.title = 'Copied'; setTimeout(() => { cu.innerHTML = ICON.copy; cu.title = was; }, 1500); }, () => {}); cu.closest('.card')?.classList.add('opened'); cu.closest('.card')?.querySelector('[data-login-code]')?.focus(); return; } // the result on the button you pressed, not a toast
     const ae = e.target.closest('[data-ask-esc]'); if (ae) { keys(['\x1b']); answered(ae); return; } // a question's Skip: Esc, as in the CLI
     const ls = e.target.closest('[data-login-send]'); if (ls && selectedId != null) { const i = ls.parentElement.querySelector('input'), v = i && i.value.trim(); if (v) { api.send({ type: 'termInput', id: selectedId, data: v + '\r' }); i.disabled = true; ls.disabled = true; ls.innerHTML = '<span class="loading"></span>Submitting'; } return; }
     const efb = e.target.closest('[data-effort], [data-effort-ultra]'); // /effort: arrows to the level then Enter; Tab toggles Ultracode
@@ -2278,8 +2278,8 @@
     const ask = btwAsk.get(id), b = btwOf(id) || (ask && Date.now() - ask.at < 4000 ? { q: ask.q, answer: '', answering: true } : null); if (!b) return ''; // just sent: up before the CLI draws its panel
     const full = ask && ask.q, cut = b.q.replace(/…$/, ''), q = full && full.startsWith(cut) ? full : b.q;
     return `<div class="card btw" data-btw-card><div class="btw-h"><span class="btw-tag">btw</span><span class="btw-q">${escH(q)}</span>`
-      + `${b.answer ? `<button type="button" class="ic-only" data-btw="copy" title="Copy" aria-label="Copy">${ICON.copy}</button>` : ''}<button type="button" class="ic-only" data-btw="esc" title="Close (Esc)" aria-label="Close">${ICON.close}</button></div>`
-      + `<div class="btw-a">${b.answering ? '<span class="btw-wait">Answering…</span>' : md(b.answer, '')}</div></div>`;
+      + `${b.answer ? `<button type="button" class="ic-only" data-copy-url="${escH(b.answer)}" title="Copy" aria-label="Copy">${ICON.copy}</button>` : ''}<button type="button" class="ic-only" data-btw="esc" title="Close (Esc)" aria-label="Close">${ICON.close}</button></div>`
+      + (b.answering ? '<div class="btw-wait">Answering…</div>' : `<div class="msg ai"><div class="md">${md(b.answer, (agents.get(id) || {}).cwd)}</div></div>`) + '</div>'; // rendered as a reply in the thread is
   }
   let peekOff = 0, screenSig = '', autoSplitFor = null, panelOff = 0; // autoSplitFor: the split an inline panel opened (not the user's)
   const screenRows = (x, n) => bufferRows(x.terminal.buffer.active, n);

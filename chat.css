@@ -1284,20 +1284,15 @@ body.world-mode #hdr-chat { display: none; }
 :root body #chat-vis-full .vis-big { width: min(1440px, 100%); height: 100%; margin: 0; display: flex; flex-direction: column; box-shadow: 0 24px 80px rgba(0,0,0,.45); }
 :root body #chat-vis-full .vis-big .vis-body { flex: 1; min-height: 0; }
 :root body #chat-vis-full .vis-big .vis-f { height: 100%; transition: none; }
-/* /btw: its answer as a card above the reply box (chat-ui btwHtml) */
-:root body #conversation .card.btw { padding: 12px 14px 14px; animation: chat-in .2s var(--chat-ease) both; }
-:root body #conversation .card.btw .btw-h { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+/* /btw: its answer as a card above the reply box (chat-ui btwHtml); the answer is a thread reply (.msg.ai .md) */
+:root body #conversation .card.btw { padding: 12px 16px 14px; animation: chat-in .2s var(--chat-ease) both; }
+:root body #conversation .card.btw.leaving { opacity: 0; transition: opacity .2s; }
+:root body #conversation .card.btw .btw-h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 :root body #conversation .card.btw .btw-tag { flex: none; font: 600 11px/1 'Geist Mono', monospace; color: var(--claude); background: color-mix(in srgb, var(--claude) 14%, transparent); padding: 4px 7px; border-radius: 6px; }
-:root body #conversation .card.btw .btw-q { flex: 1; min-width: 0; color: var(--subtext); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:root body #conversation .card.btw button.ic-only { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--overlay1, var(--subtext)); cursor: pointer; }
+:root body #conversation .card.btw .btw-q { flex: 1; min-width: 0; color: var(--subtext); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+:root body #conversation .card.btw button.ic-only { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--subtext); cursor: pointer; }
 :root body #conversation .card.btw button.ic-only:hover { background: var(--surface1, rgba(255,255,255,.06)); color: var(--text); }
 :root body #conversation .card.btw button.ic-only svg { width: 15px; height: 15px; }
-:root body #conversation .card.btw .btw-a { color: var(--text); line-height: 1.55; max-height: 40vh; overflow: auto; }
-:root body #conversation .card.btw .btw-a > :first-child { margin-top: 0; } :root body #conversation .card.btw .btw-a > :last-child { margin-bottom: 0; }
+:root body #conversation .card.btw .msg.ai { margin: 0; max-height: 45vh; overflow: auto; }
+:root body #conversation .card.btw .md p { margin: 0 0 14px; color: inherit; } /* .card p would grey it and drop the gaps */
 :root body #conversation .card.btw .btw-wait { color: var(--subtext); animation: chat-pulse 1.6s ease-in-out infinite; }
-:root body #conversation .card.btw.leaving { opacity: 0; transition: opacity .2s; }
-:root body #conversation .card.btw .btw-a :is(p, li) { color: var(--text); font-weight: 400; line-height: 1.55; }
-:root body #conversation .card.btw .btw-a p { margin: 0 0 8px; }
-:root body #conversation .card.btw .btw-a :is(ul, ol) { margin: 0 0 8px; padding-left: 20px; list-style: revert; display: block; }
-:root body #conversation .card.btw .btw-a li { display: list-item; margin: 2px 0; padding: 0; background: none; border: 0; }
-:root body #conversation .card.btw .btw-q { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

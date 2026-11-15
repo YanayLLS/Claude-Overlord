@@ -219,20 +219,25 @@ function screenPanel(rows) {
 // Esc to close") is indented 2. The terminal wraps the answer: lines are joined back into paragraphs, list items and
 // headings kept. ponytail: a code block in an answer loses its line breaks; read the CLI's own buffer if that matters.
 function screenBtw(rows) {
-  const lines = rows.map(r => r.replace(/\s+$/, '')), nb = lines.filter(r => r.trim());
-  if (!dialogFooter(nb.slice(-3).join(' '))) return null;
-  let h = -1; for (let i = lines.length - 1; i >= 0; i--) if (/^\s{1,4}\/btw\s+\S/.test(lines[i])) { h = i; break; }
+  const lines = rows.map(r => r.replace(/\s+$/, ''));
+  let h = -1; for (let i = lines.length - 1; i >= Math.max(0, lines.length - 60); i--) if (/^\s{1,4}\/btw\s+\S/.test(lines[i])) { h = i; break; }
   if (h < 0) return null;
-  const body = [];
-  for (let i = h + 1; i < lines.length; i++) { const r = lines[i]; if (r.trim() && !/^\s{4}/.test(r)) break; body.push(r.slice(4)); }
-  const paras = [];
-  for (const r of body) {
-    const prev = paras.length ? paras[paras.length - 1] : '';
-    if (!r.trim()) { if (prev !== '') paras.push(''); continue; }
-    if (prev && !/^\s*([-*+]\s|\d+[.)]\s|#|>|```)/.test(r)) paras[paras.length - 1] = prev + ' ' + r.trim(); else paras.push(r);
+  const body = []; let f = h + 1;
+  for (; f < lines.length; f++) { const r = lines[f]; if (r.trim() && !/^\s{4}/.test(r)) break; body.push(r); }
+  // its footer right under the answer; idle that's the screen's bottom, during a turn the prompt box sits below it
+  if (!dialogFooter(lines.slice(f).filter(r => r.trim()).slice(0, 3).join(' ').split(/─{4,}/)[0])) return null;
+  const paras = [], edge = Math.max(0, ...body.map(r => r.length)); let prevRaw = '';
+  for (const raw of body) {
+    const r = raw.slice(4), prev = paras.length ? paras[paras.length - 1] : '';
+    if (!r.trim()) { if (prev !== '') paras.push(''); prevRaw = ''; continue; }
+    // a link longer than the line is cut at the edge (even inside "https"): its rest joins it without a space.
+    // ponytail: a link ending exactly at the edge with no punctuation after it glues to the next word
+    const cut = prevRaw.length >= edge && !/[)\]:;,.!?"']$/.test(prev) && /:\/\//.test(/\S*$/.exec(prev)[0] + /^\S*/.exec(r.trim())[0]);
+    if (prev && !/^\s*([-*+]\s|\d+[.)]\s|#|>|```)/.test(r)) paras[paras.length - 1] = prev + (cut ? '' : ' ') + r.trim(); else paras.push(r);
+    prevRaw = raw;
   }
-  const answer = paras.join('\n').trim();
-  return { q: lines[h].trim().replace(/^\/btw\s+/, ''), answer: /^\S?\s*Answering…?$/.test(answer) ? '' : answer, answering: !answer || /^\S?\s*Answering…?$/.test(answer) }; // any spinner glyph
+  const answer = paras.join('\n').trim(), wait = !answer || /^\S?\s*Answering…?$/.test(answer); // any spinner glyph
+  return { q: lines[h].trim().replace(/^\/btw\s+/, ''), answer: wait ? '' : answer, answering: wait };
 }
 
 // ── Shared by the Chat view's thread (chat-ui.js) and reply box (chat-composer.js), so both read text the same way ──
