@@ -1163,8 +1163,8 @@
       + '<span class="grow"></span>'
       // Its @name, as the terminal shows it bottom-right: click copies it, to mention this agent (and its chat) elsewhere.
       + (a.agentName ? `<button type="button" class="chip name" data-act="copy-name" data-name="${escH(a.agentName)}" title="Copy @${escH(a.agentName)}: mention it in another agent to share this chat">@${escH(a.agentName)}</button>` : '')
-      // Context left before auto-compact, once it matters (half used); click puts /compact in the box.
-      + (pct >= 50 ? `<button type="button" class="chip ctx${pct > 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${((100 - pct) / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
+      // Context left before auto-compact, always (it used to hide below half used and read as gone); click puts /compact in the box.
+      + (s.ctxTok ?`<button type="button" class="chip ctx${pct > 80 ? ' hot' : ''}" data-insert="/compact" title="${pct}% of the context used. Click for /compact"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}"/><circle class="v" cx="9" cy="9" r="${r}" stroke-dasharray="${((100 - pct) / 100 * c).toFixed(1)} ${c.toFixed(1)}"/></svg>${100 - pct}% left</button>` : '')
       + (model ? `<button type="button" class="chip model" data-act="model" aria-haspopup="menu" title="${escH(s.model)}">${escH(model)}${s.effort ? ` <em>${escH(s.effort)}</em>` : ''}</button>` : '')
       + `<button type="button" class="chip icon" data-act="view-menu" aria-haspopup="menu" title="Text size and shortcuts">${ICON.more}</button>`;
   }
