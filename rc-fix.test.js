@@ -9,13 +9,14 @@ assert.strictEqual(readResult('{"status":"maybe"}'), null);
 assert.strictEqual(prNumber('https://github.com/o/r/pull/12'), 12);
 
 // the brief tells the agent to look for someone else's fix first, on the base since the tested commit
-const cause = { module: 'billing', critical: true, scenarios: ['Resuming puts the subscription back on renewal'], step: 'the billing page should show no status banner', error: 'boom', url: 'u' };
-const b = briefFor({ cause, i: 2, nightlyId: 77, repo: 'o/r', base: 'dev', testedSha: 'abc123', reportUrl: 'r', runUrl: 'run', resultPath: 'C:/x/2.json', skill: 'S.md' });
+const blocker = { module: 'billing', tag: 'Billing', causes: [{ critical: true, scenarios: ['Resuming puts the subscription back on renewal'], step: 'the billing page should show no status banner', error: 'boom', url: 'u' }] };
+const b = briefFor({ blocker, i: 2, nightlyId: 77, repo: 'o/r', base: 'dev', testedSha: 'abc123', reportUrl: 'r', runUrl: 'run', resultPath: 'C:/x/2.json', skill: 'S.md' });
 assert.ok(b.includes('git log --oneline abc123..origin/dev') && b.includes('fixed-on-dev') && b.includes('open-elsewhere'));
 assert.ok(b.includes('fix/rc-77-2') && b.includes('C:/x/2.json') && b.includes('@critical'));
 
 // what the card shows per cause
-assert.strictEqual(causeState({ started: false }).kind, 'idle');
+assert.strictEqual(causeState({ started: false }).kind, 'queued');
+assert.strictEqual(readyToMerge({ a: { kind: 'green', mine: true }, b: { kind: 'queued' } }), false);
 assert.strictEqual(causeState({ started: true }).kind, 'working');
 assert.strictEqual(causeState({ started: true, result: { status: 'fixed-on-dev', url: 'c', by: 'ahmad' } }).kind, 'fixed');
 assert.strictEqual(causeState({ started: true, result: { status: 'declined', reason: 'r', question: 'q?' } }).kind, 'needs-you');

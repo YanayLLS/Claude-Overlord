@@ -377,6 +377,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
 
   // ── Fix blockers: one agent per blocking cause of the candidate, then Merge & re-run (rc-fix.js) ──
   const RC_FIX_POLL_MS = 2 * 60 * 1000;
+  const RC_FIX_AT_ONCE = 6; // agents running at a time; the rest wait their turn
   const rcRepo = () => (state.config && state.config.rc && state.config.rc.repo) || 'LLSLtd/frontlineio-frontend';
   const rcBase = () => { const p = releasePlan(state.config, ['prod']).prs.find(x => x.repo.toLowerCase() === rcRepo().toLowerCase()); return (p && p.source) || 'dev'; };
   let rcFixTimer = null;
@@ -389,20 +390,34 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const fix = state.rcFix && state.rcFix.runId === runId ? state.rcFix : { runId, items: {} };
     const testedSha = (c.shas && c.shas[repo] && c.shas[repo].sha) || '';
     const skill = path.join(cwd, '.claude', 'skills', 'bdd-fix', 'SKILL.md').replace(/\\/g, '/');
-    let started = 0;
-    // ponytail: one agent per cause up to 8; the rest wait for the next click, so a broken night can't open dozens
-    for (const [i, cause] of c.blockers.slice(0, 8).entries()) {
-      if (fix.items[cause.key]) continue;
+    let added = 0;
+    // every blocking module gets a brief now; startQueued() starts them RC_FIX_AT_ONCE at a time
+    for (const [i, blocker] of c.blockers.entries()) {
+      if (fix.items[blocker.key]) continue;
       const base = path.join(runsDir(), `rc-fix-${runId}-${i}`);
       const resultPath = (base + '.json').replace(/\\/g, '/');
-      fs.writeFileSync(base + '.md', rcFix.briefFor({ cause, i, nightlyId: runId, repo, base: rcBase(), testedSha, reportUrl: c.evidence.reportUrl, runUrl: c.evidence.runUrl, resultPath, skill }));
-      fix.items[cause.key] = { i, startedAt: Date.now(), resultPath, title: cause.title };
-      startAgent(cwd, `Fix one release blocker. Read and follow ${(base + '.md').replace(/\\/g, '/')} and write its result file`);
-      started++;
+      fs.writeFileSync(base + '.md', rcFix.briefFor({ blocker, i, nightlyId: runId, repo, base: rcBase(), testedSha, reportUrl: c.evidence.reportUrl, runUrl: c.evidence.runUrl, resultPath, skill }));
+      fix.items[blocker.key] = { i, resultPath, brief: (base + '.md').replace(/\\/g, '/'), title: blocker.tag, causeKeys: blocker.causes.map(x => x.key), startedAt: null };
+      added++;
     }
+    fix.cwd = cwd;
     push({ rcFix: fix }); persist();
-    send({ type: 'toast', text: started ? `Started ${started} fix agent${started === 1 ? '' : 's'}` : 'Every blocker already has an agent' });
+    send({ type: 'toast', text: added ? `Fixing ${added} module${added === 1 ? '' : 's'}, ${RC_FIX_AT_ONCE} at a time` : 'Every blocker already has an agent' });
     pollRcFix().catch(() => {});
+  }
+  // start waiting agents while fewer than RC_FIX_AT_ONCE are still working
+  function startQueued(states) {
+    const fix = state.rcFix;
+    if (!fix || !fix.cwd || !startAgent) return false;
+    let busy = Object.values(states).filter(x => x.kind === 'working').length, changed = false;
+    for (const it of Object.values(fix.items).sort((a, b) => a.i - b.i)) {
+      if (busy >= RC_FIX_AT_ONCE) break;
+      if (it.startedAt) continue;
+      it.startedAt = Date.now(); busy++; changed = true;
+      startAgent(fix.cwd, `Fix the release blockers in one module. Read and follow ${it.brief} and write its result file`);
+    }
+    if (changed) { push({ rcFix: { ...fix } }); persist(); }
+    return changed;
   }
   async function prState(url) {
     const m = String(url || '').match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
@@ -420,10 +435,11 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     for (const [key, it] of Object.entries(fix.items)) {
       let result = null; try { result = rcFix.readResult(fs.readFileSync(it.resultPath, 'utf8')); } catch {}
       const pr = result && (result.status === 'pr' || result.status === 'open-elsewhere') ? await prState(result.url) : null;
-      states[key] = { ...rcFix.causeState({ started: true, result, pr }), title: it.title, pr: pr ? { repo: pr.repo, number: pr.number } : null };
+      states[key] = { ...rcFix.causeState({ started: !!it.startedAt, result, pr }), title: it.title, causeKeys: it.causeKeys || [], pr: pr ? { repo: pr.repo, number: pr.number } : null };
     }
+    if (startQueued(states)) for (const [key, it] of Object.entries(fix.items)) if (it.startedAt && states[key].kind === 'queued') states[key] = { ...states[key], kind: 'working' };
     push({ rcFixView: { runId: fix.runId, states, ready: rcFix.readyToMerge(states) } });
-    if (Object.values(states).some(x => ['working', 'running'].includes(x.kind))) rcFixTimer = setTimeout(() => pollRcFix().catch(() => {}), RC_FIX_POLL_MS);
+    if (Object.values(states).some(x => ['queued', 'working', 'running'].includes(x.kind))) rcFixTimer = setTimeout(() => pollRcFix().catch(() => {}), RC_FIX_POLL_MS);
   }
   // Merge every green fix PR this card opened, then start a full regression with the fixer from the base: its
   // grade is the next candidate.

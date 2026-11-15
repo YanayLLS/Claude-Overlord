@@ -220,11 +220,18 @@ function grade(input) {
 
   // the causes "Fix blockers" hands to agents: new, unexplained or confirmed broken, critical first
   const rank = (g) => (g.critical && (g.category === 'product' || g.confirmed) ? 0 : g.critical ? 1 : 2);
-  const blockers = causes.filter(g => g.category === 'product' || g.category === 'unexamined')
-    // the ones holding the release first (confirmed critical), then critical seen once, then the rest
-    .sort((x, y) => rank(x) - rank(y))
-    .map(g => ({ key: g.id, module: g.module, tag: titleOf[g.module] || g.module, title: g.failures[0].name, critical: g.critical,
-      step: g.failures[0].step, error: g.failures[0].error, scenarios: g.failures.map(x => x.name), url: link(g.failures[0]) }));
+  // One blocker per module: its causes go to one agent, since one breakage often splits into many causes in a
+  // module and separate agents would fix it twice. Modules holding the release first (a confirmed critical),
+  // then those with a critical seen once, then the rest.
+  const byModule = new Map();
+  for (const g of causes.filter(g => g.category === 'product' || g.category === 'unexamined')) {
+    const b = byModule.get(g.module) || byModule.set(g.module, { key: 'module:' + g.module, module: g.module, tag: titleOf[g.module] || g.module, rank: 9, causes: [] }).get(g.module);
+    b.rank = Math.min(b.rank, rank(g));
+    b.causes.push({ key: g.id, title: g.failures[0].name, critical: g.critical, step: g.failures[0].step, error: g.failures[0].error,
+      scenarios: g.failures.map(x => x.name), url: link(g.failures[0]) });
+  }
+  const blockers = [...byModule.values()].sort((x, y) => x.rank - y.rank)
+    .map(({ rank: r, ...b }) => ({ ...b, critical: r < 2, title: b.causes[0].title }));
   return { ...finish(rules, { causes: causes.length, broken: broken.length, firstRed: firstRed.length, minor: minor.length, spec: spec.length,
     env: envScenarios, test: of('test').length, flaky: page.failures.filter(f => f.flaky).length, unreported: known.length }), blockers };
 }

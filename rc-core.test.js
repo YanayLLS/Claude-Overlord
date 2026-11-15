@@ -53,7 +53,8 @@ assert.strictEqual(g({ page: page([fail('a', 'Logs in', { tags: ['@critical'], f
 // the blockers handed to Fix blockers: new causes only, critical first
 {
   const r = g({ page: page([fail('b', 'Logs out', { step: 'other step' }), crit]), history: history({ 'a|Logs in': 'FP' }) });
-  assert.deepStrictEqual(r.blockers.map(b => [b.title, b.critical]), [['Logs in', true], ['Logs out', false]]);
+  assert.deepStrictEqual(r.blockers.map(b => [b.module, b.critical]), [['a', true], ['b', false]]);
+  assert.deepStrictEqual(r.blockers[0].causes.map(c => c.title), ['Logs in']);
   assert.strictEqual(g({ page: page() }).blockers.length, 0);
 }
 

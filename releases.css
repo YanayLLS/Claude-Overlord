@@ -722,3 +722,7 @@ a.rl-rc-chip { cursor:pointer; } a.rl-rc-chip:hover { color:var(--text); }
 .rl-rc-chip { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; padding:0 7px; border-radius:999px; background:var(--surface1); font-size:10.5px; line-height:18px; color:var(--subtext); text-decoration:none; white-space:nowrap; }
 a.rl-rc-chip { cursor:pointer; } a.rl-rc-chip:hover { color:var(--text); }
 .rl-rc-chip .ic { width:10px; height:10px; } .rl-rc-chip.ok { color:var(--green); } .rl-rc-chip.bad { color:var(--red); } .rl-rc-chip.warn { color:var(--yellow); } .rl-rc-chip.run { color:var(--accent); }
+.rl-rc-itemwrap { display:flex; align-items:center; gap:6px; } .rl-rc-itemwrap > .rl-rc-item { flex:1; min-width:0; }
+.rl-rc-chip { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; padding:0 7px; border-radius:999px; background:var(--surface1); font-size:10.5px; line-height:18px; color:var(--subtext); text-decoration:none; white-space:nowrap; }
+a.rl-rc-chip { cursor:pointer; } a.rl-rc-chip:hover { color:var(--text); }
+.rl-rc-chip .ic { width:10px; height:10px; } .rl-rc-chip.ok { color:var(--green); } .rl-rc-chip.bad { color:var(--red); } .rl-rc-chip.warn { color:var(--yellow); } .rl-rc-chip.run { color:var(--accent); }

@@ -1467,10 +1467,10 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     // a row: what broke, where (said once per run of rows), and that it opens the report
     // a blocker's fix agent, as a chip on its row: what it is doing, and where its PR is
     const fixV = s.rcFixView && c.evidence && s.rcFixView.runId === c.evidence.runId ? s.rcFixView : null;
-    const CHIP = { working: ['run', 'Fixing'], running: ['run', 'Testing'], green: ['ok', 'Ready'], red: ['bad', 'Fix failed'], merged: ['ok', 'Merged'],
+    const CHIP = { queued: ['', 'Queued'], working: ['run', 'Fixing'], running: ['run', 'Testing'], green: ['ok', 'Ready'], red: ['bad', 'Fix failed'], merged: ['ok', 'Merged'],
       fixed: ['ok', 'Fixed on dev'], elsewhere: ['', 'PR open'], pr: ['', 'PR'], 'needs-you': ['warn', 'Needs you'], declined: ['', 'Declined'], closed: ['', 'Closed'] };
     const chipHtml = (key) => {
-      const st = fixV && fixV.states[key]; if (!st || !CHIP[st.kind]) return '';
+      const st = fixV && Object.values(fixV.states).find(x => (x.causeKeys || []).includes(key)); if (!st || !CHIP[st.kind]) return '';
       const [tone, label] = CHIP[st.kind];
       const tip = esc([st.by ? 'by ' + st.by : '', st.text || ''].filter(Boolean).join(' · '));
       const inner = (st.kind === 'working' || st.kind === 'running' ? rcIc(RC_IC.busy, ' turn') : '') + label;
@@ -1514,10 +1514,10 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
         : `<button class="rl-hist-btn rl-rc-any${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : ''}Release anyway</button>`)
       : `<button class="rl-hist-btn go${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : '🚀 '}Release</button>`;
     // Fix blockers until every blocker has an agent; Merge & re-run once their PRs are green
-    const blockers = c.blockers || [], untouched = blockers.slice(0, 8).filter(b => !(fixV && fixV.states[b.key]));
+    const blockers = c.blockers || [], untouched = blockers.filter(b => !(fixV && fixV.states[b.key]));
     const fixBtn = !can || c.level === 'ship' || !blockers.length ? ''
       : fixV && fixV.ready && !fixV.rerunAt ? `<button class="rl-hist-btn go" data-act="rcMerge" title="Merge the green fix PRs into dev and run a full regression with the fixer">${rcIc(RC_IC.pr)}Merge &amp; re-run</button>`
-      : untouched.length ? `<button class="rl-hist-btn${hold ? '' : ''}" data-act="rcFix" title="One agent per blocking cause, each on its own branch from dev">${rcIc(RC_IC.ai)}Fix blockers</button>`
+      : untouched.length ? `<button class="rl-hist-btn${hold ? '' : ''}" data-act="rcFix" title="One agent per blocking module, 6 at a time, each on its own branch from dev">${rcIc(RC_IC.ai)}Fix blockers</button>`
       : fixV && fixV.rerunAt ? `<span class="rl-rc-lock">${rcIc(RC_IC.busy, ' turn')}Re-running</span>` : '';
     const report = rcLink(`rl-hist-btn${hold && !(fixV && fixV.ready) ? ' go' : ''}`, c.evidence.reportUrl, rcIc(RC_IC.report) + 'Report');
     // the fixer's PR matters while it is still to be merged

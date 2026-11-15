@@ -1,6 +1,6 @@
-// "Fix blockers" on the release candidate card: one agent per blocking root cause, each on its own branch from
-// the integration branch, then "Merge & re-run" once every fix PR is green. Pure: the brief an agent follows,
-// how its result file is read, and what the card shows per cause. releases-main.js does the I/O.
+// "Fix blockers" on the release candidate card: one agent per blocking module (its causes together), each on its
+// own branch from the integration branch, then "Merge & re-run" once every fix PR is green. Pure: the brief an
+// agent follows, how its result file is read, and what the card shows per module. releases-main.js does the I/O.
 
 // What an agent writes when it is done, to the path its brief names (one JSON object):
 //   { "status": "pr", "url": "<pull request url>" }
@@ -13,33 +13,39 @@ function readResult(text) {
   return j && STATUSES.has(j.status) ? j : null;
 }
 const prNumber = (url) => { const m = String(url || '').match(/\/pull\/(\d+)/); return m ? Number(m[1]) : null; };
+const tick = (s) => String(s).replace(/`/g, "'");
 
-// One brief per cause. testedSha: the commit the graded run tested, so the agent can see what landed on the
-// base since (someone may already have fixed it).
-function briefFor({ cause, i, nightlyId, repo, base, testedSha, reportUrl, runUrl, resultPath, skill }) {
+// One brief per blocking module (rc-core grade().blockers). testedSha: the commit the graded run tested, so the
+// agent can see what landed on the base since (someone may already have fixed it).
+function briefFor({ blocker, i, nightlyId, repo, base, testedSha, reportUrl, runUrl, resultPath, skill }) {
   const branch = `fix/rc-${nightlyId}-${i}`;
-  return `# Fix one release blocker
+  const since = testedSha || '<tested sha>';
+  const causes = blocker.causes.map((c, n) => [
+    `### Cause ${n + 1}${c.critical ? ' · **@critical**' : ''}`,
+    `- Scenarios: ${c.scenarios.map(s => `"${s}"`).join(', ')}`,
+    `- Failing step: \`${tick(c.step)}\``,
+    `- First error: \`${tick(c.error)}\``,
+    `- In the report: ${c.url || reportUrl}`,
+  ].join('\n')).join('\n\n');
+  return `# Fix the release blockers in one module
 
-The release candidate (graded from run ${runUrl}) is held by this root cause. Fix it, or say precisely why not.
+The release candidate (graded from run ${runUrl}) is held by these failures in module \`${blocker.module}\` (${blocker.tag}). Several causes can share one breakage: find it, fix every cause you can, or say precisely why not.
 
-- Module (cucumber profile): \`${cause.module}\`${cause.critical ? ' · **@critical**' : ''}
-- Scenarios: ${cause.scenarios.map(s => `"${s}"`).join(', ')}
-- Failing step: \`${cause.step}\`
-- First error: \`${String(cause.error).replace(/`/g, "'")}\`
-- Where it failed in the report: ${cause.url || reportUrl}
 - Repo: ${repo} · base \`${base}\` · the run tested \`${testedSha || 'unknown'}\`
+
+${causes}
 
 ## 1. First: has someone already fixed it?
 Other people push fixes to \`${base}\` all the time. Before anything else:
-- \`git fetch origin ${base}\` and look at what landed since the tested commit: \`git log --oneline ${testedSha || '<tested sha>'}..origin/${base} -- <the feature file, its step definitions, its page objects and the product code they drive>\`.
+- \`git fetch origin ${base}\` and look at what landed since the tested commit: \`git log --oneline ${since}..origin/${base} -- <the feature files, their step definitions, their page objects and the product code they drive>\`.
 - \`gh pr list -R ${repo} --state open --search "<scenario words or module>"\`.
-- A commit on \`${base}\` that plainly fixes this cause → write \`{"status":"fixed-on-dev","url":"<commit url>","by":"<author>"}\` and stop.
-- Someone else's open PR that fixes it → write \`{"status":"open-elsewhere","url":"<pr url>","by":"<author>"}\` and stop. Do not open a second PR.
+- A commit on \`${base}\` that plainly fixes these causes → write \`{"status":"fixed-on-dev","url":"<commit url>","by":"<author>"}\` and stop.
+- Someone else's open PR that fixes them → write \`{"status":"open-elsewhere","url":"<pr url>","by":"<author>"}\` and stop. Do not open a second PR.
 
 ## 2. Otherwise fix it
 Follow \`${skill}\` (run by hand: open a PR instead of emitting patch files; its rules, risk tiers and red-then-green ledger apply, the ledger goes in the PR body).
 - Work in your own git worktree on branch \`${branch}\` from \`origin/${base}\`. Never edit the shared checkout, never \`git stash\`.
-- **Do not run BDD, Playwright or browsers locally** (other agents run beside you). Prove it on CI: open the PR against \`${base}\` with a \`\`\`bdd block naming \`${cause.module}\` narrowed with \`scenarios:\` to the ones above (as a mapping, see docs/rules/bdd-ci.md), and wait for its run. Unit tests of files you touch are fine at low priority.
+- **Do not run BDD, Playwright or browsers locally** (other agents run beside you). Prove it on CI: open ONE PR against \`${base}\` with a \`\`\`bdd block naming \`${blocker.module}\` narrowed with \`scenarios:\` to the ones above (as a mapping, see docs/rules/bdd-ci.md), and wait for its run. Unit tests of files you touch are fine at low priority.
 - No scenario removal, no @skip/@future/@known-red, no weaker assertion, no wider timeout to hide a cause.
 - A product decision you cannot make from the code → decline with the question.
 - Then write \`{"status":"pr","url":"<pr url>"}\`.
@@ -49,10 +55,10 @@ One JSON object to \`${resultPath}\` (write a temp file then rename it, so a hal
 `;
 }
 
-// The card's state per cause, from the result file and the PR (when there is one).
+// The card's state per module, from the result file and the PR (when there is one).
 // pr: { state, merged, green, pending } as read from GitHub, or null.
 function causeState({ started, result, pr }) {
-  if (!started) return { kind: 'idle' };
+  if (!started) return { kind: 'queued' };
   if (!result) return { kind: 'working' };
   if (result.status === 'declined') return { kind: result.question ? 'needs-you' : 'declined', text: result.question || result.reason };
   if (result.status === 'fixed-on-dev') return { kind: 'fixed', url: result.url, by: result.by };
@@ -62,11 +68,11 @@ function causeState({ started, result, pr }) {
   return { kind: pr.green ? 'green' : pr.pending ? 'running' : 'red', url: result.url, by: result.by, mine: result.status === 'pr' };
 }
 
-// Merge & re-run is offered when nothing is still being worked on and every PR this card opened is green (or
-// merged). Causes fixed on the base or declined don't hold it back; someone else's PR is theirs to merge.
+// Merge & re-run is offered when nothing is queued or still being worked on and every PR this card opened is green
+// (or merged). Modules fixed on the base or declined don't hold it back; someone else's PR is theirs to merge.
 function readyToMerge(states) {
   const list = Object.values(states || {});
-  if (!list.length || list.some(s => s.kind === 'working' || s.kind === 'running' || s.kind === 'red')) return false;
+  if (!list.length || list.some(s => ['queued', 'working', 'running', 'red'].includes(s.kind))) return false;
   return list.some(s => s.kind === 'green' && s.mine) || list.every(s => ['merged', 'fixed', 'declined', 'needs-you', 'elsewhere', 'closed'].includes(s.kind));
 }
 
