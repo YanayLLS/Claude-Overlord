@@ -4761,7 +4761,7 @@ function handleAgentMsg(msg) {
         const was = a.status;
         a.quietSince = msg.status === 'active' ? null : (a.quietSince || Date.now());
         a.status = msg.status;
-        a.crashed = null;
+        if (a.crashed !== 'fatal') a.crashed = null; // a stopped agent stays stopped until crashCleared (a real resume)
         if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now();
         // Finished while you were looking elsewhere: a dot on its card until you open it, and (in the Chat view) a toast that jumps there.
         if (msg.status === 'waiting' && was === 'active' && msg.id !== selectedId) { a.unread = true; if (termTab === 'conversation' && !worldView) chatUi.maybeDone(msg.id); } // in the agent list, and only once it has really finished

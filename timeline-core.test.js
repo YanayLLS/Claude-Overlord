@@ -215,3 +215,13 @@ test('a refused Artifact publish carries no artifactUrl (no card for a page that
   const [d] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a2', is_error: true, content: '<artifact-deleted url="https://claude.ai/artifact/H6Pv"/> deleted' }] } });
   assert.strictEqual(d.artifactUrl, undefined);
 });
+
+test('a resume that dies on start writes bookkeeping only, which is not the CLI being back', () => {
+  const { isLiveLine } = require('./timeline-core');
+  assert.strictEqual(isLiveLine(JSON.stringify({ type: 'bridge-session', sessionId: 's' })), false);
+  assert.strictEqual(isLiveLine(JSON.stringify({ type: 'system', subtype: 'bridge_status', content: '/remote-control is active' })), false);
+  assert.strictEqual(isLiveLine(JSON.stringify({ type: 'history-suppression' })), false);
+  assert.strictEqual(isLiveLine('{"type":"us'), false);
+  assert.strictEqual(isLiveLine(JSON.stringify({ type: 'user', message: { content: 'restarted' } })), true);
+  assert.strictEqual(isLiveLine(JSON.stringify({ type: 'assistant', message: { content: [] } })), true);
+});

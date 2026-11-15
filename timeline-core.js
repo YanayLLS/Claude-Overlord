@@ -199,4 +199,10 @@ function watchedEnd(size, fileOffset, lineBuffer) {
   return Math.max(0, fileOffset - Buffer.byteLength(lineBuffer || ''));
 }
 
-module.exports = { parseLineForTimeline, isNarration, toolArgs, activeLines, branches, isPromptRec, freshUsage, watchedEnd };
+// A transcript line that shows the CLI really running a conversation. A resume that dies on start still writes its
+// bookkeeping first (bridge-session, bridge_status, history-suppression), which must not read as "it's back".
+function isLiveLine(line) {
+  try { const t = JSON.parse(line).type; return t === 'user' || t === 'assistant' || t === 'progress' || t === 'attachment'; } catch { return false; }
+}
+
+module.exports = { parseLineForTimeline, isLiveLine, isNarration, toolArgs, activeLines, branches, isPromptRec, freshUsage, watchedEnd };

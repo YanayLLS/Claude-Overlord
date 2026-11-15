@@ -2343,7 +2343,7 @@ function readLines(id) {
     a.fileOffset = st.size;
     const text = a.lineBuffer + buf.toString('utf-8');
     const lines = text.split('\n'); a.lineBuffer = lines.pop() || '';
-    if (a.crashed && lines.some(l => l.trim())) { a.crashed = false; send({ type: 'crashCleared', id }); } // it's writing again: resumed (the window kept "Crashed — auto-resuming" after a restart)
+    if (a.crashed && lines.some(timelineCore.isLiveLine)) { a.crashed = false; send({ type: 'crashCleared', id }); } // it's writing again: resumed (the window kept "Crashed — auto-resuming" after a restart)
     // Only turn progress ends a pending ask/permission — queued notifications, attachments etc. do not
     // Another subagent's progress isn't an answer to the dialog on screen (answering it goes through handleTermInput).
     if (!a.askIds?.size && lines.some(l => movesTurn(l) && !(a.ptyPerm && /"type":"progress"/.test(l)))) { clrTimer(id, permTimers); clearPtyPerm(id, a); if (a.permSent) { a.permSent = false; logToRenderer(`[ASKDBG] agent ${id}: batch of ${lines.length} line(s) cleared perm at ${new Date().toISOString()} :: ${lines.filter(l=>l.trim()).map(l=>{try{const r=JSON.parse(l);const c=r.message?.content;return r.type+(Array.isArray(c)?'['+c.map(b=>b.name||b.type).join(',')+']':'');}catch{return 'unparsed';}}).join(' | ')}`); send({ type: 'permClear', id }); } }
