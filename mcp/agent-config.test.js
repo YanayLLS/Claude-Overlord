@@ -85,6 +85,7 @@ test('a feature agent gets an edit hook that relays Overlord\'s deny to the CLI'
     const cfg = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     const entry = cfg.hooks.PreToolUse.find(h => h.matcher === 'Edit|MultiEdit|Write|NotebookEdit');
     assert.ok(entry, 'edit hook registered');
+    assert.ok(cfg.hooks.PreToolUse.some(h => h.matcher === 'Bash|PowerShell' && h.hooks[0].command === entry.hooks[0].command), 'shell commands go through the same hook');
     const cmd = entry.hooks[0].command;
     const run = (file) => new Promise((resolve) => {
       const p = require('child_process').exec(cmd, (e, out) => resolve(out));

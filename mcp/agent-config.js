@@ -41,7 +41,9 @@ function writeAgentSettings(id, editHook = null) {
   if (editHook) {
     const eh = path.join(dir, 'edit-hook.js');
     fs.writeFileSync(eh, EDIT_HOOK);
-    hooks.PreToolUse.push({ matcher: 'Edit|MultiEdit|Write|NotebookEdit', hooks: [{ type: 'command', command: `node "${fwd(eh)}" ${Number(editHook.port)} ${editHook.token}`, timeout: 120 }] });
+    const cmd = `node "${fwd(eh)}" ${Number(editHook.port)} ${editHook.token}`;
+    hooks.PreToolUse.push({ matcher: 'Edit|MultiEdit|Write|NotebookEdit', hooks: [{ type: 'command', command: cmd, timeout: 120 }] });
+    hooks.PreToolUse.push({ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: cmd, timeout: 120 }] }); // only clear changes to a main checkout are stopped (planShellRedirect)
   }
   fs.writeFileSync(settingsPath, JSON.stringify({ permissions: { deny: DENIED_SERVERS }, hooks }, null, 2));
   return settingsPath;

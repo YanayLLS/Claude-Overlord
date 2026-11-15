@@ -10,7 +10,7 @@ const net = require('net');
 let autoUpdater = null; // electron-updater: packaged builds only, loaded on app ready (setupAutoUpdater)
 const pty = require('node-pty');
 const wt = require('./worktree');
-const { planRedirect } = require('./feature-redirect');
+const { planRedirect, planShellRedirect } = require('./feature-redirect');
 const nodeReq = require('./node-req');
 const featureEnvLib = require('./feature-env');
 const pc = require('./peer-core');
@@ -4618,9 +4618,11 @@ const featureJoins = new Map(); // `${feature}|${repo}` -> Promise<worktree entr
 async function onFeatureEdit(agentId, input) {
   const a = agents.get(agentId);
   const file = input && (input.file_path || input.notebook_path);
-  if (!a || !file) return {};
+  const command = input && typeof input.command === 'string' ? input.command : '';
+  if (!a || (!file && !command)) return {};
   const repos = [...(settings.knownProjects || []), ...Object.keys(settings.projects || {}), ...(settings.lastFeatureRepos || [])];
-  const plan = planRedirect({ file, cwd: a.cwd, worktrees: settings.worktrees || [], repos });
+  const ctx = { cwd: a.cwd, worktrees: settings.worktrees || [], repos };
+  const plan = file ? planRedirect({ file, ...ctx }) : planShellRedirect({ command, ...ctx });
   if (!plan) return {};
   let member = plan.member;
   if (!member) {
@@ -4637,6 +4639,11 @@ async function onFeatureEdit(agentId, input) {
     }
     try { member = await featureJoins.get(key); }
     catch (e) { flog(`feature ${plan.feature}: could not add ${plan.repo}:`, e); return {}; } // let the edit through rather than block the agent
+  }
+  if (!file) { // a shell command that would change the main checkout
+    flog(`feature ${plan.feature}: stopped agent ${agentId} changing ${plan.repo} from the shell: ${command.slice(0, 200)}`);
+    return { deny: `${path.basename(plan.repo)} is part of feature "${plan.feature}" in its own worktree on branch ${member.branch}. `
+      + `Don't change its main checkout (${plan.repo}): run this in ${member.path} instead (same paths inside it). Reading the main checkout is fine.` };
   }
   const target = path.join(member.path, plan.rel);
   return { deny: `${path.basename(plan.repo)} is part of feature "${plan.feature}" now, in its own worktree on branch ${member.branch}. `
