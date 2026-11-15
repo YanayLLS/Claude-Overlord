@@ -645,7 +645,10 @@ button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
 .feature-header:hover { background:rgba(137,180,250,.08); }
 .feature-icon { color:var(--blue,#89b4fa); }
 .feature-name { font-weight:700; font-size:12px; letter-spacing:.4px; color:var(--text); }
-.feature-summary { font-size:10px; color:var(--subtext,#a6adc8); }
+.feature-summary { white-space:nowrap; font-size:10px; color:var(--subtext,#a6adc8); }
+.feature-hidden { white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:4px; font:inherit; font-size:10px; color:var(--dim); background:none; border:1px solid var(--border); border-radius:999px; padding:1px 7px 1px 5px; cursor:pointer; }
+.feature-hidden:hover { color:var(--text); border-color:var(--border-hi); }
+.feature-hidden svg { width:12px; height:12px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 .feature-header .group-menu-wrap { margin-left:auto; }
 .feature-body { padding:2px 6px 6px; }
 .feature.collapsed .feature-body { display:none; }
@@ -1829,6 +1832,13 @@ function closeFilterMenu() {
 }
 // ponytail: localStorage, not settings.json — collapse state is per-window UI, not config.
 const collapsedGroups = new Set(JSON.parse(localStorage.getItem('collapsedGroups') || '[]'));
+// Repos tucked out of their feature card (cwd). Per machine, like collapse: keeps the list to what you work on now.
+const hiddenInFeature = new Set((() => { try { return JSON.parse(localStorage.getItem('hiddenInFeature') || '[]'); } catch { return []; } })());
+function setHiddenInFeature(cwds, on) {
+  for (const c of cwds) on ? hiddenInFeature.add(c) : hiddenInFeature.delete(c);
+  try { localStorage.setItem('hiddenInFeature', JSON.stringify([...hiddenInFeature])); } catch {}
+  render();
+}
 function toggleGroup(cwd) {
   hotCwd = cwd;
   if (collapsedGroups.has(cwd)) collapsedGroups.delete(cwd); else collapsedGroups.add(cwd);
@@ -1976,12 +1986,16 @@ function featureHeaderHtml(name) {
   const safe = escAttr(name.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
   const collapsed = collapsedGroups.has(key);
   const runningCount = members.filter(w => wtRunning.has(w.path)).length;
-  const summary = `${members.length} repo${members.length !== 1 ? 's' : ''}${runningCount ? ` · ${runningCount} running` : ''}`;
+  const hidden = members.filter(w => hiddenInFeature.has(w.path));
+  const shown = members.length - hidden.length;
+  const summary = `${shown} repo${shown !== 1 ? 's' : ''}${runningCount ? ` · ${runningCount} running` : ''}`;
+  const hiddenQ = escAttr(JSON.stringify(hidden.map(w => w.path)));
   return `<div class="feature${collapsed ? ' collapsed' : ''}"><div class="feature-header" onclick="toggleGroup('${escAttr(key)}')">
     <span class="group-chevron">&#x25BC;</span>
     <span class="feature-icon">&#x2726;</span>
     <span class="feature-name">${esc(name)}</span>
     <span class="feature-summary">${esc(summary)}</span>
+    ${hidden.length ? `<button class="feature-hidden" onclick="event.stopPropagation();setHiddenInFeature(${hiddenQ},false)" title="Show ${escAttr(hidden.map(w => pathLabel(w.repo)).join(', '))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c5 0 9 4.5 10 7a12 12 0 0 1-2.7 3.7M6.6 6.6C4.3 8 2.7 10.2 2 12c1 2.5 5 7 10 7a10 10 0 0 0 4.4-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>${hidden.length} hidden</button>` : ''}
     <div class="group-menu-wrap">
       <button class="group-menu-btn" onclick="event.stopPropagation();toggleGroupMenu(this)" title="Feature actions">&#x22EE;</button>
       <div class="group-dropdown" data-menu="feature:${escAttr(name)}">${ddItems([
@@ -1989,6 +2003,7 @@ function featureHeaderHtml(name) {
         runningCount < members.length && { icon: 'play', label: 'Start all servers', on: `startFeature('${safe}')` },
         runningCount && { icon: 'stop', label: 'Stop all servers', on: `stopFeature('${safe}')` },
         { icon: 'pr', label: 'Create PRs', on: `prFeature('${safe}')` },
+        ...(hidden.length ? ['-', ...hidden.map(w => ({ icon: 'eye', label: 'Show ' + esc(pathLabel(w.repo)), on: `setHiddenInFeature(${escAttr(JSON.stringify([w.path]))},false)` }))] : []),
         '-',
         { icon: 'trash', label: 'Remove feature', danger: true, on: `removeFeature('${safe}')` },
       ])}</div>
@@ -2011,6 +2026,8 @@ const DD_ICON = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   check: '<path d="m5 12 5 5 9-10"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  eye: '<path d="M2 12c1-2.5 5-7 10-7s9 4.5 10 7c-1 2.5-5 7-10 7S3 14.5 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c5 0 9 4.5 10 7a12 12 0 0 1-2.7 3.7M6.6 6.6C4.3 8 2.7 10.2 2 12c1 2.5 5 7 10 7a10 10 0 0 0 4.4-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
 };
 // items: [{ icon, label, on, danger, sub }], '-' = section break (doubled / edge breaks collapse), falsy = skipped.
 function ddItems(items) {
@@ -2036,6 +2053,7 @@ function groupMenuItems(cwd, q, wt, running, archived, doneCount) {
     wt && wt.status === 'failed' && { icon: 'log', label: 'Setup log', on: `send({type:'openSetupLog',path:'${q}'})` },
     wt && wt.status !== 'setup' && wt.status !== 'failed' && { icon: 'log', label: 'Server log', on: `send({type:'openServerLog',path:'${q}'})` },
     !wt && { icon: 'branch', label: 'New worktree&#x2026;', on: `openNewWorktree('${q}')` },
+    wt && wt.feature && { icon: 'eyeOff', label: 'Hide from feature', on: `setHiddenInFeature(${escAttr(JSON.stringify([cwd]))},true)` },
     !wt && { icon: 'gear', label: 'Dev server&#x2026;', on: `openProjectConfig('${q}')` },
     '-',
     { icon: 'folderPlus', label: 'New folder', on: `createFolder('${q}')` },
@@ -3289,6 +3307,7 @@ function render() {
       if (feature !== null) html += featureHeaderHtml(feature);
     }
     filterMatches += items.length;
+    if (feature !== null && hiddenInFeature.has(cwd) && !filterText) continue;
     const gDoneCount = items.filter(([,a]) => { const s = agentStatus(a); return s === 'waiting' || s === 'idle'; }).length;
 
     // Collect servers from all agents in this group (dedupe by port)
