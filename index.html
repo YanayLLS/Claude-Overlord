@@ -435,6 +435,11 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 #agent-tip .tip-prompt:first-of-type { border-top:none; }
 .agent.dragging { opacity:0.3; }
+.top-dragging { opacity:.35; }
+.top-drop-before { box-shadow:0 -2px 0 0 var(--accent); }
+.top-drop-after { box-shadow:0 2px 0 0 var(--accent); }
+[data-top] > .group-header[draggable], [data-top] > .feature-header[draggable] { cursor:grab; }
+[data-top] > .group-header[draggable]:active, [data-top] > .feature-header[draggable]:active { cursor:grabbing; }
 .agent.drag-over-top { border-top:2px solid var(--accent); margin-top:-1px; }
 .agent.drag-over-bottom { border-bottom:2px solid var(--accent); margin-bottom:-1px; }
 .agent::before {
@@ -2021,7 +2026,7 @@ function featureHeaderHtml(name) {
   const shown = members.length - hidden.length;
   const summary = `${shown} repo${shown !== 1 ? 's' : ''}${runningCount ? ` · ${runningCount} running` : ''}`;
   const hiddenQ = escAttr(JSON.stringify(hidden.map(w => w.path)));
-  return `<div class="feature${collapsed ? ' collapsed' : ''}"><div class="feature-header" onclick="toggleGroup('${escAttr(key)}')">
+  return `<div class="feature${collapsed ? ' collapsed' : ''}" data-top="${escAttr(key)}" ${TOP_DND}><div class="feature-header" draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()" onclick="toggleGroup('${escAttr(key)}')">
     <span class="group-chevron">&#x25BC;</span>
     <span class="feature-icon">&#x2726;</span>
     <span class="feature-name">${esc(name)}</span>
@@ -2275,6 +2280,52 @@ function sortByOrder(cwd, items) {
     const pb = posMap.has(b[1].agentName) ? posMap.get(b[1].agentName) : 9999;
     return pa - pb;
   });
+}
+
+// ── Top-level order: drag a project or feature header to move the whole card ──
+let topOrder = (() => { try { return JSON.parse(localStorage.getItem('topOrder') || '[]'); } catch { return []; } })();
+let _dragTop = null;
+const TOP_DND = 'ondragover="onTopDragOver(event)" ondragleave="onTopDragLeave(event)" ondrop="onTopDrop(event)"';
+// Saved keys first in their saved order; anything new keeps its natural place after them.
+function sortTopBlocks(blocks) {
+  const pos = new Map(topOrder.map((k, i) => [k, i]));
+  const at = (b, i) => pos.has(b.key) ? pos.get(b.key) : 1e6 + i;
+  return blocks.map((b, i) => [b, at(b, i)]).sort((x, y) => x[1] - y[1]).map(x => x[0]);
+}
+function onTopDragStart(e) {
+  if (_dragId != null || _dragFolder != null) return;
+  const block = e.currentTarget.closest('[data-top]');
+  if (!block || _renaming) { e.preventDefault(); return; }
+  _dragTop = block.dataset.top;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', _dragTop);
+  requestAnimationFrame(() => block.classList.add('top-dragging'));
+}
+function onTopDragEnd() {
+  _dragTop = null;
+  document.querySelectorAll('.top-dragging,.top-drop-before,.top-drop-after').forEach(el => el.classList.remove('top-dragging', 'top-drop-before', 'top-drop-after'));
+  scheduleRender(); // renders held back during the drag
+}
+function onTopDragOver(e) {
+  if (_dragTop == null) return;
+  const block = e.currentTarget;
+  if (block.dataset.top === _dragTop) return;
+  e.preventDefault(); e.stopPropagation();
+  e.dataTransfer.dropEffect = 'move';
+  const r = block.getBoundingClientRect(), before = e.clientY < r.top + r.height / 2;
+  block.classList.toggle('top-drop-before', before);
+  block.classList.toggle('top-drop-after', !before);
+}
+function onTopDragLeave(e) { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('top-drop-before', 'top-drop-after'); }
+function onTopDrop(e) {
+  if (_dragTop == null) return;
+  e.preventDefault(); e.stopPropagation();
+  const target = e.currentTarget.dataset.top, before = e.currentTarget.classList.contains('top-drop-before');
+  const keys = [...document.querySelectorAll('#list [data-top]')].map(el => el.dataset.top).filter(k => k !== _dragTop);
+  const i = keys.indexOf(target);
+  if (i >= 0) { keys.splice(before ? i : i + 1, 0, _dragTop); topOrder = keys; try { localStorage.setItem('topOrder', JSON.stringify(keys)); } catch {} }
+  onTopDragEnd();
+  render();
 }
 
 let _dragId = null, _dragCwd = null;
@@ -3277,7 +3328,7 @@ function statusLineHTML(a, st) {
 
 let _renderPending = false;
 let _renaming = false; // true while inline rename input is active
-function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; if (_renaming || _dragId != null || _dragFolder != null) return; render(); }); } }
+function scheduleRender() { if (!_renderPending) { _renderPending = true; requestAnimationFrame(() => { _renderPending = false; if (_renaming || _dragId != null || _dragFolder != null || _dragTop != null) return; render(); }); } }
 // Mouse held down on the list: a rebuild between press and release swaps the pressed button
 // for a fresh copy and the browser drops the click. Hold renders until release, then catch up.
 let _listPressed = false, _renderHeld = false;
@@ -3288,7 +3339,7 @@ for (const ev of ['pointerup', 'pointercancel', 'dragend', 'blur']) window.addEv
   if (_renderHeld) { _renderHeld = false; setTimeout(scheduleRender); } // after the click handler runs
 });
 function render() {
-  if (_dragId != null || _dragFolder != null) return; // never rebuild the list mid-drag — it cancels native drag-and-drop
+  if (_dragId != null || _dragFolder != null || _dragTop != null) return; // never rebuild the list mid-drag — it cancels native drag-and-drop
   if (_renaming) return; // rebuilding would destroy the inline rename input
   if (_listPressed) { _renderHeld = true; return; }
   const list = document.getElementById('list');
@@ -3338,12 +3389,14 @@ function render() {
   // Order groups so all repos of a feature sit together under one heading; standalone
   // groups follow. curFeature tracks when we cross a feature boundary to open/close the wrapper.
   const featureNames = [...new Set(worktrees.filter(w => w.feature).map(w => w.feature))];
-  const orderedCwds = [], seenCwd = new Set();
-  for (const fname of featureNames) for (const cwd of groups.keys()) {
-    const w = worktreeAt(cwd);
-    if (w && w.feature === fname && !seenCwd.has(cwd)) { orderedCwds.push({ cwd, feature: fname }); seenCwd.add(cwd); }
+  const blocks = [], seenCwd = new Set();
+  for (const fname of featureNames) {
+    const cwds = [...groups.keys()].filter(c => { const w = worktreeAt(c); return w && w.feature === fname && !seenCwd.has(c); });
+    cwds.forEach(c => seenCwd.add(c));
+    if (cwds.length) blocks.push({ key: 'feature:' + fname, feature: fname, cwds });
   }
-  for (const cwd of groups.keys()) if (!seenCwd.has(cwd)) orderedCwds.push({ cwd, feature: null });
+  for (const cwd of groups.keys()) if (!seenCwd.has(cwd)) blocks.push({ key: cwd, feature: null, cwds: [cwd] });
+  const orderedCwds = sortTopBlocks(blocks).flatMap(b => b.cwds.map(cwd => ({ cwd, feature: b.feature })));
 
   let html = '', filterMatches = 0, curFeature = null;
   for (const { cwd, feature } of orderedCwds) {
@@ -3386,7 +3439,7 @@ function render() {
     const wtServerBadge = wtEntry && running
       ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openLink('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${esc(running.url.replace(/^https?:\/\//, ''))}<span class="server-menu-btn">&#x2197;</span></a></div>`
       : (wtEntry && wtEntry.status !== 'failed' && wtEntry.status !== 'setup' ? `<a class="wt-port" onclick="event.stopPropagation();openLink('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
-    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}" data-cwd="${escAttr(cwd)}"><div class="group-header${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ondragover="onGroupDragOver(event,'${safeCwd}')" ondragleave="this.classList.remove('drop-into')" ondrop="onGroupDrop(event,'${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
+    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}" data-cwd="${escAttr(cwd)}"${feature === null ? ` data-top="${escAttr(cwd)}" ${TOP_DND}` : ''}><div class="group-header"${feature === null ? ' draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()"' : ''}${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ondragover="onGroupDragOver(event,'${safeCwd}')" ondragleave="this.classList.remove('drop-into')" ondrop="onGroupDrop(event,'${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
       <span class="group-chevron">&#x25BC;</span>
       <div class="group-info" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>
       ${wtStatus}
