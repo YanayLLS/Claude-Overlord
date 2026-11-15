@@ -34,10 +34,21 @@ function worktreePath(repoPath, branch, root = WT_ROOT) {
 
 const samePath = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase(); // Windows paths ignore case
 
-// Worktree paths git has registered for repo.
+// Worktree paths git has registered for repo. Throws when git can't say: an empty answer would
+// make a live worktree look like a leftover.
 async function registeredWorktrees(repo) {
-  const out = await git(repo, ['worktree', 'list', '--porcelain'], 20000).catch(() => '');
+  const out = await git(repo, ['worktree', 'list', '--porcelain'], 20000);
   return out.split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9).trim());
+}
+
+// A folder is a dead leftover only when it has no .git link or its link points at a gitdir that is
+// gone. A live worktree of any repo (another clone with the same folder name) is never one.
+function isDeadLeftover(dir) {
+  let link; try { link = fs.readFileSync(path.join(dir, '.git'), 'utf8'); } catch (e) {
+    return e.code === 'ENOENT'; // no .git at all: a half-deleted tree. A .git FOLDER (EISDIR) is a real repo: keep.
+  }
+  const m = /^gitdir:\s*(.+)$/m.exec(link);
+  return !m || !fs.existsSync(path.resolve(dir, m[1].trim()));
 }
 
 function git(repo, args, timeout = 120000) {
@@ -155,6 +166,7 @@ async function createWorktree({ repo, branch, base, root }) {
       const cur = (await git(dest, ['branch', '--show-current'], 15000).catch(() => '')).trim();
       return { dest, branch: cur || branch, adopted: true };
     }
+    if (!isDeadLeftover(dest)) throw new Error(`Worktree path already exists and is in use by another checkout: ${dest}`);
     await fs.promises.rm(dest, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
     await git(repo, ['worktree', 'prune'], 20000).catch(() => {});
   }

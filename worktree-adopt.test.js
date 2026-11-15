@@ -47,3 +47,12 @@ test('removeWorktree deletes the folder and the git registration', async () => {
   assert.ok(!String(g('worktree', 'list')).includes('feat-z'));
   assert.ok(!String(g('branch', '--list', 'feat-z')).trim());
 });
+
+test('a live worktree of ANOTHER clone with the same folder name is never deleted', async () => {
+  const a = tmpRepo(), b = tmpRepo(); // both clones are folders named "repo"
+  const root = a.root;
+  const made = await wt.createWorktree({ repo: a.repo, branch: 'feat-c', base: 'dev', root });
+  fs.writeFileSync(path.join(made.dest, 'work.txt'), 'unsaved');
+  await assert.rejects(wt.createWorktree({ repo: b.repo, branch: 'feat-c', base: 'dev', root }), /already/i);
+  assert.ok(fs.existsSync(path.join(made.dest, 'work.txt')), 'the other clone\'s files are still there');
+});

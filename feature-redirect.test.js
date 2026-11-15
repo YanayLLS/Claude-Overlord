@@ -38,6 +38,10 @@ test('paths match case-insensitively, like Windows does', () => {
   assert.strictEqual(plan(R('designs', 'a.ts').toUpperCase()).member.path, W('Designs', 'Model-update'));
 });
 
+test('a known folder that holds the feature worktrees (e.g. home) is not a repo to redirect from', () => {
+  assert.strictEqual(planRedirect({ file: 'C:\\Users\\me\\AppData\\Local\\Temp\\x.md', cwd, worktrees, repos: [...repos, 'C:\\Users\\me'] }), null);
+});
+
 test('files outside every known repo and agents outside a feature are left alone', () => {
   assert.strictEqual(plan('C:\\Users\\me\\notes.md'), null);
   assert.strictEqual(plan(R('overlord', 'main.js'), R('overlord')), null);

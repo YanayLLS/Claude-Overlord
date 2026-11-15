@@ -4621,7 +4621,8 @@ async function onFeatureEdit(agentId, input) {
   const file = input && (input.file_path || input.notebook_path);
   const command = input && typeof input.command === 'string' ? input.command : '';
   if (!a || (!file && !command)) return {};
-  const repos = [...(settings.knownProjects || []), ...Object.keys(settings.projects || {}), ...(settings.lastFeatureRepos || [])];
+  const repos = [...new Set([...(settings.knownProjects || []), ...Object.keys(settings.projects || {}), ...(settings.lastFeatureRepos || [])])]
+    .filter(r => { try { return fs.statSync(path.join(r, '.git')).isDirectory(); } catch { return false; } }); // a main checkout, not a folder or a worktree
   const ctx = { cwd: a.cwd, worktrees: settings.worktrees || [], repos };
   const plan = file ? planRedirect({ file, ...ctx }) : planShellRedirect({ command, ...ctx });
   if (!plan) return {};
@@ -4638,8 +4639,14 @@ async function onFeatureEdit(agentId, input) {
         })
         .finally(() => featureJoins.delete(key)));
     }
-    try { member = await featureJoins.get(key); }
+    const SLOW = Symbol('slow');
+    try { member = await Promise.race([featureJoins.get(key), new Promise(r => setTimeout(() => r(SLOW), 8000))]); }
     catch (e) { flog(`feature ${plan.feature}: could not add ${plan.repo}:`, e); return {}; } // let the edit through rather than block the agent
+    if (member === SLOW) { // big repo: fetch + checkout outlast the hook. Hold the agent off instead of letting the call through.
+      const dest = wt.worktreePath(plan.repo, wt.safeBranch(plan.branch));
+      return { deny: `Overlord is creating ${path.basename(plan.repo)}'s worktree for feature "${plan.feature}" at ${dest}. `
+        + `Do not touch its main checkout (${plan.repo}); wait a few seconds and do this there instead.` };
+    }
   }
   if (!file) { // a shell command that would change the main checkout
     flog(`feature ${plan.feature}: stopped agent ${agentId} changing ${plan.repo} from the shell: ${command.slice(0, 200)}`);
@@ -4672,7 +4679,8 @@ async function doCreateWorktree({ repo, branch, base, feature }) {
   const dest = made.dest;
   branch = made.branch;
   const known = (settings.worktrees || []).find(w => w.path.toLowerCase() === dest.toLowerCase());
-  if (known) { // already listed: just move it into this feature
+  if (known) { // already listed: join it to this feature, unless it belongs to another one
+    if (feature && known.feature && known.feature !== feature) throw new Error(`the ${branch} worktree of ${path.basename(repo)} already belongs to feature "${known.feature}"`);
     known.feature = feature || known.feature || null;
     saveState(); send({ type: 'settings', settings: publicSettings() });
     send({ type: 'toast', text: `${path.basename(repo)}: using the existing ${branch} worktree` });
