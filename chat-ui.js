@@ -94,7 +94,18 @@
       return depth || !p ? p : richText(p, own);
     }).join('');
   }
-  const tagChips = (text, own) => inlineRich(escH(text), own);
+  // @Name of one of your agents in your text: a chip; hover shows what it's on, a click opens it. (It no longer sends
+  // the message to that agent: the agent it's typed to gets the mentioned one's context.)
+  const MENT_ST = { active: 'Working', resuming: 'Working', settling: 'Done', waiting: 'Done', idle: 'Idle', question: 'Needs you', permission: 'Needs you' };
+  function mentionChips(html) {
+    const byName = new Map(); for (const [id, a] of agents) if (a.agentName && !a.archived) byName.set(a.agentName.toLowerCase(), [id, a]);
+    return !byName.size ? html : html.replace(/(^|[^\w@&;])@([A-Za-z][A-Za-z0-9]*)(?![\w@])/g, (m, pre, n) => {
+      const hit = byName.get(n.toLowerCase()); if (!hit) return m;
+      const [id, a] = hit;
+      return pre + '<button type="button" class="ment" style="--h:' + [...a.agentName].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7) + '" data-goto-agent="' + id + '">@' + escH(a.agentName) + '</button>';
+    });
+  }
+  const tagChips = (text, own) => inlineRich(mentionChips(escH(text)), own);
   // When a usage limit resets: "…|1761580800" (epoch seconds) or "resets 6pm" / "resets at 18:30" (the next such time).
   function resetOf(ev) {
     const t = String(ev.text || ''), ep = /\|(\d{10})\b/.exec(t); if (ep) return +ep[1] * 1000;
@@ -1671,6 +1682,7 @@
     const dl = e.target.closest('[data-act="dismiss-limit"]'); if (dl && evs) { const ev = evs[+dl.dataset.i]; if (ev) { ev._dismissed = true; cache.delete(ev); rerender(); document.getElementById('term-order-input')?.focus({ preventScroll: true }); } return; }
     if (a && evs) evs = viewEvs(a, evs); // the blocks' data-i count the list paint drew, hidden messages left out
     const cwd = a && a.cwd;
+    const ga = e.target.closest('[data-goto-agent]'); if (ga) { if (agents.has(+ga.dataset.gotoAgent)) focusAgent(+ga.dataset.gotoAgent); return; } // an @Name chip
     const bt = e.target.closest('[data-btw]'); // /btw card: Close (Esc to the CLI); its Copy is the shared data-copy-url
     if (bt && selectedId != null) { keys(['']); bt.closest('.card')?.classList.add('leaving'); setTimeout(rerender, 300); return; }
     const k = e.target.closest('[data-keys]'); // permission card: the same keys the terminal menu takes
@@ -2159,6 +2171,8 @@
   // Copy from chat as clean HTML (lists, bold, links, code - no app colors/classes) + plain text that keeps list numbers.
   // Hovering a /skill in a message shows its description (tooltip.js reads data-tip on the same mouseover, after this).
   document.getElementById('conversation').addEventListener('mouseover', (e) => {
+    const m = e.target.closest && e.target.closest('.ment'); // an @Name chip: what that agent is on now (the app's tooltip shows it)
+    if (m) { const a = agents.get(+m.dataset.gotoAgent); m.dataset.tip = a ? [a.customName || a.title, MENT_ST[a.status], baseName(a.cwd || '')].filter(Boolean).join(' · ') : 'Closed'; return; }
     const t = e.target.closest && e.target.closest('.cmdtag'); if (!t || t.dataset.tip) return;
     const d = window.chatComposer && chatComposer.cmdDesc(t.textContent.trim()); if (d) t.dataset.tip = d;
   });

@@ -1296,3 +1296,9 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.btw .msg.ai { margin: 0; max-height: 45vh; overflow: auto; }
 :root body #conversation .card.btw .md p { margin: 0 0 14px; color: inherit; } /* .card p would grey it and drop the gaps */
 :root body #conversation .card.btw .btw-wait { color: var(--subtext); animation: chat-pulse 1.6s ease-in-out infinite; }
+/* @Name of one of your agents in your message (chat-ui mentionChips): a chip with the agent's own colour; hover (tooltip.js) tells what it's on, click opens it */
+:root body #conversation .msg.user .ment { all: unset; position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px 0 6px; margin: 0 1px; border-radius: 999px; line-height: 1.55; font-weight: 600; cursor: pointer; color: var(--text);
+  background: linear-gradient(color-mix(in srgb, #cba6f7 16%, var(--surface0, #1e1e2e)), color-mix(in srgb, #89b4fa 12%, var(--surface0, #1e1e2e))) padding-box, linear-gradient(120deg, #89b4fa, #cba6f7, #f5c2e7) border-box; border: 1px solid transparent; transition: transform .15s var(--chat-ease), box-shadow .15s; }
+:root body #conversation .msg.user .ment::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--h, 260) 75% 70%); box-shadow: 0 0 6px hsl(var(--h, 260) 75% 60% / .7); flex: none; }
+:root body #conversation .msg.user .ment:hover { transform: translateY(-1px); box-shadow: 0 4px 14px color-mix(in srgb, #cba6f7 30%, transparent); }
+:root body #conversation .msg.user .ment:focus-visible { outline: 2px solid #89b4fa; outline-offset: 2px; }

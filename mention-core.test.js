@@ -39,12 +39,3 @@ test('agent @names in a terminal line', () => {
   assert.deepStrictEqual(agentMentions('@Zephyrs', ['Zephyr']), []);
 });
 
-test('a prompt that starts with @Name is addressed to those agents', () => {
-  const { leadingAgentMentions: lead } = require('./mention-core');
-  const names = ['Pike', 'Rio'];
-  assert.deepStrictEqual(lead('@mijnvais @pike what is agents?', names), { names: ['Pike'], unknown: ['mijnvais'], body: 'what is agents?' });
-  assert.deepStrictEqual(lead('  @Pike, @Rio, @pike hi\nthere', names), { names: ['Pike', 'Rio'], unknown: [], body: 'hi\nthere' });
-  assert.strictEqual(lead('when @Pike is done, review it', names), null);
-  assert.strictEqual(lead('@Pike   ', names), null);
-  assert.strictEqual(lead('@Bob hi', names), null);
-});

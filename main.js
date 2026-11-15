@@ -4298,22 +4298,6 @@ function buildMentionContext(mentions) {
   return blocks.join('\n\n');
 }
 
-function sendLeadMention(id, { names, unknown, body }) {
-  const a = agents.get(id);
-  let user = ''; try { user = os.userInfo().username; } catch {}
-  const sent = [];
-  for (const name of names) {
-    const target = findLocalAgentByName(name);
-    if (target === null || target === id) continue;
-    const env = pc.buildEnvelope({ toAgent: name, fromAgent: settings.peersEnabled ? (a && a.agentName) || '' : '', fromPeer: myPeerName(), fromUser: user, text: body, hop: 0 });
-    flog(`@mention: agent ${id} → @${name} (agent ${target})`);
-    queuePeerInjection(target, env);
-    sent.push('@' + name);
-  }
-  const miss = unknown.length ? ` · no agent named ${unknown.map(n => '@' + n).join(', ')}` : '';
-  send({ type: 'toast', text: sent.length ? `✉ Sent to ${sent.join(', ')}${miss}` : `✕ Not sent — that is this agent${miss}` });
-}
-
 // ── Picker catalog: Claude's real built-ins (read from its binary once per version) + "new" marks ──
 const BUILTINS_FILE = path.join(STATE_DIR, 'claude-builtins.json'); // { key, items }
 const SEEN_FILE = path.join(STATE_DIR, 'catalog-seen.json');        // { "type:name": firstSeenMs }
@@ -4519,10 +4503,6 @@ function handleTermInput(id, data, shown) {
       return;
     }
     { const ag = agents.get(id); if (ag) ag.peerHopBase = 0; } // human prompt resets the agent-chain budget
-    // A prompt that starts with @Name(s) is addressed to those agents: it goes straight to them (the human typed
-    // it, so no approval step) and never reaches this one.
-    const lead = mc.leadingAgentMentions(buf, [...agents.values()].filter(x => x.agentName && !x.archived).map(x => x.agentName));
-    if (lead) { sendLeadMention(id, lead); t.write('\x15'); inputBuffers.set(id, ''); return; }
     const mentions = findMentions(buf);
     if (mentions.length > 0) {
       const ctx = buildMentionContext(mentions);
@@ -5349,11 +5329,9 @@ function handleIpc(msg) {
     case 'dictateWarm': if (!settings.dictationKey && require('./whisper').installed(WHISPER_DIR())) require('./whisper').warm(WHISPER_DIR()).catch(() => {}); break;
     case 'dictateRemove': { const n = require('./whisper').remove(WHISPER_DIR()); send({ type: 'dictation', setup: true, reset: true, toast: n ? `Speech engine removed (${(n / 1e9).toFixed(1)} GB freed)` : 'Speech engine is not installed' }); break; }
     case 'questPrompt': { let text = String(msg.text || '').slice(0, 200000);
-      // @Name from the chat works as typed in the terminal (see the input-buffer path): a message that starts with
-      // @Name goes to that agent instead; @Name anywhere else adds that agent's context below the message.
+      // @Name from the chat works as typed in the terminal (see the input-buffer path): it adds that agent's context
+      // below the message, wherever it sits; the message stays with this agent.
       if (!msg.intoDialog) {
-        const lead = mc.leadingAgentMentions(text, [...agents.values()].filter(x => x.agentName && !x.archived).map(x => x.agentName));
-        if (lead) { sendLeadMention(msg.id, lead); send({ type: 'mentionRouted', id: msg.id }); break; }
         const mentions = findMentions(text).filter(m => m.id !== msg.id);
         if (mentions.length) text += '\n\n' + buildMentionContext(mentions);
       }

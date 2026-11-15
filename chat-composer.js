@@ -417,9 +417,9 @@
   pane.addEventListener('drop', (e) => { order().classList.remove('drop'); if (!chat() || !e.dataTransfer?.files.length) return; e.preventDefault(); e.stopPropagation(); addFiles([...e.dataTransfer.files]); box().focus(); });
 
   // An agent row dragged from the list onto the chat box puts @Name at the caret: the message then reaches it
-  // with that agent's context (main.js findMentions / sendLeadMention).
+  // with that agent's context (main.js findMentions).
   const AGENT = 'application/x-overlord-agent', isAgent = (e) => [...(e.dataTransfer?.types || [])].includes(AGENT);
-  order().addEventListener('dragover', (e) => { if (!chat() || !isAgent(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'link'; order().classList.add('drop'); });
+  order().addEventListener('dragover', (e) => { if (!chat() || !isAgent(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; order().classList.add('drop'); }); // the row allows copy or move, not link
   order().addEventListener('dragleave', (e) => { if (!order().contains(e.relatedTarget)) order().classList.remove('drop'); });
   order().addEventListener('drop', (e) => {
     if (!chat() || !isAgent(e)) return;
