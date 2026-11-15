@@ -372,6 +372,9 @@ function protectClaudeConfig(extra = []) {
 }
 const ACCOUNTS_PATH = path.join(STATE_DIR, 'accounts.json');
 const LOG_FILE = path.join(STATE_DIR, 'overlord.log');
+// GitHub calls per feature: one log line every 10 minutes names who spent the rate limit (gh-meter.js)
+const ghMeter = require('./gh-meter').createGhMeter();
+setInterval(() => { const l = ghMeter.report(); if (l) flog(l); }, 10 * 60e3).unref();
 
 // Append-only diagnostic log so failures (worktree setup, git, PR, crashes) leave a
 // readable trail on disk instead of vanishing into a truncated toast. Path is printed
@@ -2884,6 +2887,7 @@ function fetchAllPRs(repos) {
     let out = '', errbuf = '', proc, done = false;
     const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
     try {
+      ghMeter.meter('graphql', new Error().stack);
       proc = spawn('gh', ['api', 'graphql', '-F', 'query=@-'], { windowsHide: true, shell: process.platform === 'win32' });
     } catch (e) { return resolve({ prs: [], failed: valid, error: ghErr(e), errorCode: ghErrCode(e) }); }
     const to = setTimeout(() => { try { proc.kill(); } catch {} finish({ prs: [], failed: valid, error: 'timeout' }); }, 25000);
@@ -2948,6 +2952,7 @@ function fetchBehind(prs) {
     let out = '', proc, done = false;
     const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
     try {
+      ghMeter.meter('graphql', new Error().stack);
       proc = spawn('gh', ['api', 'graphql', '-F', 'query=@-'], { windowsHide: true, shell: process.platform === 'win32' });
     } catch { return resolve({}); }
     const to = setTimeout(() => { try { proc.kill(); } catch {} finish({}); }, 25000);
@@ -3292,6 +3297,7 @@ async function ghGraphql(query, timeout = 30000) {
   return ghGraphqlRaw(query, timeout);
 }
 function ghGraphqlRaw(query, timeout) {
+  ghMeter.meter('graphql', new Error().stack);
   return new Promise((resolve) => {
     let out = '', errbuf = '', proc, done = false;
     const finish = (v) => { if (done) return; done = true; clearTimeout(to); resolve(v); };
@@ -3337,6 +3343,7 @@ async function listReposWithLastPr() {
 }
 
 function ghJsonRaw(args, timeout = 20000) {
+  ghMeter.meter(args[0] === 'api' && args.includes('graphql') ? 'graphql' : 'rest', new Error().stack);
   return new Promise((resolve) => {
     execFile('gh', args, { timeout, windowsHide: true, shell: process.platform === 'win32', maxBuffer: 8 * 1024 * 1024 },
       (err, stdout) => {
@@ -3371,7 +3378,9 @@ async function releasesFindLocal(repo, rel, ref) {
   return found;
 }
 // Plain GETs revalidate with ETags (a 304 is free) and a rate-limited answer pauses REST until the reset: gh-cache.js.
-const ghCache = require('./gh-cache').createGhCache({ run: ghJsonRaw, fetch, token: () => ghTokenGet() });
+// the cache's REST fetches count too: a 304 is free, anything else costs a call
+const meteredFetch = (url, opts) => { const stack = new Error().stack; return fetch(url, opts).then(r => { ghMeter.meter(r.status === 304 ? 'free' : 'rest', stack); return r; }); };
+const ghCache = require('./gh-cache').createGhCache({ run: ghJsonRaw, fetch: meteredFetch, token: () => ghTokenGet() });
 const ghJson = ghCache.ghJson;
 const releases = require('./releases-main')({ send, ghJson, ghGraphql, stateDir: STATE_DIR, findLocal: releasesFindLocal,
   away: userAway,
