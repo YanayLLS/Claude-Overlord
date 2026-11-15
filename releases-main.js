@@ -66,7 +66,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   const file = path.join(stateDir, 'releases.json');
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(file, 'utf-8')) || {}; } catch {}
-  let state = { ...(saved.cache || {}), source: !saved.source || saved.source === OLD_SOURCE ? DEFAULT_SOURCE : saved.source, loading: false };
+  let state = { ...(saved.cache || {}), source: !saved.source || saved.source === OLD_SOURCE ? DEFAULT_SOURCE : saved.source, loading: false, signing: false }; // a sign never outlives the run that started it
   if (state.releaseRun && (state.releaseRun.running || Date.now() - state.releaseRun.startedAt > RUN_TTL_MS)) state.releaseRun = null;
   // Overlord quit mid Release all: say so, offer Resume (it picks up with what's still open)
   // …and when it was running right up to the quit (a restart, an update), it resumes by itself once the app has settled.
@@ -96,7 +96,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   }
   function flush() {
     clearTimeout(persistTimer); persistTimer = null;
-    const { loading, branches, branchesMore, deployEta, ...cache } = state; // fetched fresh each session, not worth saving
+    const { loading, signing, branches, branchesMore, deployEta, ...cache } = state; // signing: saved once, it locked Sign after a restart. // fetched fresh each session, not worth saving
     const text = JSON.stringify({ source: state.source, cache }, null, 2);
     if (text === lastWritten) return;
     try { fs.writeFileSync(file, text); lastWritten = text; } catch {}
@@ -903,10 +903,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // Signing shows at once (state.signing → the buttons say "Signing…"); the team list is reused when
   // it's fresh — re-reading it cost two GitHub calls before anything happened.
   // lateId: a release that already merged unsigned: approve its merged PRs (a late signature, marked so)
+  const SIGN_CAP_MS = 2 * 60e3;
   async function signRelease(lateId) {
     if (state.signing) return;
     push({ signing: true });
-    try { await signNow(lateId); } finally { push({ signing: false }); }
+    // ponytail: a sign stuck on a call that never answers would lock Sign for the session; 2 min frees the button
+    const cap = new Promise(r => { const t = setTimeout(() => r('timeout'), SIGN_CAP_MS); if (t.unref) t.unref(); });
+    try { if (await Promise.race([signNow(lateId), cap]) === 'timeout') send({ type: 'toast', text: 'Signing took over 2 minutes: check the PRs, then sign again' }); }
+    finally { push({ signing: false }); }
   }
   async function signNow(lateId) {
     const who = await whoAmI();
