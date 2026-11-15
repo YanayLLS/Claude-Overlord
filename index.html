@@ -2069,7 +2069,7 @@ function groupMenuItems(cwd, q, wt, running, archived, doneCount, solo = false) 
        : { icon: 'trash', label: 'Remove project', danger: true, on: `removeProject('${q}')` },
   ];
 }
-function startFeature(name) { featureMembers(name).forEach(w => send({ type: 'startDevServer', path: w.path })); }
+function startFeature(name) { send({ type: 'startFeatureServers', feature: name }); }
 function stopFeature(name) { featureMembers(name).forEach(w => send({ type: 'stopDevServer', path: w.path })); }
 function prFeature(name) { featureMembers(name).forEach(w => send({ type: 'createPr', path: w.path })); }
 async function removeFeature(name) {

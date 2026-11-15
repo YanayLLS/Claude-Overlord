@@ -12,6 +12,7 @@ const pty = require('node-pty');
 const wt = require('./worktree');
 const { planRedirect } = require('./feature-redirect');
 const nodeReq = require('./node-req');
+const featureEnvLib = require('./feature-env');
 const pc = require('./peer-core');
 const wc = require('./watch-core');
 const timelineCore = require('./timeline-core');
@@ -4737,6 +4738,24 @@ function installWorktree(entry) {
   attempt([], false);
 }
 
+// Does this checkout's dev tooling read env var `name`? (package.json scripts + scripts/*.{js,mjs,cjs}), cached 5 min.
+const _readsCache = new Map();
+function scriptsRead(dir, name) {
+  const k = dir + '|' + name, c = _readsCache.get(k);
+  if (c && Date.now() - c.at < 300000) return c.v;
+  let v = false;
+  try {
+    const files = [path.join(dir, 'package.json'), ...fs.readdirSync(path.join(dir, 'scripts')).filter(f => /\.(m|c)?js$/.test(f)).map(f => path.join(dir, 'scripts', f))];
+    v = files.some(f => { try { return fs.readFileSync(f, 'utf8').includes(name); } catch { return false; } });
+  } catch {}
+  _readsCache.set(k, { at: Date.now(), v });
+  return v;
+}
+const serverUrl = (p) => (devServers.get(p) || externalServers.get(p) || {}).url || null;
+function featureEnvFor(entry) {
+  return featureEnvLib.featureEnv({ entry, worktrees: settings.worktrees || [], running: serverUrl, reads: (_repo, name) => scriptsRead(entry.path, name), base: process.env });
+}
+
 function startDevServer(p) {
   const entry = findWorktree(p);
   if (!entry) return;
@@ -4754,11 +4773,14 @@ function startDevServer(p) {
   const url = fillPort(cfg.urlTemplate, entry.port);
   const logPath = path.join(STATE_DIR, 'logs', `server-${wt.slug(entry.branch)}-${wt.slug(path.basename(entry.repo))}.log`);
   entry.serverLog = logPath;
-  try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.writeFileSync(logPath, `# ${cfg.devCommand}\n# cwd ${entry.path}  PORT=${entry.port}\n# started ${new Date().toISOString()}\n\n`); } catch {}
+  // In a feature: its sibling servers' URLs, and e.g. Designs' FL_BACK_URL pointed at this feature's own backend.
+  const fenv = featureEnvFor(entry);
+  const linkLines = fenv.links.map(l => `# ${l.name}=${l.url}  (this feature's ${l.repo})\n`).join('');
+  try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.writeFileSync(logPath, `# ${cfg.devCommand}\n# cwd ${entry.path}  PORT=${entry.port}\n${linkLines}# started ${new Date().toISOString()}\n\n`); } catch {}
   const append = d => { try { fs.appendFileSync(logPath, d); } catch {} };
   const shell2 = agentShell();
   const shellArgs = process.platform === 'win32' ? ['/c', cfg.devCommand] : ['-c', cfg.devCommand];
-  const env = { ...process.env, PORT: String(entry.port), PORT_BASE: String(entry.port) };
+  const env = { ...process.env, PORT: String(entry.port), PORT_BASE: String(entry.port), ...fenv.env };
   try {
     const proc = pty.spawn(shell2, shellArgs, { name: 'xterm-256color', cols: 120, rows: 30, cwd: entry.path, env });
     const startedAt = Date.now();
@@ -4775,9 +4797,15 @@ function startDevServer(p) {
         send({ type: 'toast', text: `${path.basename(entry.repo)} server stopped: ${line || 'exited immediately'} — see server log in ⋮` });
       }
     });
-    devServers.set(p, { proc, port: entry.port, url, repo: entry.repo });
+    devServers.set(p, { proc, port: entry.port, url, repo: entry.repo, links: fenv.links });
     send({ type: 'wtServer', path: p, running: true, port: entry.port, url });
-    send({ type: 'toast', text: `Starting server: ${url}` });
+    send({ type: 'toast', text: fenv.links.length ? `Starting ${path.basename(entry.repo)} at ${url} · using this feature's ${fenv.links.map(l => l.repo).join(', ')}` : `Starting server: ${url}` });
+    // A sibling front-end already running without this server: it needs a restart to use it (not done for you).
+    if (entry.feature) for (const w of settings.worktrees || []) {
+      const s = w.feature === entry.feature && w.path !== p && devServers.get(w.path);
+      if (s && featureEnvFor(w).links.some(l => !(s.links || []).some(x => x.name === l.name && x.url === l.url)))
+        send({ type: 'toast', text: `Restart ${path.basename(w.repo)}'s server to use this feature's ${path.basename(entry.repo)}` });
+    }
   } catch (e) {
     append(`\n# spawn error: ${e.message}\n`);
     send({ type: 'toast', text: 'Failed to start server: ' + e.message });
@@ -4902,6 +4930,11 @@ function handleIpc(msg) {
         doCreateWorktree({ repo: r.repo, branch: name, base: r.base || 'dev', feature: name })
           .catch(e => { flog(`createFeature ${name} / ${r.repo} failed:`, e); send({ type: 'toast', text: `Feature ${name} — ${path.basename(r.repo)} failed: ${e.message || 'error'}` }); });
       }
+      break;
+    }
+    case 'startFeatureServers': { // backends first, so the front-ends after them get wired to them
+      const members = (settings.worktrees || []).filter(w => w.feature === msg.feature && !devServers.has(w.path) && !externalServers.has(w.path));
+      for (const w of featureEnvLib.startOrder(members)) startDevServer(w.path);
       break;
     }
     case 'repoChecks': { // the New feature / Add repo rows: does this machine have the Node each repo needs?
