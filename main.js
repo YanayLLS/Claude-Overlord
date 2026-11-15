@@ -91,9 +91,6 @@ const USAGE_POLL_MS = 60000;
 const USAGE_TIMEOUT_MS = 15000;
 const USAGE_STALE_MS = 60 * 60 * 1000; // 1 hour — fetch even when idle if data older than this
 const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
-const TEAM_POLL_MS = 3000; // reads + parses every ~/.claude/teams dir each tick — but returns early with no agents
-const TEAMS_DIR = path.join(os.homedir(), '.claude', 'teams');
-const TASKS_DIR = path.join(os.homedir(), '.claude', 'tasks');
 const SERVER_URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})\b[^\s)>\]'"]*/g;
 
 const AGENT_NAMES = [
@@ -551,8 +548,6 @@ async function probeServers() {
   probeBusy = false;
 }
 setTimeout(probeServers, 6000); setInterval(probeServers, 20000);
-const teams = new Map(); // teamName -> { name, leadAgentId, leadSessionId, members[], tasks[] }
-const agentTeamMap = new Map(); // agentId -> teamName
 const knownJsonlFiles = new Map(); // projectDir -> Set<filePath>
 const pendingClearAgents = new Set(); // agentIds that recently ran /clear — used to correctly assign new JSONL files
 // Terminal output kept for the mobile remote and a renderer-reload replay (last TERM_BUFFER_MAX chars).
@@ -733,9 +728,6 @@ function sendFullState() {
     if (ports) { for (const [port, url] of ports) send({ type: 'serverDetected', id, port, url }); }
     if (a.cronCount > 0) send({ type: 'looping', id, active: true, count: a.cronCount });
     if (a.compacting) send({ type: 'compacting', id, active: true });
-  }
-  for (const [, teamData] of teams) {
-    send({ type: 'teamDetected', team: { name: teamData.name, leadAgentId: teamData.leadAgentId, members: teamData.members, tasks: teamData.tasks } });
   }
   if (lastUsage) send({ type: 'usage', usage: lastUsage });
   if (lastUsageCost) send({ type: 'usageCost', cost: lastUsageCost });
@@ -2103,10 +2095,10 @@ function takeSpare(cwd) {
 // typed initialPrompt. Must already be shell-safe (see fixRunPlan). A spare is already
 // running, so it can't take one.
 // team: turn on agent teams (only the team dialog's lead needs teammates)
-function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team, quiet) { // quiet: opens in the background, the user stays where they are
+function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, _unused, quiet) { // quiet: opens in the background, the user stays where they are
   const cwd = folderPath || os.homedir();
   protectClaudeConfig();
-  const warm = argPrompt || team ? null : takeSpare(cwd);
+  const warm = argPrompt ? null : takeSpare(cwd);
   const sessionId = warm ? warm.sessionId : crypto.randomUUID();
   const id = warm ? warm.id : nextId++;
   const agent = {
@@ -2133,7 +2125,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team, quiet
   send({ type: 'stats', id, stats: agent.stats });
   if (!quiet) { send({ type: 'focused', id }); focusedAgentId = id; }
 
-  const agentEnv = cleanAgentEnv(team ? { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1', ...feat.env } : feat.env);
+  const agentEnv = cleanAgentEnv(feat.env);
   try {
     const proc = warm ? warm.proc : agentPty().spawn(shell, shellArgs, { name: 'xterm-256color', ...spawnSize(id), cwd: safeCwd(cwd), env: agentEnv });
     terminals.set(id, proc);
@@ -4253,103 +4245,6 @@ function fetchUsageFromHeaders(apiKey) {
   req.end();
 }
 
-// ── Team prompt building ──────────────────────────────
-function buildTeamPrompt(task, roles) {
-  let prompt = `Create an agent team to accomplish this task:\n\n${task}\n\n`;
-  if (roles && roles.length > 0) {
-    prompt += 'Team members should have these roles:\n';
-    for (const role of roles) {
-      prompt += `- ${role.name}: ${role.description}\n`;
-    }
-    prompt += '\n';
-  }
-  prompt += 'Use the agent teams feature to coordinate the work. Create the team, assign tasks, and begin working.';
-  return prompt;
-}
-
-// ── Team detection ────────────────────────────────────
-// Async, and a team's config is re-read only when its file changes: with hundreds of team dirs under ~/.claude/teams the
-// sync version (exists + read + parse of each, every 3 s) stalled the main process 300-650 ms per tick.
-const teamCfgCache = new Map(); // team dir -> { mtimeMs, config }
-let teamScanBusy = false;
-async function scanTeams() {
-  if (teamScanBusy) return; teamScanBusy = true;
-  try {
-    if (!(await fs.promises.stat(TEAMS_DIR).catch(() => null))) return;
-    // Build sessionId -> agentId lookup from our agents
-    const sessionToAgent = new Map();
-    for (const [id, a] of agents) sessionToAgent.set(a.sessionId, id);
-    if (!sessionToAgent.size && !teams.size) return; // nobody could lead a team: no reason to read every team dir
-    const teamDirs = await fs.promises.readdir(TEAMS_DIR);
-
-    for (const teamName of teamDirs) {
-      const configPath = path.join(TEAMS_DIR, teamName, 'config.json');
-      const st = await fs.promises.stat(configPath).catch(() => null); if (!st) { teamCfgCache.delete(teamName); continue; }
-      let config, hit = teamCfgCache.get(teamName);
-      if (hit && hit.mtimeMs === st.mtimeMs) config = hit.config;
-      else { try { config = JSON.parse(await fs.promises.readFile(configPath, 'utf-8')); } catch { continue; } teamCfgCache.set(teamName, { mtimeMs: st.mtimeMs, config }); }
-      if (!config.leadSessionId || !config.members) continue;
-
-      // Match team to one of our agents via leadSessionId
-      const leadAgentId = sessionToAgent.get(config.leadSessionId);
-      if (leadAgentId === undefined) continue; // not our agent
-
-      // Read tasks
-      let taskList = [];
-      const tasksDir = path.join(TASKS_DIR, teamName);
-      if (await fs.promises.stat(tasksDir).catch(() => null)) {
-        try {
-          const taskFiles = (await fs.promises.readdir(tasksDir)).filter(f => f.endsWith('.json'));
-          for (const tf of taskFiles) {
-            try {
-              const task = JSON.parse(await fs.promises.readFile(path.join(tasksDir, tf), 'utf-8'));
-              taskList.push({ id: task.id, subject: task.subject, status: task.status, owner: task.owner, activeForm: task.activeForm });
-            } catch {}
-          }
-        } catch {}
-      }
-
-      const existing = teams.get(teamName);
-      const memberIds = config.members.map(m => m.agentId).sort().join(',');
-      const taskHash = taskList.map(t => `${t.id}:${t.status}:${t.owner}`).join(',');
-
-      if (existing) {
-        // Check for member changes
-        const existMemberIds = existing.members.map(m => m.agentId).sort().join(',');
-        if (existMemberIds !== memberIds) {
-          existing.members = config.members;
-          existing.tasks = taskList;
-          agentTeamMap.set(leadAgentId, teamName);
-          send({ type: 'teamDetected', team: { name: teamName, leadAgentId, members: config.members, tasks: taskList } });
-        }
-        // Check for task changes
-        const existTaskHash = existing.tasks.map(t => `${t.id}:${t.status}:${t.owner}`).join(',');
-        if (existTaskHash !== taskHash) {
-          existing.tasks = taskList;
-          send({ type: 'teamTasksUpdated', teamName, tasks: taskList });
-        }
-      } else {
-        // New team found
-        const teamData = { name: teamName, leadAgentId, leadSessionId: config.leadSessionId, members: config.members, tasks: taskList };
-        teams.set(teamName, teamData);
-        agentTeamMap.set(leadAgentId, teamName);
-        send({ type: 'teamDetected', team: { name: teamName, leadAgentId, members: config.members, tasks: taskList } });
-        console.log(`[Overlord] Team detected: ${teamName} (lead agent ${leadAgentId}, ${config.members.length} members)`);
-      }
-    }
-
-    // Clean up teams whose lead agent was closed
-    for (const [teamName, teamData] of teams) {
-      if (!agents.has(teamData.leadAgentId)) {
-        teams.delete(teamName);
-        agentTeamMap.delete(teamData.leadAgentId);
-        send({ type: 'teamRemoved', teamName });
-      }
-    }
-  } catch (e) { console.log('[Overlord] Team scan error:', e.message); }
-  finally { teamScanBusy = false; }
-}
-
 // ── @Mention detection + context injection ─────────────
 const inputBuffers = new Map(); // agentId -> string buffer
 const pendingTermInput = new Map(); // agentId -> array of strings queued pre-spawn
@@ -5889,26 +5784,6 @@ function handleIpc(msg) {
       send({ type: 'usage', usage: null });
       break;
     }
-    case 'createTeam': {
-      const teamPrompt = buildTeamPrompt(msg.task, msg.roles);
-      createAgent(msg.cwd, teamPrompt, undefined, false, true);
-      break;
-    }
-    case 'focusTeamMember': {
-      const team = teams.get(msg.teamName);
-      if (!team) break;
-      const leadId = team.leadAgentId;
-      spawnTerminal(leadId);
-      send({ type: 'focused', id: leadId });
-      // Type @member-name tag into the lead's terminal for non-lead members
-      if (!msg.isLead && msg.memberName) {
-        const t = terminals.get(leadId);
-        if (t) {
-          setTimeout(() => { try { t.write('@' + msg.memberName + ' '); } catch {} }, 300);
-        }
-      }
-      break;
-    }
     case 'getAgents': {
       sendFullState();
       break;
@@ -5952,8 +5827,6 @@ setInterval(() => {
   }
 }, STATUS_STUCK_MS);
 
-// Periodically scan for teams
-setInterval(() => scanTeams(), TEAM_POLL_MS);
 setInterval(() => flog('memory ' + JSON.stringify(memorySummary())), 10 * 60 * 1000);
 // A pty host from an older build keeps running (agents live in it); once it's empty, swap in this build's.
 setInterval(() => { if (ptyHost.stale) ptyHost.upgradeIfEmpty().then(ok => { if (ok) flog('pty host upgraded to the current build'); }); }, 60 * 1000);

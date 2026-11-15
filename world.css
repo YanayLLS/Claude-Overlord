@@ -246,7 +246,6 @@ body.world-mode .agent[data-status="waiting"]::after { color: var(--green); }
 body.world-mode .agent[data-status="crashed"]::after { color: var(--red); }
 body.world-mode .agent[data-status="resuming"]::after { color: var(--purple); }
 body.world-mode .agent-fill { grid-row: 1 / span 2; grid-column: 1 / -1; }
-body.world-mode .agent-team { margin-left: 22px; }
 /* Feature headers read like the compound banners on the map */
 body.world-mode .feature-header { padding: 9px 12px 3px; }
 body.world-mode .feature-header:hover { background: rgba(255,255,255,.03); }

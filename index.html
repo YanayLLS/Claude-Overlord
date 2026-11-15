@@ -346,8 +346,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   transition:color .12s, border-color .12s, background .12s;
 }
 .group-actions button:hover { color:var(--green); border-color:rgba(166,227,161,.4); background:rgba(166,227,161,.08); }
-.group-actions .btn-team { color:var(--dim); }
-.group-actions .btn-team:hover { color:var(--purple); border-color:rgba(203,166,247,.4); background:rgba(203,166,247,.08); }
 .group-actions .btn-archive { color:var(--dim); }
 .group-actions .btn-archive:hover { color:var(--yellow,#f9e2af); border-color:rgba(249,226,175,.4); background:rgba(249,226,175,.08); }
 .group-menu-wrap { position:relative; flex-shrink:0; }
@@ -448,8 +446,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 }
 .agent:hover { background:rgba(205,214,244,.04); border-color:var(--accent); }
 .agent.selected:hover .agent-btn { opacity:.7; }
-.agent.has-team { border-color:rgba(203,166,247,.15); }
-.agent.has-team::before { background:var(--purple); }
 
 /* Two-line card layout — top row = identity, bottom row = status + actions */
 .agent-top { display:flex; align-items:center; gap:6px; }
@@ -571,36 +567,6 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
   text-transform:uppercase; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 
-/* ── Team section (inline in agent card) ── */
-.agent-team {
-  margin:5px 0 0; border-top:1px solid rgba(192,132,252,.2);
-  padding:5px 0 0;
-}
-.agent-team-header {
-  display:flex; align-items:center; gap:6px; user-select:none;
-  padding:0 0 3px;
-}
-.team-icon { color:var(--purple); font-size:11px; flex-shrink:0; }
-.team-name { font-size:11px; color:var(--purple); font-weight:normal; letter-spacing:.3px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.team-count { font-size:10px; color:var(--dim); flex-shrink:0; }
-/* #3 & #4: Team members use border-left indent pattern (consistent with .subagent) */
-.team-members { padding:2px 0 0; display:flex; flex-direction:column; gap:0;
-  margin-left:4px; border-left:2px solid rgba(192,132,252,.2); }
-.team-member {
-  display:flex; align-items:center; gap:6px; padding:3px 6px 3px 10px; cursor:pointer;
-  background:transparent; border:none;
-  transition:background .12s;
-}
-.team-member:hover { background:rgba(192,132,252,.06); }
-.team-member-dot { width:5px; height:5px; flex-shrink:0; background:var(--purple); box-shadow:0 0 4px var(--purple); }
-.team-member-name { font-size:11px; color:var(--text); opacity:.7; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.team-member-role { font-size:10px; color:var(--dim); flex-shrink:0; letter-spacing:.3px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* #5: Task progress — text-based with inline dot, distinct from ctx bar */
-.team-tasks-bar { display:flex; align-items:center; gap:6px; margin:3px 0 0 4px; padding:2px 0 0 10px;
-  border-left:2px solid rgba(192,132,252,.2); }
-.team-tasks-dot { width:5px; height:5px; flex-shrink:0; background:var(--purple); box-shadow:0 0 4px var(--purple); }
-.team-tasks-label { font-size:10px; color:var(--purple); flex-shrink:0; letter-spacing:.3px; }
-.team-tasks-pct { font-size:9px; color:var(--dim); flex-shrink:0; }
 
 
 /* ── Status bar (3-line usage footer) ── */
@@ -1046,7 +1012,7 @@ button:focus-visible { outline-offset:0; }
 .help-desc { font-size:12px; color:var(--dim); letter-spacing:.2px; }
 
 /* ── Prompt overlay ── */
-#prompt-overlay, #team-overlay {
+#prompt-overlay {
   display:none; position:fixed; inset:0; background:rgba(17,17,27,.7); backdrop-filter:blur(4px); z-index:999;
   align-items:center; justify-content:center; transition:opacity .15s;
 }
@@ -1650,17 +1616,6 @@ button:focus-visible { outline-offset:0; }
       </div>
     </div>
   </div>
-  <div id="team-overlay" onclick="closeTeamOverlay()">
-    <div class="prompt-modal" onclick="event.stopPropagation()">
-      <h3 style="color:var(--purple)">New Agent Team</h3>
-      <div class="prompt-path" id="team-cwd"></div>
-      <textarea class="prompt-input" id="team-task" rows="4" placeholder="Describe the task and team structure, e.g.&#10;&#10;Review PR #42 with 3 teammates: one on security, one on performance, one on test coverage"></textarea>
-      <div class="prompt-actions">
-        <button onclick="closeTeamOverlay()">Cancel</button>
-        <button class="btn-go" onclick="submitTeam()" style="background:var(--purple);border-color:var(--purple);color:var(--shadow);">Start Team</button>
-      </div>
-    </div>
-  </div>
   <div id="help-overlay" onclick="closeHelp()">
     <div class="help-modal" onclick="event.stopPropagation()">
       <h3>Keyboard Shortcuts</h3>
@@ -1776,7 +1731,6 @@ function ctxWindow(modelFamily, ctxTok) {
   return base;
 }
 const agents = new Map(); // id -> { cwd, status, tools:Map, prompt, preview, stats, sessionId, servers:Map(port->url) }
-const teamMap = new Map(); // teamName -> { name, leadAgentId, members[], tasks[] }
 const knownProjects = new Set(); // cwd paths that persist even when all agents are closed
 let worktrees = []; // [{path, repo, branch, base, port, status}] — from settings, groups render even with 0 agents
 let projects = {}; // repo path -> {devCommand, urlTemplate, basePort, portStep, seedFiles, defaultBase}
@@ -2066,7 +2020,6 @@ const DD_ICON = {
   folder: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   folderPlus: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/>',
   log: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
-  team: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.5A6.5 6.5 0 0 1 21.5 20"/>',
   archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>',
   branch: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="7" r="2.5"/><path d="M6 7.5v9M18 9.5c0 5-12 3-12 7"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
@@ -2104,7 +2057,6 @@ function groupMenuItems(cwd, q, wt, running, archived, doneCount, solo = false) 
     !wt && { icon: 'gear', label: 'Dev server&#x2026;', on: `openProjectConfig('${q}')` },
     '-',
     { icon: 'folderPlus', label: 'New folder', on: `createFolder('${q}')` },
-    { icon: 'team', label: 'New team', on: `showTeamOverlay('${q}')` },
     archived && { icon: 'archive', label: 'Archived', sub: archived, on: `openArchiveModal('${q}')` },
     '-',
     doneCount && { icon: 'check', label: 'Close done', sub: doneCount, on: `closeDoneInGroup('${q}')` },
@@ -2706,38 +2658,6 @@ function submitPrompt() {
   closePromptOverlay();
 }
 
-// ── Team overlay ──
-let pendingTeamCwd = null;
-let _teamCloseTimer = null;
-function showTeamOverlay(cwd) {
-  if (_teamCloseTimer) { clearTimeout(_teamCloseTimer); _teamCloseTimer = null; }
-  pendingTeamCwd = cwd;
-  document.getElementById('team-cwd').textContent = cwd;
-  const input = document.getElementById('team-task');
-  input.value = '';
-  const el = document.getElementById('team-overlay');
-  el.style.display = 'flex'; el.style.opacity = '0';
-  requestAnimationFrame(() => { el.style.opacity = '1'; input.focus(); });
-  input.onkeydown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitTeam(); }
-    if (e.key === 'Escape') closeTeamOverlay();
-  };
-}
-function closeTeamOverlay() {
-  if (_teamCloseTimer) return;
-  const el = document.getElementById('team-overlay');
-  el.style.opacity = '0';
-  _teamCloseTimer = setTimeout(() => { _teamCloseTimer = null; el.style.display = 'none'; }, 150);
-  pendingTeamCwd = null;
-}
-function submitTeam() {
-  if (!pendingTeamCwd) return;
-  const task = document.getElementById('team-task').value.trim();
-  if (!task) { document.getElementById('team-task').focus(); return; }
-  api.send({ type: 'createTeam', cwd: pendingTeamCwd, task });
-  closeTeamOverlay();
-}
-
 // ── In-app confirm dialog ──
 let _confirmCb = null;
 function showConfirm(message, okLabel) {
@@ -3224,7 +3144,6 @@ function setEffort(id, level) {
 function openFolder(p) { api.send({ type: 'openFolder', path: p }); }
 function stopLoop(id) { api.send({ type: 'stopLoop', id }); }
 function compactAgent(id) { api.send({ type: 'compactAgent', id }); }
-function focusTeamMember(teamName, memberName, isLead) { api.send({ type: 'focusTeamMember', teamName, memberName, isLead }); }
 
 function fmtTok(n) { return n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'k' : String(n); }
 function fmtDur(ms) { const s = Math.floor(ms/1000); if (s < 60) return s+'s'; const m = Math.floor(s/60); if (m < 60) return m+'m '+(s%60)+'s'; return Math.floor(m/60)+'h '+(m%60)+'m'; }
@@ -3484,10 +3403,9 @@ function render() {
       const ctxCls = ctxPct >= 90 ? 'danger' : ctxPct >= 70 ? 'warn' : '';
       const stext = (statusVerb(a, st) + (statusMetaText(a) ? ' · ' + statusMetaText(a) : '') + (a.sleeping ? ' · Sleeping' : '')).trim();
 
-      const hasTeam = [...teamMap.values()].some(t => t.leadAgentId === id);
       const statusBadge = st === 'permission' ? '!' : st === 'crashed' ? '\u2715' : '';
       const mf = a.stats?.modelFamily || '';
-      html += `<div class="agent${sel ? ' selected' : ''}${a.sleeping ? ' sleeping' : ''}${hasTeam ? ' has-team' : ''}${needsAnswer(a) ? ' needs-answer' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
+      html += `<div class="agent${sel ? ' selected' : ''}${a.sleeping ? ' sleeping' : ''}${needsAnswer(a) ? ' needs-answer' : ''}" data-status="${st}" data-id="${id}" data-prompt="${escAttr(a.prompt || '')}" data-aname="${escAttr(a.agentName || '')}" data-stext="${escAttr(stext)}" draggable="true" onclick="focusAgent(${id})" oncontextmenu="event.preventDefault();showAgentMenu(event,${id})" ondragstart="onCardDragStart(event,${id},'${safeCwd}')" ondragend="onCardDragEnd()" ondragover="onCardDragOver(event,${id})" ondragleave="onCardDragLeave(event)" ondrop="onCardDrop(event,${id},'${safeCwd}')">
         <div class="agent-fill ${ctxCls}" style="width:${Math.min(ctxPct, 100)}%"></div>
         <span class="agent-dot"></span>
         <span class="agent-name${a.unread ? ' unread' : ''}" data-tip-overflow onmousedown="if(event.detail===2){event.preventDefault();event.stopPropagation();renameAgent(${id},this);}">${esc(title)}</span>
@@ -3502,46 +3420,6 @@ function render() {
             </span>
           </span>
         </div>`;
-
-      // If this agent leads a team, render team members inline
-      const leadTeamName = [...teamMap.entries()].find(([, t]) => t.leadAgentId === id);
-      if (leadTeamName) {
-        const [teamName, team] = leadTeamName;
-        const safeTeamName = escAttr(teamName.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
-        const nonLeadMembers = team.members.filter(m => m.agentType !== 'team-lead');
-        const completedTasks = team.tasks.filter(t => t.status === 'completed').length;
-        const totalTasks = team.tasks.length;
-        const taskPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-        html += `<div class="agent-team">
-          <div class="agent-team-header">
-            <span class="team-icon">&#x2726;</span>
-            <span class="team-name">${esc(teamName)}</span>
-            <span class="team-count">${nonLeadMembers.length} teammate${nonLeadMembers.length !== 1 ? 's' : ''}</span>
-          </div>
-          <div class="team-members">`;
-
-        nonLeadMembers.forEach(member => {
-          const taskOwned = team.tasks.find(t => t.owner === member.name && t.status !== 'completed');
-          const taskLabel = taskOwned ? taskOwned.activeForm || taskOwned.subject : '';
-          const safeMemberName = esc(member.name).replace(/'/g, "\\'");
-          html += `<div class="team-member" onclick="focusTeamMember('${safeTeamName}','${safeMemberName}',false)">
-            <span class="team-member-dot"></span>
-            <span class="team-member-name">${esc(member.name)}</span>
-            ${taskLabel ? `<span class="team-member-role" title="${escAttr(taskLabel)}">${esc(taskLabel)}</span>` : `<span class="team-member-role">${esc(member.agentType || '')}</span>`}
-          </div>`;
-        });
-
-        html += `</div>`;
-        if (totalTasks > 0) {
-          html += `<div class="team-tasks-bar">
-            <span class="team-tasks-dot"></span>
-            <span class="team-tasks-label">${completedTasks}/${totalTasks} done</span>
-            <span class="team-tasks-pct">${taskPct}%</span>
-          </div>`;
-        }
-        html += `</div>`;
-      }
 
       return html + `</div>`;
     };
@@ -4817,10 +4695,6 @@ function handleAgentMsg(msg) {
       agents.delete(msg.id); destroyXterm(msg.id);
       refreshArchiveModal(closedCwd);
       lastTermDataAt.delete(msg.id); agentEffort.delete(msg.id); _worldIdleSince.delete(msg.id); lastStatsKey.delete(msg.id); pastedImages.delete(msg.id); { const dt = _doneTimers.get(msg.id); if (dt) { clearTimeout(dt); _doneTimers.delete(msg.id); } } // per-agent bookkeeping goes with the agent
-      // Clean up teams led by this agent
-      for (const [teamName, team] of teamMap) {
-        if (team.leadAgentId === msg.id) teamMap.delete(teamName);
-      }
       if (selectedId === msg.id) {
         // Auto-select next agent if available, otherwise close terminal
         const remaining = [...agents.entries()].filter(([, x]) => !x.archived).map(([i]) => i);
@@ -5107,22 +4981,6 @@ function handleAgentMsg(msg) {
     case 'serverRemoved': { const a = agents.get(msg.id); if (a) { a.servers.delete(msg.port); scheduleRender(); if (worldView) worldSync(); } break; }
     case 'looping': { const a = agents.get(msg.id); if (a) { a.looping = msg.active; scheduleRender(); } break; }
     case 'compacting': { const a = agents.get(msg.id); if (a) { a.compacting = msg.active; scheduleRender(); } break; }
-    case 'teamDetected': {
-      const t = msg.team;
-      teamMap.set(t.name, { name: t.name, leadAgentId: t.leadAgentId, members: t.members, tasks: t.tasks || [] });
-      scheduleRender();
-      break;
-    }
-    case 'teamTasksUpdated': {
-      const team = teamMap.get(msg.teamName);
-      if (team) { team.tasks = msg.tasks || []; scheduleRender(); }
-      break;
-    }
-    case 'teamRemoved': {
-      teamMap.delete(msg.teamName);
-      scheduleRender();
-      break;
-    }
   }
 }
 
@@ -5873,8 +5731,6 @@ document.addEventListener('keydown', (e) => {
     if (document.getElementById('term-search').style.display !== 'none') { closeTermSearch(); return; }
     const prompt = document.getElementById('prompt-overlay');
     if (prompt && prompt.style.display === 'flex') { closePromptOverlay(); return; }
-    const team = document.getElementById('team-overlay');
-    if (team && team.style.display === 'flex') { closeTeamOverlay(); return; }
     const el = document.getElementById('settings-overlay');
     if (el.style.display === 'flex') toggleSettings();
   }
@@ -8154,7 +8010,6 @@ function setWorldView(on, persist = true) {
       stopLoop: (id) => { if (id > 0) stopLoop(id); },
       showModelMenu: (ev, id) => { if (id > 0) showModelMenu(ev, id); },
       showEffortMenu: (ev, id) => { if (id > 0) showEffortMenu(ev, id); },
-      focusTeamMember: (team, member, isLead) => focusTeamMember(team, member, isLead),
       addAgent: (cwd) => addAgent(cwd),
       openFolder: (p) => openFolder(p),
       openPr: (url) => openPr(url),
@@ -8226,14 +8081,11 @@ function worldSnapshot() {
     if (st === 'waiting' || st === 'idle') { if (!_worldIdleSince.has(id)) _worldIdleSince.set(id, now); } else _worldIdleSince.delete(id);
     const idleMin = _worldIdleSince.has(id) ? Math.floor((now - _worldIdleSince.get(id)) / 60000) : 0;
     const ctxPct = a.stats?.ctxTok ? Math.min(100, Math.round((a.stats.ctxTok / win) * 100)) : 0;
-    const lead = [...teamMap.entries()].find(([, t]) => t.leadAgentId === id);
-    let team = null;
-    if (lead) { const [name, t] = lead; const members = t.members.filter(m => m.agentType !== 'team-lead').map(m => { const task = t.tasks.find(k => k.owner === m.name && k.status !== 'completed'); return { name: m.name, agentType: m.agentType || '', task: task ? (task.activeForm || task.subject || '') : '' }; }); team = { name, members, done: t.tasks.filter(k => k.status === 'completed').length, total: t.tasks.length }; }
     agentRows.push({ id, cwd: a.cwd || '(unknown)', title: a.customName ? a.title : (a.prompt || a.title || 'New agent'), status: needsAnswer(a) && st === 'permission' ? 'question' : st,
       verb: statusVerb(a, st), ctxPct, cost: calcCost(a.stats), costStr: fmtCost(calcCost(a.stats)), model: a.stats?.modelFamily || '', looping: !!a.looping,
       tool: ([...a.tools.values()].find(t => !t.done) || {}).name || '', idleMin,
       turns: a.stats?.turns || 0, toolsUsed: Object.values(a.stats?.tools || {}).reduce((x, y) => x + (y || 0), 0), tokIn: a.stats?.inTok || 0, tokOut: a.stats?.outTok || 0,
-      crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', team });
+      crash: a.crashCount != null ? a.crashCount + '/' + a.crashMax : '', team: null });
   }
   // What a glance at the ship should say, worst first: conflicts, changes requested, failing checks, behind base, blocked, ready, open.
   const prState_ = (p) => { if (p.mergeable === 'CONFLICTING' || p.mergeState === 'DIRTY') return 'conflict'; if (p.reviewDecision === 'CHANGES_REQUESTED') return 'changes'; if (p.checks === 'fail') return 'blocked'; if (p.mergeState === 'BEHIND' || p.behindBy > 0) return 'behind'; if (p.mergeState === 'BLOCKED') return 'blocked'; if (prMergeInfo(p).enabled && (p.reviewDecision === 'APPROVED' || p.mine)) return 'ready'; return 'open'; };
