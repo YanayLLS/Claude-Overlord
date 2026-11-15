@@ -105,7 +105,7 @@
     return d.getTime();
   }
   const autoRetry = new Set(); let retryTimer = null; // "agentId:resetTime" the user asked to retry at
-  const dur = (ms) => { const s = Math.floor(ms / 1000); // the CLI floors: 6.9 s is "6s" return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
+  const dur = (ms) => { const s = Math.floor(ms / 1000); /* the CLI floors: 6.9 s is "6s" */ return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor(s % 3600 / 60) + 'm'; };
   const clocks = new Map(); // formatting a time is slow, and every footer shows one on every redraw
   const clock = (ts) => { let c = clocks.get(ts); if (c == null) { try { c = new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch { c = ''; } clocks.set(ts, c); } return c; };
 
