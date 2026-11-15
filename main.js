@@ -2494,6 +2494,7 @@ function parseLine(id, line) {
       flushPeerMsgs(id);
       fireWatches(id, a);
       moveIfIdle(id);
+      if (a.closeWhenDone) setImmediate(() => closeAgent(id)); // close_self (mcp/tools.js); after watchers got the handoff
     } else if (r.type === 'progress') {
       const ptid = r.parentToolUseID, d = r.data;
       if (ptid && d) {
@@ -6864,7 +6865,9 @@ app.whenReady().then(() => {
     captureHost: browserCaptureHost = createCaptureHost({ makeWindow: () => makeCaptureWindow({ BrowserWindow, screen: require('electron').screen }) }),
     onRecovered: (id, reason, ok, url) => flog(ok ? `agent ${id} browser died (${reason}): recreated${url ? `, reloading ${url}` : ''}` : `agent ${id} browser died (${reason}) again: giving up for now`),
   });
-  mcpServer = createMcpServer({ onEditHook: onFeatureEdit, prClaims: prClaimsApi, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
+  // ponytail: closeWhenDone is in memory; an Overlord restart mid-turn forgets it.
+  const closeSelf = (id) => { const a = agents.get(id); if (!a) return false; a.closeWhenDone = true; return true; };
+  mcpServer = createMcpServer({ onEditHook: onFeatureEdit, prClaims: prClaimsApi, closeSelf, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.apiEnabled) startLocalApi();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });

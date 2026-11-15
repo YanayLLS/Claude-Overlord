@@ -49,6 +49,12 @@ const PR_SCHEMAS = [
   { name: 'pr_release', description: 'Hand back a PR you claimed with pr_claim, once it is merged or you stop working on it, so Overlord can send another agent if it goes red again.',
     inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
 ];
+// close_self (main.js closeSelf): the agent asks to be closed once its current turn ends.
+const SELF_SCHEMAS = [
+  { name: 'close_self', description: 'Close yourself (this agent) in Overlord when your current turn ends: your item leaves the agent list and your session stops (its transcript stays on disk). Call it only when the user asked you to close when done, as your last action.',
+    inputSchema: { type: 'object', properties: {} } },
+];
+
 function prCall(claims, agentId, name, args = {}) {
   if (!claims) return fail('PR claims are unavailable.');
   const r = (name === 'pr_claim' ? claims.claim : claims.release)(agentId, args.pr);
@@ -111,4 +117,4 @@ function terminalCall(terminals, name, args = {}) {
   } catch (e) { return fail(e && e.message ? e.message : String(e)); }
 }
 
-module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, prCall, visualCall, createDispatcher, terminalCall };
+module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, prCall, visualCall, createDispatcher, terminalCall };

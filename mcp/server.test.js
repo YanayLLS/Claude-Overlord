@@ -51,11 +51,11 @@ test('initialize returns protocol version and tools capability', async () => {
   });
 });
 
-test('tools/list returns the eight browser tools, three terminal tools, show_visual and the two PR claim tools', async () => {
+test('tools/list returns the eight browser tools, three terminal tools, show_visual, the two PR claim tools and close_self', async () => {
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 15);
+    assert.strictEqual(json.result.tools.length, 16);
   });
 });
 
@@ -181,6 +181,20 @@ test("pr_claim and pr_release reach the claims host with the calling agent's id"
     assert.strictEqual((await call(t1, 'pr_release')).content[0].text, 'Released.');
     assert.deepStrictEqual(seen, [['claim', 1, 'o/r#5'], ['claim', 2, 'o/r#5'], ['release', 1, 'o/r#5']]);
   }, () => ACTIONS, claims);
+});
+
+test("close_self is listed and asks the host to close the calling agent", async () => {
+  const seen = [];
+  const server = createMcpServer({ resolveActions: () => ACTIONS, closeSelf: (id) => (seen.push(id), true) });
+  await server.start();
+  try {
+    const t = server.mintToken(4);
+    const list = await rpc(server, t, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    assert.ok(list.json.result.tools.some((x) => x.name === 'close_self'));
+    const r = (await rpc(server, t, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'close_self', arguments: {} } })).json.result;
+    assert.ok(!r.isError);
+    assert.deepStrictEqual(seen, [4]);
+  } finally { await server.stop(); }
 });
 
 test('POST /hook/<token> hands the tool input to onEditHook for that agent and returns its answer', async () => {
