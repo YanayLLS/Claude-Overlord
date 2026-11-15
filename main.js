@@ -4659,7 +4659,7 @@ function installedNode() {
   _nodeV = { at: Date.now(), p };
   return p;
 }
-async function repoCheck(repo) { return { repo, node: nodeReq.checkNode(nodeReq.nodeRequirement(repo), await installedNode()) }; }
+async function repoCheck(repo) { const [req, v] = await Promise.all([nodeReq.nodeRequirement(repo), installedNode()]); return { repo, node: nodeReq.checkNode(req, v) }; }
 
 // Background folder deletions by lower-cased path, so re-creating a just-removed worktree
 // waits for its old folder to go instead of colliding with it halfway.

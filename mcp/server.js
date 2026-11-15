@@ -83,7 +83,10 @@ function createMcpServer({ resolveActions, getTerminals = () => null, prClaims =
       const agentId = tokens.get(url.slice(6));
       if (agentId === undefined) return reply(res, 404, null);
       let body = {}; try { body = JSON.parse(await readBody(req)); } catch {}
-      return reply(res, 200, (await onEditHook(agentId, body.tool_input || {})) || {});
+      const r = (await onEditHook(agentId, body.tool_input || {})) || {};
+      // The hook prints this body as-is (curl), so a deny comes back in Claude's own hook format; nothing = allow.
+      if (!r.deny) return reply(res, 200, null);
+      return reply(res, 200, { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: r.deny } });
     }
     const token = url.replace(/^\/mcp\//, '');
     if (!tokens.has(token)) return reply(res, 404, null);

@@ -24,18 +24,18 @@ function repo(files) {
   return dir;
 }
 
-test('nodeRequirement takes the strictest of .nvmrc, .node-version and engines.node', () => {
-  assert.deepStrictEqual(nodeRequirement(repo({ 'package.json': '{"engines":{"node":">=20"}}', '.nvmrc': '24.22.2\n' })), { major: 24, source: '.nvmrc' });
-  assert.deepStrictEqual(nodeRequirement(repo({ 'package.json': '{"engines":{"node":">=22"}}' })), { major: 22, source: 'package.json' });
-  assert.deepStrictEqual(nodeRequirement(repo({ '.node-version': '18' })), { major: 18, source: '.node-version' });
-  assert.strictEqual(nodeRequirement(repo({ 'package.json': '{}' })), null);
-  assert.strictEqual(nodeRequirement(path.join(os.tmpdir(), 'no-such-repo-xyz')), null);
+test('nodeRequirement takes the strictest of .nvmrc, .node-version and engines.node', async () => {
+  assert.deepStrictEqual(await nodeRequirement(repo({ 'package.json': '{"engines":{"node":">=20"}}', '.nvmrc': '24.22.2\n' })), { major: 24, source: '.nvmrc' });
+  assert.deepStrictEqual(await nodeRequirement(repo({ 'package.json': '{"engines":{"node":">=22"}}' })), { major: 22, source: 'package.json' });
+  assert.deepStrictEqual(await nodeRequirement(repo({ '.node-version': '18' })), { major: 18, source: '.node-version' });
+  assert.strictEqual(await nodeRequirement(repo({ 'package.json': '{}' })), null);
+  assert.strictEqual(await nodeRequirement(path.join(os.tmpdir(), 'no-such-repo-xyz')), null);
 });
 
-test('a repo whose lockfile needs more than it declares is caught too', () => {
+test('a repo whose lockfile needs more than it declares is caught too', async () => {
   // frontline declared nothing, but a locked package needed Node 22: npm's engine check failed the install.
   const lock = { packages: { '': {}, 'node_modules/@azure/core-process': { engines: { node: '>=22.0.0' } }, 'node_modules/x': { engines: { node: '>=14' } } } };
-  assert.deepStrictEqual(nodeRequirement(repo({ 'package.json': '{}', 'package-lock.json': JSON.stringify(lock) })), { major: 22, source: '@azure/core-process' });
+  assert.deepStrictEqual(await nodeRequirement(repo({ 'package.json': '{}', 'package-lock.json': JSON.stringify(lock) })), { major: 22, source: '@azure/core-process' });
 });
 
 test('checkNode compares with the installed version', () => {

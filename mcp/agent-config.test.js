@@ -75,9 +75,10 @@ test('the config directory is not left world-readable', { skip: process.platform
 
 test('a feature agent gets an edit hook that relays Overlord\'s deny to the CLI', async () => {
   const http = require('http');
+  // Stands in for mcp/server.js's /hook route: a deny in Claude's hook format, an empty body to allow.
   const srv = http.createServer((req, res) => { let b = ''; req.on('data', d => { b += d; }).on('end', () => {
     const input = JSON.parse(b).tool_input;
-    res.end(JSON.stringify(input.file_path === 'C:/Work/back-office/a.ts' ? { deny: 'edit the worktree instead' } : {}));
+    res.end(input.file_path === 'C:/Work/back-office/a.ts' ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'edit the worktree instead' } }) : '');
   }); });
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
   try {

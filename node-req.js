@@ -17,19 +17,20 @@ const lockCache = new Map(); // lock path -> { mtimeMs, hit }
 
 // The strictest need found: .nvmrc / .node-version pins, package.json engines.node, and any locked
 // package's engines.node (a dependency can need more than the repo declares). null when nothing says.
-function nodeRequirement(repo) {
+// Async: a lockfile is megabytes, read off the main thread's way; parsed once per change (mtime).
+async function nodeRequirement(repo) {
   const found = [];
   for (const f of ['.nvmrc', '.node-version']) { const t = read(path.join(repo, f)); const n = t && minMajor(t.trim()); if (n) found.push({ major: n, source: f }); }
   const pkg = read(path.join(repo, 'package.json'));
   if (pkg) { try { const n = minMajor(((JSON.parse(pkg).engines) || {}).node); if (n) found.push({ major: n, source: 'package.json' }); } catch {} }
   const lockPath = path.join(repo, 'package-lock.json');
-  let st = null; try { st = fs.statSync(lockPath); } catch {}
+  const st = await fs.promises.stat(lockPath).catch(() => null);
   if (st) {
     let c = lockCache.get(lockPath);
     if (!c || c.mtimeMs !== st.mtimeMs) {
       let hit = null;
       try {
-        for (const [k, v] of Object.entries(JSON.parse(read(lockPath)).packages || {})) {
+        for (const [k, v] of Object.entries(JSON.parse(await fs.promises.readFile(lockPath, 'utf8')).packages || {})) {
           const n = k && v && v.engines && minMajor(v.engines.node);
           if (n && (!hit || n > hit.major)) hit = { major: n, source: k.replace(/^.*node_modules\//, '') };
         }

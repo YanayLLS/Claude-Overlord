@@ -20,13 +20,12 @@ function mcpConfig(port, token) {
 
 // The deny rule is the half that matters on every spawn site, including the
 // detached before-quit process that outlives the MCP server's port.
-// Feature agents only: before each file edit, ask Overlord (POST /hook/<token>, mcp/server.js) whether
-// the file sits in a repo's main checkout; if so Overlord makes the feature's worktree there and the
-// edit is denied with the path to use instead. Overlord unreachable or slow -> the edit goes through.
-const EDIT_HOOK = "const [port, token] = process.argv.slice(2); let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', async () => { try {"
-  + " const r = await fetch('http://127.0.0.1:' + port + '/hook/' + token, { method: 'POST', body: s, signal: AbortSignal.timeout(110000) });"
-  + " const a = await r.json(); if (a && a.deny) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: a.deny } }));"
-  + " } catch {} });\n";
+// Feature agents only: before each file edit or shell command, ask Overlord (POST /hook/<token>, mcp/server.js)
+// whether it changes a repo's main checkout; if so Overlord makes the feature's worktree there and the call is
+// denied with where to do it instead. curl (built into Windows 10+ and Git Bash) passes the tool call through and
+// prints Overlord's answer, already in Claude's hook format (~40 ms less than starting node per call).
+// Overlord unreachable (closed or restarting while agents live on), slow or curl missing -> nothing printed, the
+// call goes through; the 0.5 s connect timeout keeps a closed Overlord from adding ~2 s to every call.
 
 function writeAgentSettings(id, editHook = null) {
   const dir = agentConfigDir(id);
@@ -39,9 +38,7 @@ function writeAgentSettings(id, editHook = null) {
   fs.writeFileSync(hook, "let s = ''; process.stdin.on('data', (d) => { s += d; }).on('end', () => { try { require('fs').writeFileSync(process.argv[2], JSON.stringify(JSON.parse(s).tool_input || {})); } catch {} });\n");
   const hooks = { PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: `node "${fwd(hook)}" "${fwd(askFile(id))}"`, timeout: 5 }] }] };
   if (editHook) {
-    const eh = path.join(dir, 'edit-hook.js');
-    fs.writeFileSync(eh, EDIT_HOOK);
-    const cmd = `node "${fwd(eh)}" ${Number(editHook.port)} ${editHook.token}`;
+    const cmd = `curl -s -m 110 --connect-timeout 0.5 --data-binary @- http://127.0.0.1:${Number(editHook.port)}/hook/${encodeURIComponent(editHook.token)}`;
     hooks.PreToolUse.push({ matcher: 'Edit|MultiEdit|Write|NotebookEdit', hooks: [{ type: 'command', command: cmd, timeout: 120 }] });
     hooks.PreToolUse.push({ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: cmd, timeout: 120 }] }); // only clear changes to a main checkout are stopped (planShellRedirect)
   }

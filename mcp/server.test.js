@@ -204,7 +204,7 @@ test('POST /hook/<token> hands the tool input to onEditHook for that agent and r
   try {
     const token = server.mintToken(7);
     const res = await fetch(`http://127.0.0.1:${server.port()}/hook/${token}`, { method: 'POST', body: JSON.stringify({ tool_input: { file_path: 'C:/x.js' } }) });
-    assert.deepStrictEqual(await res.json(), { deny: 'use the worktree' });
+    assert.deepStrictEqual(await res.json(), { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'use the worktree' } });
     assert.deepStrictEqual(seen, [[7, 'C:/x.js']]);
     const bad = await fetch(`http://127.0.0.1:${server.port()}/hook/nope`, { method: 'POST', body: '{}' });
     assert.strictEqual(bad.status, 404);
