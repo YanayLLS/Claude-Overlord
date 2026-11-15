@@ -143,6 +143,7 @@
     rcRefresh: () => { if (!state || !state.rc || state.rc.loading) return; state = { ...state, rc: { ...state.rc, loading: true } }; if (armed === 'rc') { armed = null; clearTimeout(armTimer); } say('Reading the night again'); render(); api.send({ type: 'releasesRc' }); },
     rcRetry: () => actions.rcRefresh(), rcRetryAi: () => actions.rcRefresh(), rcRetryFlags: () => actions.rcRefresh(),
     rcMore: () => { rcOpen = !rcOpen; render(); },
+    rrHealthy: () => { rrHealthy = !rrHealthy; render(); },
     flagCopy: (el) => { const id = el.dataset.id || ''; if (!flagCopyOpen.delete(id)) flagCopyOpen.add(id); render(); },
     flagBackup: (el) => { try { navigator.clipboard.writeText(el.dataset.v || ''); } catch {} el.textContent = '✓ Copied'; },
     rcShas: () => { rcShas = !rcShas; render(); },
@@ -1211,20 +1212,36 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
 
   // The run's results: one row per release PR as it goes (open/reuse → back-merge → mergeable →
   // checks), a Fix on anything blocked, then the hand-deployed envs and the flag check.
+  let rrHealthy = false; // run block: the folded ready rows are open
   function releaseResultsHtml(s) {
     const run = s.releaseRun;
     const prLink = (p, label) => p && p.url ? link(p.url, label) : '';
     const pending = !run.running && run.rows.some(r => r.pr && !r.merged && !r.closed && (r.checks === 'pending' || r.checks === 'none' || r.conflict === null));
-    let h = `<div class="rl-rel-pop rl-rr still"><div class="rl-rel-head"><span>Release ${esc(run.envs.join(' + '))} · ${esc(age(new Date(run.startedAt).toISOString()))} ago</span>`
+    const isBad = (r) => !r.closed && (r.status === 'blocked' || r.status === 'error' || r.conflict === true || r.checks === 'fail');
+    // every live row is one of: blocked (its full row, first), warn (a quiet line anyone must see), ready (green, folded), checking
+    const warnOf = (r) => r.dbschemas && (r.dbschemas.otherLine || (r.dbschemas.used && r.dbschemas.used.length)) ? 'dbschemas old line' : '';
+    const kindOf = (r) => isBad(r) ? 'bad' : r.running || !r.pr ? 'checking' : warnOf(r) ? 'warn' : r.checks === 'pass' && r.conflict === false ? 'ready' : 'checking';
+    const live = run.rows.filter(r => !r.closed && r.status !== 'nothing'), by = (k) => live.filter(r => kindOf(r) === k);
+    const bad = by('bad'), sum = (n, cls, label) => n ? `<span class="rl-rr-sum ${cls}">● ${n} ${label}</span>` : '';
+    const summary = sum(bad.length, 'bad', 'blocked') + sum(by('warn').length, 'warn', 'to check') + sum(by('ready').length, 'ok', 'ready') + sum(by('checking').length, 'run', 'checking');
+    const openNow = run.running ? [] : run.rows.filter(r => r.pr && !r.merged && !r.closed);
+    let h = `<div class="rl-rel-pop rl-rr still"><div class="rl-rel-head"><span class="rl-rr-title">Release ${esc(run.envs.join(' + '))} · ${esc(age(new Date(run.startedAt).toISOString()))}</span>${summary}`
       + (run.running ? '<span class="rl-rr-spin">running…</span>' : pending ? '<span class="rl-rr-spin" title="Re-checking open PRs every minute">watching checks…</span>' : '')
+      + (openNow.length ? RECHECK_BTN('', 'rl-rr-recheck') : '')
       + '</div><div class="rl-rr-rows">';
+    const healthy = [], checking = [], warned = [];
     // compact: closed PRs and repos with nothing to release collapse into one line at the end
     const quiet = run.running ? [] : run.rows.filter(r => r.closed || r.status === 'nothing');
     // a row that became a release PR is on its release card below: only what didn't (blocked, error) stays here
     const items = (s.history && s.history.items) || [];
     const onCard = (r) => !run.running && r.pr && items.some(m => m.repos.some(x => x.repo === r.repo && x.pr && x.pr.number === r.pr.number));
-    run.rows.forEach((r, i) => {
+    const order = run.rows.map((r, i) => [r, i]).sort((a, b) => (isBad(b[0]) ? 1 : 0) - (isBad(a[0]) ? 1 : 0));
+    order.forEach(([r, i]) => {
       if (quiet.includes(r) || onCard(r)) return;
+      const k = kindOf(r);
+      if (k === 'ready') { healthy.push(r); return; }
+      if (k === 'checking') { checking.push(r); return; }
+      if (k === 'warn') { warned.push(r); return; }
       const env = `<span class="rl-env" style="--hue:${ENV_HUE[r.env.toLowerCase()] || 'var(--dim)'}">${esc(r.env)}</span>`;
       const bits = [];
       if (r.running && !r.pr) bits.push('<span class="rl-rr-chip">checking…</span>');
@@ -1261,7 +1278,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       if (d && d.bump) { const off = (d.prodRepos || []).filter(x => x.version !== d.bump.to);
         bits.push(`<span class="rl-rr-chip warn" title="${esc(`Prod runs dbschemas ${d.bump.from} here; this ships ${d.bump.to}.` + (d.prodRepos ? (off.length ? `\nThe rest of prod stays on: ${off.map(x => `${x.label} ${x.version}`).join(', ')}` : '\nThe rest of prod already runs it.') : '') + `\nCheck the schema changes between them don't break what those repos read or write.`)}">⚠ dbschemas ${esc(d.bump.from)} → ${esc(d.bump.to)}${off.length ? ` · ${off.length} prod repo${off.length === 1 ? '' : 's'} on others` : ''}</span>`); }
       if (r.pr && !r.running && r.builds === 'none') bits.push('<span class="rl-rr-chip warn" title="No check on this PR builds or tests it, so nothing verifies it still builds after merging">⚠ no CI build</span>');
-      if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them, so merging isn't blocked: ${esc(r.advisory.join(', '))}">not required: ${esc([...new Set(r.advisory.map(x => x.replace(/\s*\(.*\)$/, '')))].join(', '))}</span>`);
+      if (r.advisory && r.advisory.length) bits.push(`<span class="rl-rr-chip" title="Failing, but ${esc(r.target)}'s branch protection doesn't require them, so merging isn't blocked: ${esc(r.advisory.join(', '))}">${r.advisory.length} not required</span>`);
       if (r.knownFailing && r.knownFailing.length) bits.push(`<span class="rl-rr-chip" title="Also failing on ${esc(r.target)}: red before this release, so not counted">red before: ${esc(r.knownFailing.join(', '))}</span>`);
       if (r.error) bits.push(`<span class="rl-rr-chip bad" title="${esc(r.error)}">✕ ${esc(r.error.slice(0, 60))}</span>`);
       h += `<div class="rl-rr-row st-${esc(r.status || 'running')}"><div class="rl-rr-top"><b>${esc(r.label)}</b>${env}`
@@ -1270,8 +1287,16 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
         + (!r.running && (r.status === 'blocked' || r.status === 'error') ? `<button class="rl-rr-fix1" data-act="relFix" data-i="${i}" title="Start an agent that unblocks just ${esc(r.label)} ${esc(r.env)}">🔧 Fix</button>` : '')
         + `</div><div class="rl-rr-bits">${bits.join('')}</div></div>`;
     });
+    const line = (r, glyph, cls, chip) => `<div class="rl-rr-lite"><span class="rl-rr-g ${cls}" aria-hidden="true">${glyph}</span><b>${esc(r.label)}</b>${r.pr ? prLink(r.pr, `#${r.pr.number}`) : ''}${chip ? `<span class="rl-rr-chip ${cls}">${esc(chip)}</span>` : ''}</div>`;
+    h += warned.map(r => line(r, '⚠', 'warn', warnOf(r))).join('');
+    if (checking.length) h += `<div class="rl-rr-lite"><span class="rl-rr-g run" aria-hidden="true">◌</span><b>${checking.length} checking</b><span class="rl-rr-names">${esc(checking.slice(0, 6).map(r => r.label).join(', '))}${checking.length > 6 ? '…' : ''}</span></div>`;
+    if (healthy.length) {
+      const fold = healthy.length > 3;
+      h += fold ? `<button class="rl-rr-fold" data-act="rrHealthy" aria-expanded="${rrHealthy}"><span aria-hidden="true">${rrHealthy ? '▾' : '▸'}</span><span class="rl-rr-ok">✓</span>${healthy.length} ready<span class="rl-rr-names">${esc(healthy.slice(0, 4).map(r => r.label).join(', '))}${healthy.length > 4 ? '…' : ''}</span></button>` : '';
+      if (!fold || rrHealthy) h += healthy.map(r => line(r, '✓', 'ok', '')).join('');
+    }
     h += '</div>';
-    if (quiet.length) h += `<div class="rl-rr-quiet" title="${esc(quiet.map(r => `${r.label} ${r.env}: ${r.closed ? 'its PR was closed' : 'nothing to release'}`).join(' · '))}">Nothing to release: ${esc([...new Set(quiet.map(r => r.label))].join(', '))}</div>`;
+    if (quiet.length) h += `<div class="rl-rr-quiet" title="${esc(quiet.map(r => `${r.label} ${r.env}: ${r.closed ? 'its PR was closed' : 'nothing to release'}`).join(' · '))}">${[['Nothing new', quiet.filter(r => !r.closed)], ['Closed', quiet.filter(r => r.closed)]].filter(([, l]) => l.length).map(([t, l]) => `<span><b>${t}</b> ${esc([...new Set(l.map(r => r.label))].join(', '))}</span>`).join('')}</div>`;
     if (run.manual.length) {
       h += '<div class="rl-rr-sub">Deployed by hand: nothing to PR</div>';
       for (const m of run.manual) {
@@ -1283,7 +1308,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       }
     }
     if (run.flags && (run.flags.release || run.flags.releaseError)) h += flagLines(s, '', run.flags.release, run.flags.releaseError);
-    const blocked = run.running ? 0 : run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
+    const blocked = run.running ? 0 : run.rows.filter(r => !r.closed && (r.status === 'blocked' || r.status === 'error')).length;
     const a = s.approvers || {};
     const meL = (a.me || '').toLowerCase();
     const open = run.running ? [] : run.rows.filter(r => r.pr && !r.merged && !r.closed);
@@ -1303,7 +1328,6 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
         attrs: 'class="rl-rr-merge" data-act="relMerge"', lockedCls: 'rl-rr-merge', armKey: 'run' })
       + (open.length && (s.approvers || {}).isApprover && !(s.releaseAll && s.releaseAll.running) ? cancelBtn('', open.length, 'rl-rr-cancel') : ''))
       + (blocked ? `<button class="rl-rr-fix" data-act="relFix" title="One agent unblocks every blocked row">🔧 Fix all (${blocked})</button>` : '')
-      + (open.length ? RECHECK_BTN('', 'rl-rr-fix') : '')
       // a new release only once this one's PRs are all merged or closed (Release again just reuses open PRs anyway)
       + (run.running || open.length ? '' : '<button data-act="relNew">New release</button>')
       + '</div></div>';
@@ -1568,7 +1592,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
   function releaseTabHtml(s) {
     const run = s.releaseRun, items = (s.history && s.history.items) || [];
     const recorded = (r) => items.some(m => m.repos.some(x => x.repo === r.repo && x.pr && r.pr && x.pr.number === r.pr.number));
-    const showRun = run && (run.running || run.rows.some(r => (r.pr && !r.merged && !r.closed && !recorded(r)) || r.status === 'blocked' || r.status === 'error'));
+    const showRun = run && (run.running || run.rows.some(r => !r.closed && ((r.pr && !r.merged && !recorded(r)) || r.status === 'blocked' || r.status === 'error')));
     const active = activeRelease(s);
     if (run && run.running) { relOpen = false; relHot = false; } // a run just started: its results take the picker's place
     if (!active && !showRun && !relOpen) openPicker();
