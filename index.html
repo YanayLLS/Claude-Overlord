@@ -652,7 +652,14 @@ button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
 .feature-name { font-weight:700; font-size:12px; letter-spacing:.4px; color:var(--text); }
 .feature-summary { white-space:nowrap; font-size:10px; color:var(--subtext,#a6adc8); }
 .solo-name .feature-icon { font-size:11px; margin-right:5px; }
-.solo-repo { margin-left:4px; font-size:11px; font-weight:500; color:var(--dim); }
+/* One-repo feature card: the feature name never shrinks; the repo label, then the server host, then "Agent" give way */
+.group-info.solo-info { display:flex; align-items:baseline; gap:6px; }
+.solo-info .group-name { flex:none; overflow:visible; }
+.solo-repo { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:500; color:var(--dim); }
+.solo-info .group-count { margin-left:0; }
+.group-header { container-type:inline-size; }
+@container (max-width:500px) { .solo-repo, .srv-host { display:none; } }
+@container (max-width:400px) { .agent-word { display:none; } }
 .feature-header .group-menu-wrap { margin-left:auto; }
 .feature-body { padding:2px 6px 6px; }
 .feature.collapsed .feature-body { display:none; }
@@ -3438,7 +3445,7 @@ function render() {
     const running = wtRunning.get(cwd);
     // Worktree group: branch label + setup/ready state; else plain project.
     const nameHtml = solo
-      ? `<span class="group-name solo-name"><span class="feature-icon">&#x2726;</span>${esc(solo)} <span class="solo-repo">${esc(pathLabel(wtEntry.repo))}</span></span>`
+      ? `<span class="group-name solo-name"><span class="feature-icon">&#x2726;</span>${esc(solo)}</span><span class="solo-repo">${esc(pathLabel(wtEntry.repo))}</span>`
       : wtEntry
       ? `<span class="group-name">${esc(pathLabel(wtEntry.repo))}${sameName(wtEntry.branch, wtEntry.feature) ? '' : ` <span class="wt-branch">&#x2442; ${esc(wtEntry.branch)}</span>`}</span><span class="group-path">${esc(cwd)}</span>`
       : `<span class="group-name">${esc(pathLabel(cwd))}</span><span class="group-path">${esc(cwd)}</span>`;
@@ -3447,11 +3454,11 @@ function render() {
     const wtUrl = wtEntry ? fillPort(projects[wtEntry.repo] && projects[wtEntry.repo].urlTemplate, wtEntry.port) : '';
     // When the proxy is on and this server is up, prefer the clean hostname.
     const wtServerBadge = wtEntry && running
-      ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openLink('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${esc(running.url.replace(/^https?:\/\//, ''))}<span class="server-menu-btn">&#x2197;</span></a></div>`
+      ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openLink('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${(() => { const m = /^(?:https?:\/\/)?([^:/]+)(:\d+)?/.exec(running.url) || []; return m[2] ? `<span><span class="srv-host">${esc(m[1])}</span>${esc(m[2])}</span>` : esc(running.url.replace(/^https?:\/\//, '')); })()}<span class="server-menu-btn">&#x2197;</span></a></div>`
       : (wtEntry && wtEntry.status !== 'failed' && wtEntry.status !== 'setup' ? `<a class="wt-port" onclick="event.stopPropagation();openLink('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
     html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}" data-cwd="${escAttr(cwd)}"${feature === null ? ` data-top="${escAttr(solo ? 'feature:' + solo : cwd)}" ${TOP_DND}` : ''}><div class="group-header"${feature === null ? ' draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()"' : ''}${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ondragover="onGroupDragOver(event,'${safeCwd}')" ondragleave="this.classList.remove('drop-into')" ondrop="onGroupDrop(event,'${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
       <span class="group-chevron">&#x25BC;</span>
-      <div class="group-info" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>
+      <div class="group-info${solo ? ' solo-info' : ''}" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>
       ${wtStatus}
       ${wtServerBadge}
       ${serverBadges}
@@ -3460,7 +3467,7 @@ function render() {
         <div class="group-dropdown" data-menu="${safeCwd}">${solo ? ddItems([...groupMenuItems(cwd, safeCwd, wtEntry, running, archivedCounts.get(cwd), gDoneCount, true), '-', ...featureMenuItems(solo, true)]) : ddItems(groupMenuItems(cwd, safeCwd, wtEntry, running, archivedCounts.get(cwd), gDoneCount))}</div>
       </div>
       <div class="group-actions">
-        <span class="split-btn"><span class="agent-main"><button onclick="event.stopPropagation();addAgent('${safeCwd}')">+ Agent</button>${defaultPrefix() ? `<button class="fav-star" title="New agent with “${escAttr(defaultPrefix())} ”" onclick="event.stopPropagation();addAgentWithPrefix('${safeCwd}',defaultPrefix())"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg></button>` : ''}</span><button class="split-chev" title="Start with a prefix" onclick="event.stopPropagation();openPrefixPop(this,'${safeCwd}')">&#x25BE;</button></span>
+        <span class="split-btn"><span class="agent-main"><button onclick="event.stopPropagation();addAgent('${safeCwd}')">+<span class="agent-word"> Agent</span></button>${defaultPrefix() ? `<button class="fav-star" title="New agent with “${escAttr(defaultPrefix())} ”" onclick="event.stopPropagation();addAgentWithPrefix('${safeCwd}',defaultPrefix())"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg></button>` : ''}</span><button class="split-chev" title="Start with a prefix" onclick="event.stopPropagation();openPrefixPop(this,'${safeCwd}')">&#x25BE;</button></span>
       </div>
     </div><div class="agents">`;
 
