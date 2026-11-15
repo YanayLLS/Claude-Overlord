@@ -470,6 +470,10 @@ body.pr-open #pr-fire .pr-fire-cta { display: none; }
 .group.collapsed { background: transparent; border-color: transparent; }
 .group-header { margin: 0; padding: 8px 8px 6px 8px; }
 .group-name { color: var(--text); font-size: 12.5px; }
+/* One line: repo + branch ellipsize instead of wrapping in narrow (feature) cards */
+.group-info { display: flex; align-items: baseline; }
+.group-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.group-count { flex: none; }
 .group.collapsed .group-name { color: var(--subtext); }
 .agents { margin-left: 14px; padding: 0 6px 6px 4px; border-left-color: rgba(var(--ink),.05); }
 .feature { border-radius: var(--r-lg); }

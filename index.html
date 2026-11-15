@@ -1959,6 +1959,8 @@ async function removeWorktree(path) {
 }
 
 // ── Features (a worktree spanning multiple repos, same branch name) ──
+// Branch named after its feature ("Model-Update" in "Model Update") says nothing the feature header doesn't.
+function sameName(a, b) { const k = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); return !!b && k(a) === k(b); }
 function featureMembers(name) { return worktrees.filter(w => w.feature === name); }
 function featureHeaderHtml(name) {
   const members = featureMembers(name);
@@ -2000,7 +2002,7 @@ let _addRepoFeature = null; // feature name while the Add-repo dialog is open (r
 function openAddRepo(feature) {
   _addRepoFeature = feature;
   const inFeature = new Set(featureMembers(feature).map(w => w.repo));
-  const candidates = [...new Set([...[...knownProjects].filter(p => !worktreeAt(p)), ...lastFeatureRepos])].filter(r => !inFeature.has(r));
+  const candidates = [...new Set([...[...knownProjects].filter(p => !worktreeAt(p)), ...lastFeatureRepos, ...worktrees.map(w => w.repo)])].filter(r => !inFeature.has(r));
   const el = wtOverlay();
   el.innerHTML = `<div style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:10px;padding:20px;width:500px;max-width:92vw;font-size:13px">
     <div style="font-weight:600;font-size:15px;margin-bottom:4px">Add repo to "${esc(feature)}"</div>
@@ -2048,7 +2050,7 @@ let _ftIdx = 0;
 function openNewFeature() {
   _ftIdx = 0;
   // Repos to offer: current project repos + any remembered from last time (even if not active now).
-  const repoSet = [...new Set([...[...knownProjects].filter(p => !worktreeAt(p)), ...lastFeatureRepos])];
+  const repoSet = [...new Set([...[...knownProjects].filter(p => !worktreeAt(p)), ...lastFeatureRepos, ...worktrees.map(w => w.repo)])];
   const el = wtOverlay();
   el.innerHTML = `<div style="background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:10px;padding:20px;width:660px;max-width:94vw;font-size:13px">
     <div style="font-weight:600;font-size:15px;margin-bottom:4px">New feature</div>
@@ -3248,7 +3250,7 @@ function render() {
     const running = wtRunning.get(cwd);
     // Worktree group: branch label + setup/ready state; else plain project.
     const nameHtml = wtEntry
-      ? `<span class="group-name">${esc(pathLabel(wtEntry.repo))} <span class="wt-branch">&#x2442; ${esc(wtEntry.branch)}</span></span><span class="group-path">${esc(cwd)}</span>`
+      ? `<span class="group-name">${esc(pathLabel(wtEntry.repo))}${sameName(wtEntry.branch, wtEntry.feature) ? '' : ` <span class="wt-branch">&#x2442; ${esc(wtEntry.branch)}</span>`}</span><span class="group-path">${esc(cwd)}</span>`
       : `<span class="group-name">${esc(pathLabel(cwd))}</span><span class="group-path">${esc(cwd)}</span>`;
     const wtStatus = wtEntry && wtEntry.status === 'setup' ? `<span class="wt-state setup" title="Installing dependencies">setting up…</span>`
       : wtEntry && wtEntry.status === 'failed' ? `<span class="wt-state failed" title="Dependency install failed">setup failed</span>` : '';
@@ -5435,7 +5437,7 @@ function applySettings(s) {
     if (chatOpenKey && document.getElementById('chat-panel')) renderChatMsgs();
   }
   if (s.knownProjects) { for (const d of s.knownProjects) knownProjects.add(d); scheduleRender(); }
-  if (s.worktrees) { worktrees = s.worktrees; for (const w of worktrees) knownProjects.add(w.repo); scheduleRender(); }
+  if (s.worktrees) { worktrees = s.worktrees; scheduleRender(); } // a feature's repo stays inside the feature, not in the project list
   if (s.projects) projects = s.projects;
   if (s.lastFeatureRepos) lastFeatureRepos = s.lastFeatureRepos;
   if (s.prCollapsed) prCollapsed = new Set(s.prCollapsed);
