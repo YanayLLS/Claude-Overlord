@@ -1775,8 +1775,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const run = { ...(Array.isArray(repos) && repos.length ? { scope: { repos: plan.prs.map(p => p.label).filter((v, i, a) => a.indexOf(v) === i), of: Number(of) || null } } : {}), envs, startedAt: Date.now(), running: true, rows: plan.prs.map(p => ({ ...p, running: true })), manual: plan.manual, flags: null };
     push({ releaseRun: run });
     const cwd = await configCheckout();
-    const flagScript = path.join(cwd, '.claude', 'skills', 'release', 'flag-gap.cjs');
-    const flags = envs.includes('prod') && fs.existsSync(flagScript) ? flagGap(cwd, flagScript) : Promise.resolve(null);
+    // ponytail: the local flag-gap.cjs check is gone (it read prod's Mongo from a laptop, and prod.json no longer has it); the preview below covers prod
+    const flags = Promise.resolve(null);
     // the flags this release carries (every active dev flag), diffed against prod: shown now, applied by Release all
     const flagPlan = envs.includes('prod') && !hotfix ? flagRelease.preview().catch(e => ({ error: e.message })) : Promise.resolve(null);
     let n = 0;
@@ -1912,16 +1912,6 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (recheckTimer.unref) recheckTimer.unref();
   }
 
-  // The frontend's prod feature-flag gap check, when this machine has it. Read-only.
-  function flagGap(cwd, script) {
-    return new Promise((resolve) => {
-      execFile('node', [script], { cwd, timeout: 120000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-        (err, stdout, stderr) => {
-          try { const j = JSON.parse(stdout); resolve({ missing: (j.catalogueMissingOnProd || []).map(x => x.key) }); }
-          catch { resolve({ error: String(stderr || (err && err.message) || 'no output').trim().split('\n').pop().slice(0, 200) }); }
-        });
-    });
-  }
 
   // Fix all: one agent for every blocked row of the last run.
   // i = one row (its own Fix button); none = every blocked row (Fix all)

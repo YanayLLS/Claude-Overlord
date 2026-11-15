@@ -143,6 +143,8 @@
     rcRefresh: () => { if (!state || !state.rc || state.rc.loading) return; state = { ...state, rc: { ...state.rc, loading: true } }; if (armed === 'rc') { armed = null; clearTimeout(armTimer); } say('Reading the night again'); render(); api.send({ type: 'releasesRc' }); },
     rcRetry: () => actions.rcRefresh(), rcRetryAi: () => actions.rcRefresh(), rcRetryFlags: () => actions.rcRefresh(),
     rcMore: () => { rcOpen = !rcOpen; render(); },
+    flagCopy: (el) => { const id = el.dataset.id || ''; if (!flagCopyOpen.delete(id)) flagCopyOpen.add(id); render(); },
+    flagBackup: (el) => { try { navigator.clipboard.writeText(el.dataset.v || ''); } catch {} el.textContent = '✓ Copied'; },
     rcShas: () => { rcShas = !rcShas; render(); },
     rcFix: () => { api.send({ type: 'releasesRcFix' }); },
     rcMerge: (el) => { markBusy(el, 'Merging…'); render(); api.send({ type: 'releasesRcMerge' }); },
@@ -777,22 +779,46 @@
       el.classList.add('locked', 'show'); el.setAttribute('aria-disabled', 'true'); el.dataset.act = 'busy';
     }
   }
-  // The feature flags a prod release carries (flag-release.js): what it brings, then what happened to them.
-  function flagChips(rel) {
-    if (!rel) return '';
-    const bits = [...rel.new.map(k => esc(k) + ' new'), ...rel.changed.map(c => `<span title="${esc(c.fields.join(', '))}">${esc(c.key)} changed</span>`),
-      ...rel.blocked.map(b => `<span class="bad" title="${esc(b.why)}">${esc(b.key)} blocked</span>`)];
-    return bits.length ? `🚩 ${bits.join(' · ')}` : '';
+  // The feature flags a prod release carries (flag-release.js), risk first: blocked, new, behaviour changes each a row;
+  // flags whose only change is their Features-page card fold into one quiet row. The header says where the flags stand
+  // (preview failed, not promoted, promoting, promoted) next to the one action that moves them.
+  const flagCopyOpen = new Set(); // release ids whose folded Features-page row is open
+  const CARD_ONLY = (c) => c.fields.length > 0 && c.fields.every(f => f === 'FeaturesPage'); // an unknown field counts as behaviour
+  const FLAG_GLYPH = { blocked: '⊘', new: '+', behaviour: '~' };
+  const flagWhy = (t) => { const x = String(t).replace(/^Flags( not promoted)?:\s*/i, ''); return /did not finish|timed? ?out/i.test(x) ? 'Timed out' : x; };
+  function flagRow(kind, key, rest) {
+    return `<div class="rl-flag-row ${kind}"><span class="rl-flag-g" aria-label="${kind}">${FLAG_GLYPH[kind]}</span><span class="rl-flag-key">${esc(key)}</span>${rest}</div>`;
+  }
+  function flagGroups(rel) { // { rows: the risk rows' html, copy: Features-page-only keys }
+    if (!rel) return { rows: '', copy: [] };
+    const behaviour = rel.changed.filter(c => !CARD_ONLY(c)), copy = rel.changed.filter(CARD_ONLY);
+    const rows = [
+      ...rel.blocked.map(b => flagRow('blocked', b.key, `<span class="rl-flag-why">${esc(b.why)}</span>`)),
+      ...rel.new.map(k => flagRow('new', k, '')),
+      ...behaviour.map(c => flagRow('behaviour', c.key, `<span class="rl-flag-fields">${c.fields.map(esc).join(' · ')}</span>`)),
+    ].join('');
+    return { rows, copy: copy.map(c => c.key), blocked: rel.blocked.length, fresh: rel.new.length, changed: behaviour.length };
   }
   function flagLines(s, id, rel, error, deployed = false) {
     const promo = (s.flagPromo || {})[id];
-    let h = '';
-    const chips = flagChips((promo && promo.review) || rel);
-    if (chips) h += `<div class="rl-hist-man">${chips}</div>`;
-    if (promo) h += `<div class="rl-hist-man ${esc(promo.tone || '')}"${promo.backup ? ` title="Prod before: ${esc(promo.backup)} (back office › Import restores it)"` : ''}>${esc(promo.text)}</div>`;
-    else if (error) h += `<div class="rl-hist-man bad">Flags: ${esc(error)}</div>`;
-    if ((promo && promo.act === 'promote') || (!promo && deployed && chips)) h += `<button class="rl-hist-btn go" data-act="flagPromote" data-id="${esc(id)}">🚩 Promote flags</button>`;
-    return h;
+    const { rows, copy, blocked, fresh, changed } = flagGroups((promo && promo.review) || rel);
+    const any = !!(rows || copy.length);
+    if (!any && !promo && !error) return '';
+    const running = promo && promo.tone === 'run', failed = promo && promo.tone !== 'ok' && !running;
+    const st = running ? '<span class="rl-flag-st"><span class="rl-spin-dot"></span>Promoting</span>'
+      : promo && promo.tone === 'ok' ? `<span class="rl-flag-st ok">✓ ${/nothing/i.test(promo.text) ? 'Nothing to promote' : 'Promoted'}</span>`
+      : failed ? `<span class="rl-flag-st bad">✕ Promote failed</span><span class="rl-flag-st why" title="${esc(promo.text)}">${esc(flagWhy(promo.text))} · may be partly applied</span>`
+      : error ? `<span class="rl-flag-st bad">⚠ Preview failed</span><span class="rl-flag-st why" title="${esc(error)}">${esc(flagWhy(error))} · flags unknown</span>`
+      : rows ? [blocked && `<span class="rl-flag-st bad" title="Promote leaves ${blocked === 1 ? 'it' : 'them'} as prod has ${blocked === 1 ? 'it' : 'them'}">⊘ ${blocked} stay${blocked === 1 ? 's' : ''} as prod</span>`, fresh && `<span class="rl-flag-st new">+ ${fresh} new</span>`, changed && `<span class="rl-flag-st chg">~ ${changed} changed</span>`].filter(Boolean).join('')
+      : copy.length ? '<span class="rl-flag-st ok">✓ No behaviour change</span>' : '';
+    const act = !running && ((promo && promo.act === 'promote') || (!promo && deployed && any))
+      ? `<button class="rl-flag-act go" data-act="flagPromote" data-id="${esc(id)}">${failed ? 'Retry' : 'Promote flags'}</button>` : '';
+    const backup = failed && promo.backup ? `<button class="rl-flag-st backup" data-act="flagBackup" data-v="${esc(promo.backup)}" title="Copy · back office › Import restores prod from it">↺ <span class="rl-flag-key">${esc(promo.backup)}</span></button>` : '';
+    const open = flagCopyOpen.has(id);
+    const fold = !copy.length ? '' : `<button class="rl-flag-row copy" data-act="flagCopy" data-id="${esc(id)}" aria-expanded="${open}" title="No behaviour change on prod">`
+      + `<span class="rl-flag-g" aria-hidden="true">${open ? '▾' : '▸'}</span><span class="rl-flag-lbl">Features page copy</span><span class="rl-flag-n">${copy.length}</span></button>`
+      + (open ? `<div class="rl-flag-copy">${copy.map(k => `<span>${esc(k)}</span>`).join('')}</div>` : '');
+    return `<div class="rl-flags${promo && promo.tone === 'ok' ? ' done' : ''}"><div class="rl-flags-head"><span class="rl-flags-t"><span class="rl-flags-i" aria-hidden="true">⚑</span>Flags</span>${st}${act || backup ? `<span class="rl-flags-acts">${act}${backup}</span>` : ''}</div>${rows}${fold}</div>`;
   }
 
   let relSkip = new Set(); // release picker: repos left out (all in by default, every time it opens)
@@ -1256,9 +1282,6 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
         h += `<div class="rl-rr-man">✋ <b>${esc(m.label)}</b> <span class="rl-env" style="--hue:${ENV_HUE[m.env.toLowerCase()] || 'var(--dim)'}">${esc(m.env)}</span> <span>${live}</span></div>`;
       }
     }
-    if (run.flags && run.flags.missing && run.flags.missing.length) h += `<div class="rl-rr-flag bad">⚠ Seed these prod feature flags before merging: ${esc(run.flags.missing.join(', '))}</div>`;
-    else if (run.flags && run.flags.missing) h += '<div class="rl-rr-flag">Prod feature flags: nothing missing</div>';
-    else if (run.flags && run.flags.error) h += `<div class="rl-rr-flag">Flag check failed: ${esc(run.flags.error)}</div>`;
     if (run.flags && (run.flags.release || run.flags.releaseError)) h += flagLines(s, '', run.flags.release, run.flags.releaseError);
     const blocked = run.running ? 0 : run.rows.filter(r => r.status === 'blocked' || r.status === 'error').length;
     const a = s.approvers || {};
