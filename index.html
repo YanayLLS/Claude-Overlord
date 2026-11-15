@@ -629,6 +629,8 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 .wt-state { font-size:10px; padding:2px 6px; border-radius:3px; flex-shrink:0; letter-spacing:.3px; }
 .wt-state.setup { color:#f9e2af; background:rgba(249,226,175,.08); border:1px solid rgba(249,226,175,.35); }
 .wt-state.failed { color:#f38ba8; background:rgba(243,139,168,.08); border:1px solid rgba(243,139,168,.4); }
+button.wt-state { font:inherit; font-size:10px; cursor:pointer; }
+button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
 .wt-port { font-size:10px; padding:2px 6px; border-radius:3px; flex-shrink:0; color:var(--subtext,#a6adc8); background:rgba(148,226,213,.05); border:1px solid rgba(148,226,213,.2); font-family:'Geist Mono',monospace; cursor:pointer; text-decoration:none; transition:color .12s, border-color .12s; }
 .wt-port:hover { color:var(--cyan,#94e2d5); border-color:var(--cyan,#94e2d5); }
 .group.is-worktree > .group-header { border-left:2px solid var(--blue,#89b4fa); }
@@ -3252,13 +3254,13 @@ function render() {
     const nameHtml = wtEntry
       ? `<span class="group-name">${esc(pathLabel(wtEntry.repo))}${sameName(wtEntry.branch, wtEntry.feature) ? '' : ` <span class="wt-branch">&#x2442; ${esc(wtEntry.branch)}</span>`}</span><span class="group-path">${esc(cwd)}</span>`
       : `<span class="group-name">${esc(pathLabel(cwd))}</span><span class="group-path">${esc(cwd)}</span>`;
-    const wtStatus = wtEntry && wtEntry.status === 'setup' ? `<span class="wt-state setup" title="Installing dependencies">setting up…</span>`
-      : wtEntry && wtEntry.status === 'failed' ? `<span class="wt-state failed" title="Dependency install failed">setup failed</span>` : '';
+    const wtStatus = wtEntry && wtEntry.status === 'setup' ? `<span class="wt-state setup" title="Installing dependencies">Setting up…</span>`
+      : wtEntry && wtEntry.status === 'failed' ? `<button class="wt-state failed" onclick="event.stopPropagation();send({type:'openSetupLog',path:'${safeCwd}'})" title="Dependency install failed — open log">${esc(wtEntry.setupError || 'Setup failed')}</button>` : '';
     const wtUrl = wtEntry ? fillPort(projects[wtEntry.repo] && projects[wtEntry.repo].urlTemplate, wtEntry.port) : '';
     // When the proxy is on and this server is up, prefer the clean hostname.
     const wtServerBadge = wtEntry && running
       ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openLink('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${esc(running.url.replace(/^https?:\/\//, ''))}<span class="server-menu-btn">&#x2197;</span></a></div>`
-      : (wtEntry ? `<a class="wt-port" onclick="event.stopPropagation();openLink('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
+      : (wtEntry && wtEntry.status !== 'failed' && wtEntry.status !== 'setup' ? `<a class="wt-port" onclick="event.stopPropagation();openLink('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
     html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}" data-cwd="${escAttr(cwd)}"><div class="group-header${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ondragover="onGroupDragOver(event,'${safeCwd}')" ondragleave="this.classList.remove('drop-into')" ondrop="onGroupDrop(event,'${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
       <span class="group-chevron">&#x25BC;</span>
       <div class="group-info" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>

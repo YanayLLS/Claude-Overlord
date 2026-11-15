@@ -4732,8 +4732,9 @@ async function doCreateWorktree({ repo, branch, base, feature }) {
 function installWorktree(entry) {
   const pm = wt.detectPackageManager(entry.path);
   if (!pm) { entry.status = 'ready'; saveState(); send({ type: 'settings', settings: publicSettings() }); return; }
-  const logPath = path.join(STATE_DIR, 'logs', `setup-${wt.slug(entry.branch)}.log`);
+  const logPath = path.join(STATE_DIR, 'logs', `setup-${wt.slug(entry.branch)}-${wt.slug(path.basename(entry.repo))}.log`);
   entry.setupLog = logPath;
+  delete entry.setupError;
   try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.writeFileSync(logPath, `# ${pm} install in ${entry.path}\n# started ${new Date().toISOString()}\n\n`); } catch {}
   const append = d => { try { fs.appendFileSync(logPath, d); } catch {} };
   send({ type: 'toast', text: `Setting up ${entry.branch} — installing dependencies…` });
@@ -4763,9 +4764,10 @@ function installWorktree(entry) {
         flog(`Setup for ${entry.branch}: ${pm} install exited ${code}, retrying with --legacy-peer-deps`);
         attempt(pm === 'npm' ? ['--legacy-peer-deps'] : [], true);
       } else {
-        entry.status = 'failed'; saveState(); send({ type: 'settings', settings: publicSettings() });
-        flog(`Setup failed for ${entry.branch}: install exited ${code}. Log: ${logPath}`);
-        send({ type: 'toast', text: `${entry.branch} setup failed (exit ${code}) — see log in ⋮ menu` });
+        let reason = null; try { reason = wt.setupFailReason(fs.readFileSync(logPath, 'utf8')); } catch {}
+        entry.status = 'failed'; if (reason) entry.setupError = reason; saveState(); send({ type: 'settings', settings: publicSettings() });
+        flog(`Setup failed for ${entry.branch} (${path.basename(entry.repo)}): install exited ${code}${reason ? ' - ' + reason : ''}. Log: ${logPath}`);
+        send({ type: 'toast', text: `${path.basename(entry.repo)} setup failed${reason ? ': ' + reason : ` (exit ${code})`}` });
       }
     });
     proc.on('error', (e) => {

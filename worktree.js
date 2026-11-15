@@ -180,7 +180,18 @@ async function repoRoot(dir) {
   return out.trim();
 }
 
+// Short human reason for a failed install, read from the setup log's last attempt.
+function setupFailReason(log) {
+  const last = String(log || '').split(/^# \S+ install .*\(retry\)$/m).pop();
+  const node = /EBADENGINE[\s\S]*?Required: \{"node":"[^\d]*(\d+)/.exec(last);
+  if (node) return `Needs Node ${node[1]}`;
+  if (/\bE40[13]\b/.test(last)) return 'Registry login';
+  if (/\bERESOLVE\b/.test(last)) return 'Dependency conflict';
+  return null;
+}
+
 module.exports = {
+  setupFailReason,
   WT_ROOT, slug, safeBranch, worktreePath, listBranches, copySeedFiles, detectSeedFiles,
   detectPackageManager, detectDevCommand, createWorktree, removeWorktree, repoRoot,
 };
