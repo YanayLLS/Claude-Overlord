@@ -58,6 +58,14 @@ assert.strictEqual(g({ page: page([fail('a', 'Logs in', { tags: ['@critical'], f
   assert.strictEqual(g({ page: page() }).blockers.length, 0);
 }
 
+// on-prem modules ship separately: their failures are listed and never hold the release
+{
+  const r = g({ page: page([fail('onpremWorkers', 'Signs in', { tags: ['@critical'] })], [mod('onpremWorkers'), mod('a')]), history: history({ 'onpremWorkers|Signs in': 'FP' }, { onpremWorkers: [[10, 0, 0]], a: [[10, 0, 0]] }) });
+  assert.strictEqual(r.level, 'ship');
+  assert.strictEqual(rule(r, 'offrelease').items[0].text, 'Signs in');
+  assert.strictEqual(r.blockers.length, 0);
+}
+
 // ── what the fixer concluded ──────────────────────────
 const cause = (o) => ({ key: 'k1', profile: 'a', scenarios: [{ profile: 'a', scenario: 'Logs in' }], ...o });
 assert.strictEqual(categoryOf(cause({ verdict: 'fixed', riskTier: 'T1' })), 'test');

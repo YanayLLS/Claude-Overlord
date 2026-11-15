@@ -9,6 +9,9 @@
 
 const POLICY = {
   criticalTag: '@critical',
+  // modules that test what ships to customers by hand (on-prem bundles), not what this release deploys: listed,
+  // never holding it. The release config's rc.policy.offRelease overrides it (a regex source string).
+  offRelease: '^onprem',
   minorShip: 5,           // new unexplained minor root causes a Ship tolerates…
   minorShipModules: 3,    // …spread over at most this many modules
   minorLook: 15,          // more than this is a Hold
@@ -103,6 +106,7 @@ function rootCauses(page, phase, history, pn, evidence, P = POLICY, unreleased =
     if (evidence === 'verify' && category === 'test') category = 'unexamined'; // fixed, yet still red after the fix
     // a scenario that has to switch on a flag prod hasn't released tests something no customer can reach yet
     if ((f.flags || []).some(k => hidden.has(k))) category = 'unreleased';
+    if (P.offRelease && new RegExp(P.offRelease, 'i').test(f.module)) category = 'offrelease';
     // the runner's own placeholder for a module whose stack died before it reported: the runner broke, not the app
     if (DEAD_STACK.test(f.step)) category = 'env';
     const id = c ? c.key : `${f.module}::${f.step}`;
@@ -181,6 +185,9 @@ function grade(input) {
   const spec = of('spec');
   if (spec.length) add('spec', 'look', `${plural(spec.length, 'product question')} open`,
     spec.slice(0, P.shown).map(g => ({ text: String(g.question || g.diagnosis).slice(0, 160), tag: titleOf[g.module] || g.module, url: link(g.failures[0]) })), spec.length);
+
+  const off = of('offrelease');
+  if (off.length) add('offrelease', 'ship', `${plural(off.length, 'failure')} only in on-prem builds, which ship separately`, names(off), off.length);
 
   const hid = of('unreleased');
   if (hid.length) add('unreleased', 'ship', `${plural(hid.length, 'failure')} only in features prod has not released`,
