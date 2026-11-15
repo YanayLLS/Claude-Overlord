@@ -415,6 +415,19 @@
   pane.addEventListener('dragleave', (e) => { if (!pane.contains(e.relatedTarget)) order().classList.remove('drop'); });
   pane.addEventListener('drop', (e) => { order().classList.remove('drop'); if (!chat() || !e.dataTransfer?.files.length) return; e.preventDefault(); e.stopPropagation(); addFiles([...e.dataTransfer.files]); box().focus(); });
 
+  // An agent row dragged from the list onto the chat box puts @Name at the caret: the message then reaches it
+  // with that agent's context (main.js findMentions / sendLeadMention).
+  const AGENT = 'application/x-overlord-agent', isAgent = (e) => [...(e.dataTransfer?.types || [])].includes(AGENT);
+  order().addEventListener('dragover', (e) => { if (!chat() || !isAgent(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'link'; order().classList.add('drop'); });
+  order().addEventListener('dragleave', (e) => { if (!order().contains(e.relatedTarget)) order().classList.remove('drop'); });
+  order().addEventListener('drop', (e) => {
+    if (!chat() || !isAgent(e)) return;
+    e.preventDefault(); e.stopPropagation(); order().classList.remove('drop');
+    const name = e.dataTransfer.getData(AGENT), t = box(); if (!name) return;
+    const at = t === document.activeElement ? t.selectionStart : t.value.length, before = t.value.slice(0, at);
+    const ins = (before && !/\s$/.test(before) ? ' ' : '') + '@' + name + ' ';
+    t.focus(); t.setSelectionRange(at, at); document.execCommand('insertText', false, ins); // keeps undo, fires input
+  });
   document.getElementById('term-order-input').addEventListener('paste', onPaste);
   // Inserting a character scrolled the chat itself up ~45 px (the browser revealing the caret walks scroll containers),
   // then the bring-to-latest below smooth-scrolled it back: every key bounced the thread. Its scroll is put back

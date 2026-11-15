@@ -5275,7 +5275,16 @@ function handleIpc(msg) {
     case 'dictateSetup': dictateSetup(); break;
     case 'dictateWarm': if (!settings.dictationKey && require('./whisper').installed(WHISPER_DIR())) require('./whisper').warm(WHISPER_DIR()).catch(() => {}); break;
     case 'dictateRemove': { const n = require('./whisper').remove(WHISPER_DIR()); send({ type: 'dictation', setup: true, reset: true, toast: n ? `Speech engine removed (${(n / 1e9).toFixed(1)} GB freed)` : 'Speech engine is not installed' }); break; }
-    case 'questPrompt': { const text = String(msg.text || '').slice(0, 200000); chatDeliver(msg.id, text, null, +msg.erase || 0, () => markSessionSwitch(msg.id, text), !!msg.intoDialog); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
+    case 'questPrompt': { let text = String(msg.text || '').slice(0, 200000);
+      // @Name from the chat works as typed in the terminal (see the input-buffer path): a message that starts with
+      // @Name goes to that agent instead; @Name anywhere else adds that agent's context below the message.
+      if (!msg.intoDialog) {
+        const lead = mc.leadingAgentMentions(text, [...agents.values()].filter(x => x.agentName && !x.archived).map(x => x.agentName));
+        if (lead) { sendLeadMention(msg.id, lead); send({ type: 'mentionRouted', id: msg.id }); break; }
+        const mentions = findMentions(text).filter(m => m.id !== msg.id);
+        if (mentions.length) text += '\n\n' + buildMentionContext(mentions);
+      }
+      chatDeliver(msg.id, text, null, +msg.erase || 0, () => markSessionSwitch(msg.id, text), !!msg.intoDialog); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
     case 'apiNewToken': settings.apiToken = newToken(); saveState(); if (localApiServer) { stopLocalApi(); startLocalApi(); } else sendApiState(); break; // a restart also drops streams opened with the old one
     case 'cliCancel': cliCancel(msg.id, msg.esc !== false); break; // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
