@@ -154,8 +154,12 @@ function grade(input) {
       (wasRed.length ? wasRed : known).slice(0, P.shown).map(m => ({ text: m, tag: 'no report', url: input.pageUrl })), (wasRed.length ? wasRed : known).length);
   } else if (env.length) {
     const dead = [...new Set(env.filter(g => g.failures.every(f => DEAD_STACK.test(f.step))).map(g => g.module))];
-    if (dead.length === env.length) add('evidence', 'look', `${plural(dead.length, 'module')} did not finish: the runner stopped first`, dead.slice(0, P.shown).map(m => ({ text: titleOf[m] || m, tag: 'stopped early', url: moduleUrl(m) })), dead.length);
-    else add('evidence', 'look', `${plural(envScenarios, 'scenario')} hit a broken runner, not the app`, names(env), env.length);
+    // modules whose runner stopped are named by module; other runner breakage follows them
+    const rest = env.filter(g => !g.failures.every(f => DEAD_STACK.test(f.step)));
+    const restScenarios = rest.reduce((n, g) => n + g.failures.length, 0);
+    const items = dead.map(m => ({ text: titleOf[m] || m, tag: 'stopped early', url: moduleUrl(m) })).concat(rest.map(causeItem)).slice(0, P.shown);
+    const text = [dead.length ? `${plural(dead.length, 'module')} did not finish` : '', restScenarios ? `${plural(restScenarios, 'scenario')} hit a broken runner` : ''].filter(Boolean).join(', ');
+    add('evidence', 'look', text, items, dead.length + rest.length);
   }
   else add('evidence', 'ship', 'Every module reported');
 
