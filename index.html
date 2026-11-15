@@ -434,6 +434,10 @@ html,body { width:100%; height:100%; background:var(--bg); color:var(--text); ov
 #agent-tip .tip-prompt:first-of-type { border-top:none; }
 .agent.dragging { opacity:0.3; }
 .top-dragging { opacity:.35; }
+.quiet-row { display:flex; align-items:center; gap:6px; width:100%; margin:2px 0 0; padding:4px 10px; font:inherit; font-size:11px; color:var(--dim); background:none; border:none; border-radius:6px; cursor:pointer; text-align:left; }
+.quiet-row:hover { color:var(--text); background:var(--surface0); }
+.quiet-row .group-chevron { transform:rotate(-90deg); transition:transform .15s; }
+.quiet-row.open .group-chevron { transform:none; }
 .top-drop-before { box-shadow:0 -2px 0 0 var(--accent); }
 .top-drop-after { box-shadow:0 2px 0 0 var(--accent); }
 [data-top] > .group-header[draggable], [data-top] > .feature-header[draggable] { cursor:grab; }
@@ -2267,6 +2271,15 @@ function sortByOrder(cwd, items) {
   });
 }
 
+const QUIET_MS = 2 * 3600000;
+const quietOpen = new Set((() => { try { return JSON.parse(localStorage.getItem('quietOpen') || '[]'); } catch { return []; } })());
+function toggleQuiet(cwd) {
+  quietOpen.has(cwd) ? quietOpen.delete(cwd) : quietOpen.add(cwd);
+  try { localStorage.setItem('quietOpen', JSON.stringify([...quietOpen])); } catch {}
+  render();
+}
+setInterval(() => { if (!document.hidden) scheduleRender(); }, 5 * 60000); // agents cross the quiet line without any event
+
 // ── Top-level order: drag a project or feature header to move the whole card ──
 let topOrder = (() => { try { return JSON.parse(localStorage.getItem('topOrder') || '[]'); } catch { return []; } })();
 let _dragTop = null;
@@ -3452,7 +3465,15 @@ function render() {
       if (filterText && !rows.length) continue;
       html += folderHeaderHtml(folder, rows, safeCwd) + rows.map(rowHtml).join('') + `</div></div>`;
     }
-    html += split.loose.map(rowHtml).join('');
+    // Agents with nothing to do for 2 h+ fold into one "+N quiet" row (2 or more only). Never the one you're on,
+    // an unread one, one in a folder you arranged, or during a search.
+    const quiet = filterText ? [] : split.loose.filter(([id, a]) => id !== selectedId && !a.unread && agentStatus(a) === 'idle' && a.quietSince && Date.now() - a.quietSince > QUIET_MS);
+    if (quiet.length >= 2) {
+      const q = new Set(quiet.map(([id]) => id)), open = quietOpen.has(cwd);
+      html += split.loose.filter(([id]) => !q.has(id)).map(rowHtml).join('');
+      html += `<button type="button" class="quiet-row${open ? ' open' : ''}" onclick="event.stopPropagation();toggleQuiet('${safeCwd}')" aria-expanded="${open}"><span class="group-chevron">&#x25BC;</span>${quiet.length} quiet</button>`;
+      if (open) html += quiet.map(rowHtml).join('');
+    } else html += split.loose.map(rowHtml).join('');
 
     html += `</div></div>`;
   }
@@ -4738,6 +4759,7 @@ function handleAgentMsg(msg) {
       const a = agents.get(msg.id);
       if (a) {
         const was = a.status;
+        a.quietSince = msg.status === 'active' ? null : (a.quietSince || Date.now());
         a.status = msg.status;
         a.crashed = null;
         if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now();

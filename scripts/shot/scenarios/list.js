@@ -29,4 +29,9 @@ module.exports = async ({ inject, js, shot, wait }) => {
   await inject({ type: 'wtServer', path: `${W}/Designs/Model-update`, running: true, port: 5180, url: 'https://lvh.me:5180' });
   await wait(600);
   await shot('list');
+  // Agents idle for hours fold into "+N quiet"; the row opens them.
+  await js(`for (const id of [4, 5]) agents.get(id).quietSince = Date.now() - 3 * 3600000; render(); true`);
+  await shot('list-quiet');
+  await js(`document.querySelector('.quiet-row').click(); true`);
+  await shot('list-quiet-open');
 };
