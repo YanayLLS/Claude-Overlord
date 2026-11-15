@@ -4710,9 +4710,23 @@ function nextBasePort(repo) {
   return port;
 }
 
+// Background folder deletions by lower-cased path, so re-creating a just-removed worktree
+// waits for its old folder to go instead of colliding with it halfway.
+const pendingRemovals = new Map();
 async function doCreateWorktree({ repo, branch, base, feature }) {
   branch = wt.safeBranch(branch); // git forbids spaces/special chars in branch names
-  const dest = await wt.createWorktree({ repo, branch, base });
+  const pending = pendingRemovals.get(wt.worktreePath(repo, branch).toLowerCase());
+  if (pending) await pending;
+  const made = await wt.createWorktree({ repo, branch, base });
+  const dest = made.dest;
+  branch = made.branch;
+  const known = (settings.worktrees || []).find(w => w.path.toLowerCase() === dest.toLowerCase());
+  if (known) { // already listed: just move it into this feature
+    known.feature = feature || known.feature || null;
+    saveState(); send({ type: 'settings', settings: publicSettings() });
+    send({ type: 'toast', text: `${path.basename(repo)}: using the existing ${branch} worktree` });
+    return known;
+  }
   ensureProjectConfig(repo, base);
   const cfg = projectConfig(repo);
   const seeds = (cfg && cfg.seedFiles) ? cfg.seedFiles : wt.detectSeedFiles(repo);
@@ -4722,7 +4736,7 @@ async function doCreateWorktree({ repo, branch, base, feature }) {
   settings.worktrees.push(entry);
   saveState();
   send({ type: 'settings', settings: publicSettings() });
-  send({ type: 'toast', text: `Created worktree ${branch}` });
+  send({ type: 'toast', text: made.adopted ? `${path.basename(repo)}: using the existing ${branch} worktree` : `Created worktree ${branch}` });
   installWorktree(entry);
   return entry;
 }
@@ -4955,8 +4969,11 @@ function handleIpc(msg) {
       settings.worktrees = (settings.worktrees || []).filter(w => w.path !== msg.path);
       saveState();
       send({ type: 'settings', settings: publicSettings() });
-      wt.removeWorktree({ repo: entry.repo, dest: entry.path, branch: entry.branch, deleteBranch: !!msg.deleteBranch })
-        .catch(e => { flog('removeWorktree cleanup failed:', e); send({ type: 'toast', text: `Cleanup of ${entry.branch} folder failed — remove it manually` }); });
+      const key = entry.path.toLowerCase();
+      const job = wt.removeWorktree({ repo: entry.repo, dest: entry.path, branch: entry.branch, deleteBranch: !!msg.deleteBranch })
+        .catch(e => { flog('removeWorktree cleanup failed:', e); send({ type: 'toast', text: `Cleanup of ${entry.branch} folder failed — remove it manually` }); })
+        .finally(() => { if (pendingRemovals.get(key) === job) pendingRemovals.delete(key); });
+      pendingRemovals.set(key, job);
       break;
     }
     case 'openSetupLog': {

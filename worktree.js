@@ -28,8 +28,16 @@ function slug(branch) {
   return String(branch).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'wt';
 }
 
-function worktreePath(repoPath, branch) {
-  return path.join(WT_ROOT, path.basename(repoPath), slug(branch));
+function worktreePath(repoPath, branch, root = WT_ROOT) {
+  return path.join(root, path.basename(repoPath), slug(branch));
+}
+
+const samePath = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase(); // Windows paths ignore case
+
+// Worktree paths git has registered for repo.
+async function registeredWorktrees(repo) {
+  const out = await git(repo, ['worktree', 'list', '--porcelain'], 20000).catch(() => '');
+  return out.split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9).trim());
 }
 
 function git(repo, args, timeout = 120000) {
@@ -137,9 +145,19 @@ async function resolveRef(repo, ref) {
 
 // git worktree add -b <branch> <dest> origin/<base>. Fetches first so <base> is fresh.
 // If the branch already exists locally, checks it out into the worktree instead of -b.
-async function createWorktree({ repo, branch, base }) {
-  const dest = worktreePath(repo, branch);
-  if (fs.existsSync(dest)) throw new Error(`Worktree path already exists: ${dest}`);
+// Returns { dest, branch, adopted }. A folder already at dest is either a live worktree of
+// this repo (adopted as-is, with its files and branch) or a leftover git no longer knows,
+// e.g. a removal that died halfway through node_modules (cleared, then made fresh).
+async function createWorktree({ repo, branch, base, root }) {
+  const dest = worktreePath(repo, branch, root);
+  if (fs.existsSync(dest)) {
+    if ((await registeredWorktrees(repo)).some(p => samePath(p, dest))) {
+      const cur = (await git(dest, ['branch', '--show-current'], 15000).catch(() => '')).trim();
+      return { dest, branch: cur || branch, adopted: true };
+    }
+    await fs.promises.rm(dest, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    await git(repo, ['worktree', 'prune'], 20000).catch(() => {});
+  }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   try { await git(repo, ['fetch', 'origin', base], 60000); } catch {}
 
@@ -160,16 +178,16 @@ async function createWorktree({ repo, branch, base }) {
     ? ['worktree', 'add', dest, branch]
     : ['worktree', 'add', '-b', branch, dest, startPoint];
   await git(repo, args);
-  return dest;
+  return { dest, branch, adopted: false };
 }
 
+// Deletes the folder ourselves, then prunes git's registration. `git worktree remove` ran
+// under a 60 s timeout that a big node_modules outlasts: git was killed halfway and left
+// an unregistered half-deleted folder behind. fs.rm has no timeout, retries locked files
+// (a dev server still letting go) and never follows junctions out of the tree.
 async function removeWorktree({ repo, dest, branch, deleteBranch }) {
-  try { await git(repo, ['worktree', 'remove', '--force', dest], 60000); }
-  catch (e) {
-    // Path already gone on disk — prune the stale registration so git isn't left confused.
-    await git(repo, ['worktree', 'prune'], 20000).catch(() => {});
-    if (fs.existsSync(dest)) throw e;
-  }
+  await fs.promises.rm(dest, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  await git(repo, ['worktree', 'prune'], 20000).catch(() => {});
   if (deleteBranch && branch) {
     await git(repo, ['branch', '-D', branch], 20000).catch(() => {});
   }
