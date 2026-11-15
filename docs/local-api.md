@@ -112,6 +112,7 @@ What each field means:
 | `agent.title` | agentId, title |
 | `agent.tool_start` / `agent.tool_done` | agentId, toolId, tool, status |
 | `agent.send_failed` | agentId, text |
+| `feature.repo_added` | agentId, feature, repo, path, branch: an agent in a feature edited a repo the feature did not have yet; that repo got the feature's worktree (`path`, on `branch`) and joined the feature |
 | `chat.message` | conversation (`{type:'peer'\|'group', id}`), group, message: sent or received peer chat |
 
 Every event also carries `seq` (it increases by one per event and restarts at 1 when Overlord restarts) and `at` (ISO time).

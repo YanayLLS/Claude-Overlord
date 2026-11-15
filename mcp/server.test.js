@@ -182,3 +182,17 @@ test("pr_claim and pr_release reach the claims host with the calling agent's id"
     assert.deepStrictEqual(seen, [['claim', 1, 'o/r#5'], ['claim', 2, 'o/r#5'], ['release', 1, 'o/r#5']]);
   }, () => ACTIONS, claims);
 });
+
+test('POST /hook/<token> hands the tool input to onEditHook for that agent and returns its answer', async () => {
+  const seen = [];
+  const server = createMcpServer({ resolveActions: () => ACTIONS, onEditHook: async (agentId, input) => { seen.push([agentId, input.file_path]); return { deny: 'use the worktree' }; } });
+  await server.start();
+  try {
+    const token = server.mintToken(7);
+    const res = await fetch(`http://127.0.0.1:${server.port()}/hook/${token}`, { method: 'POST', body: JSON.stringify({ tool_input: { file_path: 'C:/x.js' } }) });
+    assert.deepStrictEqual(await res.json(), { deny: 'use the worktree' });
+    assert.deepStrictEqual(seen, [[7, 'C:/x.js']]);
+    const bad = await fetch(`http://127.0.0.1:${server.port()}/hook/nope`, { method: 'POST', body: '{}' });
+    assert.strictEqual(bad.status, 404);
+  } finally { await server.stop(); }
+});

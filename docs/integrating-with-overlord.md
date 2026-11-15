@@ -109,6 +109,7 @@ Every event has `type`, `seq`, `at` (ISO time) and, for agent events, `agentId`.
 | `agent.title` | `title` |
 | `agent.tool_start`, `agent.tool_done` | `toolId`, `tool`, `status` |
 | `agent.send_failed` | `text` |
+| `feature.repo_added` | `agentId`, `feature`, `repo`, `path`, `branch` |
 | `chat.message` | `conversation` (`{type: 'peer' or 'group', id}`), `group`, `message` |
 
 Filter with exact types or prefixes ending in `.`, for example `agent.status,chat.`. `seq` restarts at 1 when Overlord restarts. If you send a `since` larger than the current `seq`, you get the whole buffer again, so dedupe by `(at, type, agentId)` if that matters to you.

@@ -10,6 +10,7 @@ const net = require('net');
 let autoUpdater = null; // electron-updater: packaged builds only, loaded on app ready (setupAutoUpdater)
 const pty = require('node-pty');
 const wt = require('./worktree');
+const { planRedirect } = require('./feature-redirect');
 const pc = require('./peer-core');
 const wc = require('./watch-core');
 const timelineCore = require('./timeline-core');
@@ -466,7 +467,7 @@ function watchAsk(id) {
     }).on('error', function () { this.close(); askWatched.delete(id); }); // the folder went with the agent: an uncaught EPERM otherwise
   } catch {}
 }
-function agentClaudeFlags(id, { browser = true } = {}) {
+function agentClaudeFlags(id, { browser = true, cwd = null } = {}) {
   setImmediate(() => watchAsk(id)); // the config folder exists once the flags below are written
   try {
     if (!browser) return settingsFlags(id);
@@ -474,7 +475,9 @@ function agentClaudeFlags(id, { browser = true } = {}) {
       console.log(`[Overlord] Browser MCP not ready for agent ${id} — spawning with deny rule only`);
       return settingsFlags(id);
     }
-    return writeAgentConfig({ id, port: mcpServer.port(), token: mcpServer.mintToken(id) }).flags;
+    // A feature agent's edits in a repo's main checkout are redirected into the feature's worktree there (onFeatureEdit).
+    const editHook = !!(cwd && findWorktree(cwd) && findWorktree(cwd).feature);
+    return writeAgentConfig({ id, port: mcpServer.port(), token: mcpServer.mintToken(id), editHook }).flags;
   } catch (e) {
     console.log(`[Overlord] Browser config failed for agent ${id}: ${e.message}`);
     return '';
@@ -1939,7 +1942,7 @@ function doSpawnTerminal(id, attached) {
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const useResume = hasJsonl && !a._resumeFailed;
   const feat = featureAgentArgs(a.cwd);
-  const claudeCmd = (useResume ? `${claudeBin()} --resume ${a.sessionId}${skip}` : `${claudeBin()} --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id);
+  const claudeCmd = (useResume ? `${claudeBin()} --resume ${a.sessionId}${skip}` : `${claudeBin()} --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id, { cwd: a.cwd });
   const sh = agentShell();
   // /c, not /k: /k left cmd.exe alive after Claude died, so the pty never exited and
   // crashes went unnoticed (no auto-resume). /c exits with Claude's own exit code.
@@ -2077,7 +2080,7 @@ function scheduleSpare(cwd) {
     const sessionId = crypto.randomUUID();
     const feat = featureAgentArgs(cwd);
     const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
-    const cmd = `${claudeBin()} --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}`;
+    const cmd = `${claudeBin()} --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id, { cwd })}`;
     const shell = agentShell();
     const args = process.platform === 'win32' ? `/c ${cmd}` : ['-c', cmd];
     try {
@@ -2123,7 +2126,7 @@ function createAgent(folderPath, initialPrompt, argPrompt, noSubmit, team, quiet
 
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const feat = featureAgentArgs(cwd);
-  const claudeCmd = `${claudeBin()} --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id)}${argPrompt ? ` "${argPrompt}"` : ''}`;
+  const claudeCmd = `${claudeBin()} --session-id ${sessionId}${skip}${feat.flags}${agentClaudeFlags(id, { cwd })}${argPrompt ? ` "${argPrompt}"` : ''}`;
   const shell = agentShell();
   const shellArgs = process.platform === 'win32' ? `/c ${claudeCmd}` : ['-c', claudeCmd];
   send({ type: 'agentCreated', id, cwd, sessionId, createdAt: agent.createdAt, agentName: agent.agentName, quiet: !!quiet });
@@ -4710,6 +4713,39 @@ function nextBasePort(repo) {
   return port;
 }
 
+// A feature agent is about to edit a file (its edit hook asked, see mcp/agent-config.js). A file in a
+// repo's main checkout would land on whatever branch that checkout is on, outside the feature: make
+// the feature's worktree in that repo if it has none (it joins the feature card) and deny the edit
+// with the same file's path in the worktree. One creation per repo at a time; parallel edits share it.
+const featureJoins = new Map(); // `${feature}|${repo}` -> Promise<worktree entry>
+async function onFeatureEdit(agentId, input) {
+  const a = agents.get(agentId);
+  const file = input && (input.file_path || input.notebook_path);
+  if (!a || !file) return {};
+  const repos = [...(settings.knownProjects || []), ...Object.keys(settings.projects || {}), ...(settings.lastFeatureRepos || [])];
+  const plan = planRedirect({ file, cwd: a.cwd, worktrees: settings.worktrees || [], repos });
+  if (!plan) return {};
+  let member = plan.member;
+  if (!member) {
+    const key = `${plan.feature}|${plan.repo.toLowerCase()}`;
+    if (!featureJoins.has(key)) {
+      const base = (projectConfig(plan.repo) || {}).defaultBase || 'dev';
+      featureJoins.set(key, doCreateWorktree({ repo: plan.repo, branch: plan.branch, base, feature: plan.feature })
+        .then((entry) => {
+          flog(`feature ${plan.feature}: ${path.basename(plan.repo)} joined (agent ${agentId} edited ${file})`);
+          send({ type: 'featureRepoAdded', id: agentId, feature: plan.feature, repo: plan.repo, path: entry.path, branch: entry.branch });
+          return entry;
+        })
+        .finally(() => featureJoins.delete(key)));
+    }
+    try { member = await featureJoins.get(key); }
+    catch (e) { flog(`feature ${plan.feature}: could not add ${plan.repo}:`, e); return {}; } // let the edit through rather than block the agent
+  }
+  const target = path.join(member.path, plan.rel);
+  return { deny: `${path.basename(plan.repo)} is part of feature "${plan.feature}" now, in its own worktree on branch ${member.branch}. `
+    + `Do not edit its main checkout (${plan.repo}): make this change in ${target} instead, and do all further work in that repo under ${member.path}.` };
+}
+
 // Background folder deletions by lower-cased path, so re-creating a just-removed worktree
 // waits for its old folder to go instead of colliding with it halfway.
 const pendingRemovals = new Map();
@@ -4876,6 +4912,9 @@ function featureAgentArgs(cwd) {
     env.OVERLORD_FEATURE = self.feature;
     env.OVERLORD_FEATURE_BRANCH = self.branch || '';
     env.OVERLORD_FEATURE_REPOS = siblings.map(w => `${path.basename(w.repo)}=${w.path}`).join(';');
+    notes.push(`This folder is a worktree of feature "${self.feature}" (branch ${self.branch}). When the task needs another repo, `
+      + `edit its files at their usual path with your Edit/Write tools: Overlord then gives that repo a worktree on the same branch and tells you its path; work there from then on. `
+      + `Never change a repo's main checkout from the shell (no sed, git commit or git checkout there).`);
     if (siblings.length) {
       const list = siblings.map(w => `${path.basename(w.repo)} (${w.path})`).join('; ');
       notes.push(`This git worktree is part of feature "${self.feature}" on branch ${self.branch}, spanning multiple repos. `
@@ -6878,7 +6917,7 @@ app.whenReady().then(() => {
     captureHost: browserCaptureHost = createCaptureHost({ makeWindow: () => makeCaptureWindow({ BrowserWindow, screen: require('electron').screen }) }),
     onRecovered: (id, reason, ok, url) => flog(ok ? `agent ${id} browser died (${reason}): recreated${url ? `, reloading ${url}` : ''}` : `agent ${id} browser died (${reason}) again: giving up for now`),
   });
-  mcpServer = createMcpServer({ prClaims: prClaimsApi, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
+  mcpServer = createMcpServer({ onEditHook: onFeatureEdit, prClaims: prClaimsApi, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.apiEnabled) startLocalApi();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });

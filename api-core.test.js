@@ -52,6 +52,11 @@ test('renderer messages map to public events; terminal bytes do not', () => {
   assert.ok(!wants(['agent.status'], 'agent.pending') && !wants(['chat.'], 'agent.status'));
 });
 
+test('a repo joining a feature mid-task is a public event', () => {
+  assert.deepStrictEqual(toEvent({ type: 'featureRepoAdded', id: 4, feature: 'Model update', repo: 'C:/Work/back-office', path: 'C:/wt/back-office/Model-update', branch: 'Model-update' }),
+    { type: 'feature.repo_added', agentId: 4, feature: 'Model update', repo: 'C:/Work/back-office', path: 'C:/wt/back-office/Model-update', branch: 'Model-update' });
+});
+
 test('publish numbers events, keeps them for replay, filters by type', () => {
   const api = createApi(fakeHost());
   api.publish({ type: 'status', id: 1, status: 'active' });

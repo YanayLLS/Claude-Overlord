@@ -54,6 +54,7 @@ const EVENTS = [
   ['sleeping', 'agent.sleeping', 'CPU saving closed an idle agent\'s CLI (sleeping true), or it was resumed (false). Fields: agentId, sleeping.', (m) => ({ agentId: m.id, sleeping: !!m.on })],
   ['crashed', 'agent.crashed', 'An agent\'s CLI crashed. Fields: agentId.', (m) => ({ agentId: m.id })],
   ['sendFailed', 'agent.send_failed', 'A message for an agent could not be delivered. Fields: agentId, text.', (m) => ({ agentId: m.id, text: m.text })],
+  ['featureRepoAdded', 'feature.repo_added', 'An agent in a feature edited a repo the feature did not have yet, so that repo got the feature\'s worktree and joined it. Fields: agentId, feature, repo, path, branch.', (m) => ({ agentId: m.id, feature: m.feature, repo: m.repo, path: m.path, branch: m.branch })],
   ['chatMsg', 'chat.message', 'A peer-chat message was sent or received. Fields: conversation ({type: peer | group, id}), group, message.', (m) => ({ conversation: m.key, group: m.groupName, message: m.msg })],
 ];
 const EVENT_BY_SOURCE = new Map(EVENTS.map(([src, type, , map]) => [src, { type, map }]));

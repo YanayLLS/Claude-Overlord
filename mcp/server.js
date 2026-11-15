@@ -53,7 +53,7 @@ async function handleRpc(msg, resolveActions, agentId, getTerminals, prClaims) {
   return err(id, -32601, `Method not found: ${method}`);
 }
 
-function createMcpServer({ resolveActions, getTerminals = () => null, prClaims = null }) {
+function createMcpServer({ resolveActions, getTerminals = () => null, prClaims = null, onEditHook = async () => ({}) }) {
   const tokens = new Map(); // token -> agentId
   const byAgent = new Map(); // agentId -> token
   let server = null;
@@ -73,7 +73,15 @@ function createMcpServer({ resolveActions, getTerminals = () => null, prClaims =
   }
 
   async function onRequest(req, res) {
-    const token = (req.url || '').split('?')[0].replace(/^\/mcp\//, '');
+    const url = (req.url || '').split('?')[0];
+    // POST /hook/<token>: the agent's file-edit hook (mcp/agent-config.js) asking before an edit.
+    if (url.startsWith('/hook/')) {
+      const agentId = tokens.get(url.slice(6));
+      if (agentId === undefined) return reply(res, 404, null);
+      let body = {}; try { body = JSON.parse(await readBody(req)); } catch {}
+      return reply(res, 200, (await onEditHook(agentId, body.tool_input || {})) || {});
+    }
+    const token = url.replace(/^\/mcp\//, '');
     if (!tokens.has(token)) return reply(res, 404, null);
     if (req.method !== 'POST') return reply(res, 405, null);
     let msg;

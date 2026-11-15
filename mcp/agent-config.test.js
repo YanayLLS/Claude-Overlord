@@ -72,3 +72,29 @@ test('the config directory is not left world-readable', { skip: process.platform
   assert.strictEqual(fs.statSync(agentConfigDir(108)).mode & 0o777, 0o700);
   removeAgentConfig(108);
 });
+
+test('a feature agent gets an edit hook that relays Overlord\'s deny to the CLI', async () => {
+  const http = require('http');
+  const srv = http.createServer((req, res) => { let b = ''; req.on('data', d => { b += d; }).on('end', () => {
+    const input = JSON.parse(b).tool_input;
+    res.end(JSON.stringify(input.file_path === 'C:/Work/back-office/a.ts' ? { deny: 'edit the worktree instead' } : {}));
+  }); });
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  try {
+    const { settingsPath } = writeAgentConfig({ id: 104, port: srv.address().port, token: 'tk', editHook: true });
+    const cfg = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    const entry = cfg.hooks.PreToolUse.find(h => h.matcher === 'Edit|MultiEdit|Write|NotebookEdit');
+    assert.ok(entry, 'edit hook registered');
+    const cmd = entry.hooks[0].command;
+    const run = (file) => new Promise((resolve) => {
+      const p = require('child_process').exec(cmd, (e, out) => resolve(out));
+      p.stdin.end(JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: file } }));
+    });
+    const denied = JSON.parse(await run('C:/Work/back-office/a.ts'));
+    assert.strictEqual(denied.hookSpecificOutput.permissionDecision, 'deny');
+    assert.strictEqual(denied.hookSpecificOutput.permissionDecisionReason, 'edit the worktree instead');
+    assert.strictEqual((await run('C:/elsewhere.ts')).trim(), '');
+    const plain = JSON.parse(fs.readFileSync(writeAgentConfig({ id: 105, port: 1, token: 't' }).settingsPath, 'utf8'));
+    assert.ok(!plain.hooks.PreToolUse.some(h => h.matcher.includes('Edit')), 'agents outside a feature get no edit hook');
+  } finally { srv.close(); removeAgentConfig(104); removeAgentConfig(105); }
+});

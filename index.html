@@ -651,6 +651,10 @@ button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
 .feature-icon { color:var(--blue,#89b4fa); }
 .feature-name { font-weight:700; font-size:12px; letter-spacing:.4px; color:var(--text); }
 .feature-summary { white-space:nowrap; font-size:10px; color:var(--subtext,#a6adc8); }
+.solo-name { display:inline-flex; align-items:baseline; gap:6px; }
+.solo-name .feature-icon { font-size:11px; }
+.solo-repo { font-size:11px; font-weight:500; color:var(--dim); }
+.group-info .feature-hidden { margin-left:8px; vertical-align:1px; }
 .feature-hidden { white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:4px; font:inherit; font-size:10px; color:var(--dim); background:none; border:1px solid var(--border); border-radius:999px; padding:1px 7px 1px 5px; cursor:pointer; }
 .feature-hidden:hover { color:var(--text); border-color:var(--border-hi); }
 .feature-hidden svg { width:12px; height:12px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
@@ -2016,33 +2020,42 @@ async function removeWorktree(path) {
 // Branch named after its feature ("Model-Update" in "Model Update") says nothing the feature header doesn't.
 function sameName(a, b) { const k = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); return !!b && k(a) === k(b); }
 function featureMembers(name) { return worktrees.filter(w => w.feature === name); }
+const featureQ = (name) => escAttr(name.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+function featureHiddenChip(name) {
+  const hidden = featureMembers(name).filter(w => hiddenInFeature.has(w.path));
+  if (!hidden.length) return '';
+  return `<button class="feature-hidden" onclick="event.stopPropagation();setHiddenInFeature(${escAttr(JSON.stringify(hidden.map(w => w.path)))},false)" title="Show ${escAttr(hidden.map(w => pathLabel(w.repo)).join(', '))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c5 0 9 4.5 10 7a12 12 0 0 1-2.7 3.7M6.6 6.6C4.3 8 2.7 10.2 2 12c1 2.5 5 7 10 7a10 10 0 0 0 4.4-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>${hidden.length} hidden</button>`;
+}
+function featureMenuItems(name, solo = false) {
+  const members = featureMembers(name), safe = featureQ(name);
+  const runningCount = members.filter(w => wtRunning.has(w.path)).length;
+  const hidden = members.filter(w => hiddenInFeature.has(w.path));
+  return [
+    { icon: 'plus', label: 'Add repo&#x2026;', on: `openAddRepo('${safe}')` },
+    !solo && members.length > 1 && runningCount < members.length && { icon: 'play', label: 'Start all servers', on: `startFeature('${safe}')` },
+    !solo && members.length > 1 && runningCount && { icon: 'stop', label: 'Stop all servers', on: `stopFeature('${safe}')` },
+    { icon: 'pr', label: members.length > 1 ? 'Create PRs' : 'Create PR', on: `prFeature('${safe}')` },
+    ...(hidden.length ? ['-', ...hidden.map(w => ({ icon: 'eye', label: 'Show ' + esc(pathLabel(w.repo)), on: `setHiddenInFeature(${escAttr(JSON.stringify([w.path]))},false)` }))] : []),
+    '-',
+    { icon: 'trash', label: 'Remove feature', danger: true, on: `removeFeature('${safe}')` },
+  ];
+}
 function featureHeaderHtml(name) {
   const members = featureMembers(name);
   const key = 'feature:' + name;
-  const safe = escAttr(name.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
   const collapsed = collapsedGroups.has(key);
   const runningCount = members.filter(w => wtRunning.has(w.path)).length;
-  const hidden = members.filter(w => hiddenInFeature.has(w.path));
-  const shown = members.length - hidden.length;
+  const shown = members.filter(w => !hiddenInFeature.has(w.path)).length;
   const summary = `${shown} repo${shown !== 1 ? 's' : ''}${runningCount ? ` · ${runningCount} running` : ''}`;
-  const hiddenQ = escAttr(JSON.stringify(hidden.map(w => w.path)));
   return `<div class="feature${collapsed ? ' collapsed' : ''}" data-top="${escAttr(key)}" ${TOP_DND}><div class="feature-header" draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()" onclick="toggleGroup('${escAttr(key)}')">
     <span class="group-chevron">&#x25BC;</span>
     <span class="feature-icon">&#x2726;</span>
     <span class="feature-name">${esc(name)}</span>
     <span class="feature-summary">${esc(summary)}</span>
-    ${hidden.length ? `<button class="feature-hidden" onclick="event.stopPropagation();setHiddenInFeature(${hiddenQ},false)" title="Show ${escAttr(hidden.map(w => pathLabel(w.repo)).join(', '))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c5 0 9 4.5 10 7a12 12 0 0 1-2.7 3.7M6.6 6.6C4.3 8 2.7 10.2 2 12c1 2.5 5 7 10 7a10 10 0 0 0 4.4-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>${hidden.length} hidden</button>` : ''}
+    ${featureHiddenChip(name)}
     <div class="group-menu-wrap">
       <button class="group-menu-btn" onclick="event.stopPropagation();toggleGroupMenu(this)" title="Feature actions">&#x22EE;</button>
-      <div class="group-dropdown" data-menu="feature:${escAttr(name)}">${ddItems([
-        { icon: 'plus', label: 'Add repo&#x2026;', on: `openAddRepo('${safe}')` },
-        runningCount < members.length && { icon: 'play', label: 'Start all servers', on: `startFeature('${safe}')` },
-        runningCount && { icon: 'stop', label: 'Stop all servers', on: `stopFeature('${safe}')` },
-        { icon: 'pr', label: 'Create PRs', on: `prFeature('${safe}')` },
-        ...(hidden.length ? ['-', ...hidden.map(w => ({ icon: 'eye', label: 'Show ' + esc(pathLabel(w.repo)), on: `setHiddenInFeature(${escAttr(JSON.stringify([w.path]))},false)` }))] : []),
-        '-',
-        { icon: 'trash', label: 'Remove feature', danger: true, on: `removeFeature('${safe}')` },
-      ])}</div>
+      <div class="group-dropdown" data-menu="feature:${escAttr(name)}">${ddItems(featureMenuItems(name))}</div>
     </div>
   </div><div class="feature-body">`;
 }
@@ -2076,20 +2089,20 @@ function ddItems(items) {
   }
   return rows.join('');
 }
-function groupMenuItems(cwd, q, wt, running, archived, doneCount) {
+function groupMenuItems(cwd, q, wt, running, archived, doneCount, solo = false) {
   const ready = wt && wt.status !== 'setup' && wt.status !== 'failed';
-  return ddItems([
+  return [
     wt && wt.status === 'failed' && { icon: 'retry', label: 'Retry setup', on: `send({type:'retrySetup',path:'${q}'})` },
     ready && !running && { icon: 'play', label: 'Start server', on: `send({type:'startDevServer',path:'${q}'})` },
     ready && running && { icon: 'retry', label: 'Restart server', on: `send({type:'restartDevServer',path:'${q}'})` },
     ready && running && { icon: 'stop', label: 'Stop server', on: `send({type:'stopDevServer',path:'${q}'})` },
-    wt && { icon: 'pr', label: 'Create PR', sub: `&#x2192; ${esc(wt.base)}`, on: `send({type:'createPr',path:'${q}'})` },
+    wt && !solo && { icon: 'pr', label: 'Create PR', sub: `&#x2192; ${esc(wt.base)}`, on: `send({type:'createPr',path:'${q}'})` },
     '-',
     { icon: 'folder', label: 'Open folder', on: `openFolder('${q}')` },
     wt && wt.status === 'failed' && { icon: 'log', label: 'Setup log', on: `send({type:'openSetupLog',path:'${q}'})` },
     wt && wt.status !== 'setup' && wt.status !== 'failed' && { icon: 'log', label: 'Server log', on: `send({type:'openServerLog',path:'${q}'})` },
     !wt && { icon: 'branch', label: 'New worktree&#x2026;', on: `openNewWorktree('${q}')` },
-    wt && wt.feature && { icon: 'eyeOff', label: 'Hide from feature', on: `setHiddenInFeature(${escAttr(JSON.stringify([cwd]))},true)` },
+    wt && wt.feature && !solo && { icon: 'eyeOff', label: 'Hide from feature', on: `setHiddenInFeature(${escAttr(JSON.stringify([cwd]))},true)` },
     !wt && { icon: 'gear', label: 'Dev server&#x2026;', on: `openProjectConfig('${q}')` },
     '-',
     { icon: 'folderPlus', label: 'New folder', on: `createFolder('${q}')` },
@@ -2097,9 +2110,9 @@ function groupMenuItems(cwd, q, wt, running, archived, doneCount) {
     archived && { icon: 'archive', label: 'Archived', sub: archived, on: `openArchiveModal('${q}')` },
     '-',
     doneCount && { icon: 'check', label: 'Close done', sub: doneCount, on: `closeDoneInGroup('${q}')` },
-    wt ? { icon: 'trash', label: 'Remove worktree', danger: true, on: `removeWorktree('${q}')` }
+    solo ? null : wt ? { icon: 'trash', label: 'Remove worktree', danger: true, on: `removeWorktree('${q}')` }
        : { icon: 'trash', label: 'Remove project', danger: true, on: `removeProject('${q}')` },
-  ]);
+  ];
 }
 function startFeature(name) { featureMembers(name).forEach(w => send({ type: 'startDevServer', path: w.path })); }
 function stopFeature(name) { featureMembers(name).forEach(w => send({ type: 'stopDevServer', path: w.path })); }
@@ -2182,9 +2195,9 @@ function openNewFeature() {
     </div></div>`;
   el.style.display = 'flex';
   document.getElementById('ft-name').focus();
-  // Checked if it was in the last feature, or (first-ever use) check all.
-  const rememberAll = lastFeatureRepos.length === 0;
-  for (const r of repoSet) addFeatureRepoRow(r, rememberAll || lastFeatureRepos.includes(r));
+  // One repo is enough to start: others join with their own worktree the moment an agent edits them.
+  const start = lastFeatureRepos.find(r => repoSet.includes(r)) || repoSet[0];
+  for (const r of repoSet) addFeatureRepoRow(r, r === start);
   ftUpdate();
 }
 // Live branch preview, row on/off look, and a Create button that names what it will make.
@@ -3396,10 +3409,14 @@ function render() {
     if (cwds.length) blocks.push({ key: 'feature:' + fname, feature: fname, cwds });
   }
   for (const cwd of groups.keys()) if (!seenCwd.has(cwd)) blocks.push({ key: cwd, feature: null, cwds: [cwd] });
-  const orderedCwds = sortTopBlocks(blocks).flatMap(b => b.cwds.map(cwd => ({ cwd, feature: b.feature })));
+  const orderedCwds = sortTopBlocks(blocks).flatMap(b => {
+    const shown = b.feature ? b.cwds.filter(c => !hiddenInFeature.has(c) || filterText) : b.cwds;
+    if (b.feature && shown.length === 1) return [{ cwd: shown[0], feature: null, solo: b.feature }]; // one card, no nesting
+    return b.cwds.map(cwd => ({ cwd, feature: b.feature }));
+  });
 
   let html = '', filterMatches = 0, curFeature = null;
-  for (const { cwd, feature } of orderedCwds) {
+  for (const { cwd, feature, solo } of orderedCwds) {
     const items = groups.get(cwd);
     if (feature !== curFeature) {
       if (curFeature !== null) html += `</div></div>`;   // close previous feature body + wrapper
@@ -3429,7 +3446,9 @@ function render() {
     const wtEntry = worktreeAt(cwd);
     const running = wtRunning.get(cwd);
     // Worktree group: branch label + setup/ready state; else plain project.
-    const nameHtml = wtEntry
+    const nameHtml = solo
+      ? `<span class="group-name solo-name"><span class="feature-icon">&#x2726;</span>${esc(solo)} <span class="solo-repo">${esc(pathLabel(wtEntry.repo))}</span></span>`
+      : wtEntry
       ? `<span class="group-name">${esc(pathLabel(wtEntry.repo))}${sameName(wtEntry.branch, wtEntry.feature) ? '' : ` <span class="wt-branch">&#x2442; ${esc(wtEntry.branch)}</span>`}</span><span class="group-path">${esc(cwd)}</span>`
       : `<span class="group-name">${esc(pathLabel(cwd))}</span><span class="group-path">${esc(cwd)}</span>`;
     const wtStatus = wtEntry && wtEntry.status === 'setup' ? `<span class="wt-state setup" title="Installing dependencies">Setting up…</span>`
@@ -3439,15 +3458,15 @@ function render() {
     const wtServerBadge = wtEntry && running
       ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openLink('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${esc(running.url.replace(/^https?:\/\//, ''))}<span class="server-menu-btn">&#x2197;</span></a></div>`
       : (wtEntry && wtEntry.status !== 'failed' && wtEntry.status !== 'setup' ? `<a class="wt-port" onclick="event.stopPropagation();openLink('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
-    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}" data-cwd="${escAttr(cwd)}"${feature === null ? ` data-top="${escAttr(cwd)}" ${TOP_DND}` : ''}><div class="group-header"${feature === null ? ' draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()"' : ''}${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ondragover="onGroupDragOver(event,'${safeCwd}')" ondragleave="this.classList.remove('drop-into')" ondrop="onGroupDrop(event,'${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
+    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}" data-cwd="${escAttr(cwd)}"${feature === null ? ` data-top="${escAttr(solo ? 'feature:' + solo : cwd)}" ${TOP_DND}` : ''}><div class="group-header"${feature === null ? ' draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()"' : ''}${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ondragover="onGroupDragOver(event,'${safeCwd}')" ondragleave="this.classList.remove('drop-into')" ondrop="onGroupDrop(event,'${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
       <span class="group-chevron">&#x25BC;</span>
-      <div class="group-info" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>
+      <div class="group-info" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span>${solo ? featureHiddenChip(solo) : ''}</div>
       ${wtStatus}
       ${wtServerBadge}
       ${serverBadges}
       <div class="group-menu-wrap">
         <button class="group-menu-btn" onclick="event.stopPropagation();toggleGroupMenu(this)" title="More actions">&#x22EE;</button>
-        <div class="group-dropdown" data-menu="${safeCwd}">${groupMenuItems(cwd, safeCwd, wtEntry, running, archivedCounts.get(cwd), gDoneCount)}</div>
+        <div class="group-dropdown" data-menu="${safeCwd}">${solo ? ddItems([...groupMenuItems(cwd, safeCwd, wtEntry, running, archivedCounts.get(cwd), gDoneCount, true), '-', ...featureMenuItems(solo, true)]) : ddItems(groupMenuItems(cwd, safeCwd, wtEntry, running, archivedCounts.get(cwd), gDoneCount))}</div>
       </div>
       <div class="group-actions">
         <span class="split-btn"><span class="agent-main"><button onclick="event.stopPropagation();addAgent('${safeCwd}')">+ Agent</button>${defaultPrefix() ? `<button class="fav-star" title="New agent with “${escAttr(defaultPrefix())} ”" onclick="event.stopPropagation();addAgentWithPrefix('${safeCwd}',defaultPrefix())"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg></button>` : ''}</span><button class="split-chev" title="Start with a prefix" onclick="event.stopPropagation();openPrefixPop(this,'${safeCwd}')">&#x25BE;</button></span>
