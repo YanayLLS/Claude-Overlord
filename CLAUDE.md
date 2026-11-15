@@ -26,3 +26,7 @@ Other programs integrate with Overlord through the local API (`api-core.js`, `ap
 5. **Compatibility**: tools and events are a contract. Add new arguments as optional and new event fields freely. Never rename or remove a tool, event or field, and never change what one means, without bumping `API_VERSION` in api-core.js and saying so in the commit message.
 
 A feature that deliberately stays out of the API (purely visual, such as a theme or a layout) says so in its commit message.
+
+## Checking UI changes
+
+`npx electron scripts/shot/run.js <scenario.js> <outDir>` renders the real `index.html` offscreen with made-up state and saves PNGs (see `scripts/shot/run.js` for the scenario API, `scripts/shot/scenarios/list.js` for an example). The real `main.js` never starts, nothing shows on screen, and it exits on its own, so it is safe to run while the app is in use. Run it at low priority, one at a time.
