@@ -90,6 +90,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `pr_repos_list` | | `{ enabled, repos, locked }`: the PR watchlist. `locked` are release repos the team watches; they can't be removed |
 | `pr_repos_add` | `repos` (`owner/name` each) | the watchlist; also turns PR notifications on. Already-watched repos are skipped (case-insensitive) |
 | `pr_repos_remove` | `repos` | the watchlist. 409 for a locked repo, 404 for one not watched |
+| `pr_auto_merge` | `urls?` (PR urls), `on?` (default `true`) | `{ urls }` changed. Arms Fix & merge, as the PR row's Auto-merge; no `urls` = every open PR of yours that can be armed (the panel's "Auto-merge all"). `on: false` cancels |
 | `webhook_list` | | `{ webhooks }` (without secrets) |
 | `webhook_remove` | `id` | `{ ok: true }` |
 

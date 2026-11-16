@@ -101,6 +101,7 @@ const TOOLS = [
   ['pr_repos_list', 'The PR watchlist: GitHub repos whose open PRs the PRs panel shows. enabled: PR notifications on. locked: release repos the whole team watches; they can\'t be removed.', obj({})],
   ['pr_repos_add', 'Watch more repos for PRs (owner/name), as ticking them in the PR settings. Turns PR notifications on. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
   ['pr_repos_remove', 'Stop watching repos for PRs. A release repo (locked) is refused. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
+  ['pr_auto_merge', 'Fix & merge PRs, as the PRs panel\'s Auto-merge: Overlord keeps each one green and merges it. No urls: every open PR of yours that can be armed ("Auto-merge all"). on false cancels. Returns the urls changed.', obj({ urls: { type: 'array', items: { type: 'string' }, description: 'PR urls (https://github.com/owner/name/pull/N). Default: all of yours.' }, on: { type: 'boolean', description: 'Default true.' } })],
   ['webhook_list', 'Registered webhooks (no secrets), with delivery failure counts.', obj({})],
   ['webhook_remove', 'Remove a webhook.', obj({ id: S('Webhook id.') }, ['id'])],
 ].map(([name, description, inputSchema]) => ({ name, description, inputSchema }));
@@ -292,6 +293,10 @@ function createApi(host) {
       const none = x.repos.find(r => !w.repos.some(h => lc(h) === lc(r))); if (none) throw missing(`not watched: ${none}`);
       host.setPrWatch({ enabled: w.enabled, repos: w.repos.filter(r => !drop.has(lc(r))) });
       return host.prWatch();
+    },
+    pr_auto_merge: (x) => {
+      if (x.urls !== undefined && (!Array.isArray(x.urls) || x.urls.some(u => !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(u)))) throw bad('urls must be GitHub PR urls');
+      return host.prAutoMerge({ urls: x.urls, on: x.on !== false });
     },
     webhook_list: () => ({ webhooks: hooks.map(({ secret, ...h }) => h) }),
     webhook_remove: (x) => { const n = hooks.length; hooks = hooks.filter(h => h.id !== x.id); if (hooks.length === n) throw missing('no such webhook'); queues.delete(x.id); persistHooks(); return { ok: true }; },

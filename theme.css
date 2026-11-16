@@ -511,7 +511,9 @@ body.pr-open #pr-fire .pr-fire-cta { display: none; }
 .dt-n { text-align: right; justify-content: flex-end; font-variant-numeric: tabular-nums; }
 .dt-row .pr-chip { height: 16px; padding: 0 6px; font-size: 10px; }
 .dt-row .pr-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
-.dt-row .pr-refs { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-row .pr-refs { display: inline-flex; gap: .5ch; overflow: hidden; white-space: nowrap; }
+.dt-row .pr-refs > * { flex-shrink: 0; }
+.dt-row .pr-refs > .pr-head { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dt-row :is(.pr-actions, .act-copy) { background: var(--pop); }
 /* Repo band: framed across the table, so each repo reads as its own section */
 :is(#pr-dropdown, #actions-dropdown) .dt-group, :is(#pr-dropdown, #actions-dropdown) .dt-group:hover { margin: 6px 6px 2px; padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--r);
@@ -804,6 +806,8 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
   background: transparent; color: #89b4fa; box-shadow: inset 0 0 0 1px rgba(137,180,250,.45); transition: background .14s, color .14s, box-shadow .14s; }
 #pr-dropdown button.pr-am:hover, #pr-dropdown button.pr-am:focus-visible { background: rgba(137,180,250,.12); box-shadow: inset 0 0 0 1px #89b4fa; }
 #pr-dropdown .pr-am svg { flex: none; }
+#pr-dropdown .pr-am.pr-am-all { width: auto; margin-right: 4px; }
+#pr-dropdown .pr-am-all em { font-style: normal; font-weight: 500; opacity: .7; }
 #pr-dropdown .pr-am :focus-visible, #pr-dropdown button.pr-am:focus-visible, #pr-dropdown .pr-am-ic:focus-visible { outline: 2px solid #89b4fa; outline-offset: 1px; }
 /* Undo: the bar drains over the 8s it stays */
 #pr-dropdown .pr-am.undo { overflow: hidden; box-shadow: inset 0 0 0 1px rgba(137,180,250,.35); }

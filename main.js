@@ -3062,6 +3062,20 @@ function autoPhaseOf(p) {
   const f = autoFixAgents.get(p.url);
   return autoPhase(p, { fixing: f === 'starting' || !!prClaimFor(p.url), fixFailed: f === 'failed', merging: autoMerging.has(p.url), held: !!releases.holdOn(p.repo, p.baseRef) });
 }
+// The PR row, the panel's "Auto-merge all" and the local API's pr_auto_merge all arm/disarm through here.
+function setPrAutoMerge(urls, on) {
+  urls = (urls || []).filter(u => typeof u === 'string' && u.startsWith('https://github.com/'));
+  if (!urls.length) return [];
+  const s = new Set(settings.prAutoMerge || []);
+  for (const u of urls) {
+    if (on) s.add(u); else s.delete(u);
+    if (autoFixAgents.get(u) === 'failed') { autoFixAgents.delete(u); autoFixReason.delete(u); }
+  }
+  settings.prAutoMerge = [...s]; saveState(); pollPRs();
+  return urls;
+}
+// "Auto-merge all": my open PRs that can be armed (same rule as the row's Auto-merge button)
+function prAutoMergeable(prs) { return (prs || []).filter(p => p.mine && !p.isDraft && !p.isCrossRepository && !p.archived && !p.autoMerge); }
 function runAutoMerge(prs, failedRepos = []) {
   const armed = settings.prAutoMerge || [];
   if (!armed.length || !_stateRestored) return; // agents (and so PR claims) not back yet
@@ -5774,14 +5788,7 @@ function handleIpc(msg) {
       mergePrNow(url);
       break;
     }
-    case 'setPrAutoMerge': {
-      if (typeof msg.url !== 'string' || !msg.url.startsWith('https://github.com/')) break;
-      const s = new Set(settings.prAutoMerge || []);
-      if (msg.on) s.add(msg.url); else s.delete(msg.url);
-      if (autoFixAgents.get(msg.url) === 'failed') { autoFixAgents.delete(msg.url); autoFixReason.delete(msg.url); }
-      settings.prAutoMerge = [...s]; saveState(); pollPRs();
-      break;
-    }
+    case 'setPrAutoMerge': setPrAutoMerge(msg.urls || [msg.url], !!msg.on); break;
     case 'getTimeline': { const evts = getFullTimeline(msg.id); send({ type: 'timelineData', id: msg.id, events: evts }); const ag = agents.get(msg.id); if (ag && ag.askInput) send({ type: 'askInput', id: msg.id, input: ag.askInput }); break; } // a reload: the open question's previews too
     case 'globalSearch': { const results = globalSearch(msg.query); send({ type: 'searchResults', query: msg.query, results }); break; }
     case 'setTimelineAgent': timelineAgentId = msg.id ?? null; break;
@@ -5992,6 +5999,7 @@ function apiHost() {
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
     repoCheck: (repo) => repoCheck(repo),
+    prAutoMerge: ({ urls, on }) => ({ urls: setPrAutoMerge(urls || prAutoMergeable((settings.prCache || {}).prs).map(p => p.url), on) }),
     prWatch: () => { const c = settings.prSettings || {}; return { enabled: !!c.enabled, repos: [...(c.repos || [])], locked: releases.releaseRepos() }; },
     setPrWatch: ({ enabled, repos }) => savePrSettings({ ...(settings.prSettings || {}), enabled, repos }),
     chatList: () => {

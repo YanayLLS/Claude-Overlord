@@ -6575,8 +6575,7 @@ function prRowHtml(p, dim) {
     + (hold ? `<span class="pr-chip warn" title="@${escapeHtml(hold.by)} asked not to merge into ${escapeHtml(hold.branch)}${hold.note ? ': ' + escapeHtml(hold.note) : ''}">${prPauseIc(10)}${escapeHtml(hold.branch)} held</span>` : '');
   const behindChip = p.behindBy > 0 ? `<span class="pr-chip warn" title="${escapeHtml(p.baseRef)} has ${p.behindBy} commit(s) this branch doesn't">${p.behindBy} behind</span>` : '';
   // One table row per PR: each piece in its own column so rows line up (headers: prDropdownHead).
-  // Into dev is the norm: only a different base is worth the space
-  const refs = p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}">${prRefHtml(p.headRef)}${p.baseRef === 'dev' ? '' : ' → ' + prRefHtml(p.baseRef)}</span>` : '';
+  const refs = p.headRef && p.baseRef ? `<span class="pr-refs" title="${escapeHtml(p.headRef)} → ${escapeHtml(p.baseRef)}"><span class="pr-head">${prRefHtml(p.headRef)}</span> → ${prRefHtml(p.baseRef)}</span>` : '';
   const age = p.createdAt ? `<span class="pr-age" data-created="${p.createdAt}">${escapeHtml(prRelTime(p.createdAt))}</span>` : '';
   // "feat(dt-ai):" is metadata, not the headline: dim it
   const t = escapeHtml(p.title), pre = t.match(/^[a-z]+(\([^)]*\))?!?:\s*/i);
@@ -6673,7 +6672,9 @@ function prDropdownHead() {
     + `<button class="pr-seg${prShowAll ? ' on' : ''}" title="Every open PR in the watched repos, including drafts and PRs you already approved" onclick="event.stopPropagation();setPrShowAll(true)">All open<em>${n(prState.prs.concat(prState.extra || []))}</em></button></span>`;
   const scopeIdle = prScope === 'all' && live.every(p => p.baseRef === 'dev');
   const scope = scopeIdle ? '' : `<span class="pr-scope">${seg('all', 'All', 'Every open PR')}${seg('dev', 'Into dev', 'Only PRs merging into dev')}${seg('norel', 'Hide releases', 'Hide PRs into alpha, staging, master, main and prod')}</span>`;
+  const autoN = prAutoAllList().length;
   return `<div class="pr-dhead"><span>Pull requests</span>${who}${scope}<span class="pr-dhead-btns">`
+    + (autoN > 1 ? `<button class="pr-approve pr-am pr-am-all" title="Fix &amp; merge all ${autoN} of your PRs" onclick="event.stopPropagation();prAutoMergeAll()">${prSvg(PR_WATCH)}Auto-merge all<em>${autoN}</em></button>` : '')
     + (prState.prs.some(p => p.archived) ? `<button class="pr-refresh" title="${prCollapsed.has('__archived_open__') ? 'Hide' : 'Show'} archived" style="opacity:${prCollapsed.has('__archived_open__') ? 1 : .45}" onclick="event.stopPropagation();togglePrRepo('__archived_open__')">📦</button>` : '')
     + (window.releasesUi && releasesUi.holdBranches().length ? `<button class="pr-refresh" title="Hold a branch: ask the team not to merge into it until your deploy is out" style="opacity:${prHoldForm ? 1 : .6}" onclick="event.stopPropagation();prHoldToggle()">${prPauseIc(13)}</button>` : '')
     + `<button class="pr-refresh" title="Refresh now" onclick="event.stopPropagation();refreshPrs(this)">↻</button>`
@@ -7181,6 +7182,16 @@ function setPrAutoMerge(url, on) {
   if (!on) prAutoUndo.set(url, setTimeout(() => { prAutoUndo.delete(url); refreshOpenDropdown('pr-dropdown', prDropdownHtml); prAutoRefocus(url); }, 8000));
   flipPrFlag(p => p.url === url, 'autoMerge', on); api.send({ type: 'setPrAutoMerge', url, on });
   prAutoRefocus(url);
+}
+// Header "Auto-merge all": my visible PRs whose row offers Auto-merge (or Merge — arming lands those too)
+function prAutoAllList() {
+  return prMenuList().filter(p => prInScope(p) && p.mine && !p.isDraft && !p.isCrossRepository && !p.autoMerge && !p.archived && !p.muted && !p.repoMuted && !p.snoozed);
+}
+function prAutoMergeAll() {
+  const urls = prAutoAllList().map(p => p.url);
+  if (!urls.length) return;
+  const set = new Set(urls);
+  flipPrFlag(p => set.has(p.url), 'autoMerge', true); api.send({ type: 'setPrAutoMerge', urls, on: true });
 }
 // keyboard focus follows the control across arm / cancel / undo re-renders
 function prAutoRefocus(url) {

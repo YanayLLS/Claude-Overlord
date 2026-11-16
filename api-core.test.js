@@ -75,6 +75,16 @@ test('PR watchlist: list, add (turns notifications on, no duplicates), remove (r
   await assert.rejects(api.call('pr_repos_remove', { repos: ['acme/nope'] }), { status: 404 });
 });
 
+test('pr_auto_merge: all of mine by default, explicit urls, cancel, rejects non-PR urls', async () => {
+  const calls = [];
+  const api = createApi(fakeHost({ prAutoMerge: (a) => { calls.push(a); return { urls: a.urls || ['all'] }; } }));
+  assert.deepStrictEqual(await api.call('pr_auto_merge', {}), { urls: ['all'] });
+  const u = 'https://github.com/acme/web/pull/7';
+  await api.call('pr_auto_merge', { urls: [u], on: false });
+  assert.deepStrictEqual(calls, [{ urls: undefined, on: true }, { urls: [u], on: false }]);
+  await assert.rejects(api.call('pr_auto_merge', { urls: ['https://evil.com/x'] }), { status: 400 });
+});
+
 test('publish numbers events, keeps them for replay, filters by type', () => {
   const api = createApi(fakeHost());
   api.publish({ type: 'status', id: 1, status: 'active' });
