@@ -1642,6 +1642,9 @@ function restoreAgents(state) {
 
   // ── Phase 2: Async — kill orphans in one sweep, parse JSONL, pre-warm terminals ──
   protectClaudeConfig();
+  // Spawns wait on this from now, not from when the sweep starts: opening an agent during the pty host's attach
+  // loop awaited the old resolved promise, spawned Claude, then the sweep killed it by its session id (a "crash").
+  let sweepDone; _restoreSweep = new Promise(r => { sweepDone = r; });
   (async () => {
     // Kill saved orphan PIDs + anything still holding a session lock — one process
     // scan for all agents instead of one wmic call per agent. All terminal spawns
@@ -1694,7 +1697,7 @@ function restoreAgents(state) {
       // Sessions swept — spawnTerminal can skip its own kill pass for these agents.
       for (const { id } of fresh) { const ag = agents.get(id); if (ag) ag._sessionCleaned = true; }
     })();
-    _restoreSweep = sweep;
+    sweep.then(sweepDone, sweepDone);
     // Cut off by the crash / restart (their Claude didn't survive): offer to tell them and carry on.
     const cut = [];
     for (const { id } of fresh) {
@@ -1790,7 +1793,7 @@ function restoreAgents(state) {
     // After the resumes: warm a spare where the newest agent lives — likely where the next one goes.
     const newest = [...agents.values()].filter(a => !a.archived).sort((a, b) => b.createdAt - a.createdAt)[0];
     if (newest) _prewarmChain.then(() => scheduleSpare(newest.cwd));
-  })();
+  })().finally(() => sweepDone()); // failed before the sweep: spawns must not wait forever
 }
 
 // ── Terminal pre-warm queue ────────────────────────────
