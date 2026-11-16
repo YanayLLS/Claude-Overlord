@@ -11,7 +11,7 @@ module.exports = async ({ inject, js, shot, wait }) => {
   const cell = (env, pr, ago, extra = {}) => ({ env, branch: env, deploy: 'deploy.yml', commit: commit(pr, ago), run: run('success', ago), nexts: [], ...extra });
   const uses = (env) => ({ env, uses: 'dev' });
   const app = [
-    ['frontend', [cell('dev', 1756, 15 * M, { run: run('running', 2 * M), nexts: [next('alpha', 6406), next('prod', 366)] }), cell('alpha', 1543, 11 * D), cell('staging', 1245, 28 * D), cell('prod', 1748, 2 * H)]],
+    ['frontend', [cell('dev', 1756, 15 * M, { run: run('running', 2 * M), nexts: [next('alpha', 6406), next('prod', 366, 1)] }), cell('alpha', 1543, 11 * D), cell('staging', 1245, 28 * D), cell('prod', 1748, 2 * H)]],
     ['backend', [cell('dev', 2469, 12 * M, { nexts: [next('alpha', 274), next('prod', 18)] }), cell('alpha', 2410, 11 * D), cell('staging', 2030, 77 * D), cell('prod', 2464, 7 * H)]],
   ];
   const svc = [
@@ -26,7 +26,7 @@ module.exports = async ({ inject, js, shot, wait }) => {
   const rows = [...app.map(([l, c]) => ({ repo: 'LLSLtd/' + l, label: l, group: 'App', cells: c })), ...svc.map(([l, c]) => ({ repo: 'LLSLtd/' + l, label: l, group: 'Services', cells: c }))];
   const repos = rows.map(r => ({ repo: r.repo, label: r.label, branches: { dev: 'dev', alpha: 'alpha', staging: 'staging', prod: 'main' },
     promote: r.group === 'App' ? [['dev', 'alpha'], ['dev', 'prod']] : ['dev', 'prod'], deploy: { dev: 'deploy.yml', prod: 'deploy.yml' } }));
-  const state = { source: 'LLSLtd/release-config', updatedAt: iso(0), config: { envs, repos }, grid: { envs, rows }, history: { repo: 'LLSLtd/release-manifests', items: [] }, approvers: { members: [1, 2, 3], isApprover: true } };
+  const state = { source: 'LLSLtd/release-config', updatedAt: iso(0), config: { envs, repos, releaseOrder: [['frontline-jobs'], rows.map(r => r.label).filter(l => l !== 'frontline-jobs')] }, rc: { level: 'ship', released: true, night: iso(18 * H) }, grid: { envs, rows }, history: { repo: 'LLSLtd/release-manifests', items: [] }, approvers: { members: [1, 2, 3], isApprover: true } };
   await inject({ type: 'releases', state, open: true });
   await wait(800);
   await js(`document.querySelector('[data-act="tab"][data-tab="envs"]').click(); true`);
@@ -35,4 +35,9 @@ module.exports = async ({ inject, js, shot, wait }) => {
   await js(`document.querySelector('[data-act="tab"][data-tab="release"]').click(); true`);
   await wait(400);
   await shot('release');
+  await js(`document.querySelector('[data-act="relToggle"][data-env="alpha"]').click(); true`);
+  await wait(200);
+  await js(`document.querySelector('[data-act="relRepo"][data-repo="LLSLtd/frontline-jobs"]').click(); true`);
+  await wait(300);
+  await shot('release-leftout');
 };

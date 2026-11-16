@@ -321,7 +321,7 @@
     // no deployment of its own: say whose it runs instead of leaving a hole
     if (c.uses) {
       return `<div class="rl-uses" data-r="${r}" data-c="${i}">`
-        + `<i style="--hue:${ENV_HUE[c.uses.toLowerCase()] || 'var(--dim)'}"></i><span>uses ${esc(c.uses)}</span></div>`;
+        + `<i style="--hue:${ENV_HUE[c.uses.toLowerCase()] || 'var(--dim)'}"></i></div>`;
     }
     const d = deployInfo(c);
     // a manually deployed env with a pinned commit shows THAT commit, not the branch tip
@@ -338,8 +338,8 @@
       const lead = k ? ' rl-next-more' : '';
       if (n.loading) return `<span class="rl-next zero${lead}">… ${esc(n.to)}</span>`;
       if (n.error) return `<span class="rl-next rl-bad${lead}">? ${esc(n.to)}</span>`;
-      const back = n.behind ? `<span class="rl-next rl-back${n.ahead ? ' rl-next-more' : lead}" title="${esc(n.to)} has ${n.behind} commit${n.behind === 1 ? '' : 's'} this branch lacks — the release opens a back-merge first">${link(n.backUrl, `↩ <b>${n.behind}</b> from ${esc(n.to)}`)}</span>` : '';
-      if (!n.ahead) return back || `<span class="rl-next zero${lead}">✓ ${esc(n.to)}</span>`;
+      const back = n.behind ? `<span class="rl-next rl-back${n.ahead ? ' rl-next-more' : lead}" title="${esc(n.to)} has ${n.behind} commit${n.behind === 1 ? '' : 's'} this branch lacks — the release opens a back-merge first">${link(n.backUrl, `↩ <b>${n.behind}</b>`)}</span>` : '';
+      if (!n.ahead) return back;
       return `<span class="rl-next${lead}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>` + back;
     }).join('');
     const hand = d.manual ? '<svg class="rl-hand" viewBox="0 0 24 24" aria-label="manual deploy"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>' : '';
@@ -503,15 +503,22 @@
   }
 
   // Each item is one unbreakable unit; the row wraps between items, never inside one.
-  const LEGEND = '<div class="rl-legend">'
-    + '<span><i class="rl-sw st-bad"></i>deploy failed</span>'
-    + '<span><i class="rl-sw st-part"></i>deployed, side job failed</span>'
-    + '<span><i class="rl-sw st-run"></i>deploying</span>'
-    + '<span><i class="rl-sw st-behind"></i>deployed by hand, behind</span>'
-    + '<span><svg class="rl-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>manual deploy</span>'
-    + '<span><span class="rl-uses rl-uses-key"><i style="--hue:var(--accent)"></i></span>uses dev</span>'
-    + '<span><span class="rl-next"><b>12</b> → prod</span>waiting to promote</span>'
-    + '<span><span class="rl-next rl-back">↩ <b>3</b> from prod</span>needs a back-merge</span></div>';
+  const LEGEND_KEYS = [
+    ['bad', '<i class="rl-sw st-bad"></i>failed'], ['part', '<i class="rl-sw st-part"></i>side job failed'], ['run', '<i class="rl-sw st-run"></i>deploying'],
+    ['behind', '<i class="rl-sw st-behind"></i>behind'],
+    ['hand', '<svg class="rl-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>by hand'],
+    ['next', '<span class="rl-next"><b>12</b> → prod</span>to promote'], ['back', '<span class="rl-next rl-back">↩ <b>3</b></span>back-merge']];
+  // the legend names only what is on the board right now
+  function legendHtml(g) {
+    const on = new Set();
+    for (const row of g.rows) for (const c of row.cells || []) {
+      if (!c || c.uses) continue;
+      const d = deployInfo(c); on.add(d.cls); if (d.manual) on.add('hand');
+      for (const n of c.nexts || []) { if (n.ahead) on.add('next'); if (n.behind) on.add('back'); }
+    }
+    const keys = LEGEND_KEYS.filter(([k]) => on.has(k));
+    return keys.length ? '<div class="rl-legend">' + keys.map(([, h]) => `<span>${h}</span>`).join('') + '</div>' : '';
+  }
 
   function detailHtml(grid) {
     const row = sel && grid.rows[sel[0]];
@@ -1174,13 +1181,13 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
   // to GitHub: team maintainers can add/remove here, everyone else sees the list.
   // Why Release is off for this person, and who can change that
   // Start release: approvers only (and a recent enough Overlord); for anyone else it stays visible, locked, saying why
-  function startBtn(s, { hot = false, ok = true } = {}) {
+  function startBtn(s, { hot = false, ok = true, prs = 0 } = {}) {
     const why = s.config && s.config.minOverlord && s.appVersion && !ReleasesCore.versionAtLeast(s.appVersion, s.config.minOverlord)
       ? `Update Overlord to ${s.config.minOverlord} or later to release (this is ${s.appVersion}): older versions miss release rules`
       : s.approvers && s.approvers.me && !s.approvers.isApprover ? releaseLockedTip(s.approvers) : null;
     if (why) return `<button class="go locked" aria-disabled="true" title="${esc(why)}">🔒 Start ${hot ? 'hotfix' : 'release'}</button>`;
     if (hot) return `<button class="go" data-act="releaseGo"${ok ? '' : ' disabled'}>🩹 Start hotfix</button>`;
-    return `<button class="go" data-act="releaseGo"${relSel.size ? '' : ' disabled'}>Start release</button>`;
+    return `<button class="go" data-act="releaseGo" title="Opens the release PRs and checks each one. Nothing merges until 2 approvers sign"${relSel.size ? '' : ' disabled'}>Start release${prs ? ` · ${prs} PR${prs === 1 ? '' : 's'}` : ''}</button>`;
   }
   function releaseLockedTip(a) {
     if (!a.exists) return 'Releasing needs a release approvers team. Open 👥 Approvers to create it.';
@@ -1429,34 +1436,33 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       if (off.length) h += `<div class="rl-rr-flag warn">⚠ From another branch: ${off.map(p => `${esc(p.label)} (${esc(relSrc.get(`${p.repo}|${p.env}`))})`).join(', ')}. Their usual source won't have it until the release's back-merge.</div>`;
     } else if (relSel.size && planRepos.length) {
       const allOn = !planRepos.some(p => relSkip.has(p.repo));
+      const needed = earlierLeftOut(cfg, planRepos);
       h += `<div class="rl-rel-head rl-rel-repos-head"><span>Repos</span><button class="rl-rel-all" data-act="relReposAll" data-on="${allOn ? 0 : 1}">${allOn ? 'None' : 'All'}</button></div><div class="rl-rel-repos">`
         + planRepos.map(p => {
           const inRel = pendingWith(s, p.repo);
           return `<div class="rl-rel-repo-row"><button class="rl-rel-repo${relSkip.has(p.repo) ? '' : ' on'}" data-act="relRepo" data-repo="${esc(p.repo)}" title="${relSkip.has(p.repo) ? 'Left out of this release' : 'In this release'}">`
-            + `<i></i><b>${esc(p.label)}</b><span>${inRel ? `<em title="Its release PR is already in pending release ${esc(inRel)}: picking it alone just joins that release">in ${esc(inRel.slice(5))}</em> · ` : ''}${repoWait[p.repo]} waiting</span></button>`
+            + `<i></i><b>${esc(p.label)}</b><span>${inRel ? `<em title="Its release PR is already in pending release ${esc(inRel)}: picking it alone just joins that release">in ${esc(inRel.slice(5))}</em> · ` : ''}${needed.has(p.repo) ? `<em title="${esc(needed.get(p.repo))}">⚠</em> ` : ''}${repoWait[p.repo]}</span></button>`
             + `<button class="rl-rel-only" data-act="relOnly" data-repo="${esc(p.repo)}" title="Release just ${esc(p.label)}">only</button></div>`;
         }).join('') + '</div>';
-      // a later-wave repo going without an earlier-wave repo that has unreleased work: it may depend on it
-      const picked = planRepos.filter(p => !relSkip.has(p.repo)), left = planRepos.filter(p => relSkip.has(p.repo));
-      if (picked.length && left.length && cfg.releaseOrder) {
-        const waveOf = (p) => cfg.releaseOrder.findIndex(w => w.some(x => x === p.label || x.toLowerCase() === p.repo.toLowerCase()));
-        const lastPicked = Math.max(...picked.map(waveOf));
-        const before = left.filter(p => { const w = waveOf(p); return w >= 0 && w < lastPicked; });
-        if (before.length) h += `<div class="rl-rr-flag warn" title="Release order puts them first: what's picked may rely on their unreleased changes">⚠ Left out, but earlier in the release order: ${before.map(p => `${esc(p.label)} (${repoWait[p.repo]} waiting)`).join(', ')}. ${esc(picked.filter(p => waveOf(p) === lastPicked).map(p => p.label).join(', '))} may need them.</div>`;
-      }
     }
     // a pending release of a picked env: what's picked joins it (or, on request, a release of its own)
     const pend = ((s.history && s.history.items) || []).find(m => m.status === 'pending' && relSel.has(m.env || 'prod') && (m.kind || 'release') === 'release');
     if (pend && relSel.size) h += `<div class="rl-rel-join${relSeparate ? ' off' : ''}">${relSeparate
       ? `Starts a <b>separate</b> release (release ${esc(pend.id)} is pending) <button data-act="relSep">add to it instead</button>`
       : `➕ Adds to pending release <b>${esc(pend.id)}</b> (${pend.repos.filter(r => !r.mergeSha && !r.closed).length} open) <button data-act="relSep">start a separate one</button>`}</div>`;
-    h += '<div class="rl-rel-sum">' + (relSel.size
-      ? `${plan.prs.length} release PR${plan.prs.length === 1 ? '' : 's'} to check and open${relSkip.size && plan.prs.length ? ': ' + esc([...new Set(plan.prs.map(p => p.label))].join(', ')) : ''}`
-        + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
-      : 'Pick one or more environments') + '</div>'
-      + '<div class="rl-rel-note">Nothing merges until 2 approvers sign.</div>'
-      + `<div class="rl-rel-actions">${activeRelease(s) || s.releaseRun ? '<button data-act="releaseClose">Cancel</button>' : ''}<button data-act="relHot" title="Patch prod with just a fix: pick the repos and the branch each fix is on">🩹 Hotfix</button>${startBtn(s)}</div></div>`;
+    if (plan.manual.length) h += `<div class="rl-rel-note">✋ ${plan.manual.length} hand-deployed to report</div>`;
+    h += ''
+      + `<div class="rl-rel-actions">${activeRelease(s) || s.releaseRun ? '<button data-act="releaseClose">Cancel</button>' : ''}<button data-act="relHot" title="Patch prod with just a fix: pick the repos and the branch each fix is on">🩹 Hotfix</button>${startBtn(s, { prs: plan.prs.length })}</div></div>`;
     return h;
+  }
+  // left-out repos earlier in the release order than something picked: Map repo → why it may be needed
+  function earlierLeftOut(cfg, planRepos) {
+    const out = new Map(), picked = planRepos.filter(p => !relSkip.has(p.repo)), left = planRepos.filter(p => relSkip.has(p.repo));
+    if (!picked.length || !left.length || !cfg.releaseOrder) return out;
+    const waveOf = (p) => cfg.releaseOrder.findIndex(w => w.some(x => x === p.label || x.toLowerCase() === p.repo.toLowerCase()));
+    const lastPicked = Math.max(...picked.map(waveOf)), later = picked.filter(p => waveOf(p) === lastPicked).map(p => p.label).join(', ');
+    for (const p of left) { const w = waveOf(p); if (w >= 0 && w < lastPicked) out.set(p.repo, `Left out, but earlier in the release order: ${later} may need it`); }
+    return out;
   }
 
   // ── The Release tab: everything about the release in flight, in one place. A run in progress (or one
@@ -1509,7 +1515,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     if (c.error) return `<div class="rl-rc bad${c.loading ? ' busy' : ''}">${head(word('', rcIc(RC_IC.hold), "Can't read nightly"))}<div class="rl-rc-why note bad"><span>${esc(c.error)}</span>${retry('rcRetry')}</div></div>`;
     if (c.running) return `<div class="rl-rc">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Nightly running'))}</div>`;
     if (!c.level) return `<div class="rl-rc busy">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Reading nightly'))}${bars}</div>`;
-    if (c.released) return `<div class="rl-rc done">${head(word('ship', rcIc(RC_IC.ship), 'Released'))}</div>`;
+    if (c.released) return `<div class="rl-rc done"><div class="rl-rc-head">${word('ship', rcIc(RC_IC.ship), 'Released')}${stamp}</div></div>`;
     const [cls, verdict] = RC_LEVEL[c.level];
     const hold = c.level === 'hold';
     const flagsBad = c.flags && c.flags.error;
@@ -1604,13 +1610,16 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     return h + '</div>';
   }
 
+  let kbNav = false; // last input was the keyboard: a redraw puts focus back (with its ring) only then
+  document.addEventListener('keydown', (e) => { if (e.key === 'Tab' || e.key === 'Enter' || e.key === ' ') kbNav = true; }, true);
+  document.addEventListener('pointerdown', () => { kbNav = false; }, true);
   function render() {
     const typing = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.src != null;
     if (ptrDown || typing) { drawLater = true; return; } // a redraw would drop the click / the box being typed in
     // a redraw replaces every element: the one that had focus gets it back (same action, or same link)
     const f = document.activeElement, had = f && modal.contains(f) && f.dataset ? (f.dataset.act ? `[data-act="${f.dataset.act}"]` : f.dataset.url ? `[data-url="${CSS.escape(f.dataset.url)}"]` : null) : null;
     renderNow(); if (open) applyBusy(modal);
-    if (had && !modal.contains(document.activeElement)) { const el = modal.querySelector(had) || (/rcCancel/.test(had) ? modal.querySelector('[data-act="rcRelease"]') : /rcRetry/.test(had) ? modal.querySelector('[data-act="rcRefresh"], [data-act^="rcRetry"]') : null); if (el) el.focus({ preventScroll: true }); }
+    if (had && !modal.contains(document.activeElement)) { const el = modal.querySelector(had) || (/rcCancel/.test(had) ? modal.querySelector('[data-act="rcRelease"]') : /rcRetry/.test(had) ? modal.querySelector('[data-act="rcRefresh"], [data-act^="rcRetry"]') : null); if (el && kbNav) el.focus({ preventScroll: true }); }
   }
   function renderNow() {
     tlTip.classList.remove('show');
@@ -1642,10 +1651,10 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       // Header and footer stay put; only the board scrolls. The clicked cell's detail is a
       // drawer over the board's bottom edge, so opening it never resizes the modal.
       h += (tab === 'release' && s.config ? releaseTabHtml(s) + '</div><div class="rl-foot">'
-        + `<div class="rl-legend"><span>Shared with the team: recorded in ${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
+        + `<div class="rl-legend"><span>${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
         : tab === 'history' && s.config ? historyHtml(s) + '</div><div class="rl-foot">'
-        + `<div class="rl-legend"><span>Releases, recorded in ${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
-        : envView === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + LEGEND)
+        + `<div class="rl-legend"><span>${s.history && s.history.repo ? link('https://github.com/' + s.history.repo, esc(s.history.repo)) : 'release-manifests'}</span></div>`
+        : envView === 'timeline' && s.config ? timelineHtml(s) + '</div><div class="rl-foot">' + TL_LEGEND : gridHtml(g) + '</div>' + detailHtml(g) + '<div class="rl-foot">' + legendHtml(g))
         + (s.localOnly ? `<div class="rl-local" title="It isn't on GitHub yet, so teammates can't see this board. Commit and push it to share.">Local config, not pushed yet · <code>${esc(s.localOnly)}</code></div>` : '');
     }
     const prev = modal.querySelector('.rl-body'), top = prev ? prev.scrollTop : 0, left = prev ? prev.scrollLeft : 0;
