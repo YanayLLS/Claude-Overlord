@@ -201,7 +201,8 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     const tr = ticketRepo();
     const wantsTicket = (m) => tr && !m.ticket && m.kind !== 'rollback' && !m.imported && Date.now() - Date.parse(m.openedAt) < 21 * 86400e3 && m.repos.some(r => r.repo === tr && r.mergeSha);
     // in flight only: an old or imported record stuck at 'merged' (no deploy result) isn't re-read every cycle
-    const settling = (m) => m.status === 'pending' || (['merged', 'partial'].includes(m.status) && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
+    // deploy-failed too: a re-run, or a later run that ships the same commit, can still turn it deployed
+    const settling = (m) => m.status === 'pending' || (['merged', 'partial', 'deploy-failed'].includes(m.status) && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
     const wrote = await Promise.all(loaded.entries.filter(e => settling(e.manifest) || wantsTicket(e.manifest)).map(async ({ manifest, sha }) => {
       const seen = await Promise.all(manifest.repos.map(async (r) => {
         const out = { r };
