@@ -39,7 +39,7 @@
 /* The whole cell carries the deploy status: tinted fill + border. Neutral = no status known. */
 .rl-cell.st-ok { --tint:74,222,128; }
 .rl-cell.st-bad { --tint:248,113,113; }
-.rl-cell.st-part { --tint:74,222,128; border-color:rgba(248,113,113,.55) !important; }
+.rl-cell.st-part { --tint:251,146,60; } /* deployed, but a side job failed: orange like its tooltip badge, not green */
 .rl-cell.st-run { --tint:250,204,21; animation:rl-pulse 1.4s ease-in-out infinite; }
 .rl-cell[class*="st-"]:not(.st-off):not(.st-none):not(.st-ok) { background:rgba(var(--tint),.09); border-color:rgba(var(--tint),.3); }
 .rl-cell[class*="st-"]:not(.st-off):not(.st-none):not(.st-ok):hover { background:rgba(var(--tint),.16); border-color:rgba(var(--tint),.5); }
@@ -98,7 +98,7 @@
 .rl-sw { display:inline-block; width:14px; height:10px; border-radius:3px; border:1px solid; }
 .rl-sw.st-ok { background:rgba(74,222,128,.2); border-color:rgba(74,222,128,.55); }
 .rl-sw.st-bad { background:rgba(248,113,113,.2); border-color:rgba(248,113,113,.55); }
-.rl-sw.st-part { background:rgba(74,222,128,.2); border-color:rgba(248,113,113,.7); }
+.rl-sw.st-part { background:rgba(251,146,60,.2); border-color:rgba(251,146,60,.55); }
 .rl-sw.st-run { background:rgba(250,204,21,.2); border-color:rgba(250,204,21,.55); }
 
 /* manual deploy: a hand on the cell, colour still says whether what's live is known-good */
@@ -847,3 +847,23 @@ button.rl-flag-row.copy .rl-flag-g { font-size:14px; }
 .rl-reltab .rl-rel-repo span { margin-left:6px; }
 .rl-reltab .rl-rel-env.on::after { content:none; }
 .rl-rel-adv, .rl-rel-all { text-transform:none; letter-spacing:0; font-size:10.5px; font-weight:500; padding:1px 9px; }
+/* a cell is always one line: the age gives way first, then the target env's name becomes its colour dot */
+.rl-cell { container-type:inline-size; }
+.rl-top { flex-wrap:nowrap; }
+.rl-top .rl-age { min-width:0; overflow:hidden; text-overflow:clip; }
+.rl-nexts { flex-wrap:nowrap; flex-shrink:0; }
+.rl-to { display:inline-flex; align-items:center; }
+@container (max-width: 270px) {
+  .rl-top:has(.rl-next-more:not(.rl-back)) .rl-age { display:none; }
+}
+@container (max-width: 225px) {
+  .rl-top:has(.rl-next-more:not(.rl-back)) .rl-to { font-size:0; }
+  .rl-top:has(.rl-next-more:not(.rl-back)) .rl-to::before { content:""; width:6px; height:6px; margin-left:2px; border-radius:50%; background:var(--hue); }
+}
+@container (max-width: 190px) {
+  .rl-top:has(.rl-nexts) .rl-age { display:none; }
+}
+@container (max-width: 160px) {
+  .rl-to { font-size:0; }
+  .rl-to::before { content:''; width:6px; height:6px; margin-left:2px; border-radius:50%; background:var(--hue); }
+}

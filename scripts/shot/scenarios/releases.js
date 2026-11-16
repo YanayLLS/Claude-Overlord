@@ -18,7 +18,7 @@ module.exports = async ({ inject, js, shot, wait }) => {
     ['auth-server', 52, 4, 50], ['identity-server', 153, 15, 151], ['back-office', 427, 11, 423], ['frontline-io-AI', 66, 2, 65],
     ['AI-chat-front', 190, 5, 188, 165], ['remote-support-web', 561, 14, 555, 419], ['Websocket', 17, 2, 16], ['mediaserver', 11, 0, 10],
   ].map(([l, d, w, p, st]) => [l, [cell('dev', d, 32 * M, { nexts: [next('prod', w, l === 'back-office' ? 3 : 0)] }), uses('alpha'), st ? cell('staging', st, 35 * D) : uses('staging'), cell('prod', p, D)]]);
-  svc.push(['frontline-jobs', [cell('dev', 26, 32 * M, { run: { ...run('failure', 32 * M), failed: [{ job: 'deploy', step: 'push image' }] }, nexts: [next('prod', 2)] }), null, null, cell('prod', 25, 14 * D)]]);
+  svc.push(['frontline-jobs', [cell('dev', 26, 32 * M, { run: { ...run('failure', 32 * M), failed: [{ job: 'deploy', step: 'push image' }] }, nexts: [next('prod', 2)] }), null, null, cell('prod', 25, 14 * D, { run: { ...run('partial', 5 * D), failed: [{ job: 'release', step: 'Submit to the Microsoft Store' }] } })]]);
   svc.push(['atlas-search', [cell('dev', 0, 39 * 7 * D, { deploy: 'manual', commit: { ...commit(0, 39 * 7 * D), title: 'chore: x' }, run: null }), uses('alpha'), uses('staging'),
     cell('prod', 0, 39 * 7 * D, { deploy: 'manual', commit: { ...commit(0, 39 * 7 * D), title: 'chore: x' }, run: null })]]);
   svc.push(['partlens-embed-lambda', [cell('dev', 20, 33 * M, { nexts: [next('prod', 2)] }), uses('alpha'), uses('staging'),
@@ -32,6 +32,8 @@ module.exports = async ({ inject, js, shot, wait }) => {
   await js(`document.querySelector('[data-act="tab"][data-tab="envs"]').click(); true`);
   await wait(400);
   await shot('board');
+  await js(`(() => { const el = document.querySelector('.rl-cell.st-part'); el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); return true; })()`);
+  await shot('tip');
   await js(`document.querySelector('[data-act="tab"][data-tab="release"]').click(); true`);
   await wait(400);
   await shot('release');

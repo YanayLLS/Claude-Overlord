@@ -340,7 +340,7 @@
       if (n.error) return `<span class="rl-next rl-bad${lead}">? ${esc(n.to)}</span>`;
       const back = n.behind ? `<span class="rl-next rl-back${n.ahead ? ' rl-next-more' : lead}" title="${esc(n.to)} has ${n.behind} commit${n.behind === 1 ? '' : 's'} this branch lacks — the release opens a back-merge first">${link(n.backUrl, `↩ <b>${n.behind}</b>`)}</span>` : '';
       if (!n.ahead) return back;
-      return `<span class="rl-next${lead}">${link(n.url, `<b>${n.ahead}</b> → ${esc(n.to)}`)}</span>` + back;
+      return `<span class="rl-next${lead}">${link(n.url, `<b>${n.ahead}</b> → <span class="rl-to" style="--hue:${ENV_HUE[n.to.toLowerCase()] || 'var(--dim)'}">${esc(n.to)}</span>`)}</span>` + back;
     }).join('');
     const hand = d.manual ? '<svg class="rl-hand" viewBox="0 0 24 24" aria-label="manual deploy"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>' : '';
     const isSel = sel && sel[0] === r && sel[1] === i;
@@ -389,14 +389,13 @@
     }
     const d = deployInfo(c), shown = c.live && !c.live.error ? c.live : c.commit;
     const [cls, label] = CELL_BADGE[d.cls] || ['off', d.manual ? 'Live version unknown' : (c.run ? 'Deploy ' + c.run.state : 'No CI status')];
-    const runDate = c.run && c.run.date && c.run.state !== 'dead' ? `deploy ${age(c.run.date)} ago` : shown ? `${age(shown.date)} ago` : '';
+    const runDate = c.run && c.run.date && c.run.state !== 'dead' ? `${age(c.run.date)} ago` : shown ? `${age(shown.date)} ago` : '';
     let h = `<div class="tt-head">${envBadge}<span class="tt-state ${cls}">${esc(label)}</span>`
       + (d.manual ? '<span class="tt-state hand">✋ Manual</span>' : '') + `<span class="tt-when">${esc(runDate)}</span></div>`
       + `<div class="tt-repo">${esc(row.label)}</div>`;
     if (shown) {
-      const pr = (shown.title.match(/^#(\d+) /) || [])[1];
       h += `<div class="tt-title">${esc(shown.title.replace(/^#\d+ /, ''))}</div>`
-        + '<div class="tt-chips">' + (pr ? `<span class="tt-chip">#${esc(pr)}</span>` : '')
+        + '<div class="tt-chips">'
         + `<span class="tt-chip mono">${esc(shown.sha.slice(0, 7))}</span><span class="tt-chip">⎇ ${esc(c.branch)}</span>`
         + (c.commit && c.commit.author ? `<span class="tt-chip">@${esc(c.commit.author)}</span>` : '') + '</div>';
     } else if (c.error || c.missing) h += `<div class="tt-title">${esc(c.missing ? 'Branch ' + c.branch + ' is missing' : c.error)}</div>`;
@@ -407,12 +406,12 @@
       lines.push(n.error ? `→ ${esc(n.to)}: can't compare` : n.ahead ? `<b class="warn">${n.ahead}</b> waiting → ${esc(n.to)}` : `✓ nothing waiting for ${esc(n.to)}`);
     }
     const dead = c.run && c.run.state === 'dead';
-    if (c.deploy && c.deploy !== 'manual') lines.push(dead ? `CI <span class="mono">${esc(c.deploy)}</span> has never succeeded — not how this env ships` : `CI <span class="mono">${esc(c.deploy)}</span>`);
+    if (dead) lines.push(`CI <span class="mono">${esc(c.deploy)}</span> has never succeeded — not how this env ships`);
     if (!dead) for (const f of (c.run && c.run.failed) || []) lines.push(`<span class="bad">✕ ${esc(f.job)}${f.step ? ' › ' + esc(f.step) : ''}</span>`);
     if (c.live && c.live.from) lines.push(`pinned in <span class="mono">${esc(c.live.from.split(':')[1] || c.live.from)}</span>`);
     if (c.live && c.live.confirmed) lines.push(`deployed by hand, confirmed by @${esc(c.live.confirmed.by || '?')} ${esc(age(c.live.confirmed.at))} ago`);
     if (lines.length) h += '<div class="tt-lines">' + lines.map(l => `<div>${l}</div>`).join('') + '</div>';
-    return h + '<div class="tt-foot">Click for details · double-click opens the run</div>';
+    return h;
   }
 
   overlay.addEventListener('mouseover', (ev) => {
