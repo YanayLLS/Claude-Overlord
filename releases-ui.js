@@ -636,7 +636,8 @@
   // ── The release in flight: one summary every surface reads (footer badge, Release tab card) ──
   // in flight = open PRs, or merged in the last 2 days and still settling. An old or imported record stuck
   // at 'merged' (its deploy result was never recorded) isn't a release in flight
-  const flight = (m) => m.status === 'pending' || (['merged', 'partial'].includes(m.status) && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
+  // a cancelled release is done, even when part of it merged (status partial): it never holds the tab
+  const flight = (m) => m.status === 'pending' || (['merged', 'partial'].includes(m.status) && !m.cancelled && !m.imported && Date.now() - Date.parse(m.updatedAt || m.openedAt) < 2 * 86400e3);
   function activeRelease(st) {
     const items = (st && st.history && st.history.items) || [];
     return items.find(m => flight(m) && (m.env || 'prod') === 'prod') || items.find(flight) || null;
