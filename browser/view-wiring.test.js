@@ -36,3 +36,26 @@ test('network failures in the shared jar reach only the view that made the reque
   assert.strictEqual(a.length, 0);
   assert.strictEqual(b.length, 1);
 });
+
+test('a page whose server is gone reports unreachable; other failures do not', () => {
+  const wc = new EventEmitter(), gone = [];
+  wc.loadURL = () => Promise.resolve();
+  wireErrors(wc, { push() {} }, (u) => gone.push(u));
+  wc.emit('did-fail-load', {}, -102, 'ERR_CONNECTION_REFUSED', 'http://localhost:8765/', true);
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://nope.example/', true);
+  wc.emit('did-fail-load', {}, -102, 'ERR_CONNECTION_REFUSED', 'http://localhost:9/x.js', false); // a subframe
+  wc.emit('did-fail-load', {}, -3, 'ERR_ABORTED', 'http://localhost:8765/', true);
+  wc.emit('did-fail-load', {}, -501, 'ERR_INSECURE_RESPONSE', 'https://localhost:5173/', true);
+  assert.deepStrictEqual(gone, ['http://localhost:8765/', 'https://nope.example/']);
+});
+
+test('localPort names the port of a page on this machine, null for a remote one', () => {
+  const { localPort } = require('./view-wiring');
+  assert.strictEqual(localPort('http://localhost:8765/'), 8765);
+  assert.strictEqual(localPort('http://127.0.0.1:5173/x?y'), 5173);
+  assert.strictEqual(localPort('https://app.lvh.me:5180'), 5180);
+  assert.strictEqual(localPort('http://localhost/'), 80);
+  assert.strictEqual(localPort('https://example.com:8765/'), null);
+  assert.strictEqual(localPort('http://localhost.evil.com/'), null);
+  assert.strictEqual(localPort(null), null);
+});

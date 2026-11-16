@@ -576,6 +576,17 @@ test('actions.close (browser_close) destroys the view and tells main so the pane
   assert.deepStrictEqual(closed, [1]);
 });
 
+test('a page whose server is gone closes the pane instead of sitting there white', async () => {
+  const closed = [];
+  const { registry, made } = harness({ onClosed: (id) => closed.push(id) });
+  registry.ensure(1);
+  made[0].webContents.emit('did-fail-load', {}, -102, 'ERR_CONNECTION_REFUSED', 'http://localhost:8765/', true);
+  assert.strictEqual(registry.has(1), true, 'not inside the failing navigation event');
+  await new Promise((res) => setImmediate(res));
+  assert.strictEqual(made[0].destroyed, true);
+  assert.deepStrictEqual(closed, [1]);
+});
+
 // Overlord died (native crash, null+0x30 in content::WebContentsImpl::DidStartNavigation) on 2026-11-13. Electron
 // rejects a pending loadURL from INSIDE the did-start-navigation of the navigation that replaces it, and runs the
 // promise jobs right there. A browser call waiting on the dev-server load then started its own load in that callback,

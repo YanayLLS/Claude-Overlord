@@ -119,7 +119,7 @@ function createRegistry({
     // error buffer nor the pane may see it as a second navigation.
     const rebinder = createInputRebinder();
     const errors = createErrorBuffer((count, last) => onErrorCount(id, count, last), rebinder.isSuppressed);
-    wireErrors(view.webContents, errors);
+    wireErrors(view.webContents, errors, () => setImmediate(() => { if (entries.get(id) === entry) close(id); })); // not inside the failing navigation's event
     // Any load, even a suppressed re-bind one, can yank keyboard focus into the view.
     const wcId = view.webContents.id;
     const entry = { view, wcId, errors: null, actions: null, partition, lastNavAt: 0, shown: null, lent: false, dead: false, lastBlank: false, hungTimer: null };
@@ -158,7 +158,7 @@ function createRegistry({
       return vp ? `The page now lays out ${vp.width}px wide${vp.height ? ` x ${vp.height}px` : ''} (scaled to fit the pane when it is narrower); screenshots show that layout.` : 'Back to the pane\'s own size.';
     };
     // Done with the page: the view goes away and the pane beside the chat closes (the next browser_navigate reopens it).
-    actions.close = async () => { setImmediate(() => { destroy(id); onClosed(id); }); return 'Closed the browser pane.'; };
+    actions.close = async () => { setImmediate(() => close(id)); return 'Closed the browser pane.'; };
     entry.errors = errors; entry.actions = actions;
     entries.set(id, entry);
     establishViewport(view);
@@ -256,6 +256,9 @@ function createRegistry({
     unwireNetworkErrors(entry.partition, entry.wcId);
   }
 
+  // The pane shuts and the agent's page is forgotten, as browser_close does (the next browser_navigate reopens it).
+  function close(id) { destroy(id); onClosed(id); }
+
   const has = (id) => entries.has(id);
   const errorsFor = (id) => { ensure(id); return entries.get(id).errors; };
   const actionsFor = (id) => { try { ensure(id); return entries.get(id).actions; } catch { return null; } };
@@ -263,7 +266,7 @@ function createRegistry({
   // True when some agent view loaded within the last `ms` — the moment a view steals focus from the terminal.
   const navigatedWithin = (ms, now = Date.now()) => [...entries.values()].some(e => now - e.lastNavAt < ms);
 
-  return { setViewport, ensure, show, hideAll, has, errorsFor, actionsFor, prime, destroy, destroyAll, navigatedWithin, checkHealth };
+  return { setViewport, ensure, show, hideAll, has, errorsFor, actionsFor, prime, close, destroy, destroyAll, navigatedWithin, checkHealth };
 }
 
 module.exports = { createRegistry, DEFAULT_VIEW_WIDTH, DEFAULT_VIEW_HEIGHT };

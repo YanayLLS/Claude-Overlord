@@ -16,7 +16,16 @@ function normalizeConsole(args) {
 
 const LOCAL_HTTP = /^http:\/\/(localhost|127\.0\.0\.1|([\w-]+\.)*lvh\.me)(:\d+)?\//i;
 
-function wireErrors(webContents, errors) {
+// The port of a page on this machine (localhost, 127.0.0.1, *.lvh.me), or null for a remote page.
+function localPort(url) {
+  const m = /^(https?):\/\/(localhost|127\.0\.0\.1|([\w-]+\.)*lvh\.me)(?::(\d+))?(\/|$)/i.exec(url || '');
+  return m ? Number(m[4] || (m[1].toLowerCase() === 'https' ? 443 : 80)) : null;
+}
+
+// Failures that mean nobody is there (the server stopped, the host is gone), not a broken page.
+const UNREACHABLE = new Set([-102, -105, -109, -118]); // CONNECTION_REFUSED, NAME_NOT_RESOLVED, ADDRESS_UNREACHABLE, CONNECTION_TIMED_OUT
+
+function wireErrors(webContents, errors, onUnreachable = () => {}) {
   webContents.on('console-message', (...args) => {
     const { level, message, line, source } = normalizeConsole(args);
     if (level !== 'warning' && level !== 'error') return;
@@ -27,6 +36,7 @@ function wireErrors(webContents, errors) {
     // A local dev server on https (vite --https) answers http with an empty reply: retry the same address on https once.
     if ((code === -324 || code === -100) && LOCAL_HTTP.test(url || '')) { setImmediate(() => { try { webContents.loadURL('https' + url.slice(4)).catch(() => {}); } catch {} }); return; } // not inside the failing navigation's event
     errors.push({ kind: 'load', level: 'error', message: `Failed to load ${url}: ${desc} (${code})`, source: url, line: 0 });
+    if (UNREACHABLE.has(code)) onUnreachable(url); // a dead page never sits in the pane as a white rectangle
   });
 }
 
@@ -86,4 +96,4 @@ function wireHealth(webContents, { onGone, onUnresponsive, onResponsive }) {
   webContents.on('responsive', onResponsive);
 }
 
-module.exports = { onNetError, normalizeConsole, wireErrors, wireNavigation, wireNetworkErrors, unwireNetworkErrors, wireHealth };
+module.exports = { localPort, onNetError, normalizeConsole, wireErrors, wireNavigation, wireNetworkErrors, unwireNetworkErrors, wireHealth };

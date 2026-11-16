@@ -17,6 +17,7 @@ const pc = require('./peer-core');
 const wc = require('./watch-core');
 const timelineCore = require('./timeline-core');
 const { createRegistry } = require('./browser/registry');
+const { localPort } = require('./browser/view-wiring');
 const { createCaptureHost, makeCaptureWindow } = require('./browser/capture-host');
 const { createMcpServer } = require('./mcp/server');
 const { createApi, ApiError, newToken } = require('./api-core');
@@ -548,6 +549,13 @@ async function probeServers() {
         ports.delete(port); serverPortAt.delete(id + ':' + port); send({ type: 'serverRemoved', id, port });
       }
       if (!ports.size) serverPorts.delete(id);
+    }
+    // An open pane whose local server stopped shuts, as Claude's preview does when its server stops.
+    for (const [id, ag] of agents) {
+      const port = localPort(ag.pageUrl);
+      if (!port || !browserRegistry || !browserRegistry.has(id) || await portListening(port)) continue;
+      await new Promise(r => setTimeout(r, 3000)); // a dev server restarting (vite, nodemon) is back within a blink
+      if (browserRegistry.has(id) && localPort(ag.pageUrl) === port && !(await portListening(port))) browserRegistry.close(id);
     }
   } catch {}
   probeBusy = false;
@@ -5067,7 +5075,11 @@ function handleIpc(msg) {
     case 'focusAgent':
       focusedAgentId = msg.id; queueSaveSweep(); // the agent you left sleeps now if it's idle
       spawnTerminal(msg.id); // also wakes it from CPU saving
-      { const ag = agents.get(msg.id); if (ag && ag.pageUrl && browserRegistry && !browserRegistry.has(msg.id)) browserRegistry.actionsFor(msg.id)?.navigate(ag.pageUrl).catch(() => {}); }
+      { const ag = agents.get(msg.id), id = msg.id, url = ag && ag.pageUrl, port = localPort(url); // a local page comes back only while its server runs, like Claude's preview
+        if (url && browserRegistry && !browserRegistry.has(id)) (port ? portListening(port) : Promise.resolve(true)).then((up) => {
+          if (!up) { if (ag.pageUrl === url) ag.pageUrl = null; return; }
+          if (!browserRegistry.has(id) && ag.pageUrl === url) browserRegistry.actionsFor(id)?.navigate(url).catch(() => {});
+        }); }
       if (preview) preview.setAgent(msg.id);
       send({ type: 'focused', id: msg.id });
       break;
