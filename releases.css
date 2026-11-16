@@ -41,8 +41,8 @@
 .rl-cell.st-bad { --tint:248,113,113; }
 .rl-cell.st-part { --tint:74,222,128; border-color:rgba(248,113,113,.55) !important; }
 .rl-cell.st-run { --tint:250,204,21; animation:rl-pulse 1.4s ease-in-out infinite; }
-.rl-cell[class*="st-"]:not(.st-off):not(.st-none) { background:rgba(var(--tint),.09); border-color:rgba(var(--tint),.3); }
-.rl-cell[class*="st-"]:not(.st-off):not(.st-none):hover { background:rgba(var(--tint),.16); border-color:rgba(var(--tint),.5); }
+.rl-cell[class*="st-"]:not(.st-off):not(.st-none):not(.st-ok) { background:rgba(var(--tint),.09); border-color:rgba(var(--tint),.3); }
+.rl-cell[class*="st-"]:not(.st-off):not(.st-none):not(.st-ok):hover { background:rgba(var(--tint),.16); border-color:rgba(var(--tint),.5); }
 .rl-cell:hover { background:var(--surface1); border-color:var(--border-hi); }
 .rl-cell.sel { box-shadow:0 0 0 1.5px var(--accent); }
 .rl-top { display:flex; align-items:center; gap:6px; white-space:nowrap; min-height:20px; }
@@ -813,3 +813,34 @@ button.rl-flag-row.copy .rl-flag-g { font-size:14px; }
   .rl-rr-fold, .rl-rr-recheck { min-height:34px; }
 }
 /* /run-block */
+
+/* Board: only exceptions carry colour. A healthy deploy is a plain cell; failed / side-job / behind / deploying tint it. */
+
+
+/* deploying: the fill breathes, the text stays readable */
+.rl-cell.st-run { animation:rl-breathe 1.6s ease-in-out infinite; }
+@keyframes rl-breathe { 50% { background:rgba(250,204,21,.18); border-color:rgba(250,204,21,.6); } }
+/* waiting counts: right-aligned, and they drop under the sha instead of being clipped when the column is narrow */
+.rl-top { flex-wrap:wrap; row-gap:2px; }
+.rl-nexts { display:inline-flex; flex-wrap:wrap; justify-content:flex-end; gap:2px 10px; margin-left:auto; }
+.rl-nexts .rl-next { margin:0; padding:0; }
+/* 'uses dev': a quiet link line in that env's colour; the words show on hover */
+.rl-uses { position:relative; padding:0 10px; }
+.rl-uses > i { flex:1; height:0; border-top:1px dashed color-mix(in srgb, var(--hue) 45%, transparent); position:relative; }
+.rl-uses > i::after { content:''; position:absolute; right:-3px; top:-3.5px; width:6px; height:6px; border-radius:50%; background:var(--hue); opacity:.8; }
+.rl-uses > span { position:absolute; left:10px; padding-right:6px; background:var(--bg2); opacity:0; transition:opacity .12s; }
+.rl-uses:hover > span { opacity:1; }
+.rl-uses-key { display:inline-flex; width:22px; padding:0; opacity:1; }
+.rl-uses-key > i::after { right:-3px; }
+
+/* Release tab: room under the tabs; envs side by side; repos fill the width in columns, count next to the name */
+.rl-reltab { padding-top:14px; }
+.rl-reltab .rl-rel-envs { flex-direction:row; flex-wrap:wrap; }
+.rl-reltab .rl-rel-env { flex:1 1 200px; }
+.rl-reltab .rl-rel-repos { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:2px 16px; }
+.rl-reltab .rl-rel-repo-row.adv { grid-column:1 / -1; }
+.rl-reltab .rl-rel-repo b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.rl-reltab .rl-rel-repo span { flex-shrink:0; }
+/* tabs: a slim inset focus ring, not a box that spills over the underline */
+.rl-nav > button:focus-visible { outline:none; box-shadow:inset 0 0 0 1.5px var(--accent); border-radius:var(--r-sm); }
+.rl-cell { display:flex; align-items:center; } .rl-cell > .rl-top { flex:1; min-width:0; } /* a row grown by wrapped counts keeps its other cells centred */

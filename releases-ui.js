@@ -321,7 +321,7 @@
     // no deployment of its own: say whose it runs instead of leaving a hole
     if (c.uses) {
       return `<div class="rl-uses" data-r="${r}" data-c="${i}">`
-        + `uses <span class="rl-env" style="--hue:${ENV_HUE[c.uses.toLowerCase()] || 'var(--dim)'}">${esc(c.uses)}</span></div>`;
+        + `<i style="--hue:${ENV_HUE[c.uses.toLowerCase()] || 'var(--dim)'}"></i><span>uses ${esc(c.uses)}</span></div>`;
     }
     const d = deployInfo(c);
     // a manually deployed env with a pinned commit shows THAT commit, not the branch tip
@@ -344,7 +344,7 @@
     }).join('');
     const hand = d.manual ? '<svg class="rl-hand" viewBox="0 0 24 24" aria-label="manual deploy"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>' : '';
     const isSel = sel && sel[0] === r && sel[1] === i;
-    return `<div class="rl-cell st-${d.cls}${isSel ? ' sel' : ''}" data-r="${r}" data-c="${i}"><div class="rl-top">${hand}${top}${next}</div></div>`;
+    return `<div class="rl-cell st-${d.cls}${isSel ? ' sel' : ''}" data-r="${r}" data-c="${i}"><div class="rl-top">${hand}${top}${next ? `<span class="rl-nexts">${next}</span>` : ''}</div></div>`;
   }
 
   const ENV_HUE = { dev: 'var(--accent)', alpha: 'var(--purple)', staging: 'var(--yellow)', prod: 'var(--green)', production: 'var(--green)' };
@@ -504,12 +504,12 @@
 
   // Each item is one unbreakable unit; the row wraps between items, never inside one.
   const LEGEND = '<div class="rl-legend">'
-    + '<span><i class="rl-sw st-ok"></i>deployed</span>'
     + '<span><i class="rl-sw st-bad"></i>deploy failed</span>'
     + '<span><i class="rl-sw st-part"></i>deployed, side job failed</span>'
     + '<span><i class="rl-sw st-run"></i>deploying</span>'
     + '<span><i class="rl-sw st-behind"></i>deployed by hand, behind</span>'
     + '<span><svg class="rl-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>manual deploy</span>'
+    + '<span><span class="rl-uses rl-uses-key"><i style="--hue:var(--accent)"></i></span>uses dev</span>'
     + '<span><span class="rl-next"><b>12</b> → prod</span>waiting to promote</span>'
     + '<span><span class="rl-next rl-back">↩ <b>3</b> from prod</span>needs a back-merge</span></div>';
 
@@ -1454,7 +1454,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       ? `${plan.prs.length} release PR${plan.prs.length === 1 ? '' : 's'} to check and open${relSkip.size && plan.prs.length ? ': ' + esc([...new Set(plan.prs.map(p => p.label))].join(', ')) : ''}`
         + (plan.manual.length ? ` · ${plan.manual.length} hand-deployed to report` : '')
       : 'Pick one or more environments') + '</div>'
-      + '<div class="rl-rel-note">Overlord opens the release PRs (plus back-merges when needed) and checks each one. Nothing merges until 2 approvers sign and someone presses Release all.</div>'
+      + '<div class="rl-rel-note">Nothing merges until 2 approvers sign.</div>'
       + `<div class="rl-rel-actions">${activeRelease(s) || s.releaseRun ? '<button data-act="releaseClose">Cancel</button>' : ''}<button data-act="relHot" title="Patch prod with just a fix: pick the repos and the branch each fix is on">🩹 Hotfix</button>${startBtn(s)}</div></div>`;
     return h;
   }
