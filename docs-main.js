@@ -154,11 +154,15 @@ module.exports = function createDocs({ send, settings, saveState, log = () => {}
     try { for (const op of ops) await reg(['add', ...op, '/f']); }
     catch (e) { return { ok: false, error: e.message }; }
     // Did the user ever pick a viewer for .md by hand? Then Windows ignores the class default.
+    // Windows 11 keeps newer picks under UserChoiceLatest\ProgId, older ones under UserChoice.
     let chosen = '';
-    try {
-      const out = await reg(['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.md\\UserChoice', '/v', 'ProgId']);
-      const m = /ProgId\s+REG_SZ\s+(\S+)/i.exec(out); chosen = m ? m[1] : '';
-    } catch {}
+    const FE = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.md';
+    for (const key of [`${FE}\\UserChoiceLatest\\ProgId`, `${FE}\\UserChoice`]) {
+      if (chosen) break;
+      try {
+        const m = /ProgId\s+REG_SZ\s+(\S+)/i.exec(await reg(['query', key, '/v', 'ProgId'])); chosen = m ? m[1] : '';
+      } catch {}
+    }
     if (chosen && chosen !== PROGID) {
       try { await openExternal('ms-settings:defaultapps?registeredAppUser=Overlord'); } catch {}
       return { ok: true, needsPick: true, chosen };

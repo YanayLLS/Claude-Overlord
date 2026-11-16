@@ -87,11 +87,14 @@ test('handle: unknown messages are not ours; docShown/docReveal/docOpenWith are'
   assert.strictEqual(h.docs.handle({ type: 'docOpenWith', path: 'C:\\x.md' }), true);
 });
 
-function fakeReg(userChoice) {
+function fakeReg(userChoice, latest = '') {
   const calls = [];
   const execFile = (cmd, args, _o, cb) => {
     calls.push(args.join(' '));
-    if (args[0] === 'query') return cb(userChoice ? null : new Error('not found'), userChoice ? `    ProgId    REG_SZ    ${userChoice}\n` : '');
+    if (args[0] === 'query') {
+      const v = args[1].endsWith('UserChoiceLatest\\ProgId') ? latest : args[1].endsWith('UserChoice') ? userChoice : '';
+      return cb(v ? null : new Error('not found'), v ? `    ProgId    REG_SZ    ${v}\n` : '');
+    }
     cb(null, 'The operation completed successfully.');
   };
   return { calls, execFile };
@@ -117,6 +120,14 @@ test('associate (from source): the command runs electron with the app dir; an ex
   const res = await h.docs._associate();
   assert.deepStrictEqual(res, { ok: true, needsPick: true, chosen: 'VSCode.md' });
   assert.ok(r.calls.some(c => c.includes('"D:\\w\\node_modules\\electron\\dist\\electron.exe" "D:\\w" "%1"')));
+  assert.deepStrictEqual(h.ext, ['ms-settings:defaultapps?registeredAppUser=Overlord']);
+});
+
+test('associate: a Windows 11 choice under UserChoiceLatest also opens Default apps', async () => {
+  const r = fakeReg('', 'md_auto_file');
+  const h = harness({ execFile: r.execFile });
+  const res = await h.docs._associate();
+  assert.deepStrictEqual(res, { ok: true, needsPick: true, chosen: 'md_auto_file' });
   assert.deepStrictEqual(h.ext, ['ms-settings:defaultapps?registeredAppUser=Overlord']);
 });
 
