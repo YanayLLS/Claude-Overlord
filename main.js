@@ -5118,20 +5118,7 @@ function handleIpc(msg) {
         });
       break;
     case 'openUrl': { const url = msg.url; if (typeof url === 'string' && /^(?:https?|file):\/\//.test(url)) shell.openExternal(url).catch(() => {}); break; }
-    case 'savePrSettings': {
-      const p = msg.prSettings || {};
-      settings.prSettings = {
-        enabled: !!p.enabled,
-        repos: Array.isArray(p.repos) ? p.repos.filter(r => PR_REPO_RE.test(r)) : [],
-        intervalSec: Math.max(30, Number(p.intervalSec) || 60),
-      };
-      prSeenSeeded = false; // re-seed silently against the new repo set
-      settings.prSeen = [];
-      saveState();
-      send({ type: 'settings', settings: publicSettings() });
-      armPrTimer();
-      break;
-    }
+    case 'savePrSettings': savePrSettings(msg.prSettings || {}); break;
     case 'listRepos': {
       // Cached 10 min: opening the PR settings pane again costs nothing; "Refresh list" forces.
       if (!msg.force && repoListCache && Date.now() - repoListCache.at < 10 * 60000) { send({ type: 'repoList', ...repoListCache.msg }); break; }
@@ -5953,6 +5940,19 @@ function apiAgent(a, full) {
     tools: [...a.toolIds].map(t => ({ id: t, name: a.toolNames.get(t) || '', status: a.toolStatuses.get(t) || '' })),
     question: pending === 'question' ? (a.askInput || null) : null, stats: a.stats };
 }
+// The PR settings pane and the local API's pr_repos_* tools both save through here.
+function savePrSettings(p) {
+  settings.prSettings = {
+    enabled: !!p.enabled,
+    repos: Array.isArray(p.repos) ? p.repos.filter(r => PR_REPO_RE.test(r)) : [],
+    intervalSec: Math.max(30, Number(p.intervalSec) || 60),
+  };
+  prSeenSeeded = false; // re-seed silently against the new repo set
+  settings.prSeen = [];
+  saveState();
+  send({ type: 'settings', settings: publicSettings() });
+  armPrTimer();
+}
 function apiHost() {
   const need = (id) => { if (!agents.has(id)) throw new ApiError(404, `no agent ${id}`); return id; };
   return {
@@ -5978,6 +5978,8 @@ function apiHost() {
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
     repoCheck: (repo) => repoCheck(repo),
+    prWatch: () => { const c = settings.prSettings || {}; return { enabled: !!c.enabled, repos: [...(c.repos || [])], locked: releases.releaseRepos() }; },
+    setPrWatch: ({ enabled, repos }) => savePrSettings({ ...(settings.prSettings || {}), enabled, repos }),
     chatList: () => {
       const c = chats();
       return { peersEnabled: !!settings.peersEnabled, me: myPeerName(), online: connectedPeerNames(), conversations: [

@@ -63,6 +63,18 @@ test('repo_check reports the Node a repo needs against this machine', async () =
   await assert.rejects(api.call('repo_check', {}), { status: 400 });
 });
 
+test('PR watchlist: list, add (turns notifications on, no duplicates), remove (release repos stay)', async () => {
+  let w = { enabled: false, repos: ['acme/web'], locked: ['acme/api'] };
+  const api = createApi(fakeHost({ prWatch: () => w, setPrWatch: (s) => { w = { ...w, ...s }; } }));
+  assert.deepStrictEqual(await api.call('pr_repos_list', {}), { enabled: false, repos: ['acme/web'], locked: ['acme/api'] });
+  const added = await api.call('pr_repos_add', { repos: ['ACME/web', 'acme/app', 'acme/app'] });
+  assert.deepStrictEqual(added, { enabled: true, repos: ['acme/web', 'acme/app'], locked: ['acme/api'] });
+  await assert.rejects(api.call('pr_repos_add', { repos: ['not a repo'] }), { status: 400 });
+  await assert.rejects(api.call('pr_repos_remove', { repos: ['Acme/API'] }), { status: 409 });
+  assert.deepStrictEqual((await api.call('pr_repos_remove', { repos: ['acme/WEB'] })).repos, ['acme/app']);
+  await assert.rejects(api.call('pr_repos_remove', { repos: ['acme/nope'] }), { status: 404 });
+});
+
 test('publish numbers events, keeps them for replay, filters by type', () => {
   const api = createApi(fakeHost());
   api.publish({ type: 'status', id: 1, status: 'active' });

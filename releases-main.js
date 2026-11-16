@@ -2106,5 +2106,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
 
   // a teammate's live hold on this branch (yours don't stop you), for auto-merge
   const holdOn = (repo, branch) => liveHolds(state.holds || []).find(h => h.by !== state.holdsMe && h.repo.toLowerCase() === String(repo).toLowerCase() && h.branch === branch);
-  return { handle, mergeGate, isProdPr, flush, holdOn };
+  // The repos the release map promotes (as releases-ui's releaseRepos): every teammate watches these for PRs.
+  const releaseRepos = () => (state.config && Array.isArray(state.config.repos) ? [...new Set(state.config.repos.filter(r => r.branches).map(r => r.repo))] : []);
+  return { handle, mergeGate, isProdPr, flush, holdOn, releaseRepos };
 };

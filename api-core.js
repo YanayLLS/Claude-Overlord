@@ -98,9 +98,14 @@ const TOOLS = [
   ['events_poll', 'Events after a sequence number, waiting up to timeoutSec for one to arrive. For clients that can\'t hold an SSE stream (e.g. MCP).', obj({ since: N('Last seq you saw; 0 for what is buffered.'), types: { type: 'array', items: { type: 'string' }, description: 'Event types, or prefixes ending in "." (e.g. "agent."). Default all.' }, timeoutSec: N('Default 25, max 60.') })],
   ['webhook_add', 'Register a URL on this machine (http://127.0.0.1 or localhost) that gets each event POSTed as JSON, signed with X-Overlord-Signature: sha256=HMAC(secret, body). Returns the secret once.', obj({ url: S('http://127.0.0.1:<port>/<path>'), types: { type: 'array', items: { type: 'string' }, description: 'Event types or prefixes. Default all.' } }, ['url'])],
   ['repo_check', 'Whether this machine can set up a repo: the Node major it needs (from .nvmrc, .node-version, engines.node or a locked package) against the installed one. node.ok false means its worktree install will likely fail.', obj({ repo: S('Absolute path of the repo (its main checkout).') }, ['repo'])],
+  ['pr_repos_list', 'The PR watchlist: GitHub repos whose open PRs the PRs panel shows. enabled: PR notifications on. locked: release repos the whole team watches; they can\'t be removed.', obj({})],
+  ['pr_repos_add', 'Watch more repos for PRs (owner/name), as ticking them in the PR settings. Turns PR notifications on. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
+  ['pr_repos_remove', 'Stop watching repos for PRs. A release repo (locked) is refused. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
   ['webhook_list', 'Registered webhooks (no secrets), with delivery failure counts.', obj({})],
   ['webhook_remove', 'Remove a webhook.', obj({ id: S('Webhook id.') }, ['id'])],
 ].map(([name, description, inputSchema]) => ({ name, description, inputSchema }));
+
+const PR_REPO_RE = /^[\w.-]+\/[\w.-]+$/, lc = (s) => String(s).toLowerCase();
 
 class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const bad = (m) => new ApiError(400, m), missing = (m) => new ApiError(404, m), conflict = (m) => new ApiError(409, m);
@@ -273,6 +278,21 @@ function createApi(host) {
       return { id: h.id, url: h.url, types: h.types, secret: h.secret };
     },
     repo_check: (x) => { if (!x.repo) throw new ApiError(400, 'repo is required'); return host.repoCheck(String(x.repo)); },
+    pr_repos_list: () => host.prWatch(),
+    pr_repos_add: (x) => {
+      const bad1 = x.repos.find(r => !PR_REPO_RE.test(r)); if (bad1) throw bad(`not owner/name: ${bad1}`);
+      const w = host.prWatch(), have = new Set(w.repos.map(lc)), repos = [...w.repos];
+      for (const r of x.repos) if (!have.has(lc(r))) { have.add(lc(r)); repos.push(r); }
+      host.setPrWatch({ enabled: true, repos });
+      return host.prWatch();
+    },
+    pr_repos_remove: (x) => {
+      const w = host.prWatch(), drop = new Set(x.repos.map(lc));
+      const lock = w.locked.find(r => drop.has(lc(r))); if (lock) throw conflict(`${lock} is a release repo: the whole team watches it`);
+      const none = x.repos.find(r => !w.repos.some(h => lc(h) === lc(r))); if (none) throw missing(`not watched: ${none}`);
+      host.setPrWatch({ enabled: w.enabled, repos: w.repos.filter(r => !drop.has(lc(r))) });
+      return host.prWatch();
+    },
     webhook_list: () => ({ webhooks: hooks.map(({ secret, ...h }) => h) }),
     webhook_remove: (x) => { const n = hooks.length; hooks = hooks.filter(h => h.id !== x.id); if (hooks.length === n) throw missing('no such webhook'); queues.delete(x.id); persistHooks(); return { ok: true }; },
   };
