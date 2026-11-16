@@ -176,11 +176,6 @@ function gitCmd(args, timeout = 30000) {
   });
 }
 
-// The commit this process is running. A `git pull` outside the app moves HEAD
-// but not the running code, so "up to date" means HEAD === bootHead.
-let bootHead = null;
-gitCmd(['rev-parse', 'HEAD']).then(r => { if (r.ok) bootHead = r.out; });
-
 function isGitCheckout() {
   if (app.isPackaged) return false; // packaged builds use electron-updater
   try { return fs.existsSync(path.join(APP_DIR, '.git')); } catch { return false; }
@@ -194,12 +189,10 @@ async function checkGitUpdate() {
   const behind = await gitCmd(['rev-list', '--count', 'HEAD..origin/master']);
   const ahead = await gitCmd(['rev-list', '--count', 'origin/master..HEAD']);
   if (!behind.ok || !ahead.ok) return;
-  // commits pulled by hand since launch count as pending too: a restart picks them up
-  const local = bootHead ? await gitCmd(['rev-list', '--count', bootHead + '..HEAD']) : { ok: false };
-  const log = await gitCmd(['log', '--format=%s', '-n', '30', (local.ok && Number(local.out) ? bootHead : 'HEAD') + '..origin/master']);
+  const log = await gitCmd(['log', '--format=%s', '-n', '30', 'HEAD..origin/master']);
   send({
     type: 'gitUpdate',
-    behind: (Number(behind.out) || 0) + (local.ok ? Number(local.out) || 0 : 0),
+    behind: Number(behind.out) || 0,
     ahead: Number(ahead.out) || 0,
     changes: log.ok && log.out ? log.out.split('\n') : [],
   });
@@ -234,10 +227,9 @@ async function doGitPull() {
       return fail('Pull failed (not a fast-forward). Resolve it manually:\n' + (merge.err || merge.out).slice(0, 300));
     }
     const after = await gitCmd(['rev-parse', 'HEAD']);
-    const running = bootHead || before.out; // a hand pull moved HEAD but not the running code
-    if (running === after.out) return fail('Already up to date.');
+    if (before.out === after.out) return fail('Already up to date.');
 
-    const changed = await gitCmd(['diff', '--name-only', running, after.out]);
+    const changed = await gitCmd(['diff', '--name-only', before.out, after.out]);
     if (changed.ok && needsInstall(changed.out.split('\n'))) {
       send({ type: 'gitUpdateProgress', text: 'Installing dependencies…' });
       const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -1302,10 +1294,11 @@ function resolveRef(cwd, file, cb) {
     chatFileCache.set(cwd, { at: Date.now(), files }); pick(files);
   });
 }
-// Open it at the line in VS Code (code --goto), else with the default app.
+// Markdown opens in Overlord's own viewer; anything else at the line in VS Code (code --goto), else with the default app.
 function openFileAt({ cwd, file, line }) {
   resolveRef(cwd, file, (p) => {
     if (!p) return send({ type: 'toast', text: `Couldn't find ${file}` });
+    if (docs && /\.(md|markdown)$/i.test(p)) return docs.openPaths([p]);
     execFile('code', ['--goto', `${p}:${Math.max(1, parseInt(line, 10) || 1)}`], { shell: true, windowsHide: true, timeout: 15000 }, (err) => { if (err) shell.openPath(p); });
   });
 }
