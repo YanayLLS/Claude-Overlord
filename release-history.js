@@ -7,6 +7,17 @@
 
 const M = require('./manifest-core');
 const { deploySkipped } = require('./releases-core');
+
+// the first successful run of r's deploy workflow on its release branch after `failed` whose commit contains r's merge
+async function shippedLater(ghJson, r, failed) {
+  const ok = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/actions/workflows/${r.deploy.workflow}/runs`, '-f', 'status=success', '-f', `branch=${r.target}`, '-f', 'per_page=10']);
+  const later = ((ok.data && ok.data.workflow_runs) || []).filter(x => Date.parse(x.created_at) > Date.parse(failed.created_at)).reverse(); // oldest first
+  for (const x of later) {
+    const cmp = await ghJson(['api', `repos/${r.repo}/compare/${r.mergeSha}...${x.head_sha}`]);
+    if (cmp.data && ['ahead', 'identical'].includes(cmp.data.status)) return x;
+  }
+  return null;
+}
 const { isReleaseHead } = require('./release-run');
 
 const HISTORY_SHOWN = 30;
@@ -247,6 +258,14 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
           continue;
         }
         if (!done) continue;
+        // its own run failed, but a later successful run of the same workflow on the release branch shipped a commit
+        // that contains it (the mobile app ships every merge, and a version bump re-runs it): deployed by that run
+        const after = done.conclusion !== 'success' && r.target ? await shippedLater(ghJson, r, done) : null;
+        if (after) {
+          [m, c] = M.applyDeploy(m, r.repo, { state: 'success', url: after.html_url, at: after.updated_at });
+          changed = changed || c;
+          continue;
+        }
         [m, c] = M.applyDeploy(m, r.repo, { state: done.conclusion === 'success' ? 'success' : 'failure', url: done.html_url, at: done.updated_at });
         changed = changed || c;
       }
@@ -495,3 +514,5 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
 
   return { recordMerged, load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, holds: listHolds, updateHolds, recordHealth, markCancelled, markSigned };
 };
+
+module.exports.shippedLater = shippedLater;
