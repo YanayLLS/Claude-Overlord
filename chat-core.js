@@ -406,7 +406,16 @@ function visualDoc(html, t = {}) {
 }
 
 // The CLI's "[Crashed — auto-resuming 1/3...]" while Overlord restarts a crashed Claude; '' otherwise.
-const crashLine = (a) => a && a.crashed === 'resuming' ? `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…` : '';
+// rows (the terminal's last rows): once Claude's prompt footer is drawn after Overlord's crash note (or the resumed CLI
+// cleared it away), Claude is back and the line goes, even if the flag missed its clear (seen after an app restart).
+const crashLine = (a, rows) => {
+  if (!a || a.crashed !== 'resuming') return '';
+  if (rows) {
+    const last = (re) => { for (let i = rows.length - 1; i >= 0; i--) if (re.test(rows[i])) return i; return -1; };
+    if (last(/shift\+tab to cycle|\? for shortcuts/) > last(/^\s*\[Crashed — auto-resuming/)) return '';
+  }
+  return `Crashed — auto-resuming ${a.crashCount || 1}/${a.crashMax || 3}…`;
+};
 
 // A permission dialog as the CLI draws it: its question ("Do you want to make this edit to hello.txt?") and the rows
 // above it, up to the rule that opens the dialog, frame lines left out. A question picker ("Enter to select") isn't one.

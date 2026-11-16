@@ -164,6 +164,13 @@ test('a Claude being auto-resumed after a crash reads like the CLI line', () => 
   assert.strictEqual(crashLine({ crashed: 'resuming', crashCount: 1, crashMax: 3 }), 'Crashed — auto-resuming 1/3…');
   assert.strictEqual(crashLine({ crashed: 'fatal', crashCount: 3, crashMax: 3 }), '');
   assert.strictEqual(crashLine({ crashed: null }), '');
+  // The terminal is the truth: once the resumed Claude repaints its prompt, the line goes even if the flag lingers.
+  const a = { crashed: 'resuming', crashCount: 1, crashMax: 3 };
+  const footer = '  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 6 agents';
+  assert.strictEqual(crashLine(a, ['> ', footer, '[Crashed — auto-resuming 1/3...]', '[Connecting…]']), 'Crashed — auto-resuming 1/3…'); // old screen, still restarting
+  assert.strictEqual(crashLine(a, ['> ', footer, '[Crashed — auto-resuming 1/3...]', ' ▐▛███▛█   Claude Code', '> ', footer]), ''); // prompt back below the note
+  assert.strictEqual(crashLine(a, [' ▐▛███▛█   Claude Code', '> ', '  ? for shortcuts']), ''); // the new CLI cleared the screen
+  assert.strictEqual(crashLine(a, []), 'Crashed — auto-resuming 1/3…');
 });
 
 test('the mic hint is the project and the code-ish words on screen, newest first, without plain words or links', () => {

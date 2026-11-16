@@ -985,7 +985,7 @@
     if (perm) return h + permHtml(perm, evs, doneBy);
     if (a.crashed === 'fatal') return h + `<div class="card err"><div class="card-h">${ICON.alert}<span>The agent stopped</span></div><p>Claude quit ${a.crashMax} times in a row right after starting.</p>${(() => { const t = lastWords(selectedId); return t ? `<pre class="crash-out">${termHtml(t)}</pre>` : ''; })()}<div class="btns"><button class="primary" type="button" data-act="resume">Resume</button></div></div>`;
     // Shown even when the turn had ended: the transcript can't say Claude died at the prompt.
-    if (crashLine(a)) return h + `<div class="working crash">${ICON.alert}<span>${escH(crashLine(a))}</span></div>`;
+    const cl = crashLine(a, screenOf(selectedId, 60)); if (cl) return h + `<div class="working crash">${ICON.alert}<span>${escH(cl)}</span></div>`;
     if (a.compacting) return h + `<div class="working">${SPARK}<span class="shimmer">Compacting conversation…</span></div>`;
     if (st === 'active' || st === 'resuming') {
       // The CLI's own playful verb ("Cogitating…") when it has one; elapsed; the Esc hint. The call in flight already
@@ -2314,7 +2314,7 @@
     // else repaints: redraw whenever what it shows changed.
     if (x && termTab === 'conversation' && cv && cv.classList.contains('open')) {
       const sa = screenAsk(selectedId), rw = screenRewind(selectedId);
-      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, JSON.stringify(screenChoice(screenOf(selectedId, 40, true))), liveMode(selectedId), cliSuggestion(selectedId), JSON.stringify(btwOf(selectedId))]); // the mode chip follows Shift+Tab in the terminal too
+      const sig = JSON.stringify([sa.dialog, sa.question, sa.focus, sa.options.length, sa.preview, rw && rw.focus, rw && rw.items.length, JSON.stringify(screenChoice(screenOf(selectedId, 40, true))), liveMode(selectedId), cliSuggestion(selectedId), JSON.stringify(btwOf(selectedId)), crashLine(agents.get(selectedId), screenOf(selectedId, 60))]); // crashLine: the "Crashed" line goes when Claude's prompt is back; the mode chip follows Shift+Tab in the terminal too
       if (sig !== screenSig) { screenSig = sig; rerender(); }
     }
     // A panel drawn inline above the prompt box (/btw's answer, a skill's own UI): the terminal opens beside the chat
