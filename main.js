@@ -655,14 +655,19 @@ function followPrompts() {
     // Its watched transcript doesn't exist (a fresh agent that /resumed another chat, before or
     // across an app restart): Claude stamps every record it writes with the process's own
     // session_id — the id Overlord launched it with — so the file carrying it is the agent's.
-    if (!a.archived && !fs.existsSync(a.jsonlFile) && (!a._sidScanAt || now - a._sidScanAt > 15000)) {
+    // Also when it exists but holds no prompt or reply: a resumed agent with /remote-control on writes only its
+    // bridge file (hooks, "remote-control is active") under the launch id, while the chat goes on in the old file.
+    if (!a.archived && a._turnFile !== a.jsonlFile && (!a._sidScanAt || now - a._sidScanAt > 15000)) {
       a._sidScanAt = now;
+      // ponytail: head re-read every 15 s until the first turn lands, then never again for this file
+      if (hasTurnRecord(a.jsonlFile)) a._turnFile = a.jsonlFile;
       const stamp = `"session_id":"${a.sessionId}"`;
-      const hit = touchedSince(a, a.createdAt || 0).find(file => { try { return readTail(file, 64 * 1024).text.includes(stamp); } catch { return false; } }); // the id is on nearly every record
+      const hit = a._turnFile !== a.jsonlFile && touchedSince(a, a.createdAt || 0).find(file => { try { return readTail(file, 64 * 1024).text.includes(stamp); } catch { return false; } }); // the id is on nearly every record
       if (hit) {
         a.pendingPrompt = null;
         console.log(`[Overlord] ${path.basename(hit)} carries agent ${id}'s session id — following it`);
         reassignAgentToFile(id, hit, readTail(hit, 64 * 1024).start);
+        send({ type: 'timelineData', id, events: getFullTimeline(id), reset: true }); // the chat drops the empty file's view
         continue;
       }
     }
