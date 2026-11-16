@@ -352,7 +352,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       // the explanation is asked once per graded night, and again only when the grade's inputs changed
       const same = before.nightlyId === next.nightlyId && before.evidence && before.evidence.runId === next.evidence.runId && before.headline === next.headline;
       push({ rc: { ...next, flags, ai: same ? before.ai || null : null } });
-      if (notify && (before.nightlyId !== next.nightlyId || before.level !== next.level)) {
+      if (notify && !next.released && (before.nightlyId !== next.nightlyId || before.level !== next.level)) { // a candidate already live needs no popup
         notify({ ship: '🟢 Release candidate ready', look: '🟡 Release candidate: look first', hold: '🔴 Release candidate: hold' }[next.level], next.headline, null, () => send({ type: 'releases', state, open: true, tab: 'release' }));
       }
       if (!same || !state.rc.ai || state.rc.ai.error) {
@@ -1853,6 +1853,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   async function recheckRows(cur, pairs, full = false) {
     const members = (r) => r.env === 'prod' ? memberLogins() : null;
     const light = await Promise.all(pairs.map(async ([r, i]) => {
+      if (!r.pr) return [r, i]; // errored before its PR: only the full re-check (a retry of the Release step) helps
       const h = await prHealth(ghJson, r.repo, r.pr.number, r.target, undefined, members(r));
       const row = { ...r, ...h };
       row.status = rowStatus(row);
@@ -1884,7 +1885,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   // Re-check button: this machine's run if it has one, else the release's record (any teammate can press it)
   async function recheckAll(id) {
     const cur = state.releaseRun;
-    const open = cur && !cur.running ? cur.rows.map((r, i) => [r, i]).filter(([r]) => r.pr && !r.merged && !r.closed) : [];
+    const open = cur && !cur.running ? cur.rows.map((r, i) => [r, i]).filter(([r]) => (r.pr && !r.merged && !r.closed) || (r.error && !r.pr)) : [];
     if (open.length) { await recheckRows(cur, open, true); recheck(state.releaseRun); return; }
     const m = id && state.history && (state.history.items || []).find(x => x.id === id);
     if (!m) return;

@@ -1509,6 +1509,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     if (c.error) return `<div class="rl-rc bad${c.loading ? ' busy' : ''}">${head(word('', rcIc(RC_IC.hold), "Can't read nightly"))}<div class="rl-rc-why note bad"><span>${esc(c.error)}</span>${retry('rcRetry')}</div></div>`;
     if (c.running) return `<div class="rl-rc">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Nightly running'))}</div>`;
     if (!c.level) return `<div class="rl-rc busy">${head(word('run', rcIc(RC_IC.busy, ' turn'), 'Reading nightly'))}${bars}</div>`;
+    if (c.released) return `<div class="rl-rc done">${head(word('ship', rcIc(RC_IC.ship), 'Released'))}</div>`;
     const [cls, verdict] = RC_LEVEL[c.level];
     const hold = c.level === 'hold';
     const flagsBad = c.flags && c.flags.error;
