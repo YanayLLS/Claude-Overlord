@@ -5360,7 +5360,18 @@ function handleIpc(msg) {
         if (mentions.length) text += '\n\n' + buildMentionContext(mentions);
       }
       chatDeliver(msg.id, text, null, +msg.erase || 0, () => markSessionSwitch(msg.id, text), !!msg.intoDialog); break; } // a /clear or /resume is followed once really sent, not when queued // in turn with the agent's other sends; a /resume or /clear among them is followed
-    case 'apiNewToken': settings.apiToken = newToken(); saveState(); if (localApiServer) { stopLocalApi(); startLocalApi(); } else sendApiState(); break; // a restart also drops streams opened with the old one
+    case 'apiCopy': { // Settings → Local API copy buttons that hold the token
+      const port = localApi && localApiServer ? localApiServer.port() : 0;
+      if (!port) break;
+      const tok = settings.apiToken || '';
+      clipboard.writeText(msg.what === 'mcpConfig'
+        ? JSON.stringify({ mcpServers: { overlord: { type: 'http', url: `http://127.0.0.1:${port}/mcp`, headers: { Authorization: `Bearer ${tok}` } } } }, null, 2)
+        : tok);
+      break;
+    }
+    case 'apiRetry': if (settings.apiEnabled && !localApiServer) startLocalApi(); break;
+    case 'apiOpenLog': shell.openPath(LOG_FILE); break;
+    case 'apiNewToken': settings.apiToken = newToken(); saveState(); apiRotated = true; if (localApiServer) { stopLocalApi(); startLocalApi(); } else sendApiState(); break; // a restart also drops streams opened with the old one
     case 'cliCancel': cliCancel(msg.id, msg.esc !== false); break; // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
       const port = msg.port;
@@ -6007,6 +6018,7 @@ async function startLocalApi() {
   try {
     const port = await srv.start(+settings.apiPort || API_DEFAULT_PORT);
     if (localApiServer !== srv) { srv.stop(); return; } // switched off while it was starting
+    apiError = '';
     localApi = api;
     const base = `http://127.0.0.1:${port}`;
     // The token file lives in the user's profile folder: other Windows users can't read it.
@@ -6015,7 +6027,8 @@ async function startLocalApi() {
   } catch (e) {
     if (localApiServer === srv) localApiServer = null;
     flog(`local API failed to start: ${e.message}`);
-    send({ type: 'toast', text: `✕ Local API failed to start: ${e.message}` });
+    apiError = e.code === 'EADDRINUSE' ? 'Port in use' : e.message; // Settings shows it with Retry and Log
+    send({ type: 'toast', text: `✕ Local API failed to start: ${apiError}` });
   }
   sendApiState();
 }
@@ -6025,7 +6038,13 @@ function stopLocalApi() {
   try { fs.rmSync(API_FILE, { force: true }); } catch {}
   if (srv) srv.stop().catch(() => {});
 }
-function sendApiState() { send({ type: 'apiState', enabled: !!settings.apiEnabled, running: !!localApi, port: localApi && localApiServer ? localApiServer.port() : 0, file: API_FILE }); }
+// tokenTail: the last 4 characters, so Settings can show which token is live; the token itself stays in main
+// (as publicSettings), and apiCopy puts it on the clipboard. rotated: this state answers New token.
+let apiRotated = false, apiError = '';
+function sendApiState() {
+  send({ type: 'apiState', enabled: !!settings.apiEnabled, running: !!localApi, port: localApi && localApiServer ? localApiServer.port() : 0, file: API_FILE, tokenTail: (settings.apiToken || '').slice(-4), rotated: apiRotated, error: settings.apiEnabled && !localApi ? apiError : '' });
+  apiRotated = false;
+}
 
 // ── LAN peer server (/peer) ──────────────
 let remoteServer = null;

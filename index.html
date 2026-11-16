@@ -1602,12 +1602,20 @@ button:focus-visible { outline-offset:0; }
       <div class="sec-body">
       <label class="settings-label">
         <input type="checkbox" id="chk-api" onchange="api.send({ type: 'saveSettings', settings: { apiEnabled: this.checked } })" />
-        <span>Let programs on this computer control Overlord</span>
+        <span>Let local programs control Overlord</span>
       </label>
-      <div class="settings-hint">REST, live events (SSE or webhooks) and MCP on 127.0.0.1 only. A program holding the token can do anything you can: start and close agents, send them prompts, approve their permission prompts, read their chats and your peer chat.</div>
-      <div class="settings-hint" id="api-where" style="user-select:text;"></div>
-      <div class="field-row" style="padding-left:26px;"><button class="settings-btn" type="button" onclick="api.send({ type: 'apiNewToken' })">New token</button></div>
-      <div class="settings-hint">Programs using the old token stop working until they read the new one from the file.</div>
+      <div class="settings-hint api-scope"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Full control of Overlord · this computer only</div>
+      <div id="api-conn" class="api-conn off">
+        <div class="field-row api-acts"><button class="settings-btn primary" type="button" id="api-copy-cfg" data-off-title="Turn on to copy" onclick="api.send({ type: 'apiCopy', what: 'mcpConfig' }); apiDone(this, 'MCP config copied')"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><span>Copy MCP config</span></button><button class="settings-btn" type="button" title="api.json: port and token" onclick="api.send({ type: 'showInFolder', path: apiFile })"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Show token file</span></button></div>
+        <div class="api-box">
+          <div class="api-err" id="api-err" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span id="api-err-why"></span><button class="api-tb" type="button" id="api-retry" onclick="this.disabled = true; api.send({ type: 'apiRetry' })">Retry</button><button class="api-tb" type="button" onclick="api.send({ type: 'apiOpenLog' })">Open log</button></div>
+          <div class="api-row"><span class="api-k">MCP</span><code id="api-mcp">http://127.0.0.1:7790/mcp</code><button class="api-ib" type="button" title="Copy URL" aria-label="Copy MCP URL" onclick="apiCopyText('api-mcp', this)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
+          <div class="api-row" id="api-tok-row"><span class="api-k">Token</span><code id="api-tok">••••••••</code><span class="api-new" id="api-new">Copied</span><button class="api-ib" type="button" title="Copy token" aria-label="Copy token" onclick="api.send({ type: 'apiCopy', what: 'token' }); apiDone(this, 'Token copied')"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button><button class="api-ib api-rot" type="button" data-api-rotate title="New token" aria-label="New token" onclick="apiRotateAsk(true)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button></div>
+          <div class="api-confirm" id="api-confirm" hidden onkeydown="if(event.key==='Escape'){event.stopPropagation();apiRotateAsk(false);}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>Connected programs need the new config</span><button class="settings-btn" type="button" id="api-confirm-cancel" title="Esc" onclick="apiRotateAsk(false)">Cancel</button><button class="settings-btn danger" type="button" data-api-rotate-confirm onclick="apiRotate()">New token</button></div>
+          <div class="api-row"><span class="api-k">REST</span><code id="api-rest">http://127.0.0.1:7790/v1</code><button class="api-ib" type="button" title="Copy URL" aria-label="Copy REST URL" onclick="apiCopyText('api-rest', this)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
+        </div>
+        <div class="sr-only" id="api-live" aria-live="polite"></div>
+      </div>
       </div>
       </details>
       </div>
@@ -4961,9 +4969,37 @@ function handleAgentMsg(msg) {
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'apiState': {
       const chk = document.getElementById('chk-api'); if (chk) chk.checked = msg.enabled;
-      const chip = document.getElementById('chip-api'); if (chip) { chip.textContent = msg.running ? `● port ${msg.port}` : ''; chip.classList.toggle('on', !!msg.running); }
-      const where = document.getElementById('api-where');
-      if (where) where.textContent = msg.running ? `Running on http://127.0.0.1:${msg.port}. Port and token: ${msg.file}` : msg.enabled ? 'Not running — see the toast or overlord.log.' : '';
+      const failed = msg.enabled && !msg.running;
+      const chip = document.getElementById('chip-api');
+      if (chip) { chip.textContent = msg.running ? '● Running' : failed ? '' : 'Off'; chip.classList.toggle('on', !!msg.running); }
+      apiFile = msg.file;
+      const conn = document.getElementById('api-conn'); if (!conn) break;
+      conn.classList.toggle('off', !msg.running);
+      for (const b of conn.querySelectorAll('.api-acts button, .api-row button')) {
+        b.disabled = !msg.running;
+        if (b.dataset.offTitle) b.title = msg.running ? '' : b.dataset.offTitle;
+      }
+      document.getElementById('api-err').hidden = !failed;
+      document.getElementById('api-retry').disabled = false;
+      document.getElementById('api-err-why').textContent = msg.error ? `Couldn't start · ${msg.error}` : "Couldn't start";
+      if (msg.running) {
+        const base = `http://127.0.0.1:${msg.port}`;
+        document.getElementById('api-mcp').textContent = base + '/mcp';
+        document.getElementById('api-rest').textContent = base + '/v1';
+        document.getElementById('api-tok').textContent = '••••••••' + (msg.tokenTail || '');
+      } else {
+        apiRotateAsk(false); hideToast();
+        for (const b of conn.querySelectorAll('.done')) { clearTimeout(b._done); b.classList.remove('done'); b.style.minWidth = ''; }
+        document.getElementById('api-new').classList.remove('on');
+      }
+      if (msg.rotated && msg.running) {
+        api.send({ type: 'apiCopy', what: 'token' });
+        const row = document.getElementById('api-tok-row'); row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+        apiDone(row.querySelector('.api-ib'), 'New token copied');
+        const n = document.getElementById('api-new'); n.classList.add('on'); clearTimeout(n._t); n._t = setTimeout(() => n.classList.remove('on'), 1500);
+        // Pasted configs hold the old token: the main button asks for a fresh copy until it is clicked.
+        document.querySelector('#api-copy-cfg span').textContent = 'Copy new config';
+      }
       break;
     }
     case 'peerMsgPending': {
@@ -5453,6 +5489,27 @@ function showInterrupted(list) {
   document.body.appendChild(el);
 }
 
+// Settings → Local API. The token never reaches this page (main copies it, see apiCopy); only its last 4 characters.
+let apiFile = '';
+// Inline result where the user clicked: the icon (and a button's label) shows a check for 1.5 s; screen readers hear it.
+function apiDone(btn, what) {
+  btn.classList.add('done');
+  const label = btn.querySelector('span');
+  if (label) { if (!btn._label) { btn._label = label.textContent; btn.style.minWidth = btn.offsetWidth + 'px'; } label.textContent = 'Copied'; } // hold the width: no jump
+  document.getElementById('api-live').textContent = what;
+  clearTimeout(btn._done); btn._done = setTimeout(() => {
+    btn.classList.remove('done'); btn.style.minWidth = '';
+    if (label) { label.textContent = btn.id === 'api-copy-cfg' ? 'Copy MCP config' : btn._label; btn._label = null; }
+  }, 1500);
+}
+function apiCopyText(id, btn) { navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => apiDone(btn, 'URL copied'), () => showToast('Could not copy')); }
+function apiRotateAsk(on) {
+  const c = document.getElementById('api-confirm'); if (!c || c.hidden === !on) return;
+  c.hidden = !on;
+  (on ? document.getElementById('api-confirm-cancel') : document.querySelector('[data-api-rotate]')).focus({ focusVisible: true });
+}
+function apiRotate() { document.getElementById('api-confirm').hidden = true; document.querySelector('[data-api-rotate]').focus({ focusVisible: true }); api.send({ type: 'apiNewToken' }); }
+function hideToast() { const el = document.getElementById('toast'); if (el) el.className = 'toast'; }
 function showToast(text, onClick) {
   let el = document.getElementById('toast');
   if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }

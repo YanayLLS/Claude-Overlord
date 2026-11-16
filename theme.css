@@ -842,3 +842,60 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
 @keyframes pr-am-spin { to { transform: rotate(360deg); } }
 @keyframes pr-am-drain { to { transform: scaleX(0); } }
 @media (prefers-reduced-motion: reduce) { #pr-dropdown .pr-am, #pr-dropdown .pr-am * { animation: none !important; } }
+
+/* ── Settings → Local API: connect actions first, then endpoints and token; greyed preview while off ── */
+.api-scope { display: flex; align-items: center; gap: 6px; }
+.api-scope .ic { width: 12px; height: 12px; flex: none; }
+.api-conn { margin: 16px 0 0 42px; display: flex; flex-direction: column; gap: 12px; }
+.api-conn.off .api-acts, .api-conn.off .api-box { opacity: .4; }
+.api-conn button:disabled { cursor: default; }
+.api-acts { margin: 0; }
+.api-box { border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.api-row { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 4px 0 12px; font-size: 12px; }
+.api-row + .api-row, .api-confirm, .api-confirm + .api-row { border-top: 1px solid var(--border); }
+.api-k { flex: none; width: 44px; color: var(--dim); }
+.api-row code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Geist Mono', ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--text); user-select: text; }
+.api-ib { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--r-sm); background: none; color: var(--dim); cursor: pointer; position: relative; }
+.api-ib:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.api-ib .ic { width: 14px; height: 14px; }
+.api-confirm:not([hidden]) { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; font-size: 12px; color: var(--red); background: rgba(248,113,113,.06); }
+.api-confirm .ic { width: 14px; height: 14px; flex: none; }
+.api-confirm span { flex: 1; }
+.api-confirm .settings-btn { padding: 4px 12px; }
+.api-row.flash { animation: api-flash 1.4s ease-out; }
+@keyframes api-flash { from { background: rgba(74,222,128,.28); } }
+/* Done: the clicked control's icon turns into a green check for 1.5 s. */
+.api-ib.done .ic, .settings-btn.done .ic { visibility: hidden; }
+.api-ib.done::after { content: ''; position: absolute; inset: 0; margin: auto; width: 14px; height: 14px; background: var(--green); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat; }
+.settings-btn.done { position: relative; }
+.settings-btn.done .ic + span::before { content: ''; position: absolute; left: 12px; top: 50%; width: 13px; height: 13px; transform: translateY(-50%); background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat; }
+.settings-btn:has(.ic) { display: inline-flex; align-items: center; gap: 6px; }
+.settings-btn .ic { width: 13px; height: 13px; }
+.settings-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
+.settings-btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.settings-btn.danger { color: #fff; background: var(--red); border-color: var(--red); }
+.settings-btn.danger:hover { filter: brightness(1.08); }
+.api-err:not([hidden]) { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--red); }
+.api-err span { margin-right: 4px; }
+.api-err span::before { content: '\25CF  '; }
+.settings-sec .sec-chip.err { color: var(--red); }
+
+/* Round 2: one trailing icon slot per row, error as the card's first row, neutral disabled primary. */
+.api-conn { margin-top: 14px; gap: 14px; }
+.api-conn.off .api-acts, .api-conn.off .api-row, .api-conn.off .api-confirm { opacity: .4; }
+.api-conn.off .api-box { opacity: 1; }
+.settings-btn.primary:disabled { background: var(--surface1); border-color: var(--border); color: var(--dim); filter: none; }
+.api-rot { margin-left: 4px; }
+.api-rot:hover:not(:disabled) { color: var(--red); background: rgba(248,113,113,.1); }
+.api-ib .ic { width: 15px; height: 15px; }
+.api-new { flex: none; font-size: 11px; color: var(--green); opacity: 0; transition: opacity .15s; }
+.api-new.on { opacity: 1; }
+.api-err:not([hidden]) { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 6px 0 12px; font-size: 12px; color: var(--red); background: rgba(248,113,113,.07); border-bottom: 1px solid var(--border); }
+.api-err .ic { width: 14px; height: 14px; flex: none; }
+.api-err span { flex: 1; margin: 0; }
+.api-err span::before { content: none; }
+.api-tb { font: inherit; font-size: 12px; padding: 4px 8px; border: none; border-radius: var(--r-sm); background: none; color: var(--text); cursor: pointer; }
+.api-tb:hover:not(:disabled) { background: var(--hover); }
+.api-tb:disabled { opacity: .5; cursor: default; }
+.api-confirm .settings-btn:not(.danger) { background: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
