@@ -48,6 +48,7 @@ Follow \`${skill}\` (run by hand: open a PR instead of emitting patch files; its
 - \`git fetch origin ${base}\`, then work in your own git worktree on branch \`${branch}\` from \`origin/${base}\`. Never edit the shared checkout, never \`git stash\`.
 - **Do not run BDD, Playwright or browsers locally** (other agents run beside you). Prove it on CI: open ONE PR against \`${base}\` with a \`\`\`bdd block naming \`${blocker.module}\` narrowed with \`scenarios:\` to the ones above (as a mapping, see docs/rules/bdd-ci.md), and wait for its run. Unit tests of files you touch are fine at low priority.
 - No scenario removal, no @skip/@future/@known-red, no weaker assertion, no wider timeout to hide a cause.
+- Name the ticket so ClickUp follows the fix: the nightly opens one ClickUp ticket per failing module in the Frontline One list (901523262937), titled like "<Area> | ${blocker.module} fails in nightly regression". Find the open one for \`${blocker.module}\` (ClickUp search) and end your PR title with \`(CU-<its id>)\`. None found → say so in the PR body.
 - A product decision you cannot make from the code → decline with the question.
 - Then write \`{"status":"pr","url":"<pr url>"}\`.
 
