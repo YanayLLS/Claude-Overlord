@@ -589,7 +589,7 @@
       return true;
     }
     if (msg.type === 'docGone') { const d = docs.get(msg.path); if (d) { d.gone = true; renderTabs(); if (selected === msg.path) renderDoc(d); } return true; }
-    if (msg.type === 'docAssociated') { const b = $('doc-assoc-btn'); if (b) b.textContent = msg.ok ? '✓ Registered' : 'Set Overlord as the .md viewer'; return true; }
+    if (msg.type === 'docAssociated') { const b = $('doc-assoc-btn'); if (b) b.textContent = msg.ok ? '✓ Default' : 'Set as default'; return true; }
     return false;
   }
 

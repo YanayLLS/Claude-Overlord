@@ -903,3 +903,37 @@ body:not(.world-on) #world-raids { display: none; } /* raids are part of the Wor
 .api-tb:disabled { opacity: .5; cursor: default; }
 .api-confirm .settings-btn:not(.danger) { background: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ── Settings rows: label left, control right, grouped in cards (Linear / macOS pattern). Detail lives in tooltips. ── */
+.settings-nav button .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; opacity: .8; }
+.settings-nav button.on .ic { opacity: 1; color: var(--accent); }
+.set-group { border: 1px solid var(--border); border-radius: 10px; background: rgba(var(--ink),.02); margin-bottom: 16px; }
+.set-group > * + * { border-top: 1px solid var(--border); }
+.set-group-title { margin: 22px 0 8px 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+.set-row, .settings-label.set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 52px; padding: 10px 14px; box-sizing: border-box; }
+.set-row.stack { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 8px; padding: 12px 14px; }
+.set-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.set-name { font-size: 13px; color: var(--text); }
+.set-sub { font-size: 11.5px; line-height: 1.4; color: var(--dim); }
+.set-sub b { color: var(--subtext); font-weight: 600; }
+.set-sub code, .set-name code { font-size: 11px; }
+.set-ctl { display: flex; align-items: center; gap: 6px; flex: none; }
+.set-row.stack .set-ctl { flex: auto; }
+.set-grow { flex: 1; min-width: 0; }
+.set-num { width: 72px; text-align: right; }
+.set-key { width: 120px; text-align: center; }
+.set-mid { width: 200px; }
+.set-code { width: 84px; }
+.set-sel { min-width: 180px; }
+.set-row .pick-list { margin-top: 0; }
+.set-row .field-unit { margin: 0; }
+.set-foot { margin: -8px 2px 0; }
+.set-foot:empty { display: none; }
+.set-group .settings-hint { padding: 0; }
+/* A feature that's off hides its own settings. */
+.set-group:has(.set-master:not(:checked)) .set-dep { display: none; }
+.settings-label.set-row input[type="checkbox"] { margin: 0; }
+.api-conn { margin-left: 0; }
+.api-scope .ic { fill: none; stroke: currentColor; stroke-width: 2; }
+.pick-list:empty { display: none; }
+#clickup-bases:empty { display: none; }

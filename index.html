@@ -1358,253 +1358,164 @@ button:focus-visible { outline-offset:0; }
       <div class="settings-layout">
       <nav class="settings-nav" id="settings-nav" aria-label="Settings sections"></nav>
       <div class="settings-panes">
-      <details class="settings-sec" data-sec="general" open>
+      <details class="settings-sec" data-sec="general" data-icon='<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>' open>
       <summary>General</summary>
       <div class="sec-body">
-      <label class="settings-label">
-        <input type="checkbox" id="chk-bypass" onchange="onBypassChange(this.checked)" />
-        <span>Bypass permissions (--dangerously-skip-permissions)</span>
-      </label>
-      <div class="settings-hint">Applies to newly spawned agents. Persisted across sessions.</div>
-      <div class="settings-field">
-        <div class="field-title">Markdown documents</div>
-        <div class="field-row"><button class="settings-btn" type="button" id="doc-assoc-btn" onclick="docsUi.associate()">Set Overlord as the .md viewer</button><button class="settings-btn" type="button" onclick="docsUi.pick()">Open .md&hellip;</button></div>
+      <div class="set-group">
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Bypass permissions</span><span class="set-sub">New agents skip approval prompts</span></span><input type="checkbox" id="chk-bypass" onchange="onBypassChange(this.checked)" /></label>
+        <label class="settings-label set-row" title="Agents show in the Claude app and at claude.ai/code. Running agents switch as soon as each is idle."><span class="set-text"><span class="set-name">Remote Control</span><span class="set-sub">Continue agents in the Claude app</span></span><input type="checkbox" id="chk-remote-control" checked onchange="api.send({ type: 'saveSettings', settings: { remoteControl: this.checked } })" /></label>
+        <label class="settings-label set-row" title="An agent you don't have open closes its Claude once idle (☾ on its card). Opening it or sending it a message resumes the same session in a few seconds. Sleeping agents aren't reachable from Remote Control."><span class="set-text"><span class="set-name">CPU saving</span><span class="set-sub">Idle agents sleep until you open them</span></span><input type="checkbox" id="chk-cpu-saving" onchange="api.send({ type: 'saveSettings', settings: { cpuSaving: this.checked } })" /></label>
+        <div class="set-row"><span class="set-text"><span class="set-name">Plan budget</span><span class="set-sub">Monthly, for the footer's usage %</span></span><span class="set-ctl"><span class="field-unit">$</span><input type="number" class="settings-input set-num" id="inp-budget" min="1" step="1" onchange="onBudgetChange(this.value)" aria-label="Plan budget in dollars" /></span></div>
       </div>
-      <div class="settings-hint">Double-clicking an .md file (or "Open with → Overlord") opens it rendered in the Docs column beside the terminal; The installer registers Overlord already; this button registers the copy that is running now, and opens Windows' Default apps page when another viewer was chosen before.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-remote-control" checked onchange="api.send({ type: 'saveSettings', settings: { remoteControl: this.checked } })" />
-        <span>Remote Control (continue agents in the Claude mobile app)</span>
-      </label>
-      <div class="settings-hint">Agents show under their chat title in the app and at claude.ai/code. Switching it also connects or disconnects running agents as soon as each is idle.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-cpu-saving" onchange="api.send({ type: 'saveSettings', settings: { cpuSaving: this.checked } })" />
-        <span>CPU saving (close idle agents' Claude until you open them)</span>
-      </label>
-      <div class="settings-hint">An agent you don't have open gets its Claude process closed the moment it's idle: not working, no subagent and no shell command running (☾ on its card). Its card and chat stay. Opening it, or sending it a message, resumes the same session in a few seconds. A sleeping agent isn't reachable from Remote Control until it's resumed.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-terminals-in-app" checked onchange="api.send({ type: 'saveSettings', settings: { terminalsInApp: this.checked } })" />
-        <span>Dev-server terminals inside Overlord</span>
-      </label>
-      <div class="settings-hint">Off: scripts like start-full.bat open their own console windows.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-english-focus" checked onchange="api.send({ type: 'saveSettings', settings: { englishOnFocus: this.checked } })" />
-        <span>Switch the keyboard to English when Overlord gets focus (Windows)</span>
-      </label>
-      <div class="settings-hint">Coming back from a Hebrew window, the first words typed to an agent land in English. Shortcuts (Ctrl+V, Ctrl+W, Ctrl+F…) work under any layout regardless.</div>
-      <div class="settings-field">
-        <div class="field-title">Dictation</div>
-        <div class="field-row"><input type="password" id="inp-dict-key" placeholder="This computer · paste an OpenAI or Groq key for cloud" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();api.send({ type: 'saveSettings', settings: { dictationKey: this.value } });this.value='';}" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" /><button class="settings-btn" type="button" id="dict-local-btn" style="display:none" onclick="api.send({ type: 'saveSettings', settings: { dictationKey: '' } })">Use this computer</button><button class="settings-btn" type="button" onclick="api.send({ type: 'dictateRemove' })">Remove engine</button></div>
+      <div class="set-group">
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Dev-server terminals in Overlord</span><span class="set-sub">Off: separate console windows</span></span><input type="checkbox" id="chk-terminals-in-app" checked onchange="api.send({ type: 'saveSettings', settings: { terminalsInApp: this.checked } })" /></label>
+        <div class="set-row"><span class="set-text"><span class="set-name">Markdown files</span><span class="set-sub">Open .md files in Overlord's Docs column</span></span><span class="set-ctl"><button class="settings-btn" type="button" onclick="docsUi.pick()">Open&hellip;</button><button class="settings-btn" type="button" id="doc-assoc-btn" title="Registers this copy of Overlord as the .md viewer" onclick="docsUi.associate()">Set as default</button></span></div>
       </div>
-      <div class="settings-hint">With a key, the mic's recordings go to OpenAI (sk-…) or Groq (gsk_…).</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" />
-        <span>Prompt autocomplete (ghost text)</span>
-      </label>
-      <div class="settings-hint">As you type a prompt to an agent, suggests a gray inline completion — press Tab to accept. Uses Claude Haiku on your logged-in Claude account — no API key needed, but it counts toward your usage limits.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-catalog" checked onchange="saveCatalogSettings()" />
-        <span>Skills picker (+ button and hotkey)</span>
-      </label>
-      <div class="settings-field" id="catalog-hotkey-field">
-        <div class="field-title">Hotkey</div>
-        <div class="field-row"><input class="settings-input" id="inp-catalog-hotkey" readonly placeholder="Press a shortcut or type two characters" onkeydown="recordCatalogHotkey(event)" onblur="catalogTyped = ''; this.value = this.dataset.saved || CATALOG_HOTKEY" style="flex:1;" /><button class="settings-btn" type="button" onclick="setCatalogHotkey(CATALOG_HOTKEY)">Reset</button></div>
-      </div>
-      <div class="settings-hint">Lists the skills, commands and agents an agent can use — from this repo, ~/.claude and your plugins. Opens from the + in the terminal's corner or the hotkey: two characters typed in a row (default <code>;;</code>), or a shortcut like <code>Ctrl+K</code>.</div>
-      <label class="settings-label">
-        <span>Plan budget: $</span>
-        <input type="number" id="inp-budget" min="1" step="1" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onBudgetChange(this.value)" />
-      </label>
-      <div class="settings-hint">Monthly plan budget — used to show usage percentage in the footer.</div>
       </div>
       </details>
 
-      <details class="settings-sec" data-sec="notifications">
+      <details class="settings-sec" data-sec="typing" data-icon='<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'>
+      <summary>Typing</summary>
+      <div class="sec-body">
+      <div class="set-group">
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Prompt autocomplete</span><span class="set-sub">Tab accepts · counts toward Claude limits</span></span><input type="checkbox" id="chk-ghost" onchange="onGhostChange(this.checked)" /></label>
+        <label class="settings-label set-row" title="Windows: coming back from another layout (e.g. Hebrew), you type to agents in English. Shortcuts work under any layout."><span class="set-text"><span class="set-name">English on focus</span><span class="set-sub">Keyboard switches to English in Overlord</span></span><input type="checkbox" id="chk-english-focus" checked onchange="api.send({ type: 'saveSettings', settings: { englishOnFocus: this.checked } })" /></label>
+      </div>
+      <div class="set-group">
+        <label class="settings-label set-row" title="Skills, commands and agents from this repo, ~/.claude and your plugins. Opens from the + in the terminal's corner."><span class="set-text"><span class="set-name">Skills picker</span><span class="set-sub">+ button and hotkey</span></span><input type="checkbox" class="set-master" id="chk-catalog" checked onchange="saveCatalogSettings()" /></label>
+        <div class="set-row set-dep" id="catalog-hotkey-field"><span class="set-text"><span class="set-name">Hotkey</span><span class="set-sub">A shortcut, or two keys in a row</span></span><span class="set-ctl"><input class="settings-input set-key" id="inp-catalog-hotkey" readonly placeholder="Press keys" aria-label="Skills picker hotkey" onkeydown="recordCatalogHotkey(event)" onblur="catalogTyped = ''; this.value = this.dataset.saved || CATALOG_HOTKEY" /><button class="settings-btn" type="button" onclick="setCatalogHotkey(CATALOG_HOTKEY)">Reset</button></span></div>
+      </div>
+      <div class="set-group">
+        <div class="set-row stack"><span class="set-text"><span class="set-name">Dictation</span><span class="set-sub">Runs on this computer, or paste an OpenAI (sk-…) or Groq (gsk_…) key</span></span><span class="set-ctl"><input type="password" class="settings-input set-grow" id="inp-dict-key" placeholder="This computer · paste an OpenAI or Groq key for cloud" aria-label="Dictation API key" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();api.send({ type: 'saveSettings', settings: { dictationKey: this.value } });this.value='';}" /><button class="settings-btn" type="button" id="dict-local-btn" style="display:none" onclick="api.send({ type: 'saveSettings', settings: { dictationKey: '' } })">Use this computer</button><button class="settings-btn" type="button" onclick="api.send({ type: 'dictateRemove' })">Remove engine</button></span></div>
+      </div>
+      </div>
+      </details>
+
+      <details class="settings-sec" data-sec="notifications" data-icon='<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>'>
       <summary>Notifications</summary>
       <div class="sec-body">
-      <label class="settings-label">
-        <input type="checkbox" id="chk-notif" onchange="onNotifChange(this.checked)" />
-        <span>Desktop notifications for permission requests</span>
-      </label>
-      <div class="settings-hint">Shows a native notification and flashes the taskbar when an agent needs approval.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-sound" onchange="onSoundChange(this.checked)" />
-        <span>Notification sound</span>
-      </label>
-      <div class="settings-hint">Plays an audio chime when an agent completes or needs approval.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-pr-notif" onchange="api.send({ type: 'saveSettings', settings: { prNotifications: this.checked } })" />
-        <span>PR notifications</span>
-      </label>
+      <div class="set-group">
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Approval requests</span><span class="set-sub">Desktop alert and taskbar flash</span></span><input type="checkbox" id="chk-notif" onchange="onNotifChange(this.checked)" /></label>
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Pull requests</span><span class="set-sub">Desktop alert on PR activity</span></span><input type="checkbox" id="chk-pr-notif" onchange="api.send({ type: 'saveSettings', settings: { prNotifications: this.checked } })" /></label>
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Sound</span><span class="set-sub">Chime when an agent finishes or asks</span></span><input type="checkbox" id="chk-sound" onchange="onSoundChange(this.checked)" /></label>
+      </div>
       </div>
       </details>
 
-      <details class="settings-sec" data-sec="appearance">
+      <details class="settings-sec" data-sec="appearance" data-icon='<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>'>
       <summary>Appearance</summary>
       <div class="sec-body">
-      <label class="settings-label">
-        <span>Theme</span>
-        <select id="sel-theme" onchange="setTheme(this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
-      </label>
-      <label class="settings-label">
-        <span>Interface font</span>
-        <select id="sel-ui-font" onchange="setFont('ui', this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
-      </label>
-      <label class="settings-label">
-        <span>Chat font</span>
-        <select id="sel-chat-font" onchange="setFont('chat', this.value)" style="font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--surface0);border:1px solid var(--border);"></select>
-      </label>
+      <div class="set-group">
+        <div class="set-row"><span class="set-name">Theme</span><select class="settings-input set-sel" id="sel-theme" aria-label="Theme" onchange="setTheme(this.value)"></select></div>
+        <div class="set-row"><span class="set-name">Interface font</span><select class="settings-input set-sel" id="sel-ui-font" aria-label="Interface font" onchange="setFont('ui', this.value)"></select></div>
+        <div class="set-row"><span class="set-name">Chat font</span><select class="settings-input set-sel" id="sel-chat-font" aria-label="Chat font" onchange="setFont('chat', this.value)"></select></div>
+      </div>
       </div>
       </details>
 
-      <details class="settings-sec" data-sec="prs">
+      <details class="settings-sec" data-sec="prs" data-icon='<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12"/>'>
       <summary>Pull requests<span class="sec-chip" id="chip-pr"></span></summary>
       <div class="sec-body">
-      <label class="settings-label">
-        <input type="checkbox" id="chk-pr" onchange="onPrEnableChange(this.checked)" />
-        <span>PR notifications (watch GitHub repos)</span>
-      </label>
-      <div class="settings-hint">Polls watched repos via the <code>gh</code> CLI for open PRs.</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-pr-fire" checked onchange="prFire = this.checked; applyPrHeat(); api.send({ type: 'saveSettings', settings: { prFire: this.checked } })" />
-        <span>Fire effects</span>
-      </label>
-      <div class="settings-hint">A teammate's PR left waiting for your approval sets the screen on fire: sparks, then embers, then flames that grow while you're at the PC. Off keeps just the red PR bar.</div>
-      <div class="settings-field">
-        <div class="field-title">Watched repos <span class="field-count" id="pr-repo-count"></span></div>
-        <div class="field-row">
-          <input type="search" class="settings-input" id="inp-pr-search" placeholder="Search repos…" oninput="renderRepoPicker()" style="flex:1;" />
-          <select class="settings-input" id="sel-repo-sort" onchange="renderRepoPicker()" title="Sort repos" aria-label="Sort repos">
-            <option value="recent">Latest PR</option>
-            <option value="az">A–Z</option>
-          </select>
-          <button class="settings-btn" onclick="loadRepos(true)" title="Reload the repos you can see on GitHub">&#x21BB;</button>
+      <div class="set-group">
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Watch repos</span><span class="set-sub">Open PRs via the <code>gh</code> CLI</span></span><input type="checkbox" class="set-master" id="chk-pr" onchange="onPrEnableChange(this.checked)" /></label>
+        <label class="settings-label set-row set-dep" title="Sparks, then embers, then flames that grow while you're at the PC. Off keeps just the red PR bar."><span class="set-text"><span class="set-name">Fire effects</span><span class="set-sub">When a teammate's PR waits on you</span></span><input type="checkbox" id="chk-pr-fire" checked onchange="prFire = this.checked; applyPrHeat(); api.send({ type: 'saveSettings', settings: { prFire: this.checked } })" /></label>
+        <div class="set-row set-dep"><span class="set-name">Check every</span><span class="set-ctl"><input type="number" class="settings-input set-num" id="inp-pr-interval" min="30" step="10" value="60" aria-label="PR poll interval in seconds" onchange="onPrSettingsChange()" /><span class="field-unit">s</span></span></div>
+        <div class="set-row stack set-dep">
+          <span class="set-name">Repos <span class="field-count" id="pr-repo-count"></span></span>
+          <span class="set-ctl">
+            <input type="search" class="settings-input set-grow" id="inp-pr-search" placeholder="Search repos" aria-label="Search repos" oninput="renderRepoPicker()" />
+            <select class="settings-input" id="sel-repo-sort" onchange="renderRepoPicker()" title="Sort repos" aria-label="Sort repos">
+              <option value="recent">Latest PR</option>
+              <option value="az">A–Z</option>
+            </select>
+            <button class="settings-btn" onclick="loadRepos(true)" title="Reload repos from GitHub" aria-label="Reload repos">&#x21BB;</button>
+          </span>
+          <div id="pr-repo-list" class="pick-list"></div>
         </div>
-        <div id="pr-repo-list" class="pick-list"></div>
       </div>
-      <label class="settings-label">
-        <span>Poll interval</span>
-        <input type="number" class="settings-input" id="inp-pr-interval" min="30" step="10" value="60" style="width:80px;" onchange="onPrSettingsChange()" /><span class="field-unit">seconds</span>
-      </label>
       </div>
       </details>
 
-      <details class="settings-sec" data-sec="actions">
+      <details class="settings-sec" data-sec="actions" data-icon='<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>'>
       <summary>GitHub Actions<span class="sec-chip" id="chip-actions"></span></summary>
       <div class="sec-body">
-      <label class="settings-label">
-        <input type="checkbox" id="chk-actions" onchange="onActionsEnableChange(this.checked)" />
-        <span>Track GitHub Actions</span>
-      </label>
-      <div class="settings-hint">Watches specific workflows via the <code>gh</code> CLI. Polls every 10s while a run is in progress.</div>
-      <div class="settings-field">
-        <div class="field-title">Tracked workflows <span class="field-count" id="actions-wf-count"></span></div>
-        <div id="actions-wf-list" class="pick-list"></div>
-      </div>
-      <div class="settings-field">
-        <div class="field-title">Add a workflow</div>
-        <div class="field-row">
-          <input type="text" class="settings-input" id="inp-actions-add" placeholder="Paste a workflow URL, or owner/repo to pick from its workflows" onkeydown="if(event.key==='Enter'){event.preventDefault();addActionsInput();}" style="flex:1;" />
-          <button class="settings-btn" onclick="addActionsInput()">Add</button>
+      <div class="set-group">
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Track workflows</span><span class="set-sub">Every 10 s while a run is going</span></span><input type="checkbox" class="set-master" id="chk-actions" onchange="onActionsEnableChange(this.checked)" /></label>
+        <div class="set-row set-dep"><span class="set-name">Check idle every</span><span class="set-ctl"><input type="number" class="settings-input set-num" id="inp-actions-interval" min="30" step="10" value="60" aria-label="Idle poll interval in seconds" onchange="onActionsSettingsChange()" /><span class="field-unit">s</span></span></div>
+        <div class="set-row stack set-dep">
+          <span class="set-name">Workflows <span class="field-count" id="actions-wf-count"></span></span>
+          <span class="set-ctl">
+            <input type="text" class="settings-input set-grow" id="inp-actions-add" placeholder="Workflow URL or owner/repo" aria-label="Add a workflow" onkeydown="if(event.key==='Enter'){event.preventDefault();addActionsInput();}" />
+            <button class="settings-btn" onclick="addActionsInput()">Add</button>
+          </span>
+          <div id="actions-repo-wf" class="pick-list" style="display:none;"></div>
+          <div id="actions-wf-list" class="pick-list"></div>
         </div>
-        <div id="actions-repo-wf" class="pick-list" style="display:none;"></div>
       </div>
-      <label class="settings-label">
-        <span>Idle poll interval</span>
-        <input type="number" class="settings-input" id="inp-actions-interval" min="30" step="10" value="60" style="width:80px;" onchange="onActionsSettingsChange()" /><span class="field-unit">seconds</span>
-      </label>
       </div>
       </details>
 
-      <details class="settings-sec" data-sec="world">
+      <details class="settings-sec" data-sec="world" data-icon='<path d="M21 16V8l-9-5-9 5v8l9 5z"/>'>
       <summary>World<span class="sec-chip" id="chip-clickup"></span></summary>
       <div class="sec-body">
-      <label class="settings-label">
-        <input type="checkbox" id="chk-world" onchange="setWorldEnabled(this.checked)" />
-        <span>World game (feature flag)</span>
-      </label>
-      <div class="settings-hint">Off: nothing of the world is loaded or run &mdash; no 3D renderer, no header button, no economy. On: the game starts, showing your agents as a hex-tile island beside the list. Everything you can do in the list still works; the map is another way to look at the same state. Show or hide it with the &#x2B22; button in the header.</div>
+      <div class="set-group">
+        <label class="settings-label set-row" title="Off: nothing of the world loads or runs. Show or hide the map with the ⬢ button in the header."><span class="set-text"><span class="set-name">World game</span><span class="set-sub">Your agents as a 3D island</span></span><input type="checkbox" id="chk-world" onchange="setWorldEnabled(this.checked)" /></label>
+      </div>
       <div id="world-raids">
-      <div class="settings-subhead">ClickUp raids</div>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-clickup" onchange="onClickupEnableChange(this.checked)" />
-        <span>Raids from ClickUp (World view)</span>
-      </label>
-      <div class="settings-hint">Your tickets in a matching status become enemies that attack the base of their platform. Each user signs in with their own ClickUp account: the token stays on this machine and is only sent to api.clickup.com.</div>
-      <label class="settings-label" style="display:block;">
-        <span>Sign in:</span>
-        <div class="settings-hint" style="padding:2px 0 4px;">1. <a href="#" onclick="openLink('https://app.clickup.com/settings/apps');return false;" style="color:var(--accent,#89b4fa)">Get a token</a> — the ClickUp page has a one-click “Generate” button. 2. Paste it here and press Connect.</div>
-        <div style="display:flex;gap:6px;margin-top:4px;">
-          <input type="password" id="inp-clickup-token" placeholder="pk_… personal API token" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();clickupConnect();}" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
-          <button onclick="clickupConnect()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Connect</button>
+      <div class="set-group-title">ClickUp raids</div>
+      <div class="set-group">
+        <label class="settings-label set-row" title="A ticket in a raid status spawns an enemy at its platform's base. In a fight status the base's agents shoot it; leaving both kills it."><span class="set-text"><span class="set-name">Raids</span><span class="set-sub">Your tickets become enemies</span></span><input type="checkbox" class="set-master" id="chk-clickup" onchange="onClickupEnableChange(this.checked)" /></label>
+        <div class="set-row stack set-dep">
+          <span class="set-text"><span class="set-name">Account</span><span class="set-sub" id="clickup-auth">Not signed in.</span></span>
+          <span class="set-ctl">
+            <input type="password" class="settings-input set-grow" id="inp-clickup-token" placeholder="pk_… personal API token" aria-label="ClickUp token" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();clickupConnect();}" />
+            <button class="settings-btn" type="button" title="Opens ClickUp's API page: Generate, then paste" onclick="openLink('https://app.clickup.com/settings/apps')">Get token</button>
+            <button class="settings-btn" type="button" onclick="clickupConnect()">Connect</button>
+          </span>
         </div>
-        <div class="settings-hint" id="clickup-auth" style="padding-left:0;">Not signed in.</div>
-      </label>
-      <label class="settings-label" style="display:block;">
-        <span>Boards:</span>
-        <div style="display:flex;gap:6px;margin-top:4px;">
-          <input type="text" id="inp-clickup-search" placeholder="Search boards..." oninput="renderBoardPicker()" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
-          <button onclick="loadClickupBoards()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Load boards</button>
+        <div class="set-row stack set-dep">
+          <span class="set-name">Boards</span>
+          <span class="set-ctl">
+            <input type="search" class="settings-input set-grow" id="inp-clickup-search" placeholder="Search boards" aria-label="Search boards" oninput="renderBoardPicker()" />
+            <button class="settings-btn" type="button" onclick="loadClickupBoards()">Load</button>
+          </span>
+          <div id="clickup-board-list" class="pick-list"></div>
         </div>
-        <div id="clickup-board-list" style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:4px;margin-top:4px;padding:4px;"></div>
-      </label>
-      <label class="settings-label">
-        <input type="checkbox" id="chk-clickup-mine" checked onchange="onClickupSettingsChange()" />
-        <span>Only tickets assigned to me</span>
-      </label>
-      <label class="settings-label">
-        <span>Raid statuses (comma-separated):</span>
-        <input type="text" id="inp-clickup-status" value="failed qa" style="width:220px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
-      </label>
-      <label class="settings-label">
-        <span>Fought when in:</span>
-        <input type="text" id="inp-clickup-fight" value="in development" style="width:220px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
-      </label>
-      <div class="settings-hint">A ticket in a raid status spawns an enemy at its platform's base. Once it moves to a fight status the base's agents shoot it; when it leaves both, the enemy dies.</div>
-      <label class="settings-label" style="display:block;">
-        <span>Bases (platform → project):</span>
-        <div id="clickup-bases" style="margin-top:4px;"></div>
-      </label>
-      <label class="settings-label">
-        <span>Poll interval (seconds):</span>
-        <input type="number" id="inp-clickup-interval" min="30" step="10" value="60" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onClickupSettingsChange()" />
-      </label>
-      <div class="settings-hint" id="clickup-live" style="padding-left:0;"></div>
+        <label class="settings-label set-row set-dep"><span class="set-name">Only my tickets</span><input type="checkbox" id="chk-clickup-mine" checked onchange="onClickupSettingsChange()" /></label>
+        <div class="set-row set-dep"><span class="set-text"><span class="set-name">Raid statuses</span><span class="set-sub">Comma-separated</span></span><input type="text" class="settings-input set-mid" id="inp-clickup-status" value="failed qa" aria-label="Raid statuses" onchange="onClickupSettingsChange()" /></div>
+        <div class="set-row set-dep"><span class="set-text"><span class="set-name">Fight statuses</span><span class="set-sub">Agents shoot these</span></span><input type="text" class="settings-input set-mid" id="inp-clickup-fight" value="in development" aria-label="Fight statuses" onchange="onClickupSettingsChange()" /></div>
+        <div class="set-row stack set-dep"><span class="set-text"><span class="set-name">Bases</span><span class="set-sub">Platform → project</span></span><div id="clickup-bases"></div></div>
+        <div class="set-row set-dep"><span class="set-name">Check every</span><span class="set-ctl"><input type="number" class="settings-input set-num" id="inp-clickup-interval" min="30" step="10" value="60" aria-label="ClickUp poll interval in seconds" onchange="onClickupSettingsChange()" /><span class="field-unit">s</span></span></div>
+      </div>
+      <div class="set-sub set-foot" id="clickup-live"></div>
       </div>
       </div>
       </details>
 
-      <details class="settings-sec" data-sec="peers">
+      <details class="settings-sec" data-sec="peers" data-icon='<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>'>
       <summary>Peers<span class="sec-chip" id="chip-peers"></span></summary>
       <div class="sec-body">
-      <label class="settings-label">
-        <input type="checkbox" id="chk-peers" onchange="onPeersEnableChange(this.checked)" />
-        <span>Enable peer connections (LAN)</span>
-      </label>
-      <div class="settings-hint">Pairs this Overlord with a teammate's on the same network. Type <code>@Agent@peer message</code> in any terminal to send — the line goes only to them (not to your agent). They review it on a ✉ badge and approve before it runs on their agent.</div>
-      <div class="settings-hint" id="peers-self" style="user-select:text;"></div>
-      <label class="settings-label">
-        <span>Your peer name:</span>
-        <input type="text" id="inp-peer-name" placeholder="hostname" style="width:160px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onchange="onPeerNameChange(this.value)" />
-      </label>
-      <label class="settings-label" style="display:block;">
-        <span>Add peer:</span>
-        <div style="display:flex;gap:6px;margin-top:4px;">
-          <input type="text" id="inp-peer-host" placeholder="host or ip:port" style="flex:1;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" />
-          <input type="text" id="inp-peer-code" placeholder="code" style="width:80px;font-family:inherit;font-size:12px;padding:4px 8px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;outline:none;" onkeydown="if(event.key==='Enter'){event.preventDefault();addPeerFromInputs();}" />
-          <button onclick="addPeerFromInputs()" style="font-family:inherit;font-size:12px;padding:4px 10px;color:var(--text);background:var(--bg3);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;">Connect</button>
+      <div class="set-group">
+        <label class="settings-label set-row" title="Type @Agent@peer message in any terminal: it goes only to them. They approve it on a ✉ badge before it runs."><span class="set-text"><span class="set-name">Peer connections</span><span class="set-sub">Message a teammate's agents on your LAN</span></span><input type="checkbox" class="set-master" id="chk-peers" onchange="onPeersEnableChange(this.checked)" /></label>
+        <div class="set-row set-dep"><span class="set-text"><span class="set-name">Your name</span><span class="set-sub" id="peers-self"></span></span><input type="text" class="settings-input set-mid" id="inp-peer-name" placeholder="hostname" aria-label="Your peer name" onchange="onPeerNameChange(this.value)" /></div>
+        <div class="set-row stack set-dep">
+          <span class="set-name">Add peer</span>
+          <span class="set-ctl">
+            <input type="text" class="settings-input set-grow" id="inp-peer-host" placeholder="host or ip:port" aria-label="Peer host" />
+            <input type="text" class="settings-input set-code" id="inp-peer-code" placeholder="code" aria-label="Pairing code" onkeydown="if(event.key==='Enter'){event.preventDefault();addPeerFromInputs();}" />
+            <button class="settings-btn" type="button" onclick="addPeerFromInputs()">Connect</button>
+          </span>
+          <div id="peer-list"></div>
         </div>
-      </label>
-      <div id="peer-list" style="margin-top:6px;"></div>
+      </div>
       </div>
       </details>
-      <details class="settings-sec" data-sec="api">
+      <details class="settings-sec" data-sec="api" data-icon='<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>'>
       <summary>Local API<span class="sec-chip" id="chip-api"></span></summary>
       <div class="sec-body">
-      <label class="settings-label">
-        <input type="checkbox" id="chk-api" onchange="api.send({ type: 'saveSettings', settings: { apiEnabled: this.checked } })" />
-        <span>Let local programs control Overlord</span>
-      </label>
-      <div class="settings-hint api-scope"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Full control of Overlord · this computer only</div>
+      <div class="set-group">
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Let local programs control Overlord</span><span class="set-sub api-scope"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Full control · this computer only</span></span><input type="checkbox" id="chk-api" onchange="api.send({ type: 'saveSettings', settings: { apiEnabled: this.checked } })" /></label>
+      </div>
       <div id="api-conn" class="api-conn off">
         <div class="field-row api-acts"><button class="settings-btn primary" type="button" id="api-copy-cfg" data-off-title="Turn on to copy" onclick="api.send({ type: 'apiCopy', what: 'mcpConfig' }); apiDone(this, 'MCP config copied')"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg><span>Copy MCP config</span></button><button class="settings-btn" type="button" title="api.json: port and token" onclick="api.send({ type: 'showInFolder', path: apiFile })"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Show token file</span></button></div>
         <div class="api-box">
@@ -5645,6 +5556,7 @@ function showSettingsSec(key) {
     const b = document.createElement('button');
     b.type = 'button'; b.className = on ? 'on' : '';
     b.textContent = d.querySelector('summary').firstChild.textContent.trim();
+    if (d.dataset.icon) b.insertAdjacentHTML('afterbegin', '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + d.dataset.icon + '</svg>');
     const chip = d.querySelector('.sec-chip');
     if (chip && chip.classList.contains('on')) b.insertAdjacentHTML('beforeend', '<i class="nav-on" aria-label="on"></i>');
     b.onclick = () => showSettingsSec(d.dataset.sec);
@@ -5950,7 +5862,7 @@ function renderPeersSec() {
   if (nameInp && document.activeElement !== nameInp) nameInp.value = peersState.name || '';
   const self = document.getElementById('peers-self');
   if (self) self.innerHTML = peersState.enabled
-    ? `Share with a teammate: <b>${esc(peersState.name)}</b> &middot; <b>${esc(peersState.lanIp)}:${peersState.port}</b> &middot; code <b>${esc(fmtPairCode(peersState.code))}</b>`
+    ? `Teammates add <b>${esc(peersState.lanIp)}:${peersState.port}</b> &middot; code <b>${esc(fmtPairCode(peersState.code))}</b>`
     : '';
   const list = document.getElementById('peer-list');
   if (list) {
@@ -7618,7 +7530,7 @@ function renderTrackedWorkflows() {
   const list = actionsSettings.workflows || [];
   const count = document.getElementById('actions-wf-count');
   if (count) count.textContent = list.length ? String(list.length) : '';
-  if (!list.length) { box.innerHTML = '<div class="pick-empty">Nothing tracked yet. Add a workflow below.</div>'; return; }
+  if (!list.length) { box.innerHTML = '<div class="pick-empty">No workflows yet</div>'; return; }
   box.innerHTML = list.map(w => {
     const k = (w.repo + '/' + w.file).replace(/'/g, "\\'");
     return `<div class="pick-row"><span class="pick-name">${escapeHtml(w.name || w.file)}</span>`
