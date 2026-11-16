@@ -37,6 +37,7 @@
     visual: svg('<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 15 3.2-3.4 2.8 2.4 4-4.5"/>'),
     expand: svg('<path d="M14 4h6v6"/><path d="M10 20H4v-6"/><path d="m20 4-6.5 6.5"/><path d="m4 20 6.5-6.5"/>'),
     close: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+    send: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>'),
     alert: svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
   };
   // Claude's spark: turning while the agent works, popping once when a turn lands.
@@ -1023,7 +1024,7 @@
     const mine = [...(pending.get(id) || [])];
     const own = (e) => { const t = e.text.trim(); let k = mine.findIndex(p => (p.match || p.text || '').trim() === t); if (k < 0) k = mine.findIndex(p => Math.abs(Date.parse(e.ts) - p.at) < 15000); return k >= 0 && !!mine.splice(k, 1); };
     return q.filter(e => !e.sys && e.text.trim() && !own(e))
-      .map(e => `<div class="msg user pending cliq"><div class="bubble">${tagChips(e.text)}</div><span class="q">Queued</span></div>`).join('');
+      .map(e => `<div class="msg user pending cliq"><div class="bubble">${tagChips(e.text)}</div><span class="q"><button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button></span></div>`).join('');
   }
   function pendingHtml(id, evs, busy) {
     const list = pending.get(id);
@@ -1062,7 +1063,7 @@
     return undoRow + list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
       const queued = busy && !p.held;
-      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
     }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
@@ -1715,6 +1716,7 @@
     if (img) { lightbox(img.src); return; }
     const ar = e.target.closest('button[data-autoretry]'); // "Retry at 3:00 PM": arm it; again: undo
     if (ar) { const key = selectedId + ':' + ar.dataset.autoretry; autoRetry.has(key) ? autoRetry.delete(key) : autoRetry.add(key); rerender(); return; }
+    if (e.target.closest('[data-qnow]')) { api.send({ type: 'termInput', id: selectedId, data: '' }); return; } // Send now: the CLI's Ctrl+X Ctrl+S, it interrupts and sends everything queued
     const uq = e.target.closest('[data-unqueue]'); if (uq) uq.closest('.msg')?.classList.add('leaving'); // ✕ on a queued prompt: take it back, the agent keeps working (it fades at once)
     if (uq) { const m = uq.closest('.msg'); Promise.resolve(unqueue(selectedId, +uq.dataset.unqueue, !!uq.dataset.drop)).finally(() => m && m.isConnected && m.classList.remove('leaving')); return; }
     const art = e.target.closest('[data-art-open], [data-art-copy]'); // an Artifact card: open the page, or copy its link
