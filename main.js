@@ -176,6 +176,11 @@ function gitCmd(args, timeout = 30000) {
   });
 }
 
+// The commit this process is running. A `git pull` outside the app moves HEAD
+// but not the running code, so "up to date" means HEAD === bootHead.
+let bootHead = null;
+gitCmd(['rev-parse', 'HEAD']).then(r => { if (r.ok) bootHead = r.out; });
+
 function isGitCheckout() {
   if (app.isPackaged) return false; // packaged builds use electron-updater
   try { return fs.existsSync(path.join(APP_DIR, '.git')); } catch { return false; }
@@ -189,10 +194,12 @@ async function checkGitUpdate() {
   const behind = await gitCmd(['rev-list', '--count', 'HEAD..origin/master']);
   const ahead = await gitCmd(['rev-list', '--count', 'origin/master..HEAD']);
   if (!behind.ok || !ahead.ok) return;
-  const log = await gitCmd(['log', '--format=%s', '-n', '30', 'HEAD..origin/master']);
+  // commits pulled by hand since launch count as pending too: a restart picks them up
+  const local = bootHead ? await gitCmd(['rev-list', '--count', bootHead + '..HEAD']) : { ok: false };
+  const log = await gitCmd(['log', '--format=%s', '-n', '30', (local.ok && Number(local.out) ? bootHead : 'HEAD') + '..origin/master']);
   send({
     type: 'gitUpdate',
-    behind: Number(behind.out) || 0,
+    behind: (Number(behind.out) || 0) + (local.ok ? Number(local.out) || 0 : 0),
     ahead: Number(ahead.out) || 0,
     changes: log.ok && log.out ? log.out.split('\n') : [],
   });
@@ -227,9 +234,10 @@ async function doGitPull() {
       return fail('Pull failed (not a fast-forward). Resolve it manually:\n' + (merge.err || merge.out).slice(0, 300));
     }
     const after = await gitCmd(['rev-parse', 'HEAD']);
-    if (before.out === after.out) return fail('Already up to date.');
+    const running = bootHead || before.out; // a hand pull moved HEAD but not the running code
+    if (running === after.out) return fail('Already up to date.');
 
-    const changed = await gitCmd(['diff', '--name-only', before.out, after.out]);
+    const changed = await gitCmd(['diff', '--name-only', running, after.out]);
     if (changed.ok && needsInstall(changed.out.split('\n'))) {
       send({ type: 'gitUpdateProgress', text: 'Installing dependencies…' });
       const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
