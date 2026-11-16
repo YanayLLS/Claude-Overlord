@@ -169,7 +169,8 @@ async function releaseRow(gh, row, { writeJson, update, wait = sleep }) {
   let head = found.pr ? found.pr.head.ref : source, pinSha = null;
   // row.pinSha (the release candidate): ship that commit of `source`, the one the nightly tested, not its tip
   if (row.pinSha && legacy) return { error: `an older release PR straight from ${source} is open (#${found.pr.number}): close it to release the tested commit` };
-  if (row.pin && !legacy) {
+  // row.retry (a re-check of a row that errored before its PR): pin only when it opens the PR, an open one keeps its head
+  if (row.pin && !legacy && !(row.retry && found.pr)) {
     if (row.pinSha) pinSha = row.pinSha;
     else {
       const tip = await api(`repos/${repo}/git/ref/heads/${source}`);
@@ -366,11 +367,13 @@ async function recheckRelease(gh, rows, { writeJson, wait }) {
   const dbschemasLatest = await dbschemasLatestOf(gh);
   return Promise.all(rows.map(async (r) => {
     let res;
-    try { res = await releaseRow(gh, { ...r, dbschemasLatest }, { writeJson, update: () => {}, wait }); } catch (e) { res = { error: e.message || String(e) }; }
-    if (res.nothing) res = await prHealth(gh, r.repo, r.pr.number, r.target, wait, r.members || null); // merged since: source == target
+    // no PR yet (the run errored before opening it): retry the Release step for this row
+    const retry = r.pr ? {} : { pin: true, retry: true };
+    try { res = await releaseRow(gh, { ...r, ...retry, dbschemasLatest }, { writeJson, update: () => {}, wait }); } catch (e) { res = { error: e.message || String(e) }; }
+    if (res.nothing && r.pr) res = await prHealth(gh, r.repo, r.pr.number, r.target, wait, r.members || null); // merged since: source == target
     const row = { ...r, backMerge: null, dbschemas: null, error: null, ...res, running: false };
-    delete row.body; delete row.nothing;
     row.status = rowStatus(row);
+    delete row.body; delete row.nothing;
     return row;
   }));
 }

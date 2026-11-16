@@ -96,6 +96,33 @@ assert.strictEqual(rowStatus({ pr: {}, merged: true }), 'merged');
   }, [{ ...front }], { writeJson: () => 'f.json', wait: async () => {} });
   assert.deepStrictEqual([fixed[0].status, fixed[0].backMerge, fixed[0].checks, posted.length], ['ok', null, 'pass', 0]);
 
+  // re-check a row that errored before it had a PR: the Release step is retried for it
+  {
+    const errored = { repo: 'o/f', env: 'prod', source: 'dev', target: 'master', pinSha: 'tested7', error: 'an older release PR straight from dev is open (#9): close it' };
+    const retry = (openPrs) => { const seen = []; return { seen, gh: async (args) => {
+      const a = args.join(' '); seen.push(a);
+      if (a.includes('-f state=open') && a.includes('base=master')) return { data: openPrs };
+      if (a.includes('-X PATCH') && a.includes('git/refs')) return { data: { ref: 'refs/heads/overlord/promote-dev-to-master' } };
+      if (a.includes('compare/master...')) return { data: { ahead_by: 1, files: [{}], commits: [c('fix: y')] } };
+      if (a.includes('compare/dev...master')) return { data: { commits: [] } };
+      if (a.includes('-X POST') && a.includes('/pulls')) return { data: { number: 12, html_url: 'u12' } };
+      if (/pulls\/1[23]$/.test(a)) return { data: { mergeable: true, head: { sha: 'h' } } };
+      return { data: {} };
+    } }; };
+    // the old PR is closed now → a PR opens from the snapshot pinned at the tested commit
+    const none = retry([]);
+    const [opened] = await recheckRelease(none.gh, [errored], { writeJson: () => 'f.json', wait: async () => {} });
+    assert.ok(!opened.error && opened.pr.number === 12 && none.seen.some(x => x.includes('-X PATCH') && x.includes('sha=tested7')), 'retry: opens the release PR at the pinned commit');
+    // a snapshot PR somebody opened meanwhile is read as it stands, never re-pinned
+    const byHand = retry([{ number: 13, html_url: 'u13', head: { ref: 'overlord/promote-dev-to-master', repo: { full_name: 'o/f' } } }]);
+    const [kept] = await recheckRelease(byHand.gh, [errored], { writeJson: () => 'f.json', wait: async () => {} });
+    assert.ok(!kept.error && kept.pr.number === 13 && !byHand.seen.some(x => x.includes('git/refs')), 'retry: an open snapshot PR keeps its head');
+    // nothing left to ship → 'nothing', no PR to read
+    const [empty] = await recheckRelease(async (args) => args.join(' ').includes('compare/master...') ? { data: { ahead_by: 0, files: [] } } : { data: [] },
+      [errored], { writeJson: () => 'f.json', wait: async () => {} });
+    assert.strictEqual(empty.status, 'nothing');
+  }
+
   // snapshot PR open: a recheck reads its head as it stands (never re-pins); a Release click re-pins dev's tip on it
   {
     const { isReleaseHead, releaseRow } = require('./release-run');
