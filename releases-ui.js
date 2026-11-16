@@ -1565,8 +1565,8 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const wait = c.loading ? ' aria-disabled="true" title="Reading the night again"' : '';
     const release = !can ? `<span class="rl-rc-lock">${rcIc(RC_IC.lock)}Approvers only</span>` : hold
       ? (armed === 'rc' ? `<button class="rl-hist-btn rl-rc-cancel" data-act="rcCancel">Cancel</button><button class="rl-hist-btn rl-rc-any armed-bad" data-act="rcRelease" style="--left:${left.toFixed(3)};--ms:${Math.round(left * ARM_MS)}ms">Release despite Hold</button>`
-        : `<button class="rl-hist-btn rl-rc-any${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : ''}Release anyway</button>`)
-      : `<button class="rl-hist-btn go${c.loading ? ' locked' : ''}" data-act="rcRelease"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : '🚀 '}Release</button>`;
+        : `<button class="rl-hist-btn rl-rc-any${c.loading ? ' locked' : ''}" data-act="rcRelease" title="Ship the tested commits to alpha and prod"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : ''}Release anyway</button>`)
+      : `<button class="rl-hist-btn go${c.loading ? ' locked' : ''}" data-act="rcRelease" title="Ship the tested commits to alpha and prod"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : '🚀 '}Release</button>`;
     // Fix blockers until every blocker has an agent; Merge & re-run once their PRs are green
     const blockers = c.blockers || [], untouched = blockers.filter(b => !(fixV && fixV.states[b.key]));
     const fixBtn = !can || c.level === 'ship' || !blockers.length ? ''

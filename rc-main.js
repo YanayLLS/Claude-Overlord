@@ -156,7 +156,9 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
     if (rcBranch && ref === rcBranch.name) for (const v of Object.values(shas)) if (v.tested) v.source = rcBranch.name;
     // already shipped: every tested repo's prod branch holds the commit this candidate tested (a release went out since)
     const tests = Object.entries(shas).filter(([, v]) => v.tested && v.target);
-    const live = tests.length ? (await Promise.all(tests.map(([repo, v]) => api(`repos/${repo}/compare/${v.target}...${v.sha}`)))).every(r => r.data && r.data.ahead_by === 0) : false;
+    const alphaOf = Object.fromEntries(releasePlan(cfg, ['alpha']).prs.map(p => [p.repo, p]));
+    const targets = tests.flatMap(([repo, v]) => [[repo, v.target, v.sha], ...(alphaOf[repo] && alphaOf[repo].source === v.source ? [[repo, alphaOf[repo].target, v.sha]] : [])]);
+    const live = targets.length ? (await Promise.all(targets.map(([repo, target, sha]) => api(`repos/${repo}/compare/${target}...${sha}`)))).every(r => r.data && r.data.ahead_by === 0) : false;
     return { night: nightly.createdAt, nightlyId: nightly.id, manual, ref, rerun, evidence: { kind: rerun ? 'rc' : decision === 'pr' ? 'verify' : 'nightly', runId: evidence.id,
       reportUrl: rerun ? rerun.reportUrl : pageUrl, runUrl: rerun ? rerun.runUrl : runUrlOf(evidence) }, fixPr: pr, ...result, shas, unreleased, released: live, computedAt: now(), rerunModules: failedModules(page),
       // what the AI is given beyond the rules: each failure's first error line, and the fixer's own words

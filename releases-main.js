@@ -380,7 +380,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (DEMO && state.rc && state.rc.shas) return withBusy('release', 'Reading…', releaseRcDemo);
     const c = state.rc;
     if (!c || !c.shas || !Object.keys(c.shas).length) { send({ type: 'toast', text: 'No release candidate to release yet' }); return Promise.resolve(); }
-    return release(['prod'], null, null, false, null, false, Object.fromEntries(Object.entries(c.shas).map(([repo, v]) => [repo, v.sha])));
+    // every env the tested branch promotes into gets the tested commit: prod, and alpha for the repos that have it
+    const envs = releaseTargets(state.config).filter(e => e === 'alpha' || e === 'prod');
+    return release(envs, null, null, false, null, false, Object.fromEntries(Object.entries(c.shas).map(([repo, v]) => [repo, v.sha])));
   }
 
   // ── Fix blockers (rc-fix.js) on the rc branch (rc-branch.js) ──
@@ -1771,7 +1773,10 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const same = plan.prs.filter(p => p.source === p.target);
       if (same.length) { send({ type: 'toast', text: `Can't release a branch into itself: ${same.map(p => `${p.label} ${p.source}`).join(', ')}` }); return; }
     }
-    if (pins) plan.prs = plan.prs.map(p => (p.env === 'prod' && pins[p.repo] ? { ...p, pinSha: pins[p.repo] } : p));
+    if (pins) {
+      const gradedFrom = Object.fromEntries(releasePlan(cfg, ['prod']).prs.map(p => [p.repo, p.source]));
+      plan.prs = plan.prs.map(p => (pins[p.repo] && (p.env === 'prod' || p.source === gradedFrom[p.repo]) ? { ...p, pinSha: pins[p.repo] } : p));
+    }
     const run = { ...(Array.isArray(repos) && repos.length ? { scope: { repos: plan.prs.map(p => p.label).filter((v, i, a) => a.indexOf(v) === i), of: Number(of) || null } } : {}), envs, startedAt: Date.now(), running: true, rows: plan.prs.map(p => ({ ...p, running: true })), manual: plan.manual, flags: null };
     push({ releaseRun: run });
     const cwd = await configCheckout();
