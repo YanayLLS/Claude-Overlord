@@ -396,11 +396,7 @@
 /* results footer: one line per button, primary actions first, secondary ones quieter; wraps whole buttons, never their text */
 .rl-rel-pop.rl-rr .rl-rel-actions { flex-wrap:wrap; justify-content:flex-start; row-gap:6px; }
 .rl-rel-pop .rl-rel-actions button { white-space:nowrap; }
-.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="relNew"],
-.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="releaseClose"] { background:none; border-color:transparent; color:var(--subtext); padding:6px 10px; }
 .rl-rel-pop.rl-rr .rl-rel-actions button[data-act="relNew"] { margin-left:auto; }
-.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="relNew"]:hover,
-.rl-rel-pop.rl-rr .rl-rel-actions button[data-act="releaseClose"]:hover { color:var(--text); background:var(--hover-strong); }
 /* a failed row's own Fix: an agent for just that repo */
 .rl-rr-fix1 { margin-left:auto; flex-shrink:0; font:inherit; font-size:11px; font-weight:600; padding:2px 10px; border-radius:999px; white-space:nowrap;
   border:1px solid rgba(248,113,113,.5); background:rgba(248,113,113,.12); color:var(--red); cursor:pointer; transition:background .12s; }
@@ -633,15 +629,15 @@ a.rl-item { cursor:pointer; text-decoration:none; } a.rl-item:hover { filter:bri
 .rl-br-empty { display:flex; align-items:center; gap:6px; padding:8px 9px; color:var(--dim); font-size:11px; }
 
 /* the nightly release candidate (rc-core.js grades it) */
-.rl-rc { --tint:var(--dim); position:relative; overflow:hidden; margin:0 0 12px; padding:14px 16px 12px; border:1px solid var(--border); border-left:3px solid var(--tint); border-radius:var(--r-lg,10px); background:var(--surface0); max-width:620px; }
+.rl-rc { --tint:var(--dim); position:relative; overflow:hidden; margin:0 0 12px; padding:14px 16px 12px; border:1px solid var(--border); border-radius:var(--r-lg,10px); background:var(--surface0); max-width:620px; }
 .rl-rc.ok { --tint:var(--green); } .rl-rc.warn { --tint:var(--yellow); } .rl-rc.bad { --tint:var(--red); }
 .rl-rc .ic { width:14px; height:14px; flex-shrink:0; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 .rl-rc .ic.turn, .rl-rc-ref.spin .ic { animation:rl-spin .8s linear infinite; }
 .rl-rc-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 /* one text axis: every icon sits in a 14px gutter, every line of text starts 21px in */
 .rl-rc-head { display:flex; align-items:center; gap:8px; min-height:24px; }
-.rl-rc-verdict { display:inline-flex; align-items:center; gap:5px; margin-right:auto; font-size:17px; font-weight:700; letter-spacing:-.01em; color:var(--tint); }
-.rl-rc-verdict .ic { width:16px; height:16px; stroke-width:2.4; }
+.rl-rc-verdict { display:inline-flex; align-items:center; gap:6px; margin-right:auto; font-size:14px; font-weight:600; color:var(--text); }
+.rl-rc-verdict .ic { width:15px; height:15px; stroke-width:2.2; color:var(--tint); }
 .rl-rc-verdict.run { color:var(--subtext); }
 .rl-rc-day { display:inline-flex; align-items:center; gap:4px; padding:2px 6px; border-radius:var(--r-sm,6px); color:var(--subtext); font-size:11px; white-space:nowrap; text-decoration:none; }
 a.rl-rc-day { cursor:pointer; } a.rl-rc-day:hover { background:var(--surface1); color:var(--text); }
@@ -707,21 +703,10 @@ a.rl-rc-item:hover > .ic { color:var(--text); }
 .rl-rc-acts button.rl-hist-btn { display:inline-flex; align-items:center; gap:5px; }
 .rl-rc-acts a.rl-hist-btn { display:inline-flex; align-items:center; gap:5px; text-decoration:none; }
 .rl-rc-gap { flex:1; }
-.rl-rc-any { display:inline-flex; align-items:center; gap:5px; position:relative; overflow:hidden; background:transparent; border-color:var(--border-hi); color:var(--subtext); }
-.rl-rc-any:not(.locked):not(.armed-bad):hover { background:transparent; border-color:rgba(248,113,113,.5); color:var(--red); }
-.rl-rc-any.armed-bad { background:var(--red) !important; border-color:var(--red) !important; color:var(--on-accent) !important; }
-.rl-rc-any.armed-bad::after { content:''; position:absolute; left:0; bottom:0; height:3px; width:calc(var(--left,1) * 100%); background:rgba(0,0,0,.4); animation:rl-rc-drain var(--ms,6000ms) linear forwards; }
-.rl-rc-cancel { background:transparent; border-color:var(--border-hi); color:var(--text); }
+.rl-rc-any { position:relative; overflow:hidden; }
+.rl-rc-any.armed-bad::after { content:''; position:absolute; left:0; bottom:0; height:2px; width:calc(var(--left,1) * 100%); background:currentColor; opacity:.5; animation:rl-rc-drain var(--ms,6000ms) linear forwards; }
 .rl-rc-lock { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:var(--subtext); } .rl-rc-lock .ic { width:12px; height:12px; }
 @keyframes rl-rc-drain { to { width:0; } }
-.rl-rc-itemwrap { display:flex; align-items:center; gap:6px; } .rl-rc-itemwrap > .rl-rc-item { flex:1; min-width:0; }
-.rl-rc-chip { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; padding:0 7px; border-radius:999px; background:var(--surface1); font-size:10.5px; line-height:18px; color:var(--subtext); text-decoration:none; white-space:nowrap; }
-a.rl-rc-chip { cursor:pointer; } a.rl-rc-chip:hover { color:var(--text); }
-.rl-rc-chip .ic { width:10px; height:10px; } .rl-rc-chip.ok { color:var(--green); } .rl-rc-chip.bad { color:var(--red); } .rl-rc-chip.warn { color:var(--yellow); } .rl-rc-chip.run { color:var(--accent); }
-.rl-rc-itemwrap { display:flex; align-items:center; gap:6px; } .rl-rc-itemwrap > .rl-rc-item { flex:1; min-width:0; }
-.rl-rc-chip { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; padding:0 7px; border-radius:999px; background:var(--surface1); font-size:10.5px; line-height:18px; color:var(--subtext); text-decoration:none; white-space:nowrap; }
-a.rl-rc-chip { cursor:pointer; } a.rl-rc-chip:hover { color:var(--text); }
-.rl-rc-chip .ic { width:10px; height:10px; } .rl-rc-chip.ok { color:var(--green); } .rl-rc-chip.bad { color:var(--red); } .rl-rc-chip.warn { color:var(--yellow); } .rl-rc-chip.run { color:var(--accent); }
 .rl-rc-itemwrap { display:flex; align-items:center; gap:6px; } .rl-rc-itemwrap > .rl-rc-item { flex:1; min-width:0; }
 .rl-rc-chip { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; padding:0 7px; border-radius:999px; background:var(--surface1); font-size:10.5px; line-height:18px; color:var(--subtext); text-decoration:none; white-space:nowrap; }
 a.rl-rc-chip { cursor:pointer; } a.rl-rc-chip:hover { color:var(--text); }
@@ -756,7 +741,6 @@ button.rl-flag-st.backup:focus-visible { outline:2px solid var(--accent); }
 .rl-flag-tag { font-size:11px; color:var(--green); }
 .rl-flag-row.new .rl-flag-g { color:var(--cyan); }
 .rl-flag-row.blocked .rl-flag-tag { color:var(--peach); }
-.rl-flag-row.blocked { box-shadow:inset 2px 0 0 var(--peach); border-radius:0 6px 6px 0; }
 .rl-flag-row.blocked .rl-flag-g, .rl-flag-row.blocked .rl-flag-key { color:var(--peach); }
 .rl-flag-row.behaviour .rl-flag-g { color:var(--yellow, var(--peach)); }
 .rl-flag-fields { font-size:11.5px; color:var(--subtext, var(--text)); }
@@ -867,3 +851,51 @@ button.rl-flag-row.copy .rl-flag-g { font-size:14px; }
   .rl-to { font-size:0; }
   .rl-to::before { content:''; width:6px; height:6px; margin-left:2px; border-radius:50%; background:var(--hue); }
 }
+
+/* ── One component system: three button looks, one chip, one icon set ── */
+.rl-body { scrollbar-gutter:stable; } /* a scrollbar appearing never shifts the content */
+/* icons in text and buttons: monochrome strokes, 1em so they follow the text they sit in */
+.ic.rl-i { display:inline-block; width:1em; height:1em; flex-shrink:0; vertical-align:-.14em; margin-right:.35em; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+/* buttons: secondary is the default look; .go (and the run's Sign / Release all) is primary; armed is the danger look */
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-actions button, .rl-rr-fix, .rl-rr-fix1, .rl-rr-cancel, .rl-rr-recheck, .rl-rel-adv, .rl-rel-all, .rl-rel-join button, .rl-sign-acts button, .rl-setup button, .rl-appr-add button, .rl-flag-act, button.rl-flag-st.backup, .rl-rc-retry) {
+  display:inline-flex; align-items:center; justify-content:center; gap:5px; box-sizing:border-box; height:26px; min-height:26px; width:auto; padding:0 10px;
+  border-radius:var(--r-sm,6px); border:1px solid var(--border); background:var(--surface1); color:var(--text); font:inherit; font-size:12px; font-weight:500; line-height:1;
+  letter-spacing:0; text-transform:none; white-space:nowrap; text-decoration:none; cursor:pointer; flex-shrink:0; filter:none; opacity:1; transform:none;
+  transition:background .12s, border-color .12s, color .12s, filter .12s; }
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-actions button, .rl-rr-fix, .rl-rr-fix1, .rl-rr-cancel, .rl-rr-recheck, .rl-rel-adv, .rl-rel-all, .rl-rel-join button, .rl-sign-acts button, .rl-setup button, .rl-appr-add button, .rl-flag-act, button.rl-flag-st.backup, .rl-rc-retry):hover {
+  background:var(--surface2); border-color:var(--border-hi); color:var(--text); filter:none; }
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-actions button, .rl-rr-fix, .rl-rr-fix1, .rl-rr-cancel, .rl-rr-recheck, .rl-rel-adv, .rl-rel-all, .rl-rel-join button, .rl-sign-acts button, .rl-setup button, .rl-appr-add button, .rl-flag-act, button.rl-flag-st.backup, .rl-rc-retry) > :is(.ic, .rl-i) { width:12px; height:12px; margin:0; }
+/* primary */
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-actions button, .rl-sign-acts button, .rl-setup button, .rl-flag-act):is(.go, .rl-rr-sign, .rl-rr-merge, [data-act="saveSource"], .rl-flag-act:not(.quiet)),
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) .rl-appr-add button { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:600; }
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-actions button, .rl-sign-acts button, .rl-setup button, .rl-flag-act):is(.go, .rl-rr-sign, .rl-rr-merge, [data-act="saveSource"], .rl-flag-act:not(.quiet)):hover,
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) .rl-appr-add button:hover { background:var(--accent); border-color:var(--accent); color:var(--on-accent); filter:brightness(1.1); }
+/* toggled on (Advanced, an open Rollback, a queued release): the secondary look, outlined in accent */
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-adv):is(.on.on, .queued.queued) { border-color:var(--accent); background:var(--accent-soft); color:var(--text); }
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) .rl-rc-retry.on.on { color:var(--subtext); cursor:default; background:var(--surface1); border-color:var(--border); }
+/* danger, armed: the second click does it (yellow); destructive ones are red */
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-actions button, .rl-rr-cancel):is(.armed.armed, .armed.armed:hover) { background:rgba(251,191,36,.16); border-color:rgba(251,191,36,.7); color:var(--yellow,#fbbf24); filter:none; }
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-actions button, .rl-rr-cancel):is(.armed-bad.armed-bad, .danger.danger, .armed-bad.armed-bad:hover, .danger.danger:hover) { background:rgba(248,113,113,.16); border-color:rgba(248,113,113,.7); color:var(--red); filter:none; }
+/* locked / disabled: the same look, dimmed */
+:is(#rl-overlay, #rl-sign-overlay, #rl-manual-overlay) :is(.rl-hist-btn, .rl-rel-actions button, .rl-flag-act):is(.locked, :disabled, [aria-disabled="true"]) { opacity:.5; cursor:not-allowed; filter:none; }
+/* placement only */
+.rl-hist > .rl-hist-btn { align-self:flex-start; } /* never stretched across the page */
+.rl-rc-why .rl-rc-retry { margin:-4px 0 -4px 8px; }
+.rl-hist-btn.danger { margin-top:8px; }
+.rl-rel-join button { margin-left:6px; }
+/* row buttons: the secondary look, compact so a row keeps its height */
+.rl-row-btn { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 8px; border-radius:var(--r-sm,6px); font-size:11px; font-weight:500; background:var(--surface1); color:var(--text); }
+.rl-row-btn:hover { background:var(--surface2); border-color:var(--border-hi); }
+.rl-row-btn > .rl-i { width:11px; height:11px; margin:0; }
+/* chips: one 18px pill; a tone tints its text, the fill follows it */
+:is(.rl-rc-chip, .rl-rc-pill, .rl-rr-chip, .rl-item) { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; box-sizing:border-box; height:18px; padding:0 7px; border:0; border-radius:999px;
+  background:var(--surface1); color:var(--subtext); font-size:10.5px; font-weight:500; line-height:1; white-space:nowrap; text-decoration:none; }
+:is(.rl-rc-chip, .rl-rr-chip, .rl-item):is(.ok, .bad, .warn, .run):not(.rl-eta) { background:color-mix(in srgb, currentColor 14%, transparent); }
+:is(.rl-rc-chip, .rl-rr-chip, .rl-item) > :is(.ic, .rl-i) { width:10px; height:10px; margin:0; }
+.rl-rc-pill.demo { margin:0 auto 0 6px; color:var(--subtext); border:0; }
+#rl-tlx-tip .tt-state { display:inline-flex; align-items:center; height:18px; box-sizing:border-box; padding:0 7px; font-size:10.5px; font-weight:500; line-height:1; }
+/* prompts: the icon in the ring follows the ring's size */
+.rl-sign-icon { font-size:22px; color:var(--text); }
+.rl-sign-icon .rl-i, .rl-hist-empty-icon .rl-i { margin:0; }
+.rl-sign-box h2 { font-size:15px; font-weight:600; }
+.rl-hist-empty-icon { color:var(--subtext); }
