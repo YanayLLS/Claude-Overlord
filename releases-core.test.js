@@ -427,4 +427,15 @@ assert.strictEqual(age('garbage', now), '');
   assert.strictEqual(deployJobsState([J('clickup-released / ClickUp status', 'in_progress')]), 'running', 'only bookkeeping jobs: not done');
   assert.strictEqual(deployJobsState([]), 'running');
 }
+// release: false — on the board (its compares are read) but never in a release plan or the release targets
+{
+  const { releasePlan: plan, releaseTargets: targets } = require('./releases-core');
+  const cfg = { envs: ['dev', 'prod'], repos: [{ repo: 'o/web', branches: { dev: 'dev', prod: 'master' }, promote: ['dev', 'prod'] },
+    { repo: 'o/app', release: false, branches: { dev: 'dev', prod: 'master' }, promote: ['dev', 'prod'] }] };
+  assert.deepStrictEqual(validateConfig(cfg), []);
+  assert.deepStrictEqual(plan(cfg, ['prod']).prs.map(p => p.repo), ['o/web']);
+  assert.strictEqual(requestsFor(cfg).compares.length, 2);
+  assert.deepStrictEqual(targets({ envs: ['dev', 'prod'], repos: [cfg.repos[1]] }), []);
+  assert.ok(validateConfig({ ...cfg, repos: [{ ...cfg.repos[1], release: 'no' }] }).length);
+}
 console.log('releases-core: all passed');

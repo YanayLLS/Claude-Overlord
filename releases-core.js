@@ -81,6 +81,7 @@ function validateConfig(cfg) {
         if (!hasCaptureGroup(l && l.match)) out.push(`${at}.live.${env}.match: must be a regex with one (capture group) for the sha`);
       }
     }
+    if (r.release != null && typeof r.release !== 'boolean') out.push(`${at}.release: must be true or false (false = shown on the board, never part of a release)`);
     if (r.standalone != null && typeof r.standalone !== 'boolean') out.push(`${at}.standalone: must be true or false (true = its own PRs into prod need one teammate's approval, not a signed release)`);
     if (r.health != null) {
       if (typeof r.health !== 'object' || Array.isArray(r.health)) out.push(`${at}.health: must be an object`);
@@ -255,7 +256,7 @@ function buildTimeline(cfg, history, env, deploys) {
 // Envs a release can target: every env some repo promotes INTO, in board order.
 function releaseTargets(cfg) {
   const to = new Set();
-  for (const r of cfg.repos) if (r.branches) for (const p of promotePairs(r)) to.add(p.to);
+  for (const r of cfg.repos) if (r.branches && r.release !== false) for (const p of promotePairs(r)) to.add(p.to);
   return cfg.envs.filter(e => to.has(e));
 }
 
@@ -265,7 +266,7 @@ function releaseTargets(cfg) {
 function releasePlan(cfg, envs) {
   const prs = [], manual = [];
   for (const r of cfg.repos) {
-    if (!r.branches) continue;
+    if (!r.branches || r.release === false) continue; // release: false = on the board only (the native apps, for now)
     const label = r.label || r.repo.split('/')[1];
     for (const env of envs) {
       const steps = promotePairs(r).filter(p => p.to === env);
