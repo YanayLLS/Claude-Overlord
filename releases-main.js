@@ -2160,5 +2160,35 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   const holdOn = (repo, branch) => liveHolds(state.holds || []).find(h => h.by !== state.holdsMe && h.repo.toLowerCase() === String(repo).toLowerCase() && h.branch === branch);
   // The repos the release map promotes (as releases-ui's releaseRepos): every teammate watches these for PRs.
   const releaseRepos = () => (state.config && Array.isArray(state.config.repos) ? [...new Set(state.config.repos.filter(r => r.branches).map(r => r.repo))] : []);
-  return { handle, mergeGate, isProdPr, flush, holdOn, releaseRepos };
+  // What an agent can do with releases (mcp/tools.js release_*): read where things stand, and press the same buttons.
+  const agentApi = {
+    status() {
+      const c = state.rc || {};
+      const items = ((state.history && state.history.items) || []).filter(m => m.status === 'pending' || inFlightRel(m) || m.status === 'deploy-failed').slice(0, 6);
+      return {
+        candidate: c.level ? { level: c.level, headline: c.headline, released: !!c.released, run: c.evidence && c.evidence.runUrl, shas: Object.fromEntries(Object.entries(c.shas || {}).map(([r, v]) => [r, v.sha.slice(0, 9)])) } : (c.error ? { error: c.error } : null),
+        releases: items.map(m => ({ id: m.id, env: m.env || 'prod', status: m.status, repos: m.repos.map(r => ({ label: r.label, repo: r.repo, pr: r.pr && r.pr.number, merged: !!r.mergeSha, closed: !!r.closed,
+          signers: r.signers || [], deploy: r.deploy ? { state: r.deploy.state, url: r.deploy.url || null } : null, backMerge: r.backMerge || null })) })),
+        releaseAll: state.releaseAll ? { running: !!state.releaseAll.running, id: state.releaseAll.id, status: state.releaseAll.status, detail: state.releaseAll.detail, wave: state.releaseAll.wave, waves: state.releaseAll.waves } : null,
+      };
+    },
+    open: () => releaseRc(),
+    sign: () => signRelease(),
+    all: (id) => releaseAll(id || null),
+    // re-run every failed deploy of a release (a full re-run: a startup failure has no jobs to re-run)
+    async rerunFailed(id) {
+      const m = ((state.history && state.history.items) || []).find(x => x.id === id);
+      if (!m) throw new Error(`no release ${id}`);
+      const out = [];
+      for (const r of m.repos.filter(x => x.deploy && x.deploy.state === 'failure' && x.deploy.url)) {
+        const run = (String(r.deploy.url).match(/\/runs\/(\d+)/) || [])[1];
+        if (!run) continue;
+        const res = await ghJson(['api', '-X', 'POST', `repos/${r.repo}/actions/runs/${run}/rerun`]);
+        out.push(`${r.label}: ${res.error && !/Unexpected end|JSON/i.test(res.error) ? 'failed: ' + res.error : 're-running ' + r.deploy.url}`);
+      }
+      reconcileHistory().catch(() => {});
+      return out.length ? out : ['no failed deploys in ' + id];
+    },
+  };
+  return { handle, mergeGate, isProdPr, flush, holdOn, releaseRepos, agentApi };
 };

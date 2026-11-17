@@ -49,6 +49,31 @@ const PR_SCHEMAS = [
   { name: 'pr_release', description: 'Hand back a PR you claimed with pr_claim, once it is merged or you stop working on it, so Overlord can send another agent if it goes red again.',
     inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
 ];
+// Releases (releases-main.js agentApi): the Releases board's own buttons, for an agent the user asked to run a release.
+const RELEASE_SCHEMAS = [
+  { name: 'release_status', description: 'Where releases stand: the nightly release candidate (grade, headline, whether it is live, the commits it pins), the open and in-flight releases (each repo: PR, merged, signers, deploy state and run url, back-merge) and Release all progress. Read this first.',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'release_open', description: 'Open the release candidate release (alpha + prod PRs pinned at the tested commits), as the card Release button button. Only when the user asked to release.',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'release_sign', description: 'Sign the pending release as the user (approve its prod PRs, its alpha PRs and back-merges). It counts as the user signature: only when the user explicitly asked you to sign.',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'release_all', description: 'Start or resume Release all for a release: merges wave by wave and waits for the deploys of each wave. It refuses an unsigned release, a hold or a red check.',
+    inputSchema: { type: 'object', properties: { id: str('Release id, e.g. 2026-11-17-03 (from release_status). Omit for the current run.') } } },
+  { name: 'release_rerun_failed', description: 'Re-run every failed deploy of a release (a full re-run of each failed deploy workflow run). Then release_all with the same id picks up where it stopped once they are green.',
+    inputSchema: { type: 'object', properties: { id: str('Release id') }, required: ['id'] } },
+];
+async function releaseCall(api, name, args = {}) {
+  try {
+    if (!api) return fail('Releases are unavailable.');
+    if (name === 'release_status') return text(JSON.stringify(api.status(), null, 1));
+    if (name === 'release_open') { await api.open(); return text('Opening the release: check release_status in a minute.'); }
+    if (name === 'release_sign') { await api.sign(); return text('Signed. release_status shows the signers.'); }
+    if (name === 'release_all') { api.all(args.id).catch(() => {}); return text('Release all started: follow it with release_status.'); }
+    if (name === 'release_rerun_failed') { if (!args.id) return fail('release_rerun_failed: "id" is required'); return text((await api.rerunFailed(args.id)).join(String.fromCharCode(10))); }
+    return fail(`Unknown tool: ${name}`);
+  } catch (e) { return fail(e && e.message ? e.message : String(e)); }
+}
+
 // close_self (main.js closeSelf): the agent asks to be closed once its current turn ends.
 const SELF_SCHEMAS = [
   { name: 'close_self', description: 'Close yourself (this agent) in Overlord when your current turn ends: your item leaves the agent list and your session stops (its transcript stays on disk). Call it only when the user asked you to close when done, as your last action.',
@@ -117,4 +142,4 @@ function terminalCall(terminals, name, args = {}) {
   } catch (e) { return fail(e && e.message ? e.message : String(e)); }
 }
 
-module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, prCall, visualCall, createDispatcher, terminalCall };
+module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, RELEASE_SCHEMAS, releaseCall, prCall, visualCall, createDispatcher, terminalCall };
