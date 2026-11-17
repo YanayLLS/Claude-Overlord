@@ -496,7 +496,8 @@ body.pr-open #pr-fire .pr-fire-cta { display: none; }
 #pr-dropdown .pr-main { grid-column: 3; grid-row: 1 / span 2; }
 #pr-dropdown .pr-main .pr-approve { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pr-dropdown .pr-l2 { grid-column: 2; min-height: 16px; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
-#pr-dropdown .pr-l2-tail { display: flex; gap: 10px; min-width: 0; margin-left: 4px; }
+#pr-dropdown .pr-l2-tail { display: flex; flex: 1; gap: 10px; min-width: 0; margin-left: 4px; }
+#pr-dropdown .pr-l2-tail > .pr-refs { margin-right: auto; }
 #pr-dropdown .pr-l2-tail:first-child { margin-left: 0; }
 #pr-dropdown .pr-l2-tail > * { flex-shrink: 0; }
 #pr-dropdown .pr-l2-tail > .pr-refs { flex-shrink: 1; min-width: 0; }
