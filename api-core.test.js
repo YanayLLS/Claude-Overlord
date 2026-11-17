@@ -85,6 +85,22 @@ test('pr_auto_merge: all of mine by default, explicit urls, cancel, rejects non-
   await assert.rejects(api.call('pr_auto_merge', { urls: ['https://evil.com/x'] }), { status: 400 });
 });
 
+test('pr_list / pr_merge / pr_approve / pr_fix / pr_hide reach the host; a host { error } is 409', async () => {
+  const calls = [];
+  const api = createApi(fakeHost({
+    prList: (o) => (calls.push(['list', o]), { prs: [] }),
+    prMerge: async (pr) => ({ error: 'Blocked: ' + pr }), prApprove: async (pr) => ({ approved: pr }),
+    prFix: async () => ({ agentId: 3 }), prHide: async (x) => (calls.push(['hide', x]), { url: x.pr, hidden: x.how }),
+  }));
+  assert.deepStrictEqual(await api.call('pr_list', {}), { prs: [] });
+  await assert.rejects(api.call('pr_merge', { pr: 'o/r#1' }), { status: 409, message: 'Blocked: o/r#1' });
+  assert.deepStrictEqual(await api.call('pr_approve', { pr: 'o/r#2' }), { approved: 'o/r#2' });
+  assert.deepStrictEqual(await api.call('pr_fix', { pr: 'o/r#3' }), { agentId: 3 });
+  await api.call('pr_hide', { pr: 'o/r#4', how: 'mute' });
+  await assert.rejects(api.call('pr_hide', { pr: 'o/r#4', how: 'delete' }), { status: 400 });
+  assert.deepStrictEqual(calls, [['list', { mine: false }], ['hide', { pr: 'o/r#4', how: 'mute' }]]);
+});
+
 test('publish numbers events, keeps them for replay, filters by type', () => {
   const api = createApi(fakeHost());
   api.publish({ type: 'status', id: 1, status: 'active' });

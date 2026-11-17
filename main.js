@@ -3113,23 +3113,33 @@ function runAutoMerge(prs, failedRepos = []) {
   if (keep.length !== armed.length) { settings.prAutoMerge = keep; saveState(); }
 }
 
-function mergePrNow(url) { // → a promise that settles once the merge call is done
+function mergePrNow(url) { // → a promise of the error text, null once merged
   // prod release PRs merge only with two release approvers' signatures (SOC2)
   return releases.mergeGate(url).then((gate) => new Promise((done) => {
-    if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return done(); }
+    if (!gate.ok) { const error = 'Blocked: ' + gate.reason; send({ type: 'prActionError', url, error }); return done(error); }
     if (gate.warn) send({ type: 'toast', text: gate.warn });
     execFile('gh', ['pr', 'merge', url, '--merge'],
       { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-        done();
-        if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
+        const error = err ? ghErr({ message: ((stderr || '') + err.message).trim() }) : null;
+        done(error);
+        if (error) { send({ type: 'prActionError', url, error }); return; }
         pollPRs(); // merged PR drops from the list
       });
-  })).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
+  })).catch((e) => { const error = 'Merge check failed: ' + (e.message || e); send({ type: 'prActionError', url, error }); return error; });
+}
+function approvePrNow(url) { // → a promise of the error text, null once approved
+  return new Promise((done) => execFile('gh', ['pr', 'review', url, '--approve'],
+    { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+      const error = err ? ghErr({ message: ((stderr || '') + err.message).trim() }) : null;
+      done(error);
+      if (error) { send({ type: 'prActionError', url, error }); return; }
+      pollPRs(); // approved PR now drops from the list
+    }));
 }
 
 // Every caller (timers, the watch, ~15 PR actions) shares one poll: while one runs, more requests just queue a single
 // re-run after it, so a burst of clicks or overlapping timers can't stack GraphQL polls.
-let prPolling = null, prPollAgain = false;
+let prPolling = null, prPollAgain = false, prExtra = []; // prExtra: drafts and others' approved PRs (the menu's "All open"), for pr_list
 function pollPRs() {
   if (prPolling) { prPollAgain = true; return prPolling; }
   return prPolling = (async () => {
@@ -3191,6 +3201,7 @@ async function pollPRsOnce() {
   settings.prArchived = (settings.prArchived || []).filter(k => currentKeys.includes(k));
   prSeenSeeded = true;
   settings.prCache = { prs, failedRepos };
+  prExtra = res.extra || [];
   saveState();
   // Show the list now; "commits behind" and the checks ETA take a call per PR, so they follow.
   send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
@@ -3526,7 +3537,54 @@ const prClaimsApi = {
     if (!prRelease(prClaims(), key, a.sessionId)) return { text: 'You did not hold this PR.' };
     saveState(); return { text: 'Released.' };
   },
+  ...prActions(),
 };
+// The PRs panel's buttons for agents (mcp pr_*) and the local API. Each → a result, or { error }.
+function prActions() {
+  const known = () => [...((settings.prCache || {}).prs || []), ...prExtra.map(p => ({ ...p, extra: true }))];
+  // A PR Overlord lists: open, in a watched repo. One just opened isn't polled yet, so poll once before giving up.
+  async function find(ref) {
+    const key = prClaimKey(ref);
+    if (!key) return { error: `Not a PR: "${ref}". Pass its url or owner/repo#number.` };
+    let p = known().find(x => String(x.url).toLowerCase() === key);
+    if (!p) { await pollPRs(); p = known().find(x => String(x.url).toLowerCase() === key); }
+    return p ? { p } : { error: `${ref} is not in Overlord's PR list: it is closed, or its repo is not watched (PR settings).` };
+  }
+  const row = (p) => {
+    const holder = prClaimFor(p.url);
+    return { url: p.url, repo: p.repo, number: p.number, title: p.title, author: p.author, mine: !!p.mine, draft: !!p.isDraft,
+      checks: p.checks, failed: p.failed || 0, mergeable: p.mergeable, mergeState: p.mergeState, reviewDecision: p.reviewDecision,
+      reviewRequested: !!p.requested, behindBy: p.behindBy ?? null, autoMerge: !!p.autoMerge, autoPhase: p.autoPhase || null,
+      hidden: p.archived ? 'archived' : p.muted ? 'muted' : p.snoozed ? 'snoozed' : null, heldBy: holder ? holder.agentName || `agent ${holder.id}` : null };
+  };
+  return {
+    list: ({ mine } = {}) => ({ prs: known().filter(p => !mine || p.mine).map(row) }),
+    async autoMerge(refs, on) {
+      const urls = [];
+      for (const ref of refs) {
+        const r = await find(ref); if (r.error) return r;
+        if (on && r.p.extra && r.p.isDraft) return { error: `${r.p.url} is a draft: mark it ready (gh pr ready) first.` };
+        if (on && r.p.isCrossRepository) return { error: `${r.p.url} comes from a fork: Overlord can't push fixes to it.` };
+        urls.push(r.p.url);
+      }
+      return { urls: setPrAutoMerge(urls, on) };
+    },
+    async merge(ref) { const r = await find(ref); if (r.error) return r; const error = await mergePrNow(r.p.url); return error ? { error } : { merged: r.p.url }; },
+    async approve(ref) { const r = await find(ref); if (r.error) return r; const error = await approvePrNow(r.p.url); return error ? { error } : { approved: r.p.url }; },
+    async fix(ref) {
+      const r = await find(ref); if (r.error) return r;
+      const id = await fixPr(r.p, { quiet: true });
+      if (typeof id !== 'number') return { error: (id && id.error) || 'The fix agent did not start.' };
+      const a = agents.get(id); return { agentId: id, agent: (a && a.agentName) || null };
+    },
+    async hide(ref, how, undo, hours) {
+      if (!['archive', 'mute', 'snooze'].includes(how)) return { error: 'how must be archive, mute or snooze' };
+      const r = await find(ref); if (r.error) return r;
+      handleIpc({ type: (undo ? 'un' + how : how) + 'Pr', key: r.p.key, untilMs: Date.now() + (Number(hours) > 0 ? Number(hours) : 24) * 3600e3 });
+      return { url: r.p.url, hidden: undo ? null : how };
+    },
+  };
+}
 
 // Fix chat (the chat's ⋯ menu): the chat as shown and its terminal (pictured offscreen from the renderer's buffer
 // HTML, so the user sees nothing) are saved, and a new agent in Overlord's repo finds why they differ and fixes the
@@ -5677,11 +5735,7 @@ function handleIpc(msg) {
     case 'approvePr': {
       const url = msg.url;
       if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
-      execFile('gh', ['pr', 'review', url, '--approve'],
-        { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-          if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
-          pollPRs(); // approved PR now drops from the list
-        });
+      approvePrNow(url);
       break;
     }
     case 'pollPrsNow': pollPRs(); break;
@@ -6011,6 +6065,8 @@ function apiHost() {
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
     repoCheck: (repo) => repoCheck(repo),
     prAutoMerge: ({ urls, on }) => ({ urls: setPrAutoMerge(urls || prAutoMergeable((settings.prCache || {}).prs).map(p => p.url), on) }),
+    prList: (o) => prClaimsApi.list(o), prMerge: (pr) => prClaimsApi.merge(pr), prApprove: (pr) => prClaimsApi.approve(pr),
+    prFix: (pr) => prClaimsApi.fix(pr), prHide: ({ pr, how, undo, hours }) => prClaimsApi.hide(pr, how, undo, hours),
     prWatch: () => { const c = settings.prSettings || {}; return { enabled: !!c.enabled, repos: [...(c.repos || [])], locked: releases.releaseRepos() }; },
     setPrWatch: ({ enabled, repos }) => savePrSettings({ ...(settings.prSettings || {}), enabled, repos }),
     chatList: () => {

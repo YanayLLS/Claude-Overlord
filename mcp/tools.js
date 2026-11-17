@@ -48,6 +48,19 @@ const PR_SCHEMAS = [
     inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
   { name: 'pr_release', description: 'Hand back a PR you claimed with pr_claim, once it is merged or you stop working on it, so Overlord can send another agent if it goes red again.',
     inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
+  // The PRs panel's buttons (main.js prActions): an agent the user asked to handle PRs.
+  { name: 'pr_list', description: 'Open PRs in the repos Overlord watches, as its PRs panel lists them: checks, mergeable state, review decision, auto-merge phase, hidden state and the agent holding each. Read this first.',
+    inputSchema: { type: 'object', properties: { mine: { type: 'boolean', description: 'Only the user\'s own PRs' } } } },
+  { name: 'pr_auto_merge', description: 'Arm Fix & merge on PRs, as the row\'s Auto-merge: Overlord keeps each one green (sends a fix agent on red checks or conflicts, updates a branch that is behind) and merges it once green, release gate and holds included. Works on a PR you just opened with gh pr create. on false cancels.',
+    inputSchema: { type: 'object', properties: { prs: { type: 'array', items: { type: 'string' }, description: 'PR urls or owner/repo#number' }, on: { type: 'boolean', description: 'Default true' } }, required: ['prs'] } },
+  { name: 'pr_merge', description: 'Merge a PR now, as the row\'s Merge button (the release gate still applies). Only when the user asked you to merge.',
+    inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
+  { name: 'pr_approve', description: 'Approve a PR on GitHub as the user, as the row\'s Approve button. Only when the user asked you to approve it.',
+    inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
+  { name: 'pr_fix', description: 'Send a new agent to fix a PR\'s failing checks or conflicts, as the row\'s Fix button. If an agent already holds the PR, that one is named instead.',
+    inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
+  { name: 'pr_hide', description: 'Archive, mute or snooze a PR in Overlord\'s PRs panel (GitHub is untouched). undo shows it again.',
+    inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number'), how: { type: 'string', enum: ['archive', 'mute', 'snooze'] }, undo: { type: 'boolean' }, hours: { type: 'number', description: 'Snooze length, default 24' } }, required: ['pr', 'how'] } },
 ];
 // Releases (releases-main.js agentApi): the Releases board's own buttons, for an agent the user asked to run a release.
 const RELEASE_SCHEMAS = [
@@ -80,10 +93,25 @@ const SELF_SCHEMAS = [
     inputSchema: { type: 'object', properties: {} } },
 ];
 
-function prCall(claims, agentId, name, args = {}) {
-  if (!claims) return fail('PR claims are unavailable.');
-  const r = (name === 'pr_claim' ? claims.claim : claims.release)(agentId, args.pr);
-  return r.error ? fail(r.error) : text(r.text);
+async function prCall(claims, agentId, name, args = {}) {
+  try {
+    if (!claims) return fail('PRs are unavailable.');
+    const pr = () => { if (typeof args.pr !== 'string' || !args.pr) throw new Error(`${name}: "pr" is required`); return args.pr; };
+    const run = {
+      pr_claim: () => claims.claim(agentId, args.pr),
+      pr_release: () => claims.release(agentId, args.pr),
+      pr_list: () => claims.list({ mine: args.mine === true }),
+      pr_auto_merge: () => { if (!Array.isArray(args.prs) || !args.prs.length) throw new Error('pr_auto_merge: "prs" is required'); return claims.autoMerge(args.prs, args.on !== false); },
+      pr_merge: () => claims.merge(pr()),
+      pr_approve: () => claims.approve(pr()),
+      pr_fix: () => claims.fix(pr()),
+      pr_hide: () => claims.hide(pr(), args.how, args.undo === true, args.hours),
+    }[name];
+    if (!run) return fail(`Unknown tool: ${name}`);
+    const r = await run();
+    if (r.error) return fail(r.error);
+    return text(r.text !== undefined ? r.text : JSON.stringify(r, null, 1));
+  } catch (e) { return fail(e && e.message ? e.message : String(e)); }
 }
 
 function visualCall(args = {}) {

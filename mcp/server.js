@@ -47,7 +47,7 @@ async function handleRpc(msg, resolveActions, agentId, getTerminals, prClaims, c
       return ok(id, { content: [{ type: 'text', text: 'You will be closed when this turn ends. Finish your reply now.' }] });
     }
     if (name.startsWith('release_')) return ok(id, await releaseCall(releases, name, (params || {}).arguments || {}));
-    if (name.startsWith('pr_')) return ok(id, prCall(prClaims, agentId, name, (params || {}).arguments || {}));
+    if (name.startsWith('pr_')) return ok(id, await prCall(prClaims, agentId, name, (params || {}).arguments || {}));
     if (name.startsWith('terminal_')) return ok(id, terminalCall(getTerminals(), name, (params || {}).arguments || {}));
     const actions = resolveActions(agentId);
     if (!actions) {

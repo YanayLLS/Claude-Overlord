@@ -51,11 +51,11 @@ test('initialize returns protocol version and tools capability', async () => {
   });
 });
 
-test('tools/list returns the eight browser tools, three terminal tools, show_visual, the two PR claim tools, close_self and the five release tools', async () => {
+test('tools/list returns the eight browser tools, three terminal tools, show_visual, the eight PR tools, close_self and the five release tools', async () => {
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 21);
+    assert.strictEqual(json.result.tools.length, 27);
     assert.ok(["release_status", "release_open", "release_sign", "release_all", "release_rerun_failed"].every(n => json.result.tools.some(t => t.name === n)));
   });
 });
@@ -181,6 +181,30 @@ test("pr_claim and pr_release reach the claims host with the calling agent's id"
     assert.match(second.content[0].text, /already working/);
     assert.strictEqual((await call(t1, 'pr_release')).content[0].text, 'Released.');
     assert.deepStrictEqual(seen, [['claim', 1, 'o/r#5'], ['claim', 2, 'o/r#5'], ['release', 1, 'o/r#5']]);
+  }, () => ACTIONS, claims);
+});
+
+test('PR panel tools reach the PR host and turn { error } into isError', async () => {
+  const seen = [];
+  const claims = {
+    list: (o) => (seen.push(['list', o]), { prs: [{ url: 'u1' }] }),
+    autoMerge: async (prs, on) => (seen.push(['auto', prs, on]), { urls: prs }),
+    merge: async (pr) => (seen.push(['merge', pr]), { error: 'Blocked: needs two signatures' }),
+    approve: async (pr) => ({ approved: pr }), fix: async (pr) => ({ agentId: 9 }),
+    hide: async (pr, how, undo, hours) => (seen.push(['hide', pr, how, undo, hours]), { url: pr, hidden: how }),
+  };
+  await withServer(async (server) => {
+    const t = server.mintToken(1);
+    const call = (name, args) => rpc(server, t, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name, arguments: args } }).then((r) => r.json.result);
+    const tools = (await rpc(server, t, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })).json.result.tools.map((x) => x.name);
+    assert.ok(['pr_list', 'pr_auto_merge', 'pr_merge', 'pr_approve', 'pr_fix', 'pr_hide'].every((n) => tools.includes(n)));
+    assert.deepStrictEqual(JSON.parse((await call('pr_list', { mine: true })).content[0].text), { prs: [{ url: 'u1' }] });
+    await call('pr_auto_merge', { prs: ['o/r#1'] });
+    const m = await call('pr_merge', { pr: 'o/r#2' });
+    assert.strictEqual(m.isError, true); assert.match(m.content[0].text, /two signatures/);
+    assert.strictEqual((await call('pr_approve', {})).isError, true); // pr required
+    await call('pr_hide', { pr: 'o/r#3', how: 'snooze', hours: 2 });
+    assert.deepStrictEqual(seen, [['list', { mine: true }], ['auto', ['o/r#1'], true], ['merge', 'o/r#2'], ['hide', 'o/r#3', 'snooze', false, 2]]);
   }, () => ACTIONS, claims);
 });
 

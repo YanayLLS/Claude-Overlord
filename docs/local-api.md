@@ -91,6 +91,11 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `pr_repos_add` | `repos` (`owner/name` each) | the watchlist; also turns PR notifications on. Already-watched repos are skipped (case-insensitive) |
 | `pr_repos_remove` | `repos` | the watchlist. 409 for a locked repo, 404 for one not watched |
 | `pr_auto_merge` | `urls?` (PR urls), `on?` (default `true`) | `{ urls }` changed. Arms Fix & merge, as the PR row's Auto-merge; no `urls` = every open PR of yours that can be armed (the panel's "Auto-merge all"). `on: false` cancels |
+| `pr_list` | `mine?` | `{ prs }`: each open PR in the watched repos (drafts and others' approved ones too) with `url`, `repo`, `number`, `title`, `author`, `mine`, `draft`, `checks`, `failed`, `mergeable`, `mergeState`, `reviewDecision`, `reviewRequested`, `behindBy`, `autoMerge`, `autoPhase`, `hidden` (`archived` / `muted` / `snoozed` / `null`), `heldBy` (the agent holding it) |
+| `pr_merge` | `pr` (url or `owner/repo#N`) | `{ merged }`. The row's Merge; 409 with the reason when the release gate or GitHub refuses, or the PR isn't listed (closed, or its repo isn't watched) |
+| `pr_approve` | `pr` | `{ approved }`. Approves on GitHub as the user; 409 when GitHub refuses |
+| `pr_fix` | `pr` | `{ agentId, agent }`: the row's Fix, an agent that pushes fixes until checks are green. If one already holds the PR, that one |
+| `pr_hide` | `pr`, `how` (`archive` / `mute` / `snooze`), `undo?`, `hours?` (snooze, default 24) | `{ url, hidden }`. In Overlord only; GitHub is untouched |
 | `webhook_list` | | `{ webhooks }` (without secrets) |
 | `webhook_remove` | `id` | `{ ok: true }` |
 
