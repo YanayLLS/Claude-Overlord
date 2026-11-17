@@ -262,6 +262,18 @@ test('screenChoice: the CLI\'s unnumbered dialogs (folder trust, /login) as a ti
   assert.strictEqual(screenChoice(['some reply', '─'.repeat(60), '❯ ', '─'.repeat(60), '  ? for shortcuts']), null); // the idle prompt box
 });
 
+// 2026-11-17: /mcp (">" pointer, rows grouped under headings) read as a /login card: no options, its help link an "Open link" button.
+test('screenChoice: /mcp\'s server list, its ">" pointer and its sections', () => {
+  const { screenChoice } = require('./chat-core');
+  const mcp = ['─'.repeat(60), '  Manage MCP servers', '  5 servers', '', '    User MCPs (C:\\Users\\me\\.claude.json)', '  > √   clickup                   67 tools', '    ‼   frontline-analytics       needs authentication', '',
+    '    claude.ai', '    √   claude.ai Claude Docs     8 tools', '', '    Built-in MCPs (always available)', '    √   overlord-browser          21 tools', '', '  https://code.claude.com/docs/en/mcp for help', ' ↑/↓ to navigate · Enter to confirm · Esc to cancel'];
+  assert.deepStrictEqual(screenChoice(mcp), {
+    title: 'Manage MCP servers', lines: ['5 servers', 'https://code.claude.com/docs/en/mcp for help'],
+    options: ['√   clickup                   67 tools', '‼   frontline-analytics       needs authentication', '√   claude.ai Claude Docs     8 tools', '√   overlord-browser          21 tools'],
+    focus: 0, sections: [{ title: 'User MCPs (C:\\Users\\me\\.claude.json)', at: 0 }, { title: 'claude.ai', at: 2 }, { title: 'Built-in MCPs (always available)', at: 3 }],
+  });
+});
+
 test('contextUsage: /context output as model, total and categories (the glyph grid dropped)', () => {
   const { contextUsage } = require('./chat-core');
   const t = 'Context Usage\n⛀ ⛁ ⛀   Opus 5.5\n⛀ ⛶ ⛶   claude-opus-5-5\n⛶ ⛶ ⛶   43.3k/1m tokens (4%)\n⛶ ⛶ ⛶\n⛶ ⛶ ⛶   Estimated usage by category\n⛶ ⛶ ⛶   ⛁ System prompt: 3.1k tokens (0.3%)\n⛶ ⛝ ⛝   ⛁ Skills: 9.6k tokens (1.0%)\n            ⛶ Free space: 923.7k (92.4%)\n            ⛝ Autocompact buffer: 33k tokens (3.3%)\n\nAuto-compact window: 1m tokens\n\nLoaded\n├ a: 156 tokens';

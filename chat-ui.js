@@ -674,6 +674,7 @@
   function choiceHtml(sc) {
     const ef = effortOf(sc);
     if (ef) return `<div class="card perm choice effort"><div class="card-h">${ICON.shield}<span>Effort</span></div><div class="btns">${EFFORTS.map((n, k) => `<button type="button" data-effort="${k}" class="${k === ef.level ? 'primary' : ''}">${n}<kbd>${k + 1}</kbd></button>`).join('')}</div><div class="btns"><button type="button" data-effort-ultra>${ef.ultra ? ICON.check : ''}Ultracode ${ef.ultra ? 'on' : 'off'}<kbd>Tab</kbd></button><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div></div>`;
+    if (sc.sections) return menuListHtml(sc);
     const yes = sc.options.findIndex(o => /^yes\b/i.test(o)), prim = yes >= 0 ? yes : 0;
     const label = (o) => /trust this folder/i.test(o) ? 'Trust' : /^no,?\s*exit$/i.test(o) ? "Don't trust" : o;
     // /login: the sign-in link the CLI prints (Open is the primary, for when no browser opened by itself), and a field
@@ -686,6 +687,16 @@
     const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : (/^([a-z]:[\\/]|~|\/)/i.test(l) ? (() => { const parts = l.split(/[\\/]/), last = parts.pop(); return `<p class="fname" title="${escH(l)}"><b>${escH(last)}</b></p><p class="mono path" title="${escH(l)}">${escH((p => p.length > 4 ? [...p.slice(0, 2), '…', ...p.slice(-2)] : p)([...parts.filter(Boolean), last]).join('\\'))}</p>`; })() : `<p>${escH(l)}</p>`)).join('');
     const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled aria-label="Submit code">Submit<kbd>Enter</kbd></button></div>' : '';
     return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${login ? 'Sign in' : escH(sc.title)}</span></div>${lines}${btns ? `<div class="btns">${btns}</div>` : ''}${field}${cancel}</div>`;
+  }
+  // A sectioned list menu (/mcp): headings, each row's status glyph in its colour, name, and its status column muted.
+  const GLYPH = (g) => /^[√✓✔]$/.test(g) ? 'ok' : /^[‼!⚠]$/.test(g) ? 'warn' : /^[✗✘×]$/.test(g) ? 'bad' : '';
+  function menuListHtml(sc) {
+    const row = (o, k) => {
+      let [g, name, ...meta] = o.split(/\s{2,}/); if (!GLYPH(g)) { meta = [name, ...meta].filter(Boolean); name = g; g = ''; }
+      return `<button type="button" data-choice="${k}" class="${k === sc.focus ? 'focus' : ''}">${g ? `<i class="mg ${GLYPH(g)}">${escH(g)}</i>` : ''}<span class="ch-t"><b>${escH(name || '')}</b></span>${meta.length ? `<small class="mm">${escH(meta.join(' '))}</small>` : ''}</button>`;
+    };
+    const list = sc.options.map((o, k) => (sc.sections.filter(s => s.at === k).map(s => `<p class="ml-sec">${escH(s.title)}</p>`).join('')) + row(o, k)).join('');
+    return `<div class="card ask menu-list"><div class="card-h">${ICON.shield}<span>${escH(sc.title)}</span></div>${sc.lines.map(l => `<p class="ml-sub">${escH(l).replace(/https?:\/\/[^\s&<]+/g, u => `<a href="${u}">${u}</a>`)}</p>`).join('')}<div class="choices">${list}<button type="button" class="other" data-choice="-1"><span>Cancel</span><kbd>Esc</kbd></button></div></div>`;
   }
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
@@ -1063,7 +1074,7 @@
     return undoRow + list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
       const queued = busy && !p.held;
-      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued || (p.sentAt && /^\//.test(p.text || '')) ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
     }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
