@@ -385,7 +385,12 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const key = `${c.nightlyId}:${c.evidence.runId}`;
     if (state.rcAutoOpened === key) return;
     if (state.releaseRun && state.releaseRun.running) return;
-    if (((state.history && state.history.items) || []).some(m => m.status === 'pending' && (m.env || 'prod') === 'prod')) return;
+    const prodRels = ((state.history && state.history.items) || []).filter(m => (m.env || 'prod') === 'prod');
+    if (prodRels.some(m => m.status === 'pending')) return;
+    // someone already released since this run was graded: this candidate was acted on (even if part of it, like a
+    // fixer patch, did not go out); the next run makes the next suggestion
+    const gradedAt = Date.parse(c.night || '') || 0;
+    if (prodRels.some(m => Date.parse(m.openedAt || '') > gradedAt && !['abandoned', 'cancelled'].includes(m.status))) return;
     push({ rcAutoOpened: key }); persist();
     send({ type: 'toast', text: 'Release candidate ready: opening its release for signatures' });
     await releaseRc();

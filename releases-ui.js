@@ -1618,10 +1618,12 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const showRun = run && (run.running || run.rows.some(r => !r.closed && ((r.pr && !r.merged && !recorded(r)) || r.status === 'blocked' || r.status === 'error')));
     const active = activeRelease(s);
     if (run && run.running) { relOpen = false; relHot = false; } // a run just started: its results take the picker's place
-    if (!active && !showRun && !relOpen) openPicker();
+    // one suggestion at a time: while the candidate card offers a release, the picker waits behind "Start another release"
+    const cardOffers = !!(s.rc && s.rc.level && !s.rc.released && !s.rc.off && !s.rc.error);
+    if (!active && !showRun && !relOpen && !cardOffers) openPicker();
     let h = '<div class="rl-reltab">' + (active || showRun ? '' : rcCardHtml(s)) + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
     if (relOpen) h += releasePickerHtml(s);
-    else if (active || showRun) h += '<button class="rl-hist-btn rl-reltab-new" data-act="releaseMenu" title="Pick envs and repos for another release (or to add to the pending one)">' + icon('rocket') + 'Start another release</button>';
+    else if (active || showRun || cardOffers) h += '<button class="rl-hist-btn rl-reltab-new" data-act="releaseMenu" title="Pick envs and repos for another release (or to add to the pending one)">' + icon('rocket') + 'Start another release</button>';
     return h + '</div>';
   }
 
