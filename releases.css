@@ -378,7 +378,10 @@
 #rl-sign-overlay.open { display:flex; animation:rl-fade .18s ease-out; }
 @keyframes rl-fade { from { opacity:0; } }
 .rl-sign-box { width:min(480px, 100%); padding:26px 26px 20px; border-radius:16px; background:var(--pop); border:1px solid var(--accent);
-  box-shadow:0 24px 64px rgba(0,0,0,.6), 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent); text-align:center; animation:rl-up .22s ease-out; }
+  box-shadow:0 24px 64px rgba(0,0,0,.6), 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent); text-align:center; animation:rl-up .22s ease-out;
+  max-height:100%; display:flex; flex-direction:column; } /* long release → the list scrolls, title and buttons stay on screen */
+.rl-sign-box > * { flex-shrink:0; }
+.rl-sign-box > .rl-sign-list { flex-shrink:1; min-height:0; overflow-y:auto; }
 .rl-sign-icon { width:52px; height:52px; margin:0 auto 12px; display:flex; align-items:center; justify-content:center; border-radius:50%;
   font-size:24px; background:var(--accent-soft); border:1px solid var(--accent); }
 .rl-sign-box h2 { margin:0 0 6px; font-size:17px; font-weight:700; }
