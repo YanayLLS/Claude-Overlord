@@ -3889,9 +3889,18 @@ const USAGE_HISTORY_FILE = path.join(STATE_DIR, 'usage-history.json');
 let usageHistory = null; // { [account]: [{ t, h, w, 'm:<model>' }] }, loaded on first use
 // The active saved account first: a switch only swaps the credentials file, and `claude auth status`
 // keeps reporting the previous login's email (it reads ~/.claude.json), which mixed two accounts' history.
-function usageAccountKey() {
-  const data = loadAccounts(), active = data.accounts.find(a => a.label === data.activeLabel);
-  return active?.email || active?.label || getAccountEmail() || 'default';
+function usageAccountKey(label) {
+  const data = loadAccounts(), acct = data.accounts.find(a => a.label === (label || data.activeLabel));
+  if (label && label !== data.activeLabel) return acct ? acct.email || acct.label : null;
+  return acct?.email || acct?.label || getAccountEmail() || 'default';
+}
+// Another login's reading (usage bar viewing it): its own history, so its charts fill in too.
+function recordAccountUsage(label, usage) {
+  const key = usageAccountKey(label);
+  if (!key || !usage || label === loadAccounts().activeLabel) return;
+  const all = loadUsageHistory(), before = (all[key] || []).length;
+  all[key] = appendUsageSample(all[key], usage, usage.fetchedAt || Date.now());
+  if (all[key].length !== before) saveUsageHistory();
 }
 function loadUsageHistory() {
   if (!usageHistory) { try { usageHistory = JSON.parse(fs.readFileSync(USAGE_HISTORY_FILE, 'utf8')) || {}; } catch { usageHistory = {}; } }
@@ -5796,7 +5805,8 @@ function handleIpc(msg) {
     case 'fetchUsage': fetchUsage(); break;
     case 'getUsageHistory': { // since: only what the caller will draw (the hover tip needs 8 days, the modal all 60)
       const since = Number(msg.since) || 0;
-      send({ type: 'usageHistory', since, points: (loadUsageHistory()[usageAccountKey()] || []).filter(p => p.t >= since) });
+      const label = msg.label || '';
+      send({ type: 'usageHistory', since, label, points: (loadUsageHistory()[usageAccountKey(label)] || []).filter(p => p.t >= since) });
       break;
     }
     case 'setAgentAccount': { // pin an agent to another saved login; the active login = unpin
@@ -5812,7 +5822,7 @@ function handleIpc(msg) {
       break;
     }
     case 'fetchAccountUsage':
-      accountUsage(msg.label).then(usage => send({ type: 'accountUsage', label: msg.label, usage }), (e) => { flog('account usage failed:', e); send({ type: 'accountUsage', label: msg.label, usage: null }); });
+      accountUsage(msg.label).then(usage => { recordAccountUsage(msg.label, usage); send({ type: 'accountUsage', label: msg.label, usage }); }, (e) => { flog('account usage failed:', e); send({ type: 'accountUsage', label: msg.label, usage: null }); });
       break;
     case 'getAccountInfo': send({ type: 'accountInfo', ...getCurrentAccountInfo() }); break;
     case 'saveAccount': {

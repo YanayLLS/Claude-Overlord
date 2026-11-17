@@ -3444,7 +3444,7 @@ function renderSummaryBar() {
     const win = includeDate ? 7 * 86400000 : 5 * 3600000;
     const now = Date.now();
     const timePct = resetTs ? Math.max(0, Math.min(100, (1 - (resetTs - now) / win) * 100)) : null;
-    // Burn-rate colors need this login's history, which only the main account has.
+    // Burn-rate colors from the viewed login's history.
     const grad = key && resetTs ? usageFillGradient(usageHist, key, resetTs - win, resetTs, pct, now) : null; // usage-core.js
     return `<div class="usage-meter"${key ? ` data-meter="${escAttr(key)}"` : ''}>
       <div class="um-top"><span class="um-label">${label}${extra}</span><span class="um-pct ${cls}">${Math.round(pct)}%</span></div>
@@ -3471,11 +3471,11 @@ function renderSummaryBar() {
         tip.push(`Week: ${actual.toFixed(1)}% used, ${expectedPct.toFixed(1)}% expected by now`);
       }
     }
-    if (u.hourly != null) barHtml += usageMeterHTML('Session', u.hourly, u.hourlyReset, false, '', usageView ? '' : 'h');
-    if (u.weekly != null) barHtml += usageMeterHTML('Week', u.weekly, u.weeklyReset, true, pace, usageView ? '' : 'w');
+    if (u.hourly != null) barHtml += usageMeterHTML('Session', u.hourly, u.hourlyReset, false, '', 'h');
+    if (u.weekly != null) barHtml += usageMeterHTML('Week', u.weekly, u.weeklyReset, true, pace, 'w');
     // Per-model weekly caps (Fable, Opus, …) get their own meter.
     for (const m of u.modelWeekly || []) {
-      barHtml += usageMeterHTML(modelLabel(m.model), m.pct, m.reset || u.weeklyReset, true, '', usageView ? '' : 'm:' + m.model);
+      barHtml += usageMeterHTML(modelLabel(m.model), m.pct, m.reset || u.weeklyReset, true, '', 'm:' + m.model);
     }
     // Extra usage credits, as how much more of a week they buy past 100% (credits ÷ what 100% of this week cost).
     if (u.extra) {
@@ -4874,11 +4874,11 @@ function handleAgentMsg(msg) {
     case 'timelineEvent': handleTimelineEvent(msg); break;
     case 'usage': handleUsage(msg.usage); renderUsageModal(); break;
     case 'usageCost': usageCost = msg.cost; scheduleRender(); renderUsageModal(); break;
-    case 'usageHistory': handleUsageHistory(msg.points, msg.since); break;
-    case 'usageStamped': if (usageModalKey) api.send({ type: 'getUsageHistory', since: 0 }); break;
+    case 'usageHistory': if ((msg.label || '') === (usageView || '')) handleUsageHistory(msg.points, msg.since); break;
+    case 'usageStamped': if (usageModalKey) getUsageHist(0); break;
     case 'accountInfo': handleAccountInfo(msg); break;
     case 'agentAccount': { const a = agents.get(msg.id); if (a) { a.account = msg.account; if (selectedId === msg.id) document.getElementById('term-agent-name').textContent = termAgentLabel(a); } break; }
-    case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); break;
+    case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); if (msg.label === usageView) { getUsageHist(usageHistAll ? 0 : Date.now() - 8 * 86400000); renderUsageModal(); } break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
     case 'apiState': {
@@ -5117,21 +5117,24 @@ let usageCost = {}; // meter key -> $ this window would cost at API list prices 
 function handleUsage(usage) {
   currentUsage = usage;
   // The bar colors each slice by burn rate, so it needs the history as fresh as the reading.
-  api.send({ type: 'getUsageHistory', since: usageHistAll ? 0 : Date.now() - 8 * 86400000 });
+  if (!usageView) getUsageHist(usageHistAll ? 0 : Date.now() - 8 * 86400000);
   scheduleRender();
 }
 function refreshUsage() { api.send({ type: 'fetchUsage' }); }
 // The usage bar can show another saved login's usage without switching Overlord's login.
 let usageView = null; const otherUsage = {}; // label -> usage, null = failed
-function setUsageView(label) { usageView = label; if (label) { delete otherUsage[label]; api.send({ type: 'fetchAccountUsage', label }); } scheduleRender(); }
+function setUsageView(label) { if (label !== usageView) { usageHist = []; usageHistAll = false; } usageView = label; if (label) { delete otherUsage[label]; api.send({ type: 'fetchAccountUsage', label }); } scheduleRender(); }
 
 // ── Usage charts: hover a meter for its chart, click for a bigger one. History is per account, kept by main.
 let usageHist = [];
+// The login the bar shows (another saved one, or the active one) and its history.
+const viewedUsage = () => usageView ? otherUsage[usageView] : currentUsage;
+const getUsageHist = since => api.send({ type: 'getUsageHistory', since, label: usageView || '' });
 let usageModalKey = null;
 const usageWhen = (ms, long) => new Date(ms).toLocaleString([], long ? { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
 // One meter over one window. win omitted = the current window; a past window shows where it ended.
 function usagePanelHTML(key, W, H, win) {
-  const m = usageMeters(currentUsage).find(x => x.key === key); // usage-core.js
+  const m = usageMeters(viewedUsage()).find(x => x.key === key); // usage-core.js
   if (!m) return '';
   const now = Date.now(), long = m.span > 86400000;
   const past = win && win.end <= now;
@@ -5142,7 +5145,7 @@ function usagePanelHTML(key, W, H, win) {
   const foot = past
     ? `<span>${usageWhen(start, long)} – ${usageWhen(end, long)}</span><span>Ended at ${pct.toFixed(1)}%</span>`
     : `<span><i class="ut-key-pace"></i>On pace: ${Math.round(expected)}% by now</span>${m.reset ? `<span>Resets ${escapeHtml(usageWhen(m.reset, long))}</span>` : ''}`;
-  const usd = past ? win.usd : usageCost[key];
+  const usd = past ? win.usd : usageView ? null : usageCost[key]; // usageCost is the active login's
   const money = v => '$' + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const costRow = usd == null ? '' : `<div class="ut-foot" title="Tokens in every Claude Code transcript on this machine this window, priced at pay-per-token API rates per model"><span>At API prices</span><span class="ut-cost">${money(usd)}</span></div>`;
   // How big this window's 100% is, against the average of the (up to) 4 windows before it.
@@ -5169,7 +5172,7 @@ function showUsageTip(el) {
 document.addEventListener('mouseover', (e) => {
   const el = e.target.closest?.('#summary-bar [data-meter]');
   if (el === usageTipEl) return;
-  if (el) { showUsageTip(el); if (!usageHistAll) api.send({ type: 'getUsageHistory', since: Date.now() - 8 * 86400000 }); }
+  if (el) { showUsageTip(el); if (!usageHistAll) getUsageHist(Date.now() - 8 * 86400000); }
   else { usageTipEl = null; usageTip.classList.remove('show'); }
 });
 function openUsageModal(key) {
@@ -5177,15 +5180,15 @@ function openUsageModal(key) {
   usageTipEl = null; usageTip.classList.remove('show');
   renderUsageModal();
   document.getElementById('usage-overlay').classList.add('open');
-  api.send({ type: 'getUsageHistory', since: 0 });
-  refreshUsage();
+  getUsageHist(0);
+  if (usageView) api.send({ type: 'fetchAccountUsage', label: usageView }); else refreshUsage();
 }
 // usageModalBack: 0 = the current window, 1 = the one before, … Past windows come from the reset
 // times stored with each reading, so they match the API's real sessions/weeks.
 let usageModalBack = 0, usageHistAll = false, usageStripMode = 'cap';
 function renderUsageModal() {
   if (!usageModalKey) return;
-  const meters = usageMeters(currentUsage), m = meters.find(x => x.key === usageModalKey);
+  const meters = usageMeters(viewedUsage()), m = meters.find(x => x.key === usageModalKey);
   const tabs = meters.map(x => `<button class="${x.key === usageModalKey ? 'on' : ''}" data-key="${escAttr(x.key)}" onclick="usageModalKey=this.dataset.key;usageModalBack=0;renderUsageModal()">${escapeHtml(x.label)}</button>`).join('');
   if (!m) { document.getElementById('usage-modal-body').innerHTML = `<div class="ut-tabs">${tabs}</div>`; return; }
   const wins = usageWindows(usageHist, m.key, m.span, m.reset, Date.now()); // usage-core.js
@@ -5198,7 +5201,7 @@ function renderUsageModal() {
     + `<button onclick="usageModalBack--;renderUsageModal()" ${usageModalBack === 0 ? 'disabled' : ''} aria-label="Next ${unit}">›</button></div>`;
   // One bar per window, oldest left; click one to open it. The switch picks what a bar measures:
   // how big that window's 100% was (shrinking bars = a smaller limit) or how much of it was used.
-  const caps = wins.map((w, i) => i === wins.length - 1 ? usageCapacity(usageCost[m.key], m.pct) : usageCapacity(w.usd, w.last));
+  const caps = wins.map((w, i) => i === wins.length - 1 ? usageCapacity(usageView ? null : usageCost[m.key], m.pct) : usageCapacity(w.usd, w.last));
   const capMax = Math.max(0, ...caps.filter(v => v != null));
   const mode = capMax ? usageStripMode : 'used';
   const strip = wins.length > 1 ? `<div class="ut-strip" aria-label="Past ${unit}s">` + wins.map((w, i) => {
