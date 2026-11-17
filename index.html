@@ -1232,6 +1232,9 @@ button:focus-visible { outline-offset:0; }
   border:none;border-radius:17px;cursor:pointer;flex:none;transition:filter .15s;}
 .chat-send:hover{filter:brightness(1.12);}
 /* Web preview pane — the focused agent's embedded browser */
+#preview-restore { position:relative; color:var(--cyan); }
+#preview-restore[hidden] { display:none; }
+#preview-restore i { position:absolute; top:3px; right:3px; width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 0 2px var(--panel-bg); }
 #preview-toggle.active { color:var(--cyan); background:rgba(148,226,213,.12); }
 #preview-resize { width:4px; height:auto; background:transparent; cursor:ew-resize; flex-shrink:0; display:none; position:relative; border-left:1px solid var(--border); }
 #preview-resize::after { content:''; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:2px; height:24px; background:transparent; border-radius:1px; transition:background .15s; }
