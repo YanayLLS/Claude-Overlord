@@ -1768,6 +1768,12 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const key = `${m.id}|${signers.slice().sort().join(',')}`;
     return key === readyDismissed ? null : { m, key, signers };
   }
+  // the environments a release ships to, as env chips: prod, and alpha when its alpha step is pending too
+  function signEnvs(repos) {
+    const envs = [...new Set((repos || []).map(x => x.env).filter(Boolean))];
+    if (((state.history && state.history.items) || []).some(m => m.status === 'pending' && m.env === 'alpha') && !envs.includes('alpha')) envs.push('alpha');
+    return envs.map(e => ` <span class="rl-env" style="--hue:${ENV_HUE[e] || 'var(--dim)'}">${esc(e)}</span>`).join('');
+  }
   function renderSignPrompt() {
     if (!((state && state.toSign) || []).length && !signWaiting) {
       const r = readyPrompt();
@@ -1799,8 +1805,8 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     shownReady = null;
     setOverlay(signOverlay, promptBox({ label: 'Sign the release', icon: icon('sign'), title: 'Prod release waiting for your signature', sub: `${by.length ? by.map(x => '@' + esc(x)).join(', ') + ' · ' : ''}${esc(t[0].count)}/${esc(t[0].need)} signed`,
       // the release, whole: every repo in it; ✓ where my signature already covers it
-      body: ((state.toSignReleases && state.toSignReleases.length) ? state.toSignReleases.map(r => (state.toSignReleases.length > 1 || /^\d/.test(r.id) ? `<div class="rl-sign-rel">Release ${esc(r.id)}</div>` : '')
-        + '<div class="rl-sign-list">' + r.repos.map(x => `<div class="rl-sign-row${x.mine ? ' done' : ''}"><b>${esc(x.label)}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a>`
+      body: ((state.toSignReleases && state.toSignReleases.length) ? state.toSignReleases.map(r => (state.toSignReleases.length > 1 || /^\d/.test(r.id) ? `<div class="rl-sign-rel">Release ${esc(r.id)}${signEnvs(r.repos)}</div>` : '')
+        + '<div class="rl-sign-list">' + r.repos.map(x => `<div class="rl-sign-row${x.mine ? ' done' : ''}"><b>${esc(x.label)}${x.target ? `<span class="rl-sign-dest" title="Merges into ${esc(x.target)}">→ ${esc(x.target)}</span>` : ''}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a>`
           + `<span>${x.mine ? '✓ signed' : x.older ? 'new commits since you signed' : 'needs your signature'}</span></div>`).join('') + '</div>').join('')
         : '<div class="rl-sign-list">' + t.map(x => `<div class="rl-sign-row"><b>${esc(x.label)}</b><a data-url="${esc(x.url)}">#${esc(x.number)}</a></div>`).join('') + '</div>'),
       acts: [['later', 'Later'], ['review', 'Review first'], ['now', icon('sign') + 'Sign the release', true]] }));

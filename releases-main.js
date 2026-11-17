@@ -866,14 +866,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         const s = sos[pi];
         if (s.error) continue;
         const meL = String(who.github).toLowerCase();
-        all.push({ label: p.label, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s, number: pr.number, url: pr.html_url,
+        all.push({ label: p.label, target: p.target, env: p.env, release: releaseIdOf(s.pr.body) || p.repo + '#' + pr.number, signoff: s, number: pr.number, url: pr.html_url,
           mine: hasSigned(s, who.github), older: (s.stale || []).some(l => l.toLowerCase() === meL) });
         if (hasSigned(s, who.github)) continue;
         // its release isn't loaded yet (history unreadable just now): don't guess, ask only when sure
         const rid = releaseIdOf(s.pr.body);
         if (rid && !((state.history && state.history.items) || []).some(m => m.id === rid)) continue;
         if (signedRelease(((state.history && state.history.items) || []).find(m => m.id === releaseIdOf(s.pr.body)), who.github)) continue; // signed the release once: covers PRs added since
-        found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), number: pr.number, url: pr.html_url, head: s.pr.head.sha, commits: s.pr.commits || null, author: s.pr.user.login,
+        found.push({ repo: p.repo, label: p.label + (ROLLBACK_HEAD.test(pr.head.ref) ? ' (rollback)' : ''), target: p.target, env: p.env, number: pr.number, url: pr.html_url, head: s.pr.head.sha, commits: s.pr.commits || null, author: s.pr.user.login,
           release: all[all.length - 1].release, signers: s.signers.map(x => x.login), count: s.count, need: s.need });
       }
     }));
@@ -888,7 +888,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     found.sort((a, b) => a.label.localeCompare(b.label));
     // the prompt shows each release whole: every repo in it, and which ones still need me
     const toSignReleases = [...new Set(found.map(f => f.release))].map(id => ({ id, repos: all.filter(x => x.release === id)
-      .map(x => ({ label: x.label, number: x.number, url: x.url, mine: x.mine, older: x.older })).sort((a, b) => a.label.localeCompare(b.label)) }));
+      .map(x => ({ label: x.label, target: x.target, env: x.env, number: x.number, url: x.url, mine: x.mine, older: x.older })).sort((a, b) => a.label.localeCompare(b.label)) }));
     push({ toSign: found, toSignReleases });
     // what counts as "new" (re-notify, re-open the prompt after Later): a new release or a new PR in it —
     // not new commits, which keep a release signed (signoff-core) and land all day while it's open

@@ -902,3 +902,5 @@ button.rl-flag-row.copy .rl-flag-g { font-size:14px; }
 .rl-sign-icon .rl-i, .rl-hist-empty-icon .rl-i { margin:0; }
 .rl-sign-box h2 { font-size:15px; font-weight:600; }
 .rl-hist-empty-icon { color:var(--subtext); }
+.rl-sign-dest { margin-left:8px; font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; font-weight:500; color:var(--dim); }
+.rl-sign-rel .rl-env { margin-left:6px; text-transform:uppercase; }
