@@ -4768,7 +4768,7 @@ function handleAgentMsg(msg) {
       break;
     case 'prList': {
       if (msg.error) { prState.error = msg.error; prState.errorCode = msg.errorCode || null; }
-      else { prState.prs = msg.prs || []; prState.extra = msg.extraPrs || []; prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; prApplyPending(); prRunFixLater();
+      else { prState.prs = (msg.prs || []).filter(notReleasePr); prState.extra = (msg.extraPrs || []).filter(notReleasePr); prState.error = null; prState.errorCode = null; prState.failedRepos = msg.failedRepos || []; prApplyPending(); prRunFixLater();
         for (const url of prHeatMs.keys()) if (!prState.prs.some(p => p.url === url)) prHeatMs.delete(url); } // merged/closed PRs don't keep their heat forever
       renderPrBadge();
       refreshOpenDropdown('pr-dropdown', prDropdownHtml);
@@ -6171,6 +6171,8 @@ function createGroupFromModal() {
 
 // ── PR notifications ───────────────────────────────────
 let prState = { prs: [], error: null, errorCode: null };
+// release PRs (Overlord's overlord/promote-* snapshots into alpha, prod…) live on the Releases board, signed and merged there
+const notReleasePr = (p) => !String((p && p.headRef) || '').startsWith('overlord/promote-');
 let prSettings = { enabled: false, repos: [], intervalSec: 60 }, prSettingsLoaded = false; // loaded: the real settings arrived (releases-ui's enforcePrWatch waits for it)
 // Release-map repos (releases-ui): always watched, can't be unticked.
 const prLockedRepos = () => new Set(((window.releasesUi && releasesUi.releaseRepos()) || []).map(r => r.toLowerCase()));
