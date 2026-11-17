@@ -85,7 +85,7 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
   async function fixPr(repo, nightlyId) {
     const r = await api('-X', 'GET', `repos/${repo}/pulls`, '-f', 'state=all', '-f', `head=${repo.split('/')[0]}:bdd/auto-fix-${nightlyId}`, '-f', 'per_page=5');
     const pr = (r.data || [])[0];
-    return pr ? { number: pr.number, url: pr.html_url, merged: !!pr.merged_at, open: pr.state === 'open', invalid: /INVALID/i.test(pr.title || '') } : null;
+    return pr ? { number: pr.number, url: pr.html_url, merged: !!pr.merged_at, open: pr.state === 'open', invalid: /INVALID/i.test(pr.title || ''), headSha: (pr.head && pr.head.sha) || null } : null;
   }
 
   // cfg: the release config. unreleased: flag keys prod hasn't released. rcBranch: the live rc branch, if any
@@ -141,7 +141,17 @@ module.exports = function createRc({ ghJson, stateDir, fetchText = httpText, dow
 
     // The commits this candidate is: what the nightly tested, per repo. A repo the nightly has no suite for
     // is pinned where its source branch stood when the nightly started.
-    const tested = testedShas(page, apply, S.repo.split('/')[1]);
+    // graded on the fixer's verify run: it tested the fix branch (the night's commit plus the fixes), so that is the
+    // commit to ship, not the night's base the fixer started from (which the grade did not vouch for)
+    const onFix = decision === 'pr' && pr && pr.headSha;
+    const tested = testedShas(page, onFix ? null : apply, S.repo.split('/')[1]);
+    if (onFix) {
+      // the verify run checks the frontend only: the other repos are as the night tested them
+      const night = await fetchText(pageUrlOf(nightly));
+      const nightPage = night.text ? parseRunPage(night.text) : null;
+      for (const [k, v] of Object.entries(testedShas(nightPage, null, S.repo.split('/')[1]))) if (!(k in tested)) tested[k] = v;
+      tested[S.repo.split('/')[1]] = pr.headSha;
+    }
     const ref = ((page && page.suites.find(x => x.repo === S.repo.split('/')[1])) || {}).ref || null;
     const shas = {};
     await Promise.all(prodRow.map(async (p) => {

@@ -24,6 +24,16 @@ const HISTORY_SHOWN = 30;
 // Files whose effects live in the database, not the code: a rollback can't undo them
 const DATA_CHANGE = /(^|\/)(migrations?|migrate)\/|\.sql$|(^|\/)(schema|schemas)\//i;
 
+// what tags a PR with its release: the id mark in the body, and on a release PR ("chore(release): promote …") the id in
+// its title, so the GitHub PR list shows which release it is; null when both are already there
+function releaseTag(pr, id) {
+  const body = (pr && pr.body) || '', title = (pr && pr.title) || '';
+  const out = {};
+  if (!M.releaseIdOf(body)) out.body = body + '\n' + M.releaseIdMark(id);
+  if (/^chore\(release\): promote /.test(title) && !title.endsWith(` · ${id}`)) out.title = title.replace(/ · \d{4}-\d{2}-\d{2}-\d+$/, '') + ` · ${id}`;
+  return Object.keys(out).length ? out : null;
+}
+
 module.exports = function createHistory({ ghJson, writeTmp, push, getState, org, signoffOf, requestReviews, whoAmI, send, teamKnown = () => true, findTicket = async () => null, ticketRepo = () => null }) {
   const repoOf = () => org() && `${org()}/${M.MANIFESTS_REPO}`;
   const apiErr = (r) => r.error || (r.data && !Array.isArray(r.data) && r.data.message && r.data.status ? `${r.data.message} (${r.data.status})` : null);
@@ -123,8 +133,8 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       await Promise.all(rows.map(async (r) => {
         const cur = await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
         const body = (cur.data && cur.data.body) || '';
-        if (apiErr(cur) || M.releaseIdOf(body)) return;
-        await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeTmp({ body: body + '\n' + M.releaseIdMark(m.id) })]);
+        const patch = apiErr(cur) ? null : releaseTag(cur.data, m.id);
+        if (patch) await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeTmp(patch)]);
       }));
       await load();
       return m.id;
@@ -160,7 +170,8 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
       await Promise.all(rows.map(async (r) => {
         const cur = await ghJson(['api', `repos/${r.repo}/pulls/${r.pr.number}`]);
         const body = (cur.data && cur.data.body) || '';
-        if (!apiErr(cur) && !M.releaseIdOf(body)) await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeTmp({ body: body + '\n' + M.releaseIdMark(m.id) })]);
+        const patch = apiErr(cur) ? null : releaseTag(cur.data, m.id);
+        if (patch) await ghJson(['api', '-X', 'PATCH', `repos/${r.repo}/pulls/${r.pr.number}`, '--input', writeTmp(patch)]);
       }));
       await load();
       return m.id;
@@ -517,3 +528,4 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
 };
 
 module.exports.shippedLater = shippedLater;
+module.exports.releaseTag = releaseTag;

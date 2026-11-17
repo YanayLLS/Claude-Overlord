@@ -24,3 +24,14 @@ const { shippedLater } = require('./release-history');
   assert.strictEqual(await shippedLater(gh, r('m3'), { created_at: '2026-11-16T10:00:00Z' }), null);
   console.log('release-history-shipped: ok');
 })().catch(e => { console.error(e); process.exit(1); });
+
+// the release id goes into a release PR's title (replacing an older one) and into every PR's body once
+{
+  const { releaseTag } = require('./release-history');
+  assert.deepStrictEqual(releaseTag({ title: 'chore(release): promote dev to master', body: 'b' }, '2026-11-17-01'),
+    { body: 'b\n<!-- release-id:2026-11-17-01 -->', title: 'chore(release): promote dev to master · 2026-11-17-01' });
+  assert.deepStrictEqual(releaseTag({ title: 'chore(release): promote dev to master · 2026-11-16-02', body: '<!-- release-id:2026-11-17-01 -->' }, '2026-11-17-01'),
+    { title: 'chore(release): promote dev to master · 2026-11-17-01' });
+  assert.strictEqual(releaseTag({ title: 'fix: a hotfix', body: '<!-- release-id:2026-11-17-01 -->' }, '2026-11-17-01'), null);
+  console.log('release-tag: ok');
+}
