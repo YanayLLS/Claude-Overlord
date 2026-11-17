@@ -352,6 +352,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       // the explanation is asked once per graded night, and again only when the grade's inputs changed
       const same = before.nightlyId === next.nightlyId && before.evidence && before.evidence.runId === next.evidence.runId && before.headline === next.headline;
       push({ rc: { ...next, flags, ai: same ? before.ai || null : null } });
+      autoOpenRc(next).catch(() => {});
       if (notify && !next.released && (before.nightlyId !== next.nightlyId || before.level !== next.level)) { // a candidate already live needs no popup
         notify({ ship: '🟢 Release candidate ready', look: '🟡 Release candidate: look first', hold: '🔴 Release candidate: hold' }[next.level], next.headline, null, () => send({ type: 'releases', state, open: true, tab: 'release' }));
       }
@@ -375,6 +376,19 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         url: `https://github.com/${p.repo}/compare/${p.target}...${sha}` };
     }));
     push({ rc: { ...state.rc, plan } }); persist();
+  }
+  // A releasable candidate opens its release by itself, once per graded run, on an approver's Overlord, when no release
+  // is pending: the approvers only sign (and the second signature releases). A Hold, or one already live, opens nothing.
+  async function autoOpenRc(c) {
+    if (DEMO || !c || !c.level || c.level === 'hold' || c.released || !c.shas || !c.evidence) return;
+    if (!state.approvers || !state.approvers.isApprover) return;
+    const key = `${c.nightlyId}:${c.evidence.runId}`;
+    if (state.rcAutoOpened === key) return;
+    if (state.releaseRun && state.releaseRun.running) return;
+    if (((state.history && state.history.items) || []).some(m => m.status === 'pending' && (m.env || 'prod') === 'prod')) return;
+    push({ rcAutoOpened: key }); persist();
+    send({ type: 'toast', text: 'Release candidate ready: opening its release for signatures' });
+    await releaseRc();
   }
   function releaseRc() {
     if (DEMO && state.rc && state.rc.shas) return withBusy('release', 'Reading…', releaseRcDemo);
@@ -996,6 +1010,16 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (ids.length && !failed.length) await history.markSigned(ids, { login: who.github, clickup: who.clickup }).catch(e => send({ type: 'toast', text: `Signed on GitHub, but the release record didn't update (${e.message}): teammates may not see it yet` }));
     await reconcileHistory().catch(() => {});
     checkToSign().catch(() => {});
+    // the signature that completes a release starts it: Release all (it still refuses a hold, a red check or a running run)
+    if (!lateId && !failed.length) for (const id of ids) {
+      const m = ((state.history && state.history.items) || []).find(x => x.id === id);
+      const open = m && m.status === 'pending' && (m.env || 'prod') === 'prod' ? m.repos.filter(r => !r.mergeSha && !r.closed) : [];
+      if (open.length && open.every(r => (r.signers || []).length >= 2) && !(state.releaseAll && state.releaseAll.running)) {
+        send({ type: 'toast', text: `Release ${id} is signed: releasing` });
+        releaseAll(id).catch(e => send({ type: 'toast', text: 'Release all failed: ' + (e.message || 'error') }));
+        break;
+      }
+    }
   }
 
   // Release history: manifests in <org>/release-manifests (release-history.js)
