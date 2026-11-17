@@ -909,17 +909,20 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   async function approveBackMerges(run, who) {
     const me = who.github.toLowerCase(), seen = new Set();
     const items = ((state.history && state.history.items) || []).filter(m => m.status === 'pending');
-    const backs = [...((run && run.rows) || []), ...items.flatMap(m => m.repos)].filter(r => r.backMerge && r.backMerge.number && !r.backMerge.conflict);
-    for (const r of backs) {
-      const key = r.repo + '#' + r.backMerge.number;
+    const rows = [...((run && run.rows) || []), ...items.flatMap(m => m.repos)];
+    // back-merges, and the same release's steps into the other envs (alpha): plain PRs that need one approval
+    const prs = [...rows.filter(r => r.backMerge && r.backMerge.number && !r.backMerge.conflict).map(r => ({ repo: r.repo, number: r.backMerge.number })),
+      ...((run && run.rows) || []).filter(r => r.env && r.env !== 'prod' && r.pr && !r.merged && !r.closed).map(r => ({ repo: r.repo, number: r.pr.number }))];
+    for (const { repo, number } of prs) {
+      const key = repo + '#' + number;
       if (seen.has(key)) continue;
       seen.add(key);
-      const p = await ghJson(['api', `repos/${r.repo}/pulls/${r.backMerge.number}`]);
+      const p = await ghJson(['api', `repos/${repo}/pulls/${number}`]);
       if (!p.data || p.data.state !== 'open' || String(p.data.user && p.data.user.login).toLowerCase() === me) continue;
-      const rv = await ghJson(['api', '-X', 'GET', `repos/${r.repo}/pulls/${r.backMerge.number}/reviews`, '-f', 'per_page=100']);
+      const rv = await ghJson(['api', '-X', 'GET', `repos/${repo}/pulls/${number}/reviews`, '-f', 'per_page=100']);
       if (Array.isArray(rv.data) && rv.data.some(x => x.user && x.user.login.toLowerCase() === me && x.state === 'APPROVED' && x.commit_id === p.data.head.sha)) continue;
-      await ghJson(['api', '-X', 'POST', `repos/${r.repo}/pulls/${r.backMerge.number}/reviews`, '--input',
-        writeTmp({ event: 'APPROVE', commit_id: p.data.head.sha, body: 'Back-merge of a release I signed.' })]);
+      await ghJson(['api', '-X', 'POST', `repos/${repo}/pulls/${number}/reviews`, '--input',
+        writeTmp({ event: 'APPROVE', commit_id: p.data.head.sha, body: 'Part of a release I signed.' })]);
     }
   }
   const SIGN_CAP_MS = 2 * 60e3;
