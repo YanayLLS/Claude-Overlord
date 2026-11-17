@@ -539,7 +539,9 @@
   // At the bottom and the chat's box shrinks (the reply box grows a line as you type): stay at the bottom. It slid off
   // and back on every key, flashing the jump button.
   { const c = document.getElementById('conversation'); let end = true;
-    c.addEventListener('scroll', () => { end = c.scrollHeight - c.scrollTop - c.clientHeight < 40; holdPlace(c); }, { passive: true });
+    c.addEventListener('scroll', () => { if (c.scrollHeight - c.scrollTop - c.clientHeight < 2) c._up = false; end = !c._up && c.scrollHeight - c.scrollTop - c.clientHeight < 40; holdPlace(c); }, { passive: true });
+    // Any upward wheel lets go of the bottom at once: within 40px of it, the live tick and resizes snapped you back. Back at the very bottom, it follows again.
+    c.addEventListener('wheel', (e) => { if (e.deltaY < 0) c._up = true; }, { passive: true });
 
     new ResizeObserver(() => { if (end && c.classList.contains('open')) c.scrollTop = c.scrollHeight; }).observe(c);
   }
@@ -1286,7 +1288,7 @@
   // The first block whose bottom is below the view's top: binary search (blocks are stacked), ~10 rects per scroll, not thousands.
   function firstVisible(thread, top) { const ch = thread.children; let lo = 0, hi = ch.length - 1, at = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (ch[m].getBoundingClientRect().bottom > top) { at = m; hi = m - 1; } else lo = m + 1; } return at; }
   function holdPlace(el) { // what's at the top of the view now (called on every scroll)
-    el._anc = null; el._follow = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el._anc = null; el._follow = !el._up && el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     if (el._follow) return; // following the bottom
     const thread = el.querySelector(':scope > .thread'), top = el.getBoundingClientRect().top; if (!thread) return;
     const ch = thread.children; for (let k = Math.max(0, firstVisible(thread, top)); k < ch.length; k++) { const key = blockKey(ch[k]); if (key) { el._anc = { i: key, y: ch[k].getBoundingClientRect().top - top }; return; } }
@@ -1363,7 +1365,8 @@
     // The history landing after the loading spinner is opening the chat too: always at the bottom, nothing slides in
     // (else the last reply counted as "just arrived" and a long one parked you at its first line).
     const opening = fresh || (!!evs && el._shown !== id); if (evs) el._shown = id;
-    const stuck = !opening && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
+    if (opening || jumpOnce) el._up = false;
+    const stuck = !opening && !jumpOnce && Date.now() >= pinUntil && (el._up || el.scrollTop + el.clientHeight < el.scrollHeight - 40);
     // Scrolled up reading: the message at the top of the view stays put whatever changes above it (a new turn folds the
     // oldest into "Earlier", blocks get rebuilt).
     const keyOf = blockKey;
@@ -1523,7 +1526,7 @@
         try {
           if (!svgOf.has(key)) svgOf.set(key, (await window.mermaid.render('chat-mm-' + ++mermaidSeq, src)).svg);
           const fig = document.createElement('div'); fig.className = 'md-diagram'; fig.innerHTML = svgOf.get(key);
-          const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 80; // following the bottom: keep following as it grows
+          const atEnd = !el._up && el.scrollHeight - el.scrollTop - el.clientHeight < 80; // following the bottom: keep following as it grows
           b.querySelector('pre').before(fig); b.classList.add('drawn');
           if (atEnd) el.scrollTop = el.scrollHeight;
         } catch { b.classList.add('drawn', 'bad'); document.getElementById('dchat-mm-' + mermaidSeq)?.remove(); } // mermaid leaves its error SVG in <body>
