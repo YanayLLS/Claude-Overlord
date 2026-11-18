@@ -1310,3 +1310,8 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .card.menu-list .mg { font-style: normal; width: 14px; text-align: center; color: var(--dim); }
 :root body #conversation .card.menu-list .mg.ok { color: var(--green); } :root body #conversation .card.menu-list .mg.warn { color: var(--yellow); } :root body #conversation .card.menu-list .mg.bad { color: var(--red); }
 :root body #conversation .card.menu-list .mm { margin-left: auto; font-size: 12px; color: var(--dim); }
+/* Queued: Send now always visible, left of the bubble; Edit and Remove stay in the hover toolbar. */
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.user.pending .qrow { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.user.pending .qrow .bubble { min-width: 0; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.user.pending .qrow .q-now { flex: none; opacity: 1; width: 28px; height: 28px; min-height: 28px; margin: 0; border-radius: 7px; color: var(--subtext); }
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.user.pending .q:empty { display: none; }
