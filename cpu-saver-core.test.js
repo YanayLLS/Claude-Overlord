@@ -40,6 +40,8 @@ test('it sleeps only after a full idle stretch; any reason to stay awake restart
   assert.deepStrictEqual(dueToSleep([{ id: 1, a, why: '' }], 122000, 60000), [1]);
 });
 
-test('by default it sleeps on the first sweep that finds it idle', () => {
-  assert.deepStrictEqual(dueToSleep([{ id: 1, a: idle(), why: '' }, { id: 2, a: idle(), why: 'open' }], 5000), [1]);
+test('by default it sleeps after 5 idle minutes, not at once', () => {
+  const a = idle(), b = idle();
+  assert.deepStrictEqual(dueToSleep([{ id: 1, a, why: '' }, { id: 2, a: b, why: 'open' }], 5000), []);
+  assert.deepStrictEqual(dueToSleep([{ id: 1, a, why: '' }, { id: 2, a: b, why: 'open' }], 5000 + 5 * 60000), [1]);
 });

@@ -205,7 +205,7 @@
     }
     for (const box of roots.flatMap(r => [...(r.matches && r.matches('.vis') ? [r] : []), ...r.querySelectorAll('.vis')])) if (!box._on) { box._on = 1; visShow(box, visActive.get(box.dataset.vis) || 0); }
   }
-  // A frame says how tall its page is: it grows to that (up to visMaxH), staying at the bottom if you were there.
+  // A frame says how tall its page is: it grows to that (up to visMaxH).
   window.addEventListener('message', (e) => {
     const d = e.data; if (!d || d.ovVisual !== 1 || !(d.h > 0)) return;
     const fr = [...document.querySelectorAll('iframe.vis-f')].find(x => x.contentWindow === e.source); if (!fr) return;
@@ -215,9 +215,7 @@
     const cap = visMaxH(), h = Math.min(Math.ceil(d.h), cap);
     e.source.postMessage({ ovCapped: Math.ceil(d.h) > cap }, '*'); // only a capped page scrolls inside (a fitting one never shows a scrollbar)
     if (parseFloat(fr.style.height) === h) return;
-    const el = document.getElementById('conversation'), atEnd = el && el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    fr.style.height = h + 'px';
-    if (atEnd) el.scrollTop = el.scrollHeight;
+    fr.style.height = h + 'px'; // the thread grows: keep() holds the view
   });
   // On a visual's tabs: 1–9 pick a variant, ←/→ step through them.
   function visKey(e) {
@@ -536,12 +534,11 @@
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.target.closest('.msg').querySelector('[data-act="edit-send"]').click(); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.target.closest('.msg').querySelector('[data-act="edit-cancel"]').click(); }
   });
-  // At the bottom and the chat's box shrinks (the reply box grows a line as you type): stay at the bottom. It slid off
-  // and back on every key, flashing the jump button.
-  { const c = document.getElementById('conversation'); let end = true;
-    c.addEventListener('scroll', () => { end = c.scrollHeight - c.scrollTop - c.clientHeight < 40; holdPlace(c); }, { passive: true });
-
-    new ResizeObserver(() => { if (end && c.classList.contains('open')) c.scrollTop = c.scrollHeight; }).observe(c);
+  // A scroll that isn't keep()'s own write is yours: from then on the top-most line in view holds its pixel. The chat's
+  // box changing size (the reply box grows a line as you type, the window) holds it too.
+  { const c = document.getElementById('conversation');
+    c.addEventListener('scroll', () => { if (byHand(c)) { c._sent = false; c._settle = 0; holdPlace(c); } c._set = c.scrollTop; }, { passive: true });
+    new ResizeObserver(() => keep(c)).observe(c);
   }
   document.getElementById('conversation').addEventListener('input', (e) => { if (e.target.matches && e.target.matches('.edit-ta')) { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; } });
   // ── Live tail: what the CLI shows under the transcript ──
@@ -772,7 +769,7 @@
     const items = [...tailEl.querySelectorAll(':scope > .msg.user.pending, :scope > .msg.qremoved')].filter(n => n.classList.contains('qremoved') || n.querySelector('.q-x'));
     q.replaceChildren(...items);
     const h = items.length ? q.offsetHeight + 12 : 0, was = el._qh || 0;
-    if (h !== was) { el._qh = h; el.style.setProperty('--qh', h + 'px'); if (el._follow !== false) el.scrollTop = el.scrollHeight; }
+    if (h !== was) { el._qh = h; el.style.setProperty('--qh', h + 'px'); keep(el); }
   }
   let dockHtml = '', dockCount = { agents: 0, shells: 0 };
   function drawDock() {
@@ -1062,8 +1059,10 @@
     }
     return undoRow + list.map((p, k) => {
       const imgs = thumbs(p.imgs, tagNums(p.text));
-      const queued = busy && !p.held;
-      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
+      // Queued = in the CLI's own queue, which Send now (its Ctrl+X Ctrl+S) acts on: only once main handed it over. Before
+      // that it waits in Overlord for a CLI that can take it - one CPU saving is resuming - and Send now did nothing.
+      const queued = busy && !p.held && !!p.sentAt, ag = agents.get(id), waking = !p.sentAt && ag && (ag.sleeping || (ag.wokeAt && Date.now() - ag.wokeAt < 180000));
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : waking ? 'Waking the agent…' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
     }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls
@@ -1259,39 +1258,60 @@
   }
 
   // Draw the Chat view for agent a. Only blocks that changed are replaced, so a text selection and open rows
-  // survive live ticks; new blocks slide in. Follows the bottom unless you scrolled up.
-  let prevBusy = new Map(), tick = null, jumpOnce = false;
-  // After you send: the bottom for a moment, through what still grows the thread (its bubble, markdown, images, blocks
-  // getting their real height). Scrolling up yourself lets go.
-  let pinUntil = 0;
+  // survive live ticks; new blocks slide in.
+  // Where the view sits - two cases, and nothing else moves it (no following the bottom, no landing on a new reply):
+  // - you sent a message and haven't scrolled since: that message sits at the top of the view, with room under it for
+  //   the reply to come (el._pinMine);
+  // - you scrolled: the top-most block in view stays at the exact pixel it was at, whatever redraws, grows, folds or
+  //   arrives above or below it (el._anc). Chromium's own anchoring is off (chat.css): it shifted again on top of this.
+  // Opening a chat lands at its bottom (or where you were reading it), then holds that like a scroll.
+  let prevBusy = new Map(), tick = null;
   const places = new Map(); // agent id -> where you were reading it (a block key + offset); null/absent = its bottom
-  // Scrolled up reading: the block at the top of the view stays exactly where it is while anything in the thread
-  // changes height after a redraw (link titles, diagrams, images, tool rows filling in): only the redraw itself
-  // re-anchored, so later growth above pushed what you were reading away. Chromium's own anchoring is off (chat.css):
-  // it shifted again on top of this.
   // Keyed by the event itself, not its index: a long chat keeps its last 1000 events, so every new one shifted all
   // indices by one and the anchor latched onto the next block down - the view hopped on each update.
   const blockKey = (n) => { if (!n) return null; if (n._bi === undefined) n._bi = n.dataset.i ?? (n.querySelector('[data-i]') || {}).dataset?.i ?? null; const i = n._bi; if (i == null) return null; /* the index lookup once per node: its html (data-i included) never changes, a changed block is a new node */ const c = n.closest('#conversation'), ev = c && c._evs && c._evs[i]; return ev ? `${n.className.split(' ')[0]}|${ev.type}|${ev.ts}|${String(ev.text || ev.name || '').slice(0, 40)}` : null; };
   // The first block whose bottom is below the view's top: binary search (blocks are stacked), ~10 rects per scroll, not thousands.
   function firstVisible(thread, top) { const ch = thread.children; let lo = 0, hi = ch.length - 1, at = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (ch[m].getBoundingClientRect().bottom > top) { at = m; hi = m - 1; } else lo = m + 1; } return at; }
-  function holdPlace(el) { // what's at the top of the view now (called on every scroll)
-    el._anc = null; el._follow = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    if (el._follow) return; // following the bottom
-    const thread = el.querySelector(':scope > .thread'), top = el.getBoundingClientRect().top; if (!thread) return;
-    const ch = thread.children; for (let k = Math.max(0, firstVisible(thread, top)); k < ch.length; k++) { const key = blockKey(ch[k]); if (key) { el._anc = { i: key, y: ch[k].getBoundingClientRect().top - top }; return; } }
+  function holdPlace(el) { // you scrolled (or jumped): hold the top-most block in view at its pixel
+    el._pinMine = false; el._anc = null;
+    const thread = el.querySelector(':scope > .thread'); if (!thread || !thread.children.length) return;
+    // The view's top past the thread (in the live tail: the reply being written, a sent bubble): the thread's last block,
+    // above the view, holds it - the tail sits right under it.
+    const top = el.getBoundingClientRect().top, ch = thread.children, k0 = firstVisible(thread, top), k = k0 < 0 ? ch.length - 1 : k0;
+    const at = (j) => { const key = blockKey(ch[j]); if (key) el._anc = { i: key, y: laidTop(ch[j]) - top }; return !!key; };
+    for (let j = k; j < ch.length; j++) if (at(j)) return;
+    for (let j = k - 1; j >= 0; j--) if (at(j)) return;
   }
-  const placeRO = new ResizeObserver(() => {
-    const el = document.getElementById('conversation'), a = el._anc; if (!el.classList.contains('open') || Date.now() < pinUntil) return;
-    if (!a) { if (el._follow !== false && el.scrollHeight - el.scrollTop - el.clientHeight >= 1) el.scrollTop = el.scrollHeight; return; } // following: late growth (markdown, rows, diagrams) after the redraw left you short of the bottom, with the jump button up and new output arriving out of sight
-    const n = [...(el.querySelector(':scope > .thread')?.children || [])].find(x => blockKey(x) === a.i); if (!n) return;
-    const d = n.getBoundingClientRect().top - el.getBoundingClientRect().top - a.y; if (Math.abs(d) >= 0.5) el.scrollTop += d;
-  });
-  function pinBottom() {
-    pinUntil = Date.now() + 2000; const el = document.getElementById('conversation');
-    if (!el._pinWired) { el._pinWired = 1; el.addEventListener('wheel', (e) => { if (e.deltaY < 0) pinUntil = 0; }, { passive: true }); }
-    const f = () => { if (Date.now() >= pinUntil || !el.classList.contains('open')) return; el.scrollTop = el.scrollHeight; requestAnimationFrame(f); };
-    requestAnimationFrame(f);
+  // A block's top as laid out: a slide-in's transform (translateY 8px, 0.3 s) is not where it sits.
+  const laidTop = (n) => n.getBoundingClientRect().top - (new DOMMatrixReadOnly(getComputedStyle(n).transform).m42 || 0);
+  // The scrollTop that puts the held line back where it was.
+  function heldTop(el, room) {
+    const top = el.getBoundingClientRect().top;
+    if (!el._pinMine && el._settle > Date.now()) return el.scrollHeight - room.offsetHeight - el.clientHeight; // just opened: the bottom while images and diagrams get their size
+    if (el._pinMine) { const m = [...el.querySelectorAll(':scope > .thread > .msg.user, :scope > .tail > .msg.user')].pop(); return m ? el.scrollTop + laidTop(m) - top - (parseFloat(getComputedStyle(el).paddingTop) || 0) : el.scrollTop; }
+    const b = el._anc && [...el.querySelector(':scope > .thread').children].find(x => blockKey(x) === el._anc.i);
+    return b ? el.scrollTop + laidTop(b) - top - el._anc.y : el.scrollTop;
   }
+  // Put it back. The room under the tail is what lets it stay put when less is below than the view is tall (a short
+  // reply under a pinned message, a chat that got shorter): the browser never clamps the scroll.
+  // Moved since keep()'s last write, and not by the browser clamping it to a shorter chat's end: that was you. Checked in
+  // keep() too: a redraw landing mid wheel-scroll, before its scroll event, would otherwise pull you back.
+  function byHand(el) { const st = el.scrollTop; return el._set == null || (Math.abs(st - el._set) >= 1 && !(st < el._set && st >= el.scrollHeight - el.clientHeight - 1)); }
+  function keep(el) {
+    const room = el.querySelector(':scope > .room'); if (!room || !el.classList.contains('open')) return;
+    if (el._set != null && byHand(el)) { el._sent = false; el._settle = 0; holdPlace(el); }
+    let want = 0;
+    for (let n = 0; n < 3; n++) { // room moves a short thread too (it sits at the bottom of the view): measure again
+      want = Math.max(0, heldTop(el, room));
+      const h = Math.max(0, Math.ceil(want + el.clientHeight - (el.scrollHeight - room.offsetHeight)));
+      if (h === room.offsetHeight) break;
+      room.style.height = h + 'px';
+    }
+    if (Math.abs(el.scrollTop - want) >= 0.5) el.scrollTop = want; // no write when nothing moved: any write cancels a wheel scroll in flight
+    if (el._settle > Date.now()) holdPlace(el);
+    el._set = el.scrollTop; // the scroll event this write fires is ours, not yours
+  }
+  const placeRO = new ResizeObserver(() => keep(document.getElementById('conversation'))); // late growth: markdown, rows, diagrams, blocks getting their real height
   // The reply still being written, off the agent's terminal screen (chat-core.js liveReply), until the transcript has it.
   const squash = (t) => String(t || '').replace(/[\s*_`#>•-]+/g, '');
   function screenReply(id, evs) {
@@ -1336,7 +1356,7 @@
     let list;
     if (!evs) list = ['<div class="chat-skel" aria-label="Loading"><i class="sk-u"></i><i class="sk-t"></i><i class="sk-t s"></i><i class="sk-p"></i><i class="sk-p m"></i><i class="sk-p s"></i></div>']; // the thread's shape while it loads, not a spinner in an empty column
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
-    else { holdFold = el.dataset.for === String(id) && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40 ? id : null; list = blocks(evs, doneBy, a.cwd, id); }
+    else { holdFold = el.dataset.for === String(id) && el.scrollTop + el.clientHeight < el.scrollHeight - (el.querySelector(':scope > .room')?.offsetHeight || 0) - 40 ? id : null; list = blocks(evs, doneBy, a.cwd, id); }
     if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
     dockHtml = ''; dockCount = { agents: 0, shells: 0 };
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
@@ -1347,20 +1367,14 @@
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
     if (fresh && window.chatComposer) chatComposer.drawAtt(); // another agent: its own pending images
-    if (fresh && el._agent != null && el._agent !== id) { places.set(el._agent, el._follow === false ? el._anc : null); onAgentSwitch(); } el._agent = id;
-    if (fresh) { el.innerHTML ='<div class="thread"></div><div class="tail"></div>'; thread = el.firstChild; tailEl = el.lastChild; el._blocks = []; el.dataset.for = String(id); el._shown = null; el._anc = null; placeRO.disconnect(); placeRO.observe(thread); }
-    // The history landing after the loading spinner is opening the chat too: always at the bottom, nothing slides in
-    // (else the last reply counted as "just arrived" and a long one parked you at its first line).
+    if (fresh && el._agent != null && el._agent !== id) { const r = el.querySelector(':scope > .room'), up = el.scrollTop + el.clientHeight < el.scrollHeight - (r ? r.offsetHeight : 0) - 40; places.set(el._agent, !el._pinMine && up ? el._anc : null); onAgentSwitch(); } el._agent = id;
+    if (fresh) { el.innerHTML = '<div class="thread"></div><div class="tail"></div><div class="room" aria-hidden="true"></div>'; thread = el.querySelector(':scope > .thread'); tailEl = el.querySelector(':scope > .tail'); el._blocks = []; el.dataset.for = String(id); el._shown = null; el._anc = null; el._pinMine = false; el._sent = false; el._settle = 0; placeRO.disconnect(); placeRO.observe(thread); }
+    // The history landing after the loading spinner is opening the chat too: always at the bottom, nothing slides in.
     const opening = fresh || (!!evs && el._shown !== id); if (evs) el._shown = id;
-    const stuck = !opening && !jumpOnce && Date.now() >= pinUntil && el.scrollTop + el.clientHeight < el.scrollHeight - 40;
-    // Scrolled up reading: the message at the top of the view stays put whatever changes above it (a new turn folds the
-    // oldest into "Earlier", blocks get rebuilt).
     const keyOf = blockKey;
-    let anchor = null;
-    if (stuck) { const top = el.getBoundingClientRect().top, ch = thread.children; for (let k = Math.max(0, firstVisible(thread, top)); k < ch.length; k++) { const key = keyOf(ch[k]); if (key) { anchor = { i: key, y: ch[k].getBoundingClientRect().top }; break; } } }
     el._evs = evs; // block keys read the events now on screen
     const old = el._blocks || [];
-    let newReply = null; const changed = []; // only these get the link, image and diagram passes below (a long chat is thousands of nodes)
+    let newMine = null; const changed = []; // only these get the link, image and diagram passes below (a long chat is thousands of nodes)
     // An empty thread (opening a chat): one parse of the whole list, not one per block (a long chat opened ~2x faster).
     // Each block must come out as exactly one element; if one doesn't, the per-block path below rebuilds it.
     if (!thread.children.length && list.length > 1) { thread.innerHTML = list.join(''); if (thread.children.length === list.length) { changed.push(...thread.children); el._blocks = old.length ? old : []; for (let k = 0; k < list.length; k++) old[k] = list[k]; } else thread.innerHTML = ''; }
@@ -1371,12 +1385,10 @@
       const cur = thread.children[k];
       changed.push(node);
       if (cur) { keepOpen(cur, node); cur.replaceWith(node); }
-      else { if (!opening) node.classList.add('enter'); if (!opening && node.classList.contains('turnfoot') && prevBusy.get(id)) node.classList.add('landed'); thread.appendChild(node); if (!opening && node.classList.contains('ai')) newReply = node; }
+      else { if (!opening) node.classList.add('enter'); if (!opening && node.classList.contains('turnfoot') && prevBusy.get(id)) node.classList.add('landed'); thread.appendChild(node); if (!opening && node.classList.contains('user')) newMine = node; }
     }
     while (thread.children.length > list.length) thread.lastElementChild.remove();
     el._blocks = list;
-    if (anchor) { const n = [...thread.children].find(c => keyOf(c) === anchor.i), d = n ? n.getBoundingClientRect().top - anchor.y : 0; if (Math.abs(d) >= 0.5) el.scrollTop += d; } // no write when nothing moved: any write cancels a wheel scroll in flight (the live tick redraws every second)
-    if (stuck) holdPlace(el); else el._anc = null;
     // The live tail ticks every second (elapsed, the CLI's verb, agent timers). When only that text changed, swap the
     // text in place: rebuilding would replay the slide-in and restart the spark and shimmer on every tick.
     if (tailEl._h !== tail) {
@@ -1399,16 +1411,13 @@
     // The working line's elapsed time ticks once a second while the agent works and the view is open.
     if (busy && !tick) tick = setInterval(() => { if (!el.classList.contains('open')) { clearInterval(tick); tick = null; return; } rerender(); }, 1000);
     else if (!busy && tick) { clearInterval(tick); tick = null; }
-    // A long reply that just arrived: land on its first line, to read it top-down (from then on you're "scrolled up",
-    // so the live ticks leave it there).
-    if (!stuck && !jumpOnce && Date.now() >= pinUntil && newReply && newReply.offsetHeight > el.clientHeight * 0.6) { el.scrollTop += newReply.getBoundingClientRect().top - el.getBoundingClientRect().top - 24; holdPlace(el); }
-    else if (opening && evs && places.get(id) && (() => { const p = places.get(id), n = [...thread.children].find(c => keyOf(c) === p.i); if (!n) return false; el.scrollTop += n.getBoundingClientRect().top - el.getBoundingClientRect().top - p.y; holdPlace(el); return true; })()) places.delete(id); // back to a chat you were reading: the same spot, not its bottom
-    else if (!stuck) {
-      el.scrollTop = el.scrollHeight;
-      // Images grow the thread as they load: stay pinned to the bottom through that.
-      for (const i of changed.flatMap(n => [...n.querySelectorAll('img')])) if (!i.complete && !i._pin && (i._pin = 1)) i.addEventListener('load', () => { if (el.scrollHeight - el.scrollTop - el.clientHeight < i.offsetHeight + 120) el.scrollTop = el.scrollHeight; }, { once: true });
-    }
-    jumpOnce = false;
+    if (opening) { // back to a chat you were reading: the same spot; else its bottom
+      el._set = null; // the swap to this chat's blocks moved the scroll, not you
+      const p = evs && places.get(id);
+      if (p && [...thread.children].some(c => keyOf(c) === p.i)) { el._anc = p; el._settle = 0; places.delete(id); }
+      else if (!el._pinMine) el._settle = Date.now() + 1500; // ponytail: images/diagrams/real block heights settle well inside 1.5 s
+    } else if (el._sent && (newMine || tailEl.querySelector(':scope > .msg.user.pending'))) { el._pinMine = true; el._settle = 0; } // the message you sent is in the view (not waiting in the queue dock): to the top
+    keep(el);
     syncJump(el); // new blocks while you read above: the jump button counts them
     for (const t of changed.flatMap(n => [...n.querySelectorAll('.md table')])) { const hs = [...t.querySelectorAll('thead th')].map(h => h.textContent.trim()); t.classList.toggle('wide', hs.length >= 3); for (const r of t.querySelectorAll('tbody tr')) [...r.children].forEach((c, k) => { if (hs[k]) c.dataset.label = hs[k]; }); } // a narrow column stacks each row as label: value
     // What ticks (running calls, usage-limit cards) is in the last few blocks.
@@ -1512,9 +1521,7 @@
         try {
           if (!svgOf.has(key)) svgOf.set(key, (await window.mermaid.render('chat-mm-' + ++mermaidSeq, src)).svg);
           const fig = document.createElement('div'); fig.className = 'md-diagram'; fig.innerHTML = svgOf.get(key);
-          const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 80; // following the bottom: keep following as it grows
-          b.querySelector('pre').before(fig); b.classList.add('drawn');
-          if (atEnd) el.scrollTop = el.scrollHeight;
+          b.querySelector('pre').before(fig); b.classList.add('drawn'); // the thread grows: keep() holds the view
         } catch { b.classList.add('drawn', 'bad'); document.getElementById('dchat-mm-' + mermaidSeq)?.remove(); } // mermaid leaves its error SVG in <body>
       }
     }, () => {});
@@ -2336,5 +2343,5 @@
   let askTick = 0;
   const onTerm = (id) => { if (id === selectedId && !askTick && document.querySelector('#conversation .card.ask')) askTick = requestAnimationFrame(() => { askTick = 0; rerender(); }); };
   window.chatUi = { onTerm, onAskInput, sending: (id) => (pending.get(id) || []).some(p => !p.held), onEscSent, dropPending: (id) => { const l = pending.get(id); if (l) l.pop(); }, doneToast, maybeDone, rewindStep, rewindPick: (k) => rewindPick(k), stop, askStep, askTab, askTo: (k) => askMove(k), askState: () => screenAsk(selectedId), linkLabel, onTask, onLinkTitle, onNextSuggest, linkWaiters, permToast, dropToast, syncInbox, toggleSplit, openFind, closeFind, jumpPrompt, onMsg, paint, onClick, syncJump, SPARK, keys, addPending: (id, text, imgs = [], held = false, match = '', pastes = [], restore = null) => { if (/^\/btw\s/.test(text || '') && !held) { btwAsk.set(id, { q: text.replace(/^\/btw\s+/, '').trim(), at: Date.now() }); return rerender(); } // its card, not a queued message (the agent isn't working on it)
-      if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; ag._sendAt = Date.now(); } jumpOnce = true; pinBottom(); }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
+      if (!pending.has(id)) pending.set(id, []); pending.get(id).push({ text, imgs, held, match, pastes, restore, at: Date.now() }); const cv = document.getElementById('conversation'); if (cv && cv.dataset.for === String(id)) cv._sent = true; /* to the top of the view once it shows there */ const ag = agents.get(id); if (ag) { ag._stopAt = 0; ag._reverted = 0; ag._sendAt = Date.now(); } }, releasePending: (id) => { const p = (pending.get(id) || []).find(x => x.held); if (p) { p.held = false; p.at = Date.now(); } }, onMdReady: (fn) => { rerender = fn; } };
 })();

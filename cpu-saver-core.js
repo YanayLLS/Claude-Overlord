@@ -3,7 +3,9 @@
 // resumes the same session with `claude --resume`. A booted claude holds 250-400 MB and keeps
 // repainting its status line.
 
-const IDLE_MS = 0; // immediate, as asked: leaving an idle agent (or it going idle while you're elsewhere) closes it
+// An idle agent nobody has open sleeps after 5 minutes. It slept at once before, and each wake is a full Claude resume
+// (a few seconds for a new chat, 20 s+ for a big one), so going back and forth with an agent kept waiting on it.
+const IDLE_MS = 5 * 60000;
 
 // Why this agent's Claude must keep running, or '' when it can sleep. The rule: idle = not working, no
 // subagent running, no shell command running. The rest only guards what would break: the open agent, a CLI

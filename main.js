@@ -1226,9 +1226,10 @@ function chatDeliver(id, text, parts, erase, onSubmit, intoDialog = false) {
     send({ type: 'cliSent', id });
     if (intoDialog) return; // an answer: the transcript has it as the question's result, not a message
     e.at = Date.now(); const l = unconfirmed.get(id) || []; if (!l.includes(e)) l.push(e); unconfirmed.set(id, l.slice(-20));
-    // Idle and still not in the transcript: its Enter was lost. Enter again; on an empty box that's nothing.
+    // Idle and still not in the transcript: its Enter was lost (common right after a resume). Enter again; on an empty
+    // box that's nothing. 4 s, not 10: the transcript has a sent message within a second or two.
     const t0 = terminals.get(id);
-    setTimeout(() => { const a = agents.get(id); if (!e.done && a && a.isWaiting && terminals.get(id) === t0 && cliReady(id)) { flog('agent ' + id + ': a sent message not in the transcript after 10s idle - Enter again'); try { t0.write('\r'); } catch {} } }, 10000);
+    setTimeout(() => { const a = agents.get(id); if (!e.done && a && a.isWaiting && terminals.get(id) === t0 && cliReady(id)) { flog('agent ' + id + ': a sent message not in the transcript after 4s idle - Enter again'); try { t0.write('\r'); } catch {} } }, 4000);
   } };
   e.resend = () => { if (e.done || ++e.tries > 3) return; if (parts) cliSend.parts(id, parts, 0, opts); else cliSend.prompt(id, text, 0, onSubmit, opts); };
   if (parts) cliSend.parts(id, parts, erase, opts); else cliSend.prompt(id, text, erase, onSubmit, opts);
@@ -2302,6 +2303,7 @@ function sleepAgent(id) {
   if (!a || !t) return;
   t._ovSlept = true; // its onExit skips handleTermExit: not a crash, and the woken CLI may already be in terminals
   a.sleeping = true; a._idleSince = 0; a.claudeReady = false;
+  a._sessionCleaned = true; // Overlord closed it itself: no stray process holds the session, so waking skips the ~10 s process scan
   if (a._readyTimer) { clearTimeout(a._readyTimer); a._readyTimer = null; }
   send({ type: 'termData', id, data: '\r\n\x1b[90m[CPU saving: Claude closed while idle. Opening this agent resumes the session.]\x1b[0m\r\n' });
   killPty(t); terminals.delete(id);

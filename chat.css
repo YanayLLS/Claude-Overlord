@@ -1050,6 +1050,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .md table :is(th, td):first-child { position: static; }
 /* Short threads sit at the bottom, by the reply box (a card answered where you type), as long ones do. */
 :root body #conversation > .thread { margin-top: auto; }
+:root body #conversation > .room { flex: none; } /* room under the tail (chat-ui keep): a flex item would shrink to 0 once the chat overflows */
 /* Notices keep the rhythm: a gap before the next paragraph. */
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli { margin-bottom: 10px; }
 /* The star on older turns shows on keyboard focus too. */
