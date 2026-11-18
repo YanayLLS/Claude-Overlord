@@ -86,6 +86,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `chat_send` | `peer` or `group`, `text` | `{ conversation, message, offline }`. 409 if no recipient is online. |
 | `events_poll` | `since?`, `types?`, `timeoutSec?` (max 60) | `{ events, seq }`. Long-poll: returns as soon as one event matches. |
 | `webhook_add` | `url`, `types?` | `{ id, secret }`. The secret is shown only this once. |
+| `agent_to_feature` | `agentId`, `name?`, `dryRun?` | converts an idle plain agent into feature `name`: each repo it edited gets a worktree on a new branch at that checkout's HEAD, its uncommitted files move there (files another agent also edited are copied and stay), and it resumes in its worktree with its conversation. All or nothing. `{ feature, branch, cwd, repos: [{ repo, path, moved, shared }] }`; with `dryRun`, what would move: `{ cwd, repos: [{ repo, path, branch, files, shared }] }`. 400 when the agent is working, already in a feature, or the branch exists |
 | `feature_from_worktree` | `path`, `name` | the worktree entry: an existing git worktree (made anywhere) joins as feature `name` as-is, gets a port, installs deps and starts its dev server; removing it later keeps the folder. 400 for the main checkout, a detached HEAD or a non-worktree |
 | `repo_check` | `repo` | `{ repo, node: { ok, need, have, source } }`: the Node major the repo needs (`.nvmrc`, `.node-version`, `engines.node` or a locked package, the strictest) against `node -v` on this machine |
 | `pr_repos_list` | | `{ enabled, repos, locked }`: the PR watchlist. `locked` are release repos the team watches; they can't be removed |
@@ -123,6 +124,7 @@ What each field means:
 | `agent.title` | agentId, title |
 | `agent.tool_start` / `agent.tool_done` | agentId, toolId, tool, status |
 | `agent.send_failed` | agentId, text |
+| `agent.moved` | agentId, cwd, feature: the agent now works in another folder (converted to a feature with `agent_to_feature` or from the UI) |
 | `feature.repo_added` | agentId, feature, repo, path, branch: an agent in a feature edited a repo the feature did not have yet; that repo got the feature's worktree (`path`, on `branch`) and joined the feature |
 | `chat.message` | conversation (`{type:'peer'\|'group', id}`), group, message: sent or received peer chat |
 

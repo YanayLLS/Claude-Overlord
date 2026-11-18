@@ -54,6 +54,7 @@ const EVENTS = [
   ['sleeping', 'agent.sleeping', 'CPU saving closed an idle agent\'s CLI (sleeping true), or it was resumed (false). Fields: agentId, sleeping.', (m) => ({ agentId: m.id, sleeping: !!m.on })],
   ['crashed', 'agent.crashed', 'An agent\'s CLI crashed. Fields: agentId.', (m) => ({ agentId: m.id })],
   ['sendFailed', 'agent.send_failed', 'A message for an agent could not be delivered. Fields: agentId, text.', (m) => ({ agentId: m.id, text: m.text })],
+  ['agentCwd', 'agent.moved', 'An agent moved to another folder (converted to a feature: it now works in the feature\'s worktree). Fields: agentId, cwd, feature.', (m) => ({ agentId: m.id, cwd: m.cwd, feature: m.feature || null })],
   ['featureRepoAdded', 'feature.repo_added', 'An agent in a feature edited a repo the feature did not have yet, so that repo got the feature\'s worktree and joined it. Fields: agentId, feature, repo, path, branch.', (m) => ({ agentId: m.id, feature: m.feature, repo: m.repo, path: m.path, branch: m.branch })],
   ['chatMsg', 'chat.message', 'A peer-chat message was sent or received. Fields: conversation ({type: peer | group, id}), group, message.', (m) => ({ conversation: m.key, group: m.groupName, message: m.msg })],
 ];
@@ -97,6 +98,7 @@ const TOOLS = [
   ['chat_send', 'Send a peer-chat message to a peer or group.', obj({ ...TO, text: S('The message.') }, ['text'])],
   ['events_poll', 'Events after a sequence number, waiting up to timeoutSec for one to arrive. For clients that can\'t hold an SSE stream (e.g. MCP).', obj({ since: N('Last seq you saw; 0 for what is buffered.'), types: { type: 'array', items: { type: 'string' }, description: 'Event types, or prefixes ending in "." (e.g. "agent."). Default all.' }, timeoutSec: N('Default 25, max 60.') })],
   ['webhook_add', 'Register a URL on this machine (http://127.0.0.1 or localhost) that gets each event POSTed as JSON, signed with X-Overlord-Signature: sha256=HMAC(secret, body). Returns the secret once.', obj({ url: S('http://127.0.0.1:<port>/<path>'), types: { type: 'array', items: { type: 'string' }, description: 'Event types or prefixes. Default all.' } }, ['url'])],
+  ['agent_to_feature', 'Convert a plain agent into a feature: every repo it edited gets a worktree on a new branch named after the feature, branched at that checkout\'s HEAD (so its commits come along); its uncommitted files move there out of the checkout (files another agent also edited are copied and stay); the agent resumes in its worktree with its conversation. All or nothing. Only when the agent is idle. dryRun returns what would move.', obj({ ...AGENT, name: S('Feature name (also the branch name, made git-safe).'), dryRun: { type: 'boolean', description: 'Only report what would move: { cwd, repos: [{ repo, path, branch, files, shared }] }.' } }, ['agentId'])],
   ['feature_from_worktree', 'Turn an existing git worktree (any folder, made outside Overlord too) into a feature as-is: same folder, branch and files; it gets a port, installs deps and starts its dev server. Removing it later unregisters it and keeps the folder. Returns the worktree entry.', obj({ path: S('Absolute path of the worktree folder.'), name: S('Feature name.') }, ['path', 'name'])],
   ['repo_check', 'Whether this machine can set up a repo: the Node major it needs (from .nvmrc, .node-version, engines.node or a locked package) against the installed one. node.ok false means its worktree install will likely fail.', obj({ repo: S('Absolute path of the repo (its main checkout).') }, ['repo'])],
   ['pr_repos_list', 'The PR watchlist: GitHub repos whose open PRs the PRs panel shows. enabled: PR notifications on. locked: release repos the whole team watches; they can\'t be removed.', obj({})],
@@ -286,6 +288,7 @@ function createApi(host) {
       hooks.push(h); persistHooks();
       return { id: h.id, url: h.url, types: h.types, secret: h.secret };
     },
+    agent_to_feature: (x) => { const id = Number(x.agentId); if (!x.dryRun && !x.name) throw new ApiError(400, 'name is required'); return host.agentToFeature(id, x.name ? String(x.name) : '', !!x.dryRun); },
     feature_from_worktree: (x) => { if (!x.path || !x.name) throw new ApiError(400, 'path and name are required'); return host.featureFromWorktree(String(x.path), String(x.name)); },
     repo_check: (x) => { if (!x.repo) throw new ApiError(400, 'repo is required'); return host.repoCheck(String(x.repo)); },
     pr_repos_list: () => host.prWatch(),

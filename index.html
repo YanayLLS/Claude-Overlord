@@ -661,6 +661,14 @@ button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
 .ft-row input[type=checkbox] { width:15px; height:15px; margin:0; flex:none; accent-color:var(--accent); cursor:pointer; }
 .ft-repo { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
 .ft-from { font-size:11px; color:var(--dim); flex:none; }
+.a2f-repo { padding:7px 8px; border-radius:8px; background:var(--surface0); margin-bottom:4px; }
+.a2f-top { display:flex; align-items:center; gap:10px; font-size:13px; }
+.a2f-n { font-size:11px; color:var(--dim); flex:none; font-variant-numeric:tabular-nums; }
+.a2f-files { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.a2f-files span { font-family:'Geist Mono',monospace; font-size:10.5px; padding:1px 6px; border-radius:4px; background:var(--bg); color:var(--text); }
+.a2f-files span.shared { color:var(--yellow,#f9e2af); }
+.a2f-note { font-size:12px; color:var(--dim); padding:6px 2px; }
+.a2f-note.bad { color:var(--red,#f38ba8); }
 .ft-need { flex:none; }
 .ft-need button { display:inline-flex; align-items:center; gap:4px; padding:2px 8px 2px 6px; font:inherit; font-size:11px; font-weight:600; color:var(--yellow); background:color-mix(in srgb, var(--yellow) 10%, transparent); border:1px solid color-mix(in srgb, var(--yellow) 35%, transparent); border-radius:999px; cursor:pointer; }
 .ft-need button:hover { background:color-mix(in srgb, var(--yellow) 18%, transparent); }
@@ -2098,6 +2106,50 @@ function onRepoChecks(list) {
   document.querySelectorAll('[data-need-for]').forEach(paintNeed);
 }
 // Same rules as worktree.js safeBranch, so the preview shows the branch git will get.
+// Right-click an agent > Convert to feature: its repos and the files that would move, then a name.
+let _a2f = null; // { id, plan, busy, error } while the dialog is open
+function openAgentToFeature(id) {
+  _a2f = { id };
+  const el = wtOverlay();
+  el.innerHTML = `<div class="ft-modal" role="dialog" aria-label="Convert to feature" onkeydown="if(event.key==='Escape')closeWt();else if(event.key==='Enter'&&event.target.id==='a2f-name')submitAgentToFeature()">
+    <div class="ft-head"><span class="ft-title">Convert to feature</span><button class="ft-x" onclick="closeWt()" title="Close (Esc)" aria-label="Close">&#x2715;</button></div>
+    <input id="a2f-name" class="ft-name" autocomplete="off" spellcheck="false" placeholder="Feature name" oninput="a2fUpdate()">
+    <div class="ft-branch" id="a2f-branch"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="7" r="2.5"/><path d="M6 7.5v9M18 9.5c0 5-12 3-12 7"/></svg><span id="a2f-branch-name">branch</span></div>
+    <div class="ft-label">Moves</div>
+    <div id="a2f-rows"><div class="a2f-note">Reading its work&#x2026;</div></div>
+    <div class="ft-foot">
+      <button class="ft-btn" onclick="closeWt()">Cancel</button>
+      <button class="ft-btn primary" id="a2f-go" onclick="submitAgentToFeature()" disabled>Convert</button>
+    </div></div>`;
+  el.style.display = 'flex';
+  document.getElementById('a2f-name').focus();
+  send({ type: 'agentFeaturePlan', id });
+}
+function a2fRender() {
+  const rows = document.getElementById('a2f-rows');
+  if (!rows || !_a2f) return;
+  if (_a2f.error) { rows.innerHTML = `<div class="a2f-note bad">${esc(_a2f.error)}</div>`; return a2fUpdate(); }
+  const SHOW = 8;
+  rows.innerHTML = _a2f.plan.repos.map(r => {
+    const shared = new Set(r.shared);
+    const chips = r.files.slice(0, SHOW).map(f => `<span class="${shared.has(f) ? 'shared' : ''}" title="${escAttr(shared.has(f) ? f + ' (another agent edited it too: copied, also stays)' : f)}">${esc(f.split('/').pop())}</span>`).join('')
+      + (r.files.length > SHOW ? `<span>+${r.files.length - SHOW}</span>` : '');
+    return `<div class="a2f-repo"><div class="a2f-top"><span class="ft-repo" title="${escAttr(r.path)}">${esc(pathLabel(r.path))}</span>${r.branch ? `<span class="ft-from">from ${esc(r.branch)}</span>` : ''}<span class="a2f-n">${r.files.length ? r.files.length + ' file' + (r.files.length > 1 ? 's' : '') : 'commits only'}</span></div>${chips ? `<div class="a2f-files">${chips}</div>` : ''}</div>`;
+  }).join('') + (_a2f.busy ? '<div class="a2f-note bad">Working now. Convert when it is idle.</div>' : '');
+  a2fUpdate();
+}
+function a2fUpdate() {
+  const br = ftBranch((document.getElementById('a2f-name') || {}).value || '');
+  const b = document.getElementById('a2f-branch'); if (b) { b.classList.toggle('on', !!br); document.getElementById('a2f-branch-name').textContent = br || 'branch'; }
+  const go = document.getElementById('a2f-go'); if (go) go.disabled = !br || !_a2f || !_a2f.plan || _a2f.busy;
+}
+function submitAgentToFeature() {
+  const name = document.getElementById('a2f-name').value.trim();
+  if (!_a2f || !_a2f.plan || _a2f.busy || !ftBranch(name)) return;
+  send({ type: 'agentToFeature', id: _a2f.id, name });
+  _a2f = null; closeWt();
+  showToast(`Converting to ${name}…`);
+}
 function ftBranch(n) { return String(n).trim().replace(/[\x00-\x1f\x7f ~^:?*\[\\]+/g, '-').replace(/\/{2,}/g, '/').replace(/^[-/.]+|[-/.]+$/g, '').replace(/-{2,}/g, '-'); }
 function openNewFeature() {
   _ftIdx = 0;
@@ -2894,6 +2946,7 @@ function showAgentMenu(e, id) {
     ...(a && a.customName ? [{ label: 'Clear custom name', action: () => clearCustomName(id) }] : []),
     { label: 'Restart', action: () => restartAgent(id) },
     { label: 'Duplicate', action: () => duplicateAgent(id) },
+    ...(a && !(worktreeAt(a.cwd) || {}).feature ? [{ label: 'Convert to feature…', action: () => openAgentToFeature(id) }] : []),
     { label: 'Export transcript', action: () => exportAgent(id) },
     ...((peersState.peers || []).some(p => p.connected) ? [{ label: 'Message a peer agent…', action: () => openPeerMsgModal(id) }] : []),
     ...runAsItems(a, id),
@@ -4764,6 +4817,8 @@ function handleAgentMsg(msg) {
     case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
     case 'interrupted': showInterrupted(msg.agents); break;
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
+    case 'agentFeaturePlan': if (_a2f && _a2f.id === msg.id) { _a2f.plan = msg.plan; _a2f.busy = !!msg.busy; _a2f.error = msg.error; a2fRender(); } break;
+    case 'agentCwd': { const a = agents.get(msg.id); if (a) { a.cwd = msg.cwd; scheduleRender(); } break; } // converted to a feature: its card moves there
     case 'sleeping': { const a = agents.get(msg.id); if (a) { if (a.sleeping && !msg.on) a.wokeAt = Date.now(); a.sleeping = !!msg.on; scheduleRender(); } break; } // CPU saving closed (or resumed) its CLI
     case 'crashCleared': { const a = agents.get(msg.id); if (a) { a.crashed = null; a.crashCount = 0; a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); scheduleRender(); } break; }
     case 'perm': { const a = agents.get(msg.id); if (msg.id !== selectedId) setTimeout(() => chatUi.permToast(msg.id, msg.ask), 400); /* another agent: answer from a toast (after its menu has drawn) */ if (a) { for (const t of a.tools.values()) { if (!t.done) t.perm = msg.ask ? 'ask' : true; } scheduleRender(); } break; }

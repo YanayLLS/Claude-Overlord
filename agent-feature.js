@@ -123,4 +123,33 @@ async function convert({ git, moves, makeWorktree, dropWorktree }) {
   return made;
 }
 
-module.exports = { editedFiles, parseStatus, planMove, newCwd, repoState, copyWork, cleanSource, convert };
+const nearestDir = (d) => { while (d && !fs.existsSync(d)) { const p = path.dirname(d); if (p === d) return null; d = p; } return d; };
+
+// Everything converting needs to know: the repos the agent's folder and its edits sit in (skipRoot(root)
+// true leaves one out, e.g. another feature's worktree), and what moves in each. Its own repo is always
+// in; another only where it edited something.
+async function planForAgent({ git, cwd, files, others, skipRoot = () => false }) {
+  const topOf = (d) => git(d, ['rev-parse', '--show-toplevel']).then(s => path.resolve(s.trim())).catch(() => null);
+  const cwdRoot = await topOf(cwd);
+  if (!cwdRoot) throw new Error('This agent\'s folder is not in a git repo');
+  const roots = new Map([[norm(cwdRoot), cwdRoot]]);
+  const dirs = [...new Set(files.map(f => nearestDir(path.dirname(f))).filter(Boolean))];
+  for (const r of await Promise.all(dirs.map(topOf))) if (r && !skipRoot(r)) roots.set(norm(r), r);
+  const states = await Promise.all([...roots.values()].map(r => repoState(git, r)));
+  const moves = planMove({ files, repos: states, others }).filter(m => norm(m.root) === norm(cwdRoot) || m.touched);
+  return { cwd, moves };
+}
+
+// Claude finds a session by the folder it runs in (~/.claude/projects/<folder>/<id>.jsonl): copy the
+// transcript and its subagents next to the new folder's sessions. Returns the new transcript path.
+// ponytail: copy, not move; the old one stays as a backup.
+function moveSession({ jsonlFile, sessionId, toDir }) {
+  const to = path.join(toDir, path.basename(jsonlFile));
+  fs.mkdirSync(toDir, { recursive: true });
+  if (fs.existsSync(jsonlFile)) fs.copyFileSync(jsonlFile, to);
+  const sub = path.join(path.dirname(jsonlFile), sessionId);
+  if (fs.existsSync(sub)) fs.cpSync(sub, path.join(toDir, sessionId), { recursive: true });
+  return to;
+}
+
+module.exports = { editedFiles, parseStatus, planMove, newCwd, repoState, copyWork, cleanSource, convert, planForAgent, moveSession, nearestDir };

@@ -109,3 +109,31 @@ test('convert changes nothing in any checkout when one repo fails, and drops the
   assert.ok(!fs.existsSync(path.join(wtRoot, path.basename(one.dir))), 'the first worktree was rolled back');
   assert.strictEqual(one.g('branch', '--list', 'feat').trim(), '');
 });
+
+test('planForAgent finds its own repo (always) and every repo it edited, skips others and non-repos', async () => {
+  const web = tmpRepo(), api = tmpRepo(), idle = tmpRepo(), skipped = tmpRepo();
+  const loose = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-af-loose-'));
+  fs.mkdirSync(path.join(web.dir, 'pkg'));
+  fs.writeFileSync(path.join(api.dir, 'a.txt'), 'api edit\n');
+  fs.writeFileSync(path.join(skipped.dir, 'a.txt'), 'other feature\n');
+  const files = [path.join(api.dir, 'a.txt'), path.join(api.dir, 'gone/deleted.txt'), path.join(skipped.dir, 'a.txt'), path.join(loose, 'x.txt')];
+  const p = await af.planForAgent({ git, cwd: path.join(web.dir, 'pkg'), files, others: [], skipRoot: (r) => R(r).toLowerCase() === R(skipped.dir).toLowerCase() });
+  const roots = p.moves.map(m => R(m.root).toLowerCase()).sort();
+  assert.deepStrictEqual(roots, [R(web.dir), R(api.dir)].map(x => x.toLowerCase()).sort(), 'web (its folder, no edits) + api; not idle, skipped or loose');
+  assert.deepStrictEqual(p.moves.find(m => R(m.root).toLowerCase() === R(api.dir).toLowerCase()).tracked, ['a.txt']);
+  assert.ok(idle);
+  await assert.rejects(af.planForAgent({ git, cwd: loose, files: [], others: [] }), /not in a git repo/);
+});
+
+test('moveSession copies the transcript and its subagents into the new folder\'s project dir', () => {
+  const from = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-af-proj-')), to = path.join(os.tmpdir(), 'ov-af-proj-to-' + Date.now());
+  const id = '11111111-2222-3333-4444-555555555555';
+  fs.writeFileSync(path.join(from, id + '.jsonl'), '{"a":1}\n');
+  fs.mkdirSync(path.join(from, id, 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(from, id, 'subagents', 's.jsonl'), '{"b":2}\n');
+  const out = af.moveSession({ jsonlFile: path.join(from, id + '.jsonl'), sessionId: id, toDir: to });
+  assert.strictEqual(out, path.join(to, id + '.jsonl'));
+  assert.strictEqual(fs.readFileSync(out, 'utf8'), '{"a":1}\n');
+  assert.strictEqual(fs.readFileSync(path.join(to, id, 'subagents', 's.jsonl'), 'utf8'), '{"b":2}\n');
+  assert.ok(fs.existsSync(path.join(from, id + '.jsonl')), 'the original stays as a backup');
+});

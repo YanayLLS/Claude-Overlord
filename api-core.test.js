@@ -57,6 +57,17 @@ test('a repo joining a feature mid-task is a public event', () => {
     { type: 'feature.repo_added', agentId: 4, feature: 'Model update', repo: 'C:/Work/back-office', path: 'C:/wt/back-office/Model-update', branch: 'Model-update' });
 });
 
+test('agent_to_feature converts, or only plans with dryRun, and needs a name to convert', async () => {
+  const calls = [];
+  const api = createApi(fakeHost({ agentToFeature: async (id, name, dry) => { calls.push([id, name, dry]); return { ok: true }; } }));
+  await api.call('agent_to_feature', { agentId: 3, name: 'XR' });
+  await api.call('agent_to_feature', { agentId: 3, dryRun: true });
+  assert.deepStrictEqual(calls, [[3, 'XR', false], [3, '', true]]);
+  await assert.rejects(api.call('agent_to_feature', { agentId: 3 }), { status: 400 });
+});
+test('agentCwd becomes agent.moved', () => {
+  assert.deepStrictEqual(toEvent({ type: 'agentCwd', id: 2, cwd: 'C:/wt/web/XR', feature: 'XR' }), { type: 'agent.moved', agentId: 2, cwd: 'C:/wt/web/XR', feature: 'XR' });
+});
 test('feature_from_worktree hands the folder and name to the host', async () => {
   const api = createApi(fakeHost({ featureFromWorktree: async (p, name) => ({ path: p, feature: name, adopted: true }) }));
   assert.deepStrictEqual(await api.call('feature_from_worktree', { path: 'C:/Work/Designs-xr', name: 'XR' }), { path: 'C:/Work/Designs-xr', feature: 'XR', adopted: true });

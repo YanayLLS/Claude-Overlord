@@ -13,6 +13,7 @@ const wt = require('./worktree');
 const { planRedirect, planShellRedirect } = require('./feature-redirect');
 const nodeReq = require('./node-req');
 const featureEnvLib = require('./feature-env');
+const agentFeature = require('./agent-feature');
 const pc = require('./peer-core');
 const wc = require('./watch-core');
 const timelineCore = require('./timeline-core');
@@ -1896,6 +1897,7 @@ const spawningTerms = new Set(); // ids with an async pre-spawn kill in flight
 
 function spawnTerminal(id) {
   if (terminals.has(id) || spawningTerms.has(id)) return; // already running/starting
+  if ((agents.get(id) || {})._moving) return; // converting to a feature: it resumes in its new folder
   const a = agents.get(id);
   if (!a) return;
   a._spawnAt = Date.now(); // who started it: a CLI dying seconds after a spawn needs the spawner (crash log above)
@@ -4768,11 +4770,12 @@ async function repoCheck(repo) { const [req, v] = await Promise.all([nodeReq.nod
 // Background folder deletions by lower-cased path, so re-creating a just-removed worktree
 // waits for its old folder to go instead of colliding with it halfway.
 const pendingRemovals = new Map();
-async function doCreateWorktree({ repo, branch, base, feature }) {
+// startPoint: branch from this commit instead of base (base stays the PR target). install false: the caller installs later.
+async function doCreateWorktree({ repo, branch, base, feature, startPoint, install = true }) {
   branch = wt.safeBranch(branch); // git forbids spaces/special chars in branch names
   const pending = pendingRemovals.get(wt.worktreePath(repo, branch).toLowerCase());
   if (pending) await pending;
-  const made = await wt.createWorktree({ repo, branch, base });
+  const made = await wt.createWorktree({ repo, branch, base: startPoint || base });
   const dest = made.dest;
   branch = made.branch;
   const known = (settings.worktrees || []).find(w => w.path.toLowerCase() === dest.toLowerCase());
@@ -4793,7 +4796,7 @@ async function doCreateWorktree({ repo, branch, base, feature }) {
   saveState();
   send({ type: 'settings', settings: publicSettings() });
   send({ type: 'toast', text: made.adopted ? `${path.basename(repo)}: using the existing ${branch} worktree` : `Created worktree ${branch}` });
-  installWorktree(entry);
+  if (install) installWorktree(entry);
   return entry;
 }
 
@@ -4828,6 +4831,84 @@ async function featureFromWorktree(dir, name) {
   send({ type: 'settings', settings: publicSettings() });
   installWorktree(entry); // deps are likely in already, so this is quick; then it starts the server
   return entry;
+}
+
+// ── Convert an agent to a feature ──────────────────────────────────────
+// Its transcript text with its subagents' (their edits are its own).
+// ponytail: only the current session; edits made before a /clear live in an older file and are not seen.
+function agentTranscriptText(a) {
+  let t = ''; try { t = fs.readFileSync(a.jsonlFile, 'utf8'); } catch {}
+  const sub = path.join(path.dirname(a.jsonlFile), a.sessionId, 'subagents');
+  try { for (const f of fs.readdirSync(sub)) if (f.endsWith('.jsonl')) t += '\n' + fs.readFileSync(path.join(sub, f), 'utf8'); } catch {}
+  return t;
+}
+// What converting agent id would move: per repo, its changed files (and which another agent shares).
+async function agentFeaturePlan(id) {
+  const a = agents.get(id);
+  if (!a) throw new Error(`no agent ${id}`);
+  if ((findWorktree(a.cwd) || {}).feature) throw new Error('This agent is already in a feature');
+  const others = [];
+  for (const [oid, o] of agents) if (oid !== id) others.push(...agentFeature.editedFiles(agentTranscriptText(o)));
+  return agentFeature.planForAgent({
+    git: (dir, args) => wt.git(dir, args, 30000), cwd: a.cwd, others,
+    files: agentFeature.editedFiles(agentTranscriptText(a)),
+    skipRoot: (r) => !!(findWorktree(r) || {}).feature, // never pull work out of another feature
+  });
+}
+const planSummary = (p) => ({ cwd: p.cwd, repos: p.moves.map(m => ({ repo: m.main, path: m.root, branch: m.branch || null, files: [...m.tracked, ...m.untracked], shared: m.shared })) });
+
+// Converts: a worktree per repo branched at the checkout's HEAD, the agent's uncommitted files moved
+// in, its session moved along, then it resumes there. All or nothing; the checkouts change last.
+async function agentToFeature(id, name) {
+  name = String(name || '').trim();
+  const a = agents.get(id);
+  if (!a) throw new Error(`no agent ${id}`);
+  if (!name) throw new Error('feature name is required');
+  if (a._moving) throw new Error('Already converting');
+  if (terminals.has(id) && !a.isWaiting && !a.sleeping) throw new Error('The agent is working. Convert it when it is idle.');
+  if ((settings.worktrees || []).some(w => w.feature === name)) throw new Error(`Feature "${name}" already exists`);
+  const branch = wt.safeBranch(name);
+  const plan = await agentFeaturePlan(id);
+  for (const m of plan.moves) {
+    const taken = await wt.git(m.root, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], 15000).then(() => true, () => false);
+    if (taken) throw new Error(`${path.basename(m.main)} already has a branch "${branch}"`);
+  }
+  const t = terminals.get(id), wasRunning = !!t;
+  a._moving = true;
+  if (t) { t._ovSlept = true; a.claudeReady = false; a._sessionCleaned = true; killPty(t); terminals.delete(id); } // its exit is not a crash
+  try {
+    const made = await agentFeature.convert({
+      git: (dir, args) => wt.git(dir, args, 60000),
+      moves: plan.moves,
+      makeWorktree: async (m) => {
+        const e = await doCreateWorktree({ repo: m.main, branch, feature: name, startPoint: m.head, install: false,
+          base: (projectConfig(m.main) || {}).defaultBase || m.branch || 'dev' });
+        e.movedFrom = m.root;
+        return e.path;
+      },
+      dropWorktree: async (m, dest) => {
+        settings.worktrees = (settings.worktrees || []).filter(w => w.path !== dest);
+        await wt.removeWorktree({ repo: m.main, dest, branch, deleteBranch: true });
+      },
+    });
+    const cwd = agentFeature.nearestDir(agentFeature.newCwd(a.cwd, made)) || made[0].dest;
+    const from = a.jsonlFile, to = agentFeature.moveSession({ jsonlFile: from, sessionId: a.sessionId, toDir: claudeDir(cwd) });
+    try { fs.unwatchFile(from); } catch {}
+    a.cwd = cwd; a.jsonlFile = to;
+    saveState();
+    send({ type: 'settings', settings: publicSettings() });
+    send({ type: 'agentCwd', id, cwd, feature: name });
+    startWatch(id);
+    for (const m of made) { const e = findWorktree(m.dest); if (e) installWorktree(e); }
+    a._moving = false;
+    if (wasRunning) spawnTerminal(id);
+    return { feature: name, branch, cwd, repos: made.map(m => ({ repo: m.main, path: m.dest, moved: [...m.tracked, ...m.untracked], shared: m.shared })) };
+  } catch (e) {
+    a._moving = false;
+    saveState(); send({ type: 'settings', settings: publicSettings() });
+    if (wasRunning) spawnTerminal(id); // back where it was, nothing moved
+    throw e;
+  }
 }
 
 // Install deps so the worktree is actually runnable. Runs in the background; the group
@@ -4995,6 +5076,9 @@ function featureAgentArgs(cwd) {
     notes.push(`This folder is a worktree of feature "${self.feature}" (branch ${self.branch}). When the task needs another repo, `
       + `edit its files at their usual path with your Edit/Write tools: Overlord then gives that repo a worktree on the same branch and tells you its path; work there from then on. `
       + `Never change a repo's main checkout from the shell (no sed, git commit or git checkout there).`);
+    const moved = (settings.worktrees || []).filter(w => w.feature === self.feature && w.movedFrom);
+    if (moved.length) notes.push(`This conversation was moved into the feature together with its uncommitted work. Earlier messages name the old folders; `
+      + `use the new ones from now on: ${moved.map(w => `${w.movedFrom} -> ${w.path}`).join('; ')}.`);
     if (siblings.length) {
       const list = siblings.map(w => `${path.basename(w.repo)} (${w.path})`).join('; ');
       notes.push(`This git worktree is part of feature "${self.feature}" on branch ${self.branch}, spanning multiple repos. `
@@ -5076,6 +5160,18 @@ function handleIpc(msg) {
         doCreateWorktree({ repo: r.repo, branch: name, base: r.base || 'dev', feature: name })
           .catch(e => { flog(`createFeature ${name} / ${r.repo} failed:`, e); send({ type: 'toast', text: `Feature ${name} — ${path.basename(r.repo)} failed: ${e.message || 'error'}` }); });
       }
+      break;
+    }
+    case 'agentFeaturePlan': {
+      agentFeaturePlan(msg.id)
+        .then(p => send({ type: 'agentFeaturePlan', id: msg.id, plan: planSummary(p), busy: terminals.has(msg.id) && !agents.get(msg.id).isWaiting }))
+        .catch(e => send({ type: 'agentFeaturePlan', id: msg.id, error: e.message || 'error' }));
+      break;
+    }
+    case 'agentToFeature': {
+      agentToFeature(msg.id, msg.name)
+        .then(r => send({ type: 'toast', text: `${r.feature}: agent moved, ${r.repos.reduce((n, x) => n + x.moved.length, 0)} file(s) with it` }))
+        .catch(e => { flog('agentToFeature failed:', e); send({ type: 'toast', text: 'Convert failed: ' + (e.message || 'error') }); });
       break;
     }
     case 'featureFromWorktree': {
@@ -6106,6 +6202,7 @@ function apiHost() {
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
     repoCheck: (repo) => repoCheck(repo),
+    agentToFeature: (id, name, dryRun) => { need(id); return (dryRun ? agentFeaturePlan(id).then(planSummary) : agentToFeature(id, name)).catch(e => { throw new ApiError(400, e.message); }); },
     featureFromWorktree: (p, name) => featureFromWorktree(p, name).catch(e => { throw new ApiError(400, e.message); }),
     prAutoMerge: ({ urls, on }) => ({ urls: setPrAutoMerge(urls || prAutoMergeable((settings.prCache || {}).prs).map(p => p.url), on) }),
     prList: (o) => prClaimsApi.list(o), prMerge: (pr) => prClaimsApi.merge(pr), prApprove: (pr) => prClaimsApi.approve(pr),
