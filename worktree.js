@@ -205,6 +205,15 @@ async function removeWorktree({ repo, dest, branch, deleteBranch }) {
   }
 }
 
+// Linked worktrees (main checkout dropped) on a branch, from `git worktree list --porcelain`.
+function parseWorktrees(out) {
+  return String(out || '').split(/\r?\n\r?\n/).map(b => ({
+    path: (/^worktree (.+)$/m.exec(b) || [])[1],
+    branch: ((/^branch refs\/heads\/(.+)$/m.exec(b) || [])[1] || ''),
+  })).filter(w => w.path).slice(1).filter(w => w.branch).map(w => ({ path: path.resolve(w.path.trim()), branch: w.branch.trim() }));
+}
+async function listWorktrees(repo) { return parseWorktrees(await git(repo, ['worktree', 'list', '--porcelain'], 20000)); }
+
 // An existing folder that can become a feature member as-is: a linked worktree (git lists the
 // main checkout first) on a named branch. The main checkout itself never joins; a feature owns
 // and can delete its members.
@@ -231,7 +240,7 @@ function setupFailReason(log) {
 }
 
 module.exports = {
-  setupFailReason, adoptTarget, registeredWorktrees, git,
+  setupFailReason, adoptTarget, parseWorktrees, listWorktrees, registeredWorktrees, git,
   WT_ROOT, slug, safeBranch, worktreePath, listBranches, copySeedFiles, detectSeedFiles,
   detectPackageManager, detectDevCommand, createWorktree, removeWorktree, repoRoot,
 };

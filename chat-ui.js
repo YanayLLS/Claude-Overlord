@@ -1034,7 +1034,7 @@
     const mine = [...(pending.get(id) || [])];
     const own = (e) => { const t = e.text.trim(); let k = mine.findIndex(p => (p.match || p.text || '').trim() === t); if (k < 0) k = mine.findIndex(p => Math.abs(Date.parse(e.ts) - p.at) < 15000); return k >= 0 && !!mine.splice(k, 1); };
     return q.filter(e => !e.sys && e.text.trim() && !own(e))
-      .map(e => `<div class="msg user pending cliq"><div class="bubble">${tagChips(e.text)}</div><span class="q"><button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button></span></div>`).join('');
+      .map(e => `<div class="msg user pending cliq"><div class="qrow"><button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><div class="bubble">${tagChips(e.text)}</div></div><span class="q"></span></div>`).join('');
   }
   function pendingHtml(id, evs, busy) {
     const list = pending.get(id);
@@ -1075,7 +1075,7 @@
       // Queued = in the CLI's own queue, which Send now (its Ctrl+X Ctrl+S) acts on: only once main handed it over. Before
       // that it waits in Overlord for a CLI that can take it - one CPU saving is resuming - and Send now did nothing.
       const queued = busy && !p.held && !!p.sentAt, ag = agents.get(id), waking = !p.sentAt && ag && (ag.sleeping || (ag.wokeAt && Date.now() - ag.wokeAt < 180000));
-      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued || (p.sentAt && /^\//.test(p.text || '')) ? '' : waking ? 'Waking the agent…' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="qrow">${queued ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button>` : ''}<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div></div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued || (p.sentAt && /^\//.test(p.text || '')) ? '' : waking ? 'Waking the agent…' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
     }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls

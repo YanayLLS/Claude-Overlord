@@ -40,6 +40,9 @@ test('API errors, token use, background shells and their end become events', () 
   assert.deepStrictEqual(t.u, { m: 'claude-opus-5-5', i: 5, o: 7, cr: 100, cw: 3 });
   const [d] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'Command running in background with ID: b2k. Output is being written to: C:\\t\\b2k.output. You will be notified' }] } });
   assert.strictEqual(d.bgId, 'b2k'); assert.strictEqual(d.bgOut, 'C:\\t\\b2k.output');
+  // a foreground command that hit its timeout and was moved to the background is a background shell too
+  const [d2] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'Command did not complete within its 120s timeout and was moved to the background (ID: bf5). Output is being written to: C:\\t\\bf5.output. You will be notified' }] } });
+  assert.strictEqual(d2.bgId, 'bf5'); assert.strictEqual(d2.bgOut, 'C:\\t\\bf5.output');
   // its <summary> is the line the CLI prints; after a compaction a still-running one gets its own line too
   assert.deepStrictEqual(parse({ type: 'user', message: { content: '<task-notification><task-id>b2k</task-id><status>completed</status><summary>Background command "Watch" completed (exit code 0)</summary></task-notification>' } }), [{ type: 'bgdone', ts: null, taskId: 'b2k', status: 'completed', text: 'Background command "Watch" completed (exit code 0)' }]);
   assert.deepStrictEqual(parse({ type: 'attachment', attachment: { type: 'task_status', status: 'running', description: 'Watch' } }), [{ type: 'note', ts: null, text: 'Task "Watch" still running in background' }]);

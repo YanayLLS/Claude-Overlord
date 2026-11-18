@@ -639,6 +639,11 @@ button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
   background:#11111b; border:1px solid #45475a; border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.5); }
 .branch-item { padding:5px 8px; font-size:12px; color:#cdd6f4; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .branch-item:hover { background:rgba(137,180,250,.18); }
+.branch-item.wt { display:flex; align-items:center; gap:6px; }
+.branch-item.wt svg { width:12px; height:12px; flex:none; fill:none; stroke:var(--accent); stroke-width:2; }
+.branch-item.wt small { color:var(--subtext,#a6adc8); overflow:hidden; text-overflow:ellipsis; }
+.branch-sep { height:1px; margin:3px 0; background:var(--border,#45475a); }
+.ft-row .branch-combo input.wt { color:var(--accent); }
 .ft-modal { width:520px; max-width:calc(100vw - 32px); box-sizing:border-box; padding:18px 20px 16px; background:var(--bg3); color:var(--text); border:1px solid var(--border-hi); border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.45); font-size:13px; }
 .ft-head { display:flex; align-items:center; margin-bottom:12px; }
 .ft-title { font-size:15px; font-weight:600; }
@@ -2145,32 +2150,42 @@ function addFeatureRepoRow(repo, checked) {
     <span class="ft-from">from</span>
     <div class="branch-combo">
       <input id="ft-base-${i}" autocomplete="off" spellcheck="false" value="${escAttr(def)}" placeholder="dev" title="${escAttr(def)}"
-        oninput="filterBranchMenu(${i})" onfocus="this.select();filterBranchMenu(${i})" onblur="setTimeout(()=>hideBranchMenu(${i}),150)">
+        oninput="ftUnpickWt(${i});filterBranchMenu(${i})" onfocus="this.select();filterBranchMenu(${i},true)" onblur="setTimeout(()=>hideBranchMenu(${i}),150)">
       <div id="ft-menu-${i}" class="branch-menu" style="display:none"></div>
     </div>`;
   rows.appendChild(row);
   ftUpdate();
   send({ type: 'repoChecks', repos: [repo] });
-  _branchCbs[repo] = (branches, err) => {
+  _branchCbs[repo] = (branches, err, wts) => {
     _ftBranches[i] = (err || !branches || !branches.length) ? ['dev'] : branches;
+    _ftWts[i] = (wts || []).filter(w => !worktrees.some(x => x.feature && x.path.toLowerCase() === w.path.toLowerCase())); // not already in a feature
     if (document.activeElement === document.getElementById(`ft-base-${i}`)) filterBranchMenu(i);
   };
   send({ type: 'listBranches', repo });
 }
-function filterBranchMenu(i) {
+function filterBranchMenu(i, all) {
   const inp = document.getElementById(`ft-base-${i}`), menu = document.getElementById(`ft-menu-${i}`);
   if (!inp || !menu) return;
   inp.title = inp.value; // hover the field to see the full (possibly long) branch name
-  const q = inp.value.trim().toLowerCase();
+  const q = all ? '' : inp.value.trim().toLowerCase(); // on focus: everything, the current value is selected for replacing
   // Substring match anywhere: "branch" matches "feat/my-branch". Exact-prefix ranked first.
+  // Existing worktrees first: picking one makes the feature use that folder as-is.
+  const wts = (_ftWts[i] || []).filter(w => !q || (w.path + ' ' + w.branch).toLowerCase().includes(q)).slice(0, 10);
+  const wtHtml = wts.map(w => `<div class="branch-item wt" title="${escAttr(w.path)}" onmousedown="event.preventDefault();ftPickWt(${i},'${escAttr(w.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>${esc(pathLabel(w.path))}<small>${esc(w.branch)}</small></div>`).join('');
   const hits = (_ftBranches[i] || []).filter(b => !q || b.toLowerCase().includes(q))
     .sort((a, b) => (a.toLowerCase().startsWith(q) ? 0 : 1) - (b.toLowerCase().startsWith(q) ? 0 : 1))
     .slice(0, 60);
-  if (!hits.length) { menu.style.display = 'none'; return; }
-  menu.innerHTML = hits.map(b => `<div class="branch-item" title="${escAttr(b)}" onmousedown="event.preventDefault();pickBranch('${i}','${escAttr(b.replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')">${esc(b)}</div>`).join('');
+  if (!hits.length && !wtHtml) { menu.style.display = 'none'; return; }
+  menu.innerHTML = wtHtml + (wtHtml && hits.length ? '<div class="branch-sep"></div>' : '') + hits.map(b => `<div class="branch-item" title="${escAttr(b)}" onmousedown="event.preventDefault();pickBranch('${i}','${escAttr(b.replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')">${esc(b)}</div>`).join('');
   menu.style.display = 'block';
 }
-function pickBranch(i, b) { const inp = document.getElementById(`ft-base-${i}`); if (inp) { inp.value = b; inp.title = b; } hideBranchMenu(i); }
+const _ftWts = {}; // row index -> existing worktrees of that repo
+function ftPickWt(i, p) {
+  const inp = document.getElementById(`ft-base-${i}`); if (!inp) return;
+  inp.value = pathLabel(p); inp.title = p; inp.dataset.wt = p; inp.classList.add('wt'); hideBranchMenu(i);
+}
+function ftUnpickWt(i) { const inp = document.getElementById(`ft-base-${i}`); if (inp && inp.dataset.wt) { delete inp.dataset.wt; inp.classList.remove('wt'); } }
+function pickBranch(i, b) { ftUnpickWt(i); const inp = document.getElementById(`ft-base-${i}`); if (inp) { inp.value = b; inp.title = b; } hideBranchMenu(i); }
 function hideBranchMenu(i) { const m = document.getElementById(`ft-menu-${i}`); if (m) m.style.display = 'none'; }
 function submitFeature() {
   const name = document.getElementById('ft-name').value.trim();
@@ -2178,10 +2193,13 @@ function submitFeature() {
   const repos = [];
   document.querySelectorAll('#ft-rows [id^="ft-repo-"]').forEach((chk) => {
     const i = chk.id.replace('ft-repo-', '');
-    if (chk.checked) repos.push({ repo: chk.dataset.repo, base: (document.getElementById(`ft-base-${i}`) || {}).value.trim() || 'dev' });
+    const inp = document.getElementById(`ft-base-${i}`) || {};
+    if (chk.checked) repos.push({ repo: chk.dataset.repo, base: inp.value.trim() || 'dev', wt: inp.dataset && inp.dataset.wt });
   });
   if (!repos.length) return;
-  send({ type: 'createFeature', name, repos });
+  repos.filter(r => r.wt).forEach(r => send({ type: 'featureFromWorktree', path: r.wt, name })); // existing folder joins as-is
+  const fresh = repos.filter(r => !r.wt).map(({ repo, base }) => ({ repo, base }));
+  if (fresh.length) send({ type: 'createFeature', name, repos: fresh });
   closeWt();
 }
 document.addEventListener('click', closeGroupMenus);
@@ -4773,7 +4791,7 @@ function handleAgentMsg(msg) {
     case 'winFocus': winFocused = !!msg.focused; onBgChange(); break;
     case 'ramUsage': showTopRam(msg); break;
     case 'models': setModels(msg.models || [], msg.error); break;
-    case 'branchList': if (_branchCbs[msg.repo]) _branchCbs[msg.repo](msg.branches, msg.error); break;
+    case 'branchList': if (_branchCbs[msg.repo]) _branchCbs[msg.repo](msg.branches, msg.error, msg.worktrees); break;
     case 'featureRepoAdded':
       if (_addRepoFeature) {
         // Add-repo dialog: insert the browsed repo as an option and select it.
