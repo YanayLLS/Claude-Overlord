@@ -262,6 +262,11 @@
 
   // Switching Chat ↔ Terminal keeps what you were typing: the reply box's text goes into the CLI's prompt (not sent),
   // and the CLI's prompt comes into the reply box. ponytail: a draft with images stays in the chat (the CLI can't take them as typed).
+  // What the chat typed into an agent's CLI box on the way to the terminal, with the draft it came from: back in the
+  // chat, a box that still holds it gives that draft back as it was (paste chips, files, links), not the screen's
+  // reading of it (a long paste went over as a temp file's path, and a wrapped line came back broken into lines).
+  const carried = new Map();
+  const squashWs = (s) => String(s || '').replace(/\s+/g, '');
   function carryDraft(from, to) {
     // The box must hold this agent's draft first: switching agent and view in one go (answering another agent's question
     // in its terminal, opening the chat after picking an agent in the terminal) used to carry one agent's draft into the
@@ -276,12 +281,18 @@
       if (screenDialog(bufferRows(x.terminal.buffer.active, 40))) return; // a dialog is up: the draft would be typed into it
       const v = expandLinks(expandPastes(t.value, a), a); if (!v.trim()) return;
       api.send({ type: 'termInput', id, data: '\x1b[200~' + v.replace(/\r\n?/g, '\n') + '\x1b[201~' });
+      carried.set(id, { sent: v, draft: t.value, pastes: a ? a.pastes : [], files: a ? a.files : [], links: a ? a.links : [] });
       t.value = ''; drafts.set(id, ''); if (a) { a.pastes = []; a.files = []; a.links = []; } grow(t); drawAtt(); saveDraft(id);
     } else if (from === 'terminal' && to === 'conversation') {
       if (typeof readPromptBox !== 'function' || t.value.trim()) return;
       const rows = bufferRows(x.terminal.buffer.active, 40);
       if (screenDialog(rows)) return; // a dialog is up: its Ctrl+C would cancel it
-      const v = readPromptBox(x.terminal);
+      const v = readPromptBox(x.terminal), c = carried.get(id); carried.delete(id);
+      if (c && v && (squashWs(v) === squashWs(c.sent) || /^\[Pasted text #\d+[^\]]*\]$/.test(v.trim()) || (c.sent.length > 500 && /^\S*overlord-paste-\d+\.txt$/.test(squashWs(v))))) { // untouched in the CLI: as typed, folded into its paste tag, or (over 500 characters) the temp file main's paste handling typed instead
+        const a = attOf(id); a.pastes = c.pastes; a.files = c.files; a.links = c.links;
+        t.value = c.draft; drafts.set(id, c.draft); grow(t); drawAtt(); saveDraft(id);
+        api.send({ type: 'termInput', id, data: '\x03' }); return;
+      }
       if (!v || !v.trim() || /^Try "/.test(v) || /^\d+\.\s/.test(v)) return; // the box's own hint, or a dialog's option
       if (/\[(Pasted text|Image) #\d+/.test(v)) return; // a paste or image only the CLI holds: its placeholder alone would be sent
       t.value = v; drafts.set(id, v); grow(t); saveDraft(id);

@@ -3931,7 +3931,7 @@ function readPromptBox(terminal) {
     const s = ln ? ln.translateToString(true) : '', m = /^(\s*[❯>]\s+)\S/.exec(s), c = m && ln.getCell(m[1].length);
     lines.push(c && c.isDim() ? m[1].trimEnd() : s);
   }
-  return readPromptText(lines, cursorAbs - from);
+  return readPromptText(lines, cursorAbs - from, terminal.cols);
 }
 
 // Ctrl+A: mark the typed prompt text. Ctrl+C then copies it; on a one-row prompt

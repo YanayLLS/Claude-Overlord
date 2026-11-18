@@ -17,8 +17,21 @@ function boxInner(line) {
   return m ? m[1] : null;
 }
 
-// lines: rendered buffer rows, cursorIdx: index of the row holding the cursor.
-function readPromptText(lines, cursorIdx) {
+// The CLI wraps a long line itself, so the screen can't tell its wraps from your line breaks. Its box holds cols - 4
+// characters a row: a row cut short because the next word didn't fit was a wrap between words (a space); a full row is a
+// word too long for any row broken mid-way (a long URL: nothing) when its two halves together overflow a row, else a word
+// that fitted exactly (a space); anything else a line break of yours. Without cols every row is a line.
+function joinRows(rows, cols) {
+  const w = cols - 4;
+  return rows.reduce((s, r, i) => {
+    if (!i) return r;
+    const prev = rows[i - 1].trimEnd(), word = (r.match(/^\S*/) || [''])[0];
+    const sep = !cols ? '\n' : prev.length >= w ? (prev.match(/\S*$/)[0].length + word.length > w ? '' : ' ') : prev.length + 1 + word.length > w ? ' ' : '\n';
+    return s.trimEnd() + sep + r;
+  }, '');
+}
+// lines: rendered buffer rows, cursorIdx: index of the row holding the cursor, cols: the terminal's width (optional).
+function readPromptText(lines, cursorIdx, cols) {
   const at = (i) => (i >= 0 && i < (lines || []).length ? lines[i] : undefined);
   if (boxInner(at(cursorIdx)) === null) {
     // Today's CLI: no side borders, its box is the rows between two ──── rules. A message long enough to wrap
@@ -29,7 +42,7 @@ function readPromptText(lines, cursorIdx) {
     while (bot < lines.length - 1 && !rule(at(bot + 1)) && bot - cursorIdx < 40) bot++;
     if (!rule(at(cursorIdx)) && rule(at(top - 1)) && rule(at(bot + 1))) {
       const rows = lines.slice(top, bot + 1), m = (rows[0] || '').match(MARKER);
-      if (m) return rows.map((r, i) => (i === 0 ? r.replace(MARKER, '') : r.replace(new RegExp(`^ {0,${m[0].length}}`), ''))).join('\n').trim();
+      if (m) return joinRows(rows.map((r, i) => (i === 0 ? r.replace(MARKER, '') : r.replace(new RegExp(`^ {0,${m[0].length}}`), ''))), cols).trim();
     }
     // ponytail: no box (plain shell) — the cursor line alone is the best guess.
     const raw = at(cursorIdx);

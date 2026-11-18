@@ -75,4 +75,15 @@ const wrapped = ['● hi', '────────────────', '
 assert.strictEqual(readPromptText(wrapped, 3), 'Run this exact bash command in the foreground: node -e\n"setTimeout(()=>1,20000)" ; then reply DONE.');
 assert.strictEqual(readPromptText(wrapped, 2), readPromptText(wrapped, 3));
 assert.strictEqual(readPromptText(['────────────', '❯ ', '────────────'], 1), '');
+// With the width (rows as a 45-column CLI drew them): wraps between words are spaces, a word broken mid-way joins back,
+// a line break of yours stays one
+const rule45 = '─'.repeat(45);
+const typed = [rule45, '❯ This is one long line typed in the chat', '  box to see whether it comes back exactly   ', '  the same. END', rule45];
+assert.strictEqual(readPromptText(typed, 2, 45), 'This is one long line typed in the chat box to see whether it comes back exactly the same. END');
+const url = [rule45, '❯ https://example.com/abcdefghijabcdefghija', '  bcdefghijabcdefghijabcdefghijabcdefghijab  ', '  cdefghij', rule45];
+assert.strictEqual(readPromptText(url, 1, 45), 'https://example.com/abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij');
+assert.strictEqual(readPromptText([rule45, '❯ first line', '  second line', rule45], 1, 45), 'first line\nsecond line');
+// rows a real 45-column CLI drew: a URL broken mid-way joins back, a word that fitted its full row exactly is still a space
+const real = [rule45, '❯ Typed straight into the terminal box,', '  long enough to wrap a few times at this    ', '  width, with a URL https://example.com/abc', '  defghijabcdefghijabcdefghijabcdefghij and', '  ending here. END', rule45];
+assert.strictEqual(readPromptText(real, 5, 45), 'Typed straight into the terminal box, long enough to wrap a few times at this width, with a URL https://example.com/abcdefghijabcdefghijabcdefghijabcdefghij and ending here. END');
 console.log('ruled box ok');
