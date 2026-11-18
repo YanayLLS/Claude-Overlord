@@ -94,8 +94,8 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
             if (b.type === 'tool_result' && b.tool_use_id) {
               const out = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.filter(x => x.type === 'text').map(x => x.text || '').join('\n') : '';
               const ev = { type: 'tool_done', ts, toolId: b.tool_use_id, text: capEnds(out, TL_OUT_MAX), err: !!b.is_error };
-              // A background shell: its task id and the file its output streams to.
-              const bg = /running in background with ID: (\w+)\. Output is being written to: (.+?\.output)/.exec(out);
+              // A background shell (started there, or moved there when it hit its timeout): its task id and output file.
+              const bg = /(?:running in background with ID: |moved to the background \(ID: )(\w+)\)?\. Output is being written to: (.+?\.output)/.exec(out);
               if (bg) { ev.bgId = bg[1]; ev.bgOut = bg[2]; }
               const art = /https:\/\/claude\.ai\/[\w/.-]*artifact\/[\w-]+/.exec(out); // a published Artifact's page
               if (art && !b.is_error) ev.artifactUrl = art[0]; // a refused publish names the artifact it could not update
