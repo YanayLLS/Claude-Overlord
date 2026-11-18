@@ -19,7 +19,11 @@ test('setupFailReason falls back to null for unknown failures', () => {
   assert.strictEqual(setupFailReason('something odd'), null);
 });
 
-const { adoptTarget } = require('./worktree');
+const { adoptTarget, parseWorktrees } = require('./worktree');
+test('parseWorktrees lists linked worktrees on a branch, not the main checkout or a detached one', () => {
+  const out = 'worktree C:/Work/Designs\nHEAD aa\nbranch refs/heads/dev\n\nworktree C:/Work/Designs-xr\nHEAD bb\nbranch refs/heads/xr/ui-improve-wip\n\nworktree C:/Work/Designs-vc\nHEAD cc\ndetached\n';
+  assert.deepStrictEqual(parseWorktrees(out), [{ path: require('path').resolve('C:/Work/Designs-xr'), branch: 'xr/ui-improve-wip' }]);
+});
 test('adoptTarget: a linked worktree on a branch joins with its main checkout as repo', () => {
   assert.deepStrictEqual(adoptTarget('C:\\Work\\Designs-xr', ['C:/Work/Designs', 'C:/Work/Designs-xr'], 'xr/ui-improve-wip'),
     { repo: require('path').resolve('C:/Work/Designs'), branch: 'xr/ui-improve-wip' });

@@ -5024,8 +5024,8 @@ function handleIpc(msg) {
     case 'createAgent': createAgent(msg.cwd, msg.prompt, undefined, !!msg.prefill); break;
     case 'fixChat': fixChat(msg).catch(e => { flog('fixChat failed:', e); send({ type: 'toast', text: 'Fix chat failed: ' + (e.message || 'error') }); }); break;
     case 'listBranches': {
-      wt.listBranches(msg.repo)
-        .then(branches => send({ type: 'branchList', repo: msg.repo, branches, error: null }))
+      Promise.all([wt.listBranches(msg.repo), wt.listWorktrees(msg.repo).catch(() => [])])
+        .then(([branches, worktrees]) => send({ type: 'branchList', repo: msg.repo, branches, worktrees, error: null }))
         .catch(e => send({ type: 'branchList', repo: msg.repo, branches: null, error: e.message }));
       break;
     }
