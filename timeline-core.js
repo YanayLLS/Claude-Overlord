@@ -137,7 +137,9 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
     // Lines the CLI prints between turns: its "※ recap:", a notice ("Compacted while idle…", "x is idle"), and what a
     // compaction put back ("⎿ Read file (n lines)", "⎿ Skills restored (…)").
     if (r.type === 'system' && r.subtype === 'away_summary' && r.content) return [{ type: 'note', ts, kind: 'recap', text: cap(String(r.content), 2000) }];
-    if (r.type === 'system' && r.subtype === 'informational' && r.content) return [{ type: 'note', ts, text: cap(String(r.content), 2000) }];
+    if (r.type === 'system' && r.subtype === 'informational' && r.content) return [{ type: 'note', ts, ...(r.level === 'warning' ? { kind: 'warn' } : {}), text: cap(String(r.content), 2000) }]; // a warning: the CLI's yellow ● line, in full
+    // "/remote-control is active · …": the CLI shows only the newest one, under the transcript (chat-ui keeps the last).
+    if (r.type === 'system' && r.subtype === 'bridge_status' && r.content) return [{ type: 'note', ts, kind: 'bridge', text: cap(String(r.content), 400) }];
     if (r.type === 'attachment' && r.attachment?.type === 'file' && r.attachment.displayPath) { const n = r.attachment.content?.file?.numLines; return [{ type: 'note', ts, kind: 'sub', text: `Read ${r.attachment.displayPath}${n ? ` (${n} lines)` : ''}` }]; }
     if (r.type === 'attachment' && r.attachment?.type === 'invoked_skills' && r.attachment.skills?.length) return [{ type: 'note', ts, kind: 'sub', text: `Skills restored (${r.attachment.skills.map(s => s.name).join(', ')})` }];
     // After a compaction, a background shell or agent still going: the CLI prints "Task "x" still running in background".

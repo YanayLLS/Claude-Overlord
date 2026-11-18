@@ -57,6 +57,11 @@ test('a repo joining a feature mid-task is a public event', () => {
     { type: 'feature.repo_added', agentId: 4, feature: 'Model update', repo: 'C:/Work/back-office', path: 'C:/wt/back-office/Model-update', branch: 'Model-update' });
 });
 
+test('feature_from_worktree hands the folder and name to the host', async () => {
+  const api = createApi(fakeHost({ featureFromWorktree: async (p, name) => ({ path: p, feature: name, adopted: true }) }));
+  assert.deepStrictEqual(await api.call('feature_from_worktree', { path: 'C:/Work/Designs-xr', name: 'XR' }), { path: 'C:/Work/Designs-xr', feature: 'XR', adopted: true });
+  await assert.rejects(api.call('feature_from_worktree', { path: 'C:/Work/Designs-xr' }), { status: 400 });
+});
 test('repo_check reports the Node a repo needs against this machine', async () => {
   const api = createApi(fakeHost({ repoCheck: async (repo) => ({ repo, node: { ok: false, need: 24, have: '20.20.0', source: '.nvmrc' } }) }));
   assert.deepStrictEqual(await api.call('repo_check', { repo: 'C:/Work/Designs' }), { repo: 'C:/Work/Designs', node: { ok: false, need: 24, have: '20.20.0', source: '.nvmrc' } });
@@ -83,6 +88,22 @@ test('pr_auto_merge: all of mine by default, explicit urls, cancel, rejects non-
   await api.call('pr_auto_merge', { urls: [u], on: false });
   assert.deepStrictEqual(calls, [{ urls: undefined, on: true }, { urls: [u], on: false }]);
   await assert.rejects(api.call('pr_auto_merge', { urls: ['https://evil.com/x'] }), { status: 400 });
+});
+
+test('pr_list / pr_merge / pr_approve / pr_fix / pr_hide reach the host; a host { error } is 409', async () => {
+  const calls = [];
+  const api = createApi(fakeHost({
+    prList: (o) => (calls.push(['list', o]), { prs: [] }),
+    prMerge: async (pr) => ({ error: 'Blocked: ' + pr }), prApprove: async (pr) => ({ approved: pr }),
+    prFix: async () => ({ agentId: 3 }), prHide: async (x) => (calls.push(['hide', x]), { url: x.pr, hidden: x.how }),
+  }));
+  assert.deepStrictEqual(await api.call('pr_list', {}), { prs: [] });
+  await assert.rejects(api.call('pr_merge', { pr: 'o/r#1' }), { status: 409, message: 'Blocked: o/r#1' });
+  assert.deepStrictEqual(await api.call('pr_approve', { pr: 'o/r#2' }), { approved: 'o/r#2' });
+  assert.deepStrictEqual(await api.call('pr_fix', { pr: 'o/r#3' }), { agentId: 3 });
+  await api.call('pr_hide', { pr: 'o/r#4', how: 'mute' });
+  await assert.rejects(api.call('pr_hide', { pr: 'o/r#4', how: 'delete' }), { status: 400 });
+  assert.deepStrictEqual(calls, [['list', { mine: false }], ['hide', { pr: 'o/r#4', how: 'mute' }]]);
 });
 
 test('publish numbers events, keeps them for replay, filters by type', () => {

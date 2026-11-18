@@ -10,6 +10,14 @@
     if (more) { toggleBtn.className = 'hdr-menu-item'; toggleBtn.removeAttribute('title'); toggleBtn.innerHTML = '<span class="mi-glyph">⧉</span><span>Web preview</span>'; more.appendChild(toggleBtn); }
     else document.getElementById('header').insertBefore(toggleBtn, document.getElementById('account-btn'));
 
+    // Minimized pane: a header chip brings the agent's live page back.
+    const restoreBtn = document.createElement('button');
+    restoreBtn.className = 'hdr-btn'; restoreBtn.id = 'preview-restore'; restoreBtn.hidden = true;
+    restoreBtn.title = 'Show browser'; restoreBtn.setAttribute('aria-label', 'Show browser');
+    restoreBtn.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg><i></i>';
+    restoreBtn.onclick = actions.onToggle;
+    document.getElementById('header').insertBefore(restoreBtn, document.getElementById('hdr-chat') || document.getElementById('account-btn'));
+
     const content = document.getElementById('content');
     const handle = document.createElement('div');
     handle.id = 'preview-resize';
@@ -24,7 +32,7 @@
         <button id="preview-rotate" title="Rotate orientation" style="display:none">&#x21BB;&#x1F4D0;</button>
         <button id="preview-max" title="Expand (Esc to close)" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
         <button id="preview-reload" title="Reload">&#x21BB;</button>
-        <button id="preview-close" title="Hide preview">&times;</button>
+        <button id="preview-close" title="Minimize: the agent keeps browsing"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
       </div>
       <div id="preview-host"></div>
       <div id="preview-status">Waiting for localhost…</div>
@@ -36,7 +44,7 @@
     content.appendChild(col);
 
     const refs = {
-      toggleBtn, col, handle,
+      toggleBtn, restoreBtn, col, handle,
       host: col.querySelector('#preview-host'),
       urlInput: col.querySelector('#preview-url'),
       statusEl: col.querySelector('#preview-status'),

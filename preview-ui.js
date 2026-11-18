@@ -33,8 +33,12 @@
       term.style.width = termWidthBefore; termWidthBefore = null;
     }
     api.send({ type: 'previewToggle', visible });
+    syncRestore();
     if (visible) { reportBounds(); showUrl(currentUrl); } else setMax(false);
   }
+
+  // Minimized (not closed): the agent's page stays live off-screen; the header chip reopens it.
+  function syncRestore() { refs.restoreBtn.hidden = visible || activeAgentId == null || !pages.has(activeAgentId); }
 
   // Anything drawn over the pane (a menu, popover, dialog) is hidden by the native page view, whatever its z-index.
   // A hit-test grid over the pane finds it, whatever it is; while covered, main swaps the page for a still frame.
@@ -121,6 +125,7 @@
     const want = activeAgentId != null && pages.has(activeAgentId) && !shut.has(activeAgentId);
     if (want && !visible) toggle(false);
     else if (!want && visible && auto) toggle(false);
+    syncRestore();
   }
 
   function onPreviewError(msg) {
@@ -136,6 +141,7 @@
     if (msg.nav && msg.id != null && /^https?:/.test(msg.url || '')) {
       pages.add(msg.id);
       if (msg.id === activeAgentId && !visible && !shut.has(msg.id)) toggle(false);
+      syncRestore();
     }
     if (msg.id != null && msg.id !== activeAgentId) return;
     if (msg.url) setUrlValue(msg.url);
@@ -170,7 +176,7 @@
       if (msg.type === 'previewError') onPreviewError(msg);
       else if (msg.type === 'previewLoaded') onPreviewLoaded(msg);
       else if (msg.type === 'previewLoadFailed') onPreviewLoadFailed(msg);
-      else if (msg.type === 'previewClosed') { pages.delete(msg.id); if (msg.id === activeAgentId && visible) toggle(false); } // the agent closed its browser
+      else if (msg.type === 'previewClosed') { pages.delete(msg.id); if (msg.id === activeAgentId && visible) toggle(false); syncRestore(); } // the agent closed its browser
       else if (msg.type === 'previewFrame') { refs.host.style.backgroundImage = occluded && msg.url ? `url("${msg.url}")` : ''; refs.host.style.backgroundSize = '100% 100%'; }
     });
     window.preview = { toggle, setUrl, setActiveAgent };

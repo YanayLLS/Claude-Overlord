@@ -438,10 +438,26 @@ function screenChoice(rows) {
   const top = rows.findLastIndex((r, i) => i < foot && /^\s*[─━]{10,}\s*$/.test(r));
   const body = rows.slice(top + 1, foot);
   if (body.some(r => /^\s*[❯›>]?\s*\d+\.\s/.test(r))) return null;
-  const f = body.findIndex(r => /^\s*❯\s+\S/.test(r)), col = f < 0 ? -1 : body[f].indexOf('❯') + 2;
+  const f = body.findIndex(r => /^\s*[❯>]\s+\S/.test(r)), col = f < 0 ? -1 : body[f].search(/[❯>]/) + 2; // /mcp's pointer is ">"
   let a = f, b = f; const opt = (r) => r.trim() && r.search(/\S/) === col;
   if (f >= 0) { while (a > 0 && opt(body[a - 1])) a--; while (b < body.length - 1 && opt(body[b + 1])) b++; }
-  const options = f < 0 ? [] : body.slice(a, b + 1).map(r => r.replace(/^\s*❯?\s*/, '').trim());
+  // /mcp: groups at the option indent split by blank lines, each led by its heading ("User MCPs", "claude.ai"…)
+  let lo = a, hi = b;
+  for (let i = a - 1; i >= 0 && (!body[i].trim() || opt(body[i])); i--) if (body[i].trim()) lo = i;
+  for (let i = b + 1; i < body.length && (!body[i].trim() || opt(body[i])); i++) if (body[i].trim()) hi = i;
+  const lead = (i) => body[i].trim() && (i === lo || !body[i - 1].trim());
+  if (f >= 0 && (lo < a || hi > b) && !lead(f)) {
+    const options = [], sections = []; let focus = 0;
+    for (let i = lo; i <= hi; i++) {
+      if (!body[i].trim()) continue;
+      if (lead(i)) { sections.push({ title: body[i].trim(), at: options.length }); continue; }
+      if (i === f) focus = options.length;
+      options.push(body[i].replace(/^\s*[❯>]?\s*/, '').trim());
+    }
+    const text = body.filter((r, i) => r.trim() && (i < lo || i > hi)).map(r => r.trim());
+    return { title: (text[0] || '').replace(/:$/, ''), lines: text.slice(1), options, focus, sections };
+  }
+  const options = f < 0 ? [] : body.slice(a, b + 1).map(r => r.replace(/^\s*[❯>]?\s*/, '').trim());
   const text = body.filter((r, i) => r.trim() && (f < 0 || i < a || i > b)).map(r => r.trim().replace(/^[·•]\s*/, ''));
   if (!text.length && !options.length) return null;
   if (options.some(o => /trust this folder/i.test(o))) return { title: 'Trust this folder?', lines: text.filter(t => /^([a-z]:[\\/]|~|\/)/i.test(t)), options, focus: f - a };

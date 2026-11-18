@@ -975,6 +975,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli:not(.sub) { margin: 2px 0 6px; font-family: inherit; font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli:not(.sub):hover { white-space: normal; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli.recap { white-space: normal; font-style: normal; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli.warn { white-space: normal; color: var(--yellow); } /* the CLI's yellow warning line, wrapped in full */
 /* Turn footer: cost and tokens show on hover; the time and actions stay. */
 :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot .tf-cost { opacity: 0; transition: opacity .15s; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot:hover .tf-cost, :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot:focus-within .tf-cost { opacity: 1; }
@@ -1303,3 +1304,10 @@ body.world-mode #hdr-chat { display: none; }
 :root body #conversation .msg.user .ment::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--h, 260) 75% 70%); box-shadow: 0 0 6px hsl(var(--h, 260) 75% 60% / .7); flex: none; }
 :root body #conversation .msg.user .ment:hover { transform: translateY(-1px); box-shadow: 0 4px 14px color-mix(in srgb, #cba6f7 30%, transparent); }
 :root body #conversation .msg.user .ment:focus-visible { outline: 2px solid #89b4fa; outline-offset: 2px; }
+/* A sectioned CLI list menu (/mcp): headings, a status glyph in its colour, the status column muted at the right. */
+:root body #conversation .card.menu-list .ml-sub { margin: 0 0 6px; color: var(--subtext); }
+:root body #conversation .card.menu-list .ml-sec { margin: 10px 0 0; font-size: 12px; font-weight: 600; color: var(--subtext); }
+:root body #conversation .card.menu-list .ml-sec:first-child { margin-top: 0; }
+:root body #conversation .card.menu-list .mg { font-style: normal; width: 14px; text-align: center; color: var(--dim); }
+:root body #conversation .card.menu-list .mg.ok { color: var(--green); } :root body #conversation .card.menu-list .mg.warn { color: var(--yellow); } :root body #conversation .card.menu-list .mg.bad { color: var(--red); }
+:root body #conversation .card.menu-list .mm { margin-left: auto; font-size: 12px; color: var(--dim); }

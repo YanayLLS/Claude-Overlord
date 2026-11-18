@@ -97,11 +97,17 @@ const TOOLS = [
   ['chat_send', 'Send a peer-chat message to a peer or group.', obj({ ...TO, text: S('The message.') }, ['text'])],
   ['events_poll', 'Events after a sequence number, waiting up to timeoutSec for one to arrive. For clients that can\'t hold an SSE stream (e.g. MCP).', obj({ since: N('Last seq you saw; 0 for what is buffered.'), types: { type: 'array', items: { type: 'string' }, description: 'Event types, or prefixes ending in "." (e.g. "agent."). Default all.' }, timeoutSec: N('Default 25, max 60.') })],
   ['webhook_add', 'Register a URL on this machine (http://127.0.0.1 or localhost) that gets each event POSTed as JSON, signed with X-Overlord-Signature: sha256=HMAC(secret, body). Returns the secret once.', obj({ url: S('http://127.0.0.1:<port>/<path>'), types: { type: 'array', items: { type: 'string' }, description: 'Event types or prefixes. Default all.' } }, ['url'])],
+  ['feature_from_worktree', 'Turn an existing git worktree (any folder, made outside Overlord too) into a feature as-is: same folder, branch and files; it gets a port, installs deps and starts its dev server. Removing it later unregisters it and keeps the folder. Returns the worktree entry.', obj({ path: S('Absolute path of the worktree folder.'), name: S('Feature name.') }, ['path', 'name'])],
   ['repo_check', 'Whether this machine can set up a repo: the Node major it needs (from .nvmrc, .node-version, engines.node or a locked package) against the installed one. node.ok false means its worktree install will likely fail.', obj({ repo: S('Absolute path of the repo (its main checkout).') }, ['repo'])],
   ['pr_repos_list', 'The PR watchlist: GitHub repos whose open PRs the PRs panel shows. enabled: PR notifications on. locked: release repos the whole team watches; they can\'t be removed.', obj({})],
   ['pr_repos_add', 'Watch more repos for PRs (owner/name), as ticking them in the PR settings. Turns PR notifications on. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
   ['pr_repos_remove', 'Stop watching repos for PRs. A release repo (locked) is refused. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
   ['pr_auto_merge', 'Fix & merge PRs, as the PRs panel\'s Auto-merge: Overlord keeps each one green and merges it. No urls: every open PR of yours that can be armed ("Auto-merge all"). on false cancels. Returns the urls changed.', obj({ urls: { type: 'array', items: { type: 'string' }, description: 'PR urls (https://github.com/owner/name/pull/N). Default: all of yours.' }, on: { type: 'boolean', description: 'Default true.' } })],
+  ['pr_list', 'Open PRs in the watched repos, as the PRs panel lists them (drafts and others\' approved PRs too): checks, mergeable state, review decision, auto-merge phase, hidden state and the agent holding it.', obj({ mine: { type: 'boolean', description: 'Only your PRs.' } })],
+  ['pr_merge', 'Merge a PR now, as the row\'s Merge button. The release gate (prod PRs need two signatures) still applies.', obj({ pr: S('PR url or owner/repo#number.') }, ['pr'])],
+  ['pr_approve', 'Approve a PR as you on GitHub, as the row\'s Approve button.', obj({ pr: S('PR url or owner/repo#number.') }, ['pr'])],
+  ['pr_fix', 'Send an agent to fix a PR\'s failing checks or conflicts, as the row\'s Fix button. If an agent already holds it, that one is returned.', obj({ pr: S('PR url or owner/repo#number.') }, ['pr'])],
+  ['pr_hide', 'Archive, mute or snooze a PR in Overlord (GitHub is untouched); undo shows it again.', obj({ pr: S('PR url or owner/repo#number.'), how: S('archive | mute | snooze', { enum: ['archive', 'mute', 'snooze'] }), undo: { type: 'boolean', description: 'Show it again.' }, hours: N('Snooze length. Default 24.') }, ['pr', 'how'])],
   ['webhook_list', 'Registered webhooks (no secrets), with delivery failure counts.', obj({})],
   ['webhook_remove', 'Remove a webhook.', obj({ id: S('Webhook id.') }, ['id'])],
 ].map(([name, description, inputSchema]) => ({ name, description, inputSchema }));
@@ -110,6 +116,8 @@ const PR_REPO_RE = /^[\w.-]+\/[\w.-]+$/, lc = (s) => String(s).toLowerCase();
 
 class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const bad = (m) => new ApiError(400, m), missing = (m) => new ApiError(404, m), conflict = (m) => new ApiError(409, m);
+// A PR action's { error } (not listed, gh refused, release gate) → 409 with its text.
+const prDone = async (r) => { r = await r; if (r && r.error) throw conflict(r.error); return r; };
 
 // Arguments against the schema: required present, declared types, nothing unknown.
 function checkArgs(tool, args) {
@@ -278,6 +286,7 @@ function createApi(host) {
       hooks.push(h); persistHooks();
       return { id: h.id, url: h.url, types: h.types, secret: h.secret };
     },
+    feature_from_worktree: (x) => { if (!x.path || !x.name) throw new ApiError(400, 'path and name are required'); return host.featureFromWorktree(String(x.path), String(x.name)); },
     repo_check: (x) => { if (!x.repo) throw new ApiError(400, 'repo is required'); return host.repoCheck(String(x.repo)); },
     pr_repos_list: () => host.prWatch(),
     pr_repos_add: (x) => {
@@ -298,6 +307,11 @@ function createApi(host) {
       if (x.urls !== undefined && (!Array.isArray(x.urls) || x.urls.some(u => !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(u)))) throw bad('urls must be GitHub PR urls');
       return host.prAutoMerge({ urls: x.urls, on: x.on !== false });
     },
+    pr_list: (x) => host.prList({ mine: x.mine === true }),
+    pr_merge: (x) => prDone(host.prMerge(x.pr)),
+    pr_approve: (x) => prDone(host.prApprove(x.pr)),
+    pr_fix: (x) => prDone(host.prFix(x.pr)),
+    pr_hide: (x) => prDone(host.prHide(x)),
     webhook_list: () => ({ webhooks: hooks.map(({ secret, ...h }) => h) }),
     webhook_remove: (x) => { const n = hooks.length; hooks = hooks.filter(h => h.id !== x.id); if (hooks.length === n) throw missing('no such webhook'); queues.delete(x.id); persistHooks(); return { ok: true }; },
   };

@@ -294,7 +294,7 @@
     }
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
     else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span>${/fail/i.test(m[2]) ? ICON.alert : ICON.check}</div>`; }
-    else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
+    else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && ev.kind !== 'warn' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
     else if (ev.type === 'note' && ev.kind === 'recap') h = `<details class="msg note cli recap"><summary><b>Recap</b><span class="rt">${escH(String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '').split('\n')[0])}</span>${ICON.chev}</summary><div>${escH(String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, ''))}</div></details>`;
     else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>Recap</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
@@ -416,12 +416,14 @@
     // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
     const mk = marksOf(id);
     const close = () => { flush(); if (!turn) return; if (open) out.push(footHtml(textAt, turn, sum, textAt >= 0 && evs[textAt].ts ? { ts: evs[textAt].ts, on: mk.has(evs[textAt].ts) } : null)); textAt = -1; turn = null; open = false; sum = fresh(); };
+    let lastBridge = -1; evs.forEach((e, k) => { if (e.type === 'note' && e.kind === 'bridge') lastBridge = k; }); // the CLI shows only its newest remote-control line
     const folded = new Set(); // CLI lines a compaction printed (files re-read, skills restored): under its divider
     evs.forEach((ev, i) => {
       if (i < start || folded.has(i)) return;
       const t = ev.type;
       if (t === 'compact' && !ev._restored) { ev._restored = []; for (let j = i + 1; j < evs.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { ev._restored.push(String(evs[j].text || '').replace(/^⎿\s*/, '').split('\n')[0]); folded.add(j); } }
       else if (t === 'compact') for (let j = i + 1, n = 0; j < evs.length && n < ev._restored.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { folded.add(j); n++; }
+      if (t === 'note' && ev.kind === 'bridge' && i !== lastBridge) return;
       tally(ev, i);
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
       // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.
@@ -671,6 +673,7 @@
   function choiceHtml(sc) {
     const ef = effortOf(sc);
     if (ef) return `<div class="card perm choice effort"><div class="card-h">${ICON.shield}<span>Effort</span></div><div class="btns">${EFFORTS.map((n, k) => `<button type="button" data-effort="${k}" class="${k === ef.level ? 'primary' : ''}">${n}<kbd>${k + 1}</kbd></button>`).join('')}</div><div class="btns"><button type="button" data-effort-ultra>${ef.ultra ? ICON.check : ''}Ultracode ${ef.ultra ? 'on' : 'off'}<kbd>Tab</kbd></button><button type="button" class="dec" data-choice="-1">Cancel<kbd>Esc</kbd></button></div></div>`;
+    if (sc.sections) return menuListHtml(sc);
     const yes = sc.options.findIndex(o => /^yes\b/i.test(o)), prim = yes >= 0 ? yes : 0;
     const label = (o) => /trust this folder/i.test(o) ? 'Trust' : /^no,?\s*exit$/i.test(o) ? "Don't trust" : o;
     // /login: the sign-in link the CLI prints (Open is the primary, for when no browser opened by itself), and a field
@@ -683,6 +686,16 @@
     const lines = sc.lines.filter(l => !(url && l.includes(url)) && !/paste (the )?code/i.test(l) && !(url && helper(l))).map(l => /…$/.test(l) && login ? `<p class="status"><span class="loading"></span>${escH(l.replace(/\s+to sign in(?=…$)/i, ''))}</p>` : (/^([a-z]:[\\/]|~|\/)/i.test(l) ? (() => { const parts = l.split(/[\\/]/), last = parts.pop(); return `<p class="fname" title="${escH(l)}"><b>${escH(last)}</b></p><p class="mono path" title="${escH(l)}">${escH((p => p.length > 4 ? [...p.slice(0, 2), '…', ...p.slice(-2)] : p)([...parts.filter(Boolean), last]).join('\\'))}</p>`; })() : `<p>${escH(l)}</p>`)).join('');
     const field = code ? '<div class="code-in"><input type="text" placeholder="Paste code" aria-label="Sign-in code" data-login-code><button type="button" data-login-send disabled aria-label="Submit code">Submit<kbd>Enter</kbd></button></div>' : '';
     return `<div class="card perm choice"><div class="card-h">${login ? ICON.key : ICON.shield}<span>${login ? 'Sign in' : escH(sc.title)}</span></div>${lines}${btns ? `<div class="btns">${btns}</div>` : ''}${field}${cancel}</div>`;
+  }
+  // A sectioned list menu (/mcp): headings, each row's status glyph in its colour, name, and its status column muted.
+  const GLYPH = (g) => /^[√✓✔]$/.test(g) ? 'ok' : /^[‼!⚠]$/.test(g) ? 'warn' : /^[✗✘×]$/.test(g) ? 'bad' : '';
+  function menuListHtml(sc) {
+    const row = (o, k) => {
+      let [g, name, ...meta] = o.split(/\s{2,}/); if (!GLYPH(g)) { meta = [name, ...meta].filter(Boolean); name = g; g = ''; }
+      return `<button type="button" data-choice="${k}" class="${k === sc.focus ? 'focus' : ''}">${g ? `<i class="mg ${GLYPH(g)}">${escH(g)}</i>` : ''}<span class="ch-t"><b>${escH(name || '')}</b></span>${meta.length ? `<small class="mm">${escH(meta.join(' '))}</small>` : ''}</button>`;
+    };
+    const list = sc.options.map((o, k) => (sc.sections.filter(s => s.at === k).map(s => `<p class="ml-sec">${escH(s.title)}</p>`).join('')) + row(o, k)).join('');
+    return `<div class="card ask menu-list"><div class="card-h">${ICON.shield}<span>${escH(sc.title)}</span></div>${sc.lines.map(l => `<p class="ml-sub">${escH(l).replace(/https?:\/\/[^\s&<]+/g, u => `<a href="${u}">${u}</a>`)}</p>`).join('')}<div class="choices">${list}<button type="button" class="other" data-choice="-1"><span>Cancel</span><kbd>Esc</kbd></button></div></div>`;
   }
   function planHtml(ev, cwd) {
     const opts = menuOptions(selectedId), labels = opts.length ? opts : ['Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning'];
@@ -1062,7 +1075,7 @@
       // Queued = in the CLI's own queue, which Send now (its Ctrl+X Ctrl+S) acts on: only once main handed it over. Before
       // that it waits in Overlord for a CLI that can take it - one CPU saving is resuming - and Send now did nothing.
       const queued = busy && !p.held && !!p.sentAt, ag = agents.get(id), waking = !p.sentAt && ag && (ag.sleeping || (ag.wokeAt && Date.now() - ag.wokeAt < 180000));
-      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued ? '' : waking ? 'Waking the agent…' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
+      return `<div class="msg user pending" data-pk="${k}">${imgs}${p.text ? `<div class="bubble">${tagChips(p.text, new Map(tagNums(p.text).map((n, j) => [n, p.imgs[j]]).filter(e => e[1]))).replace(/data-pn="(\d+)"/g, (m, n) => { const x = (p.pastes || []).find(y => y.n === +n); return x ? `${m} title="${escH(x.text.split('\n').slice(0, 8).join('\n'))}"` : m; })}</div>` : ''}<span class="q">${p.held ? 'Attaching…' : queued || (p.sentAt && /^\//.test(p.text || '')) ? '' : waking ? 'Waking the agent…' : 'Sending…'}${queued && p.text ? `<button type="button" class="q-x q-now" data-qnow="1" title="Send now (Ctrl+X Ctrl+S)" aria-label="Send now">${ICON.send}</button><button type="button" class="q-x q-ed" data-unqueue="${k}" title="Edit (back to the reply box)" aria-label="Edit">${ICON.edit}</button><button type="button" class="q-x" data-unqueue="${k}" data-drop="1" title="Remove" aria-label="Remove">×</button>` : ''}</span></div>`;
     }).join('') + cliQueue(id, evs);
   }
   // Take a queued prompt back without stopping the agent. The CLI has no "remove from queue": ↑ in its empty prompt pulls

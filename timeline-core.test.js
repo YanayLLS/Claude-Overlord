@@ -148,6 +148,8 @@ test('a question keeps each option\'s whole preview, per question', () => {
 test('the CLI\'s recap, notices and what a compaction restored show as notes', () => {
   assert.deepStrictEqual(parse({ type: 'system', subtype: 'away_summary', content: 'Getting PR green.' }), [{ type: 'note', ts: null, kind: 'recap', text: 'Getting PR green.' }]);
   assert.deepStrictEqual(parse({ type: 'system', subtype: 'informational', content: 'Compacted while idle' }), [{ type: 'note', ts: null, text: 'Compacted while idle' }]);
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'informational', level: 'warning', content: 'Monitor did not resume' }), [{ type: 'note', ts: null, kind: 'warn', text: 'Monitor did not resume' }]);
+  assert.deepStrictEqual(parse({ type: 'system', subtype: 'bridge_status', content: '/remote-control is active' }), [{ type: 'note', ts: null, kind: 'bridge', text: '/remote-control is active' }]);
   assert.deepStrictEqual(parse({ type: 'attachment', attachment: { type: 'file', displayPath: 'a\b.ts', content: { file: { numLines: 149 } } } }), [{ type: 'note', ts: null, kind: 'sub', text: 'Read a\b.ts (149 lines)' }]);
   assert.deepStrictEqual(parse({ type: 'attachment', attachment: { type: 'invoked_skills', skills: [{ name: 'pr-green' }] } }), [{ type: 'note', ts: null, kind: 'sub', text: 'Skills restored (pr-green)' }]);
 });

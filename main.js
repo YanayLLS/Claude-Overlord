@@ -3115,23 +3115,33 @@ function runAutoMerge(prs, failedRepos = []) {
   if (keep.length !== armed.length) { settings.prAutoMerge = keep; saveState(); }
 }
 
-function mergePrNow(url) { // → a promise that settles once the merge call is done
+function mergePrNow(url) { // → a promise of the error text, null once merged
   // prod release PRs merge only with two release approvers' signatures (SOC2)
   return releases.mergeGate(url).then((gate) => new Promise((done) => {
-    if (!gate.ok) { send({ type: 'prActionError', url, error: 'Blocked: ' + gate.reason }); return done(); }
+    if (!gate.ok) { const error = 'Blocked: ' + gate.reason; send({ type: 'prActionError', url, error }); return done(error); }
     if (gate.warn) send({ type: 'toast', text: gate.warn });
     execFile('gh', ['pr', 'merge', url, '--merge'],
       { timeout: 30000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-        done();
-        if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
+        const error = err ? ghErr({ message: ((stderr || '') + err.message).trim() }) : null;
+        done(error);
+        if (error) { send({ type: 'prActionError', url, error }); return; }
         pollPRs(); // merged PR drops from the list
       });
-  })).catch((e) => send({ type: 'prActionError', url, error: 'Merge check failed: ' + (e.message || e) }));
+  })).catch((e) => { const error = 'Merge check failed: ' + (e.message || e); send({ type: 'prActionError', url, error }); return error; });
+}
+function approvePrNow(url) { // → a promise of the error text, null once approved
+  return new Promise((done) => execFile('gh', ['pr', 'review', url, '--approve'],
+    { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
+      const error = err ? ghErr({ message: ((stderr || '') + err.message).trim() }) : null;
+      done(error);
+      if (error) { send({ type: 'prActionError', url, error }); return; }
+      pollPRs(); // approved PR now drops from the list
+    }));
 }
 
 // Every caller (timers, the watch, ~15 PR actions) shares one poll: while one runs, more requests just queue a single
 // re-run after it, so a burst of clicks or overlapping timers can't stack GraphQL polls.
-let prPolling = null, prPollAgain = false;
+let prPolling = null, prPollAgain = false, prExtra = []; // prExtra: drafts and others' approved PRs (the menu's "All open"), for pr_list
 function pollPRs() {
   if (prPolling) { prPollAgain = true; return prPolling; }
   return prPolling = (async () => {
@@ -3193,6 +3203,7 @@ async function pollPRsOnce() {
   settings.prArchived = (settings.prArchived || []).filter(k => currentKeys.includes(k));
   prSeenSeeded = true;
   settings.prCache = { prs, failedRepos };
+  prExtra = res.extra || [];
   saveState();
   // Show the list now; "commits behind" and the checks ETA take a call per PR, so they follow.
   send({ type: 'prList', prs, extraPrs: res.extra || [], error: null, failedRepos });
@@ -3528,7 +3539,54 @@ const prClaimsApi = {
     if (!prRelease(prClaims(), key, a.sessionId)) return { text: 'You did not hold this PR.' };
     saveState(); return { text: 'Released.' };
   },
+  ...prActions(),
 };
+// The PRs panel's buttons for agents (mcp pr_*) and the local API. Each → a result, or { error }.
+function prActions() {
+  const known = () => [...((settings.prCache || {}).prs || []), ...prExtra.map(p => ({ ...p, extra: true }))];
+  // A PR Overlord lists: open, in a watched repo. One just opened isn't polled yet, so poll once before giving up.
+  async function find(ref) {
+    const key = prClaimKey(ref);
+    if (!key) return { error: `Not a PR: "${ref}". Pass its url or owner/repo#number.` };
+    let p = known().find(x => String(x.url).toLowerCase() === key);
+    if (!p) { await pollPRs(); p = known().find(x => String(x.url).toLowerCase() === key); }
+    return p ? { p } : { error: `${ref} is not in Overlord's PR list: it is closed, or its repo is not watched (PR settings).` };
+  }
+  const row = (p) => {
+    const holder = prClaimFor(p.url);
+    return { url: p.url, repo: p.repo, number: p.number, title: p.title, author: p.author, mine: !!p.mine, draft: !!p.isDraft,
+      checks: p.checks, failed: p.failed || 0, mergeable: p.mergeable, mergeState: p.mergeState, reviewDecision: p.reviewDecision,
+      reviewRequested: !!p.requested, behindBy: p.behindBy ?? null, autoMerge: !!p.autoMerge, autoPhase: p.autoPhase || null,
+      hidden: p.archived ? 'archived' : p.muted ? 'muted' : p.snoozed ? 'snoozed' : null, heldBy: holder ? holder.agentName || `agent ${holder.id}` : null };
+  };
+  return {
+    list: ({ mine } = {}) => ({ prs: known().filter(p => !mine || p.mine).map(row) }),
+    async autoMerge(refs, on) {
+      const urls = [];
+      for (const ref of refs) {
+        const r = await find(ref); if (r.error) return r;
+        if (on && r.p.extra && r.p.isDraft) return { error: `${r.p.url} is a draft: mark it ready (gh pr ready) first.` };
+        if (on && r.p.isCrossRepository) return { error: `${r.p.url} comes from a fork: Overlord can't push fixes to it.` };
+        urls.push(r.p.url);
+      }
+      return { urls: setPrAutoMerge(urls, on) };
+    },
+    async merge(ref) { const r = await find(ref); if (r.error) return r; const error = await mergePrNow(r.p.url); return error ? { error } : { merged: r.p.url }; },
+    async approve(ref) { const r = await find(ref); if (r.error) return r; const error = await approvePrNow(r.p.url); return error ? { error } : { approved: r.p.url }; },
+    async fix(ref) {
+      const r = await find(ref); if (r.error) return r;
+      const id = await fixPr(r.p, { quiet: true });
+      if (typeof id !== 'number') return { error: (id && id.error) || 'The fix agent did not start.' };
+      const a = agents.get(id); return { agentId: id, agent: (a && a.agentName) || null };
+    },
+    async hide(ref, how, undo, hours) {
+      if (!['archive', 'mute', 'snooze'].includes(how)) return { error: 'how must be archive, mute or snooze' };
+      const r = await find(ref); if (r.error) return r;
+      handleIpc({ type: (undo ? 'un' + how : how) + 'Pr', key: r.p.key, untilMs: Date.now() + (Number(hours) > 0 ? Number(hours) : 24) * 3600e3 });
+      return { url: r.p.url, hidden: undo ? null : how };
+    },
+  };
+}
 
 // Fix chat (the chat's ⋯ menu): the chat as shown and its terminal (pictured offscreen from the renderer's buffer
 // HTML, so the user sees nothing) are saved, and a new agent in Overlord's repo finds why they differ and fixes the
@@ -3891,9 +3949,18 @@ const USAGE_HISTORY_FILE = path.join(STATE_DIR, 'usage-history.json');
 let usageHistory = null; // { [account]: [{ t, h, w, 'm:<model>' }] }, loaded on first use
 // The active saved account first: a switch only swaps the credentials file, and `claude auth status`
 // keeps reporting the previous login's email (it reads ~/.claude.json), which mixed two accounts' history.
-function usageAccountKey() {
-  const data = loadAccounts(), active = data.accounts.find(a => a.label === data.activeLabel);
-  return active?.email || active?.label || getAccountEmail() || 'default';
+function usageAccountKey(label) {
+  const data = loadAccounts(), acct = data.accounts.find(a => a.label === (label || data.activeLabel));
+  if (label && label !== data.activeLabel) return acct ? acct.email || acct.label : null;
+  return acct?.email || acct?.label || getAccountEmail() || 'default';
+}
+// Another login's reading (usage bar viewing it): its own history, so its charts fill in too.
+function recordAccountUsage(label, usage) {
+  const key = usageAccountKey(label);
+  if (!key || !usage || label === loadAccounts().activeLabel) return;
+  const all = loadUsageHistory(), before = (all[key] || []).length;
+  all[key] = appendUsageSample(all[key], usage, usage.fetchedAt || Date.now());
+  if (all[key].length !== before) saveUsageHistory();
 }
 function loadUsageHistory() {
   if (!usageHistory) { try { usageHistory = JSON.parse(fs.readFileSync(USAGE_HISTORY_FILE, 'utf8')) || {}; } catch { usageHistory = {}; } }
@@ -4730,6 +4797,39 @@ async function doCreateWorktree({ repo, branch, base, feature }) {
   return entry;
 }
 
+// A worktree made outside Overlord (e.g. by an agent's own git worktree add) becomes a feature as-is:
+// same folder, branch and files. It gets a port, a dev server and the feature card like any other.
+// adopted: removing it later only unregisters it; the folder was never Overlord's to delete.
+async function featureFromWorktree(dir, name) {
+  name = String(name || '').trim();
+  if (!name) throw new Error('feature name is required');
+  if (!dir || !path.isAbsolute(dir) || !fs.existsSync(dir)) throw new Error(`not a folder: ${dir}`);
+  const [registered, branch] = await Promise.all([
+    wt.registeredWorktrees(dir).catch(() => []),
+    wt.git(dir, ['branch', '--show-current'], 15000).then(s => s.trim()).catch(() => ''),
+  ]);
+  const t = wt.adoptTarget(dir, registered, branch);
+  if (t.error) throw new Error(t.error);
+  const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  const repo = Object.keys(settings.projects || {}).find(k => same(k, t.repo)) || t.repo; // reuse its dev-server config
+  const known = (settings.worktrees || []).find(w => same(w.path, dir));
+  if ((settings.worktrees || []).some(w => w !== known && w.feature === name && same(w.repo, repo))) throw new Error(`feature "${name}" already has a ${path.basename(repo)} worktree`);
+  if (known) {
+    if (known.feature && known.feature !== name) throw new Error(`already in feature "${known.feature}"`);
+    known.feature = name; saveState(); send({ type: 'settings', settings: publicSettings() });
+    return known;
+  }
+  const base = (projectConfig(repo) || {}).defaultBase || 'dev';
+  ensureProjectConfig(repo, base);
+  const entry = { path: dir, repo, branch: t.branch, base, port: nextBasePort(repo), status: 'setup', feature: name, autostart: true, adopted: true };
+  settings.worktrees = settings.worktrees || [];
+  settings.worktrees.push(entry);
+  saveState();
+  send({ type: 'settings', settings: publicSettings() });
+  installWorktree(entry); // deps are likely in already, so this is quick; then it starts the server
+  return entry;
+}
+
 // Install deps so the worktree is actually runnable. Runs in the background; the group
 // card shows a "setup" state until done. seamless > watching npm scroll.
 function installWorktree(entry) {
@@ -4978,6 +5078,12 @@ function handleIpc(msg) {
       }
       break;
     }
+    case 'featureFromWorktree': {
+      featureFromWorktree(msg.path, msg.name)
+        .then(e => send({ type: 'toast', text: `${e.feature}: ${path.basename(e.path)} joined as-is` }))
+        .catch(e => send({ type: 'toast', text: 'Feature failed: ' + (e.message || 'error') }));
+      break;
+    }
     case 'startFeatureServers': { // backends first, so the front-ends after them get wired to them
       const members = (settings.worktrees || []).filter(w => w.feature === msg.feature && !devServers.has(w.path) && !externalServers.has(w.path));
       for (const w of featureEnvLib.startOrder(members)) startDevServer(w.path);
@@ -5006,6 +5112,7 @@ function handleIpc(msg) {
       settings.worktrees = (settings.worktrees || []).filter(w => w.path !== msg.path);
       saveState();
       send({ type: 'settings', settings: publicSettings() });
+      if (entry.adopted) { send({ type: 'toast', text: `${path.basename(entry.path)} left the feature; folder kept` }); break; }
       const key = entry.path.toLowerCase();
       const job = wt.removeWorktree({ repo: entry.repo, dest: entry.path, branch: entry.branch, deleteBranch: !!msg.deleteBranch })
         .catch(e => { flog('removeWorktree cleanup failed:', e); send({ type: 'toast', text: `Cleanup of ${entry.branch} folder failed — remove it manually` }); })
@@ -5670,11 +5777,7 @@ function handleIpc(msg) {
     case 'approvePr': {
       const url = msg.url;
       if (typeof url !== 'string' || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(url)) break;
-      execFile('gh', ['pr', 'review', url, '--approve'],
-        { timeout: 15000, windowsHide: true, shell: process.platform === 'win32' }, (err, _o, stderr) => {
-          if (err) { send({ type: 'prActionError', url, error: ghErr({ message: ((stderr || '') + err.message).trim() }) }); return; }
-          pollPRs(); // approved PR now drops from the list
-        });
+      approvePrNow(url);
       break;
     }
     case 'pollPrsNow': pollPRs(); break;
@@ -5798,7 +5901,8 @@ function handleIpc(msg) {
     case 'fetchUsage': fetchUsage(); break;
     case 'getUsageHistory': { // since: only what the caller will draw (the hover tip needs 8 days, the modal all 60)
       const since = Number(msg.since) || 0;
-      send({ type: 'usageHistory', since, points: (loadUsageHistory()[usageAccountKey()] || []).filter(p => p.t >= since) });
+      const label = msg.label || '';
+      send({ type: 'usageHistory', since, label, points: (loadUsageHistory()[usageAccountKey(label)] || []).filter(p => p.t >= since) });
       break;
     }
     case 'setAgentAccount': { // pin an agent to another saved login; the active login = unpin
@@ -5814,7 +5918,7 @@ function handleIpc(msg) {
       break;
     }
     case 'fetchAccountUsage':
-      accountUsage(msg.label).then(usage => send({ type: 'accountUsage', label: msg.label, usage }), (e) => { flog('account usage failed:', e); send({ type: 'accountUsage', label: msg.label, usage: null }); });
+      accountUsage(msg.label).then(usage => { recordAccountUsage(msg.label, usage); send({ type: 'accountUsage', label: msg.label, usage }); }, (e) => { flog('account usage failed:', e); send({ type: 'accountUsage', label: msg.label, usage: null }); });
       break;
     case 'getAccountInfo': send({ type: 'accountInfo', ...getCurrentAccountInfo() }); break;
     case 'saveAccount': {
@@ -6002,7 +6106,10 @@ function apiHost() {
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
     repoCheck: (repo) => repoCheck(repo),
+    featureFromWorktree: (p, name) => featureFromWorktree(p, name).catch(e => { throw new ApiError(400, e.message); }),
     prAutoMerge: ({ urls, on }) => ({ urls: setPrAutoMerge(urls || prAutoMergeable((settings.prCache || {}).prs).map(p => p.url), on) }),
+    prList: (o) => prClaimsApi.list(o), prMerge: (pr) => prClaimsApi.merge(pr), prApprove: (pr) => prClaimsApi.approve(pr),
+    prFix: (pr) => prClaimsApi.fix(pr), prHide: ({ pr, how, undo, hours }) => prClaimsApi.hide(pr, how, undo, hours),
     prWatch: () => { const c = settings.prSettings || {}; return { enabled: !!c.enabled, repos: [...(c.repos || [])], locked: releases.releaseRepos() }; },
     setPrWatch: ({ enabled, repos }) => savePrSettings({ ...(settings.prSettings || {}), enabled, repos }),
     chatList: () => {
