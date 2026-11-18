@@ -1984,6 +1984,7 @@ function groupMenuItems(cwd, q, wt, running, archived, doneCount, solo = false) 
     wt && wt.status === 'failed' && { icon: 'log', label: 'Setup log', on: `send({type:'openSetupLog',path:'${q}'})` },
     wt && wt.status !== 'setup' && wt.status !== 'failed' && { icon: 'log', label: 'Server log', on: `send({type:'openServerLog',path:'${q}'})` },
     !wt && { icon: 'branch', label: 'New worktree&#x2026;', on: `openNewWorktree('${q}')` },
+    !wt && { icon: 'branch', label: 'Make feature&#x2026;', on: `openFeatureFrom('${q}')` },
     wt && wt.feature && !solo && { icon: 'eyeOff', label: 'Hide from feature', on: `setHiddenInFeature(${escAttr(JSON.stringify([cwd]))},true)` },
     !wt && { icon: 'gear', label: 'Dev server&#x2026;', on: `openProjectConfig('${q}')` },
     '-',
@@ -1994,6 +1995,26 @@ function groupMenuItems(cwd, q, wt, running, archived, doneCount, solo = false) 
     solo ? null : wt ? { icon: 'trash', label: 'Remove worktree', danger: true, on: `removeWorktree('${q}')` }
        : { icon: 'trash', label: 'Remove project', danger: true, on: `removeProject('${q}')` },
   ];
+}
+// An existing worktree (one Overlord didn't make) becomes a feature as-is. main refuses non-worktrees with a toast.
+function openFeatureFrom(dir) {
+  const el = wtOverlay();
+  el.innerHTML = `<div class="ft-modal" role="dialog" aria-label="Make feature" onkeydown="if(event.key==='Escape')closeWt();else if(event.key==='Enter')submitFeatureFrom()">
+    <div class="ft-head"><span class="ft-title">Make feature</span><button class="ft-x" onclick="closeWt()" title="Close (Esc)" aria-label="Close">&#x2715;</button></div>
+    <input id="ff-name" class="ft-name" autocomplete="off" spellcheck="false" placeholder="Feature name" oninput="document.getElementById('ff-go').disabled=!this.value.trim()">
+    <div class="ft-branch on"><span>${esc(pathLabel(dir))}</span></div>
+    <div class="ft-foot">
+      <button class="ft-btn" onclick="closeWt()">Cancel</button>
+      <button class="ft-btn primary" id="ff-go" data-dir="${escAttr(dir)}" onclick="submitFeatureFrom()" disabled>Make feature</button>
+    </div></div>`;
+  el.style.display = 'flex';
+  document.getElementById('ff-name').focus();
+}
+function submitFeatureFrom() {
+  const name = document.getElementById('ff-name').value.trim(), dir = document.getElementById('ff-go').dataset.dir;
+  if (!name) return;
+  send({ type: 'featureFromWorktree', path: dir, name });
+  closeWt();
 }
 function startFeature(name) { send({ type: 'startFeatureServers', feature: name }); }
 function stopFeature(name) { featureMembers(name).forEach(w => send({ type: 'stopDevServer', path: w.path })); }

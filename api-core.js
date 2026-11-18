@@ -97,6 +97,7 @@ const TOOLS = [
   ['chat_send', 'Send a peer-chat message to a peer or group.', obj({ ...TO, text: S('The message.') }, ['text'])],
   ['events_poll', 'Events after a sequence number, waiting up to timeoutSec for one to arrive. For clients that can\'t hold an SSE stream (e.g. MCP).', obj({ since: N('Last seq you saw; 0 for what is buffered.'), types: { type: 'array', items: { type: 'string' }, description: 'Event types, or prefixes ending in "." (e.g. "agent."). Default all.' }, timeoutSec: N('Default 25, max 60.') })],
   ['webhook_add', 'Register a URL on this machine (http://127.0.0.1 or localhost) that gets each event POSTed as JSON, signed with X-Overlord-Signature: sha256=HMAC(secret, body). Returns the secret once.', obj({ url: S('http://127.0.0.1:<port>/<path>'), types: { type: 'array', items: { type: 'string' }, description: 'Event types or prefixes. Default all.' } }, ['url'])],
+  ['feature_from_worktree', 'Turn an existing git worktree (any folder, made outside Overlord too) into a feature as-is: same folder, branch and files; it gets a port, installs deps and starts its dev server. Removing it later unregisters it and keeps the folder. Returns the worktree entry.', obj({ path: S('Absolute path of the worktree folder.'), name: S('Feature name.') }, ['path', 'name'])],
   ['repo_check', 'Whether this machine can set up a repo: the Node major it needs (from .nvmrc, .node-version, engines.node or a locked package) against the installed one. node.ok false means its worktree install will likely fail.', obj({ repo: S('Absolute path of the repo (its main checkout).') }, ['repo'])],
   ['pr_repos_list', 'The PR watchlist: GitHub repos whose open PRs the PRs panel shows. enabled: PR notifications on. locked: release repos the whole team watches; they can\'t be removed.', obj({})],
   ['pr_repos_add', 'Watch more repos for PRs (owner/name), as ticking them in the PR settings. Turns PR notifications on. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
@@ -285,6 +286,7 @@ function createApi(host) {
       hooks.push(h); persistHooks();
       return { id: h.id, url: h.url, types: h.types, secret: h.secret };
     },
+    feature_from_worktree: (x) => { if (!x.path || !x.name) throw new ApiError(400, 'path and name are required'); return host.featureFromWorktree(String(x.path), String(x.name)); },
     repo_check: (x) => { if (!x.repo) throw new ApiError(400, 'repo is required'); return host.repoCheck(String(x.repo)); },
     pr_repos_list: () => host.prWatch(),
     pr_repos_add: (x) => {

@@ -86,6 +86,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `chat_send` | `peer` or `group`, `text` | `{ conversation, message, offline }`. 409 if no recipient is online. |
 | `events_poll` | `since?`, `types?`, `timeoutSec?` (max 60) | `{ events, seq }`. Long-poll: returns as soon as one event matches. |
 | `webhook_add` | `url`, `types?` | `{ id, secret }`. The secret is shown only this once. |
+| `feature_from_worktree` | `path`, `name` | the worktree entry: an existing git worktree (made anywhere) joins as feature `name` as-is, gets a port, installs deps and starts its dev server; removing it later keeps the folder. 400 for the main checkout, a detached HEAD or a non-worktree |
 | `repo_check` | `repo` | `{ repo, node: { ok, need, have, source } }`: the Node major the repo needs (`.nvmrc`, `.node-version`, `engines.node` or a locked package, the strictest) against `node -v` on this machine |
 | `pr_repos_list` | | `{ enabled, repos, locked }`: the PR watchlist. `locked` are release repos the team watches; they can't be removed |
 | `pr_repos_add` | `repos` (`owner/name` each) | the watchlist; also turns PR notifications on. Already-watched repos are skipped (case-insensitive) |

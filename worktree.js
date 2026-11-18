@@ -205,6 +205,16 @@ async function removeWorktree({ repo, dest, branch, deleteBranch }) {
   }
 }
 
+// An existing folder that can become a feature member as-is: a linked worktree (git lists the
+// main checkout first) on a named branch. The main checkout itself never joins; a feature owns
+// and can delete its members.
+function adoptTarget(dir, registered, branch) {
+  if (!registered.length || samePath(registered[0], dir)) return { error: 'Only a worktree can become a feature, not the main checkout' };
+  if (!registered.some(p => samePath(p, dir))) return { error: 'Not a git worktree' };
+  if (!branch) return { error: 'Check out a branch first (detached HEAD)' };
+  return { repo: path.resolve(registered[0]), branch };
+}
+
 async function repoRoot(dir) {
   const out = await git(dir, ['rev-parse', '--show-toplevel'], 15000);
   return out.trim();
@@ -221,7 +231,7 @@ function setupFailReason(log) {
 }
 
 module.exports = {
-  setupFailReason,
+  setupFailReason, adoptTarget, registeredWorktrees, git,
   WT_ROOT, slug, safeBranch, worktreePath, listBranches, copySeedFiles, detectSeedFiles,
   detectPackageManager, detectDevCommand, createWorktree, removeWorktree, repoRoot,
 };

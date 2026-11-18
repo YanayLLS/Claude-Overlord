@@ -4795,6 +4795,39 @@ async function doCreateWorktree({ repo, branch, base, feature }) {
   return entry;
 }
 
+// A worktree made outside Overlord (e.g. by an agent's own git worktree add) becomes a feature as-is:
+// same folder, branch and files. It gets a port, a dev server and the feature card like any other.
+// adopted: removing it later only unregisters it; the folder was never Overlord's to delete.
+async function featureFromWorktree(dir, name) {
+  name = String(name || '').trim();
+  if (!name) throw new Error('feature name is required');
+  if (!dir || !path.isAbsolute(dir) || !fs.existsSync(dir)) throw new Error(`not a folder: ${dir}`);
+  const [registered, branch] = await Promise.all([
+    wt.registeredWorktrees(dir).catch(() => []),
+    wt.git(dir, ['branch', '--show-current'], 15000).then(s => s.trim()).catch(() => ''),
+  ]);
+  const t = wt.adoptTarget(dir, registered, branch);
+  if (t.error) throw new Error(t.error);
+  const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  const repo = Object.keys(settings.projects || {}).find(k => same(k, t.repo)) || t.repo; // reuse its dev-server config
+  const known = (settings.worktrees || []).find(w => same(w.path, dir));
+  if ((settings.worktrees || []).some(w => w !== known && w.feature === name && same(w.repo, repo))) throw new Error(`feature "${name}" already has a ${path.basename(repo)} worktree`);
+  if (known) {
+    if (known.feature && known.feature !== name) throw new Error(`already in feature "${known.feature}"`);
+    known.feature = name; saveState(); send({ type: 'settings', settings: publicSettings() });
+    return known;
+  }
+  const base = (projectConfig(repo) || {}).defaultBase || 'dev';
+  ensureProjectConfig(repo, base);
+  const entry = { path: dir, repo, branch: t.branch, base, port: nextBasePort(repo), status: 'setup', feature: name, autostart: true, adopted: true };
+  settings.worktrees = settings.worktrees || [];
+  settings.worktrees.push(entry);
+  saveState();
+  send({ type: 'settings', settings: publicSettings() });
+  installWorktree(entry); // deps are likely in already, so this is quick; then it starts the server
+  return entry;
+}
+
 // Install deps so the worktree is actually runnable. Runs in the background; the group
 // card shows a "setup" state until done. seamless > watching npm scroll.
 function installWorktree(entry) {
@@ -5043,6 +5076,12 @@ function handleIpc(msg) {
       }
       break;
     }
+    case 'featureFromWorktree': {
+      featureFromWorktree(msg.path, msg.name)
+        .then(e => send({ type: 'toast', text: `${e.feature}: ${path.basename(e.path)} joined as-is` }))
+        .catch(e => send({ type: 'toast', text: 'Feature failed: ' + (e.message || 'error') }));
+      break;
+    }
     case 'startFeatureServers': { // backends first, so the front-ends after them get wired to them
       const members = (settings.worktrees || []).filter(w => w.feature === msg.feature && !devServers.has(w.path) && !externalServers.has(w.path));
       for (const w of featureEnvLib.startOrder(members)) startDevServer(w.path);
@@ -5071,6 +5110,7 @@ function handleIpc(msg) {
       settings.worktrees = (settings.worktrees || []).filter(w => w.path !== msg.path);
       saveState();
       send({ type: 'settings', settings: publicSettings() });
+      if (entry.adopted) { send({ type: 'toast', text: `${path.basename(entry.path)} left the feature; folder kept` }); break; }
       const key = entry.path.toLowerCase();
       const job = wt.removeWorktree({ repo: entry.repo, dest: entry.path, branch: entry.branch, deleteBranch: !!msg.deleteBranch })
         .catch(e => { flog('removeWorktree cleanup failed:', e); send({ type: 'toast', text: `Cleanup of ${entry.branch} folder failed — remove it manually` }); })
@@ -6064,6 +6104,7 @@ function apiHost() {
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
     repoCheck: (repo) => repoCheck(repo),
+    featureFromWorktree: (p, name) => featureFromWorktree(p, name).catch(e => { throw new ApiError(400, e.message); }),
     prAutoMerge: ({ urls, on }) => ({ urls: setPrAutoMerge(urls || prAutoMergeable((settings.prCache || {}).prs).map(p => p.url), on) }),
     prList: (o) => prClaimsApi.list(o), prMerge: (pr) => prClaimsApi.merge(pr), prApprove: (pr) => prClaimsApi.approve(pr),
     prFix: (pr) => prClaimsApi.fix(pr), prHide: ({ pr, how, undo, hours }) => prClaimsApi.hide(pr, how, undo, hours),
