@@ -296,7 +296,7 @@
     }
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
     else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span>${/fail/i.test(m[2]) ? ICON.alert : ICON.check}</div>`; }
-    else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
+    else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && ev.kind !== 'warn' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
     else if (ev.type === 'note' && ev.kind === 'recap') h = `<details class="msg note cli recap"><summary><b>Recap</b><span class="rt">${escH(String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '').split('\n')[0])}</span>${ICON.chev}</summary><div>${escH(String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, ''))}</div></details>`;
     else if (ev.type === 'note') h = `<div class="msg note cli${ev.kind ? ' ' + ev.kind : ''}">${ev.kind === 'recap' ? '<b>Recap</b> ' : ev.kind === 'sub' ? '⎿ ' : ''}${escH(ev.kind === 'recap' ? String(ev.text).replace(/\s*\(disable recaps in \/config\)\s*$/i, '') : ev.text)}</div>`;
     else if (ev.type === 'peer') h = `<details class="msg peer" data-i="${i}"><summary>${ICON.agent}<span class="pr-from">${escH(ev.from)}</span><span class="pr-sum">${escH(ev.summary || ev.text.split('\n')[0])}</span>${ICON.chev}</summary><div class="md sub">${md(ev.text, cwd)}</div></details>`; // another session's note
@@ -418,12 +418,14 @@
     // Only a finished turn gets a footer: a message typed mid-turn doesn't end the turn.
     const mk = marksOf(id);
     const close = () => { flush(); if (!turn) return; if (open) out.push(footHtml(textAt, turn, sum, textAt >= 0 && evs[textAt].ts ? { ts: evs[textAt].ts, on: mk.has(evs[textAt].ts) } : null)); textAt = -1; turn = null; open = false; sum = fresh(); };
+    let lastBridge = -1; evs.forEach((e, k) => { if (e.type === 'note' && e.kind === 'bridge') lastBridge = k; }); // the CLI shows only its newest remote-control line
     const folded = new Set(); // CLI lines a compaction printed (files re-read, skills restored): under its divider
     evs.forEach((ev, i) => {
       if (i < start || folded.has(i)) return;
       const t = ev.type;
       if (t === 'compact' && !ev._restored) { ev._restored = []; for (let j = i + 1; j < evs.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { ev._restored.push(String(evs[j].text || '').replace(/^⎿\s*/, '').split('\n')[0]); folded.add(j); } }
       else if (t === 'compact') for (let j = i + 1, n = 0; j < evs.length && n < ev._restored.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { folded.add(j); n++; }
+      if (t === 'note' && ev.kind === 'bridge' && i !== lastBridge) return;
       tally(ev, i);
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
       // A published Artifact stands on its own as a card (title, what it is, its link), not as a row in a run of calls.

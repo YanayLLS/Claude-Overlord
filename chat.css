@@ -975,6 +975,7 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli:not(.sub) { margin: 2px 0 6px; font-family: inherit; font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli:not(.sub):hover { white-space: normal; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli.recap { white-space: normal; font-style: normal; }
+:root body :is(#conversation, #chat-shell, #chat-queue) .msg.note.cli.warn { white-space: normal; color: var(--yellow); } /* the CLI's yellow warning line, wrapped in full */
 /* Turn footer: cost and tokens show on hover; the time and actions stay. */
 :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot .tf-cost { opacity: 0; transition: opacity .15s; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot:hover .tf-cost, :root body :is(#conversation, #chat-shell, #chat-queue) .turnfoot:focus-within .tf-cost { opacity: 1; }
