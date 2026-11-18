@@ -106,6 +106,9 @@ test('liveReply: the reply being written, read off the CLI screen above its spin
   assert.strictEqual(liveReply(screen.slice(0, 8)), '');
   // a reply from an earlier turn above the latest prompt is not this turn's
   assert.strictEqual(liveReply(['● old answer', '', '> next question', '', '✶ Pondering… (2s · esc to interrupt)']), '');
+  // today's CLI: the sent message is "❯ text" under the last turn's footer (as seen while Claude was thinking)
+  assert.strictEqual(liveReply(['● No, nothing has been merged into master.', '', '✻ Brewed for 2s · done 2:52 PM', '', '❯ when you think about the next thing', '', '✶ Thinking… (7s · esc to interrupt)']), '');
+  assert.strictEqual(liveReply(['● old answer', '', '✻ Brewed for 2s · done 2:52 PM', '', '✶ Thinking… (7s · esc to interrupt)']), '');
   // a running call's ● blinks off: its rows are still a call, not part of the text above (it flickered in and out)
   assert.strictEqual(liveReply(['● Checking it on a real card.', '', '  Bash(cd /c/Work)', '  ⎿  Running… (48s)', '', '✻ Sketching… (1m · esc to interrupt)']), '');
 });

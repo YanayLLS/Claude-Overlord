@@ -183,7 +183,9 @@ function liveReply(lines) {
     if (/^\s*[●⏺]\s/.test(lines[i])) { b = i; break; }
     // A running call's ● blinks: on its blank frames "  Bash(…)" / "  ⎿ Running…" is still a call, newer than any text.
     if (/^\s{0,2}([A-Z][\w-]*\(|⎿\s)/.test(lines[i])) return '';
-    if (/^>\s/.test(lines[i])) return ''; // the latest prompt: no reply yet this turn
+    // The latest prompt (today's CLI draws a sent message as "❯ text", older ones "> text"), or the last turn's footer
+    // ("✻ Brewed for 2s · done 2:52 PM"): no reply yet this turn - the ● above them is the previous answer.
+    if (/^\s*[>❯]\s/.test(lines[i]) || /^\s*[·✢✳✶✻✽*]\s+\p{Lu}\S* for \d/u.test(lines[i])) return '';
   }
   if (b < 0) return '';
   const first = lines[b].replace(/^\s*[●⏺]\s+/, '');
