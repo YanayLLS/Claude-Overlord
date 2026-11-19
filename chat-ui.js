@@ -1263,8 +1263,14 @@
     if (!x || !conv) return;
     requestAnimationFrame(() => requestAnimationFrame(() => { // the menu is gone from the picture
       const b = x.terminal.buffer.active, r = conv.getBoundingClientRect(), th = x.terminal.options.theme || {};
-      api.send({ type: 'fixChat', id,
-        rect: { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
+      const box = (q) => q && { x: Math.round(q.left), y: Math.round(q.top), width: Math.round(q.width), height: Math.round(q.height) };
+      // The state the list and the chat show for this agent, so the fixer can check it against main's real state.
+      const a = agents.get(id) || {}, row = document.querySelector(`.agent[data-id="${id}"]`);
+      const state = { list: agentStatus(a), status: a.status, silent: silent(a), doneConfirmed: !!a.doneConfirmed, crashed: a.crashed || null, spinnerText: a.spinnerText || '',
+        tools: [...(a.tools || new Map()).values()].map(t => ({ name: t.name, done: !!t.done, perm: !!t.perm })),
+        chatBusy: !!document.getElementById('term-order')?.classList.contains('busy'), listRow: row ? row.outerHTML : null };
+      api.send({ type: 'fixChat', id, state, rowRect: row && row.offsetParent ? box(row.getBoundingClientRect()) : null,
+        rect: box(r),
         cli: cellsHtml(b, b.baseY, b.baseY + x.terminal.rows, th), bg: th.background || '#000', fg: th.foreground || '#ccc', cols: x.terminal.cols, rows: x.terminal.rows,
         cliText: (screenOf(id, 400) || []).join('\n'), chatHtml: conv.outerHTML.slice(-500000) });
     }));

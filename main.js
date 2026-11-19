@@ -3598,8 +3598,14 @@ async function fixChat(msg) {
   const a = agents.get(msg.id); if (!a || !mainWindow) return;
   const dir = path.join(os.tmpdir(), 'overlord-fixchat', String(Date.now())); fs.mkdirSync(dir, { recursive: true });
   const f = (n) => path.join(dir, n);
-  const z = mainWindow.webContents.getZoomFactor(), r = msg.rect; // rect is CSS px, capturePage wants DIP (app zoom)
-  fs.writeFileSync(f('chat.png'), (await mainWindow.webContents.capturePage({ x: Math.round(r.x * z), y: Math.round(r.y * z), width: Math.round(r.width * z), height: Math.round(r.height * z) })).toPNG());
+  const z = mainWindow.webContents.getZoomFactor(); // rects are CSS px, capturePage wants DIP (app zoom)
+  const shot = async (r, n) => fs.writeFileSync(f(n), (await mainWindow.webContents.capturePage({ x: Math.round(r.x * z), y: Math.round(r.y * z), width: Math.round(r.width * z), height: Math.round(r.height * z) })).toPNG());
+  await shot(msg.rect, 'chat.png');
+  if (msg.rowRect) await shot(msg.rowRect, 'list-row.png');
+  // Main's real state (from the transcript + PTY) next to what the list and the chat show.
+  const real = { shown: shownStatus(a), isWaiting: !!a.isWaiting, bgTasks: a.bgTasks ? a.bgTasks.size : 0, askIds: a.askIds ? a.askIds.size : 0, permSent: !!a.permSent,
+    tools: [...(a.toolIds || [])].map(t => a.toolNames.get(t) || '?'), spinnerText: a.spinnerText || '', claudeReady: !!a.claudeReady, crashed: a.crashed || null };
+  fs.writeFileSync(f('state.json'), JSON.stringify({ main: real, renderer: msg.state || null }, null, 2));
   const page = `<!doctype html><meta charset="utf-8"><body style="margin:0;overflow:hidden;background:${msg.bg}"><pre style="margin:0;padding:8px;display:inline-block;color:${msg.fg};font:13px/1.2 'Cascadia Mono',Consolas,monospace">${msg.cli || ''}</pre></body>`;
   fs.writeFileSync(f('cli.html'), page); fs.writeFileSync(f('cli.txt'), msg.cliText || ''); fs.writeFileSync(f('chat.html'), msg.chatHtml || '');
   const w = new BrowserWindow({ show: false, width: Math.ceil((msg.cols || 120) * 8 + 24), height: Math.ceil((msg.rows || 40) * 15.6 + 24), webPreferences: { offscreen: true } });
@@ -3610,6 +3616,8 @@ async function fixChat(msg) {
     `- Terminal (the truth): ${p('cli.png')}, its text (last 400 rows): ${p('cli.txt')}`,
     `- Chat view as shown: ${p('chat.png')}, its DOM: ${p('chat.html')}`,
     a.jsonlFile ? `- Transcript: ${a.jsonlFile.replace(/\\/g, '/')}` : '',
+    `- State: ${p('state.json')} (main = real state from transcript/PTY; renderer = what the agent list (list) and chat (chatBusy, tools) show)${msg.rowRect ? `, its list row: ${p('list-row.png')}` : ''}`,
+    `Also check the status: does the list row and the chat show the agent as working / waiting / needing input exactly when it really is (main state, transcript tail, terminal)? A mismatch (e.g. list says idle while it works, or the chat shows a running turn that ended) is a bug: find its root cause (index.html agentStatus/silent, main.js shownStatus and status sends, chat-ui.js busy) and fix it too.`,
     `Look at both pictures and list every difference: missing, extra or wrong text, state, options, colours, layout. Find each one's root cause in the renderer (chat-ui.js, chat-core.js, timeline-core.js, chat.css, index.html) and fix it so this case renders like the terminal from now on. Pure logic gets a test in chat-core.test.js or timeline-core.test.js.`,
     `That agent is live: never type into, resume or fork its session. Other agents edit this repo: commit only your own lines, bump package.json, don't push.`,
   ].filter(Boolean).join('\n');
