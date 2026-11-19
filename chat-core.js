@@ -355,7 +355,8 @@ function cellsHtml(buf, from, to, theme = {}) {
 // (tables, diagrams, code): the caller shows it as text.
 function sketchHtml(src) {
   const lines = String(src).replace(/\x1b\[[0-9;?]*[@-~]/g, '').replace(/\s+$/, '').split('\n');
-  if (/[├┤┬┴┼╔║═]/.test(src) || !lines.some(l => /[┌└]─|\[ .+? \]|^\s*[│|].*[│|]\s*$/.test(l))) return '';
+  // "│ … │" rows with no ┌─┐ corners are panes side by side (a tree beside a list), not cards: those stay text.
+  if (/[├┤┬┴┼╔║═]/.test(src) || !lines.some(l => /[┌└]─|\[ .+? \]/.test(l))) return '';
   // The CLI's copy on screen draws the "+" marker as a list "-": then a "-" before a box edge means added.
   const dashAdd = !lines.some(l => /^\+ /.test(l)) && lines.some(l => /^- [│┌└|]/.test(l)), diff = dashAdd || lines.some(l => /^\+ /.test(l));
   const inline = (s) => escHtml(s)

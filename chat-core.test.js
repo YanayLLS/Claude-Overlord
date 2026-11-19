@@ -204,6 +204,8 @@ test('sketchHtml: a preview drawn in text shows as UI (boxes, buttons, icons, no
   // not a sketch: a table or plain text stays text
   assert.strictEqual(sketchHtml('┌─┬─┐\n│a│b│\n├─┼─┤'), '');
   assert.strictEqual(sketchHtml('just words'), '');
+  // panes split by "│" with no ┌─┐ box (a tree beside a list): each row as its own card broke the layout, so it stays text
+  assert.strictEqual(sketchHtml('3D Tools   ⟳ ✕\n[🔍 Search tools…   ] [+ New tool]\n│ All             │ mftPRO › Screens\n│ ▾ My Categories │ [tool][tool]\n│   ▸ 5008X       │\n│      Parts      │'), '');
 });
 test('screenDialog: an inline panel above the prompt box (/btw, a skill UI) counts, so the chat shows the terminal', () => {
   const { screenDialog } = require('./chat-core');
