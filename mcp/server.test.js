@@ -51,11 +51,12 @@ test('initialize returns protocol version and tools capability', async () => {
   });
 });
 
-test('tools/list returns the eight browser tools, three terminal tools, show_visual, the eight PR tools, close_self and the five release tools', async () => {
+test('tools/list returns the eight browser tools, three terminal tools, show_visual, the eight PR tools, close_self, the five release tools and the two agent-messaging tools', async () => {
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 27);
+    assert.strictEqual(json.result.tools.length, 29);
+    assert.ok(['agent_list', 'agent_message'].every(n => json.result.tools.some(t => t.name === n)));
     assert.ok(["release_status", "release_open", "release_sign", "release_all", "release_rerun_failed"].every(n => json.result.tools.some(t => t.name === n)));
   });
 });
@@ -206,6 +207,26 @@ test('PR panel tools reach the PR host and turn { error } into isError', async (
     await call('pr_hide', { pr: 'o/r#3', how: 'snooze', hours: 2 });
     assert.deepStrictEqual(seen, [['list', { mine: true }], ['auto', ['o/r#1'], true], ['merge', 'o/r#2'], ['hide', 'o/r#3', 'snooze', false, 2]]);
   }, () => ACTIONS, claims);
+});
+
+test('agent_message hands the calling agent, the name and the text to the host; agent_list lists; errors come back as tool errors', async () => {
+  const seen = [];
+  const messaging = {
+    list: (from) => [{ name: 'Ada', title: 't', cwd: 'C:/w', status: 'sleeping', from }],
+    send: (from, name, text) => { if (name === 'Nobody') throw new Error('No agent named Nobody in this Overlord.'); seen.push([from, name, text]); return 'Sent.'; },
+  };
+  const server = createMcpServer({ resolveActions: () => ACTIONS, messaging });
+  await server.start();
+  try {
+    const t = server.mintToken(4);
+    const call = async (name, args) => (await rpc(server, t, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } })).json.result;
+    const sent = await call('agent_message', { agent: '@Ada', text: 'hello' });
+    assert.ok(!sent.isError); assert.strictEqual(sent.content[0].text, 'Sent.');
+    assert.deepStrictEqual(seen, [[4, 'Ada', 'hello']]); // the @ is dropped, the caller is the token's agent
+    assert.strictEqual((await call('agent_message', { agent: 'Nobody', text: 'x' })).isError, true);
+    assert.strictEqual((await call('agent_message', { agent: 'Ada' })).isError, true); // text required
+    assert.deepStrictEqual(JSON.parse((await call('agent_list', {})).content[0].text)[0].from, 4);
+  } finally { await server.stop(); }
 });
 
 test("close_self is listed and asks the host to close the calling agent", async () => {

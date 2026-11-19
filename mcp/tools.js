@@ -93,6 +93,27 @@ const SELF_SCHEMAS = [
     inputSchema: { type: 'object', properties: {} } },
 ];
 
+// Messaging another agent in this Overlord (main.js agentMessaging). Claude Code's own SendMessage reaches only agents
+// whose Claude is running: one CPU saving put to sleep was unreachable. This wakes it and delivers.
+const AGENT_SCHEMAS = [
+  { name: 'agent_list', description: 'List the other agents in this Overlord by their Overlord name (the name the user calls them by, e.g. Ada), with title, folder and status (working, waiting or sleeping).',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'agent_message', description: 'Send a message to another agent in this Overlord, by its Overlord name. It arrives as a prompt from you, and an agent CPU saving put to sleep is woken for it. Use this, not SendMessage, for agents in this Overlord. Only when the user asked you to message that agent.',
+    inputSchema: { type: 'object', properties: { agent: { type: 'string', description: 'The agent\'s Overlord name, e.g. Ada (agent_list shows them)' }, text: { type: 'string', description: 'The message' } }, required: ['agent', 'text'] } },
+];
+async function agentCall(messaging, agentId, name, args = {}) {
+  try {
+    if (!messaging) return fail('Messaging other agents is unavailable.');
+    if (name === 'agent_list') return text(JSON.stringify(messaging.list(agentId), null, 1));
+    if (name === 'agent_message') {
+      if (typeof args.agent !== 'string' || !args.agent.trim()) return fail('agent_message: "agent" is required');
+      if (typeof args.text !== 'string' || !args.text.trim()) return fail('agent_message: "text" is required');
+      return text(messaging.send(agentId, args.agent.trim().replace(/^@/, ''), args.text));
+    }
+    return fail(`Unknown tool: ${name}`);
+  } catch (e) { return fail(e && e.message ? e.message : String(e)); }
+}
+
 async function prCall(claims, agentId, name, args = {}) {
   try {
     if (!claims) return fail('PRs are unavailable.');
@@ -170,4 +191,4 @@ function terminalCall(terminals, name, args = {}) {
   } catch (e) { return fail(e && e.message ? e.message : String(e)); }
 }
 
-module.exports = { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, RELEASE_SCHEMAS, releaseCall, prCall, visualCall, createDispatcher, terminalCall };
+module.exports = { AGENT_SCHEMAS, agentCall, TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, RELEASE_SCHEMAS, releaseCall, prCall, visualCall, createDispatcher, terminalCall };

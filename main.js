@@ -5100,8 +5100,11 @@ function featureAgentArgs(cwd) {
   // newly started agents).
   if (settings.peersEnabled) notes.push('Overlord peer messaging: when the user asks you to send or forward a message to another agent, '
     + 'end your reply with a line: PEER-SEND AgentName@target: followed by the message you compose (it may continue to the end of your reply). '
-    + 'Use target me for an agent in this same Overlord, or the peer machine name for an agent on a teammates machine. '
+    + 'Use the peer machine name as target, for an agent on a teammates machine (for one in this same Overlord use agent_message, below). '
     + 'Only do this when the user asks you to message another agent. Never use SendMessage or teammate mentions for cross-Overlord messaging.');
+  // Claude Code's own SendMessage only reaches agents whose Claude is running: one CPU saving put to sleep was unreachable.
+  notes.push('Messaging another agent in this Overlord: use the agent_message tool of the overlord-browser MCP (agent_list shows their names), '
+    + 'not SendMessage or PEER-SEND. It wakes an agent that is asleep. Only when the user asks you to message that agent.');
   notes.push('Overlord agent watch: when the user asks you to do something once another agent in this Overlord is done, '
     + 'end your reply with a line: WHEN-DONE @AgentName: followed by what to do then (it may continue to the end of your reply). '
     + 'Overlord sends it back to you, with the final message of that agent, when its turn ends. One-shot: write it again to keep watching.');
@@ -6557,7 +6560,7 @@ function injectPeerMessage(agentId, env) {
     // bounded. A human-submitted prompt resets it to 0.
     a.peerHopBase = (Number(env.hop) || 0) + 1;
     // Return address so a PEER-REPLY line can route back; consumed by one reply.
-    if (env.fromAgent) a.peerReplyTo = { peer: env.fromPeer, agent: env.fromAgent, hop: a.peerHopBase };
+    if (env.fromAgent) a.peerReplyTo = { peer: env.fromPeer, agent: env.fromAgent, hop: a.peerHopBase, local: !!env.local };
   }
   // Write straight to the pty, NOT through handleTermInput: injected content
   // must never enter the input scanner, or a message whose text contains an
@@ -6606,8 +6609,8 @@ function confirmPeerInjection(a, txt) {
 // (one reply per incoming message), lands in the remote HUMAN's approval
 // queue, and the hop counter hard-stops the chain at MAX_HOP.
 function scanPeerReply(id, a, text) {
-  if (!settings.peersEnabled) return;
   if (!a.peerReplyTo) return;
+  if (!settings.peersEnabled && !a.peerReplyTo.local) return; // agent_message (same Overlord) works with peers off
   const m = text.match(/^\s*PEER-REPLY:\s*(.+)$/m);
   if (!m || !m[1].trim()) return;
   const replyTo = a.peerReplyTo;
@@ -6625,6 +6628,7 @@ function scanPeerReply(id, a, text) {
   if (replyTo.peer.toLowerCase() === myPeerName().toLowerCase() && !findPeerConn(replyTo.peer)) {
     const target = findLocalAgentByName(replyTo.agent);
     if (target === null || target === id) { send({ type: 'toast', text: `✕ Agent reply not delivered — no local agent named @${replyTo.agent}` }); return; }
+    if (replyTo.local) { env.local = true; queuePeerInjection(target, env); send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} replied to @${replyTo.agent}` }); return; } // agent_message: no approval, as asked
     deliverPeerMessage(target, env);
     send({ type: 'toast', text: `✉ ${a.agentName || 'Agent'} replied to @${replyTo.agent} — awaiting your approval` });
     return;
@@ -7139,7 +7143,29 @@ app.whenReady().then(() => {
   });
   // ponytail: closeWhenDone is in memory; an Overlord restart mid-turn forgets it.
   const closeSelf = (id) => { const a = agents.get(id); if (!a) return false; a.closeWhenDone = true; return true; };
-  mcpServer = createMcpServer({ onEditHook: onFeatureEdit, prClaims: prClaimsApi, closeSelf, releases: releases.agentApi, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
+  // agent_list / agent_message (mcp/tools.js): one agent messaging another in this Overlord. Delivered like an approved peer
+  // message (queuePeerInjection: wakes one CPU saving put to sleep, waits for its CLI, checks the transcript got it), no
+  // approval - same Overlord, same user - and the hop budget it carries stops agents bouncing messages forever.
+  const agentMessaging = {
+    list: (fromId) => [...agents.values()].filter(a => !a.archived && a.id !== fromId && a.agentName)
+      .map(a => ({ name: a.agentName, title: a.title || '', cwd: a.cwd, status: a.sleeping ? 'sleeping' : shownStatus(a) === 'active' ? 'working' : 'waiting' })),
+    send: (fromId, name, text) => {
+      const from = agents.get(fromId), to = findLocalAgentByName(name);
+      if (to === null) throw new Error(`No agent named ${name} in this Overlord. agent_list shows them.`);
+      if (to === fromId) throw new Error(`${name} is you.`);
+      let user = ''; try { user = os.userInfo().username; } catch {}
+      const env = pc.buildEnvelope({ toAgent: agents.get(to).agentName, fromAgent: (from && from.agentName) || '', fromPeer: myPeerName(), fromUser: user, text, hop: (from && from.peerHopBase) || 0 });
+      const v = pc.validateEnvelope(env);
+      if (!v.ok) throw new Error(v.error === 'hop limit reached' ? 'Agent message chain hit its limit: a person has to continue it.' : `Not sent: ${v.error}`);
+      env.local = true; // its PEER-REPLY comes straight back too, peers on or off (scanPeerReply)
+      const asleep = !!agents.get(to).sleeping;
+      flog(`agent ${fromId} agent_message -> @${env.toAgent} (agent ${to}${asleep ? ', asleep: waking it' : ''})`);
+      queuePeerInjection(to, env);
+      send({ type: 'toast', text: `✉ ${env.fromAgent || 'An agent'} sent a message to @${env.toAgent}` });
+      return asleep ? `Sent. ${env.toAgent} was asleep (CPU saving): it is resuming and gets the message once ready, usually within a minute.` : `Sent to ${env.toAgent}.`;
+    },
+  };
+  mcpServer = createMcpServer({ onEditHook: onFeatureEdit, prClaims: prClaimsApi, closeSelf, releases: releases.agentApi, messaging: agentMessaging, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.apiEnabled) startLocalApi();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
