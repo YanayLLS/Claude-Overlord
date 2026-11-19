@@ -3646,6 +3646,8 @@ function createXterm(id) {
     theme: xtermTheme(currentTheme), // theme-core.js
     fontFamily: '"Cascadia Mono","Cascadia Code","JetBrains Mono",Consolas,monospace', fontSize: 13, lineHeight: 1.2, cursorBlink: false /* blinkCaret() below */, scrollback: 10000 /* ~12 B/cell × cols × lines: up to ~24 MB per terminal at 200 cols — kept, history is worth it */, cursorStyle: 'bar', cursorWidth: 2,
     allowProposedApi: true, // search highlight decorations (TERM_SEARCH_OPTS) throw without it
+    // OSC 8 hyperlinks: xterm's default asks confirm() then window.open — open in the browser instead.
+    linkHandler: { activate: (e, uri) => openLink(uri, id) },
   });
   const searchAddon = new XSearchAddon();
   const imageAddon = new XImageAddon({ sixelSupport: false, iipSupport: true, enableSizeReports: true, storageLimit: 8 }); // MB of decoded images kept per terminal (the addon's default is 128)

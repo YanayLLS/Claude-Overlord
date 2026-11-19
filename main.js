@@ -7090,6 +7090,11 @@ app.whenReady().then(() => {
   };
   if (bounds.x !== undefined && bounds.y !== undefined) { opts.x = bounds.x; opts.y = bounds.y; }
   mainWindow = new BrowserWindow(opts);
+  // window.open from the renderer (e.g. an OSC 8 terminal link) → the real browser, never a bare Electron window.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
   // Show as soon as the page is painted — don't wait for agent restoration. Hooked
   // first, so a throw in the setup below can't leave a running app with no window,
   // and a page that never paints (GPU/driver trouble) still shows after 10s.
