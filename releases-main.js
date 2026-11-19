@@ -6,11 +6,12 @@
 const fs = require('fs');
 const path = require('path');
 const { releaseFixBrief } = require('./release-playbook');
-const { runRelease, recheckRelease, prHealth, rowStatus, isHotfix, isReleaseHead, prodDbschemas } = require('./release-run');
+const { snapshotRef, runRelease, recheckRelease, prHealth, rowStatus, isHotfix, isReleaseHead, prodDbschemas } = require('./release-run');
 const createHistory = require('./release-history');
 const createRc = require('./rc-main');
 const { demoCandidate, ghIsRead } = require('./rc-core');
 const rcFix = require('./rc-fix');
+const releaseFix = require('./release-fix');
 const rcBranch = require('./rc-branch');
 // Demo mode (a sandboxed instance started with OVERLORD_RC_DEMO=1): the Releases board can be walked end to
 // end, but it only ever READS GitHub. Every write this board would make is refused before it leaves.
@@ -1929,6 +1930,23 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   function shareHealth(run) {
     clearTimeout(healthTimer);
     healthTimer = setTimeout(() => history.recordHealth(run.rows).catch(() => {}), 3000);
+    fixBlockedRows(run).catch(() => {});
+  }
+  // a release PR that settles blocked gets an agent before anyone signs (release-fix.js); approvers only, and the
+  // tries are kept per run so a fix that did not hold gets one more go, not a loop
+  async function fixBlockedRows(run) {
+    if (DEMO || !startAgent || run.running || !state.approvers || !state.approvers.isApprover) return;
+    const runKey = String(run.startedAt), tries = state.releaseFixTries || {};
+    const rows = releaseFix.rowsToFix(run.rows, runKey, tries);
+    if (!rows.length) return;
+    const cwd = await configCheckout();
+    const file = path.join(runsDir(), `release-fix-${runKey}-${Date.now()}.md`);
+    fs.writeFileSync(file, releaseFix.briefFor(rows, { snapshotRef, workRoot: path.dirname(cwd).replace(/\\/g, '/') }));
+    const next = { ...tries };
+    for (const r of rows) next[`${runKey}|${r.repo}`] = (next[`${runKey}|${r.repo}`] || 0) + 1;
+    push({ releaseFixTries: next }); persist();
+    startAgent(cwd, 'Read and follow ' + file.replace(/\\/g, '/'));
+    send({ type: 'toast', text: `Fixing ${rows.map(r => r.label || r.repo).join(', ')} before signing` });
   }
   // opening Releases: the last run's rows can be hours old (PRs closed/merged/re-signed on GitHub since)
   async function refreshRun() {
