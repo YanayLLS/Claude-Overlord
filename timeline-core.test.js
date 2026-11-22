@@ -146,6 +146,7 @@ test('a question keeps each option\'s whole preview, per question', () => {
   assert.deepStrictEqual(ev.args.prevs, [{ q: 'How?', p: ['```diff\n+ one\n  two\n```', 'just y'] }]);
   const [plain] = parse({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: { questions: [qs[1]] } }] } });
   assert.strictEqual(plain.args.prevs, undefined);
+  assert.strictEqual(plain.args.header, 'B'); // one question still has its chip ("[ ] Solution" in the CLI)
 });
 
 test('the CLI\'s recap, notices and what a compaction restored show as notes', () => {
