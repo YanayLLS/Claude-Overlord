@@ -182,9 +182,11 @@
     if (resumeCheck(e.target)) return;
     const m = atQuery(e.target), a = agents.get(selectedId);
     if (!m || !a) return closeAt();
-    at = { kind: m.kind, start: m.start, q: m.q, files: at && at.kind === m.kind ? at.files : [], sel: 0 };
+    const opening = !at || at.kind !== m.kind;
+    at = { kind: m.kind, start: m.start, q: m.q, files: opening ? [] : at.files, sel: 0 };
     if (m.kind === '@') api.send({ type: 'chatFiles', id: selectedId, cwd: a.cwd, q: m.q, seq: ++atSeq });
-    else { if (!catalog.has(a.cwd)) api.send({ type: 'catalog', cwd: a.cwd }); at.files = slashMatches(a.cwd, m.q); drawAt(); }
+    // rescan each time the list opens, so a skill made since shows without a restart (cached list shows meanwhile)
+    else { if (opening) api.send({ type: 'catalog', cwd: a.cwd }); at.files = slashMatches(a.cwd, m.q); drawAt(); }
   }
   function onFiles(msg) {
     if (!at || at.kind !== '@' || msg.seq !== atSeq || msg.id !== selectedId) return;
