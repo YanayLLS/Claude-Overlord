@@ -7271,6 +7271,11 @@ app.whenReady().then(() => {
     if (input.key === 'F12' && input.type === 'keyDown') {
       mainWindow.webContents.toggleDevTools();
     }
+    // Ctrl+Alt+Shift+R: full app restart, caught in main so it works even when the renderer is stuck
+    if (input.type === 'keyDown' && input.code === 'KeyR' && input.control && input.alt && input.shift) {
+      _e.preventDefault();
+      quitBecause('full restart asked by Ctrl+Alt+Shift+R'); forceQuit = true; _restarting = true; app.relaunch({ args: relaunchArgs() }); app.quit();
+    }
   });
   mainWindow.on('resize', saveWindowBounds);
   mainWindow.on('move', saveWindowBounds);
