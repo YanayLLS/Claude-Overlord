@@ -1322,15 +1322,19 @@
   function keep(el) {
     const room = el.querySelector(':scope > .room'); if (!room || !el.classList.contains('open')) return;
     if (el._set != null && byHand(el)) { el._sent = false; el._settle = 0; holdPlace(el); }
-    let want = 0;
+    let want = 0, cut = false;
     for (let n = 0; n < 3; n++) { // room moves a short thread too (it sits at the bottom of the view): measure again
       want = Math.max(0, heldTop(el, room));
+      // Only your sent message gets room past the chat's end. A held block that shrank or went, or a scroll into the room
+      // a pinned message left, otherwise kept the view on the empty room: the chat showed blank. Half the view stays chat.
+      const most = Math.max(0, el.scrollHeight - room.offsetHeight - el.clientHeight / 2);
+      if (!el._pinMine && want > most) { want = most; cut = true; }
       const h = Math.max(0, Math.ceil(want + el.clientHeight - (el.scrollHeight - room.offsetHeight)));
       if (h === room.offsetHeight) break;
       room.style.height = h + 'px';
     }
     if (Math.abs(el.scrollTop - want) >= 0.5) el.scrollTop = want; // no write when nothing moved: any write cancels a wheel scroll in flight
-    if (el._settle > Date.now()) holdPlace(el);
+    if (cut || el._settle > Date.now()) holdPlace(el);
     el._set = el.scrollTop; // the scroll event this write fires is ours, not yours
   }
   const placeRO = new ResizeObserver(() => keep(document.getElementById('conversation'))); // late growth: markdown, rows, diagrams, blocks getting their real height
