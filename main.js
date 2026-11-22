@@ -487,11 +487,16 @@ function agentClaudeFlags(id, { browser = true, cwd = null } = {}) {
     return '';
   }
 }
-// Remote Control: the session shows in the Claude mobile app / claude.ai/code. No name
-// given, so the phone shows Claude's own session title: the ai-title / /rename that the
-// agent's row shows here. The flag takes an optional value, so it goes right after
-// `claude`, where the next token is always another flag, never the prompt.
-function claudeBin() { return settings.remoteControl === false ? 'claude' : 'claude --remote-control'; }
+// Remote Control: the session shows in the Claude mobile app / claude.ai/code. A new chat
+// gets no name, so the CLI titles it from the first message. A resume registers a new
+// remote session that the CLI names "<host>-adj-noun" and never retitles, so it gets the
+// agent's title. The flag takes an optional value, so it goes right after `claude`, where
+// the next token is always another flag, never the prompt. cmd.exe line: no quotes/%^&|<>!.
+function claudeBin(name) {
+  if (settings.remoteControl === false) return 'claude';
+  const n = String(name || '').replace(/["%^&|<>!\r\n]/g, '').trim().slice(0, 80);
+  return n ? `claude --remote-control "${n}"` : 'claude --remote-control';
+}
 // The toggle also reaches running agents: type /remote-control into each idle one with an
 // empty input line, then answer the menu it opens. Off→on shows an "Enable Remote Control"
 // confirm (Enter); a connected session shows Disconnect / Show QR / Continue with Continue
@@ -1959,7 +1964,7 @@ function doSpawnTerminal(id, attached) {
   const skip = settings.bypassPermissions ? ' --dangerously-skip-permissions' : '';
   const useResume = hasJsonl && !a._resumeFailed;
   const feat = featureAgentArgs(a.cwd);
-  const claudeCmd = (useResume ? `${claudeBin()} --resume ${a.sessionId}${skip}` : `${claudeBin()} --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id, { cwd: a.cwd });
+  const claudeCmd = (useResume ? `${claudeBin(a.title)} --resume ${a.sessionId}${skip}` : `${claudeBin()} --session-id ${a.sessionId}${skip}`) + feat.flags + agentClaudeFlags(id, { cwd: a.cwd });
   const sh = agentShell();
   // /c, not /k: /k left cmd.exe alive after Claude died, so the pty never exited and
   // crashes went unnoticed (no auto-resume). /c exits with Claude's own exit code.
