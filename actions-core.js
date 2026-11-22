@@ -135,6 +135,7 @@ function autoPhase(p, ctx) {
   if (p.checks === 'pass' || p.checks === 'none') {
     if (ctx.held) return 'held';
     if (p.mergeState === 'BLOCKED') return 'review';
+    if (['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState)) return 'merging'; // green: merges now, or right after the one ahead in its base
   }
   return 'waiting';
 }

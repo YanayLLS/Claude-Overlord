@@ -6527,7 +6527,7 @@ function prAutoCtl(p, u) {
   if (readyNow && !p.autoMerge) return ''; // Merge now is the job
   const arm = `event.stopPropagation();setPrAutoMerge('${u}',true)`, id = `data-am="${escapeHtml(p.url)}"`;
   if (p.autoMerge) {
-    const ph = PR_AUTO_PH[p.autoPhase] ? p.autoPhase : 'waiting', [lbl, look, ic, tip0] = PR_AUTO_PH[ph];
+    const ph = PR_AUTO_PH[p.autoPhase] ? p.autoPhase : readyNow ? 'merging' : 'waiting', [lbl, look, ic, tip0] = PR_AUTO_PH[ph];
     const hold = ph === 'held' && prHoldOn(p), tip = ph === 'stuck' && p.autoReason ? p.autoReason : hold ? `Held by @${hold.by}` : tip0;
     const st = ph === 'stuck'
       ? `<button class="st" ${id} title="${escapeHtml(tip)}" onclick="event.stopPropagation();prAutoRetry('${u}')">${prSvg(ic)}${lbl}</button>`

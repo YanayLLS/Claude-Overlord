@@ -195,7 +195,8 @@ const { fixPrPlan } = require('./actions-core');
   assert.strictEqual(autoPhase({ ...p, checks: 'fail' }, { fixing: true }), 'fixing');
   assert.strictEqual(autoPhase({ ...p, mergeState: 'DIRTY' }, { fixing: true }), 'fixing');
   assert.strictEqual(autoPhase({ ...p, checks: 'fail' }, { fixFailed: true }), 'stuck');
-  assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'CLEAN' }, { fixing: true }), 'waiting'); // a fixer still open on a green PR isn't "fixing"
+  assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'CLEAN' }, { fixing: true }), 'merging'); // a fixer still open on a green PR isn't "fixing"
+  assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'CLEAN' }, {}), 'merging'); // green waits on no checks: never "Testing"
   assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'BEHIND' }, {}), 'updating');
   assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'BLOCKED' }, {}), 'review');
   assert.strictEqual(autoPhase({ ...p, checks: 'pass', mergeState: 'CLEAN' }, { held: true }), 'held');

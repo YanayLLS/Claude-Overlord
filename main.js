@@ -3085,7 +3085,11 @@ function runAutoMerge(prs, failedRepos = []) {
   const armed = settings.prAutoMerge || [];
   if (!armed.length || !_stateRestored) return; // agents (and so PR claims) not back yet
   const keep = [];
-  for (const url of armed) {
+  // One merge per base at a time, oldest PR first: two merges into one base at once make the second fail (base moved).
+  const baseOf = (p) => p.repo + '#' + p.baseRef;
+  const busy = new Set(prs.filter(p => autoMerging.has(p.url)).map(baseOf));
+  const num = (u) => +((u.match(/\/pull\/(\d+)/) || [])[1] || 0);
+  for (const url of [...armed].sort((x, y) => num(x) - num(y))) {
     const p = prs.find(x => x.url === url);
     if (!p) { if (failedRepos.some(r => url.toLowerCase().includes('/' + r.toLowerCase() + '/'))) keep.push(url); continue; } // closed/merged, unless its repo just failed to load
     keep.push(url);
@@ -3109,7 +3113,8 @@ function runAutoMerge(prs, failedRepos = []) {
       continue;
     }
     const green = (p.checks === 'pass' || p.checks === 'none') && ['CLEAN', 'HAS_HOOKS', 'UNSTABLE'].includes(p.mergeState); // UNSTABLE: an older run of a now-green check still counts on GitHub; the panel calls it mergeable too
-    if (!green || releases.holdOn(p.repo, p.baseRef)) continue;
+    if (!green || releases.holdOn(p.repo, p.baseRef) || busy.has(baseOf(p))) continue;
+    busy.add(baseOf(p));
     keep.pop();
     autoMerging.add(url);
     mergePrNow(url).finally(() => autoMerging.delete(url));
