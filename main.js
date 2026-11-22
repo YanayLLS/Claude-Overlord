@@ -5110,6 +5110,10 @@ function featureAgentArgs(cwd) {
   // Claude Code's own SendMessage only reaches agents whose Claude is running: one CPU saving put to sleep was unreachable.
   notes.push('Messaging another agent in this Overlord: use the agent_message tool of the overlord-browser MCP (agent_list shows their names), '
     + 'not SendMessage or PEER-SEND. It wakes an agent that is asleep. Only when the user asks you to message that agent.');
+  // An agent's own /login is undone by Overlord's credential guard, so a chat stuck on the wrong account switches here.
+  notes.push('Claude account: when work must happen as another Claude account (an artifact must belong to another email, '
+    + 'the user says to use or switch to another account), call account_switch of the overlord-browser MCP yourself (account_list shows the saved ones). '
+    + 'Never /login and never ask the user to: Overlord undoes it.');
   notes.push('Overlord agent watch: when the user asks you to do something once another agent in this Overlord is done, '
     + 'end your reply with a line: WHEN-DONE @AgentName: followed by what to do then (it may continue to the end of your reply). '
     + 'Overlord sends it back to you, with the final message of that agent, when its turn ends. One-shot: write it again to keep watching.');
