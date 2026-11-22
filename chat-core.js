@@ -494,9 +494,19 @@ function permLabel(l) {
 }
 // The lines a compaction printed right after its divider: files re-read and skills restored ("⎿ …", kind sub) fold
 // under the divider; the rest ("Task "x" still running in background", "Compacted while idle…") stay ● lines, as in the CLI.
+// Background tasks that are over: a task-notification came, or TaskStop / KillShell stopped one (no notification
+// follows a stop: its result "Successfully stopped task: <id> (…)" is the only record).
+function bgEnded(evs, doneBy) {
+  const ended = new Set();
+  for (const e of evs) {
+    if (e.type === 'bgdone') ended.add(e.taskId);
+    else if (e.type === 'tool' && (e.name === 'TaskStop' || e.name === 'KillShell')) { const m = /Successfully (?:stopped|killed)[^:]*: (\w+)/.exec((doneBy.get(e.toolId) || {}).text || ''); if (m) ended.add(m[1]); }
+  }
+  return ended;
+}
 function compactRun(evs, i) {
   const fold = [], keep = [];
   for (let j = i + 1; j < evs.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') (evs[j].kind === 'sub' ? fold : keep).push(j);
   return { fold, keep };
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };
+if (typeof module !== 'undefined' && module.exports) module.exports = { bgEnded, compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };

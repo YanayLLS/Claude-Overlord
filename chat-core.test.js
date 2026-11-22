@@ -356,3 +356,14 @@ test('after a compaction, restored files and skills fold under its divider; runn
   const evs = [{ type: 'compact' }, { type: 'note', kind: 'sub', text: 'Read a.js (3 lines)' }, { type: 'note', text: 'Task "Serve on 5200" still running in background' }, { type: 'mode' }, { type: 'note', kind: 'sub', text: 'Skills restored (improve)' }, { type: 'note', text: 'Compacted while idle, before the prompt cache expired · turn off with …' }, { type: 'user', text: 'hi' }, { type: 'note', text: 'later' }];
   assert.deepStrictEqual(compactRun(evs, 0), { fold: [1, 4], keep: [2, 5] });
 });
+
+test('a stopped background shell is over: TaskStop writes no task-notification', () => {
+  const { bgEnded } = require('./chat-core');
+  const evs = [
+    { type: 'tool', name: 'Bash', toolId: 't1' }, { type: 'tool', name: 'Bash', toolId: 't2' },
+    { type: 'tool', name: 'TaskStop', toolId: 's1' }, { type: 'bgdone', taskId: 'b3' },
+  ];
+  const doneBy = new Map([['s1', { text: '{"message":"Successfully stopped task: b1 (node dev.mjs)","task_id":"b1"}' }]]);
+  assert.deepStrictEqual([...bgEnded(evs, doneBy)].sort(), ['b1', 'b3']);
+  assert.strictEqual(bgEnded([{ type: 'tool', name: 'TaskStop', toolId: 'x' }], new Map([['x', { text: 'No task found', err: true }]])).size, 0);
+});

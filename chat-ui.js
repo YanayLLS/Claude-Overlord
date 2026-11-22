@@ -973,7 +973,7 @@
     }
     // Background agents still running: an Agent call without a result, or one launched in the background whose
     // task-notification hasn't come yet.
-    const ended = new Set(evs.filter(e => e.type === 'bgdone').map(e => e.taskId));
+    const ended = bgEnded(evs, doneBy);
     // A crash or restart kills them without a notification; Overlord's resume prompt marks that point.
     // So does Claude's process ending: nothing launched before the current one still runs.
     let cut = -1; evs.forEach((e, k) => { if (e.type === 'resumed' || (a.procAt && e.ts && Date.parse(e.ts) < a.procAt)) cut = k; });
@@ -1389,6 +1389,12 @@
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
     const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && !(a._reverted && now - a._reverted < 8000) && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
     const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + btwHtml(id) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(id, evs)) : ''); // queued text waits above the spinner or an open question, as in the CLI
+    // The CLI's last turn line ends "· 1 shell still running" while background work outlives the turn.
+    if (list && !busy && (dockCount.shells || dockCount.agents)) {
+      const k = list.length - 1, { agents: na, shells: ns } = dockCount;
+      const still = [ns ? `${ns} shell${ns > 1 ? 's' : ''}` : '', na ? `${na} agent${na > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') + ' still running';
+      if (k >= 0 && list[k].startsWith('<div class="turnfoot latest"')) list[k] = list[k].replace(/(<span class="tf-meta">[\s\S]*?)(<\/span>)/, `$1 · ${escH(still)}$2`);
+    }
 
     let thread = el.querySelector(':scope > .thread'), tailEl = el.querySelector(':scope > .tail');
     const fresh = el.dataset.for !== String(id) || !thread;
