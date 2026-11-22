@@ -100,3 +100,14 @@ test('browser_viewport hands width and height to the view', async () => {
   assert.deepStrictEqual(got, [1440, undefined]);
   assert.strictEqual(r.content[0].text, 'ok');
 });
+
+test('account_switch requires an account and passes the caller', async () => {
+  const { accountCall } = require('./tools');
+  const seen = [];
+  const accounts = { list: (id) => ({ you: 'a', id }), switchTo: async (id, acct) => (seen.push([id, acct]), 'Switched') };
+  assert.strictEqual((await accountCall(accounts, 7, 'account_switch', {})).isError, true);
+  assert.strictEqual((await accountCall(accounts, 7, 'account_switch', { account: ' b@x ' })).content[0].text, 'Switched');
+  assert.deepStrictEqual(seen, [[7, 'b@x']]);
+  assert.match((await accountCall(accounts, 7, 'account_list')).content[0].text, /"you": "a"/);
+  assert.strictEqual((await accountCall(null, 7, 'account_list')).isError, true);
+});

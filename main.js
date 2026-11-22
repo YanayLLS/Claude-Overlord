@@ -6223,6 +6223,8 @@ function apiHost() {
     prAutoMerge: ({ urls, on }) => ({ urls: setPrAutoMerge(urls || prAutoMergeable((settings.prCache || {}).prs).map(p => p.url), on) }),
     prList: (o) => prClaimsApi.list(o), prMerge: (pr) => prClaimsApi.merge(pr), prApprove: (pr) => prClaimsApi.approve(pr),
     prFix: (pr) => prClaimsApi.fix(pr), prHide: ({ pr, how, undo, hours }) => prClaimsApi.hide(pr, how, undo, hours),
+    accountList: () => { const d = loadAccounts(); return { main: d.activeLabel || null, accounts: d.accounts.map(x => ({ label: x.label, email: x.email || null })) }; },
+    accountSwitch: async (label) => { if (!findAccount(loadAccounts(), label)) throw new ApiError(404, `no saved login ${label}`); await switchAccount(label); return { main: loadAccounts().activeLabel }; },
     prWatch: () => { const c = settings.prSettings || {}; return { enabled: !!c.enabled, repos: [...(c.repos || [])], locked: releases.releaseRepos() }; },
     setPrWatch: ({ enabled, repos }) => savePrSettings({ ...(settings.prSettings || {}), enabled, repos }),
     chatList: () => {
@@ -7170,7 +7172,26 @@ app.whenReady().then(() => {
       return asleep ? `Sent. ${env.toAgent} was asleep (CPU saving): it is resuming and gets the message once ready, usually within a minute.` : `Sent to ${env.toAgent}.`;
     },
   };
-  mcpServer = createMcpServer({ onEditHook: onFeatureEdit, prClaims: prClaimsApi, closeSelf, releases: releases.agentApi, messaging: agentMessaging, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
+  // account_list / account_switch (mcp/tools.js): a chat switching the main login itself, as the account menu does.
+  const agentAccounts = {
+    list: (fromId) => { const d = loadAccounts(), a = agents.get(fromId); return { main: d.activeLabel || null, you: (a && a.account) || d.activeLabel || null, accounts: d.accounts.map(x => ({ label: x.label, email: x.email || null })) }; },
+    switchTo: async (fromId, want) => {
+      const d = loadAccounts(), w = want.toLowerCase(), t = d.accounts.find(x => x.label.toLowerCase() === w || (x.email || '').toLowerCase() === w);
+      if (!t) throw new Error(`No saved login ${want}. Saved: ${d.accounts.map(x => x.label).join(', ') || 'none'}. The user adds one in Overlord's account menu.`);
+      const a = agents.get(fromId), pinned = a && a.account;
+      flog(`agent ${fromId} account_switch -> ${t.label}`);
+      if (pinned) { a.account = null; saveState(); send({ type: 'agentAccount', id: fromId, account: null }); }
+      if (d.activeLabel === t.label) {
+        if (!pinned) return `You already run on ${t.label}.`;
+        a._loginMove = true; moveIfIdle(fromId); // pinned elsewhere: restart onto the main login
+        return `Unpinned: you restart on ${t.label} when this turn ends.`;
+      }
+      await switchAccount(t.label);
+      send({ type: 'toast', text: `${(a && a.agentName) || 'An agent'} switched the login to ${t.label}` });
+      return `Switched the main login to ${t.label}. You restart on it when this turn ends and this chat resumes.`;
+    },
+  };
+  mcpServer = createMcpServer({ accounts: agentAccounts, onEditHook: onFeatureEdit, prClaims: prClaimsApi, closeSelf, releases: releases.agentApi, messaging: agentMessaging, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.apiEnabled) startLocalApi();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });

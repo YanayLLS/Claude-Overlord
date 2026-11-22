@@ -117,6 +117,17 @@ test('pr_list / pr_merge / pr_approve / pr_fix / pr_hide reach the host; a host 
   assert.deepStrictEqual(calls, [['list', { mine: false }], ['hide', { pr: 'o/r#4', how: 'mute' }]]);
 });
 
+test('account_list / account_switch reach the host', async () => {
+  const calls = [];
+  const api = createApi(fakeHost({
+    accountList: () => ({ main: 'a', accounts: [{ label: 'a', email: 'a@x' }] }),
+    accountSwitch: async (l) => (calls.push(l), { main: l }),
+  }));
+  assert.deepStrictEqual(await api.call('account_list', {}), { main: 'a', accounts: [{ label: 'a', email: 'a@x' }] });
+  assert.deepStrictEqual(await api.call('account_switch', { label: 'b' }), { main: 'b' });
+  assert.deepStrictEqual(calls, ['b']);
+});
+
 test('publish numbers events, keeps them for replay, filters by type', () => {
   const api = createApi(fakeHost());
   api.publish({ type: 'status', id: 1, status: 'active' });

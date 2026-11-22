@@ -105,6 +105,8 @@ const TOOLS = [
   ['pr_repos_add', 'Watch more repos for PRs (owner/name), as ticking them in the PR settings. Turns PR notifications on. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
   ['pr_repos_remove', 'Stop watching repos for PRs. A release repo (locked) is refused. Returns the watchlist.', obj({ repos: { type: 'array', items: { type: 'string' }, description: 'Repos as owner/name.' } }, ['repos'])],
   ['pr_auto_merge', 'Fix & merge PRs, as the PRs panel\'s Auto-merge: Overlord keeps each one green and merges it. No urls: every open PR of yours that can be armed ("Auto-merge all"). on false cancels. Returns the urls changed.', obj({ urls: { type: 'array', items: { type: 'string' }, description: 'PR urls (https://github.com/owner/name/pull/N). Default: all of yours.' }, on: { type: 'boolean', description: 'Default true.' } })],
+  ['account_list', 'The Claude logins saved in Overlord (label, email) and which one is the main login every unpinned agent runs on.', obj({})],
+  ['account_switch', 'Switch the main Claude login to a saved one, as the account menu does. Each agent on the main login restarts on it at its next idle moment, resuming its chat.', obj({ label: S('Saved login label (account_list).') }, ['label'])],
   ['pr_list', 'Open PRs in the watched repos, as the PRs panel lists them (drafts and others\' approved PRs too): checks, mergeable state, review decision, auto-merge phase, hidden state and the agent holding it.', obj({ mine: { type: 'boolean', description: 'Only your PRs.' } })],
   ['pr_merge', 'Merge a PR now, as the row\'s Merge button. The release gate (prod PRs need two signatures) still applies.', obj({ pr: S('PR url or owner/repo#number.') }, ['pr'])],
   ['pr_approve', 'Approve a PR as you on GitHub, as the row\'s Approve button.', obj({ pr: S('PR url or owner/repo#number.') }, ['pr'])],
@@ -310,6 +312,8 @@ function createApi(host) {
       if (x.urls !== undefined && (!Array.isArray(x.urls) || x.urls.some(u => !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(u)))) throw bad('urls must be GitHub PR urls');
       return host.prAutoMerge({ urls: x.urls, on: x.on !== false });
     },
+    account_list: () => host.accountList(),
+    account_switch: (x) => host.accountSwitch(x.label),
     pr_list: (x) => host.prList({ mine: x.mine === true }),
     pr_merge: (x) => prDone(host.prMerge(x.pr)),
     pr_approve: (x) => prDone(host.prApprove(x.pr)),

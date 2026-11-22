@@ -101,6 +101,26 @@ const AGENT_SCHEMAS = [
   { name: 'agent_message', description: 'Send a message to another agent in this Overlord, by its Overlord name. It arrives as a prompt from you, and an agent CPU saving put to sleep is woken for it. Use this, not SendMessage, for agents in this Overlord. Only when the user asked you to message that agent.',
     inputSchema: { type: 'object', properties: { agent: { type: 'string', description: 'The agent\'s Overlord name, e.g. Ada (agent_list shows them)' }, text: { type: 'string', description: 'The message' } }, required: ['agent', 'text'] } },
 ];
+// Switching the Claude login (main.js agentAccounts). An agent's own /login is undone by Overlord, which owns the
+// credentials file, so a chat that must act as another account (publish an artifact as it, say) asks for it here.
+const ACCOUNT_SCHEMAS = [
+  { name: 'account_list', description: 'The Claude logins saved in Overlord, which one is the main login, and which one you run on.',
+    inputSchema: { type: 'object', properties: {} } },
+  { name: 'account_switch', description: 'Switch Overlord\'s main Claude login to a saved account (account_list shows them) and run yourself on it, e.g. to publish artifacts as that account. Every agent on the main login moves to it at its next idle moment; you restart on it when this turn ends and the chat resumes, so finish your reply and continue the task after the restart. Never use /login: Overlord undoes it.',
+    inputSchema: { type: 'object', properties: { account: { type: 'string', description: 'Saved account label or email' } }, required: ['account'] } },
+];
+async function accountCall(accounts, agentId, name, args = {}) {
+  try {
+    if (!accounts) return fail('Switching accounts is unavailable.');
+    if (name === 'account_list') return text(JSON.stringify(accounts.list(agentId), null, 1));
+    if (name === 'account_switch') {
+      if (typeof args.account !== 'string' || !args.account.trim()) return fail('account_switch: "account" is required');
+      return text(await accounts.switchTo(agentId, args.account.trim()));
+    }
+    return fail(`Unknown tool: ${name}`);
+  } catch (e) { return fail(e && e.message ? e.message : String(e)); }
+}
+
 async function agentCall(messaging, agentId, name, args = {}) {
   try {
     if (!messaging) return fail('Messaging other agents is unavailable.');
@@ -191,4 +211,4 @@ function terminalCall(terminals, name, args = {}) {
   } catch (e) { return fail(e && e.message ? e.message : String(e)); }
 }
 
-module.exports = { AGENT_SCHEMAS, agentCall, TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, RELEASE_SCHEMAS, releaseCall, prCall, visualCall, createDispatcher, terminalCall };
+module.exports = { AGENT_SCHEMAS, agentCall, TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, RELEASE_SCHEMAS, releaseCall, prCall, visualCall, createDispatcher, terminalCall, ACCOUNT_SCHEMAS, accountCall };

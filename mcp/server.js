@@ -2,7 +2,7 @@
 // The token in the path is the whole identity mechanism: one agent, one browser.
 const http = require('http');
 const crypto = require('crypto');
-const { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, RELEASE_SCHEMAS, AGENT_SCHEMAS, agentCall, releaseCall, prCall, createDispatcher, terminalCall, visualCall } = require('./tools');
+const { TOOL_SCHEMAS, TERMINAL_SCHEMAS, VISUAL_SCHEMAS, PR_SCHEMAS, SELF_SCHEMAS, RELEASE_SCHEMAS, AGENT_SCHEMAS, ACCOUNT_SCHEMAS, accountCall, agentCall, releaseCall, prCall, createDispatcher, terminalCall, visualCall } = require('./tools');
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_INFO = { name: 'overlord-browser', version: '1.0.0' };
@@ -32,13 +32,13 @@ function reply(res, status, payload) {
   res.end(body);
 }
 
-async function handleRpc(msg, resolveActions, agentId, getTerminals, prClaims, closeSelf, releases = null, messaging = null) {
+async function handleRpc(msg, resolveActions, agentId, getTerminals, prClaims, closeSelf, releases = null, messaging = null, accounts = null) {
   const { id, method, params } = msg;
   if (method === 'initialize') {
     return ok(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS });
   }
   if (method === 'ping') return ok(id, {});
-  if (method === 'tools/list') return ok(id, { tools: [...TOOL_SCHEMAS, ...TERMINAL_SCHEMAS, ...VISUAL_SCHEMAS, ...PR_SCHEMAS, ...SELF_SCHEMAS, ...RELEASE_SCHEMAS, ...AGENT_SCHEMAS] });
+  if (method === 'tools/list') return ok(id, { tools: [...TOOL_SCHEMAS, ...TERMINAL_SCHEMAS, ...VISUAL_SCHEMAS, ...PR_SCHEMAS, ...SELF_SCHEMAS, ...RELEASE_SCHEMAS, ...AGENT_SCHEMAS, ...ACCOUNT_SCHEMAS] });
   if (method === 'tools/call') {
     const name = (params || {}).name || '';
     if (name === 'show_visual') return ok(id, visualCall((params || {}).arguments || {})); // drawn by the chat from the call itself
@@ -47,6 +47,7 @@ async function handleRpc(msg, resolveActions, agentId, getTerminals, prClaims, c
       return ok(id, { content: [{ type: 'text', text: 'You will be closed when this turn ends. Finish your reply now.' }] });
     }
     if (name === 'agent_list' || name === 'agent_message') return ok(id, await agentCall(messaging, agentId, name, (params || {}).arguments || {}));
+    if (name.startsWith('account_')) return ok(id, await accountCall(accounts, agentId, name, (params || {}).arguments || {}));
     if (name.startsWith('release_')) return ok(id, await releaseCall(releases, name, (params || {}).arguments || {}));
     if (name.startsWith('pr_')) return ok(id, await prCall(prClaims, agentId, name, (params || {}).arguments || {}));
     if (name.startsWith('terminal_')) return ok(id, terminalCall(getTerminals(), name, (params || {}).arguments || {}));
@@ -59,7 +60,7 @@ async function handleRpc(msg, resolveActions, agentId, getTerminals, prClaims, c
   return err(id, -32601, `Method not found: ${method}`);
 }
 
-function createMcpServer({ resolveActions, getTerminals = () => null, prClaims = null, closeSelf = null, releases = null, messaging = null, onEditHook = async () => ({}) }) {
+function createMcpServer({ resolveActions, getTerminals = () => null, prClaims = null, closeSelf = null, releases = null, messaging = null, accounts = null, onEditHook = async () => ({}) }) {
   const tokens = new Map(); // token -> agentId
   const byAgent = new Map(); // agentId -> token
   let server = null;
@@ -97,7 +98,7 @@ function createMcpServer({ resolveActions, getTerminals = () => null, prClaims =
     try { msg = JSON.parse(await readBody(req)); }
     catch { return reply(res, 400, err(null, -32700, 'Parse error')); }
     if (msg.id === undefined) return reply(res, 202, null); // notification
-    try { reply(res, 200, await handleRpc(msg, resolveActions, tokens.get(token), getTerminals, prClaims, closeSelf, releases, messaging)); }
+    try { reply(res, 200, await handleRpc(msg, resolveActions, tokens.get(token), getTerminals, prClaims, closeSelf, releases, messaging, accounts)); }
     catch (e) { reply(res, 200, err(msg.id, -32603, e.message || 'Internal error')); }
   }
 
