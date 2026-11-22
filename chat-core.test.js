@@ -350,3 +350,9 @@ test('screenBtw: during a turn its footer sits above the prompt box; a link cut 
   assert.strictEqual(screenBtw(htt).answer, '- Offscreen Rendering tutorial (https://www.electronjs.org/docs/latest/tutorial/offscreen-rendering): explains the paint event.');
   assert.strictEqual(screenBtw(['  /btw x', '    answer', '  something else']), null); // no footer: not the panel
 });
+
+test('after a compaction, restored files and skills fold under its divider; running tasks and notices stay lines', () => {
+  const { compactRun } = require('./chat-core');
+  const evs = [{ type: 'compact' }, { type: 'note', kind: 'sub', text: 'Read a.js (3 lines)' }, { type: 'note', text: 'Task "Serve on 5200" still running in background' }, { type: 'mode' }, { type: 'note', kind: 'sub', text: 'Skills restored (improve)' }, { type: 'note', text: 'Compacted while idle, before the prompt cache expired · turn off with …' }, { type: 'user', text: 'hi' }, { type: 'note', text: 'later' }];
+  assert.deepStrictEqual(compactRun(evs, 0), { fold: [1, 4], keep: [2, 5] });
+});

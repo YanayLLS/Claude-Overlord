@@ -492,4 +492,11 @@ function permLabel(l) {
   if (/^yes,?\s+(and\s+)?(allow|don'?t ask)/i.test(l)) return /don'?t ask/i.test(l) ? "Don't ask again" : /edits/i.test(l) ? 'Allow all edits' : 'Always allow';
   return l;
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };
+// The lines a compaction printed right after its divider: files re-read and skills restored ("⎿ …", kind sub) fold
+// under the divider; the rest ("Task "x" still running in background", "Compacted while idle…") stay ● lines, as in the CLI.
+function compactRun(evs, i) {
+  const fold = [], keep = [];
+  for (let j = i + 1; j < evs.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') (evs[j].kind === 'sub' ? fold : keep).push(j);
+  return { fold, keep };
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = { compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };

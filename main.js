@@ -700,6 +700,7 @@ function send(data) {
   if (data.type === 'stats') lastStatsSent.set(data.id, JSON.stringify(data.stats));
   // Status trail: each change of an agent's dot, with the code line that caused it — the
   // evidence for "why does this row show the wrong state" (see ~/.overlord/overlord.log).
+  if (data.type === 'status') { const a = agents.get(data.id); if (a) data.bg = a.bgTasks?.size || 0; } // background shells/agents running: the renderer's quiet-terminal check mustn't call it idle
   if (data.type === 'status' && lastStatusSent.get(data.id) !== data.status) {
     const a = agents.get(data.id);
     flog(`status ${data.id} "${(a?.title || '').slice(0, 30)}" ${lastStatusSent.get(data.id) || '-'} -> ${data.status} tools=${a?.toolIds?.size ?? '?'} bg=${a?.bgTasks?.size ?? 0} at ${(new Error().stack.split('\n')[2] || '').trim().replace(/^at /, '')}`);

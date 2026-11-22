@@ -3250,6 +3250,7 @@ const _bootAt = Date.now();
 function silent(a) {
   if (a._id == null) for (const [k, v] of agents) if (v === a) a._id = k;
   let heard; try { heard = lastTermDataAt.get(a._id); } catch { return false; } // declared further down: not yet while the page loads
+  if (a.bg && a.status === 'active' && !a.dead) return false; // waiting on its own background shells/agents: quiet but working
   return !!a.dead || Date.now() - (heard || _bootAt) > 10000;
 }
 // …and the list shows it once it goes quiet: nothing else re-renders a silent agent.
@@ -4778,6 +4779,7 @@ function handleAgentMsg(msg) {
         const was = a.status;
         a.quietSince = msg.status === 'active' ? null : (a.quietSince || Date.now());
         a.status = msg.status;
+        a.bg = msg.bg || 0;
         if (a.crashed !== 'fatal') a.crashed = null; // a stopped agent stays stopped until crashCleared (a real resume)
         if (msg.status === 'active' && was !== 'active') a.activeAt = Date.now();
         // Finished while you were looking elsewhere: a dot on its card until you open it, and (in the Chat view) a toast that jumps there.

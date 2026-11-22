@@ -292,6 +292,7 @@
       const u = contextUsage(ev.text), used = u.cats.filter(c => !/^free/i.test(c.name)), hue = (k) => `var(${['--claude', '--cyan', '--purple', '--yellow', '--green', '--peach', '--red'][k % 7]})`; // theme tokens, one per category
       h = `<div class="msg ctx-use"><div class="cu-h"><b title="${u.pct}% used">${escH(u.used.replace(/(\d)m\b/g, '$1M').replace(/\//, ' / '))}</b><span class="cu-m">${escH(u.model.replace(/^claude-(\w+)-(\d+)-(\d+).*$/i, (m, f, a2, b2) => f[0].toUpperCase() + f.slice(1) + ' ' + a2 + '.' + b2))}</span></div><div class="cu-bar">${used.map((c, k) => `<i style="width:${c.pct}%;background:${hue(k)}" title="${escH(c.name)} · ${escH(c.size)}"></i>`).join('')}</div><ul class="cu-l">${u.cats.map(c => { const k = used.indexOf(c); return `<li><i style="background:${k < 0 ? 'var(--surface1)' : hue(k)}"></i><span>${escH(c.name)}</span><b title="${c.pct}%">${escH(c.size)}</b></li>`; }).join('')}</ul>${u.rest ? `<details class="cu-more"><summary>Details</summary><pre>${escH(u.rest)}</pre></details>` : ''}</div>`;
     }
+    else if (ev.type === 'note' && ev._afterCompact && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg note cli" title="${escH(ev.text)}">${escH(String(ev.text).split(' · ')[0])}</div>`; // under the compaction's own divider: the CLI's ● line, its settings hint in the tooltip
     else if (ev.type === 'note' && /^compacted\b/i.test(ev.text || '')) h = `<div class="msg divider" title="${escH(ev.text)}"><span>Compacted</span></div>`; // the CLI's notice: a divider; its settings hint in the tooltip
     else if (ev.type === 'note' && /^Agent ".+" (finished|completed|failed)/.test(ev.text || '')) { const m = /^Agent "(.+)" (\w+)/.exec(ev.text); h = `<div class="msg note cli agentdone" title="${escH(ev.text)}">${ICON.agent}<span>${escH(m[1])}</span>${/fail/i.test(m[2]) ? ICON.alert : ICON.check}</div>`; }
     else if (ev.type === 'note' && ev.kind !== 'sub' && ev.kind !== 'recap' && ev.kind !== 'warn' && String(ev.text || '').length > 90) h = `<details class="msg note cli long"><summary>${escH(String(ev.text).split('\n')[0])}</summary><div>${escH(ev.text)}</div></details>`;
@@ -421,8 +422,7 @@
     evs.forEach((ev, i) => {
       if (i < start || folded.has(i)) return;
       const t = ev.type;
-      if (t === 'compact' && !ev._restored) { ev._restored = []; for (let j = i + 1; j < evs.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { ev._restored.push(String(evs[j].text || '').replace(/^⎿\s*/, '').split('\n')[0]); folded.add(j); } }
-      else if (t === 'compact') for (let j = i + 1, n = 0; j < evs.length && n < ev._restored.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') { folded.add(j); n++; }
+      if (t === 'compact') { const r = compactRun(evs, i); ev._restored = r.fold.map(j => String(evs[j].text || '').replace(/^⎿\s*/, '').split('\n')[0]); r.fold.forEach(j => folded.add(j)); r.keep.forEach(j => { evs[j]._afterCompact = true; }); }
       if (t === 'note' && ev.kind === 'bridge' && i !== lastBridge) return;
       tally(ev, i);
       if (t === 'tool' && (ev.name === 'AskUserQuestion' || ev.name === 'ExitPlanMode') && !doneBy.get(ev.toolId)) return; // its card shows it
