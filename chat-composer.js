@@ -174,9 +174,6 @@
   }
   function onInput(e) {
     if (!chat()) return;
-    // Typing brings the chat to its latest message, so you answer what you can see.
-    const c = document.getElementById('conversation');
-    if (c && c.scrollHeight - c.scrollTop - c.clientHeight > 40) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
     linkify.pasted = e.inputType === 'insertFromPaste';
     if (linkify.pasted || /\s/.test(e.data || '') || e.inputType === 'insertLineBreak') { const was = e.target.value; linkify(e.target); if (e.target.value !== was) syncHl(); }
     if (resumeCheck(e.target)) return;
@@ -444,8 +441,8 @@
   });
   document.getElementById('term-order-input').addEventListener('paste', onPaste);
   // Inserting a character scrolled the chat itself up ~45 px (the browser revealing the caret walks scroll containers),
-  // then the bring-to-latest below smooth-scrolled it back: every key bounced the thread. Its scroll is put back
-  // between the insert and the paint.
+  // so typing moved the thread you were reading. Its scroll is put back between the insert and the paint; only sending
+  // brings the chat to its latest.
   { let st = null; const c = () => document.getElementById('conversation');
     document.getElementById('term-order-input').addEventListener('beforeinput', () => { const el = c(); st = el ? el.scrollTop : null; });
     document.getElementById('term-order-input').addEventListener('input', () => { const el = c(); if (el && st != null && el.scrollTop !== st) el.scrollTop = st; st = null; }); }
