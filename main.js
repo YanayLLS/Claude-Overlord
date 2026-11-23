@@ -4095,6 +4095,14 @@ function getCurrentAccountInfo() {
 }
 
 async function switchAccount(label, auto) {
+      // A saved token near expiry makes the CLI refresh it right after the swap, which the credential
+      // guard below would take for the old login's refresh and undo, leaving a revoked refresh token.
+      // Mint a fresh one first so the new login runs for hours without refreshing. Before the load below:
+      // nothing may await between reading accounts.json and writing it back (see saveMinted).
+      const pre = findAccount(loadAccounts(), label), so = pre?.credentials?.claudeAiOauth;
+      if (so?.refreshToken && !acctCore.validToken(so, Date.now())) {
+        try { await acctCore.mintUsageToken(pre); saveMinted(pre); } catch (e) { flog('switch: refresh of saved login failed:', e.message); }
+      }
       const data = loadAccounts();
       const target = data.accounts.find(a => a.label === label);
       if (!target) return;
@@ -4106,13 +4114,6 @@ async function switchAccount(label, auto) {
           const curIdx = data.accounts.findIndex(a => a.label === data.activeLabel);
           if (curIdx >= 0 && curCreds?.claudeAiOauth?.accessToken) { data.accounts[curIdx].credentials = curCreds; data.accounts[curIdx].meta = getAccountMeta(); }
         } catch {}
-      }
-      // A saved token near expiry makes the CLI refresh it right after the swap, which the credential
-      // guard below would take for the old login's refresh and undo, leaving a revoked refresh token.
-      // Mint a fresh one first so the new login runs for hours without refreshing.
-      const so = target.credentials?.claudeAiOauth;
-      if (so?.refreshToken && !acctCore.validToken(so, Date.now())) {
-        try { await acctCore.mintUsageToken(target); } catch (e) { flog('switch: refresh of saved login failed:', e.message); }
       }
       const fromLabel = data.activeLabel;
       fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(target.credentials, null, 2));
@@ -4261,6 +4262,13 @@ function spawnAfterAgentLogin(id) {
     doSpawnTerminal(id);
   });
 }
+// A mint awaits the network, and the accounts.json read before it is stale by then: saving that copy put
+// back an activeLabel switched meanwhile, flipping the main login back (usage polls of the other login did,
+// right after a chat's account_switch). Re-read and write only the minted account's tokens.
+function saveMinted(acct) {
+  const d = loadAccounts(), f = findAccount(d, acct.label);
+  if (f) { f.credentials = acct.credentials; f.usageToken = acct.usageToken; saveAccountsFile(d); }
+}
 // Another login's usage, read with an 8h token from its saved refresh token.
 async function accountUsage(label) {
   const data = loadAccounts(), acct = findAccount(data, label);
@@ -4268,7 +4276,7 @@ async function accountUsage(label) {
   // The active login's saved refresh token is the CLI's: minting from it would revoke the CLI's copy.
   if (label === data.activeLabel) return requestOauthUsage(getApiKey());
   let t = acctCore.validToken(acct.usageToken, Date.now());
-  if (!t) { t = await acctCore.mintUsageToken(acct); saveAccountsFile(data); }
+  if (!t) { t = await acctCore.mintUsageToken(acct); saveMinted(acct); }
   return requestOauthUsage(t);
 }
 
