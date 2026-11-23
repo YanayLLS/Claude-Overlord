@@ -4217,10 +4217,30 @@ function checkCreds() {
 const acctCore = require('./account-core');
 const findAccount = (data, label) => data.accounts.find(x => x.label === label);
 // Env for an agent's claude: {} = Overlord's own login, null = pinned but no token yet.
+// The token comes from the login's saved refresh token, with all its scopes: the 1-year setup token (agentToken)
+// is inference-only, so artifacts and other claude.ai tools of a pinned chat still ran as the main login.
+// It lives ~8h: the agent restarts onto a fresh one at an idle moment before it runs out.
 function agentAccountEnv(a) {
   if (!a.account) return {};
-  const t = acctCore.validToken(findAccount(loadAccounts(), a.account)?.agentToken, Date.now());
+  const acct = findAccount(loadAccounts(), a.account), oauth = acct?.credentials?.claudeAiOauth;
+  const full = acctCore.validToken(oauth, Date.now());
+  if (full) { renewPinned(a, oauth.expiresAt); return { CLAUDE_CODE_OAUTH_TOKEN: full }; }
+  if (oauth?.refreshToken && !a._mintFailed) return null; // spawnAfterAgentLogin mints one first
+  const t = acctCore.validToken(acct?.agentToken, Date.now());
   return t ? { CLAUDE_CODE_OAUTH_TOKEN: t } : null;
+}
+// ponytail: timer lost when Overlord restarts with the agent still running; it then runs to the token's expiry.
+function renewPinned(a, expiresAt) {
+  clearTimeout(a._renewTimer);
+  a._renewTimer = setTimeout(() => { if (a.account && agents.get(a.id) === a) { a._loginMove = true; moveIfIdle(a.id); } }, Math.max(60000, expiresAt - Date.now() - 2 * 3600000));
+}
+let _pinMint = Promise.resolve(); // one mint at a time: each rotates the login's refresh token
+function mintPinned(label) {
+  return (_pinMint = _pinMint.catch(() => {}).then(async () => {
+    const acct = findAccount(loadAccounts(), label);
+    if (acctCore.validToken(acct?.credentials?.claudeAiOauth, Date.now())) return; // another agent just minted
+    await acctCore.mintUsageToken(acct); saveMinted(acct);
+  }));
 }
 // The browser sign-in `claude setup-token` does, minting a 1-year token for that login.
 let _agentLogin = null; // one at a time
@@ -4251,6 +4271,11 @@ function loginAgentToken(label) {
 }
 function spawnAfterAgentLogin(id) {
   const a = agents.get(id);
+  if (findAccount(loadAccounts(), a.account)?.credentials?.claudeAiOauth?.refreshToken && !a._mintFailed) {
+    mintPinned(a.account).catch((e) => { flog(`agent ${id}: token for ${a.account} failed:`, e.message); a._mintFailed = true; })
+      .then(() => { if (agents.has(id) && !terminals.has(id)) doSpawnTerminal(id); });
+    return;
+  }
   send({ type: 'termData', id, data: `\x1b[33m[Sign in as ${a.account} in the browser to run this agent on that account\u2026]\x1b[0m\r\n` });
   loginAgentToken(a.account).then((ok) => {
     if (!agents.has(id) || terminals.has(id)) return;
