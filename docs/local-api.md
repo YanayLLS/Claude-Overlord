@@ -94,6 +94,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `pr_repos_remove` | `repos` | the watchlist. 409 for a locked repo, 404 for one not watched |
 | `pr_auto_merge` | `urls?` (PR urls), `on?` (default `true`) | `{ urls }` changed. Arms Fix & merge, as the PR row's Auto-merge; no `urls` = every open PR of yours that can be armed (the panel's "Auto-merge all"). `on: false` cancels |
 | `account_list` | | `{ main, accounts }`: the saved Claude logins (`label`, `email`) and which one is the main login |
+| `agent_account` | `agentId`, `label` | `{ account }`: runs only that agent on a saved login (null = the main login), as its "Run as" menu; it restarts on it at once, resuming its chat. Unknown agent or label: 404 |
 | `account_switch` | `label` | `{ main }`: switches the main login to a saved one; each agent on it restarts on the new login when idle, resuming its chat. Unknown label: 404 |
 | `pr_list` | `mine?` | `{ prs }`: each open PR in the watched repos (drafts and others' approved ones too) with `url`, `repo`, `number`, `title`, `author`, `mine`, `draft`, `checks`, `failed`, `mergeable`, `mergeState`, `reviewDecision`, `reviewRequested`, `behindBy`, `autoMerge`, `autoPhase`, `hidden` (`archived` / `muted` / `snoozed` / `null`), `heldBy` (the agent holding it) |
 | `pr_merge` | `pr` (url or `owner/repo#N`) | `{ merged }`. The row's Merge; 409 with the reason when the release gate or GitHub refuses, or the PR isn't listed (closed, or its repo isn't watched) |

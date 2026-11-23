@@ -128,6 +128,13 @@ test('account_list / account_switch reach the host', async () => {
   assert.deepStrictEqual(calls, ['b']);
 });
 
+test('agent_account pins one agent through the host', async () => {
+  const calls = [];
+  const api = createApi(fakeHost({ agentAccount: (id, l) => (calls.push([id, l]), { account: l }) }));
+  assert.deepStrictEqual(await api.call('agent_account', { agentId: 1, label: 'b' }), { account: 'b' });
+  assert.deepStrictEqual(calls, [[1, 'b']]);
+});
+
 test('publish numbers events, keeps them for replay, filters by type', () => {
   const api = createApi(fakeHost());
   api.publish({ type: 'status', id: 1, status: 'active' });

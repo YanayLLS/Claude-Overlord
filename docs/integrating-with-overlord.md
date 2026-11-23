@@ -65,7 +65,7 @@ Over MCP, a failed call returns `isError: true` with the message as its text.
 | Repos | `repo_check` (`repo`): `node.ok` false means a worktree install there will likely fail; `need`, `have`, `source` say why |
 | PR watchlist | `pr_repos_list`, `pr_repos_add` / `pr_repos_remove` (`repos`: `owner/name` each); release repos are `locked` |
 | Auto-merge PRs | `pr_auto_merge` (`urls?`, `on?`): no `urls` arms all of your open PRs |
-| Claude login | `account_list`, `account_switch` (`label`): switch the main login; agents on it move over when idle |
+| Claude login | `account_list`, `account_switch` (`label`): switch the main login; agents on it move over when idle. `agent_account` (`agentId`, `label`): move one agent only |
 | PR actions | `pr_list` (`mine?`), `pr_merge` / `pr_approve` / `pr_fix` (`pr`: url or `owner/repo#N`), `pr_hide` (`pr`, `how`: archive / mute / snooze, `undo?`, `hours?`); a refusal is 409 with the reason |
 | Events | `events_poll` (`since?`, `types?`, `timeoutSec?` max 60), `webhook_add` / `webhook_list` / `webhook_remove` |
 

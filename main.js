@@ -4181,6 +4181,8 @@ function moveIfIdle(id) {
   a._loginMove = false;
   if (m.nudge) a._crashNudge = 'The usage limit stopped you, so Overlord moved you to another account and resumed this chat.'
     + (m.nudge === 'limit+bg' ? ' Your background shells and subagents were killed — check what finished, re-run what did not, and continue.' : ' Continue from where you left off.');
+  else if (a._resumeNudge) a._crashNudge = a._resumeNudge; // the chat asked for the move mid-task (account_use / account_switch)
+  a._resumeNudge = null;
   a._accountRespawn = true; killPty(t);
   if (![...agents.values()].some(x => x._loginMove)) unguardCreds();
 }
@@ -5118,7 +5120,8 @@ function featureAgentArgs(cwd) {
     + 'not SendMessage or PEER-SEND. It wakes an agent that is asleep. Only when the user asks you to message that agent.');
   // An agent's own /login is undone by Overlord's credential guard, so a chat stuck on the wrong account switches here.
   notes.push('Claude account: when work must happen as another Claude account (an artifact must belong to another email, '
-    + 'the user says to use or switch to another account), call account_switch of the overlord-browser MCP yourself (account_list shows the saved ones). '
+    + 'the user says to use another account), call account_use of the overlord-browser MCP yourself: it moves only this chat (account_list shows the saved ones). '
+    + 'account_switch changes the login of the whole app: only when the main login hit its usage limit or the user asks to switch Overlord itself. '
     + 'Never /login and never ask the user to: Overlord undoes it.');
   notes.push('Overlord agent watch: when the user asks you to do something once another agent in this Overlord is done, '
     + 'end your reply with a line: WHEN-DONE @AgentName: followed by what to do then (it may continue to the end of your reply). '
@@ -6234,6 +6237,7 @@ function apiHost() {
     prList: (o) => prClaimsApi.list(o), prMerge: (pr) => prClaimsApi.merge(pr), prApprove: (pr) => prClaimsApi.approve(pr),
     prFix: (pr) => prClaimsApi.fix(pr), prHide: ({ pr, how, undo, hours }) => prClaimsApi.hide(pr, how, undo, hours),
     accountList: () => { const d = loadAccounts(); return { main: d.activeLabel || null, accounts: d.accounts.map(x => ({ label: x.label, email: x.email || null })) }; },
+    agentAccount: (id, label) => { if (!findAccount(loadAccounts(), label)) throw new ApiError(404, `no saved login ${label}`); handleIpc({ type: 'setAgentAccount', id, label }); return { account: agents.get(id).account || null }; },
     accountSwitch: async (label) => { if (!findAccount(loadAccounts(), label)) throw new ApiError(404, `no saved login ${label}`); await switchAccount(label); return { main: loadAccounts().activeLabel }; },
     prWatch: () => { const c = settings.prSettings || {}; return { enabled: !!c.enabled, repos: [...(c.repos || [])], locked: releases.releaseRepos() }; },
     setPrWatch: ({ enabled, repos }) => savePrSettings({ ...(settings.prSettings || {}), enabled, repos }),
@@ -7182,12 +7186,29 @@ app.whenReady().then(() => {
       return asleep ? `Sent. ${env.toAgent} was asleep (CPU saving): it is resuming and gets the message once ready, usually within a minute.` : `Sent to ${env.toAgent}.`;
     },
   };
-  // account_list / account_switch (mcp/tools.js): a chat switching the main login itself, as the account menu does.
+  // account_list / account_use / account_switch (mcp/tools.js): a chat moving itself, or the main login as the account menu does.
+  const findSaved = (want) => {
+    const d = loadAccounts(), w = want.toLowerCase(), t = d.accounts.find(x => x.label.toLowerCase() === w || (x.email || '').toLowerCase() === w);
+    if (!t) throw new Error(`No saved login ${want}. Saved: ${d.accounts.map(x => x.label).join(', ') || 'none'}. The user adds one in Overlord's account menu.`);
+    return { d, t };
+  };
   const agentAccounts = {
     list: (fromId) => { const d = loadAccounts(), a = agents.get(fromId); return { main: d.activeLabel || null, you: (a && a.account) || d.activeLabel || null, accounts: d.accounts.map(x => ({ label: x.label, email: x.email || null })) }; },
+    // account_use: only this chat moves (pinned, as "Run as" in its menu does); the main login and every other agent stay.
+    use: (fromId, want) => {
+      const { d, t } = findSaved(want), a = agents.get(fromId);
+      if (!a) throw new Error('Unknown agent.');
+      const label = t.label === d.activeLabel ? null : t.label; // the main login = unpin
+      if ((a.account || null) === label) return `You already run on ${t.label}.`;
+      flog(`agent ${fromId} account_use -> ${t.label}`);
+      a.account = label; saveState();
+      send({ type: 'agentAccount', id: fromId, account: label });
+      a._loginMove = true; a._resumeNudge = `Overlord moved this chat to the ${t.label} login as you asked. Continue the task.`;
+      moveIfIdle(fromId);
+      return `Only this chat moves to ${t.label}: you restart on it when this turn ends and the chat resumes. The main login and other agents stay as they are.`;
+    },
     switchTo: async (fromId, want) => {
-      const d = loadAccounts(), w = want.toLowerCase(), t = d.accounts.find(x => x.label.toLowerCase() === w || (x.email || '').toLowerCase() === w);
-      if (!t) throw new Error(`No saved login ${want}. Saved: ${d.accounts.map(x => x.label).join(', ') || 'none'}. The user adds one in Overlord's account menu.`);
+      const { d, t } = findSaved(want);
       const a = agents.get(fromId), pinned = a && a.account;
       flog(`agent ${fromId} account_switch -> ${t.label}`);
       if (pinned) { a.account = null; saveState(); send({ type: 'agentAccount', id: fromId, account: null }); }
@@ -7196,6 +7217,7 @@ app.whenReady().then(() => {
         a._loginMove = true; moveIfIdle(fromId); // pinned elsewhere: restart onto the main login
         return `Unpinned: you restart on ${t.label} when this turn ends.`;
       }
+      if (a) a._resumeNudge = `Overlord switched the main login to ${t.label} as you asked. Continue the task.`;
       await switchAccount(t.label);
       send({ type: 'toast', text: `${(a && a.agentName) || 'An agent'} switched the login to ${t.label}` });
       return `Switched the main login to ${t.label}. You restart on it when this turn ends and this chat resumes.`;

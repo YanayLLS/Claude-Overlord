@@ -108,6 +108,10 @@ test('account_switch requires an account and passes the caller', async () => {
   assert.strictEqual((await accountCall(accounts, 7, 'account_switch', {})).isError, true);
   assert.strictEqual((await accountCall(accounts, 7, 'account_switch', { account: ' b@x ' })).content[0].text, 'Switched');
   assert.deepStrictEqual(seen, [[7, 'b@x']]);
+  accounts.use = (id, acct) => (seen.push(['use', id, acct]), 'Only this chat');
+  assert.strictEqual((await accountCall(accounts, 7, 'account_use', {})).isError, true);
+  assert.strictEqual((await accountCall(accounts, 7, 'account_use', { account: 'c' })).content[0].text, 'Only this chat');
+  assert.deepStrictEqual(seen[1], ['use', 7, 'c']);
   assert.match((await accountCall(accounts, 7, 'account_list')).content[0].text, /"you": "a"/);
   assert.strictEqual((await accountCall(null, 7, 'account_list')).isError, true);
 });

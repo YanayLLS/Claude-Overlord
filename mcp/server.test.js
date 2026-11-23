@@ -55,8 +55,8 @@ test('tools/list returns the eight browser tools, three terminal tools, show_vis
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 31);
-    assert.ok(['agent_list', 'agent_message', 'account_list', 'account_switch'].every(n => json.result.tools.some(t => t.name === n)));
+    assert.strictEqual(json.result.tools.length, 32);
+    assert.ok(['agent_list', 'agent_message', 'account_list', 'account_use', 'account_switch'].every(n => json.result.tools.some(t => t.name === n)));
     assert.ok(["release_status", "release_open", "release_sign", "release_all", "release_rerun_failed"].every(n => json.result.tools.some(t => t.name === n)));
   });
 });

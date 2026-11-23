@@ -106,16 +106,18 @@ const AGENT_SCHEMAS = [
 const ACCOUNT_SCHEMAS = [
   { name: 'account_list', description: 'The Claude logins saved in Overlord, which one is the main login, and which one you run on.',
     inputSchema: { type: 'object', properties: {} } },
-  { name: 'account_switch', description: 'Switch Overlord\'s main Claude login to a saved account (account_list shows them) and run yourself on it, e.g. to publish artifacts as that account. Every agent on the main login moves to it at its next idle moment; you restart on it when this turn ends and the chat resumes, so finish your reply and continue the task after the restart. Never use /login: Overlord undoes it.',
+  { name: 'account_use', description: 'Run only this chat on a saved Claude account (account_list shows them), e.g. to publish artifacts as that account. The main login and every other agent stay as they are. You restart on it when this turn ends and the chat resumes, so finish your reply; Overlord then tells you to continue. Use this whenever only your own work needs the account. Never use /login: Overlord undoes it.',
+    inputSchema: { type: 'object', properties: { account: { type: 'string', description: 'Saved account label or email' } }, required: ['account'] } },
+  { name: 'account_switch', description: 'Switch Overlord\'s main Claude login, for the whole app, to a saved account (account_list shows them). Only for app-wide reasons, such as the main login hitting its usage limit or the user asking to switch Overlord\'s account; for your own work use account_use. Every agent on the main login moves to it at its next idle moment; you restart on it when this turn ends and the chat resumes. Never use /login: Overlord undoes it.',
     inputSchema: { type: 'object', properties: { account: { type: 'string', description: 'Saved account label or email' } }, required: ['account'] } },
 ];
 async function accountCall(accounts, agentId, name, args = {}) {
   try {
     if (!accounts) return fail('Switching accounts is unavailable.');
     if (name === 'account_list') return text(JSON.stringify(accounts.list(agentId), null, 1));
-    if (name === 'account_switch') {
-      if (typeof args.account !== 'string' || !args.account.trim()) return fail('account_switch: "account" is required');
-      return text(await accounts.switchTo(agentId, args.account.trim()));
+    if (name === 'account_switch' || name === 'account_use') {
+      if (typeof args.account !== 'string' || !args.account.trim()) return fail(`${name}: "account" is required`);
+      return text(await (name === 'account_use' ? accounts.use : accounts.switchTo)(agentId, args.account.trim()));
     }
     return fail(`Unknown tool: ${name}`);
   } catch (e) { return fail(e && e.message ? e.message : String(e)); }
