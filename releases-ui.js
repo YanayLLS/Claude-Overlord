@@ -1792,6 +1792,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       const left = (state && state.toSign) || [];
       if (!left.length) { promptDismissed = signWaiting; try { localStorage.setItem('rl-sign-dismissed', promptDismissed || ''); } catch {} signOverlay.classList.remove('open'); }
       signWaiting = null;
+      signOverlay._html = null; // the click rewrote the Sign button in place: force a redraw, or an unchanged prompt keeps "Signing…" forever
     }
     const t = (state && state.toSign) || [];
     const key = state && state.signPromptKey;
