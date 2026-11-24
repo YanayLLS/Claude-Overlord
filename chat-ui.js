@@ -539,6 +539,7 @@
   // A scroll that isn't keep()'s own write is yours: from then on the top-most line in view holds its pixel. The chat's
   // box changing size (the reply box grows a line as you type, the window) holds it too.
   { const c = document.getElementById('conversation');
+    for (const t of ['wheel', 'touchmove', 'pointerdown', 'keydown']) c.addEventListener(t, () => { c._hand = Date.now(); }, { passive: true });
     c.addEventListener('scroll', () => { if (byHand(c)) { c._sent = false; c._settle = 0; holdPlace(c); } c._set = c.scrollTop; }, { passive: true });
     new ResizeObserver(() => keep(c)).observe(c);
   }
@@ -1318,7 +1319,9 @@
   // reply under a pinned message, a chat that got shorter): the browser never clamps the scroll.
   // Moved since keep()'s last write, and not by the browser clamping it to a shorter chat's end: that was you. Checked in
   // keep() too: a redraw landing mid wheel-scroll, before its scroll event, would otherwise pull you back.
-  function byHand(el) { const st = el.scrollTop; return el._set == null || (Math.abs(st - el._set) >= 1 && !(st < el._set && st >= el.scrollHeight - el.clientHeight - 1)); }
+  // A scroll within 1 s of your wheel, touch, key or click on the chat is yours even when it ends at the chat's end: the
+  // room sizes the view to end there, so scrolling up from a sent message read as a clamp and the next update pulled you back.
+  function byHand(el) { const st = el.scrollTop; return el._set == null || (Math.abs(st - el._set) >= 1 && (Date.now() - (el._hand || 0) < 1000 || !(st < el._set && st >= el.scrollHeight - el.clientHeight - 1))); }
   function keep(el) {
     const room = el.querySelector(':scope > .room'); if (!room || !el.classList.contains('open')) return;
     if (el._set != null && byHand(el)) { el._sent = false; el._settle = 0; holdPlace(el); }
