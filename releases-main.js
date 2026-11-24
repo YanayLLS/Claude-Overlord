@@ -2101,7 +2101,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
       // the bar shows the outcome: a failure as pauseErr (inline, its form kept), a success as the new relPause
-      case 'relPauseSet': setPause(msg.until || null, msg.note).then(() => push({ pauseErr: null }), e => push({ pauseErr: { text: e.message, at: Date.now() } })); return true;
+      case 'relPauseSet': setPause(msg.until || null, msg.note).then(() => push({ pauseErr: null }), async (e) => { await livePause().catch(() => {}); push({ pauseErr: { text: e.message, at: Date.now() } }); }); return true;
       case 'relPauseLift': liftPause(msg.seenAt || null).then(() => push({ pauseErr: null }), e => push({ pauseErr: { text: e.message, at: Date.now() } })); return true;
       case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;
       // the picker's branch boxes: a repo's branches (cached for the session)

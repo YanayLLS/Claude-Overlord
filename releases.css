@@ -905,13 +905,52 @@ button.rl-flag-row.copy .rl-flag-g { font-size:14px; }
 .rl-sign-dest { margin-left:8px; font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; font-weight:500; color:var(--dim); }
 .rl-sign-rel .rl-env { margin-left:6px; text-transform:uppercase; }
 
-/* team-wide release pause (releases-ui pauseBarHtml) */
-.rl-pause { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:12px; }
-.rl-pause .ic { width:13px; height:13px; flex:none; }
-.rl-pause.on { padding:8px 10px; border-radius:10px; border:1px solid var(--yellow); background:color-mix(in srgb, var(--yellow) 12%, transparent); }
-.rl-pause-txt { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--subtext); } .rl-pause-txt b { color:var(--text); font-weight:600; }
-.rl-pause-open { margin-left:auto; display:inline-flex; align-items:center; gap:5px; font:inherit; font-size:11.5px; color:var(--subtext); background:none; border:0; padding:2px 4px; cursor:pointer; border-radius:6px; } .rl-pause-open:hover { color:var(--text); background:var(--surface1); }
-.rl-pause.form { padding:6px 8px; border-radius:10px; border:1px solid var(--border); background:var(--surface0, var(--surface1)); }
-.rl-pause.form input { font:inherit; font-size:12px; padding:3px 6px; border-radius:6px; border:1px solid var(--border); background:var(--surface1); color:var(--text); }
-.rl-pause-note { flex:1; min-width:80px; }
-.rl-pause-err { color:var(--red); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40%; }
+/* team-wide release pause (releases-ui pausePillHtml / pausePopHtml) */
+.rl-head .rl-pause-btn { width:auto; height:26px; padding:0 10px; gap:5px; border-radius:999px; border:1px solid var(--border); font-size:11.5px; font-weight:600; color:var(--subtext); }
+.rl-head .rl-pause-btn .rl-i { width:12px; height:12px; }
+.rl-head .rl-pause-btn.on, .rl-head .rl-pause-btn:hover { color:var(--text); border-color:var(--border-hi); background:var(--hover-strong); }
+.rl-head .rl-pause-btn.paused { color:var(--yellow); border-color:color-mix(in srgb, var(--yellow) 55%, transparent); background:color-mix(in srgb, var(--yellow) 12%, transparent); }
+.rl-head .rl-pause-btn.paused:hover, .rl-head .rl-pause-btn.paused.on { background:color-mix(in srgb, var(--yellow) 20%, transparent); color:var(--yellow); }
+.rl-rel-pop.rl-pausepop { width:300px; display:flex; flex-direction:column; gap:10px; }
+.rl-pp-presets { display:flex; flex-direction:column; gap:2px; }
+.rl-pp-opt { display:flex; align-items:center; gap:9px; height:32px; padding:0 9px; border:1px solid transparent; border-radius:var(--r); background:none; color:var(--text); font:inherit; font-size:12.5px; cursor:pointer; text-align:left; }
+.rl-pp-opt:hover { background:var(--hover-strong); }
+.rl-pp-opt.on { background:var(--accent-soft); }
+.rl-pp-opt i { width:12px; height:12px; flex:none; border-radius:50%; border:1.5px solid var(--dim); box-sizing:border-box; }
+.rl-pp-opt.on i { border:4px solid var(--accent); }
+.rl-pp-when { margin-left:auto; color:var(--subtext); font-variant-numeric:tabular-nums; font-size:12px; }
+.rl-pp-opt:disabled { opacity:.55; cursor:default; }
+.rl-pp-opt:focus-visible, .rl-pausepop .rl-hist-btn:focus-visible, .rl-head .rl-pause-btn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.rl-pp-why[readonly] { color:var(--text); opacity:1; }
+.rl-pp-custom, .rl-pp-why { font:inherit; font-size:12.5px; height:30px; padding:0 9px; border-radius:var(--r); border:1px solid var(--border); background:var(--surface0); color:var(--text); box-sizing:border-box; width:100%; }
+.rl-pp-custom { margin:4px 0 0; }
+.rl-pp-why:focus, .rl-pp-custom:focus { outline:none; border-color:var(--accent); }
+.rl-pp-acts { display:flex; justify-content:flex-end; gap:6px; }
+.rl-pp-acts .rl-hist-btn { display:inline-flex; align-items:center; gap:6px; min-width:92px; justify-content:center; }
+.rl-pp-acts .rl-hist-btn[aria-disabled="true"] { opacity:.55; cursor:default; }
+.rl-pp-err { display:flex; gap:7px; align-items:flex-start; font-size:12px; line-height:1.4; color:var(--red); }
+.rl-pp-err .rl-i { width:13px; height:13px; flex:none; margin-top:2px; }
+.rl-pp-lock { display:flex; align-items:center; gap:8px; color:var(--yellow); font-size:13px; }
+.rl-pp-lock .rl-i { width:14px; height:14px; }
+.rl-pp-lock b { font-weight:600; color:var(--text); }
+.rl-pp-in { margin-left:auto; color:var(--subtext); font-size:12px; font-variant-numeric:tabular-nums; }
+.rl-pp-by { font-size:12px; color:var(--subtext); margin-top:-4px; }
+.rl-pp-note { font-size:12.5px; color:var(--text); line-height:1.45; padding:2px 0 2px 10px; border-radius:0; background:none; border-left:2px solid var(--yellow); overflow-wrap:anywhere; }
+.rl-rc-lock.paused { color:var(--yellow); }
+#releases-badge.paused::after { content:''; width:6px; height:6px; border-radius:50%; background:var(--yellow); }
+.rl-pause-strip { display:flex; align-items:center; gap:10px; margin:0 0 12px; padding:6px 6px 6px 12px; min-height:40px; box-sizing:border-box; border-left:3px solid var(--yellow); border-radius:var(--r); background:color-mix(in srgb, var(--yellow) 12%, transparent); font-size:12.5px; color:var(--text); flex-wrap:wrap; }
+.rl-pause-strip .rl-hist-btn { display:inline-flex; align-items:center; gap:6px; }
+.rl-pause-strip .rl-pp-err { flex-basis:100%; }
+.rl-pause-strip b { font-weight:600; white-space:nowrap; }
+.rl-pause-strip .rl-i { width:13px; height:13px; color:var(--yellow); flex:none; }
+.rl-ps-note { flex:1; min-width:0; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rl-ps-by { color:var(--text); opacity:.75; white-space:nowrap; font-size:12px; }
+.rl-pp-acts.start { justify-content:flex-start; }
+.rl-pp-first { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--yellow); }
+.rl-pp-first .rl-i { width:12px; height:12px; }
+.rl-pause-strip:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.rl-pause-strip.flash { background:color-mix(in srgb, var(--yellow) 20%, transparent); transition:box-shadow .2s, background .2s; }
+.rl-ps-who { margin-left:4px; white-space:nowrap; }
+.rl-rc-lock .rl-i { align-self:center; }
+.rl-head .rl-pause-btn.quiet { display:inline-flex; align-items:center; cursor:default; }
+.rl-ps-note .rl-ps-by { margin-left:0; }

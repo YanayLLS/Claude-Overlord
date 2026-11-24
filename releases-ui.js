@@ -76,9 +76,12 @@
     // a click outside the approvers popover closes just the popover
     if (apprOpen && !e.target.closest('.rl-rel-pop, .rl-appr-btn')) {
       apprOpen = false;
-      if (!e.target.closest('.rl-nav')) { render(); return; } // a tab click closes it and switches in one go
+      if (!e.target.closest('.rl-nav, [data-act="pauseMenu"]')) { render(); return; } // a tab click closes it and switches in one go
     }
-    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"], [data-act="queueAll"], [data-act="rcRelease"]')) { armed = null; render(); }
+    if (pauseMenu && !e.target.closest('.rl-pausepop, .rl-pause-btn')) {
+      pauseMenu = false; pauseForm = null; render(); // and the click goes on to what it hit
+    }
+    if (armed && !e.target.closest('[data-act="relMerge"], [data-act="histMerge"], [data-act="relCancel"], [data-act="rowMerge"], [data-act="rowHand"], [data-act="queueAll"], [data-act="rcRelease"], [data-act="pauseLift"], [data-act="pauseResumeCancel"]')) { armed = null; render(); }
     if (e.target === overlay) return show(false);
     const a = e.target.closest('[data-url]');
     if (a) { e.stopPropagation(); return api.send({ type: 'openUrl', url: a.dataset.url }); }
@@ -99,6 +102,7 @@
     render();
   });
   overlay.addEventListener('focusout', (e) => {
+    if (e.target.dataset && e.target.dataset.pause != null) { if (drawLater) { drawLater = false; setTimeout(render, 0); } return; } // the pause inputs held a redraw while typed in
     if (!e.target.dataset || e.target.dataset.src == null) return;
     setTimeout(() => { if (document.activeElement !== brFor) brHide(); }, 120);
     if (drawLater) { drawLater = false; setTimeout(render, 0); }
@@ -150,7 +154,15 @@
     const o = e.target.closest('[data-br]'); if (o) brPick(o.dataset.br);
   });
   overlay.addEventListener('focusin', (e) => { if (e.target.dataset && e.target.dataset.src != null) { brHi = 0; brShow(e.target); } });
-  overlay.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pause; if (k && pauseForm) pauseForm[k] = e.target.value; });
+  overlay.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pause; if (k && pauseForm) { pauseForm[k] = e.target.value; if (k === 'custom') { const b = modal.querySelector('[data-act="pauseSet"]'); if (b) b.toggleAttribute('aria-disabled', !pauseUntil()); } } });
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.dataset && e.target.dataset.pause && pauseForm) { e.preventDefault(); actions.pauseSet(); return; }
+    const opt = (e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.target.closest && e.target.closest('.rl-pp-opt');
+    if (!opt) return;
+    e.preventDefault();
+    const all = [...modal.querySelectorAll('.rl-pp-opt')], i = all.indexOf(opt), to = all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length];
+    actions.pausePick(to); const again = modal.querySelector(`.rl-pp-opt[data-k="${to.dataset.k}"]`); if (again) again.focus();
+  });
   overlay.addEventListener('input', (e) => { if (e.target.dataset && e.target.dataset.src != null) { brHi = 0; brShow(e.target); } });
   overlay.addEventListener('keydown', (e) => {
     if (!e.target.dataset || e.target.dataset.src == null) return;
@@ -169,6 +181,7 @@
     e.stopPropagation();
     if (brMenu.classList.contains('open')) { brHide(); return; }
     if (armed) { armed = null; clearTimeout(armTimer); render(); return; } // Esc takes back a first click before it closes anything
+    if (pauseMenu) { pauseMenu = false; pauseForm = null; render(); const b = modal.querySelector('[data-act="pauseMenu"]'); if (b) b.focus(); return; }
     if (apprOpen) { apprOpen = false; render(); } else if (relOpen && tab === 'release' && (activeRelease(state) || (state && state.releaseRun))) { relOpen = false; render(); } else if (sel) { sel = null; render(); } else show(false);
   }, true);
 
@@ -183,10 +196,23 @@
     flagBackup: (el) => { try { navigator.clipboard.writeText(el.dataset.v || ''); } catch {} el.textContent = '✓ Copied'; },
     rcShas: () => { rcShas = !rcShas; render(); },
     rcFix: () => { api.send({ type: 'releasesRcFix' }); },
-    pauseOpen: () => { const d = new Date(ReleasesCore.pauseDefaultUntil()); pauseForm = { until: new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 16), note: '' }; render(); const n = modal.querySelector('[data-pause="note"]'); if (n) n.focus(); },
-    pauseCancel: () => { pauseForm = null; render(); },
-    pauseSet: () => { const f = pauseForm; if (!f || !f.until || pauseBusy) return; pauseBusy = { kind: 'set', at: Date.now() }; render(); api.send({ type: 'relPauseSet', until: new Date(f.until).toISOString(), note: f.note }); },
-    pauseLift: () => { const p = pausedNow(state); if (!p || pauseBusy) return; pauseBusy = { kind: 'lift', at: Date.now() }; render(); api.send({ type: 'relPauseLift', seenAt: p.at }); },
+    pauseMenu: () => {
+      const strip = !pauseMenu && tab === 'release' && pausedNow(state) && modal.querySelector('.rl-pause-strip');
+      if (strip) { (strip.querySelector('[data-act="pauseLift"]') || strip).focus(); flashStrip(); return; }
+      apprOpen = false; pauseMenu = !pauseMenu; pauseShown = false; pauseAskedAt = 0; pauseLost = false; if (armed === 'resume') armed = null;
+      pauseForm = pauseMenu && !pausedNow(state) ? (pauseDraft || { pick: 'tom', custom: localInput(new Date(ReleasesCore.pauseDefaultUntil())), note: '' }) : null;
+      if (pauseForm) pauseDraft = null;
+      render(); const n = pauseMenu && modal.querySelector('[data-pause="note"]'); if (n) n.focus();
+    },
+    pausePick: (el) => { if (!pauseForm || pauseBusy) return; pauseForm.pick = el.dataset.k; render(); const n = el.dataset.k === 'custom' && modal.querySelector('[data-pause="custom"]'); if (n) n.focus(); },
+    pauseSet: () => { const until = pauseUntil(); if (!until || pauseBusy) return; if (document.activeElement && document.activeElement.dataset && document.activeElement.dataset.pause != null) document.activeElement.blur(); pauseBusy = { kind: 'set', at: Date.now() }; render(); api.send({ type: 'relPauseSet', until: until.toISOString(), note: pauseForm.note }); },
+    pauseLift: () => {
+      const p = pausedNow(state); if (!p || pauseBusy) return;
+      if (armed !== 'resume') { arm('resume'); render(); const c = modal.querySelector('[data-act="pauseResumeCancel"]'); if (c) c.focus(); return; }
+      if (Date.now() - armAt < 400) return; // a double click is not a confirmation
+      armed = null; clearTimeout(armTimer); pauseBusy = { kind: 'lift', at: Date.now() }; render(); api.send({ type: 'relPauseLift', seenAt: p.at });
+    },
+    pauseResumeCancel: () => { armed = null; clearTimeout(armTimer); render(); const r = modal.querySelector('[data-act="pauseLift"]'); if (r) r.focus(); },
     rcMerge: (el) => { markBusy(el, 'Merging…'); render(); api.send({ type: 'releasesRcMerge' }); },
     rcCancel: () => { armed = null; clearTimeout(armTimer); say('Release cancelled'); render(); },
     // a Hold is released only on a second, deliberate click
@@ -218,7 +244,7 @@
     }
   }
   Object.assign(actions, {
-    apprMenu: () => { apprOpen = !apprOpen; apprShown = false; if (apprOpen) api.send({ type: 'releasesApprovers' }); render(); },
+    apprMenu: () => { pauseMenu = false; apprOpen = !apprOpen; apprShown = false; if (apprOpen) api.send({ type: 'releasesApprovers' }); render(); },
     apprAdd: () => {
       localBusy.set('appr', { label: 'Adding…', at: Date.now() });
       const inp = modal.querySelector('#rl-appr-add');
@@ -976,6 +1002,10 @@
     const join = running && ready.length;
     // one Release all across the team: someone else's is running
     if (s.teamRun) return `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(`@${s.teamRun.by} is running Release all: wave ${s.teamRun.wave}/${s.teamRun.waves}, ${s.teamRun.status}${s.teamRun.detail ? ' (' + s.teamRun.detail + ')' : ''}${(s.teamRun.merged || []).length ? '\nmerged: ' + s.teamRun.merged.join(', ') : ''}`)}">${icon('rocket')}Running on @${esc(s.teamRun.by)}'s Overlord · wave ${esc(s.teamRun.wave)}/${esc(s.teamRun.waves)}</button>`;
+    const pz = pausedNow(s);
+    const relItem = myId && ((s.history && s.history.items) || []).find(x => x.id === myId);
+    const pauseHolds = relItem ? (relItem.env || 'prod') === 'prod' && (relItem.kind || 'release') !== 'rollback' : ready.some(r => r.env === 'prod');
+    if (pz && pauseHolds) return `<button class="${lockedCls} locked" aria-disabled="true" title="${esc(pauseTip(pz))}">${icon('pause')}Release all</button>`;
     const so = signoff || { count: 0, need: 2, signers: [], gaps: [] };
     const signedLine = `the prod release is signed ${so.count}/${so.need}${so.signers.length ? ' (' + so.signers.map(l => '@' + l).join(', ') + ')' : ''}`;
     const gapLines = (so.gaps || []).map(g => `\n@${g.login} still to sign: ${g.missing.map(x => x.label + (x.older ? ' (new commits)' : '')).join(', ')}`).join('');
@@ -1224,6 +1254,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       ? `Update Overlord to ${s.config.minOverlord} or later to release (this is ${s.appVersion}): older versions miss release rules`
       : s.approvers && s.approvers.me && !s.approvers.isApprover ? releaseLockedTip(s.approvers) : null;
     if (why) return `<button class="go locked" aria-disabled="true" title="${esc(why)}">${icon('lock')}Start ${hot ? 'hotfix' : 'release'}</button>`;
+    if (pausedNow(s) && (hot || relSel.has('prod'))) return pauseLockBtn(s, '', hot ? 'Start hotfix' : 'Start release');
     if (hot) return `<button class="go" data-act="releaseGo"${ok ? '' : ' disabled'}>${icon('bandage')}Start hotfix</button>`;
     return `<button class="go" data-act="releaseGo" title="Opens the release PRs and checks each one. Nothing merges until 2 approvers sign"${relSel.size ? '' : ' disabled'}>Start release${prs ? ` · ${prs} PR${prs === 1 ? '' : 's'}` : ''}</button>`;
   }
@@ -1490,7 +1521,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       : `${icon('plus')}Adds to pending release <b>${esc(pend.id)}</b> (${pend.repos.filter(r => !r.mergeSha && !r.closed).length} open) <button data-act="relSep">start a separate one</button>`}</div>`;
     if (plan.manual.length) h += `<div class="rl-rel-note">${icon('hand')}${plan.manual.length} hand-deployed to report</div>`;
     h += ''
-      + `<div class="rl-rel-actions">${activeRelease(s) || s.releaseRun ? '<button data-act="releaseClose">Cancel</button>' : ''}<button data-act="relHot" title="Patch prod with just a fix: pick the repos and the branch each fix is on">${icon('bandage')}Hotfix</button>${startBtn(s, { prs: plan.prs.length })}</div></div>`;
+      + `<div class="rl-rel-actions">${activeRelease(s) || s.releaseRun ? '<button data-act="releaseClose">Cancel</button>' : ''}${pausedNow(s) ? pauseLockBtn(s, '', 'Hotfix') : `<button data-act="relHot" title="Patch prod with just a fix: pick the repos and the branch each fix is on">${icon('bandage')}Hotfix</button>`}${startBtn(s, { prs: plan.prs.length })}</div></div>`;
     return h;
   }
   // left-out repos earlier in the release order than something picked: Map repo → why it may be needed
@@ -1584,7 +1615,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const can = s.approvers && s.approvers.isApprover;
     const left = armed === 'rc' ? Math.max(0, 1 - (Date.now() - armAt) / ARM_MS) : 0;
     const wait = c.loading ? ' aria-disabled="true" title="Reading the night again"' : '';
-    const release = !can ? `<span class="rl-rc-lock">${rcIc(RC_IC.lock)}Approvers only</span>` : pausedNow(s) ? `<span class="rl-rc-lock">${icon('pause')}Paused</span>` : hold
+    const release = !can ? `<span class="rl-rc-lock">${rcIc(RC_IC.lock)}Approvers only</span>` : pausedNow(s) ? `<span class="rl-rc-lock paused" title="${esc(pauseTip(pausedNow(s)))}">${icon('pause')}Paused · ${esc(ReleasesCore.pauseWhen(pausedNow(s).until))}</span>` : hold
       ? (armed === 'rc' ? `<button class="rl-hist-btn rl-rc-cancel" data-act="rcCancel">Cancel</button><button class="rl-hist-btn rl-rc-any armed-bad" data-act="rcRelease" style="--left:${left.toFixed(3)};--ms:${Math.round(left * ARM_MS)}ms">Release despite Hold</button>`
         : `<button class="rl-hist-btn rl-rc-any${c.loading ? ' locked' : ''}" data-act="rcRelease" title="Ship the tested commits to alpha and prod"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : ''}Release anyway</button>`)
       : `<button class="rl-hist-btn go${c.loading ? ' locked' : ''}" data-act="rcRelease" title="Ship the tested commits to alpha and prod"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : rcIc(RC_IC.rocket)}Release</button>`;
@@ -1624,27 +1655,76 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
   function pauseSettle() {
     if (!pauseBusy || !state) return;
     const err = state.pauseErr && state.pauseErr.at >= pauseBusy.at;
-    const done = pauseBusy.kind === 'set' ? !!pausedNow(state) && pausedNow(state).at && Date.parse(pausedNow(state).at) >= pauseBusy.at - 60e3 : !pausedNow(state);
+    const mine = pausedNow(state) && (!state.holdsMe || String(pausedNow(state).by).toLowerCase() === String(state.holdsMe).toLowerCase()); // who I am unknown: fall back to the time check
+    const done = pauseBusy.kind === 'set' ? !!mine && Date.parse(pausedNow(state).at) >= pauseBusy.at - 60e3 : !pausedNow(state);
     if (!err && !done) return;
     pauseAskedAt = pauseBusy.at;
-    if (!err) { if (pauseBusy.kind === 'set') pauseForm = null; say(pauseBusy.kind === 'set' ? 'Releases paused' : 'Releases resumed'); }
+    if (err && pauseBusy.kind === 'set' && pausedNow(state)) { pauseDraft = pauseForm; pauseForm = null; pauseBusy = null; pauseAskedAt = 0; pauseShown = false; pauseLost = pausedNow(state).at; if (tab === 'release') { pauseMenu = false; setTimeout(() => flashStrip(), 0); } say(pauseTip(pausedNow(state))); return; } // someone paused first: show theirs
+    if (!err) { if (pauseBusy.kind === 'set') pauseForm = null; pauseMenu = false; pauseFocusPill = true; say(pauseBusy.kind === 'set' ? 'Releases paused' : 'Releases resumed'); }
     else say((pauseBusy.kind === 'set' ? 'Pause failed: ' : 'Resume failed: ') + state.pauseErr.text);
     pauseBusy = null;
   }
-  const pauseErrHtml = (s) => (!pauseBusy && s.pauseErr && s.pauseErr.at >= pauseAskedAt && pauseAskedAt ? `<span class="rl-pause-err" role="alert">${esc(s.pauseErr.text)}</span>` : '');
+  const pauseErrHtml = (s) => (!pauseBusy && s.pauseErr && s.pauseErr.at >= pauseAskedAt && pauseAskedAt ? `<div class="rl-pp-err" role="alert">${icon('warn')}<span>${esc(s.pauseErr.text)}</span></div>` : '');
+  let stripFlash = null;
+  function flashStrip() { const el = modal.querySelector('.rl-pause-strip'); if (!el) return; el.classList.add('flash'); clearTimeout(stripFlash); stripFlash = setTimeout(() => { const x = modal.querySelector('.rl-pause-strip'); if (x) x.classList.remove('flash'); }, 1500); }
+  let pauseMenu = false, pauseShown = false, pauseFocusPill = false, pauseLost = false, pauseDraft = null;
   const pausedNow = (s) => (window.ReleasesCore && ReleasesCore.pauseActive(s.relPause) ? s.relPause : null);
-  function pauseBarHtml(s) {
+  const pauseWho = (s, p) => (s && s.holdsMe && String(s.holdsMe).toLowerCase() === String(p.by).toLowerCase() ? 'You' : '@' + p.by);
+  const pauseTip = (p) => `Releases paused by @${p.by} until ${ReleasesCore.pauseWhen(p.until)}${p.note ? ': ' + p.note : ''}`;
+  const pauseLockBtn = (s, cls, label) => `<button class="${cls} locked" aria-disabled="true" aria-describedby="rl-pause-strip" title="${esc(pauseTip(pausedNow(s)))}">${icon('pause')}${label}</button>`;
+  // the Release tab says why at the top (who, why); the header pill holds the end time and Resume
+  function pauseStripHtml(s) {
     const p = pausedNow(s), can = s.approvers && s.approvers.isApprover;
+    if (!p) return '';
+    return `<div class="rl-pause-strip" id="rl-pause-strip" tabindex="-1" role="status" title="${esc(pauseTip(p))}">${icon('pause')}<b>Until ${esc(ReleasesCore.pauseWhen(p.until))}</b>`
+      + `<span class="rl-ps-note">${esc(p.note || '')}${armed === 'resume' ? '' : `<span class="rl-ps-by">${p.note ? ' · ' : ''}${esc(pauseWho(s, p))}</span>`}</span>${can ? resumeActsHtml() : resumersHtml(s, p)}${pauseErrHtml(s)}</div>`;
+  }
+  const resumersHtml = (s, p) => { const others = ((s.approvers && s.approvers.members) || []).filter(m => m && m.login && m.login.toLowerCase() !== String(p.by).toLowerCase()).slice(0, 3); return `<span class="rl-rc-lock rl-ps-who" title="Release approvers can resume">${icon('lock')}${others.length ? 'Resume: ' + esc(others.map(m => '@' + m.login).join(' ')) : 'Approvers only'}</span>`; };
+  const resumeActsHtml = () => (armed === 'resume' ? '<button class="rl-hist-btn" data-act="pauseResumeCancel">Cancel</button>' : '')
+    + `<button class="rl-hist-btn${armed === 'resume' || pauseBusy ? ' go' : ''}" data-act="pauseLift"${pauseBusy ? ' aria-disabled="true" aria-busy="true"' : ''}>${pauseBusy ? '<span class="rl-spin-dot"></span>Resume' : icon('play') + 'Resume'}</button>`;
+  // presets: the default end (pauseDefaultUntil: 18:00 the next day), Friday 18:00 and Monday 09:00 when later
+  function pausePresets(now = new Date()) {
+    const tom = new Date(ReleasesCore.pauseDefaultUntil(now.getTime()));
+    const next = (dow, h) => { for (let i = 1; i <= 8; i++) { const d = new Date(now); d.setDate(d.getDate() + i); d.setHours(h, 0, 0, 0); if (d.getDay() === dow) return d; } };
+    const out = [{ k: 'tom', label: tom.toDateString() === now.toDateString() ? 'Today' : 'Tomorrow', d: tom }];
+    for (const [k, label, d] of [['fri', 'Friday', next(5, 18)], ['mon', 'Monday', next(1, 9)]]) if (d > tom && !out.some(x => x.d.toDateString() === d.toDateString())) out.push({ k, label, d });
+    return out;
+  }
+  const localInput = (d) => new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 16);
+  function pauseUntil() {
+    if (!pauseForm) return null;
+    if (pauseForm.pick === 'custom') { const d = pauseForm.custom ? new Date(pauseForm.custom) : null; return d && d > new Date() ? d : null; }
+    const p = pausePresets().find(x => x.k === pauseForm.pick);
+    return p ? p.d : null;
+  }
+  // header pill: approvers pause from it; while paused everyone sees the lock and its end there, on every tab
+  function pausePillHtml(s) {
+    const p = pausedNow(s), can = s.approvers && s.approvers.isApprover;
+    if (!p && !can) return '';
+    if (p && tab === 'release') return `<span class="rl-pause-btn paused quiet" role="status">${icon('pause')}<span>Paused</span></span>`; // the strip below holds it here
+    return `<button class="rl-pause-btn${p ? ' paused' : ''}${pauseMenu ? ' on' : ''}" data-act="pauseMenu" aria-expanded="${pauseMenu}" aria-haspopup="dialog" title="${p ? esc(`Releases paused by @${p.by}${p.note ? ': ' + p.note : ''}`) : 'Pause releases'}">${icon('pause')}<span>${p ? 'Paused' : 'Pause'}</span></button>`;
+  }
+  function pausePopHtml(s) {
+    const p = pausedNow(s), can = s.approvers && s.approvers.isApprover;
+    let h = `<div class="rl-rel-pop rl-pausepop${pauseShown ? ' still' : ''}" role="dialog" aria-label="${p ? 'Releases paused' : 'Pause releases'}">`;
+    pauseShown = true;
     if (p) {
-      const until = ReleasesCore.pauseWhen(p.until);
-      return `<div class="rl-pause on" role="status">${icon('pause')}<span class="rl-pause-txt"><b>Paused until ${esc(until)}</b> · @${esc(p.by)}${p.note ? ' · ' + esc(p.note) : ''}</span>`
-        + pauseErrHtml(s) + (can ? `<button class="rl-hist-btn" data-act="pauseLift"${pauseBusy ? ' aria-disabled="true" aria-busy="true"' : ''}>${pauseBusy ? 'Resuming…' : 'Resume'}</button>` : '') + '</div>';
+      h += `<div class="rl-pp-lock">${icon('pause')}<b>Until ${esc(ReleasesCore.pauseWhen(p.until))}</b><span class="rl-pp-in">${esc(pauseWho(s, p))}</span></div>`
+        + (p.note ? `<div class="rl-pp-note">${esc(p.note)}</div>` : '');
+      h += can ? pauseErrHtml(s) + '<div class="rl-pp-acts">' + resumeActsHtml() + '</div>'
+        : `<div class="rl-pp-acts start">${resumersHtml(s, p)}</div>`;
+      return h + '</div>';
     }
-    if (!can) return '';
-    if (!pauseForm) return '<div class="rl-pause"><button class="rl-pause-open" data-act="pauseOpen" title="No release opens or merges until then">' + icon('pause') + 'Pause releases</button></div>';
-    return `<div class="rl-pause form">${icon('pause')}<input type="datetime-local" data-pause="until" value="${esc(pauseForm.until)}" aria-label="Paused until">`
-      + `<input class="rl-pause-note" data-pause="note" value="${esc(pauseForm.note)}" placeholder="Why" maxlength="140" aria-label="Why">`
-      + pauseErrHtml(s) + `<button class="rl-hist-btn" data-act="pauseCancel">Cancel</button><button class="rl-hist-btn go" data-act="pauseSet"${pauseBusy ? ' aria-disabled="true" aria-busy="true"' : ''}>${pauseBusy ? 'Pausing…' : 'Pause'}</button></div>`;
+    const f = pauseForm, busy = !!pauseBusy;
+    h += '<div class="rl-pp-presets" role="radiogroup" aria-label="Until">'
+      + pausePresets().map(x => `<button class="rl-pp-opt${f.pick === x.k ? ' on' : ''}" role="radio" aria-checked="${f.pick === x.k}" data-act="pausePick" data-k="${x.k}"${busy ? ' disabled' : ''}><i></i><span>${x.label}</span><span class="rl-pp-when">${esc(ReleasesCore.pauseWhen(x.d.toISOString()))}</span></button>`).join('')
+      + `<button class="rl-pp-opt${f.pick === 'custom' ? ' on' : ''}" role="radio" aria-checked="${f.pick === 'custom'}" data-act="pausePick" data-k="custom"${busy ? ' disabled' : ''}><i></i><span>Custom</span></button>`
+      + (f.pick === 'custom' ? `<input type="datetime-local" class="rl-pp-custom" data-pause="custom" value="${esc(f.custom)}" min="${localInput(new Date())}" aria-label="Paused until"${busy ? ' disabled' : ''}>` : '')
+      + '</div>'
+      + `<input class="rl-pp-why" data-pause="note" value="${esc(f.note)}" placeholder="Reason (optional)" maxlength="140" aria-label="Reason"${busy ? ' readonly' : ''}>`
+      + pauseErrHtml(s)
+      + `<div class="rl-pp-acts"><button class="rl-hist-btn" data-act="pauseMenu">Cancel</button><button class="rl-hist-btn go" data-act="pauseSet"${busy || !pauseUntil() ? ' aria-disabled="true"' : ''}${busy ? ' aria-busy="true"' : ''}>${busy ? '<span class="rl-spin-dot"></span>Pausing' : icon('pause') + 'Pause'}</button></div>`;
+    return h + '</div>';
   }
 
   function releaseTabHtml(s) {
@@ -1656,7 +1736,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     // one suggestion at a time: while the candidate card offers a release, the picker waits behind "Start another release"
     const cardOffers = !!(s.rc && s.rc.level && !s.rc.released && !s.rc.off && !s.rc.error);
     if (!active && !showRun && !relOpen && !cardOffers) openPicker();
-    let h = '<div class="rl-reltab">' + pauseBarHtml(s) + (active || showRun ? '' : rcCardHtml(s)) + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
+    let h = '<div class="rl-reltab">' + pauseStripHtml(s) + (active || showRun ? '' : rcCardHtml(s)) + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
     if (relOpen) h += releasePickerHtml(s);
     else if (active || showRun || cardOffers) h += '<button class="rl-hist-btn rl-reltab-new" data-act="releaseMenu" title="Pick envs and repos for another release (or to add to the pending one)">' + icon('rocket') + 'Start another release</button>';
     return h + '</div>';
@@ -1671,6 +1751,9 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     // a redraw replaces every element: the one that had focus gets it back (same action, or same link)
     const f = document.activeElement, had = f && modal.contains(f) && f.dataset ? (f.dataset.act ? `[data-act="${f.dataset.act}"]` : f.dataset.url ? `[data-url="${CSS.escape(f.dataset.url)}"]` : null) : null;
     renderNow(); if (open) applyBusy(modal);
+    const pop = open && modal.querySelector('.rl-pausepop'), pill = pop && modal.querySelector('.rl-pause-btn');
+    if (pop && pill) { const host = pop.offsetParent || modal, hr = host.getBoundingClientRect(), pr = pill.getBoundingClientRect(); pop.style.right = Math.max(8, hr.right - pr.right) + 'px'; pop.style.top = (pr.bottom - hr.top + 6) + 'px'; } // under its pill
+    if (pauseFocusPill) { pauseFocusPill = false; const b = modal.querySelector('[data-act="pauseMenu"]'); if (b) b.focus({ preventScroll: true }); }
     if (had && !modal.contains(document.activeElement)) { const el = modal.querySelector(had) || (/rcCancel/.test(had) ? modal.querySelector('[data-act="rcRelease"]') : /rcRetry/.test(had) ? modal.querySelector('[data-act="rcRefresh"], [data-act^="rcRetry"]') : null); if (el && kbNav) el.focus({ preventScroll: true }); }
   }
   function renderNow() {
@@ -1682,6 +1765,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       + `<button class="rl-src-btn" data-act="editSource" title="Release config: ${esc(s.source)} (click to change)">⚙</button>`
       + (s.rateLimitedUntil && s.rateLimitedUntil > Date.now() ? `<span class="rl-upd bad" title="GitHub's API limit (shared by every tool on your account) was hit: background updates pause until then. What you click still goes through.">GitHub limit: paused until ${new Date(s.rateLimitedUntil).toTimeString().slice(0, 5)}</span>` : '')
       + `<span class="rl-upd">${s.loading ? 'loading…' : esc(upd)}</span>`
+      + (s.config ? pausePillHtml(s) : '')
       + (s.config ? `<button class="rl-appr-btn${apprOpen ? ' on' : ''}" data-act="apprMenu" title="Release approvers: releasing and merging prod needs two of them"><svg class="ic" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
         + `<span>${s.approvers && s.approvers.members ? s.approvers.members.length : ''}</span></button>` : '')
       + `<button data-act="refresh" class="${s.loading ? 'spin' : ''}" title="Refresh"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>`
@@ -1694,6 +1778,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
         + '</div>' : '')
       + '<div class="rl-body">';
     if (apprOpen && s.config) h += approversHtml(s);
+    if (pauseMenu && s.config) h += pausePopHtml(s);
     const g = s.grid;
     if (s.editing || !g || s.error || s.problems) {
       h += (!g && s.loading && !s.error && !s.problems && !s.editing) ? skeletonHtml() : setupHtml(s);
@@ -1745,7 +1830,9 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const act = activeRelease(state);
     const nx = act ? releaseNext(state, act) : null;
     badge.classList.toggle('live', !!act && !toSign.length && !failed.length);
-    badge.textContent = toSign.length ? `Releases · ${toSign.length} to sign` : act ? `${act.id.slice(5)} · ${nx.phase}` : 'Releases' + (failed.length ? ` · ${failed.length} failing` : '') + (running ? ` · ${running} deploying` : '');
+    const pz = state && window.ReleasesCore && pausedNow(state);
+    badge.classList.toggle('paused', !!pz && !failed.length && !toSign.length);
+    badge.textContent = (pz && !toSign.length && !act && !failed.length) ? 'Releases · paused' : toSign.length ? `Releases · ${toSign.length} to sign` : act ? `${act.id.slice(5)} · ${nx.phase}` : 'Releases' + (failed.length ? ` · ${failed.length} failing` : '') + (running ? ` · ${running} deploying` : '');
     badge.title = act && !toSign.length ? `Release ${act.id}: ${nx.phase}${nx.next ? ' · next: ' + nx.next : ''}` : toSign.length ? `Prod release waiting for your signature: ${toSign.map(t => t.label + ' #' + t.number).join(', ')}`
       : failed.length ? `Deploy failing: ${failed.join(', ')}` : "Releases — what's merged in each environment of each repo";
   }
