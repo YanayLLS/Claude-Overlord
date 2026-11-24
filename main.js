@@ -151,12 +151,12 @@ const prGate = require('./pr-gate');
 const { sessionSwitchKind } = require('./resume-core');
 const { interruptedBy } = require('./interrupt-core');
 const { promptKey, recordHasPrompt, linesHavePrompt } = require('./follow-core');
-const { applyBgRecord } = require('./bg-core');
+const { applyBgRecord, busyBgCount } = require('./bg-core');
 const { unsettledJobFor } = require('./daemon-jobs');
 const { applyAskRecord, liveTurnIn, dialogAtEnd } = require('./ask-core');
 const { themeOf, titleBarColors } = require('./theme-core');
 // 'waiting' only when at the prompt AND no background shell/agent is still going
-const shownStatus = (a) => (a.isWaiting && !a.bgTasks?.size ? 'waiting' : 'active');
+const shownStatus = (a) => (a.isWaiting && !busyBgCount(a.bgTasks) ? 'waiting' : 'active'); // background shells alone don't count: the CLI calls that turn done
 const { parseState } = require('./state-core');
 const { scanSessions, mergeRecovered, listSessions } = require('./recover-core');
 const { makeSender } = require('./send-queue');
@@ -700,7 +700,7 @@ function send(data) {
   if (data.type === 'stats') lastStatsSent.set(data.id, JSON.stringify(data.stats));
   // Status trail: each change of an agent's dot, with the code line that caused it — the
   // evidence for "why does this row show the wrong state" (see ~/.overlord/overlord.log).
-  if (data.type === 'status') { const a = agents.get(data.id); if (a) data.bg = a.bgTasks?.size || 0; } // background shells/agents running: the renderer's quiet-terminal check mustn't call it idle
+  if (data.type === 'status') { const a = agents.get(data.id); if (a) data.bg = busyBgCount(a.bgTasks); } // background shells/agents running: the renderer's quiet-terminal check mustn't call it idle
   if (data.type === 'status' && lastStatusSent.get(data.id) !== data.status) {
     const a = agents.get(data.id);
     flog(`status ${data.id} "${(a?.title || '').slice(0, 30)}" ${lastStatusSent.get(data.id) || '-'} -> ${data.status} tools=${a?.toolIds?.size ?? '?'} bg=${a?.bgTasks?.size ?? 0} at ${(new Error().stack.split('\n')[2] || '').trim().replace(/^at /, '')}`);
@@ -7383,7 +7383,7 @@ app.on('before-quit', () => {
   // keeps only the ones mid-turn, so their work finishes and they reattach next launch.
   if (!_restarting) {
     let busy = 0;
-    for (const [id, a] of agents) { const t = terminals.get(id); if (!t || !t.key) continue; if (shownStatus(a) === 'waiting') killPty(t); else busy++; } // background work keeps it alive too
+    for (const [id, a] of agents) { const t = terminals.get(id); if (!t || !t.key) continue; if (a.isWaiting && !a.bgTasks?.size) killPty(t); else busy++; } // background work (shells too: a dev server) keeps it alive
     // An update installs on this quit only if the pty host (Overlord.exe too) can go with it: nothing mid-turn
     // left in it, so stop it now (the installer waits ~1.3s before it looks). With agents mid-turn, their work
     // wins: the update installs on a later quit, or from the update button.

@@ -119,3 +119,14 @@ test('a finish notice written before its launch result does not leave the task r
   applyBgRecord(t, { type: 'user', toolUseResult: { success: true, message: 'Resuming agent a1', resumedAgentId: 'a1' } });
   assert.deepStrictEqual([...t], ['a1']);
 });
+
+test('a background shell (dev server) does not keep the agent working; a background agent does', () => {
+  const { busyBgCount } = require('./bg-core');
+  const t = new Set();
+  applyBgRecord(t, { type: 'user', toolUseResult: { backgroundTaskId: 'bw1' } });
+  assert.strictEqual(t.size, 1);
+  assert.strictEqual(busyBgCount(t), 0);
+  applyBgRecord(t, { type: 'user', toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'a9' } });
+  assert.strictEqual(busyBgCount(t), 1);
+  assert.strictEqual(busyBgCount(undefined), 0);
+});

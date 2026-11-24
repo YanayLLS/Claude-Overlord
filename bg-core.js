@@ -21,7 +21,7 @@ function applyBgRecord(tasks, r) {
     // A quick agent's "finished" notice can be written before its launch result (parallel launches
     // are written when the whole batch returns): that launch is of a task already over.
     const launch = (id) => { if (!tasks.endedEarly?.delete(id)) tasks.add(id); };
-    if (tur.backgroundTaskId) launch(tur.backgroundTaskId);
+    if (tur.backgroundTaskId) { launch(tur.backgroundTaskId); if (tasks.has(tur.backgroundTaskId)) (tasks.shells ||= new Set()).add(tur.backgroundTaskId); }
     // async Agent → agentId; a background Workflow run → taskId
     if (tur.status === 'async_launched' && (tur.agentId || tur.taskId)) launch(tur.agentId || tur.taskId);
     if (tur.resumedAgentId) tasks.add(tur.resumedAgentId); // SendMessage woke a finished agent
@@ -71,4 +71,13 @@ function applyBgRecord(tasks, r) {
   return tasks.size !== before;
 }
 
-module.exports = { applyBgRecord };
+// Background work that keeps the agent "working": agents, workflows, teammates. A background shell
+// (often a dev server that never ends) doesn't — the CLI shows the turn "done · 1 shell still running".
+function busyBgCount(tasks) {
+  if (!tasks) return 0;
+  let n = 0;
+  for (const id of tasks) if (!tasks.shells?.has(id)) n++;
+  return n;
+}
+
+module.exports = { applyBgRecord, busyBgCount };
