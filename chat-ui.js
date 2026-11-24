@@ -1042,9 +1042,8 @@
   }
   function pendingHtml(id, evs, busy) {
     const list = pending.get(id);
-    // /btw isn't queued: the CLI answers it at once in its own panel (shown as the terminal) and never writes it to the
-    // transcript, so its bubble would wait "Queued" forever.
-    if (list) for (let k = list.length - 1; k >= 0; k--) if (!list[k].held && /^\/btw\s/.test(list[k].text || '') && Date.now() - list[k].at > 1500) list.splice(k, 1);
+    // /btw, /model…: the CLI runs them at once, never queued (runsAtOnce), so their bubbles would wait "Queued" all turn.
+    if (list) for (let k = list.length - 1; k >= 0; k--) if (!list[k].held && runsAtOnce(list[k].text) && Date.now() - list[k].at > 1500) list.splice(k, 1);
     const rq = removedQ.get(id), undoRow = rq && Date.now() - rq.at < 10000 ? `<div class="msg note cli qremoved">Removed “${escH(String(rq.text || '').slice(0, 60))}” <button type="button" class="q-x undo" data-act="unremove">Undo</button></div>` : '';
     if (!list || !list.length) return undoRow + cliQueue(id, evs);
     // Each message sent from here becomes the next message of yours in the transcript, in the order sent, so they clear

@@ -380,3 +380,13 @@ test('the working line counts tokens written this turn off the transcript, each 
   assert.strictEqual(turnOutTokens([...evs, { type: 'bgdone', taskId: 'x' }, { type: 'text', u: { id: 'm3', o: 50 } }]), 50); // a wake-up starts a turn
   assert.strictEqual(turnOutTokens([]), 0);
 });
+
+test('a command the CLI runs at once mid-turn is not left waiting as queued', () => {
+  const { runsAtOnce } = require('./chat-core');
+  assert.ok(runsAtOnce('/model'));
+  assert.ok(runsAtOnce('/model claude-opus-5-5'));
+  assert.ok(runsAtOnce('/btw why?'));
+  assert.ok(!runsAtOnce('/improve the modal'));
+  assert.ok(!runsAtOnce('/modelling'));
+  assert.ok(!runsAtOnce('fix the /model bug'));
+});

@@ -519,4 +519,8 @@ function turnOutTokens(evs) {
   }
   return o;
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { turnOutTokens, bgEnded, compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };
+// A slash command the CLI runs the moment it's sent, even while the agent works: it never waits in the queue (/btw
+// answers in its own panel, /model switches and prints "Set model to …" under the prompt). Its transcript line comes
+// only at the turn's end, so a bubble waiting for it sat "Queued" all turn.
+function runsAtOnce(text) { return /^\/(btw|model|effort|fast|config|status|cost|context|usage|help|theme|vim)(\s|$)/.test(String(text || '').trim()); }
+if (typeof module !== 'undefined' && module.exports) module.exports = { runsAtOnce, turnOutTokens, bgEnded, compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };
