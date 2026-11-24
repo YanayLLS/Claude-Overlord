@@ -106,3 +106,16 @@ test('seen notices are capped, oldest first', () => {
   applyBgRecord(t, { type: 'user', message: { content: note('y', 'running') } });
   assert.strictEqual(t.size, 0);
 });
+
+test('a finish notice written before its launch result does not leave the task running', () => {
+  const t = new Set();
+  const done = note('a1', 'completed', '<summary>Agent "quick" finished</summary>\n');
+  applyBgRecord(t, { type: 'queue-operation', operation: 'enqueue', content: done });
+  applyBgRecord(t, { type: 'user', toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'a1' } });
+  applyBgRecord(t, { type: 'queue-operation', operation: 'remove', content: done });
+  applyBgRecord(t, { type: 'user', message: { content: done } });
+  assert.strictEqual(t.size, 0);
+  // resumed later: working again
+  applyBgRecord(t, { type: 'user', toolUseResult: { success: true, message: 'Resuming agent a1', resumedAgentId: 'a1' } });
+  assert.deepStrictEqual([...t], ['a1']);
+});

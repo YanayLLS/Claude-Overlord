@@ -18,9 +18,12 @@ function applyBgRecord(tasks, r) {
   const before = tasks.size;
   const tur = r.toolUseResult;
   if (tur && typeof tur === 'object') {
-    if (tur.backgroundTaskId) tasks.add(tur.backgroundTaskId);
+    // A quick agent's "finished" notice can be written before its launch result (parallel launches
+    // are written when the whole batch returns): that launch is of a task already over.
+    const launch = (id) => { if (!tasks.endedEarly?.delete(id)) tasks.add(id); };
+    if (tur.backgroundTaskId) launch(tur.backgroundTaskId);
     // async Agent → agentId; a background Workflow run → taskId
-    if (tur.status === 'async_launched' && (tur.agentId || tur.taskId)) tasks.add(tur.agentId || tur.taskId);
+    if (tur.status === 'async_launched' && (tur.agentId || tur.taskId)) launch(tur.agentId || tur.taskId);
     if (tur.resumedAgentId) tasks.add(tur.resumedAgentId); // SendMessage woke a finished agent
     // Agent-team teammate: working from spawn, and again whenever the lead messages it
     if (tur.status === 'teammate_spawned' && tur.name) tasks.add('tm:' + tur.name);
@@ -47,7 +50,14 @@ function applyBgRecord(tasks, r) {
       if (seen.size > SEEN_NOTICES_MAX) seen.delete(seen.values().next().value); // oldest first: Set keeps insertion order
       // An agent that stopped with its own background work still going will notify again
       const pending = status === 'running' || NOTE_STILL_RUNNING.test(block);
-      for (const id of ids) { if (pending) tasks.add(id); else tasks.delete(id); }
+      for (const id of ids) {
+        if (pending) tasks.add(id);
+        else if (!tasks.delete(id)) {
+          const early = tasks.endedEarly || (tasks.endedEarly = new Set());
+          early.add(id);
+          if (early.size > SEEN_NOTICES_MAX) early.delete(early.values().next().value);
+        }
+      }
     }
   }
   // A teammate's turn ended: it's done (its own shells' completions never reach its transcript,
