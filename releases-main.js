@@ -1916,7 +1916,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       const row = { ...r, ...h };
       row.status = rowStatus(row);
       cur.rows[i] = row;
-      return full || (row.status === 'blocked' && !row.closed && h.headSha && r.headSha && h.headSha !== r.headSha) ? [row, i] : null;
+      // a conflicting back-merge lives on its own PR: the release PR's head never moves when it's resolved, so read it again
+      const backBlocked = row.backMerge && row.backMerge.conflict;
+      return full || (row.status === 'blocked' && !row.closed && (backBlocked || (h.headSha && r.headSha && h.headSha !== r.headSha))) ? [row, i] : null;
     }));
     const deep = light.filter(Boolean);
     if (deep.length) (await recheckRelease(ghJson, deep.map(([r]) => ({ ...r, members: members(r) })), { writeJson: writeTmp })).forEach((row, k) => { cur.rows[deep[k][1]] = row; });
@@ -1939,12 +1941,13 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const runKey = String(run.startedAt), tries = state.releaseFixTries || {};
     const rows = releaseFix.rowsToFix(run.rows, runKey, tries);
     if (!rows.length) return;
-    const cwd = await configCheckout();
-    const file = path.join(runsDir(), `release-fix-${runKey}-${Date.now()}.md`);
-    fs.writeFileSync(file, releaseFix.briefFor(rows, { snapshotRef, workRoot: path.dirname(cwd).replace(/\\/g, '/') }));
+    // count the try before the await: two re-checks landing together started two agents on the same blocker
     const next = { ...tries };
     for (const r of rows) next[`${runKey}|${r.repo}`] = (next[`${runKey}|${r.repo}`] || 0) + 1;
     push({ releaseFixTries: next }); persist();
+    const cwd = await configCheckout();
+    const file = path.join(runsDir(), `release-fix-${runKey}-${Date.now()}.md`);
+    fs.writeFileSync(file, releaseFix.briefFor(rows, { snapshotRef, workRoot: path.dirname(cwd).replace(/\\/g, '/') }));
     startAgent(cwd, 'Read and follow ' + file.replace(/\\/g, '/'));
     send({ type: 'toast', text: `Fixing ${rows.map(r => r.label || r.repo).join(', ')} before signing` });
   }
