@@ -540,7 +540,7 @@
   // box changing size (the reply box grows a line as you type, the window) holds it too.
   { const c = document.getElementById('conversation');
     for (const t of ['wheel', 'touchmove', 'pointerdown', 'keydown']) c.addEventListener(t, () => { c._hand = Date.now(); }, { passive: true });
-    c.addEventListener('scroll', () => { if (byHand(c)) { c._sent = false; c._settle = 0; holdPlace(c); c._probe = null; } else if (c.scrollTop !== c._set) watchMove(c, 'clamp'); c._set = c.scrollTop; }, { passive: true });
+    c.addEventListener('scroll', () => { if (byHand(c)) { c._sent = false; c._settle = 0; holdPlace(c); } c._set = c.scrollTop; }, { passive: true });
     new ResizeObserver(() => keep(c)).observe(c);
   }
   document.getElementById('conversation').addEventListener('input', (e) => { if (e.target.matches && e.target.matches('.edit-ta')) { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; } });
@@ -1339,23 +1339,6 @@
     if (Math.abs(el.scrollTop - want) >= 0.5) el.scrollTop = want; // no write when nothing moved: any write cancels a wheel scroll in flight
     if (cut || el._settle > Date.now()) holdPlace(el);
     el._set = el.scrollTop; // the scroll event this write fires is ours, not yours
-    watchMove(el, cut ? 'cut' : 'keep');
-  }
-  // ponytail: diagnostic. The block at the view's top moving with no wheel/key/touch from you is the bug "the chat moves
-  // while I read": it's logged to overlord.log (what moved, by how much, the held anchor) so the cause shows. Drop once fixed.
-  function viewTop(el) {
-    const top = el.getBoundingClientRect().top, th = el.querySelector(':scope > .thread'); if (!th) return null;
-    const k = firstVisible(th, top), n = k >= 0 ? th.children[k] : [...(el.querySelector(':scope > .tail')?.children || [])].find(x => x.getBoundingClientRect().bottom > top);
-    return n ? { n, k: blockKey(n), y: laidTop(n) - top } : null;
-  }
-  function watchMove(el, why) {
-    const p = el._probe; el._probe = viewTop(el);
-    if (!p || el._settle > Date.now() || Date.now() - (el._hand || 0) < 1500) return;
-    const n = p.n.isConnected ? p.n : p.k && [...el.querySelector(':scope > .thread').children].find(x => blockKey(x) === p.k); if (!n) return;
-    const d = Math.round(laidTop(n) - el.getBoundingClientRect().top - p.y); if (Math.abs(d) < 2) return;
-    const m = Math.floor(Date.now() / 60000); if (el._logM !== m) { el._logM = m; el._logN = 0; } if (++el._logN > 20) return;
-    const anc = el._anc && el._anc.i, found = !!(anc && [...el.querySelector(':scope > .thread').children].some(x => blockKey(x) === anc));
-    api.send({ type: 'perfLog', text: `chat-move ${why} d=${d}px top=${n.className.split(' ').slice(0, 2).join('.')}${n.closest('.tail') ? '(tail)' : ''}${n === p.n ? '' : '(redrawn)'} "${n.textContent.trim().slice(0, 30)}" st=${Math.round(el.scrollTop)} sh=${el.scrollHeight} ch=${el.clientHeight} room=${el.querySelector(':scope > .room')?.offsetHeight} pin=${!!el._pinMine} anc=${anc ? (found ? 'ok' : 'LOST') + ':' + anc.slice(0, 50) : 'none'}` });
   }
   const placeRO = new ResizeObserver(() => keep(document.getElementById('conversation'))); // late growth: markdown, rows, diagrams, blocks getting their real height
   // The reply still being written, off the agent's terminal screen (chat-core.js liveReply), until the transcript has it.
