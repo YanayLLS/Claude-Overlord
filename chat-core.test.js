@@ -367,3 +367,16 @@ test('a stopped background shell is over: TaskStop writes no task-notification',
   assert.deepStrictEqual([...bgEnded(evs, doneBy)].sort(), ['b1', 'b3']);
   assert.strictEqual(bgEnded([{ type: 'tool', name: 'TaskStop', toolId: 'x' }], new Map([['x', { text: 'No task found', err: true }]])).size, 0);
 });
+
+test('the working line counts tokens written this turn off the transcript, each reply once', () => {
+  const { turnOutTokens } = require('./chat-core');
+  const evs = [
+    { type: 'prompt', text: 'old' }, { type: 'text', u: { id: 'm0', o: 900 } },
+    { type: 'prompt', text: 'fix it' },
+    { type: 'text', u: { id: 'm1', o: 1200 } }, { type: 'tool', u: { id: 'm1', o: 1200 } }, // same reply, two records
+    { type: 'tool', u: { id: 'm2', o: 2600 } },
+  ];
+  assert.strictEqual(turnOutTokens(evs), 3800);
+  assert.strictEqual(turnOutTokens([...evs, { type: 'bgdone', taskId: 'x' }, { type: 'text', u: { id: 'm3', o: 50 } }]), 50); // a wake-up starts a turn
+  assert.strictEqual(turnOutTokens([]), 0);
+});

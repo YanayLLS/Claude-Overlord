@@ -509,4 +509,14 @@ function compactRun(evs, i) {
   for (let j = i + 1; j < evs.length && (evs[j].type === 'note' || evs[j].type === 'mode'); j++) if (evs[j].type === 'note') (evs[j].kind === 'sub' ? fold : keep).push(j);
   return { fold, keep };
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = { bgEnded, compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };
+// Tokens written so far this turn (since the last prompt or background-task wake-up), off the transcript: the CLI's
+// "↓ 3.8k tokens". A reply's usage repeats on each of its records, so each reply counts once.
+function turnOutTokens(evs) {
+  const seen = new Set(); let o = 0;
+  for (let k = evs.length - 1; k >= 0; k--) {
+    const e = evs[k]; if (e.type === 'prompt' || e.type === 'bgdone') break;
+    if (e.u && !(e.u.id && seen.has(e.u.id))) { if (e.u.id) seen.add(e.u.id); o += e.u.o || 0; }
+  }
+  return o;
+}
+if (typeof module !== 'undefined' && module.exports) module.exports = { turnOutTokens, bgEnded, compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };

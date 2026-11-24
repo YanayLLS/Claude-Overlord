@@ -1005,7 +1005,7 @@
       // The CLI's own playful verb ("Cogitating…") when it has one; elapsed; the Esc hint. The call in flight already
       // shows as the running row just above, so it isn't repeated here.
       // Elapsed and tokens written this turn, like the CLI's "(1m 4s · ↓ 3.2k tokens · esc to interrupt)".
-      const tok = a.stats && a._tok0 != null ? (a.stats.outTok || 0) - a._tok0 : 0;
+      const tok = turnOutTokens(evs); // off the transcript: right after a restart or opening the chat mid-turn too
       const toolRuns = evs.some(e => e.type === 'tool' && e.toolId && !doneBy.get(e.toolId) && e.name !== 'AskUserQuestion' && e.name !== 'ExitPlanMode'); // a running call's row carries its own clock: one clock on screen
       const meta = [a.activeAt && !toolRuns ? dur(now - a.activeAt) : '', tok > 0 ? '↓ ' + (tok >= 1000 ? (tok / 1000).toFixed(1) + 'k' : tok) + ' tokens' : ''].filter(Boolean).map(escH).join(' · ');
       if (toolRuns && !a.spinnerText) return h + '<div class="live-reply" hidden></div>'; // the running call's row is the live indicator
@@ -1403,7 +1403,6 @@
     if (!evs) list = ['<div class="chat-skel" aria-label="Loading"><i class="sk-u"></i><i class="sk-t"></i><i class="sk-t s"></i><i class="sk-p"></i><i class="sk-p m"></i><i class="sk-p s"></i></div>']; // the thread's shape while it loads, not a spinner in an empty column
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
     else { holdFold = el.dataset.for === String(id) && el.scrollTop + el.clientHeight < el.scrollHeight - (el.querySelector(':scope > .room')?.offsetHeight || 0) - 40 ? id : null; list = blocks(evs, doneBy, a.cwd, id); }
-    if (busy && !prevBusy.get(id)) a._tok0 = (a.stats && a.stats.outTok) || 0; // tokens are counted from the turn's start
     dockHtml = ''; dockCount = { agents: 0, shells: 0 };
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
