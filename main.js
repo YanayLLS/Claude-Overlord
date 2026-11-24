@@ -1707,7 +1707,7 @@ function restoreAgents(state) {
       for (const { id } of fresh) { const ag = agents.get(id); if (ag) ag._sessionCleaned = true; }
     })();
     sweep.then(sweepDone, sweepDone);
-    // Cut off by the crash / restart (their Claude didn't survive): offer to tell them and carry on.
+    // Cut off by the crash / restart (their Claude didn't survive): they carry on by themselves.
     const cut = [];
     for (const { id } of fresh) {
       const ag = agents.get(id);
@@ -1716,9 +1716,8 @@ function restoreAgents(state) {
       if (why) cut.push({ id, why });
     }
     let updated = false; try { updated = Date.now() - fs.statSync(UPDATE_MARK).mtimeMs < 30 * 60e3; fs.unlinkSync(UPDATE_MARK); } catch {}
-    // After an update the user chose the restart: no banner, the prewarm spawn's ready detector sends the nudge.
-    if (updated) for (const { id } of cut) agents.get(id)._crashNudge = cutOffNudge('Overlord was updated');
-    else if (cut.length) send({ type: 'interrupted', agents: cut });
+    // No asking: the prewarm spawn's ready detector sends the nudge, so a PC restart picks the work back up unattended.
+    for (const { id } of cut) agents.get(id)._crashNudge = cutOffNudge(updated ? 'Overlord was updated' : 'Overlord or the PC went down');
     await sweep;
     for (const { id, entry } of agentEntries) {
       const agent = agents.get(id);
@@ -1876,15 +1875,6 @@ function handleTermExit(id, exitCode) {
 
 
 const cutOffNudge = (cause) => `${cause} and your session was cut off, so it was resumed. Your running tools, background shells and subagents were killed — check what finished, re-run what did not, and continue from where you left off.`;
-
-function continueInterrupted(ids) {
-  for (const id of ids) {
-    const a = agents.get(id);
-    if (!a || a.archived) continue;
-    a._crashNudge = cutOffNudge('Overlord or the PC went down');
-    if (a.claudeReady) sendCrashNudge(id); else spawnTerminal(id); // not up yet → the ready detector sends it
-  }
-}
 
 function sendCrashNudge(id) {
   const a = agents.get(id), t = terminals.get(id);
@@ -5168,7 +5158,6 @@ function handleIpc(msg) {
   if (docs && docs.handle(msg)) return;
   if (termPane && /^tp:/.test(msg.type || '')) return termPane.handle(msg);
   switch (msg.type) {
-    case 'continueInterrupted': continueInterrupted(msg.ids || []); break;
     case 'createAgent': createAgent(msg.cwd, msg.prompt, undefined, !!msg.prefill); break;
     case 'fixChat': fixChat(msg).catch(e => { flog('fixChat failed:', e); send({ type: 'toast', text: 'Fix chat failed: ' + (e.message || 'error') }); }); break;
     case 'listBranches': {

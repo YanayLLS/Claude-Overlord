@@ -1179,12 +1179,6 @@ button:focus-visible { outline-offset:0; }
 
 
 /* Toast */
-#interrupt-bar { pointer-events:auto; color:var(--tip-fg); display:flex; align-items:center; gap:10px; bottom:72px; padding:6px 6px 6px 16px; font-size:12.5px; white-space:nowrap; }
-#interrupt-bar .ib-ic { color:var(--yellow); }
-#interrupt-bar .ib-go { font:inherit; font-weight:500; background:var(--accent); color:var(--on-accent); border:none; border-radius:999px; padding:5px 14px; margin-left:4px; cursor:pointer; }
-#interrupt-bar .ib-go:hover { filter:brightness(1.12); }
-#interrupt-bar .ib-x { font:inherit; font-size:16px; line-height:1; width:26px; height:26px; display:grid; place-items:center; background:none; border:none; border-radius:50%; color:var(--dim); cursor:pointer; }
-#interrupt-bar .ib-x:hover { background:var(--hover-strong); color:var(--tip-fg); }
 .toast {
   position:fixed; bottom:36px; left:50%; transform:translateX(-50%) translateY(12px);
   background:var(--bg3); color:var(--green); border:1px solid rgba(166,227,161,.3);
@@ -4820,7 +4814,6 @@ function handleAgentMsg(msg) {
     case 'toolsClear': { const a = agents.get(msg.id); if (a) { a.tools.clear(); a.subTools.clear(); scheduleRender(); } break; }
     case 'subToolStart': { const a = agents.get(msg.id); if (a) { let subs = a.subTools.get(msg.parentToolId); if (!subs) { subs = new Map(); a.subTools.set(msg.parentToolId, subs); } subs.set(msg.toolId, { status: msg.status, name: msg.name, done: false }); scheduleRender(); } break; }
     case 'subToolDone': { const a = agents.get(msg.id); if (a) { const subs = a.subTools.get(msg.parentToolId); if (subs) { const t = subs.get(msg.toolId); if (t) t.done = true; } scheduleRender(); } break; }
-    case 'interrupted': showInterrupted(msg.agents); break;
     case 'crashed': { const a = agents.get(msg.id); if (a) { a.crashed = msg.fatal ? 'fatal' : 'resuming'; a.crashCount = msg.crashCount; a.crashMax = msg.maxRetries; if (msg.fatal) markDead(msg.id, `Claude crashed — ${msg.maxRetries} auto-resume attempts failed.`); else { a.dead = null; if (selectedId === msg.id) updateDeadOverlay(); } scheduleRender(); } break; }
     case 'agentFeaturePlan': if (_a2f && _a2f.id === msg.id) { _a2f.plan = msg.plan; _a2f.busy = !!msg.busy; _a2f.error = msg.error; a2fRender(); } break;
     case 'agentCwd': { const a = agents.get(msg.id); if (a) { a.cwd = msg.cwd; scheduleRender(); } break; } // converted to a feature: its card moves there
@@ -5491,19 +5484,6 @@ function showImagePop(src, ev, tag) {
   pop.style.display = 'block';
 }
 function hideImagePop() { for (const i of ['image-pop', 'image-tag-hl']) { const e = document.getElementById(i); if (e) e.style.display = 'none'; } }
-
-// Agents a crash / PC restart cut off mid-task: one click tells them and they carry on.
-function showInterrupted(list) {
-  document.getElementById('interrupt-bar')?.remove();
-  const el = document.createElement('div');
-  el.id = 'interrupt-bar'; el.className = 'toast show';
-  const names = list.map(x => `${agents.get(x.id)?.agentName || x.id} — ${x.why}`).join('\n');
-  el.innerHTML = `<span class="ib-ic">⚠</span><span class="ib-txt">${list.length} agent${list.length > 1 ? 's' : ''} cut off</span><button class="ib-go">Continue all</button><button class="ib-x" aria-label="Dismiss">&times;</button>`;
-  el.querySelector('.ib-txt').title = names;
-  el.querySelector('.ib-go').onclick = () => { window.api.send({ type: 'continueInterrupted', ids: list.map(x => x.id) }); el.remove(); showToast(`Told ${list.length} to continue`); };
-  el.querySelector('.ib-x').onclick = () => el.remove();
-  document.body.appendChild(el);
-}
 
 // Settings → Local API. The token never reaches this page (main copies it, see apiCopy); only its last 4 characters.
 let apiFile = '';
