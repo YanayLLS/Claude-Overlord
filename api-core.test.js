@@ -117,6 +117,15 @@ test('pr_list / pr_merge / pr_approve / pr_fix / pr_hide reach the host; a host 
   assert.deepStrictEqual(calls, [['list', { mine: false }], ['hide', { pr: 'o/r#4', how: 'mute' }]]);
 });
 
+test('release_pause reaches the host; a refusal is 409', async () => {
+  const calls = [];
+  const api = createApi(fakeHost({ releasePause: async (on, until, note) => { calls.push([on, until, note]); if (note === 'x') throw new Error('only release approvers can pause releases'); return on ? { by: 'me', until } : null; } }));
+  assert.deepStrictEqual(await api.call('release_pause', { on: true, until: '2026-11-25T16:00:00Z', note: 'n' }), { pause: { by: 'me', until: '2026-11-25T16:00:00Z' } });
+  assert.deepStrictEqual(await api.call('release_pause', { on: false }), { pause: null });
+  await assert.rejects(api.call('release_pause', { on: true, note: 'x' }), { status: 409 });
+  assert.deepStrictEqual(calls[1], [false, undefined, undefined]);
+});
+
 test('account_list / account_switch reach the host', async () => {
   const calls = [];
   const api = createApi(fakeHost({

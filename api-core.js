@@ -56,6 +56,7 @@ const EVENTS = [
   ['sendFailed', 'agent.send_failed', 'A message for an agent could not be delivered. Fields: agentId, text.', (m) => ({ agentId: m.id, text: m.text })],
   ['agentCwd', 'agent.moved', 'An agent moved to another folder (converted to a feature: it now works in the feature\'s worktree). Fields: agentId, cwd, feature.', (m) => ({ agentId: m.id, cwd: m.cwd, feature: m.feature || null })],
   ['featureRepoAdded', 'feature.repo_added', 'An agent in a feature edited a repo the feature did not have yet, so that repo got the feature\'s worktree and joined it. Fields: agentId, feature, repo, path, branch.', (m) => ({ agentId: m.id, feature: m.feature, repo: m.repo, path: m.path, branch: m.branch })],
+  ['releasePause', 'release.paused', 'Prod releases were paused (pause set) or resumed (pause null), by you or a teammate. Fields: pause ({ by, at, until, note } or null).', (m) => ({ pause: m.pause || null })],
   ['chatMsg', 'chat.message', 'A peer-chat message was sent or received. Fields: conversation ({type: peer | group, id}), group, message.', (m) => ({ conversation: m.key, group: m.groupName, message: m.msg })],
 ];
 const EVENT_BY_SOURCE = new Map(EVENTS.map(([src, type, , map]) => [src, { type, map }]));
@@ -112,6 +113,7 @@ const TOOLS = [
   ['pr_merge', 'Merge a PR now, as the row\'s Merge button. The release gate (prod PRs need two signatures) still applies.', obj({ pr: S('PR url or owner/repo#number.') }, ['pr'])],
   ['pr_approve', 'Approve a PR as you on GitHub, as the row\'s Approve button.', obj({ pr: S('PR url or owner/repo#number.') }, ['pr'])],
   ['pr_fix', 'Send an agent to fix a PR\'s failing checks or conflicts, as the row\'s Fix button. If an agent already holds it, that one is returned.', obj({ pr: S('PR url or owner/repo#number.') }, ['pr'])],
+  ['release_pause', 'Pause prod releases for the whole team (no release opens by itself, none merges) until a time, or resume them. Release approvers only.', obj({ on: { type: 'boolean', description: 'true pauses, false resumes.' }, until: S('When the pause ends (ISO time). Default 18:00 the next day.'), note: S('Why, shown to the team.') }, ['on'])],
   ['pr_hide', 'Archive, mute or snooze a PR in Overlord (GitHub is untouched); undo shows it again.', obj({ pr: S('PR url or owner/repo#number.'), how: S('archive | mute | snooze', { enum: ['archive', 'mute', 'snooze'] }), undo: { type: 'boolean', description: 'Show it again.' }, hours: N('Snooze length. Default 24.') }, ['pr', 'how'])],
   ['webhook_list', 'Registered webhooks (no secrets), with delivery failure counts.', obj({})],
   ['webhook_remove', 'Remove a webhook.', obj({ id: S('Webhook id.') }, ['id'])],
@@ -321,6 +323,7 @@ function createApi(host) {
     pr_approve: (x) => prDone(host.prApprove(x.pr)),
     pr_fix: (x) => prDone(host.prFix(x.pr)),
     pr_hide: (x) => prDone(host.prHide(x)),
+    release_pause: async (x) => ({ pause: await host.releasePause(x.on, x.until, x.note).catch(e => { throw conflict(e.message); }) }),
     webhook_list: () => ({ webhooks: hooks.map(({ secret, ...h }) => h) }),
     webhook_remove: (x) => { const n = hooks.length; hooks = hooks.filter(h => h.id !== x.id); if (hooks.length === n) throw missing('no such webhook'); queues.delete(x.id); persistHooks(); return { ok: true }; },
   };

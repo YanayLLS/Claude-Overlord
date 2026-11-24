@@ -24,7 +24,7 @@ const { runProgress, releaseEtaMs } = require('./deploy-eta');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
-const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas, releasePeriods, activeHolds, HOLD_MS } = require('./releases-core');
+const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas, releasePeriods, activeHolds, HOLD_MS, pauseActive, pauseDefaultUntil } = require('./releases-core');
 const { deployState, deployJobsState, deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 // Polling cadence (full refresh, deploy runs, sign ping, stray scan) lives in releasePeriods: slower while the modal is closed
@@ -385,6 +385,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (!state.approvers || !state.approvers.isApprover) return;
     const key = `${c.nightlyId}:${c.evidence.runId}`;
     if (state.rcAutoOpened === key) return;
+    // releases paused: this candidate is skipped for good (not opened later, after the pause ends)
+    if (await livePause()) { push({ rcAutoOpened: key }); persist(); return; }
     if (state.releaseRun && state.releaseRun.running) return;
     const prodRels = ((state.history && state.history.items) || []).filter(m => (m.env || 'prod') === 'prod');
     if (prodRels.some(m => m.status === 'pending')) return;
@@ -693,6 +695,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   async function loadHolds() {
     const [r, who] = await Promise.all([history.holds(), whoAmI()]);
     if (!r.error && (JSON.stringify(r.data) !== JSON.stringify(state.holds || []) || state.holdsMe !== who.github)) push({ holds: r.data, holdsMe: who.github || null });
+    const p = await history.pause();
+    if (!p.error) pauseSeen(p.data);
   }
   const liveHolds = (list) => activeHolds(list, state.config, state.results && state.results.deploys);
   async function setHold(repo, branch, note) {
@@ -712,6 +716,40 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const res = await history.updateHolds(list => liveHolds(list).filter(x => x.id !== id), `hold lifted: ${id}`);
     if (res.error) return send({ type: 'toast', text: 'Lift failed: ' + res.error });
     push({ holds: res.data });
+  }
+
+  // ── Release pause (releases-core pauseActive): no prod release opens by itself or merges until it ends ──
+  // read fresh before acting (fail closed: an unreadable pause.json counts as paused only if we last saw one live)
+  async function livePause() {
+    const r = await history.pause();
+    if (!r.error) pauseSeen(r.data);
+    return pauseActive(state.relPause) ? state.relPause : null;
+  }
+  const pauseText = (p) => `releases paused by @${p.by} until ${new Date(p.until).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}${p.note ? ' (' + p.note + ')' : ''}`;
+  async function setPause(until, note) {
+    if (!state.approvers || !state.approvers.isApprover) await loadApprovers().catch(() => {});
+    if (!state.approvers || !state.approvers.isApprover) throw new Error('only release approvers can pause releases');
+    const end = until ? Date.parse(until) : Date.parse(pauseDefaultUntil());
+    if (!(end > Date.now())) throw new Error('the pause must end in the future');
+    const who = await whoAmI();
+    const p = { by: who.github || 'someone', at: new Date().toISOString(), until: new Date(end).toISOString(), note: String(note || '').slice(0, 140) };
+    const res = await history.setPause(p, `releases paused by @${p.by} until ${p.until}${p.note ? ' · ' + p.note : ''}`);
+    if (res.error) throw new Error(res.error);
+    pauseSeen(p);
+    return p;
+  }
+  async function liftPause() {
+    const who = await whoAmI();
+    const res = await history.setPause(null, `releases resumed by @${who.github || 'someone'}`);
+    if (res.error) throw new Error(res.error);
+    pauseSeen(null);
+  }
+  // a change (here or a teammate's, seen on a poll) → the releases state + a releasePause message (API event release.paused)
+  function pauseSeen(p) {
+    p = p || null;
+    if (JSON.stringify(p) === JSON.stringify(state.relPause || null)) return;
+    push({ relPause: p });
+    send({ type: 'releasePause', pause: p });
   }
 
   async function whoAmI() { if (!me || !me.github) me = await whoami().catch(() => ({ github: null, clickup: null })); return me; }
@@ -783,6 +821,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const back = cfgSteps.find(p => p.repo.toLowerCase() === m[1].toLowerCase() && p.source === pr.data.base.ref && p.target === pr.data.head.ref);
     if (back) return { ok: true, warn: `Back-merge into ${back.source}: the open ${back.target} release PR takes these commits too` };
     if (!prodStep(m[1], pr.data.base.ref, pr.data.head.ref)) return { ok: true }; // not a prod release PR
+    const p = memo && memo.has('pause') ? memo.get('pause') : await livePause();
+    if (memo) memo.set('pause', p);
+    if (p) return { ok: false, reason: pauseText(p) };
     // a standalone repo (a side product: back-office): its own PRs into prod need one teammate's approval, not a
     // signed release; as part of a product release (it carries a release id) the release's signatures apply
     if (standaloneRepo(m[1]) && !releaseIdOf(pr.data.body)) {
@@ -2041,6 +2082,8 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesRcRelease': releaseRc().catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
+      case 'relPauseSet': setPause(msg.until || null, msg.note).catch(e => send({ type: 'toast', text: 'Pause failed: ' + e.message })); return true;
+      case 'relPauseLift': liftPause().catch(e => send({ type: 'toast', text: 'Resume failed: ' + e.message })); return true;
       case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;
       // the picker's branch boxes: a repo's branches (cached for the session)
       case 'releasesBranches': branchesOf(msg.repo).catch(() => {}); return true;
@@ -2195,11 +2238,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
         candidate: c.level ? { level: c.level, headline: c.headline, released: !!c.released, run: c.evidence && c.evidence.runUrl, shas: Object.fromEntries(Object.entries(c.shas || {}).map(([r, v]) => [r, v.sha.slice(0, 9)])) } : (c.error ? { error: c.error } : null),
         releases: items.map(m => ({ id: m.id, env: m.env || 'prod', status: m.status, repos: m.repos.map(r => ({ label: r.label, repo: r.repo, pr: r.pr && r.pr.number, merged: !!r.mergeSha, closed: !!r.closed,
           signers: r.signers || [], deploy: r.deploy ? { state: r.deploy.state, url: r.deploy.url || null } : null, backMerge: r.backMerge || null })) })),
+        paused: pauseActive(state.relPause) ? state.relPause : null,
         releaseAll: state.releaseAll ? { running: !!state.releaseAll.running, id: state.releaseAll.id, status: state.releaseAll.status, detail: state.releaseAll.detail, wave: state.releaseAll.wave, waves: state.releaseAll.waves } : null,
       };
     },
     open: () => releaseRc(),
     sign: () => signRelease(),
+    // on: pause prod releases until `until` (ISO; default 18:00 the next day); off: resume
+    pause: (on, until, note) => (on ? setPause(until, note) : liftPause().then(() => null)),
     all: (id) => releaseAll(id || null),
     // re-run every failed deploy of a release (a full re-run: a startup failure has no jobs to re-run)
     async rerunFailed(id) {

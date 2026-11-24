@@ -443,27 +443,30 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
   }
 
   // holds.json: "don't merge into <branch> for now" notices, shared by the team ([{ id, repo, branch, by, sha, at, until, note }])
-  const HOLDS = 'holds.json';
-  async function readHolds() {
-    const r = await ghJson(['api', `repos/${repoOf()}/contents/${HOLDS}?ref=main`]);
-    if (apiErr(r)) return /404|empty/i.test(apiErr(r)) ? { sha: null, data: [] } : { error: apiErr(r) };
-    try { return { sha: r.data.sha, data: JSON.parse(Buffer.from(r.data.content, 'base64').toString('utf8')) }; } catch { return { sha: r.data.sha, data: [] }; }
+  // pause.json: "no prod releases until <until>", shared by the team ({ by, at, until, note } or null)
+  async function readJson(file, empty) {
+    const r = await ghJson(['api', `repos/${repoOf()}/contents/${file}?ref=main`]);
+    if (apiErr(r)) return /404|empty/i.test(apiErr(r)) ? { sha: null, data: empty } : { error: apiErr(r) };
+    try { return { sha: r.data.sha, data: JSON.parse(Buffer.from(r.data.content, 'base64').toString('utf8')) }; } catch { return { sha: r.data.sha, data: empty }; }
   }
-  async function listHolds() { return repoOf() ? readHolds() : { data: [] }; }
+  const listHolds = () => (repoOf() ? readJson('holds.json', []) : { data: [] });
+  const readPause = () => (repoOf() ? readJson('pause.json', null) : { data: null });
   // edit(list) → the new list; retried when a teammate wrote in between
-  async function updateHolds(edit, message) {
+  const updateHolds = (edit, message) => updateJson('holds.json', [], (d) => edit(Array.isArray(d) ? d : []), message);
+  const setPause = (pause, message) => updateJson('pause.json', null, () => pause, message);
+  async function updateJson(file, empty, edit, message) {
     if (!repoOf()) return { error: 'no release-manifests repo' };
     for (let attempt = 0; attempt < 3; attempt++) {
-      const cur = await readHolds();
+      const cur = await readJson(file, empty);
       if (cur.error) return cur;
-      const data = edit(Array.isArray(cur.data) ? cur.data : []);
-      const r = await ghJson(['api', '-X', 'PUT', `repos/${repoOf()}/contents/${HOLDS}`, '--input', writeTmp({ message, branch: 'main',
+      const data = edit(cur.data);
+      const r = await ghJson(['api', '-X', 'PUT', `repos/${repoOf()}/contents/${file}`, '--input', writeTmp({ message, branch: 'main',
         ...(cur.sha ? { sha: cur.sha } : {}), content: Buffer.from(JSON.stringify(data, null, 2) + '\n').toString('base64') })]);
       const e = apiErr(r);
       if (!e) return { data };
       if (!/409|422|does not match/i.test(e)) return { error: e };
     }
-    return { error: 'holds.json kept changing: try again' };
+    return { error: `${file} kept changing: try again` };
   }
 
   // A run's findings per prod PR, into its pending manifest (only what changed is written)
@@ -526,7 +529,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     }
   }
 
-  return { recordMerged, load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, holds: listHolds, updateHolds, recordHealth, markCancelled, markSigned };
+  return { recordMerged, load, recordRun, reconcile, rollback, importPast, confirmed, confirm, running, setRunning, holds: listHolds, updateHolds, pause: readPause, setPause, recordHealth, markCancelled, markSigned };
 };
 
 module.exports.shippedLater = shippedLater;

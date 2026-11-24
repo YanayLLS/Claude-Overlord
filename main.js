@@ -6257,6 +6257,7 @@ function apiHost() {
     featureFromWorktree: (p, name) => featureFromWorktree(p, name).catch(e => { throw new ApiError(400, e.message); }),
     prAutoMerge: ({ urls, on }) => ({ urls: setPrAutoMerge(urls || prAutoMergeable((settings.prCache || {}).prs).map(p => p.url), on) }),
     prList: (o) => prClaimsApi.list(o), prMerge: (pr) => prClaimsApi.merge(pr), prApprove: (pr) => prClaimsApi.approve(pr),
+    releasePause: (on, until, note) => releases.agentApi.pause(on, until, note),
     prFix: (pr) => prClaimsApi.fix(pr), prHide: ({ pr, how, undo, hours }) => prClaimsApi.hide(pr, how, undo, hours),
     accountList: () => { const d = loadAccounts(); return { main: d.activeLabel || null, accounts: d.accounts.map(x => ({ label: x.label, email: x.email || null })) }; },
     agentAccount: (id, label) => { if (!findAccount(loadAccounts(), label)) throw new ApiError(404, `no saved login ${label}`); handleIpc({ type: 'setAgentAccount', id, label }); return { account: agents.get(id).account || null }; },

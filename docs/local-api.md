@@ -101,6 +101,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `pr_approve` | `pr` | `{ approved }`. Approves on GitHub as the user; 409 when GitHub refuses |
 | `pr_fix` | `pr` | `{ agentId, agent }`: the row's Fix, an agent that pushes fixes until checks are green. If one already holds the PR, that one |
 | `pr_hide` | `pr`, `how` (`archive` / `mute` / `snooze`), `undo?`, `hours?` (snooze, default 24) | `{ url, hidden }`. In Overlord only; GitHub is untouched |
+| `release_pause` | `on`, `until?` (ISO, default 18:00 the next day), `note?` | `{ pause }` (`{ by, at, until, note }`, or `null` when resumed). Pauses prod releases for the whole team: no release opens by itself, none merges (signing doesn't start one). Approvers only; a refusal is 409 |
 | `webhook_list` | | `{ webhooks }` (without secrets) |
 | `webhook_remove` | `id` | `{ ok: true }` |
 
@@ -129,6 +130,7 @@ What each field means:
 | `agent.send_failed` | agentId, text |
 | `agent.moved` | agentId, cwd, feature: the agent now works in another folder (converted to a feature with `agent_to_feature` or from the UI) |
 | `feature.repo_added` | agentId, feature, repo, path, branch: an agent in a feature edited a repo the feature did not have yet; that repo got the feature's worktree (`path`, on `branch`) and joined the feature |
+| `release.paused` | pause (`{ by, at, until, note }`, or null when resumed): prod releases were paused or resumed, here or by a teammate |
 | `chat.message` | conversation (`{type:'peer'\|'group', id}`), group, message: sent or received peer chat |
 
 Every event also carries `seq` (it increases by one per event and restarts at 1 when Overlord restarts) and `at` (ISO time).

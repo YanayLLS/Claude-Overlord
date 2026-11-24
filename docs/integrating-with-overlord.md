@@ -67,6 +67,7 @@ Over MCP, a failed call returns `isError: true` with the message as its text.
 | Auto-merge PRs | `pr_auto_merge` (`urls?`, `on?`): no `urls` arms all of your open PRs |
 | Claude login | `account_list`, `account_switch` (`label`): switch the main login; agents on it move over when idle. `agent_account` (`agentId`, `label`): move one agent only |
 | PR actions | `pr_list` (`mine?`), `pr_merge` / `pr_approve` / `pr_fix` (`pr`: url or `owner/repo#N`), `pr_hide` (`pr`, `how`: archive / mute / snooze, `undo?`, `hours?`); a refusal is 409 with the reason |
+| Releases | `release_pause` (`on`, `until?`, `note?`): pause prod releases for the team (approvers only); `release.paused` fires when a pause starts or ends |
 | Events | `events_poll` (`since?`, `types?`, `timeoutSec?` max 60), `webhook_add` / `webhook_list` / `webhook_remove` |
 
 ## 5. Recipes

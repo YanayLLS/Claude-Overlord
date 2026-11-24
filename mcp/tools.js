@@ -72,6 +72,8 @@ const RELEASE_SCHEMAS = [
     inputSchema: { type: 'object', properties: {} } },
   { name: 'release_all', description: 'Start or resume Release all for a release: merges wave by wave and waits for the deploys of each wave. It refuses an unsigned release, a hold or a red check.',
     inputSchema: { type: 'object', properties: { id: str('Release id, e.g. 2026-11-17-03 (from release_status). Omit for the current run.') } } },
+  { name: 'release_pause', description: 'Pause prod releases for the whole team until a time (no release opens by itself, none merges, signing does not start one), or resume them (on false). Only when the user asked.',
+    inputSchema: { type: 'object', properties: { on: { type: 'boolean', description: 'true pauses, false resumes' }, until: str('When the pause ends (ISO time). Default 18:00 the next day.'), note: str('Why, shown to the team') }, required: ['on'] } },
   { name: 'release_rerun_failed', description: 'Re-run every failed deploy of a release (a full re-run of each failed deploy workflow run). Then release_all with the same id picks up where it stopped once they are green.',
     inputSchema: { type: 'object', properties: { id: str('Release id') }, required: ['id'] } },
 ];
@@ -82,6 +84,7 @@ async function releaseCall(api, name, args = {}) {
     if (name === 'release_open') { await api.open(); return text('Opening the release: check release_status in a minute.'); }
     if (name === 'release_sign') { await api.sign(); return text('Signed. release_status shows the signers.'); }
     if (name === 'release_all') { api.all(args.id).catch(() => {}); return text('Release all started: follow it with release_status.'); }
+    if (name === 'release_pause') { const p = await api.pause(args.on !== false, args.until, args.note); return text(p ? `Releases paused until ${p.until}.` : 'Releases resumed.'); }
     if (name === 'release_rerun_failed') { if (!args.id) return fail('release_rerun_failed: "id" is required'); return text((await api.rerunFailed(args.id)).join(String.fromCharCode(10))); }
     return fail(`Unknown tool: ${name}`);
   } catch (e) { return fail(e && e.message ? e.message : String(e)); }

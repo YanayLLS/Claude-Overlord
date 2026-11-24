@@ -904,3 +904,13 @@ button.rl-flag-row.copy .rl-flag-g { font-size:14px; }
 .rl-hist-empty-icon { color:var(--subtext); }
 .rl-sign-dest { margin-left:8px; font-family:'Geist Mono',ui-monospace,Consolas,monospace; font-size:10.5px; font-weight:500; color:var(--dim); }
 .rl-sign-rel .rl-env { margin-left:6px; text-transform:uppercase; }
+
+/* team-wide release pause (releases-ui pauseBarHtml) */
+.rl-pause { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:12px; }
+.rl-pause .ic { width:13px; height:13px; flex:none; }
+.rl-pause.on { padding:8px 10px; border-radius:10px; border:1px solid var(--yellow); background:color-mix(in srgb, var(--yellow) 12%, transparent); }
+.rl-pause-txt { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--subtext); } .rl-pause-txt b { color:var(--text); font-weight:600; }
+.rl-pause-open { margin-left:auto; display:inline-flex; align-items:center; gap:5px; font:inherit; font-size:11.5px; color:var(--subtext); background:none; border:0; padding:2px 4px; cursor:pointer; border-radius:6px; } .rl-pause-open:hover { color:var(--text); background:var(--surface1); }
+.rl-pause.form { padding:6px 8px; border-radius:10px; border:1px solid var(--border); background:var(--surface0, var(--surface1)); }
+.rl-pause.form input { font:inherit; font-size:12px; padding:3px 6px; border-radius:6px; border:1px solid var(--border); background:var(--surface1); color:var(--text); }
+.rl-pause-note { flex:1; min-width:80px; }

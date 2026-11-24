@@ -150,6 +150,7 @@
     const o = e.target.closest('[data-br]'); if (o) brPick(o.dataset.br);
   });
   overlay.addEventListener('focusin', (e) => { if (e.target.dataset && e.target.dataset.src != null) { brHi = 0; brShow(e.target); } });
+  overlay.addEventListener('input', (e) => { const k = e.target.dataset && e.target.dataset.pause; if (k && pauseForm) pauseForm[k] = e.target.value; });
   overlay.addEventListener('input', (e) => { if (e.target.dataset && e.target.dataset.src != null) { brHi = 0; brShow(e.target); } });
   overlay.addEventListener('keydown', (e) => {
     if (!e.target.dataset || e.target.dataset.src == null) return;
@@ -182,6 +183,10 @@
     flagBackup: (el) => { try { navigator.clipboard.writeText(el.dataset.v || ''); } catch {} el.textContent = '✓ Copied'; },
     rcShas: () => { rcShas = !rcShas; render(); },
     rcFix: () => { api.send({ type: 'releasesRcFix' }); },
+    pauseOpen: () => { const d = new Date(ReleasesCore.pauseDefaultUntil()); pauseForm = { until: new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 16), note: '' }; render(); const n = modal.querySelector('[data-pause="note"]'); if (n) n.focus(); },
+    pauseCancel: () => { pauseForm = null; render(); },
+    pauseSet: (el) => { const f = pauseForm; if (!f || !f.until) return; markBusy(el, 'Pausing…'); api.send({ type: 'relPauseSet', until: new Date(f.until).toISOString(), note: f.note }); pauseForm = null; say('Releases paused'); },
+    pauseLift: (el) => { markBusy(el, 'Resuming…'); api.send({ type: 'relPauseLift' }); say('Releases resumed'); },
     rcMerge: (el) => { markBusy(el, 'Merging…'); render(); api.send({ type: 'releasesRcMerge' }); },
     rcCancel: () => { armed = null; clearTimeout(armTimer); say('Release cancelled'); render(); },
     // a Hold is released only on a second, deliberate click
@@ -1579,7 +1584,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     const can = s.approvers && s.approvers.isApprover;
     const left = armed === 'rc' ? Math.max(0, 1 - (Date.now() - armAt) / ARM_MS) : 0;
     const wait = c.loading ? ' aria-disabled="true" title="Reading the night again"' : '';
-    const release = !can ? `<span class="rl-rc-lock">${rcIc(RC_IC.lock)}Approvers only</span>` : hold
+    const release = !can ? `<span class="rl-rc-lock">${rcIc(RC_IC.lock)}Approvers only</span>` : pausedNow(s) ? `<span class="rl-rc-lock">${icon('pause')}Paused</span>` : hold
       ? (armed === 'rc' ? `<button class="rl-hist-btn rl-rc-cancel" data-act="rcCancel">Cancel</button><button class="rl-hist-btn rl-rc-any armed-bad" data-act="rcRelease" style="--left:${left.toFixed(3)};--ms:${Math.round(left * ARM_MS)}ms">Release despite Hold</button>`
         : `<button class="rl-hist-btn rl-rc-any${c.loading ? ' locked' : ''}" data-act="rcRelease" title="Ship the tested commits to alpha and prod"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : ''}Release anyway</button>`)
       : `<button class="rl-hist-btn go${c.loading ? ' locked' : ''}" data-act="rcRelease" title="Ship the tested commits to alpha and prod"${wait}>${c.loading ? rcIc(RC_IC.busy, ' turn') : rcIc(RC_IC.rocket)}Release</button>`;
@@ -1612,6 +1617,23 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
       + `<div class="rl-rc-acts">${hold ? report + fixBtn + fixer + '<span class="rl-rc-gap"></span>' + release : release + report + fixBtn + fixer}</div></div>`;
   }
 
+  // Team-wide release pause (pause.json via releases-main setPause): a bar on top of the Release tab
+  let pauseForm = null; // { until: 'YYYY-MM-DDTHH:mm' local, note } while the form is open
+  const pausedNow = (s) => (window.ReleasesCore && ReleasesCore.pauseActive(s.relPause) ? s.relPause : null);
+  function pauseBarHtml(s) {
+    const p = pausedNow(s), can = s.approvers && s.approvers.isApprover;
+    if (p) {
+      const until = new Date(p.until).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+      return `<div class="rl-pause on" role="status">${icon('pause')}<span class="rl-pause-txt"><b>Paused until ${esc(until)}</b> · @${esc(p.by)}${p.note ? ' · ' + esc(p.note) : ''}</span>`
+        + (can ? '<button class="rl-hist-btn" data-act="pauseLift">Resume</button>' : '') + '</div>';
+    }
+    if (!can) return '';
+    if (!pauseForm) return '<div class="rl-pause"><button class="rl-pause-open" data-act="pauseOpen" title="No release opens or merges until then">' + icon('pause') + 'Pause releases</button></div>';
+    return `<div class="rl-pause form">${icon('pause')}<input type="datetime-local" data-pause="until" value="${esc(pauseForm.until)}" aria-label="Paused until">`
+      + `<input class="rl-pause-note" data-pause="note" value="${esc(pauseForm.note)}" placeholder="Why" maxlength="140" aria-label="Why">`
+      + '<button class="rl-hist-btn" data-act="pauseCancel">Cancel</button><button class="rl-hist-btn go" data-act="pauseSet">Pause</button></div>';
+  }
+
   function releaseTabHtml(s) {
     const run = s.releaseRun, items = (s.history && s.history.items) || [];
     const recorded = (r) => items.some(m => m.repos.some(x => x.repo === r.repo && x.pr && r.pr && x.pr.number === r.pr.number));
@@ -1621,7 +1643,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
     // one suggestion at a time: while the candidate card offers a release, the picker waits behind "Start another release"
     const cardOffers = !!(s.rc && s.rc.level && !s.rc.released && !s.rc.off && !s.rc.error);
     if (!active && !showRun && !relOpen && !cardOffers) openPicker();
-    let h = '<div class="rl-reltab">' + (active || showRun ? '' : rcCardHtml(s)) + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
+    let h = '<div class="rl-reltab">' + pauseBarHtml(s) + (active || showRun ? '' : rcCardHtml(s)) + (showRun ? releaseResultsHtml(s) : '') + historyHtml(s, 'now');
     if (relOpen) h += releasePickerHtml(s);
     else if (active || showRun || cardOffers) h += '<button class="rl-hist-btn rl-reltab-new" data-act="releaseMenu" title="Pick envs and repos for another release (or to add to the pending one)">' + icon('rocket') + 'Start another release</button>';
     return h + '</div>';
@@ -1631,7 +1653,7 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
   document.addEventListener('keydown', (e) => { if (e.key === 'Tab' || e.key === 'Enter' || e.key === ' ') kbNav = true; }, true);
   document.addEventListener('pointerdown', () => { kbNav = false; }, true);
   function render() {
-    const typing = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.src != null;
+    const typing = document.activeElement && document.activeElement.dataset && (document.activeElement.dataset.src != null || document.activeElement.dataset.pause != null);
     if (ptrDown || typing) { drawLater = true; return; } // a redraw would drop the click / the box being typed in
     // a redraw replaces every element: the one that had focus gets it back (same action, or same link)
     const f = document.activeElement, had = f && modal.contains(f) && f.dataset ? (f.dataset.act ? `[data-act="${f.dataset.act}"]` : f.dataset.url ? `[data-url="${CSS.escape(f.dataset.url)}"]` : null) : null;

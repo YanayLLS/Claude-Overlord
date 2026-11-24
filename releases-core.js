@@ -453,7 +453,17 @@ function holdActive(h, deploy, now = Date.now()) {
 }
 const activeHolds = (holds, cfg, deploys, now = Date.now()) => (holds || []).filter(h => holdActive(h, holdDeploy(cfg, deploys, h), now));
 
-const api = { HOLD_MS, holdDeploy, holdActive, activeHolds, deployState, deployJobsState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+// A team-wide release pause (pause.json { by, at, until, note }): no prod release opens or merges until it ends.
+const pauseActive = (p, now = Date.now()) => !!(p && p.until && now < Date.parse(p.until));
+// default end: 18:00 local the next morning's day (set before 06:00, that is today)
+function pauseDefaultUntil(now = Date.now()) {
+  const d = new Date(now);
+  if (d.getHours() >= 6) d.setDate(d.getDate() + 1);
+  d.setHours(18, 0, 0, 0);
+  return d.toISOString();
+}
+
+const api = { pauseActive, pauseDefaultUntil, HOLD_MS, holdDeploy, holdActive, activeHolds, deployState, deployJobsState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

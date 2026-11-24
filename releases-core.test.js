@@ -438,4 +438,14 @@ assert.strictEqual(age('garbage', now), '');
   assert.deepStrictEqual(targets({ envs: ['dev', 'prod'], repos: [cfg.repos[1]] }), []);
   assert.ok(validateConfig({ ...cfg, repos: [{ ...cfg.repos[1], release: 'no' }] }).length);
 }
+{
+  const { pauseActive, pauseDefaultUntil } = require('./releases-core');
+  const t = new Date(2026, 10, 24, 22, 0).getTime();
+  assert.strictEqual(new Date(pauseDefaultUntil(t)).getTime(), new Date(2026, 10, 25, 18, 0).getTime());
+  assert.strictEqual(new Date(pauseDefaultUntil(new Date(2026, 10, 25, 1, 0).getTime())).getTime(), new Date(2026, 10, 25, 18, 0).getTime());
+  const p = { by: 'a', until: new Date(t + 1000).toISOString() };
+  assert.strictEqual(pauseActive(p, t), true);
+  assert.strictEqual(pauseActive(p, t + 1000), false);
+  assert.strictEqual(pauseActive(null, t), false);
+}
 console.log('releases-core: all passed');
