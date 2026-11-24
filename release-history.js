@@ -478,6 +478,7 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
     if (!found.size) return;
     const loaded = await load();
     if (!loaded) return;
+    let wrote = false;
     for (const { manifest, sha } of loaded.entries) {
       if (manifest.status !== 'pending') continue;
       let changed = false;
@@ -487,8 +488,9 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
         changed = true;
         return { ...r, health: h };
       });
-      if (changed) await write({ ...manifest, repos, updatedAt: new Date().toISOString() }, sha, `release ${manifest.id}: checks`);
+      if (changed) { await write({ ...manifest, repos, updatedAt: new Date().toISOString() }, sha, `release ${manifest.id}: checks`); wrote = true; }
     }
+    if (wrote) await load(); // the release cards read state.history: without this they kept the old health until the next poll
   }
 
   // Cancel: mark the pending release(s) holding these PRs ('repo#n') as called off by `by`
