@@ -914,3 +914,4 @@ button.rl-flag-row.copy .rl-flag-g { font-size:14px; }
 .rl-pause.form { padding:6px 8px; border-radius:10px; border:1px solid var(--border); background:var(--surface0, var(--surface1)); }
 .rl-pause.form input { font:inherit; font-size:12px; padding:3px 6px; border-radius:6px; border:1px solid var(--border); background:var(--surface1); color:var(--text); }
 .rl-pause-note { flex:1; min-width:80px; }
+.rl-pause-err { color:var(--red); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40%; }

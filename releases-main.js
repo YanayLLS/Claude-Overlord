@@ -24,7 +24,7 @@ const { runProgress, releaseEtaMs } = require('./deploy-eta');
 const APPROVERS_TEAM = 'release-approvers'; // GitHub team in the config repo's org: who may release + sign prod
 const { execFile } = require('child_process');
 const os = require('os');
-const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas, releasePeriods, activeHolds, HOLD_MS, pauseActive, pauseDefaultUntil } = require('./releases-core');
+const { releaseTargets, releasePlan, releaseWaves, versionAtLeast, manualLeft, handRepos, runHas, releasePeriods, activeHolds, HOLD_MS, pauseActive, pauseDefaultUntil, pauseExempt, pauseRead, pauseWriteCheck, pauseLiftCheck, pauseWhen } = require('./releases-core');
 const { deployState, deployJobsState, deploySkipped, checkRunning, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, commitTitle, firstParentChain, runState, liveSha, SAFE_REF_RE, DEFAULT_SOURCE, OLD_SOURCE } = require('./releases-core');
 
 // Polling cadence (full refresh, deploy runs, sign ping, stray scan) lives in releasePeriods: slower while the modal is closed
@@ -380,13 +380,17 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   }
   // A releasable candidate opens its release by itself, once per graded run, on an approver's Overlord, when no release
   // is pending: the approvers only sign (and the second signature releases). A Hold, or one already live, opens nothing.
+  let rcPauseRetry = null;
   async function autoOpenRc(c) {
     if (DEMO || !c || !c.level || c.level === 'hold' || c.released || !c.shas || !c.evidence) return;
     if (!state.approvers || !state.approvers.isApprover) return;
     const key = `${c.nightlyId}:${c.evidence.runId}`;
     if (state.rcAutoOpened === key) return;
     // releases paused: this candidate is skipped for good (not opened later, after the pause ends)
-    if (await livePause()) { push({ rcAutoOpened: key }); persist(); return; }
+    const lp = await livePause();
+    // can't tell yet: look again in 2 min, at whatever the candidate is then (one retry pending at a time)
+    if (lp.unknown) { clearTimeout(rcPauseRetry); rcPauseRetry = setTimeout(() => autoOpenRc(state.rc).catch(() => {}), 120e3); if (rcPauseRetry.unref) rcPauseRetry.unref(); return; }
+    if (lp.pause) { push({ rcAutoOpened: key }); persist(); return; }
     if (state.releaseRun && state.releaseRun.running) return;
     const prodRels = ((state.history && state.history.items) || []).filter(m => (m.env || 'prod') === 'prod');
     if (prodRels.some(m => m.status === 'pending')) return;
@@ -695,8 +699,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   async function loadHolds() {
     const [r, who] = await Promise.all([history.holds(), whoAmI()]);
     if (!r.error && (JSON.stringify(r.data) !== JSON.stringify(state.holds || []) || state.holdsMe !== who.github)) push({ holds: r.data, holdsMe: who.github || null });
-    const p = await history.pause();
-    if (!p.error) pauseSeen(p.data);
+    await livePause();
   }
   const liveHolds = (list) => activeHolds(list, state.config, state.results && state.results.deploys);
   async function setHold(repo, branch, note) {
@@ -719,34 +722,41 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
   }
 
   // ── Release pause (releases-core pauseActive): no prod release opens by itself or merges until it ends ──
-  // read fresh before acting (fail closed: an unreadable pause.json counts as paused only if we last saw one live)
+  // read fresh before acting → { pause } (null: none, or ran out) | { unknown } (unreadable and never read: fail closed)
+  let pauseLoaded = false;
   async function livePause() {
     const r = await history.pause();
-    if (!r.error) pauseSeen(r.data);
-    return pauseActive(state.relPause) ? state.relPause : null;
+    const out = pauseRead(r, state.relPause, pauseLoaded);
+    if (!r.error) pauseLoaded = true;
+    if (!out.unknown) pauseSeen(out.pause);
+    return out;
   }
-  const pauseText = (p) => `releases paused by @${p.by} until ${new Date(p.until).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}${p.note ? ' (' + p.note + ')' : ''}`;
-  async function setPause(until, note) {
+  const pauseText = (p) => `releases paused by @${p.by} until ${pauseWhen(p.until)}${p.note ? ' (' + p.note + ')' : ''}`;
+  const needApprover = async (what) => {
     if (!state.approvers || !state.approvers.isApprover) await loadApprovers().catch(() => {});
-    if (!state.approvers || !state.approvers.isApprover) throw new Error('only release approvers can pause releases');
+    if (!state.approvers || !state.approvers.isApprover) throw new Error(`only release approvers can ${what} releases`);
+  };
+  async function setPause(until, note) {
+    await needApprover('pause');
     const end = until ? Date.parse(until) : Date.parse(pauseDefaultUntil());
     if (!(end > Date.now())) throw new Error('the pause must end in the future');
     const who = await whoAmI();
     const p = { by: who.github || 'someone', at: new Date().toISOString(), until: new Date(end).toISOString(), note: String(note || '').slice(0, 140) };
-    const res = await history.setPause(p, `releases paused by @${p.by} until ${p.until}${p.note ? ' · ' + p.note : ''}`);
+    const res = await history.setPause((cur) => { const no = pauseWriteCheck(cur, p.by); if (no) throw new Error(no); return p; }, `releases paused by @${p.by} until ${p.until}${p.note ? ' · ' + p.note : ''}`);
     if (res.error) throw new Error(res.error);
     pauseSeen(p);
     return p;
   }
-  async function liftPause() {
+  async function liftPause(seenAt) {
+    await needApprover('resume');
     const who = await whoAmI();
-    const res = await history.setPause(null, `releases resumed by @${who.github || 'someone'}`);
+    const res = await history.setPause((cur) => { const no = pauseLiftCheck(cur, seenAt); if (no) throw new Error(no); return null; }, `releases resumed by @${who.github || 'someone'}`);
     if (res.error) throw new Error(res.error);
     pauseSeen(null);
   }
   // a change (here or a teammate's, seen on a poll) → the releases state + a releasePause message (API event release.paused)
   function pauseSeen(p) {
-    p = p || null;
+    p = pauseActive(p) ? p : null;
     if (JSON.stringify(p) === JSON.stringify(state.relPause || null)) return;
     push({ relPause: p });
     send({ type: 'releasePause', pause: p });
@@ -821,9 +831,14 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     const back = cfgSteps.find(p => p.repo.toLowerCase() === m[1].toLowerCase() && p.source === pr.data.base.ref && p.target === pr.data.head.ref);
     if (back) return { ok: true, warn: `Back-merge into ${back.source}: the open ${back.target} release PR takes these commits too` };
     if (!prodStep(m[1], pr.data.base.ref, pr.data.head.ref)) return { ok: true }; // not a prod release PR
-    const p = memo && memo.has('pause') ? memo.get('pause') : await livePause();
-    if (memo) memo.set('pause', p);
-    if (p) return { ok: false, reason: pauseText(p) };
+    let paused = false;
+    if (!pauseExempt({ head: pr.data.head.ref, standalone: standaloneRepo(m[1]), releaseId: releaseIdOf(pr.data.body) })) {
+      const lp = memo && memo.has('pause') ? memo.get('pause') : await livePause();
+      if (memo) memo.set('pause', lp);
+      if (lp.unknown) return { ok: false, reason: `couldn't read the release pause (${lp.unknown}): retry` };
+      if (lp.pause) return { ok: false, reason: pauseText(lp.pause) };
+      paused = true; // the pause applies to this PR: Release all looks again before a delayed merge
+    }
     // a standalone repo (a side product: back-office): its own PRs into prod need one teammate's approval, not a
     // signed release; as part of a product release (it carries a release id) the release's signatures apply
     if (standaloneRepo(m[1]) && !releaseIdOf(pr.data.body)) {
@@ -837,7 +852,7 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
     if (!state.approvers || !state.approvers.exists) await loadApprovers();
     const s = await releaseSignoffOf(m[1], m[2], memo);
     if (s.error) return { ok: false, reason: s.error };
-    return s.ok ? { ok: true, signoff: s } : { ok: false, reason: `the release needs ${s.need} approvers' signatures (has ${s.count}${s.count ? ': ' + s.signers.map(x => '@' + x.login).join(', ') : ''})${gapsText(s)}` };
+    return s.ok ? { ok: true, signoff: s, pauseApplies: paused } : { ok: false, reason: `the release needs ${s.need} approvers' signatures (has ${s.count}${s.count ? ': ' + s.signers.map(x => '@' + x.login).join(', ') : ''})${gapsText(s)}` };
   }
   const gapsText = (s) => (s.gaps || []).map(g => ` · @${g.login} still to sign ${g.missing.map(x => x.label + (x.older ? ' (new commits)' : '')).join(', ')}`).join('');
 
@@ -1716,14 +1731,17 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
           const gate = await mergeGate(it.pr.url);
           if (!gate.ok) { markR(R, [it.label], { s: 'held', why: gate.reason }); stopR(R, `${it.label}: ${gate.reason}`); break; }
           markR(R, [it.label], { s: 'merging' });
-          let res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
+          let res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']), held = null;
           // a required check still running (a commit landed just now): wait for it, up to 30 min, then merge
           for (let t = Date.now(), ck; apiErr(res) && (ck = checkRunning(apiErr(res))) && Date.now() - t < 30 * 60e3 && !releaseAllStop && R.status === 'running';) {
             markR(R, [it.label], { s: 'merging', why: `waiting for ${ck}` });
             relProgress({ status: 'merging', detail: `${it.label}: waiting for ${ck}` });
             await new Promise(r => setTimeout(r, 30e3));
+            const lp = gate.pauseApplies ? await livePause() : {}; // a pause set while it waited stops a prod PR (not alpha, not a rollback)
+            if (lp.pause) { held = pauseText(lp.pause); break; }
             res = await ghJson(['api', '-X', 'PUT', `repos/${it.repo}/pulls/${it.pr.number}/merge`, '-f', 'merge_method=merge']);
           }
+          if (held) { markR(R, [it.label], { s: 'held', why: held }); stopR(R, `${it.label}: ${held}`); break; }
           if (apiErr(res) && shipNow.has(it.repo.toLowerCase() + '#' + Number(it.pr.number))) { markR(R, [it.label], { s: 'merged' }); continue; } // shipped from its row meanwhile
           // refused = this release stops here: its later waves depend on this one
           if (apiErr(res)) { markR(R, [it.label], { s: 'held', why: `GitHub refused the merge: ${apiErr(res)}` }); stopR(R, `${it.label}: GitHub refused the merge (${apiErr(res)}) — nothing after it was merged`); break; }
@@ -2082,8 +2100,9 @@ module.exports = function createReleases({ send, ghJson: ghJsonRaw, ghGraphql: g
       case 'releasesRcRelease': releaseRc().catch(e => { if (state.releaseRun) push({ releaseRun: { ...state.releaseRun, running: false } }); send({ type: 'toast', text: 'Release failed: ' + (e.message || 'error') }); }); return true;
       case 'releasesPromoteFlags': promoteFlagsNow(String(msg.id)).catch(e => flagFail(String(msg.id), e)); return true;
       case 'holdSet': setHold(msg.repo, msg.branch, msg.note).catch(e => send({ type: 'toast', text: 'Hold failed: ' + e.message })); return true;
-      case 'relPauseSet': setPause(msg.until || null, msg.note).catch(e => send({ type: 'toast', text: 'Pause failed: ' + e.message })); return true;
-      case 'relPauseLift': liftPause().catch(e => send({ type: 'toast', text: 'Resume failed: ' + e.message })); return true;
+      // the bar shows the outcome: a failure as pauseErr (inline, its form kept), a success as the new relPause
+      case 'relPauseSet': setPause(msg.until || null, msg.note).then(() => push({ pauseErr: null }), e => push({ pauseErr: { text: e.message, at: Date.now() } })); return true;
+      case 'relPauseLift': liftPause(msg.seenAt || null).then(() => push({ pauseErr: null }), e => push({ pauseErr: { text: e.message, at: Date.now() } })); return true;
       case 'holdLift': liftHold(String(msg.id)).catch(e => send({ type: 'toast', text: 'Lift failed: ' + e.message })); return true;
       // the picker's branch boxes: a repo's branches (cached for the session)
       case 'releasesBranches': branchesOf(msg.repo).catch(() => {}); return true;

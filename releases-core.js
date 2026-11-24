@@ -463,7 +463,30 @@ function pauseDefaultUntil(now = Date.now()) {
   return d.toISOString();
 }
 
-const api = { pauseActive, pauseDefaultUntil, HOLD_MS, holdDeploy, holdActive, activeHolds, deployState, deployJobsState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
+// Not stopped by a pause: a rollback (it restores prod) and a standalone repo's own PR (not part of a product release).
+const pauseExempt = ({ head, standalone, releaseId }) => /^rollback\/[\d-]+$/.test(String(head || '')) || (!!standalone && !releaseId);
+// A pause.json read → { pause } (null = none or expired), or { unknown } when it can't be read and was never read before
+// (fail closed: a merge must not pass on a pause this Overlord never saw).
+function pauseRead(r, last, loaded, now = Date.now()) {
+  if (r && r.error) return loaded ? { pause: pauseActive(last, now) ? last : null } : { unknown: r.error };
+  const p = (r && r.data) || null;
+  return { pause: pauseActive(p, now) ? p : null };
+}
+// Pausing over a teammate's live pause would silently change their end time: refused (lift it first). Your own: replaced.
+function pauseWriteCheck(cur, me, now = Date.now()) {
+  return pauseActive(cur, now) && String(cur.by).toLowerCase() !== String(me || '').toLowerCase()
+    ? `already paused by @${cur.by} until ${pauseWhen(cur.until, now)}: resume it first to change it` : null;
+}
+// Resume lifts the pause the user saw (seenAt = its at); one set again meanwhile stays. No seenAt (API): whatever is live.
+function pauseLiftCheck(cur, seenAt, now = Date.now()) {
+  return seenAt && pauseActive(cur, now) && cur.at !== seenAt ? `the pause changed: @${cur.by} paused until ${pauseWhen(cur.until, now)}` : null;
+}
+
+// When a pause ends, as people read it: "Wed 18:00"; over 6 days away the date too ("Tue 8 Dec, 18:00")
+const pauseWhen = (iso, now = Date.now()) => new Date(iso).toLocaleString('en-GB', Date.parse(iso) - now > 6 * 864e5
+  ? { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' } : { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+
+const api = { pauseWhen, pauseActive, pauseDefaultUntil, pauseExempt, pauseRead, pauseWriteCheck, pauseLiftCheck, HOLD_MS, holdDeploy, holdActive, activeHolds, deployState, deployJobsState, releasePeriods, deploySkipped, deployTriggered, checkRunning, manualLeft, handRepos, runHas, newDeployFailures, parseSource, validateConfig, requestsFor, buildGrid, buildTimeline, releaseWaves, versionAtLeast, releaseTargets, releasePlan, firstParentChain, failedDeploys, runState, liveSha, age, commitTitle, DEFAULT_SOURCE, OLD_SOURCE, SAFE_REF_RE, REPO_RE };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.ReleasesCore = api;
 })(this);

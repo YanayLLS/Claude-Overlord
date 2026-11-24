@@ -448,4 +448,31 @@ assert.strictEqual(age('garbage', now), '');
   assert.strictEqual(pauseActive(p, t + 1000), false);
   assert.strictEqual(pauseActive(null, t), false);
 }
+{
+  const { pauseExempt, pauseRead, pauseWriteCheck, pauseLiftCheck, pauseWhen } = require('./releases-core');
+  const n0 = new Date(2026, 10, 24, 21).getTime();
+  assert.strictEqual(pauseWhen(new Date(2026, 10, 25, 18).toISOString(), n0), 'Wed 18:00');
+  assert.match(pauseWhen(new Date(2026, 11, 8, 18).toISOString(), n0), /8 Dec/);
+  const t = Date.UTC(2026, 10, 24, 20), live = { by: 'ann', at: '2026-11-24T19:00:00.000Z', until: new Date(t + 3600e3).toISOString(), note: 'freeze' };
+  // a rollback restores prod, a standalone repo's own PR is not a product release: both merge while paused
+  assert.strictEqual(pauseExempt({ head: 'rollback/2026-11-24-01' }), true);
+  assert.strictEqual(pauseExempt({ head: 'dev', standalone: true, releaseId: null }), true);
+  assert.strictEqual(pauseExempt({ head: 'dev', standalone: true, releaseId: '2026-11-24-01' }), false);
+  assert.strictEqual(pauseExempt({ head: 'release/x' }), false);
+  // an unreadable pause.json never seen before is unknown (fail closed); seen before → the last one seen
+  assert.deepStrictEqual(pauseRead({ error: 'HTTP 502' }, null, false, t), { unknown: 'HTTP 502' });
+  assert.deepStrictEqual(pauseRead({ error: 'HTTP 502' }, live, true, t), { pause: live });
+  assert.deepStrictEqual(pauseRead({ data: live }, null, false, t), { pause: live });
+  // an expired pause reads as none (so release.paused fires null when it runs out)
+  assert.deepStrictEqual(pauseRead({ data: live }, null, false, t + 7200e3), { pause: null });
+  // pausing over a teammate's live pause is refused; over your own it replaces it
+  assert.match(pauseWriteCheck(live, 'bob', t), /already paused by @ann/);
+  assert.strictEqual(pauseWriteCheck(live, 'ANN', t), null);
+  assert.strictEqual(pauseWriteCheck(null, 'bob', t), null);
+  // Resume lifts only the pause the user saw: a newer one set meanwhile stays
+  assert.strictEqual(pauseLiftCheck(live, live.at, t), null);
+  assert.match(pauseLiftCheck({ ...live, at: '2026-11-24T19:30:00.000Z' }, live.at, t), /changed/);
+  assert.strictEqual(pauseLiftCheck(live, undefined, t), null);
+  assert.strictEqual(pauseLiftCheck(null, live.at, t), null);
+}
 console.log('releases-core: all passed');

@@ -101,7 +101,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `pr_approve` | `pr` | `{ approved }`. Approves on GitHub as the user; 409 when GitHub refuses |
 | `pr_fix` | `pr` | `{ agentId, agent }`: the row's Fix, an agent that pushes fixes until checks are green. If one already holds the PR, that one |
 | `pr_hide` | `pr`, `how` (`archive` / `mute` / `snooze`), `undo?`, `hours?` (snooze, default 24) | `{ url, hidden }`. In Overlord only; GitHub is untouched |
-| `release_pause` | `on`, `until?` (ISO, default 18:00 the next day), `note?` | `{ pause }` (`{ by, at, until, note }`, or `null` when resumed). Pauses prod releases for the whole team: no release opens by itself, none merges (signing doesn't start one). Approvers only; a refusal is 409 |
+| `release_pause` | `on`, `until?` (ISO, default 18:00 the next day), `note?` | `{ pause }` (`{ by, at, until, note }`, or `null` when resumed). Pauses prod releases for the whole team: no release opens by itself, none merges (signing doesn't start one). Approvers only (pause and resume). Refused with 409 when a teammate's pause is live (resume it first) or you are not an approver; 400 for an end time in the past. A rollback and a standalone repo's own PR still merge while paused |
 | `webhook_list` | | `{ webhooks }` (without secrets) |
 | `webhook_remove` | `id` | `{ ok: true }` |
 

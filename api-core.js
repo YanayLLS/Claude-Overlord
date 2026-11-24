@@ -323,7 +323,7 @@ function createApi(host) {
     pr_approve: (x) => prDone(host.prApprove(x.pr)),
     pr_fix: (x) => prDone(host.prFix(x.pr)),
     pr_hide: (x) => prDone(host.prHide(x)),
-    release_pause: async (x) => ({ pause: await host.releasePause(x.on, x.until, x.note).catch(e => { throw conflict(e.message); }) }),
+    release_pause: async (x) => ({ pause: await host.releasePause(x.on, x.until, x.note).catch(e => { throw /must end in the future|not a time/.test(e.message) ? bad(e.message) : conflict(e.message); }) }),
     webhook_list: () => ({ webhooks: hooks.map(({ secret, ...h }) => h) }),
     webhook_remove: (x) => { const n = hooks.length; hooks = hooks.filter(h => h.id !== x.id); if (hooks.length === n) throw missing('no such webhook'); queues.delete(x.id); persistHooks(); return { ok: true }; },
   };

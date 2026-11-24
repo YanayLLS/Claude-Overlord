@@ -453,7 +453,8 @@ module.exports = function createHistory({ ghJson, writeTmp, push, getState, org,
   const readPause = () => (repoOf() ? readJson('pause.json', null) : { data: null });
   // edit(list) → the new list; retried when a teammate wrote in between
   const updateHolds = (edit, message) => updateJson('holds.json', [], (d) => edit(Array.isArray(d) ? d : []), message);
-  const setPause = (pause, message) => updateJson('pause.json', null, () => pause, message);
+  // edit(current pause) → the new one (null lifts it); it may throw to refuse
+  const setPause = (edit, message) => updateJson('pause.json', null, edit, message);
   async function updateJson(file, empty, edit, message) {
     if (!repoOf()) return { error: 'no release-manifests repo' };
     for (let attempt = 0; attempt < 3; attempt++) {

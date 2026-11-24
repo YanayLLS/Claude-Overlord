@@ -123,6 +123,8 @@ test('release_pause reaches the host; a refusal is 409', async () => {
   assert.deepStrictEqual(await api.call('release_pause', { on: true, until: '2026-11-25T16:00:00Z', note: 'n' }), { pause: { by: 'me', until: '2026-11-25T16:00:00Z' } });
   assert.deepStrictEqual(await api.call('release_pause', { on: false }), { pause: null });
   await assert.rejects(api.call('release_pause', { on: true, note: 'x' }), { status: 409 });
+  const past = createApi(fakeHost({ releasePause: async () => { throw new Error('the pause must end in the future'); } }));
+  await assert.rejects(past.call('release_pause', { on: true, until: '2020-01-01T00:00:00Z' }), { status: 400 });
   assert.deepStrictEqual(calls[1], [false, undefined, undefined]);
 });
 

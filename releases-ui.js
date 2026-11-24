@@ -185,8 +185,8 @@
     rcFix: () => { api.send({ type: 'releasesRcFix' }); },
     pauseOpen: () => { const d = new Date(ReleasesCore.pauseDefaultUntil()); pauseForm = { until: new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 16), note: '' }; render(); const n = modal.querySelector('[data-pause="note"]'); if (n) n.focus(); },
     pauseCancel: () => { pauseForm = null; render(); },
-    pauseSet: (el) => { const f = pauseForm; if (!f || !f.until) return; markBusy(el, 'Pausing…'); api.send({ type: 'relPauseSet', until: new Date(f.until).toISOString(), note: f.note }); pauseForm = null; say('Releases paused'); },
-    pauseLift: (el) => { markBusy(el, 'Resuming…'); api.send({ type: 'relPauseLift' }); say('Releases resumed'); },
+    pauseSet: () => { const f = pauseForm; if (!f || !f.until || pauseBusy) return; pauseBusy = { kind: 'set', at: Date.now() }; render(); api.send({ type: 'relPauseSet', until: new Date(f.until).toISOString(), note: f.note }); },
+    pauseLift: () => { const p = pausedNow(state); if (!p || pauseBusy) return; pauseBusy = { kind: 'lift', at: Date.now() }; render(); api.send({ type: 'relPauseLift', seenAt: p.at }); },
     rcMerge: (el) => { markBusy(el, 'Merging…'); render(); api.send({ type: 'releasesRcMerge' }); },
     rcCancel: () => { armed = null; clearTimeout(armTimer); say('Release cancelled'); render(); },
     // a Hold is released only on a second, deliberate click
@@ -1619,19 +1619,32 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
 
   // Team-wide release pause (pause.json via releases-main setPause): a bar on top of the Release tab
   let pauseForm = null; // { until: 'YYYY-MM-DDTHH:mm' local, note } while the form is open
+  let pauseBusy = null, pauseAskedAt = 0; // { kind: set | lift, at } until main answers (relPause changes, or pauseErr)
+  // main's answer to Pause / Resume: the new pause (or none) closes the busy state; an error keeps the form and shows inline
+  function pauseSettle() {
+    if (!pauseBusy || !state) return;
+    const err = state.pauseErr && state.pauseErr.at >= pauseBusy.at;
+    const done = pauseBusy.kind === 'set' ? !!pausedNow(state) && pausedNow(state).at && Date.parse(pausedNow(state).at) >= pauseBusy.at - 60e3 : !pausedNow(state);
+    if (!err && !done) return;
+    pauseAskedAt = pauseBusy.at;
+    if (!err) { if (pauseBusy.kind === 'set') pauseForm = null; say(pauseBusy.kind === 'set' ? 'Releases paused' : 'Releases resumed'); }
+    else say((pauseBusy.kind === 'set' ? 'Pause failed: ' : 'Resume failed: ') + state.pauseErr.text);
+    pauseBusy = null;
+  }
+  const pauseErrHtml = (s) => (!pauseBusy && s.pauseErr && s.pauseErr.at >= pauseAskedAt && pauseAskedAt ? `<span class="rl-pause-err" role="alert">${esc(s.pauseErr.text)}</span>` : '');
   const pausedNow = (s) => (window.ReleasesCore && ReleasesCore.pauseActive(s.relPause) ? s.relPause : null);
   function pauseBarHtml(s) {
     const p = pausedNow(s), can = s.approvers && s.approvers.isApprover;
     if (p) {
-      const until = new Date(p.until).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+      const until = ReleasesCore.pauseWhen(p.until);
       return `<div class="rl-pause on" role="status">${icon('pause')}<span class="rl-pause-txt"><b>Paused until ${esc(until)}</b> · @${esc(p.by)}${p.note ? ' · ' + esc(p.note) : ''}</span>`
-        + (can ? '<button class="rl-hist-btn" data-act="pauseLift">Resume</button>' : '') + '</div>';
+        + pauseErrHtml(s) + (can ? `<button class="rl-hist-btn" data-act="pauseLift"${pauseBusy ? ' aria-disabled="true" aria-busy="true"' : ''}>${pauseBusy ? 'Resuming…' : 'Resume'}</button>` : '') + '</div>';
     }
     if (!can) return '';
     if (!pauseForm) return '<div class="rl-pause"><button class="rl-pause-open" data-act="pauseOpen" title="No release opens or merges until then">' + icon('pause') + 'Pause releases</button></div>';
     return `<div class="rl-pause form">${icon('pause')}<input type="datetime-local" data-pause="until" value="${esc(pauseForm.until)}" aria-label="Paused until">`
       + `<input class="rl-pause-note" data-pause="note" value="${esc(pauseForm.note)}" placeholder="Why" maxlength="140" aria-label="Why">`
-      + '<button class="rl-hist-btn" data-act="pauseCancel">Cancel</button><button class="rl-hist-btn go" data-act="pauseSet">Pause</button></div>';
+      + pauseErrHtml(s) + `<button class="rl-hist-btn" data-act="pauseCancel">Cancel</button><button class="rl-hist-btn go" data-act="pauseSet"${pauseBusy ? ' aria-disabled="true" aria-busy="true"' : ''}>${pauseBusy ? 'Pausing…' : 'Pause'}</button></div>`;
   }
 
   function releaseTabHtml(s) {
@@ -1902,6 +1915,6 @@ Also ships the ${comp.join(', ')} release opened with it, side by side` : ''))}"
   const holds = () => (window.ReleasesCore && state && state.config ? ReleasesCore.activeHolds(state.holds, state.config, state.results && state.results.deploys) : [])
     .map(h => ({ ...h, mine: !!state.holdsMe && h.by === state.holdsMe }));
   const holdBranches = () => ((state && state.config && state.config.repos) || []).map(r => ({ repo: r.repo, branch: Object.values(r.branches || {})[0] })).filter(x => x.branch);
-  window.releasesUi = { releaseRepos, enforcePrWatch, isReleasePr, holds, holdBranches, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (brFor && document.activeElement === brFor) brShow(brFor); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ if (msg.open && !open) show(true); render(); } };
+  window.releasesUi = { releaseRepos, enforcePrWatch, isReleasePr, holds, holdBranches, onMsg(msg) { state = { ...msg.state, editing: state && state.editing && !msg.state.error ? state.editing : false }; enforcePrWatch(); renderBadge(); renderSignPrompt(); renderManualLeft(); if (brFor && document.activeElement === brFor) brShow(brFor); if (msg.tab) tab = 'release'; /* main only ever points at the release in flight */ pauseSettle(); if (msg.open && !open) show(true); render(); } };
   api.send({ type: 'releasesState' }); // a reloaded page has no state until main's next push (the PR panel's ⏸ needs the config)
 })();
