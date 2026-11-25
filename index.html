@@ -3588,9 +3588,11 @@ function renderSummaryBar() {
   if (u) { bar.removeAttribute('title'); delete bar.dataset.tip; } else bar.title = tip.join('\n');
   bar.innerHTML = barHtml;
   // The bar redraws often (usage, history, agent status; hovering a meter fetches history): a press on a meter
-  // and its release on the redrawn one make Chromium fire the click on the bar itself, so the press decides.
-  bar.onpointerdown = (e) => { bar._downMeter = e.target.closest('[data-meter]')?.dataset.meter; };
-  bar.onclick = (e) => { if (e.target.closest('[data-acct-menu]')) return showUsageAcctMenu(e); const key = e.target.closest('[data-meter]')?.dataset.meter || (e.target === bar && bar._downMeter); bar._downMeter = null; if (key) openUsageModal(key); else if (usageView) setUsageView(usageView); else refreshUsage(); };
+  // and its release on the redrawn one fire no click at all, so a meter opens on press + release of the same key.
+  const meterKey = (e) => e.target.closest('[data-meter]')?.dataset.meter;
+  bar.onpointerdown = (e) => { bar._downMeter = e.button === 0 && meterKey(e); bar._opened = false; };
+  bar.onpointerup = (e) => { const k = meterKey(e); if (k && k === bar._downMeter) { bar._opened = true; openUsageModal(k); } bar._downMeter = null; };
+  bar.onclick = (e) => { if (e.target.closest('[data-acct-menu]')) return showUsageAcctMenu(e); if (bar._opened || meterKey(e)) return; if (usageView) setUsageView(usageView); else refreshUsage(); };
   bar.classList.add('show');
 }
 
