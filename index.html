@@ -997,6 +997,11 @@ button:focus-visible { outline-offset:0; }
 .agent.needs-answer::before { background:var(--peach) !important; }
 .agent.needs-answer:not(.selected) .agent-dot { background:var(--peach) !important; opacity:1; }
 .agent.needs-answer:not(.selected) .agent-status-line { color:var(--peach); }
+/* Collapsed group/feature/folder hiding an agent that needs an answer pulses the same orange, so it can't be missed. */
+.group.asks > .group-header, .feature.asks > .feature-header, .folder.asks > .folder-header { position:relative; background:rgba(250,179,135,.07); }
+.group.asks > .group-header::after, .feature.asks > .feature-header::after, .folder.asks > .folder-header::after { content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  box-shadow:inset 0 0 10px 2px rgba(250,179,135,.5), inset 2px 0 0 var(--peach); animation:needs-answer-flash 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion:reduce) { .group.asks > .group-header::after, .feature.asks > .feature-header::after, .folder.asks > .folder-header::after { animation:none; } }
 @media (prefers-reduced-motion:reduce) { .agent.needs-answer { border-color:var(--peach); } .agent.needs-answer::after { animation:none; } }
 
 /* Done flash — green glow that fades out when agent finishes */
@@ -1932,14 +1937,14 @@ function featureMenuItems(name) {
     { icon: 'trash', label: 'Remove feature', danger: true, on: `removeFeature('${safe}')` },
   ];
 }
-function featureHeaderHtml(name) {
+function featureHeaderHtml(name, ask) {
   const members = featureMembers(name);
   const key = 'feature:' + name;
   const collapsed = collapsedGroups.has(key);
   const runningCount = members.filter(w => wtRunning.has(w.path)).length;
   const shown = members.filter(w => !hiddenInFeature.has(w.path)).length;
   const summary = `${shown} repo${shown !== 1 ? 's' : ''}${runningCount ? ` · ${runningCount} running` : ''}`;
-  return `<div class="feature${collapsed ? ' collapsed' : ''}" data-top="${escAttr(key)}" ${TOP_DND}><div class="feature-header" draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()" onclick="toggleGroup('${escAttr(key)}')">
+  return `<div class="feature${collapsed ? ' collapsed' : ''}${collapsed && ask ? ' asks' : ''}" data-top="${escAttr(key)}" ${TOP_DND}><div class="feature-header" draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()" onclick="toggleGroup('${escAttr(key)}')">
     <span class="group-chevron">&#x25BC;</span>
     <span class="feature-icon">&#x2726;</span>
     <span class="feature-name">${esc(name)}</span>
@@ -3385,7 +3390,7 @@ function render() {
     if (feature !== curFeature) {
       if (curFeature !== null) html += `</div></div>`;   // close previous feature body + wrapper
       curFeature = feature;
-      if (feature !== null) html += featureHeaderHtml(feature);
+      if (feature !== null) html += featureHeaderHtml(feature, orderedCwds.some(o => o.feature === feature && groups.get(o.cwd).some(([, a]) => needsAnswer(a))));
     }
     filterMatches += items.length;
     if (feature !== null && hiddenInFeature.has(cwd) && !filterText) continue;
@@ -3422,7 +3427,7 @@ function render() {
     const wtServerBadge = wtEntry && running
       ? `<div class="group-servers"><a class="server-badge running" onclick="event.stopPropagation();openLink('${escAttr(running.url)}')" title="Open ${escAttr(running.url)}">${(() => { const m = /^(?:https?:\/\/)?([^:/]+)(:\d+)?/.exec(running.url) || []; return m[2] ? `<span><span class="srv-host">${esc(m[1])}</span>${esc(m[2])}</span>` : esc(running.url.replace(/^https?:\/\//, '')); })()}<span class="server-menu-btn">&#x2197;</span></a></div>`
       : (wtEntry && wtEntry.status !== 'failed' && wtEntry.status !== 'setup' ? `<a class="wt-port" onclick="event.stopPropagation();openLink('${escAttr(wtUrl)}')" title="Open ${escAttr(wtUrl)}">:${wtEntry.port} &#x2197;</a>` : '');
-    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${wtEntry ? ' is-worktree' : ''}" data-cwd="${escAttr(cwd)}"${feature === null ? ` data-top="${escAttr(solo ? 'feature:' + solo : cwd)}" ${TOP_DND}` : ''}><div class="group-header"${feature === null ? ' draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()"' : ''}${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ondragover="onGroupDragOver(event,'${safeCwd}')" ondragleave="this.classList.remove('drop-into')" ondrop="onGroupDrop(event,'${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
+    html += `<div class="group${isCollapsed ? ' collapsed' : ''}${isCollapsed && items.some(([, a]) => needsAnswer(a)) ? ' asks' : ''}${wtEntry ? ' is-worktree' : ''}" data-cwd="${escAttr(cwd)}"${feature === null ? ` data-top="${escAttr(solo ? 'feature:' + solo : cwd)}" ${TOP_DND}` : ''}><div class="group-header"${feature === null ? ' draggable="true" ondragstart="onTopDragStart(event)" ondragend="onTopDragEnd()"' : ''}${_prefixes.length && cwd === hotkeyCwd() ? ' hot' : ''}" onclick="toggleGroup('${safeCwd}')" ondragover="onGroupDragOver(event,'${safeCwd}')" ondragleave="this.classList.remove('drop-into')" ondrop="onGroupDrop(event,'${safeCwd}')" ${_prefixes.length && cwd === hotkeyCwd() ? 'title="Ctrl+Alt+1–9 starts agents here"' : ''}>
       <span class="group-chevron">&#x25BC;</span>
       <div class="group-info${solo ? ' solo-info' : ''}" title="${escAttr(cwd)}">${nameHtml}<span class="group-count">${items.length}</span></div>
       ${wtStatus}
