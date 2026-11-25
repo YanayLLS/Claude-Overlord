@@ -97,6 +97,8 @@ function parseLineForTimeline(line, fmtTool, isSystemMessage) {
               // A background shell (started there, or moved there when it hit its timeout): its task id and output file.
               const bg = /(?:running in background with ID: |moved to the background \(ID: )(\w+)\)?\. Output is being written to: (.+?\.output)/.exec(out);
               if (bg) { ev.bgId = bg[1]; ev.bgOut = bg[2]; }
+              const mon = /^Monitor started \(task (\w+)/.exec(out); // a Monitor watch: runs until its task-notification with a <status>
+              if (mon) ev.monId = mon[1];
               const art = /https:\/\/claude\.ai\/[\w/.-]*artifact\/[\w-]+/.exec(out); // a published Artifact's page
               if (art && !b.is_error) ev.artifactUrl = art[0]; // a refused publish names the artifact it could not update
               const ag = /agentId: (\w+)/.exec(out); // an Agent call's subagent, for its steps

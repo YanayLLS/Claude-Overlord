@@ -361,7 +361,7 @@ test('a stopped background shell is over: TaskStop writes no task-notification',
   const { bgEnded } = require('./chat-core');
   const evs = [
     { type: 'tool', name: 'Bash', toolId: 't1' }, { type: 'tool', name: 'Bash', toolId: 't2' },
-    { type: 'tool', name: 'TaskStop', toolId: 's1' }, { type: 'bgdone', taskId: 'b3' },
+    { type: 'tool', name: 'TaskStop', toolId: 's1' }, { type: 'bgdone', taskId: 'b3', status: 'completed' },
   ];
   const doneBy = new Map([['s1', { text: '{"message":"Successfully stopped task: b1 (node dev.mjs)","task_id":"b1"}' }]]);
   assert.deepStrictEqual([...bgEnded(evs, doneBy)].sort(), ['b1', 'b3']);
@@ -396,4 +396,10 @@ test('a menu option wrapped beside a preview keeps its whole label', () => {
   assert.deepStrictEqual(optLine({ label: 'C. Side panel beside the', desc: '' }, 'list', true), { label: 'C. Side panel beside the list', desc: '' });
   assert.deepStrictEqual(optLine({ label: 'A. Fast', desc: '' }, '(Recommended)', false), { label: 'A. Fast (Recommended)', desc: '' });
   assert.deepStrictEqual(optLine({ label: 'A. Fast', desc: '' }, 'Ships today', false), { label: 'A. Fast', desc: 'Ships today' });
+});
+
+test('a Monitor event (no <status>) does not end the watch; its final notice does', () => {
+  const { bgEnded } = require('./chat-core');
+  assert.strictEqual(bgEnded([{ type: 'bgdone', taskId: 'm1', status: '', text: 'Monitor event: "x"' }], new Map()).size, 0);
+  assert.deepStrictEqual([...bgEnded([{ type: 'bgdone', taskId: 'm1', status: 'completed' }], new Map())], ['m1']);
 });

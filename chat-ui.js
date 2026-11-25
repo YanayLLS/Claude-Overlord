@@ -786,7 +786,7 @@
     const h = items.length ? q.offsetHeight + 12 : 0, was = el._qh || 0;
     if (h !== was) { el._qh = h; el.style.setProperty('--qh', h + 'px'); keep(el); }
   }
-  let dockHtml = '', dockCount = { agents: 0, shells: 0 };
+  let dockHtml = '', dockCount = { agents: 0, shells: 0, monitors: 0 };
   function drawDock() {
     let el = document.getElementById('chat-bg');
     if (!el) {
@@ -805,8 +805,8 @@
       el.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el.classList.contains('pinned')) { e.stopPropagation(); closeDock(); pill.focus(); } });
     }
     const pop = el.querySelector('.bg-pop'), n = el.querySelector('.bg-n');
-    const { agents: na, shells: ns } = dockCount;
-    const label = [na ? `${na} agent${na > 1 ? 's' : ''}` : '', ns ? `${ns} shell${ns > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+    const { agents: na, shells: ns, monitors: nm } = dockCount;
+    const label = [na ? `${na} agent${na > 1 ? 's' : ''}` : '', ns ? `${ns} shell${ns > 1 ? 's' : ''}` : '', nm ? `${nm} monitor${nm > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
     if (n.textContent !== label) n.textContent = label;
     // Only the timers tick: swap their text in place, so a hovered row isn't rebuilt under the pointer.
     const key = liveKey(dockHtml);
@@ -982,9 +982,12 @@
     const shells = evs.filter((e, k) => k > cut && e.type === 'tool' && doneBy.get(e.toolId) && doneBy.get(e.toolId).bgId && !ended.has(doneBy.get(e.toolId).bgId));
     // Both dock above the reply box (paint puts dockHtml in #chat-bg), out of the scrolling thread.
     const since = (e) => e.ts ? escH(dur(now - Date.parse(e.ts))) : '';
-    dockCount = { agents: bg.length, shells: shells.length };
+    // Monitor watches until their final task-notification (one with a <status>).
+    const mons = evs.filter((e, k) => k > cut && e.type === 'tool' && doneBy.get(e.toolId) && doneBy.get(e.toolId).monId && !ended.has(doneBy.get(e.toolId).monId));
+    dockCount = { agents: bg.length, shells: shells.length, monitors: mons.length };
     dockHtml = shells.map(e => { const d = doneBy.get(e.toolId), a2 = e.args || {}, name = a2.description || a2.command || 'Background shell';
       return `<button type="button" role="menuitem" class="bga bgsh" data-bgout="${escH(d.bgOut)}" data-bgname="${escH(name)}" data-cmd="${escH(a2.command || '')}">${ICON.cmd}<span class="bga-n">${escH(name)}</span><span class="bga-t" data-live="s${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('')
+      + mons.map(e => `<button type="button" role="menuitem" class="bga">${ICON.cmd}<span class="bga-n">${escH((e.args || {}).description || 'Monitor')}</span><span class="bga-t" data-live="m${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`).join('')
       + bg.map(e => { const a2 = e.args || {};
         return `<button type="button" role="menuitem" class="bga" data-jump="${escH(e.toolId)}" data-kind="${escH(a2.subagent_type || '')}" data-task="${escH(String(a2.prompt || '').split('\n').find(l => l.trim()) || '')}">${ICON.agent}<span class="bga-n">${escH(a2.description || a2.subagent_type || 'Agent')}</span><span class="bga-t" data-live="b${escH(e.toolId)}">${since(e)}</span><span class="bga-dot"></span></button>`; }).join('');
     // A menu on the CLI's screen that main didn't flag (a question with previews, say): still a question card, not the raw terminal.
@@ -1384,15 +1387,15 @@
     if (!evs) list = ['<div class="chat-skel" aria-label="Loading"><i class="sk-u"></i><i class="sk-t"></i><i class="sk-t s"></i><i class="sk-p"></i><i class="sk-p m"></i><i class="sk-p s"></i></div>']; // the thread's shape while it loads, not a spinner in an empty column
     else if (!evs.length) list = [`<div class="chat-empty hello">${SPARK}<div>What are we building?</div></div>`];
     else { holdFold = el.dataset.for === String(id) && el.scrollTop + el.clientHeight < el.scrollHeight - (el.querySelector(':scope > .room')?.offsetHeight || 0) - 40 ? id : null; list = blocks(evs, doneBy, a.cwd, id); }
-    dockHtml = ''; dockCount = { agents: 0, shells: 0 };
+    dockHtml = ''; dockCount = { agents: 0, shells: 0, monitors: 0 };
     // Until the transcript writes its own interrupt note for this turn, the chat shows one.
     const noted = evs && (() => { for (let k = evs.length - 1; k >= 0; k--) { if (evs[k].type === 'interrupt') return true; if (evs[k].type === 'prompt') return false; } return false; })();
     const stopNote = a._stopAt && now - a._stopAt < 8000 && evs && !noted && !(a._reverted && now - a._reverted < 8000) && (stopped || st === 'waiting') ? '<div class="msg note">⎿ Interrupted</div>' : '';
     const tail = (evs ? stopNote + pendingHtml(id, evs, busy) + liveHtml(a, st, evs, doneBy, now) + btwHtml(id) + (busy || st === 'question' || st === 'permission' || (pending.get(id) || []).length ? '' : qrHtml(id, evs)) : ''); // queued text waits above the spinner or an open question, as in the CLI
     // The CLI's last turn line ends "· 1 shell still running" while background work outlives the turn.
-    if (list && !busy && (dockCount.shells || dockCount.agents)) {
-      const k = list.length - 1, { agents: na, shells: ns } = dockCount;
-      const still = [ns ? `${ns} shell${ns > 1 ? 's' : ''}` : '', na ? `${na} agent${na > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') + ' still running';
+    if (list && !busy && (dockCount.shells || dockCount.agents || dockCount.monitors)) {
+      const k = list.length - 1, { agents: na, shells: ns, monitors: nm } = dockCount;
+      const still = [ns ? `${ns} shell${ns > 1 ? 's' : ''}` : '', na ? `${na} agent${na > 1 ? 's' : ''}` : '', nm ? `${nm} monitor${nm > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') + ' still running';
       if (k >= 0 && list[k].startsWith('<div class="turnfoot latest"')) list[k] = list[k].replace(/(<span class="tf-meta">[\s\S]*?)(<\/span>)/, `$1 · ${escH(still)}$2`);
     }
 

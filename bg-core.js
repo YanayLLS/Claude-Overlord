@@ -22,6 +22,8 @@ function applyBgRecord(tasks, r) {
     // are written when the whole batch returns): that launch is of a task already over.
     const launch = (id) => { if (!tasks.endedEarly?.delete(id)) tasks.add(id); };
     if (tur.backgroundTaskId) { launch(tur.backgroundTaskId); if (tasks.has(tur.backgroundTaskId)) (tasks.shells ||= new Set()).add(tur.backgroundTaskId); }
+    // Monitor: { taskId, timeoutMs } — a watch that outlives the turn, like a shell (the CLI: "done · 1 monitor still running")
+    if (tur.taskId && tur.timeoutMs != null && !tur.status) { launch(tur.taskId); if (tasks.has(tur.taskId)) (tasks.shells ||= new Set()).add(tur.taskId); }
     // async Agent → agentId; a background Workflow run → taskId
     if (tur.status === 'async_launched' && (tur.agentId || tur.taskId)) launch(tur.agentId || tur.taskId);
     if (tur.resumedAgentId) tasks.add(tur.resumedAgentId); // SendMessage woke a finished agent

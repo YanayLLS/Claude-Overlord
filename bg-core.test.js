@@ -139,3 +139,15 @@ test('a background shell keeps the agent working when its last reply says I AM W
   assert.strictEqual(busyBgCount(t, 'Which port?\n\nI NEED YOU: which port?'), 0);
   assert.strictEqual(busyBgCount(new Set(), 'I AM WORKING ETA ~21:00'), 0);
 });
+
+test('a Monitor counts like a shell: working under I AM WORKING, until its final notice', () => {
+  const { busyBgCount } = require('./bg-core');
+  const t = new Set();
+  applyBgRecord(t, { type: 'user', toolUseResult: { taskId: 'm1', timeoutMs: 1800000, persistent: false } });
+  assert.strictEqual(busyBgCount(t, 'I AM WORKING ETA ~22:45\n- rerun, watched by monitor'), 1);
+  assert.strictEqual(busyBgCount(t, 'I AM DONE'), 0);
+  applyBgRecord(t, { type: 'user', message: { content: '<task-notification>\n<task-id>m1</task-id>\n<summary>Monitor event: "x"</summary>\n</task-notification>' } });
+  assert.strictEqual(t.size, 1);
+  applyBgRecord(t, { type: 'user', message: { content: '<task-notification>\n<task-id>m1</task-id>\n<status>completed</status>\n<summary>Monitor "x" stream ended</summary>\n</task-notification>' } });
+  assert.strictEqual(t.size, 0);
+});

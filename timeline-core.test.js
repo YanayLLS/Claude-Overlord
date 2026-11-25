@@ -231,3 +231,8 @@ test('a resume that dies on start writes bookkeeping only, which is not the CLI 
   assert.strictEqual(isLiveLine(JSON.stringify({ type: 'user', message: { content: 'restarted' } })), true);
   assert.strictEqual(isLiveLine(JSON.stringify({ type: 'assistant', message: { content: [] } })), true);
 });
+
+test('a Monitor launch result carries its task id', () => {
+  const [d] = parse({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'Monitor started (task bc146hn80, expires in 30m unless the source ends first). You will be notified on each event.' }] } });
+  assert.strictEqual(d.monId, 'bc146hn80');
+});

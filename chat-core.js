@@ -499,7 +499,7 @@ function permLabel(l) {
 function bgEnded(evs, doneBy) {
   const ended = new Set();
   for (const e of evs) {
-    if (e.type === 'bgdone') ended.add(e.taskId);
+    if (e.type === 'bgdone' && e.status) ended.add(e.taskId); // a Monitor event has no <status>: the watch goes on
     else if (e.type === 'tool' && (e.name === 'TaskStop' || e.name === 'KillShell')) { const m = /Successfully (?:stopped|killed)[^:]*: (\w+)/.exec((doneBy.get(e.toolId) || {}).text || ''); if (m) ended.add(m[1]); }
   }
   return ended;
