@@ -130,3 +130,12 @@ test('a background shell (dev server) does not keep the agent working; a backgro
   assert.strictEqual(busyBgCount(t), 1);
   assert.strictEqual(busyBgCount(undefined), 0);
 });
+
+test('a background shell keeps the agent working when its last reply says I AM WORKING', () => {
+  const { busyBgCount } = require('./bg-core');
+  const t = new Set();
+  applyBgRecord(t, { type: 'user', toolUseResult: { backgroundTaskId: 'bw1' } });
+  assert.strictEqual(busyBgCount(t, 'Files are ready.\n\nI AM WORKING ETA ~21:00\n- rerun of reds (background shell)'), 1);
+  assert.strictEqual(busyBgCount(t, 'Which port?\n\nI NEED YOU: which port?'), 0);
+  assert.strictEqual(busyBgCount(new Set(), 'I AM WORKING ETA ~21:00'), 0);
+});

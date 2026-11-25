@@ -73,8 +73,10 @@ function applyBgRecord(tasks, r) {
 
 // Background work that keeps the agent "working": agents, workflows, teammates. A background shell
 // (often a dev server that never ends) doesn't — the CLI shows the turn "done · 1 shell still running".
-function busyBgCount(tasks) {
+// Unless the last reply says it is still at work on them ("I AM WORKING", e.g. a test run it waits on): then shells count too.
+function busyBgCount(tasks, lastText) {
   if (!tasks) return 0;
+  if (!require('./watch-core').turnIsDone(lastText)) return tasks.size;
   let n = 0;
   for (const id of tasks) if (!tasks.shells?.has(id)) n++;
   return n;
