@@ -285,3 +285,10 @@ test('MCP: tools/list and tools/call share the REST tools; errors come back as i
   assert.strictEqual(bad.result.isError, true);
   assert.strictEqual((await api.mcp({ jsonrpc: '2.0', id: 4, method: 'x' })).error.code, -32601);
 });
+
+test('agent_focus shows that agent in the Overlord window; an unknown agent is a 404', async () => {
+  const h = fakeHost({ focus: (id) => h.calls.push(['focus', id]) }), api = createApi(h);
+  assert.deepStrictEqual(await api.call('agent_focus', { agentId: 1 }), { ok: true });
+  assert.deepStrictEqual(h.calls, [['focus', 1]]);
+  await assert.rejects(api.call('agent_focus', { agentId: 99 }), { status: 404 });
+});

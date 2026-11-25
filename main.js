@@ -6267,6 +6267,7 @@ function apiHost() {
     archive: (id) => archiveAgent(need(id)),
     unarchive: (id) => unarchiveAgent(need(id)),
     wake: (id) => wakeAgent(need(id)),
+    focus: (id) => { need(id); focusMainWindow(); send({ type: 'focusFromNotification', id }); },
     close: (id) => closeAgent(need(id)),
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),

@@ -58,7 +58,7 @@ Over MCP, a failed call returns `isError: true` with the message as its text.
 | Read history | `agent_transcript` (`agentId`, `limit?`), `agent_screen` (`agentId`, `chars?`), which is the terminal as text |
 | Unblock an agent | `permission_answer` (`decision`: `allow` \| `allow_always` \| `deny`, or `option` 1–9), `question_answer` (`options`: one 1-based number per question, or `text`) |
 | Low-level control | `agent_keys` (raw keys: `"\r"` Enter, `"\u001b"` Esc, `"\u001b[B"` down arrow), `agent_interrupt` (Esc: stops the turn and drops queued sends) |
-| Lifecycle | `agent_archive`, `agent_unarchive`, `agent_close`, `agent_wake` (resume a sleeping agent) |
+| Lifecycle | `agent_archive`, `agent_unarchive`, `agent_close`, `agent_wake` (resume a sleeping agent), `agent_focus` (show it to the user in the Overlord window) |
 | Peer chat (people and their Overlords on the LAN) | `chat_list`, `chat_read` (`peer` or `group`, `limit?`), `chat_send` (`peer` or `group`, `text`) |
 | Features | `agent_to_feature` (`agentId`, `name`, `dryRun?`): an idle agent becomes a feature, its uncommitted work and conversation moved into new worktrees; `dryRun` lists what would move |
 | Features | `feature_from_worktree` (`path`, `name`): an existing worktree becomes a feature as-is, with its own port and dev server |

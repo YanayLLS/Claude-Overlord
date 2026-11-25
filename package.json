@@ -1,6 +1,6 @@
 {
   "name": "overlord",
-  "version": "1.269.12",
+  "version": "1.269.13",
   "description": "Overlord â€” Claude Agent Manager",
   "main": "main.js",
   "scripts": {

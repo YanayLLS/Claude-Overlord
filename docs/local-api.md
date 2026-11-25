@@ -81,6 +81,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `agent_interrupt` | `agentId` | Esc: stops the turn and drops queued sends |
 | `agent_archive`, `agent_unarchive`, `agent_close` | `agentId` | `{ ok: true }` |
 | `agent_wake` | `agentId` | `{ woke }`: resumes an agent CPU saving put to sleep (`woke` false if it wasn't asleep). You rarely need it: `agent_send` and `agent_ask` wake it themselves. |
+| `agent_focus` | `agentId` | `{ ok }`: brings the Overlord window to the front with that agent open, as clicking it in the roster. For apps that link to the agent working on something. |
 | `chat_list` | | `{ peersEnabled, me, online, conversations }` |
 | `chat_read` | `peer` or `group`, `limit?` | `{ messages }` |
 | `chat_send` | `peer` or `group`, `text` | `{ conversation, message, offline }`. 409 if no recipient is online. |
