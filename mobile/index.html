@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="referrer" content="no-referrer">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Overlord</title>
+<!-- Phone companion (mobile-server.js): Overlord's agents and their chats, served by the desktop app on the LAN. -->
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a; --text: #e6e8ee; --dim: #8b93a3;
+    --accent: #7c9cff; --me: #2b3a66; --ok: #3ecf8e; --warn: #f5b041; --bad: #ef5b5b; --code: #11141a;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f6f7f9; --panel: #fff; --panel2: #eef0f4; --line: #dde1e8; --text: #1b1f27; --dim: #667085;
+      --accent: #3d63dd; --me: #dce5ff; --ok: #12a46b; --warn: #c27c0e; --bad: #d13b3b; --code: #f1f3f6; color-scheme: light; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-text-size-adjust: 100%; }
+  body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  header { display: flex; align-items: center; gap: 8px; padding: calc(env(safe-area-inset-top) + 10px) 12px 10px;
+    background: var(--panel); border-bottom: 1px solid var(--line); min-height: 52px; flex: none; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .sub { display: block; font-size: 12px; font-weight: 400; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+  .icon-btn { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none; }
+  .icon-btn:active { background: var(--panel2); }
+  .icon-btn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+  .conn.on { background: var(--ok); } .conn.off { background: var(--bad); }
+  main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  .empty { padding: 48px 24px; text-align: center; color: var(--dim); }
+  .empty b { display: block; color: var(--text); font-size: 17px; margin-bottom: 8px; }
+
+  /* list */
+  .sec { padding: 14px 16px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  .row { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .row:active { background: var(--panel2); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--dim); }
+  .dot.active { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  .dot.waiting { background: var(--ok); } .dot.pending { background: var(--warn); }
+  .dot.sleeping { background: transparent; border: 2px solid var(--dim); } .dot.crashed { background: var(--bad); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .row .txt { flex: 1; min-width: 0; }
+  .row .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .s { font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--warn); color: #1b1300; flex: none; }
+
+  /* chat */
+  .thread { padding: 12px 12px 4px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 92%; padding: 9px 12px; border-radius: 14px; overflow-wrap: anywhere; }
+  .msg.me { align-self: flex-end; background: var(--me); border-bottom-right-radius: 4px; white-space: pre-wrap; }
+  .msg.ai { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.ai > :first-child { margin-top: 0; } .msg.ai > :last-child { margin-bottom: 0; }
+  .msg.ai p { margin: .5em 0; } .msg.ai ul, .msg.ai ol { padding-left: 1.3em; margin: .4em 0; }
+  .msg.ai pre { background: var(--code); padding: 8px 10px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; }
+  .msg.ai code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em; }
+  .msg.ai :not(pre) > code { background: var(--code); padding: 1px 5px; border-radius: 5px; }
+  .msg.ai table { border-collapse: collapse; display: block; overflow-x: auto; font-size: 13px; }
+  .msg.ai th, .msg.ai td { border: 1px solid var(--line); padding: 4px 8px; }
+  .msg.ai a { color: var(--accent); }
+  .msg img { max-width: 100%; border-radius: 8px; }
+  .tool { align-self: flex-start; font-size: 13px; color: var(--dim); padding: 2px 6px; max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .tool::before { content: "› "; color: var(--accent); }
+  .meta { align-self: center; font-size: 12px; color: var(--dim); padding: 2px 0; }
+  .more { align-self: center; font-size: 13px; color: var(--accent); padding: 6px 12px; }
+
+  /* waiting on you */
+  .ask { margin: 8px 12px; padding: 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--warn); }
+  .ask h3 { margin: 0 0 6px; font-size: 14px; color: var(--warn); }
+  .ask .q { font-weight: 600; margin: 8px 0 6px; }
+  .ask pre { background: var(--code); padding: 8px; border-radius: 8px; font-size: 12px; max-height: 40vh; overflow: auto; white-space: pre-wrap; margin: 0 0 10px; }
+  .opts { display: flex; flex-direction: column; gap: 6px; }
+  .opt { text-align: left; padding: 10px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); }
+  .opt.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--panel2)); }
+  .opt small { display: block; color: var(--dim); font-size: 12.5px; }
+  .btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .btn { flex: 1; padding: 10px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); font-weight: 600; min-width: 90px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger { color: var(--bad); }
+  .btn:disabled { opacity: .5; }
+
+  footer { flex: none; display: flex; gap: 8px; align-items: flex-end; padding: 8px 10px calc(env(safe-area-inset-bottom) + 8px);
+    background: var(--panel); border-top: 1px solid var(--line); }
+  footer textarea { flex: 1; resize: none; max-height: 40vh; min-height: 40px; padding: 9px 12px; border-radius: 20px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 16px; outline: none; }
+  footer textarea:focus { border-color: var(--accent); }
+  .send { width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; flex: none; }
+  .send:disabled { opacity: .4; }
+  .send svg, .stop svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .stop { width: 40px; height: 40px; border-radius: 50%; background: var(--panel2); color: var(--bad); display: grid; place-items: center; flex: none; border: 1px solid var(--line); }
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 76px); background: var(--text); color: var(--bg);
+    padding: 8px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+  .toast.on { opacity: 1; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <button class="icon-btn" id="back" hidden aria-label="Back"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+  <h1 id="title">Overlord<span class="sub" id="subtitle"></span></h1>
+  <span class="conn" id="conn" title="Connection"></span>
+</header>
+<main id="main"></main>
+<footer id="composer" hidden>
+  <textarea id="input" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
+  <button class="stop" id="stop" hidden aria-label="Stop"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+  <button class="send" id="send" aria-label="Send" disabled><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+</footer>
+<div class="toast" id="toast" role="status"></div>
+<script>
+'use strict';
+// ── pairing: the QR code's URL carries the token in #k=…, kept in this browser only ──
+const TOKEN_KEY = 'overlord.phone.token';
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} }, del(k) { try { localStorage.removeItem(k); } catch {} } };
+(function pair() {
+  const m = /[#&]k=([^&]+)/.exec(location.hash);
+  if (m) { store.set(TOKEN_KEY, decodeURIComponent(m[1])); history.replaceState(null, '', location.pathname); }
+})();
+let token = store.get(TOKEN_KEY);
+
+const $ = (id) => document.getElementById(id);
+const main = $('main');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const base = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || p || '';
+let toastT;
+function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('on'), 2400); }
+
+async function call(tool, args = {}) {
+  const r = await fetch('/m/' + tool, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token }, body: JSON.stringify(args) });
+  const body = await r.json().catch(() => ({}));
+  if (r.status === 401) { unpaired(); throw new Error(body.error || 'not paired'); }
+  if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+  return body;
+}
+
+// ── markdown: the desktop's bundle (marked + DOMPurify), or plain text until it loads ──
+let mdReady = false;
+(function loadMd() { const s = document.createElement('script'); s.src = '/md.js'; s.onload = () => { mdReady = !!(window.marked && window.DOMPurify); if (mdReady && view.kind === 'agent') renderAgent(true); }; document.head.appendChild(s); })();
+function md(text) {
+  if (mdReady) { try { return DOMPurify.sanitize(marked.parse(String(text || ''), { breaks: true, gfm: true })); } catch {} }
+  return '<p>' + esc(text).replace(/\n/g, '<br>') + '</p>';
+}
+
+// ── state ──
+let view = { kind: 'list' };     // { kind: 'list' } | { kind: 'agent', id } | { kind: 'chat', to }
+let agents = [], chatInfo = null;
+let agentData = null, timeline = [], showAll = false;
+let pick = [];                   // chosen option per question
+
+function setHeader(title, sub, back) {
+  $('title').firstChild.textContent = title;
+  $('subtitle').textContent = sub || '';
+  $('back').hidden = !back;
+}
+function unpaired() {
+  token = null; store.del(TOKEN_KEY); stopEvents();
+  setHeader('Overlord', '', false); $('composer').hidden = true;
+  main.innerHTML = `<div class="empty"><b>Not paired</b>On your computer open Overlord → Settings → Phone, turn it on and scan the QR code with this phone's camera.</div>`;
+}
+
+// ── list ──
+const stateOf = (a) => a.pending ? 'pending' : a.crashed ? 'crashed' : a.sleeping ? 'sleeping' : a.status;
+const label = (a) => a.title || a.name || base(a.cwd) || ('Agent ' + a.id);
+async function loadList() {
+  const [l, c] = await Promise.all([call('agents_list'), call('chat_list').catch(() => null)]);
+  agents = l.agents || []; chatInfo = c;
+  if (view.kind === 'list') renderList();
+}
+function renderList() {
+  setHeader('Overlord', agents.length ? `${agents.length} agent${agents.length === 1 ? '' : 's'}` : '', false);
+  $('composer').hidden = true;
+  const rank = { pending: 0, active: 1, crashed: 2, waiting: 3, sleeping: 4 };
+  const sorted = [...agents].sort((a, b) => (rank[stateOf(a)] ?? 9) - (rank[stateOf(b)] ?? 9) || (b.createdAt || 0) - (a.createdAt || 0));
+  const needs = sorted.filter(a => a.pending);
+  const rest = sorted.filter(a => !a.pending);
+  const row = (a) => `<button class="row" data-agent="${a.id}"><span class="dot ${stateOf(a)}"></span><span class="txt"><div class="t">${esc(label(a))}</div>
+    <div class="s">${esc([a.name && a.title ? a.name : '', base(a.cwd), a.status === 'active' && !a.pending ? 'working…' : ''].filter(Boolean).join(' · '))}</div></span>
+    ${a.pending ? `<span class="badge">${a.pending === 'question' ? 'Question' : 'Approve'}</span>` : ''}</button>`;
+  let h = '';
+  if (needs.length) h += `<div class="sec">Needs you</div>` + needs.map(row).join('');
+  if (rest.length) h += `<div class="sec">Agents</div>` + rest.map(row).join('');
+  if (!agents.length) h += `<div class="empty"><b>No agents</b>Agents you start in Overlord show up here.</div>`;
+  if (chatInfo && chatInfo.peersEnabled && chatInfo.conversations && chatInfo.conversations.length) {
+    h += `<div class="sec">Peer chat</div>` + chatInfo.conversations.map(c => {
+      const key = c.peer ? 'peer:' + c.peer : 'group:' + c.group, online = c.peer && (chatInfo.online || []).includes(c.peer);
+      return `<button class="row" data-chat="${esc(key)}"><span class="dot ${online ? 'waiting' : ''}"></span><span class="txt"><div class="t">${esc(c.name || c.peer || c.group)}</div>
+        <div class="s">${esc(c.last ? (c.last.from ? c.last.from + ': ' : '') + (c.last.text || '') : '')}</div></span></button>`;
+    }).join('');
+  }
+  main.innerHTML = h;
+}
+main.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-agent]'); if (a) return openAgent(+a.dataset.agent);
+  const c = e.target.closest('[data-chat]'); if (c) { const [type, ...id] = c.dataset.chat.split(':'); return openChat({ [type]: id.join(':') }); }
+  if (e.target.closest('#show-all')) { showAll = true; renderAgent(false); return; }
+});
+
+// ── one agent ──
+function openAgent(id) {
+  view = { kind: 'agent', id }; agentData = agents.find(a => a.id === id) || null; timeline = []; showAll = false; pick = [];
+  history.pushState({ v: 'agent', id }, '');
+  main.innerHTML = `<div class="empty">Loading…</div>`;
+  $('composer').hidden = false; $('input').placeholder = 'Message…';
+  renderHeaderForAgent();
+  loadAgent(true);
+}
+function renderHeaderForAgent() {
+  const a = agentData; if (!a) return setHeader('Agent', '', true);
+  const st = a.pending ? (a.pending === 'question' ? 'asks you a question' : 'waits for approval') : a.sleeping ? 'sleeping' : a.status === 'active' ? (a.spinner || 'working…') : 'idle';
+  setHeader(label(a), `${base(a.cwd)} · ${st}`, true);
+  $('stop').hidden = !(a.status === 'active' || a.pending);
+}
+let loadSeq = 0;
+async function loadAgent(scroll) {
+  const id = view.id, my = ++loadSeq;
+  try {
+    const [a, t] = await Promise.all([call('agent_get', { agentId: id }), call('agent_transcript', { agentId: id, limit: 300 })]);
+    let screen = '';
+    if (a.pending === 'permission') screen = (await call('agent_screen', { agentId: id, chars: 2500 }).catch(() => ({ text: '' }))).text;
+    if (my !== loadSeq || view.kind !== 'agent' || view.id !== id) return;
+    if (!agentData || agentData.pending !== a.pending) pick = [];
+    agentData = a; agentData._screen = screen; timeline = t.events || [];
+    renderHeaderForAgent(); renderAgent(scroll);
+  } catch (e) { if (view.kind === 'agent' && view.id === id) { main.innerHTML = `<div class="empty"><b>Couldn't load</b>${esc(e.message)}</div>`; } }
+}
+const nearBottom = () => main.scrollHeight - main.scrollTop - main.clientHeight < 120;
+function renderAgent(forceScroll) {
+  const stick = forceScroll || nearBottom();
+  const LIMIT = 80;
+  const ev = showAll ? timeline : timeline.slice(-LIMIT);
+  let h = '<div class="thread">';
+  if (!showAll && timeline.length > LIMIT) h += `<button class="more" id="show-all">Show ${timeline.length - LIMIT} earlier</button>`;
+  for (const e of ev) {
+    if (e.type === 'prompt') { const imgs = (e.images || []).filter(u => /^data:image\//.test(u)).map(u => `<img src="${esc(u)}" alt="">`).join(''); if (e.text || imgs) h += `<div class="msg me">${imgs}${esc(e.text)}</div>`; }
+    else if (e.type === 'command') h += `<div class="msg me">${esc(e.text)}</div>`;
+    else if (e.type === 'peer') h += `<div class="msg me">${esc(e.text || '')}</div>`;
+    else if (e.type === 'text') h += `<div class="msg ai">${md(e.text)}</div>`;
+    else if (e.type === 'tool') h += `<div class="tool">${esc(e.text || e.name)}</div>`;
+    else if (e.type === 'images') h += `<div class="meta">Image attached</div>`;
+    else if (e.type === 'turn') h += `<div class="meta">${esc(e.text)}</div>`;
+    else if (e.type === 'interrupt') h += `<div class="meta">Interrupted</div>`;
+    else if (e.type === 'compact') h += `<div class="meta">Conversation compacted</div>`;
+    else if (e.type === 'apierror') h += `<div class="meta" style="color:var(--bad)">${esc(e.text || 'API error')}</div>`;
+  }
+  if (!ev.length) h += `<div class="empty">No messages yet.</div>`;
+  h += '</div>' + askHtml();
+  main.innerHTML = h;
+  if (stick) main.scrollTop = main.scrollHeight;
+}
+function askHtml() {
+  const a = agentData; if (!a || !a.pending) return '';
+  if (a.pending === 'permission') {
+    const scr = String(a._screen || '').trim().split('\n').slice(-30).join('\n');
+    return `<div class="ask"><h3>Waiting for your approval</h3>${scr ? `<pre>${esc(scr)}</pre>` : ''}
+      <div class="btns"><button class="btn primary" data-perm="allow">Allow</button><button class="btn" data-perm="allow_always">Always</button><button class="btn danger" data-perm="deny">Deny</button></div></div>`;
+  }
+  const qs = (a.question && a.question.questions) || [];
+  if (!qs.length) return `<div class="ask"><h3>Asks you a question</h3>Type your answer below.</div>`;
+  let h = `<div class="ask"><h3>${qs.length > 1 ? `${qs.length} questions` : 'Asks you a question'}</h3>`;
+  qs.forEach((q, qi) => {
+    h += `<div class="q">${esc(q.question || q.header || '')}</div><div class="opts">`;
+    (q.options || []).forEach((o, oi) => { h += `<button class="opt ${pick[qi] === oi + 1 ? 'sel' : ''}" data-q="${qi}" data-o="${oi + 1}">${esc(o.label)}${o.description ? `<small>${esc(o.description)}</small>` : ''}</button>`; });
+    h += `</div>`;
+  });
+  const ready = qs.every((_, i) => pick[i]);
+  if (qs.length > 1) h += `<div class="btns"><button class="btn primary" id="answer" ${ready ? '' : 'disabled'}>Answer</button></div>`;
+  h += `<div class="meta" style="margin-top:6px;display:block">${qs.length > 1 ? 'Pick one per question, or' : 'Tap an option, or'} type your own answer below.</div></div>`;
+  return h;
+}
+main.addEventListener('click', async (e) => {
+  const p = e.target.closest('[data-perm]');
+  if (p) { p.disabled = true; try { await call('permission_answer', { agentId: view.id, decision: p.dataset.perm }); toast('Sent'); } catch (err) { toast(err.message); } setTimeout(() => loadAgent(false), 600); return; }
+  const o = e.target.closest('.opt');
+  if (o) {
+    pick[+o.dataset.q] = +o.dataset.o;
+    const qs = (agentData.question && agentData.question.questions) || [];
+    if (qs.length === 1) return answer(); // one question: a tap answers it
+    renderAgent(false); return;
+  }
+  if (e.target.closest('#answer')) answer();
+});
+async function answer() {
+  try { await call('question_answer', { agentId: view.id, options: pick.slice() }); toast('Answered'); pick = []; } catch (err) { toast(err.message); }
+  setTimeout(() => loadAgent(false), 900);
+}
+
+// ── peer chat ──
+function openChat(to) {
+  view = { kind: 'chat', to }; history.pushState({ v: 'chat' }, '');
+  setHeader(to.peer || (chatInfo?.conversations || []).find(c => c.group === to.group)?.name || to.group, to.peer ? 'peer' : 'group', true);
+  $('composer').hidden = false; $('stop').hidden = true; $('input').placeholder = 'Message…';
+  main.innerHTML = `<div class="empty">Loading…</div>`;
+  loadChat(true);
+}
+async function loadChat(scroll) {
+  const to = view.to;
+  try {
+    const r = await call('chat_read', { ...to, limit: 200 });
+    if (view.kind !== 'chat' || view.to !== to) return;
+    const stick = scroll || nearBottom();
+    const me = chatInfo && chatInfo.me;
+    main.innerHTML = '<div class="thread">' + (r.messages || []).map(m => {
+      const mine = m.from === 'me' || (me && m.from === me);
+      return `<div class="msg ${mine ? 'me' : 'ai'}">${mine ? '' : `<div class="meta" style="align-self:auto;padding:0 0 2px">${esc(m.from || '')}</div>`}${mine ? esc(m.text) : md(m.text)}</div>`;
+    }).join('') + '</div>';
+    if (stick) main.scrollTop = main.scrollHeight;
+  } catch (e) { main.innerHTML = `<div class="empty"><b>Couldn't load</b>${esc(e.message)}</div>`; }
+}
+
+// ── composer ──
+const input = $('input'), sendBtn = $('send');
+function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, innerHeight * 0.4) + 'px'; sendBtn.disabled = !input.value.trim(); }
+input.addEventListener('input', grow);
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && matchMedia('(pointer: fine)').matches) { e.preventDefault(); doSend(); } });
+sendBtn.addEventListener('click', doSend);
+async function doSend() {
+  const text = input.value.trim(); if (!text) return;
+  sendBtn.disabled = true;
+  try {
+    if (view.kind === 'agent') {
+      if (agentData && agentData.pending === 'question') await call('question_answer', { agentId: view.id, text });
+      else await call('agent_send', { agentId: view.id, text });
+      toast(agentData && agentData.status === 'active' ? 'Queued: sends when the agent is free' : 'Sent');
+      setTimeout(() => loadAgent(true), 700);
+    } else if (view.kind === 'chat') { await call('chat_send', { ...view.to, text }); loadChat(true); }
+    input.value = ''; grow();
+  } catch (e) { toast(e.message); sendBtn.disabled = false; }
+}
+$('stop').addEventListener('click', async () => { try { await call('agent_interrupt', { agentId: view.id }); toast('Stopped'); } catch (e) { toast(e.message); } setTimeout(() => loadAgent(false), 600); });
+
+// ── navigation ──
+function goList() { view = { kind: 'list' }; renderList(); loadList().catch(() => {}); }
+$('back').addEventListener('click', () => history.back());
+addEventListener('popstate', () => { if (view.kind !== 'list') goList(); });
+
+// ── live updates: the SSE feed, read with fetch so the token goes in a header ──
+let evAbort = null, lastSeq = null, retryT;
+const timers = {};
+const soon = (k, fn, ms = 250) => { clearTimeout(timers[k]); timers[k] = setTimeout(fn, ms); };
+function onEvent(ev) {
+  if (ev.type.startsWith('agent.')) {
+    soon('list', () => loadList().catch(() => {}), 400);
+    if (view.kind === 'agent' && ev.agentId === view.id) soon('agent', () => loadAgent(false), ev.type === 'agent.status' || ev.type === 'agent.pending' ? 100 : 350);
+    if (ev.type === 'agent.closed' && view.kind === 'agent' && ev.agentId === view.id) { toast('Agent closed'); history.back(); }
+  } else if (ev.type === 'chat.message') {
+    soon('list', () => loadList().catch(() => {}), 400);
+    if (view.kind === 'chat') soon('chat', () => loadChat(false));
+  }
+}
+function setConn(s) { $('conn').className = 'conn ' + (s || ''); }
+function stopEvents() { if (evAbort) evAbort.abort(); evAbort = null; clearTimeout(retryT); setConn(''); }
+async function startEvents() {
+  stopEvents(); if (!token) return;
+  const ac = evAbort = new AbortController();
+  try {
+    const r = await fetch('/m/events' + (lastSeq != null ? '?since=' + lastSeq : ''), { headers: { authorization: 'Bearer ' + token }, signal: ac.signal, cache: 'no-store' });
+    if (r.status === 401) return unpaired();
+    if (!r.ok || !r.body) throw new Error('events ' + r.status);
+    setConn('on');
+    if (lastSeq != null) { loadList().catch(() => {}); if (view.kind === 'agent') loadAgent(false); } // caught up on a reconnect
+    const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const data = block.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6)).join('\n');
+        if (!data) continue;
+        try { const ev = JSON.parse(data); if (ev.seq) lastSeq = ev.seq; onEvent(ev); } catch {}
+      }
+    }
+    throw new Error('closed');
+  } catch (e) {
+    if (ac.signal.aborted) return;
+    setConn('off');
+    retryT = setTimeout(startEvents, 3000);
+  }
+}
+// Phones freeze background tabs: on return, reconnect and refresh.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !token) return;
+  startEvents();
+  if (view.kind === 'agent') loadAgent(false); else if (view.kind === 'chat') loadChat(false); else loadList().catch(() => {});
+});
+
+// ── start ──
+if (!token) unpaired();
+else {
+  history.replaceState({ v: 'list' }, '');
+  main.innerHTML = `<div class="empty">Connecting…</div>`;
+  loadList().then(startEvents).catch((e) => { if (token) { main.innerHTML = `<div class="empty"><b>Can't reach Overlord</b>${esc(e.message)}<br><br>Is the computer awake and on the same network?</div>`; setTimeout(() => location.reload(), 5000); } });
+}
+</script>
+</body>
+</html>

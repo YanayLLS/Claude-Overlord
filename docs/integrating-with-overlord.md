@@ -132,3 +132,4 @@ Filter with exact types or prefixes ending in `.`, for example `agent.status,cha
   - `peerChat: false` means the chat tools have no one to talk to.
   - `bypassPermissions: true` means agents rarely stop for permissions.
   - `cpuSaving: true` means idle agents get their CLI closed (`sleeping`) and the first message to one takes a few seconds longer.
+  - `phone: true` means the user can also answer from their phone (Settings → Phone): a permission or question you are waiting on may be answered there, and new prompts may arrive from it.

@@ -948,6 +948,17 @@ button.wt-state.failed:hover { background:rgba(243,139,168,.16); }
 .settings-sec > summary:hover { color:var(--accent); }
 .settings-sec .sec-chip { margin-left:auto; font-size:11px; font-weight:400; color:var(--dim); }
 .settings-sec .sec-chip.on { color:#a6e3a1; }
+.phone-conn { margin-top:14px; display:flex; flex-direction:column; gap:12px; }
+.phone-main { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+.phone-qr { width:168px; height:168px; flex:none; border-radius:10px; overflow:hidden; background:#fff; }
+.phone-qr svg { width:100%; height:100%; display:block; }
+.phone-txt { flex:1; min-width:200px; display:flex; flex-direction:column; gap:8px; }
+.phone-txt code { font-family:'Geist Mono', ui-monospace, Consolas, monospace; font-size:12px; user-select:text; overflow-wrap:anywhere; }
+#phone-body:not([hidden]) { display:flex; flex-direction:column; gap:12px; }
+.phone-pick { display:flex; gap:6px; flex-wrap:wrap; }
+.phone-pick:empty { display:none; }
+.phone-pick button { font-size:11.5px; padding:3px 10px; border-radius:99px; border:1px solid var(--border); background:none; color:var(--dim); cursor:pointer; }
+.phone-pick button.on { color:var(--text); border-color:var(--accent, #89b4fa); }
 .settings-sec > div.sec-body { padding:0 0 10px 18px; }
 .settings-title { font-size:15px; color:var(--text); letter-spacing:.3px; font-weight:600; }
 .settings-close {
@@ -1536,6 +1547,29 @@ button:focus-visible { outline-offset:0; }
           <div class="api-row"><span class="api-k">REST</span><code id="api-rest">http://127.0.0.1:7790/v1</code><button class="api-ib" type="button" title="Copy URL" aria-label="Copy REST URL" onclick="apiCopyText('api-rest', this)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button></div>
         </div>
         <div class="sr-only" id="api-live" aria-live="polite"></div>
+      </div>
+      </div>
+      </details>
+      <details class="settings-sec" data-sec="phone" data-icon='<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>'>
+      <summary>Phone<span class="sec-chip" id="chip-phone"></span></summary>
+      <div class="sec-body">
+      <div class="set-group">
+        <label class="settings-label set-row"><span class="set-text"><span class="set-name">Open my chats on my phone</span><span class="set-sub">Read, reply, approve and stop agents from a phone browser · phones on this network, or on Tailscale</span></span><input type="checkbox" id="chk-phone" onchange="api.send({ type: 'saveSettings', settings: { mobileEnabled: this.checked } })" /></label>
+      </div>
+      <div id="phone-conn" class="phone-conn" hidden>
+        <div class="api-err" id="phone-err" hidden><span id="phone-err-why"></span><button class="api-tb" type="button" onclick="api.send({ type: 'mobileRetry' })">Retry</button></div>
+        <div id="phone-body">
+          <div class="phone-pick" id="phone-pick"></div>
+          <div class="phone-main">
+            <div class="phone-qr" id="phone-qr"></div>
+            <div class="phone-txt">
+              <div class="set-name">Scan with your phone's camera</div>
+              <code id="phone-url"></code>
+              <div class="set-sub" id="phone-hint"></div>
+              <div class="field-row api-acts"><button class="settings-btn" type="button" onclick="api.send({ type: 'mobileCopy', address: phoneAddr }); apiDone(this, 'Phone link copied')"><span>Copy link</span></button><button class="settings-btn" type="button" title="Phones paired with the old code stop working" onclick="api.send({ type: 'mobileNewToken' }); showToast('New code: scan it again on your phone')"><span>New code</span></button></div>
+            </div>
+          </div>
+        </div>
       </div>
       </div>
       </details>
@@ -4973,6 +5007,7 @@ function handleAgentMsg(msg) {
     case 'accountUsage': otherUsage[msg.label] = msg.usage; scheduleRender(); if (msg.label === usageView) { getUsageHist(usageHistAll ? 0 : Date.now() - 8 * 86400000); renderUsageModal(); } break;
     case 'accountLoginComplete': api.send({ type: 'saveAccount' }); api.send({ type: 'setupRecheck' }); break;
     case 'peersState': { peersState = msg; renderPeersSec(); if (worldView) scheduleRender(); break; }
+    case 'mobileState': renderPhone(msg); break;
     case 'apiState': {
       const chk = document.getElementById('chk-api'); if (chk) chk.checked = msg.enabled;
       const failed = msg.enabled && !msg.running;
@@ -5497,6 +5532,31 @@ function apiDone(btn, what) {
     btn.classList.remove('done'); btn.style.minWidth = '';
     if (label) { label.textContent = btn.id === 'api-copy-cfg' ? 'Copy MCP config' : btn._label; btn._label = null; }
   }, 1500);
+}
+// Settings → Phone (mobile-server.js). The QR holds the pairing token; the link shown here doesn't (Copy link has it).
+let phoneAddr = '', phoneState = null;
+function renderPhone(msg) {
+  phoneState = msg || phoneState; msg = phoneState; if (!msg) return;
+  const chk = document.getElementById('chk-phone'); if (chk) chk.checked = !!msg.enabled;
+  const chip = document.getElementById('chip-phone');
+  if (chip) { chip.textContent = msg.running ? '● On' : msg.enabled ? '' : 'Off'; chip.classList.toggle('on', !!msg.running); }
+  const conn = document.getElementById('phone-conn'); if (!conn) return;
+  conn.hidden = !msg.enabled;
+  const failed = msg.enabled && !msg.running;
+  document.getElementById('phone-err').hidden = !failed;
+  document.getElementById('phone-err-why').textContent = msg.error ? `Couldn't start · ${msg.error}` : 'Starting…';
+  const addrs = msg.addresses || [];
+  document.getElementById('phone-body').hidden = !msg.running || !addrs.length;
+  if (msg.running && !addrs.length) { document.getElementById('phone-err').hidden = false; document.getElementById('phone-err-why').textContent = 'No network: connect this computer to Wi-Fi or a LAN'; }
+  if (!addrs.length) return;
+  const cur = addrs.find(a => a.address === phoneAddr) || addrs[0]; phoneAddr = cur.address;
+  const name = (a) => a.kind === 'tailscale' ? 'Tailscale' : a.iface;
+  document.getElementById('phone-pick').innerHTML = addrs.length > 1 ? addrs.map(a => `<button type="button" class="${a === cur ? 'on' : ''}" data-addr="${a.address}" onclick="phoneAddr=this.dataset.addr; renderPhone()">${esc(name(a))} · ${a.address}</button>`).join('') : '';
+  document.getElementById('phone-qr').innerHTML = cur.qr; // built in main from our own URL (vendor/qrcode.js)
+  document.getElementById('phone-url').textContent = cur.url;
+  document.getElementById('phone-hint').textContent = cur.kind === 'tailscale'
+    ? 'Works anywhere your phone has Tailscale on.'
+    : 'Your phone must be on the same Wi-Fi. For anywhere else, install Tailscale on both and pick its address. If Windows asks, allow Overlord on private networks.';
 }
 function apiCopyText(id, btn) { navigator.clipboard.writeText(document.getElementById(id).textContent).then(() => apiDone(btn, 'URL copied'), () => showToast('Could not copy')); }
 function apiRotateAsk(on) {

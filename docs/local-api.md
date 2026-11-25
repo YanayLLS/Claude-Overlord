@@ -37,7 +37,7 @@ Call `overlord_capabilities` first (`POST /v1/overlord_capabilities` with `{}`, 
 | `overlord.version`, `apiVersion` | The app version, and the API contract version. `apiVersion` goes up only on a breaking change. |
 | `auth` | How to authenticate and where the token file is |
 | `transports` | REST, MCP, SSE and webhooks: paths, resume rules, retry schedule, error codes |
-| `features` | Switches that change what you will see: `peerChat` (peer connections on), `bypassPermissions` (agents skip permission prompts, so `agent.pending` with kind `permission` is rare), `remoteControl`, `cpuSaving` (idle agents nobody has open get their CLI closed; see `sleeping`) |
+| `features` | Switches that change what you will see: `peerChat` (peer connections on), `bypassPermissions` (agents skip permission prompts, so `agent.pending` with kind `permission` is rare), `remoteControl`, `cpuSaving` (idle agents nobody has open get their CLI closed; see `sleeping`), `phone` (the phone companion is on: Settings → Phone serves a mobile chat page on the LAN, so prompts and answers can also come from a phone) |
 | `limits` | The longest `agent_ask` wait, how many events are buffered, the most webhooks allowed |
 | `tools` | Every tool with its description and JSON Schema |
 | `events` | Every event type with its description |

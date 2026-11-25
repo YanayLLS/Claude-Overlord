@@ -23,6 +23,7 @@ const { createCaptureHost, makeCaptureWindow } = require('./browser/capture-host
 const { createMcpServer } = require('./mcp/server');
 const { createApi, ApiError, newToken } = require('./api-core');
 const { createApiServer } = require('./api-server');
+const mobileSrv = require('./mobile-server');
 const { keepAwake, dueToSleep } = require('./cpu-saver-core');
 let focusedAgentId = null; // the agent open in the window (focusAgent): CPU saving never puts it to sleep
 // Messages after which an agent may have just become sleepable (a turn ended, a tool or dialog cleared).
@@ -35,6 +36,7 @@ function queueSaveSweep() {
   setTimeout(() => { _saveSweepQueued = false; cpuSaveSweep(); }, 0); // after the message's own state change lands; it checks the setting
 }
 let localApi = null, localApiServer = null; // the local API (Settings → Local API); send() feeds it, so declared before any send
+let mobileApi = null, mobileServer = null; // the phone companion (Settings → Phone, mobile-server.js); send() feeds it too
 const { writeAgentConfig, settingsFlags, removeAgentConfig, askFile } = require('./mcp/agent-config');
 const { spareFits } = require('./spare-core');
 const { createPreviewController } = require('./preview-pane');
@@ -708,6 +710,7 @@ function send(data) {
   }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('msg', data);
   if (localApi) localApi.publish(data); // the local API's events are the renderer's messages, translated (api-core.js)
+  if (mobileApi) mobileApi.publish(data);
   if (SLEEP_TRIGGERS.has(data.type)) queueSaveSweep(); // CPU saving: a turn ended, a tool or dialog cleared → check at once
 }
 function logToRenderer(...args) {
@@ -720,10 +723,10 @@ function logToRenderer(...args) {
 // the ClickUp API token stays in the main process, only its presence is reported.
 // The header is 44 CSS px; the window buttons Windows draws over it are device px, so scale them with the UI zoom.
 function titleBarOverlay(theme) { return { ...titleBarColors(theme), height: Math.round(44 * (settings.zoom || 100) / 100) }; }
-function publicSettings() { const { clickupToken, dictationKey, prCache, actionsCache, apiToken, apiWebhooks, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken, dictationHasKey: !!dictationKey }; }
+function publicSettings() { const { clickupToken, dictationKey, prCache, actionsCache, apiToken, apiWebhooks, mobileToken, ...rest } = settings; return { ...rest, clickupHasToken: !!clickupToken, dictationHasKey: !!dictationKey }; }
 function sendFullState() {
   send({ type: 'settings', settings: publicSettings() });
-  sendApiState();
+  sendApiState(); sendMobileState();
   for (const [p, sv] of devServers) send({ type: 'wtServer', path: p, running: true, port: sv.port, url: sv.url });
   for (const [p, sv] of externalServers) send({ type: 'wtServer', path: p, running: true, port: sv.port, url: sv.url });
   if (lastClickup.fetchedAt || lastClickup.error) send({ type: 'clickupList', ...lastClickup }); // a reloaded renderer gets the raids back at once
@@ -5642,6 +5645,9 @@ function handleIpc(msg) {
     }
     case 'apiRetry': if (settings.apiEnabled && !localApiServer) startLocalApi(); break;
     case 'apiOpenLog': shell.openPath(LOG_FILE); break;
+    case 'mobileCopy': { const u = mobilePairUrl(msg.address); if (u) clipboard.writeText(u); break; } // the link with the token: it stays in main, as the API token
+    case 'mobileRetry': if (settings.mobileEnabled && !mobileServer) startMobile(); break;
+    case 'mobileNewToken': settings.mobileToken = newToken(); saveState(); if (mobileServer) mobileServer.dropStreams(); sendMobileState(); break; // paired phones must scan again
     case 'apiNewToken': settings.apiToken = newToken(); saveState(); apiRotated = true; if (localApiServer) { stopLocalApi(); startLocalApi(); } else sendApiState(); break; // a restart also drops streams opened with the old one
     case 'cliCancel': cliCancel(msg.id, msg.esc !== false); break; // Esc: what the chat hasn't handed over yet stays with it // a quest handed to a running agent lands as one pasted prompt
     case 'killServer': {
@@ -5834,6 +5840,7 @@ function handleIpc(msg) {
       if ('worldEnabled' in msg.settings) armClickupTimer();
       if ('remoteControl' in msg.settings) syncRemoteControl();
       if ('apiEnabled' in msg.settings) { if (settings.apiEnabled) startLocalApi(); else { stopLocalApi(); sendApiState(); } }
+      if ('mobileEnabled' in msg.settings) { if (settings.mobileEnabled) startMobile(); else { stopMobile(); sendMobileState(); } }
       if ('cpuSaving' in msg.settings) { if (!settings.cpuSaving) { for (const [id, a] of agents) if (a.sleeping) queuePrewarm(id); } else for (const a of agents.values()) a._idleSince = 0; } // off: everyone back up, staggered
       if ('terminalsInApp' in msg.settings && termPane) try { termPane.sync(); } catch {}
       if (msg.settings.englishOnFocus) kbdHelper(() => {}); // build the helper now so the next focus switches at once
@@ -6234,7 +6241,7 @@ function apiHost() {
     info: () => ({ version: app.getVersion(), agents: [...agents.values()].filter(a => !a.archived).length, peersEnabled: !!settings.peersEnabled, peersOnline: connectedPeerNames().length }),
     // Switches that change what an integration will see. bypassPermissions: agents start with
     // --dangerously-skip-permissions, so permission prompts (agent.pending kind permission) are rare.
-    features: () => ({ peerChat: !!settings.peersEnabled, bypassPermissions: !!settings.bypassPermissions, remoteControl: settings.remoteControl !== false, cpuSaving: !!settings.cpuSaving }),
+    features: () => ({ peerChat: !!settings.peersEnabled, bypassPermissions: !!settings.bypassPermissions, remoteControl: settings.remoteControl !== false, cpuSaving: !!settings.cpuSaving, phone: !!mobileApi }),
     getAgentRaw: (id) => agents.get(id) || null,
     listAgents: (withArchived) => [...agents.values()].filter(a => withArchived || !a.archived).map(a => apiAgent(a, false)),
     getAgent: (id) => (agents.has(id) ? apiAgent(agents.get(id), true) : null),
@@ -6314,6 +6321,47 @@ let apiRotated = false, apiError = '';
 function sendApiState() {
   send({ type: 'apiState', enabled: !!settings.apiEnabled, running: !!localApi, port: localApi && localApiServer ? localApiServer.port() : 0, file: API_FILE, tokenTail: (settings.apiToken || '').slice(-4), rotated: apiRotated, error: settings.apiEnabled && !localApi ? apiError : '' });
   apiRotated = false;
+}
+
+// ── Phone companion (mobile-server.js, mobile/index.html) ──────────────
+// Overlord's chats in a phone browser: a server on the LAN (and Tailscale, when it's installed) with a slice of the
+// local API behind its own pairing token. Off until Settings → Phone turns it on. The token stays in main: the renderer
+// gets the QR code and the link without it, and mobileCopy puts the full link on the clipboard.
+async function startMobile() {
+  if (mobileServer) return;
+  if (!settings.mobileToken) { settings.mobileToken = newToken(); saveState(); }
+  const api = createApi(apiHost());
+  const srv = mobileSrv.createMobileServer({ api, getToken: () => settings.mobileToken, root: __dirname, log: flog });
+  mobileServer = srv;
+  try {
+    const port = await srv.start(+settings.mobilePort || mobileSrv.MOBILE_DEFAULT_PORT);
+    if (mobileServer !== srv) { srv.stop(); return; } // switched off while it was starting
+    mobileError = ''; mobileApi = api;
+    if (!settings.mobilePort) { settings.mobilePort = port; saveState(); } // the same port next time, so a home-screen icon keeps working
+    flog(`phone companion on port ${port}`);
+  } catch (e) {
+    if (mobileServer === srv) mobileServer = null;
+    mobileError = e.code === 'EADDRINUSE' ? 'Port in use' : e.message;
+    flog(`phone companion failed to start: ${e.message}`);
+  }
+  sendMobileState();
+}
+function stopMobile() {
+  const srv = mobileServer;
+  mobileServer = null; mobileApi = null;
+  if (srv) srv.stop().catch(() => {});
+}
+let mobileError = '';
+function mobilePairUrl(address) {
+  const port = mobileApi && mobileServer ? mobileServer.port() : 0;
+  if (!port || !mobileSrv.lanAddresses().some(x => x.address === address)) return '';
+  return mobileSrv.pairUrl(address, port, settings.mobileToken);
+}
+function sendMobileState() {
+  const port = mobileApi && mobileServer ? mobileServer.port() : 0;
+  const addrs = port ? mobileSrv.lanAddresses() : [];
+  send({ type: 'mobileState', enabled: !!settings.mobileEnabled, running: !!port, port, error: settings.mobileEnabled && !port ? mobileError : '',
+    addresses: addrs.map(x => ({ address: x.address, kind: x.kind, iface: x.iface, url: `http://${x.address}:${port}`, qr: mobileSrv.qrSvg(mobileSrv.pairUrl(x.address, port, settings.mobileToken)) })) });
 }
 
 // ── LAN peer server (/peer) ──────────────
@@ -7249,6 +7297,7 @@ app.whenReady().then(() => {
   mcpServer = createMcpServer({ accounts: agentAccounts, onEditHook: onFeatureEdit, prClaims: prClaimsApi, closeSelf, releases: releases.agentApi, messaging: agentMessaging, resolveActions: (id) => (agents.has(id) ? loggedActions(id, browserRegistry.actionsFor(id)) : null), getTerminals: () => (termPane ? termPane.api : null) });
   mcpServer.start(settings.mcpPort).then(() => { settings.mcpPort = mcpServer.port(); }).catch((e) => console.log(`[Overlord] MCP server failed to start: ${e.message}`));
   if (settings.apiEnabled) startLocalApi();
+  if (settings.mobileEnabled) startMobile();
   _ptyHostReady = ptyHost.connect().then(() => true, (e) => { flog(`pty host unavailable, agents won't survive a restart: ${e.message}`); return false; });
   termPane = createTermPane({ stateDir: STATE_DIR, ptyFactory: agentPty, ptyHost, send, log: flog, enabled: () => settings.terminalsInApp !== false });
   _ptyHostReady.then(() => termPane.start()).catch((e) => flog(`Terminals pane failed to start: ${e.message}`));
@@ -7377,6 +7426,7 @@ app.on('before-quit', () => {
   if (remoteServer) { try { remoteServer.close(); } catch {} }
   if (mcpServer) { try { mcpServer.stop(); } catch {} }
   stopLocalApi(); // its api.json goes with it: a client finding none knows Overlord's API is down
+  stopMobile();
   if (termPane) { try { termPane.stop(); } catch {} } // its servers keep running in the pty host
   if (preview) { try { preview.destroy(); } catch {} }
   if (browserRegistry) { try { browserRegistry.destroyAll(); } catch {} }
