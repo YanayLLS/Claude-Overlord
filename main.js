@@ -1692,7 +1692,7 @@ function restoreAgents(state) {
           try {
             const r = JSON.parse(l);
             // end_turn = the model finished; turns woken by a teammate message write no turn_duration
-            if (r.type === 'assistant' && r.message?.model !== '<synthetic>') midTurn = r.message?.stop_reason !== 'end_turn'; // not the resume placeholder
+            if (r.type === 'assistant' && r.message?.model !== '<synthetic>') { midTurn = r.message?.stop_reason !== 'end_turn'; const t = (r.message?.content || []).filter(b => b.type === 'text' && b.text).pop(); if (t) ag.fullText = t.text; } // not the resume placeholder; the last reply: "I AM WORKING" keeps its shells/monitors counted
             else if (r.type === 'system' && r.subtype === 'turn_duration') midTurn = false;
             if (Date.parse(r.timestamp) >= since) { applyBgRecord(ag.bgTasks, r); applyAskRecord(ag.askIds, r); }
           } catch {}
