@@ -1319,7 +1319,7 @@ function openFileAt({ cwd, file, line }) {
 function filePeek({ cwd, file, line, seq, all: whole }) {
   resolveRef(cwd, file, (p) => {
     let lines = [], start = 0;
-    if (p) try { const all = fs.readFileSync(p, 'utf8').split(/\r?\n/), n = Math.max(1, parseInt(line, 10) || 1); if (whole) { start = 1; lines = all.slice(0, 5000).map(s => s.slice(0, 500)); } else { start = Math.max(1, n - 4); lines = all.slice(start - 1, n + 6).map(s => s.slice(0, 300)); } } catch {}
+    if (p && !isBinaryFile(p)) try { const all = fs.readFileSync(p, 'utf8').split(/\r?\n/), n = Math.max(1, parseInt(line, 10) || 1); if (whole) { start = 1; lines = all.slice(0, 5000).map(s => s.slice(0, 500)); } else { start = Math.max(1, n - 4); lines = all.slice(start - 1, n + 6).map(s => s.slice(0, 300)); } } catch {}
     send({ type: 'filePeek', seq, path: p, start, line: parseInt(line, 10) || 0, lines });
   });
 }
