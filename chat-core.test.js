@@ -390,3 +390,10 @@ test('a command the CLI runs at once mid-turn is not left waiting as queued', ()
   assert.ok(!runsAtOnce('/modelling'));
   assert.ok(!runsAtOnce('fix the /model bug'));
 });
+
+test('a menu option wrapped beside a preview keeps its whole label', () => {
+  const { optLine } = require('./chat-core');
+  assert.deepStrictEqual(optLine({ label: 'C. Side panel beside the', desc: '' }, 'list', true), { label: 'C. Side panel beside the list', desc: '' });
+  assert.deepStrictEqual(optLine({ label: 'A. Fast', desc: '' }, '(Recommended)', false), { label: 'A. Fast (Recommended)', desc: '' });
+  assert.deepStrictEqual(optLine({ label: 'A. Fast', desc: '' }, 'Ships today', false), { label: 'A. Fast', desc: 'Ships today' });
+});

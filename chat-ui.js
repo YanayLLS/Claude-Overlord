@@ -617,8 +617,7 @@
       if (first >= 0 && rule && /^\s*[❯›>]?\s*Chat about this\s*$/i.test(r)) { options[options.length] = { label: 'Chat about this', desc: '', sep: true, bare: true }; if (/^\s*[❯›>]/.test(r)) focus = options.length - 1; rule = false; return; }
       const last = options[options.length - 1], d = cut(r);
       if (!last || first < 0 || !d || !/^\s{3,}/.test(r) || /^(Enter|Esc|↑|Tab|Notes:)/.test(d)) return;
-      if (/^\(.*\)$/.test(d) && !last.desc) last.label += ' ' + d; // "(Recommended)" wrapped under its label
-      else last.desc = (last.desc ? last.desc + ' ' : '') + d;
+      optLine(last, d, preview.length > 0);
     });
     // The question: the lines just above the menu (it can wrap, inside a left rule), up to a blank line.
     const q = [];

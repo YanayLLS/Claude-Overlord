@@ -523,4 +523,12 @@ function turnOutTokens(evs) {
 // answers in its own panel, /model switches and prints "Set model to …" under the prompt). Its transcript line comes
 // only at the turn's end, so a bubble waiting for it sat "Queued" all turn.
 function runsAtOnce(text) { return /^\/(btw|model|effort|fast|config|status|cost|context|usage|help|theme|vim)(\s|$)/.test(String(text || '').trim()); }
-if (typeof module !== 'undefined' && module.exports) module.exports = { runsAtOnce, turnOutTokens, bgEnded, compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };
+// A row under a menu option ("    list"): with a preview beside the menu the CLI draws labels only, so it is the label
+// wrapping; otherwise it is the description, except a wrapped "(Recommended)".
+function optLine(o, d, preview) {
+  if (preview || (/^\(.*\)$/.test(d) && !o.desc)) o.label += ' ' + d;
+  else o.desc = (o.desc ? o.desc + ' ' : '') + d;
+  return o;
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { optLine, runsAtOnce, turnOutTokens, bgEnded, compactRun, isVisualTool, visualSpec, visualDoc, contextUsage, screenChoice, permLabel, relPathRef, sketchHtml, crashLine, cellsHtml, chatUrlRe, escHtml, termHtml, bufferRows, isWorkingStatus, arrowKeys, toolView, groupSummary, lineDiff, baseName, matchFiles, parseUnified, fileRefs, pathRef, dictJoin, dictVocab, wavBytes, liveReply, screenDialog, screenPanel, screenBtw, screenPermRows, undoEdits };
