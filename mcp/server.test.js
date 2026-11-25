@@ -51,11 +51,11 @@ test('initialize returns protocol version and tools capability', async () => {
   });
 });
 
-test('tools/list returns the eight browser tools, three terminal tools, show_visual, the eight PR tools, close_self, the five release tools, the two agent-messaging tools and the two account tools', async () => {
+test('tools/list returns the eight browser tools, three terminal tools, show_visual, the nine PR tools, close_self, the five release tools, the two agent-messaging tools and the two account tools', async () => {
   await withServer(async (server) => {
     const token = server.mintToken(1);
     const { json } = await rpc(server, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.strictEqual(json.result.tools.length, 33);
+    assert.strictEqual(json.result.tools.length, 34);
     assert.ok(['agent_list', 'agent_message', 'account_list', 'account_use', 'account_switch'].every(n => json.result.tools.some(t => t.name === n)));
     assert.ok(["release_status", "release_open", "release_sign", "release_all", "release_rerun_failed", "release_pause"].every(n => json.result.tools.some(t => t.name === n)));
   });
@@ -206,6 +206,25 @@ test('PR panel tools reach the PR host and turn { error } into isError', async (
     assert.strictEqual((await call('pr_approve', {})).isError, true); // pr required
     await call('pr_hide', { pr: 'o/r#3', how: 'snooze', hours: 2 });
     assert.deepStrictEqual(seen, [['list', { mine: true }], ['auto', ['o/r#1'], true], ['merge', 'o/r#2'], ['hide', 'o/r#3', 'snooze', false, 2]]);
+  }, () => ACTIONS, claims);
+});
+
+test('pr_watch_repos adds and removes watched repos through the PR host and returns the list', async () => {
+  const seen = [];
+  const claims = {
+    repos: ({ add, remove }) => (seen.push(['repos', add, remove]), remove.includes('o/locked') ? { error: 'o/locked is a release repo' } : { enabled: true, repos: ['o/a', ...add], locked: [] }),
+  };
+  await withServer(async (server) => {
+    const t = server.mintToken(1);
+    const call = (args) => rpc(server, t, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'pr_watch_repos', arguments: args } }).then((r) => r.json.result);
+    const tools = (await rpc(server, t, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })).json.result.tools.map((x) => x.name);
+    assert.ok(tools.includes('pr_watch_repos'));
+    assert.deepStrictEqual(JSON.parse((await call({})).content[0].text).repos, ['o/a']);
+    assert.deepStrictEqual(JSON.parse((await call({ add: ['o/b'] })).content[0].text).repos, ['o/a', 'o/b']);
+    const locked = await call({ remove: ['o/locked'] });
+    assert.strictEqual(locked.isError, true); assert.match(locked.content[0].text, /release repo/);
+    assert.strictEqual((await call({ add: 'o/b' })).isError, true); // add must be a list
+    assert.deepStrictEqual(seen, [['repos', [], []], ['repos', ['o/b'], []], ['repos', [], ['o/locked']]]);
   }, () => ACTIONS, claims);
 });
 

@@ -3587,6 +3587,19 @@ function prActions() {
       if (typeof id !== 'number') return { error: (id && id.error) || 'The fix agent did not start.' };
       const a = agents.get(id); return { agentId: id, agent: (a && a.agentName) || null };
     },
+    // The watched-repo list (PR settings), as the local API's pr_repos_*: add switches watching on; release repos stay.
+    repos({ add = [], remove = [] } = {}) {
+      const lc = (r) => r.toLowerCase(), c = settings.prSettings || {}, cur = [...(c.repos || [])], locked = releases.releaseRepos();
+      const bad = [...add, ...remove].find(r => !PR_REPO_RE.test(r)); if (bad) return { error: `not owner/name: ${bad}` };
+      const lock = locked.find(r => remove.some(x => lc(x) === lc(r))); if (lock) return { error: `${lock} is a release repo: the whole team watches it` };
+      if (add.length || remove.length) {
+        const drop = new Set(remove.map(lc)), repos = cur.filter(r => !drop.has(lc(r)));
+        for (const r of add) if (!repos.some(x => lc(x) === lc(r))) repos.push(r);
+        savePrSettings({ ...c, enabled: add.length ? true : !!c.enabled, repos });
+      }
+      const s = settings.prSettings || {};
+      return { enabled: !!s.enabled, repos: [...(s.repos || [])], locked };
+    },
     async hide(ref, how, undo, hours) {
       if (!['archive', 'mute', 'snooze'].includes(how)) return { error: 'how must be archive, mute or snooze' };
       const r = await find(ref); if (r.error) return r;

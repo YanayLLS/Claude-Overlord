@@ -59,6 +59,8 @@ const PR_SCHEMAS = [
     inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
   { name: 'pr_fix', description: 'Send a new agent to fix a PR\'s failing checks or conflicts, as the row\'s Fix button. If an agent already holds the PR, that one is named instead.',
     inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number') }, required: ['pr'] } },
+  { name: 'pr_watch_repos', description: 'The repos whose PRs Overlord watches (its PRs panel and PR settings). Add or remove repos, or pass neither to read the list. Release repos are watched for the whole team and cannot be removed.',
+    inputSchema: { type: 'object', properties: { add: { type: 'array', items: { type: 'string' }, description: 'owner/name repos to start watching' }, remove: { type: 'array', items: { type: 'string' }, description: 'owner/name repos to stop watching' } } } },
   { name: 'pr_hide', description: 'Archive, mute or snooze a PR in Overlord\'s PRs panel (GitHub is untouched). undo shows it again.',
     inputSchema: { type: 'object', properties: { pr: str('The PR url, or owner/repo#number'), how: { type: 'string', enum: ['archive', 'mute', 'snooze'] }, undo: { type: 'boolean' }, hours: { type: 'number', description: 'Snooze length, default 24' } }, required: ['pr', 'how'] } },
 ];
@@ -152,6 +154,10 @@ async function prCall(claims, agentId, name, args = {}) {
       pr_approve: () => claims.approve(pr()),
       pr_fix: () => claims.fix(pr()),
       pr_hide: () => claims.hide(pr(), args.how, args.undo === true, args.hours),
+      pr_watch_repos: () => {
+        const list = (k) => { const v = args[k] ?? []; if (!Array.isArray(v) || v.some((r) => typeof r !== 'string')) throw new Error(`pr_watch_repos: "${k}" must be a list of owner/name repos`); return v; };
+        return claims.repos({ add: list('add'), remove: list('remove') });
+      },
     }[name];
     if (!run) return fail(`Unknown tool: ${name}`);
     const r = await run();
