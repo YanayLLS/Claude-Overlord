@@ -1565,7 +1565,6 @@ button:focus-visible { outline-offset:0; }
       <div class="help-row"><span class="help-key">Ctrl+N</span><span class="help-desc">New agent in current project</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Alt+1–9</span><span class="help-desc">New agent with saved prefix</span></div>
       <div class="help-row"><span class="help-key">Ctrl+W</span><span class="help-desc">Close selected agent</span></div>
-      <div class="help-row"><span class="help-key">Ctrl+R</span><span class="help-desc">Restart selected agent</span></div>
       <div class="help-row"><span class="help-key">Ctrl+Alt+Shift+R</span><span class="help-desc">Restart the app</span></div>
       <div class="help-row"><span class="help-key">Ctrl+D</span><span class="help-desc">Duplicate agent (same project, pre-filled prompt)</span></div>
       <div class="help-row"><span class="help-key">Ctrl+A</span><span class="help-desc">Mark all text in the prompt</span></div>
@@ -5730,12 +5729,8 @@ document.addEventListener('keydown', (e) => {
     if (el) renameAgent(selectedId, el);
     return;
   }
-  // Ctrl+R to restart selected agent
-  if (key === 'r' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
-    e.preventDefault();
-    if (selectedId && agents.has(selectedId)) restartAgent(selectedId);
-    return;
-  }
+  // Ctrl+R does nothing: it used to restart the agent, too easy to hit by accident. Swallowed so it never reloads the window.
+  if (key === 'r' && (e.ctrlKey || e.metaKey) && !e.shiftKey) { e.preventDefault(); return; }
   // Ctrl+L to clear terminal display
   if (key === 'l' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();

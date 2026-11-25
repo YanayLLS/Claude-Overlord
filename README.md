@@ -30,7 +30,6 @@ Each agent gets its own terminal session, live status tracking, and conversation
 |---|---|
 | `Ctrl+N` | New agent |
 | `Ctrl+W` | Close agent |
-| `Ctrl+R` | Restart agent |
 | `Ctrl+D` | Duplicate agent |
 | `Ctrl+L` | Clear terminal |
 | `Ctrl+Tab` | Next agent |
