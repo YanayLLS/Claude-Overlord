@@ -1302,11 +1302,16 @@ function resolveRef(cwd, file, cb) {
     chatFileCache.set(cwd, { at: Date.now(), files }); pick(files);
   });
 }
-// Markdown opens in Overlord's own viewer; anything else at the line in VS Code (code --goto), else with the default app.
+// ponytail: NUL byte in the first 8 KB = binary; same heuristic git uses.
+function isBinaryFile(p) {
+  try { const fd = fs.openSync(p, 'r'); try { const b = Buffer.alloc(8192); return b.subarray(0, fs.readSync(fd, b, 0, b.length, 0)).includes(0); } finally { fs.closeSync(fd); } } catch { return false; }
+}
+// Markdown opens in Overlord's own viewer; binaries with their default app; anything else at the line in VS Code (code --goto), else with the default app.
 function openFileAt({ cwd, file, line }) {
   resolveRef(cwd, file, (p) => {
     if (!p) return send({ type: 'toast', text: `Couldn't find ${file}` });
     if (docs && /\.(md|markdown)$/i.test(p)) return docs.openPaths([p]);
+    if (isBinaryFile(p)) return shell.openPath(p).catch(() => {}); // video, image, pdf...: the app Windows uses for it
     execFile('code', ['--goto', `${p}:${Math.max(1, parseInt(line, 10) || 1)}`], { shell: true, windowsHide: true, timeout: 15000 }, (err) => { if (err) shell.openPath(p); });
   });
 }
