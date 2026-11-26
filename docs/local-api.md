@@ -70,7 +70,7 @@ curl -s -X POST http://127.0.0.1:7790/v1/agent_ask  -H "Authorization: Bearer $T
 | `overlord_info` | | version, apiVersion, agent and peer counts |
 | `agents_list` | `includeArchived?` | `{ agents: [{ id, name, title, cwd, status, pending, archived, sleeping, crashed, createdAt, sessionId, model }] }` |
 | `agent_get` | `agentId` | The `agents_list` fields plus `lastPrompt`, `lastReply`, `spinner`, open `tools`, the open `question` input and `stats` |
-| `agent_create` | `cwd`, `prompt?` | `{ agentId }` |
+| `agent_create` | `cwd`, `prompt?`, `title?` (chat name, kept over automatic naming; the user can still rename) | `{ agentId }` |
 | `agent_send` | `agentId`, `text` | `{ queued: true }`. The message waits until the agent is at its prompt. If it can't be delivered, an `agent.send_failed` event follows. |
 | `agent_ask` | `agentId`, `text`, `timeoutSec?` (default 600, max 3600) | `{ reply, done, status }`. If the agent stops for you, `done` is false and `pending` says why (`permission` or `question`). `timedOut` or `error` appear when those happen. |
 | `agent_transcript` | `agentId`, `limit?` (default 100) | `{ events, total }`: the chat view's events (`prompt`, `text`, `tool`, `turn`, …) |

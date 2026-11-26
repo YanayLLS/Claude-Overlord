@@ -81,7 +81,7 @@ const TOOLS = [
   ['overlord_info','Overlord version, API version, and counts of agents and connected peers.', obj({})],
   ['agents_list', 'Every agent: id, name, title, folder, status (active | waiting), what it is pending on (permission | question | null), archived.', obj({ includeArchived: { type: 'boolean', description: 'Also list archived agents. Default false.' } })],
   ['agent_get', 'One agent in full: the agents_list fields plus its last prompt, last reply, open tools and an open question\'s input.', obj(AGENT, ['agentId'])],
-  ['agent_create', 'Start a new agent in a folder, optionally with a first prompt. Returns its id.', obj({ cwd: S('Absolute folder path the agent works in.'), prompt: S('First prompt, submitted once the agent is ready.') }, ['cwd'])],
+  ['agent_create', 'Start a new agent in a folder, optionally with a first prompt. Returns its id.', obj({ cwd: S('Absolute folder path the agent works in.'), prompt: S('First prompt, submitted once the agent is ready.'), title: S('Chat name, shown from the start and kept: automatic naming never replaces it, the user can still rename it.') }, ['cwd'])],
   ['agent_send', 'Send an agent a message (a prompt), as typing it in its chat. Queued until the agent is at its prompt; returns at once. Failure arrives as an agent.send_failed event.', obj({ ...AGENT, text: S('The message.') }, ['agentId', 'text'])],
   ['agent_ask', 'Ask an agent something and wait for its answer: sends the message, waits for the turn to end, returns the reply. Returns early with pending set when the agent stops to ask for a permission or answer.', obj({ ...AGENT, text: S('The question or task.'), timeoutSec: N('Give up after this long. Default 600, max 3600.') }, ['agentId', 'text'])],
   ['agent_transcript', 'An agent\'s conversation as structured events (prompt, text, tool, turn, ...), oldest first.', obj({ ...AGENT, limit: N('Last N events. Default 100, max 2000.') }, ['agentId'])],
@@ -142,7 +142,7 @@ function checkArgs(tool, args) {
 }
 const clamp = (v, def, max) => Math.max(1, Math.min(max, Number.isFinite(v) ? Math.floor(v) : def));
 
-// host: { info, features, getAgentRaw(id), listAgents(includeArchived), getAgent(id), createAgent(cwd, prompt), send(id, text, intoDialog),
+// host: { info, features, getAgentRaw(id), listAgents(includeArchived), getAgent(id), createAgent(cwd, prompt, title), send(id, text, intoDialog),
 //   keys(id, data), interrupt(id), archive(id), unarchive(id), close(id), transcript(id), screen(id),
 //   chatList(), chatRead(to), chatSend(to, text), loadWebhooks(), saveWebhooks(list), fetch, log }
 function createApi(host) {
@@ -249,7 +249,7 @@ function createApi(host) {
     overlord_info: () => ({ ...host.info(), apiVersion: API_VERSION }),
     agents_list: (x) => ({ agents: host.listAgents(!!x.includeArchived) }),
     agent_get: (x) => needAgent(x.agentId),
-    agent_create: (x) => ({ agentId: host.createAgent(x.cwd, x.prompt || '') }),
+    agent_create: (x) => ({ agentId: host.createAgent(x.cwd, x.prompt || '', String(x.title || '').trim().slice(0, 200)) }),
     agent_send: (x) => { const a = needAgent(x.agentId); if (a.archived) throw conflict(`agent ${x.agentId} is archived`); host.send(x.agentId, x.text, false); return { queued: true }; },
     agent_ask: (x) => ask(x.agentId, x.text, x.timeoutSec),
     agent_transcript: (x) => { needAgent(x.agentId); const ev = host.transcript(x.agentId) || []; return { events: ev.slice(-clamp(x.limit, 100, 2000)), total: ev.length }; },

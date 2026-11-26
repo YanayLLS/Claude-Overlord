@@ -52,7 +52,7 @@ Over MCP, a failed call returns `isError: true` with the message as its text.
 |---|---|
 | What can this Overlord do | `overlord_capabilities`, `overlord_info` |
 | See agents | `agents_list` (`includeArchived?`), `agent_get` (`agentId`) |
-| Start an agent | `agent_create` (`cwd`: an absolute path to an existing folder, `prompt?`). Returns `{ agentId }`. |
+| Start an agent | `agent_create` (`cwd`: an absolute path to an existing folder, `prompt?`, `title?`: the chat name, shown from the start and never replaced by automatic naming; the user can still rename it). Returns `{ agentId }`. |
 | Fire and forget a prompt | `agent_send` (`agentId`, `text`). It's queued until the agent is at its prompt. |
 | Prompt and wait for the answer | `agent_ask` (`agentId`, `text`, `timeoutSec?` default 600, max 3600) |
 | Read history | `agent_transcript` (`agentId`, `limit?`), `agent_screen` (`agentId`, `chars?`), which is the terminal as text |

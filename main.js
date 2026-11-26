@@ -6319,10 +6319,14 @@ function apiHost() {
     getAgentRaw: (id) => agents.get(id) || null,
     listAgents: (withArchived) => [...agents.values()].filter(a => withArchived || !a.archived).map(a => apiAgent(a, false)),
     getAgent: (id) => (agents.has(id) ? apiAgent(agents.get(id), true) : null),
-    createAgent: (cwd, prompt) => {
+    createAgent: (cwd, prompt, title) => {
       let dir = false; try { dir = path.isAbsolute(cwd) && fs.statSync(cwd).isDirectory(); } catch {}
       if (!dir) throw new ApiError(400, `not an absolute path to a folder: ${cwd}`);
-      return createAgent(cwd, prompt || undefined);
+      const id = createAgent(cwd, prompt || undefined);
+      const a = title && agents.get(id);
+      // Same as a user rename (renameAgent quiet): customName blocks Claude Code's ai-title and the prompt-as-name.
+      if (a) { a.title = title; a.customName = true; send({ type: 'title', id, text: title, customName: true }); saveState(); }
+      return id;
     },
     send: (id, text, intoDialog) => { const t = String(text).slice(0, 200000); chatDeliver(need(id), t, null, 0, () => markSessionSwitch(id, t), intoDialog); },
     keys: (id, data) => handleTermInput(need(id), String(data)),

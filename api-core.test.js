@@ -15,7 +15,7 @@ function fakeHost(over = {}) {
     getAgentRaw: (id) => (agents.has(id) ? { fullText: 'full ' + id } : null),
     listAgents: () => [...agents.values()],
     getAgent: (id) => agents.get(id) || null,
-    createAgent: (cwd, prompt) => { calls.push(['create', cwd, prompt]); return 7; },
+    createAgent: (cwd, prompt, title) => { calls.push(['create', cwd, prompt, title]); return 7; },
     send: (id, text, intoDialog) => calls.push(['send', id, text, intoDialog]),
     keys: (id, data) => calls.push(['keys', id, data]),
     interrupt: (id) => calls.push(['interrupt', id]),
@@ -55,6 +55,14 @@ test('renderer messages map to public events; terminal bytes do not', () => {
 test('a repo joining a feature mid-task is a public event', () => {
   assert.deepStrictEqual(toEvent({ type: 'featureRepoAdded', id: 4, feature: 'Model update', repo: 'C:/Work/back-office', path: 'C:/wt/back-office/Model-update', branch: 'Model-update' }),
     { type: 'feature.repo_added', agentId: 4, feature: 'Model update', repo: 'C:/Work/back-office', path: 'C:/wt/back-office/Model-update', branch: 'Model-update' });
+});
+
+test('agent_create passes an optional title through, trimmed', async () => {
+  const host = fakeHost(); const api = createApi(host);
+  assert.deepStrictEqual(await api.call('agent_create', { cwd: 'C:/Work', prompt: '/ultra-fix-bug x', title: '  Bug 123abc  ' }), { agentId: 7 });
+  await api.call('agent_create', { cwd: 'C:/Work' });
+  assert.deepStrictEqual(host.calls, [['create', 'C:/Work', '/ultra-fix-bug x', 'Bug 123abc'], ['create', 'C:/Work', '', '']]);
+  await assert.rejects(api.call('agent_create', { cwd: 'C:/Work', title: 5 }), { status: 400 });
 });
 
 test('agent_to_feature converts, or only plans with dryRun, and needs a name to convert', async () => {
