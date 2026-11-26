@@ -69,6 +69,17 @@ function focusMainWindow() {
   try { app.focus({ steal: true }); } catch {}
 }
 
+// Another app asked (agent_focus): Windows refuses focus to a background process, so the window goes
+// topmost for a moment, which lifts it above the caller, then focuses.
+function raiseOverOtherApps() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  focusMainWindow();
+  mainWindow.setAlwaysOnTop(true);
+  mainWindow.moveTop();
+  mainWindow.focus();
+  setTimeout(() => { if (!mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false); }, 300);
+}
+
 // ── Constants ──────────────────────────────────────────
 const JSONL_POLL_MS = 1000;
 const JSONL_FALLBACK_MS = 5000;
@@ -6334,7 +6345,7 @@ function apiHost() {
     archive: (id) => archiveAgent(need(id)),
     unarchive: (id) => unarchiveAgent(need(id)),
     wake: (id) => wakeAgent(need(id)),
-    focus: (id) => { need(id); focusMainWindow(); send({ type: 'focusFromNotification', id }); },
+    focus: (id) => { need(id); raiseOverOtherApps(); send({ type: 'focusFromNotification', id }); },
     close: (id) => closeAgent(need(id)),
     transcript: (id) => getFullTimeline(id),
     screen: (id) => termBufText(id).replace(TERM_ESC_RE, '').replace(/\r(?!\n)/g, '\n'),
