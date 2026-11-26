@@ -1230,33 +1230,17 @@ body.world-mode #hdr-chat { display: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .card.choice .code-in input::placeholder { font-family: inherit; color: var(--dim); }
 :root body :is(#conversation, #chat-shell, #chat-queue) .card.choice .code-in input { border-color: var(--border-hi); }
 
-/* Queued messages: a stack docked above the reply box, right-aligned (the background-agent pill sits on the left). */
-:root body #chat-queue { position: absolute; right: 14px; bottom: calc(100% + 8px); z-index: 3; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: min(70%, 520px); max-height: 40vh; overflow-y: auto; padding: 0 2px 14px; pointer-events: none; }
-:root body #chat-queue > * { pointer-events: auto; margin: 0; }
-:root body #chat-queue:empty { display: none; }
-:root body #term:not(:has(#conversation.open)) #chat-queue { display: none; }
-:root body #chat-queue .msg.user.pending .bubble { background: var(--bg); }
-:root body #chat-queue .msg.qremoved { padding: 4px 10px; border-radius: 10px; background: var(--surface0); border: 1px solid var(--border); font-size: 12.5px; color: var(--subtext); font-family: inherit; white-space: nowrap; }
-:root body #conversation > .tail { padding-bottom: calc(16px + var(--qh, 0px)); }
-:root body #chat-queue { width: min(70%, 520px); }
-:root body #chat-queue .msg.user.pending { margin: 0; max-width: 100%; }
-:root body #chat-queue .msg.user.pending .bubble { max-width: 100%; }
 /* ── round 16 ── */
 :root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary { display: flex; align-items: center; gap: 6px; min-width: 0; }
 :root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary .ic { flex: none; margin: 0; order: 2; }
 :root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary b { flex: none; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .card.choice .code-in input { font-family: Geist, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; }
-:root body #chat-queue { right: 37px; gap: 8px; padding-bottom: 6px; }
 :root body :is(#conversation, #chat-shell, #chat-queue) .ctx-use .cu-l li:last-child, :root body :is(#conversation, #chat-shell, #chat-queue) .ctx-use .cu-l li:has(i[style*="surface1"]) { color: var(--dim); }
-:root body #chat-queue .msg.user.pending:has(.q-x) { margin: 0; }
 /* ── round 17 ── */
 :root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary .rt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 :root body :is(#conversation, #chat-shell, #chat-queue) details.msg.note.recap > summary .ic { order: 0; }
 /* Sign in: the code's submit is always there (an arrow with its Enter key), disabled until a code is in. */
 :root body :is(#conversation, #chat-shell, #chat-queue) .card.choice .code-in:has(input:placeholder-shown) button { display: inline-flex; }
-/* Queue dock: no scrollbar strip beside the pills. */
-:root body #chat-queue { scrollbar-width: none; }
-:root body #chat-queue::-webkit-scrollbar { display: none; }
 /* A turn ends with room before the next one starts. */
 :root body :is(#conversation, #chat-shell) .turnfoot { margin-bottom: 20px; }
 /* Reply type closer to Claude's: the serif a touch lighter (variable weight), bold at 600, optical size from the font. */

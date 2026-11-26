@@ -15,7 +15,7 @@ module.exports = async ({ inject, js, shot, wait }) => {
   await js(`(window.__p = true); true`);
   await wait(500);
   await shot('queued');
-  await js(`document.querySelectorAll('#chat-queue .msg.user.pending').forEach(m => m.classList.add('hover')); document.querySelector('#chat-queue .cliq .q-now')?.focus(); true`);
+  await js(`document.querySelectorAll('#conversation .msg.user.pending').forEach(m => m.classList.add('hover')); document.querySelector('#conversation .cliq .q-now')?.focus(); true`);
   await shot('queued-focus');
-  console.log(await js(`document.getElementById('chat-queue')?.outerHTML.slice(0, 2500) || 'no queue'`));
+  console.log(await js(`document.querySelector(".tail")?.outerHTML.slice(0, 2500) || 'no queue'`));
 };
