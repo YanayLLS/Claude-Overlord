@@ -4832,6 +4832,61 @@ async function repoCheck(repo) { const [req, v] = await Promise.all([nodeReq.nod
 // Background folder deletions by lower-cased path, so re-creating a just-removed worktree
 // waits for its old folder to go instead of colliding with it halfway.
 const pendingRemovals = new Map();
+// The one delete path for a worktree's folder (and branch): a plain Remove and a cleanup waiting on a merged PR.
+function deleteWorktreeFolder({ repo, path: dest, branch }, deleteBranch) {
+  const key = dest.toLowerCase();
+  const job = wt.removeWorktree({ repo, dest, branch, deleteBranch: !!deleteBranch })
+    .catch(e => { flog('removeWorktree cleanup failed:', e); send({ type: 'toast', text: `Cleanup of ${branch} folder failed — remove it manually` }); })
+    .finally(() => { if (pendingRemovals.get(key) === job) pendingRemovals.delete(key); });
+  pendingRemovals.set(key, job);
+  return job;
+}
+
+// Closed worktrees whose branch had an open PR (wt-cleanup.js): folder and branch go once that PR merges.
+const wtCleanup = require('./wt-cleanup');
+// { path: { pr, slug } } for each worktree whose branch has an open PR; the Remove dialog words itself from it.
+async function worktreeRemovePlan(paths) {
+  const plans = {};
+  await Promise.all(paths.map(async (p) => {
+    const entry = findWorktree(p);
+    if (!entry || entry.adopted || !entry.branch) return;
+    const info = await checkoutInfo(entry.path).catch(() => null);
+    const args = info && wtCleanup.prQueryArgs(info.repo, entry.branch);
+    if (!args) return;
+    const res = await ghJson(args, 10000);
+    const pr = wtCleanup.openPrOf(res && res.data);
+    if (pr) plans[p] = { pr, slug: info.repo };
+  }));
+  return plans;
+}
+let cleanupBusy = false;
+async function checkPendingCleanups() {
+  const list = settings.pendingCleanups || [];
+  if (cleanupBusy || !list.length) return;
+  cleanupBusy = true;
+  try {
+    for (const p of list) {
+      const inUse = !!(settings.worktrees || []).find(w => w.path.toLowerCase() === String(p.path).toLowerCase());
+      const args = wtCleanup.prQueryArgs(p.slug, p.branch);
+      const res = inUse || !args ? null : await ghJson(args, 15000);
+      const verdict = wtCleanup.cleanupVerdict(res && res.data, p, inUse || !args);
+      if (verdict === 'wait') continue;
+      settings.pendingCleanups = (settings.pendingCleanups || []).filter(x => x !== p);
+      saveState();
+      if (verdict === 'delete') {
+        deleteWorktreeFolder(p, true);
+        send({ type: 'toast', text: `${p.branch}: PR #${p.pr} merged, branch and worktree deleted` });
+      }
+    }
+  } finally { cleanupBusy = false; }
+}
+const CLEANUP_CHECK_MS = 10 * 60e3;
+let cleanupTimer = null;
+function armCleanupTimer() {
+  if (cleanupTimer) return;
+  setTimeout(checkPendingCleanups, 60e3); // after the boot rush
+  cleanupTimer = setInterval(checkPendingCleanups, CLEANUP_CHECK_MS);
+}
 // startPoint: branch from this commit instead of base (base stays the PR target). install false: the caller installs later.
 async function doCreateWorktree({ repo, branch, base, feature, startPoint, install = true }) {
   branch = wt.safeBranch(branch); // git forbids spaces/special chars in branch names
@@ -5278,11 +5333,19 @@ function handleIpc(msg) {
       saveState();
       send({ type: 'settings', settings: publicSettings() });
       if (entry.adopted) { send({ type: 'toast', text: `${path.basename(entry.path)} left the feature; folder kept` }); break; }
-      const key = entry.path.toLowerCase();
-      const job = wt.removeWorktree({ repo: entry.repo, dest: entry.path, branch: entry.branch, deleteBranch: !!msg.deleteBranch })
-        .catch(e => { flog('removeWorktree cleanup failed:', e); send({ type: 'toast', text: `Cleanup of ${entry.branch} folder failed — remove it manually` }); })
-        .finally(() => { if (pendingRemovals.get(key) === job) pendingRemovals.delete(key); });
-      pendingRemovals.set(key, job);
+      const d = msg.defer; // { pr, slug }: its branch has an open PR, so the folder and branch wait for the merge
+      if (d && Number(d.pr) > 0 && wtCleanup.prQueryArgs(d.slug, entry.branch)) {
+        settings.pendingCleanups = wtCleanup.addPending(settings.pendingCleanups, { repo: entry.repo, path: entry.path, branch: entry.branch, slug: d.slug, pr: Number(d.pr), at: Date.now() });
+        saveState();
+        send({ type: 'toast', text: `${entry.branch}: deleted when PR #${Number(d.pr)} merges` });
+        break;
+      }
+      deleteWorktreeFolder(entry, msg.deleteBranch);
+      break;
+    }
+    case 'worktreeRemovePlan': {
+      const paths = (Array.isArray(msg.paths) ? msg.paths : []).filter(p => typeof p === 'string').slice(0, 50);
+      worktreeRemovePlan(paths).catch(() => ({})).then(plans => send({ type: 'worktreeRemovePlan', reqId: msg.reqId, plans }));
       break;
     }
     case 'openSetupLog': {
@@ -7313,6 +7376,7 @@ app.whenReady().then(() => {
       // (synchronous, heavy) agent restore below parses every agent's history.
       armPrTimer();
       armActionsTimer();
+      armCleanupTimer();
       restoreAgents(state);
       // Seed the settings copy at boot. Nothing else saves until the user changes
       // something, so on the launch right after an update — exactly when the old

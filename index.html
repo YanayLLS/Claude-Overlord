@@ -1906,12 +1906,32 @@ function submitProjectConfig() {
   closeWt();
 }
 
+// Which of these worktrees' branches have an open PR (main: worktreeRemovePlan): { path: { pr, slug } }.
+// Those close now and their folder and branch go when the PR merges. No answer in time: plain removal.
+let _removePlanSeq = 0;
+const _removePlanWait = new Map();
+function removePlan(paths) {
+  return new Promise((resolve) => {
+    const reqId = ++_removePlanSeq;
+    const t = setTimeout(() => { _removePlanWait.delete(reqId); resolve({}); }, 12000);
+    _removePlanWait.set(reqId, (plans) => { clearTimeout(t); resolve(plans || {}); });
+    send({ type: 'worktreeRemovePlan', reqId, paths });
+  });
+}
+function onRemovePlan(msg) { const cb = _removePlanWait.get(msg.reqId); if (cb) { _removePlanWait.delete(msg.reqId); cb(msg.plans); } }
+
 async function removeWorktree(path) {
   const w = worktreeAt(path);
   if (!w) return;
+  const plan = (await removePlan([path]))[path];
+  if (plan) {
+    if (!await showConfirm(`Close "${w.branch}"? Closes now; the branch and worktree are deleted when PR #${plan.pr} merges.`, 'Close')) return;
+    send({ type: 'removeWorktree', path, defer: plan });
+    return;
+  }
   const ok = await showConfirm(`Remove worktree "${w.branch}"? Its agents will close and its folder will be deleted.`, 'Remove');
   if (!ok) return;
-  const delBranch = await showConfirm(`Also delete the branch "${w.branch}"? (Choose No to keep it — e.g. if it has an open PR.)`, 'Delete branch');
+  const delBranch = await showConfirm(`Also delete the branch "${w.branch}"?`, 'Delete branch');
   send({ type: 'removeWorktree', path, deleteBranch: !!delBranch });
 }
 
@@ -2034,10 +2054,14 @@ function prFeature(name) { featureMembers(name).forEach(w => send({ type: 'creat
 async function removeFeature(name) {
   const m = featureMembers(name);
   if (!m.length) return;
-  const ok = await showConfirm(`Remove feature "${name}" and its ${m.length} worktree(s)? Agents close and folders are deleted.`, 'Remove feature');
+  const plans = await removePlan(m.map(w => w.path));
+  const now = m.filter(w => !plans[w.path]);
+  const ok = !now.length
+    ? await showConfirm(`Close feature "${name}"? Closes now; branches and worktrees are deleted when their PRs merge.`, 'Close feature')
+    : await showConfirm(`Remove feature "${name}" and its ${m.length} worktree(s)? Agents close and folders are deleted.${now.length < m.length ? ' Ones with an open PR are deleted when it merges.' : ''}`, 'Remove feature');
   if (!ok) return;
-  const del = await showConfirm(`Also delete the "${name}" branch in each repo? (No keeps them — e.g. open PRs.)`, 'Delete branches');
-  m.forEach(w => send({ type: 'removeWorktree', path: w.path, deleteBranch: !!del }));
+  const del = now.length ? await showConfirm(`Also delete the "${name}" branch in each repo${now.length < m.length ? ' without an open PR' : ''}?`, 'Delete branches') : false;
+  m.forEach(w => send(plans[w.path] ? { type: 'removeWorktree', path: w.path, defer: plans[w.path] } : { type: 'removeWorktree', path: w.path, deleteBranch: !!del }));
 }
 
 let _addRepoFeature = null; // feature name while the Add-repo dialog is open (routes browse result)
@@ -4970,6 +4994,7 @@ function handleAgentMsg(msg) {
     case 'dictation': chatComposer.onDictation(msg); break;
     case 'clipboardImageSaved': chatComposer.onImageSaved(msg); break;
     case 'repoChecks': onRepoChecks(msg.checks); break;
+    case 'worktreeRemovePlan': onRemovePlan(msg); break;
     case 'agentSteps': case 'bgTail': case 'gitDiff': case 'filePeek': case 'gitReverted': case 'cliSent': case 'sendFailed': chatUi.onMsg(msg); break;
     case 'searchResults': renderSearchResults(msg.results, msg.query); break;
     case 'timelineEvent': handleTimelineEvent(msg); break;
